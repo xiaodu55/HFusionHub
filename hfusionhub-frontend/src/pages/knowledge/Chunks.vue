@@ -5,15 +5,7 @@ import * as vectorizationApi from '@/api/vectorization'
 import * as documentApi from '@/api/document'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { ArrowLeft, FileText, Code, Table, List, Heading, Paragraph } from 'lucide-vue-next'
+import { ArrowLeft, FileText, Code, Table, List, Heading, AlignLeft } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -32,7 +24,7 @@ const chunks = ref<Chunk[]>([])
 const totalChunks = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
-const selectedBlockType = ref<string>('all')
+const selectedBlockType = ref('all')
 const loading = ref(false)
 
 const blockTypes = [
@@ -46,7 +38,7 @@ const blockTypes = [
 
 const loadDocumentInfo = async () => {
   try {
-    const res = await documentApi.getDocumentById(documentId.value)
+    const res = await documentApi.getDocument(documentId.value)
     documentName.value = res.data.title
   } catch (error) {
     console.error('加载文档信息失败:', error)
@@ -65,10 +57,13 @@ const loadChunks = async () => {
     }
 
     const res = await vectorizationApi.getDocumentChunks(documentId.value, params)
-    const data = res.data
-    if (data && data.data) {
-      chunks.value = data.data.records || []
-      totalChunks.value = data.data.total || 0
+    let chunksData = res.data
+    if (typeof chunksData === 'string') {
+      chunksData = JSON.parse(chunksData)
+    }
+    if (chunksData && chunksData.success) {
+      chunks.value = chunksData.chunks || []
+      totalChunks.value = chunksData.total_chunks || 0
     }
   } catch (error) {
     console.error('加载分块失败:', error)
@@ -82,43 +77,40 @@ const handlePageChange = (page: number) => {
   loadChunks()
 }
 
-const handleBlockTypeChange = (value: string) => {
-  selectedBlockType.value = value
+const handleBlockTypeChange = (e: Event) => {
+  selectedBlockType.value = (e.target as HTMLSelectElement).value
   currentPage.value = 1
   loadChunks()
 }
 
 const getBlockTypeIcon = (type: string) => {
   switch (type) {
-    case 'HEADING':
-      return Heading
-    case 'PARAGRAPH':
-      return Paragraph
-    case 'CODE':
-      return Code
-    case 'TABLE':
-      return Table
-    case 'LIST':
-      return List
-    default:
-      return FileText
+    case 'HEADING': return Heading
+    case 'PARAGRAPH': return AlignLeft
+    case 'CODE': return Code
+    case 'TABLE': return Table
+    case 'LIST': return List
+    default: return FileText
   }
 }
 
-const getBlockTypeBadge = (type: string) => {
+const getBlockTypeLabel = (type: string) => {
   switch (type) {
-    case 'HEADING':
-      return { text: '标题', variant: 'default' as const }
-    case 'PARAGRAPH':
-      return { text: '段落', variant: 'secondary' as const }
-    case 'CODE':
-      return { text: '代码', variant: 'destructive' as const }
-    case 'TABLE':
-      return { text: '表格', variant: 'outline' as const }
-    case 'LIST':
-      return { text: '列表', variant: 'outline' as const }
-    default:
-      return { text: type, variant: 'outline' as const }
+    case 'HEADING': return '标题'
+    case 'PARAGRAPH': return '段落'
+    case 'CODE': return '代码'
+    case 'TABLE': return '表格'
+    case 'LIST': return '列表'
+    default: return type
+  }
+}
+
+const getBlockTypeBadgeClass = (type: string) => {
+  switch (type) {
+    case 'CODE': return 'bg-red-100 text-red-700'
+    case 'HEADING': return 'bg-blue-100 text-blue-700'
+    case 'TABLE': return 'bg-purple-100 text-purple-700'
+    default: return 'bg-gray-100 text-gray-700'
   }
 }
 
@@ -141,32 +133,30 @@ onMounted(() => {
   <div class="space-y-6">
     <!-- 返回按钮和标题 -->
     <div class="flex items-center gap-4">
-      <Button variant="ghost" size="icon" @click="goBack">
-        <ArrowLeft class="h-5 w-5" />
+      <Button variant="ghost" size="sm" @click="goBack">
+        <ArrowLeft class="mr-2 h-4 w-4" />
+        返回
       </Button>
       <div class="flex-1">
         <h2 class="text-2xl font-bold">{{ documentName }} 分块详情</h2>
-        <p class="text-muted-foreground">
-          共 {{ totalChunks }} 个块
-        </p>
+        <p class="text-muted-foreground">共 {{ totalChunks }} 个块</p>
       </div>
     </div>
 
     <!-- 筛选器 -->
     <Card>
-      <CardContent className="pt-6">
+      <CardContent class="pt-6">
         <div class="flex items-center gap-4">
           <span class="text-sm font-medium">筛选：</span>
-          <Select :value="selectedBlockType" @update:model-value="handleBlockTypeChange">
-            <SelectTrigger class="w-[120px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="type in blockTypes" :key="type.value" :value="type.value">
-                {{ type.label }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+          <select
+            :value="selectedBlockType"
+            @change="handleBlockTypeChange"
+            class="rounded-md border border-input bg-background px-3 py-2 text-sm"
+          >
+            <option v-for="type in blockTypes" :key="type.value" :value="type.value">
+              {{ type.label }}
+            </option>
+          </select>
         </div>
       </CardContent>
     </Card>
@@ -195,12 +185,17 @@ onMounted(() => {
             <div class="flex items-center justify-between mb-3">
               <div class="flex items-center gap-3">
                 <span class="text-sm text-muted-foreground">
-                  块 #{{ (currentPage - 1) * pageSize + index }}
+                  块 #{{ (currentPage - 1) * pageSize + index + 1 }}
                 </span>
-                <Badge :variant="getBlockTypeBadge(chunk.block_type).variant">
-                  <component :is="getBlockTypeIcon(chunk.block_type)" class="mr-1 h-3 w-3" />
-                  {{ getBlockTypeBadge(chunk.block_type).text }}
-                </Badge>
+                <span
+                  :class="[
+                    'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium',
+                    getBlockTypeBadgeClass(chunk.block_type)
+                  ]"
+                >
+                  <component :is="getBlockTypeIcon(chunk.block_type)" class="h-3 w-3" />
+                  {{ getBlockTypeLabel(chunk.block_type) }}
+                </span>
               </div>
               <span class="text-xs text-muted-foreground">
                 {{ formatOutlinePath(chunk.outline_path) }}

@@ -34,3 +34,17 @@ export function getChunkDetail(chunkId: string) {
 export function getVectorizationStatus(documentId: number) {
   return request.get(`/vectorize/${documentId}/status`)
 }
+
+/**
+ * 重置文档状态为待解析
+ */
+export function resetDocument(documentId: number) {
+  return request.post(`/vectorize/${documentId}/reset`)
+}
+
+/**
+ * 同步所有待解析文档的状态（从Python引擎查询实际分块数）
+ */
+export function syncAllDocuments() {
+  return request.post('/vectorize/sync-all')
+}

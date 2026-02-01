@@ -122,6 +122,21 @@ def insert_chunks(chunks: List[VectorChunk], embeddings: List[List[float]], docu
         )
 
         print(f"Inserted {len(data)} chunks into Milvus")
+
+        # Also save to local JSON store for reliable querying
+        store_records = []
+        for chunk, embedding in zip(chunks, embeddings):
+            outline_path_str = json.dumps(chunk.outline_path) if chunk.outline_path else "[]"
+            store_records.append({
+                "chunk_id": chunk.chunk_id,
+                "document_id": document_id,
+                "content": chunk.content,
+                "block_type": chunk.block_type,
+                "outline_path": outline_path_str,
+                "metadata": json.dumps(chunk.metadata) if chunk.metadata else "{}"
+            })
+        _save_chunks_to_store(document_id, store_records)
+
         return True
 
     except Exception as e:
@@ -189,40 +204,59 @@ def search_similar(query_embedding: List[float], top_k: int = 5, document_id: Op
         return []
 
 
-def get_document_chunks(document_id: str, page: int = 1, size: int = 20, block_type: Optional[str] = None) -> Dict:
-    """Get chunks for a document"""
+# Local chunk metadata store (JSON file) - Milvus Lite's query() API is unreliable
+CHUNKS_STORE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "chunks_store.json")
+
+
+def _load_chunks_store() -> Dict[str, List[Dict]]:
+    """Load chunks metadata from local JSON file"""
     try:
-        client = get_milvus_client()
-        if client is None:
-            return {"code": 500, "message": "Milvus连接失败"}
+        if os.path.exists(CHUNKS_STORE_PATH):
+            with open(CHUNKS_STORE_PATH, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[ChunksStore] Load error: {e}")
+    return {}
 
-        # Build query
-        filter_expr = f'document_id == "{document_id}"'
+
+def _save_chunks_store(store: Dict[str, List[Dict]]):
+    """Save chunks metadata to local JSON file"""
+    try:
+        with open(CHUNKS_STORE_PATH, 'w', encoding='utf-8') as f:
+            json.dump(store, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[ChunksStore] Save error: {e}")
+
+
+def _save_chunks_to_store(document_id: str, chunks: List[Dict]):
+    """Save document chunks to local store"""
+    store = _load_chunks_store()
+    store[document_id] = chunks
+    _save_chunks_store(store)
+
+
+def get_document_chunks(document_id: str, page: int = 1, size: int = 20, block_type: Optional[str] = None) -> Dict:
+    """Get chunks for a document from local store"""
+    try:
+        store = _load_chunks_store()
+        all_chunks = store.get(str(document_id), [])
+
+        # Filter by block_type if specified
         if block_type:
-            filter_expr += f' && block_type == "{block_type}"'
+            all_chunks = [c for c in all_chunks if c.get("block_type") == block_type]
 
-        # Query
-        results = client.query(
-            collection_name=COLLECTION_NAME,
-            filter=filter_expr,
-            output_fields=["chunk_id", "document_id", "content", "block_type", "outline_path", "metadata"],
-            limit=size,
-            offset=(page - 1) * size
-        )
+        total = len(all_chunks)
 
-        # Get total count
-        count_result = client.query(
-            collection_name=COLLECTION_NAME,
-            filter=filter_expr,
-            output_fields=["chunk_id"],
-            limit=1
-        )
+        # Paginate
+        start = (page - 1) * size
+        end = start + size
+        records = all_chunks[start:end]
 
         return {
             "code": 200,
             "data": {
-                "records": results,
-                "total": len(results),
+                "records": records,
+                "total": total,
                 "page": page,
                 "size": size
             }

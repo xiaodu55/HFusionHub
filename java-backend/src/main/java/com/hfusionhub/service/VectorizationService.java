@@ -41,4 +41,11 @@ public interface VectorizationService {
      * @param chunkCount 分块数量
      */
     void updateDocumentStatus(Long documentId, String status, Integer chunkCount);
+
+    /**
+     * 同步文档状态：从Python引擎查询实际分块数，更新数据库状态
+     *
+     * @param documentId 文档ID
+     */
+    void syncDocumentStatus(Long documentId);
 }

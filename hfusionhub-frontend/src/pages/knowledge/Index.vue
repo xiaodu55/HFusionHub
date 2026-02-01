@@ -201,8 +201,8 @@ onMounted(() => {
               <CardTitle class="text-lg">{{ kb.name }}</CardTitle>
               <CardDescription>{{ kb.description || '暂无描述' }}</CardDescription>
             </div>
-            <Badge :variant="kb.status === 1 ? 'default' : 'secondary'">
-              {{ kb.status === 1 ? '启用' : '禁用' }}
+            <Badge :variant="kb.status === 0 ? 'default' : 'secondary'">
+              {{ kb.status === 0 ? '启用' : '禁用' }}
             </Badge>
           </div>
         </CardHeader>

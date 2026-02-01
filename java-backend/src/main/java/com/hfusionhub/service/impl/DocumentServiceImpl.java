@@ -21,6 +21,7 @@ import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.DocumentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import java.io.File;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -146,7 +147,19 @@ public class DocumentServiceImpl implements DocumentService {
             throw new BusinessException("无权删除该文档");
         }
 
-        // 3. 逻辑删除
+        // 3. 清理磁盘文件
+        if (document.getFilePath() != null) {
+            File file = new File(document.getFilePath());
+            if (file.exists()) {
+                if (file.delete()) {
+                    log.info("已删除磁盘文件: {}", document.getFilePath());
+                } else {
+                    log.warn("删除磁盘文件失败: {}", document.getFilePath());
+                }
+            }
+        }
+
+        // 4. 逻辑删除
         documentMapper.deleteById(id);
     }
 
@@ -187,15 +200,42 @@ public class DocumentServiceImpl implements DocumentService {
         Page<Document> page = new Page<>(queryDTO.getPage(), queryDTO.getPageSize());
         Page<Document> result = documentMapper.selectPage(page, wrapper);
 
-        // 3. 转换为 DTO
+        // 3. 批量查询知识库（避免 N+1）
+        List<Long> kbIds = result.getRecords().stream()
+                .map(Document::getKnowledgeBaseId)
+                .distinct()
+                .collect(Collectors.toList());
+        final Map<Long, KnowledgeBase> kbMap;
+        final Map<Long, String> kbNameMap;
+        if (!kbIds.isEmpty()) {
+            List<KnowledgeBase> kbs = knowledgeBaseMapper.selectBatchIds(kbIds);
+            kbMap = kbs.stream().collect(Collectors.toMap(KnowledgeBase::getId, k -> k));
+            kbNameMap = kbs.stream().collect(Collectors.toMap(KnowledgeBase::getId, KnowledgeBase::getName));
+        } else {
+            kbMap = Map.of();
+            kbNameMap = Map.of();
+        }
+
+        // 4. 批量查询用户（避免 N+1）
+        List<Long> userIds = kbMap.values().stream()
+                .map(KnowledgeBase::getUserId)
+                .distinct()
+                .collect(Collectors.toList());
+        final Map<Long, String> usernameMap;
+        if (!userIds.isEmpty()) {
+            List<User> users = userMapper.selectBatchIds(userIds);
+            usernameMap = users.stream().collect(Collectors.toMap(User::getId, User::getUsername));
+        } else {
+            usernameMap = Map.of();
+        }
+
+        // 5. 转换为 DTO
         List<DocumentInfoDTO> records = result.getRecords().stream()
-                .map(doc -> {
-                    KnowledgeBase kb = knowledgeBaseMapper.selectById(doc.getKnowledgeBaseId());
-                    return convertToInfoDTO(doc, kb != null ? kb.getName() : "未知知识库");
-                })
+                .map(doc -> convertToInfoDTO(doc, kbNameMap.getOrDefault(doc.getKnowledgeBaseId(), "未知知识库"),
+                        kbMap.get(doc.getKnowledgeBaseId()), usernameMap))
                 .collect(Collectors.toList());
 
-        // 4. 返回分页结果
+        // 6. 返回分页结果
         return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), result.getTotal(), records);
     }
 
@@ -323,17 +363,13 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     /**
-     * Document 转换为 DocumentInfoDTO
+     * Document 转换为 DocumentInfoDTO（使用预查询数据，避免 N+1）
      */
-    private DocumentInfoDTO convertToInfoDTO(Document document, String knowledgeBaseName) {
-        // 查询上传者用户名
+    private DocumentInfoDTO convertToInfoDTO(Document document, String knowledgeBaseName,
+                                              KnowledgeBase kb, Map<Long, String> usernameMap) {
         String username = "unknown";
-        KnowledgeBase kb = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
         if (kb != null) {
-            User user = userMapper.selectById(kb.getUserId());
-            if (user != null) {
-                username = user.getUsername();
-            }
+            username = usernameMap.getOrDefault(kb.getUserId(), "unknown");
         }
 
         return DocumentInfoDTO.builder()
@@ -351,6 +387,21 @@ public class DocumentServiceImpl implements DocumentService {
                 .createdAt(document.getCreatedAt())
                 .updatedAt(document.getUpdatedAt())
                 .build();
+    }
+
+    /**
+     * Document 转换为 DocumentInfoDTO（单文档版本，自动查询关联数据）
+     */
+    private DocumentInfoDTO convertToInfoDTO(Document document, String knowledgeBaseName) {
+        KnowledgeBase kb = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
+        String username = "unknown";
+        if (kb != null) {
+            User user = userMapper.selectById(kb.getUserId());
+            if (user != null) {
+                username = user.getUsername();
+            }
+        }
+        return convertToInfoDTO(document, knowledgeBaseName, kb, Map.of(kb != null ? kb.getUserId() : 0L, username));
     }
 
     /**

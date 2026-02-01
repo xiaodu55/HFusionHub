@@ -117,6 +117,7 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
             background_tasks.add_task(
                 _notify_callback,
                 callback_url=request.callback_url,
+                callback_secret=request.callback_secret,
                 document_id=request.document_id,
                 success=True,
                 message=f"Successfully parsed document into {len(chunks)} chunks",
@@ -142,6 +143,7 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
             background_tasks.add_task(
                 _notify_callback,
                 callback_url=request.callback_url,
+                callback_secret=request.callback_secret,
                 document_id=request.document_id,
                 success=False,
                 message=f"Parsing failed: {str(e)}",
@@ -152,18 +154,45 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
 
 
 @router.get("/api/chunks/{document_id}", response_model=ChunkResponse)
-async def get_chunks(document_id: str):
+async def get_chunks(document_id: str, page: int = 1, size: int = 20, block_type: str = None):
     """Get all chunks for a document"""
     try:
         validate_document_id(document_id)
 
-        chunks = get_document_chunks(config.MILVUS_COLLECTION, document_id)
+        result = get_document_chunks(document_id, page, size, block_type)
+
+        if result.get("code") != 200:
+            raise MilvusException(result.get("message", "获取分块失败"))
+
+        data = result.get("data", {})
+        records = data.get("records", [])
+        total = data.get("total", 0)
+
+        chunks = []
+        for record in records:
+            # Parse outline_path from JSON string to list
+            outline_path = record.get("outline_path", "[]")
+            if isinstance(outline_path, str):
+                import json
+                try:
+                    outline_path = json.loads(outline_path)
+                except:
+                    outline_path = []
+
+            chunks.append(VectorChunk(
+                chunk_id=record.get("chunk_id", ""),
+                index=0,
+                content=record.get("content", ""),
+                block_type=record.get("block_type", "PARAGRAPH"),
+                outline_path=outline_path,
+                metadata={}
+            ))
 
         return ChunkResponse(
             success=True,
             document_id=document_id,
-            total_chunks=len(chunks),
-            chunks=[VectorChunk(**chunk) for chunk in chunks]
+            total_chunks=total,
+            chunks=chunks
         )
 
     except Exception as e:
@@ -229,20 +258,28 @@ def _notify_callback(
     document_id: str,
     success: bool,
     message: str,
-    chunks_count: int
+    chunks_count: int,
+    callback_secret: str = None
 ):
     """Notify Java backend about processing completion"""
     try:
-        payload = CallbackRequest(
-            document_id=document_id,
-            success=success,
-            message=message,
-            chunks_count=chunks_count
-        )
+        # Convert to Java backend expected format
+        status = "COMPLETED" if success else "FAILED"
+        payload = {
+            "document_id": document_id,
+            "status": status,
+            "chunkCount": chunks_count,
+            "message": message
+        }
+
+        headers = {"Content-Type": "application/json"}
+        if callback_secret:
+            headers["X-Callback-Secret"] = callback_secret
 
         response = requests.post(
             callback_url,
-            json=payload.model_dump(),
+            json=payload,
+            headers=headers,
             timeout=10
         )
 

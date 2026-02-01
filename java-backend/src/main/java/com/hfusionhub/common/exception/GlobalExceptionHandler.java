@@ -28,6 +28,7 @@ public class GlobalExceptionHandler {
      * 业务异常
      */
     @ExceptionHandler(BusinessException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
     public R<?> handleBusinessException(BusinessException e) {
         log.warn("业务异常: {}", e.getMessage());
         return R.fail(e.getCode(), e.getMessage());
@@ -87,6 +88,16 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.joining(", "));
         log.warn("参数绑定失败: {}", message);
         return R.fail(400, message);
+    }
+
+    /**
+     * 参数非法异常
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public R<?> handleIllegalArgumentException(IllegalArgumentException e) {
+        log.warn("参数非法: {}", e.getMessage());
+        return R.fail(400, e.getMessage());
     }
 
     /**

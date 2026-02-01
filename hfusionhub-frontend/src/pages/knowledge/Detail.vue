@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as knowledgeBaseApi from '@/api/knowledgeBase'
 import * as documentApi from '@/api/document'
 import * as vectorizationApi from '@/api/vectorization'
+import { useToast } from '@/composables/useToast'
 import type { KnowledgeBase, Document } from '@/api/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -17,9 +18,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { ArrowLeft, Plus, FileText, Trash2, Upload, Play, Eye, Loader2 } from 'lucide-vue-next'
+import { ArrowLeft, Plus, FileText, Trash2, Upload, Play, Eye, Loader2, RefreshCw, RefreshCcw } from 'lucide-vue-next'
 
 const route = useRoute()
+const toast = useToast()
 const router = useRouter()
 
 const knowledgeBase = ref<KnowledgeBase | null>(null)
@@ -29,6 +31,17 @@ const isUploadDialogOpen = ref(false)
 const uploadFile = ref<File | null>(null)
 const uploading = ref(false)
 const processingDocs = ref<Set<number>>(new Set())
+const pollingTimers = new Set<ReturnType<typeof setTimeout>>()
+const addProcessing = (id: number) => {
+  const s = new Set(processingDocs.value)
+  s.add(id)
+  processingDocs.value = s
+}
+const removeProcessing = (id: number) => {
+  const s = new Set(processingDocs.value)
+  s.delete(id)
+  processingDocs.value = s
+}
 
 const loadKnowledgeBase = async () => {
   const id = Number(route.params.id)
@@ -37,6 +50,7 @@ const loadKnowledgeBase = async () => {
     knowledgeBase.value = res.data
   } catch (error) {
     console.error('加载知识库失败:', error)
+    toast.error('加载知识库失败')
   }
 }
 
@@ -51,6 +65,7 @@ const loadDocuments = async () => {
     documents.value = res.data.records
   } catch (error) {
     console.error('加载文档失败:', error)
+    toast.error('加载文档失败')
   } finally {
     loading.value = false
   }
@@ -63,17 +78,27 @@ const handleFileSelect = (event: Event) => {
   }
 }
 
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+
 const handleUpload = async () => {
   if (!uploadFile.value || !knowledgeBase.value) return
+
+  // 文件大小校验
+  if (uploadFile.value.size > MAX_FILE_SIZE) {
+    toast.error('文件大小不能超过 10MB')
+    return
+  }
 
   uploading.value = true
   try {
     await documentApi.uploadDocument(uploadFile.value, knowledgeBase.value.id)
     isUploadDialogOpen.value = false
     uploadFile.value = null
+    toast.success('文档上传成功')
     await loadDocuments()
   } catch (error) {
     console.error('上传文档失败:', error)
+    toast.error('上传文档失败')
   } finally {
     uploading.value = false
   }
@@ -87,11 +112,12 @@ const handleDeleteDocument = async (doc: Document) => {
     await loadDocuments()
   } catch (error) {
     console.error('删除文档失败:', error)
+    toast.error('删除文档失败')
   }
 }
 
 const handleStartVectorization = async (doc: Document) => {
-  processingDocs.value.add(doc.id)
+  addProcessing(doc.id)
   try {
     await vectorizationApi.startVectorization(doc.id)
     // 更新文档状态为处理中
@@ -100,7 +126,34 @@ const handleStartVectorization = async (doc: Document) => {
     pollDocumentStatus(doc.id)
   } catch (error) {
     console.error('启动向量化失败:', error)
-    processingDocs.value.delete(doc.id)
+    toast.error('启动向量化失败')
+    removeProcessing(doc.id)
+  }
+}
+
+const handleResetDocument = async (doc: Document) => {
+  try {
+    await vectorizationApi.resetDocument(doc.id)
+    doc.status = 0
+    doc.errorMessage = null
+  } catch (error) {
+    console.error('重置文档失败:', error)
+    toast.error('重置文档失败')
+  }
+}
+
+const syncing = ref(false)
+const handleSyncStatus = async () => {
+  syncing.value = true
+  try {
+    await vectorizationApi.syncAllDocuments()
+    toast.success('状态同步完成')
+    await loadDocuments()
+  } catch (error) {
+    console.error('同步状态失败:', error)
+    toast.error('同步状态失败')
+  } finally {
+    syncing.value = false
   }
 }
 
@@ -110,7 +163,7 @@ const pollDocumentStatus = async (docId: number) => {
 
   const checkStatus = async () => {
     if (attempts >= maxAttempts) {
-      processingDocs.value.delete(docId)
+      removeProcessing(docId)
       return
     }
 
@@ -120,16 +173,18 @@ const pollDocumentStatus = async (docId: number) => {
 
       if (status === 2 || status === 3) {
         // 完成或失败，停止轮询
-        processingDocs.value.delete(docId)
+        removeProcessing(docId)
         await loadDocuments() // 刷新列表
         return
       }
 
       attempts++
-      setTimeout(checkStatus, 2000)
+      const timer = setTimeout(checkStatus, 2000)
+      pollingTimers.add(timer)
     } catch (error) {
       console.error('查询状态失败:', error)
-      processingDocs.value.delete(docId)
+      toast.error('查询状态失败')
+      removeProcessing(docId)
     }
   }
 
@@ -149,7 +204,7 @@ const getStatusBadge = (status: number) => {
     case 2:
       return { text: '已完成', variant: 'default' as const }
     case 3:
-      return { text: '失败', variant: 'destructive' as const }
+      return { text: '解析失败', variant: 'destructive' as const }
     default:
       return { text: '未知', variant: 'outline' as const }
   }
@@ -171,6 +226,11 @@ onMounted(() => {
   loadKnowledgeBase()
   loadDocuments()
 })
+
+onBeforeUnmount(() => {
+  pollingTimers.forEach(timer => clearTimeout(timer))
+  pollingTimers.clear()
+})
 </script>
 
 <template>
@@ -183,8 +243,8 @@ onMounted(() => {
       <div v-if="knowledgeBase" class="flex-1">
         <div class="flex items-center gap-3">
           <h2 class="text-2xl font-bold">{{ knowledgeBase.name }}</h2>
-          <Badge :variant="knowledgeBase.status === 1 ? 'default' : 'secondary'">
-            {{ knowledgeBase.status === 1 ? '启用' : '禁用' }}
+          <Badge :variant="knowledgeBase.status === 0 ? 'default' : 'secondary'">
+            {{ knowledgeBase.status === 0 ? '启用' : '禁用' }}
           </Badge>
         </div>
         <p class="text-muted-foreground">
@@ -194,6 +254,10 @@ onMounted(() => {
       <Button @click="isUploadDialogOpen = true">
         <Upload class="mr-2 h-4 w-4" />
         上传文档
+      </Button>
+      <Button variant="outline" @click="handleSyncStatus" :disabled="syncing">
+        <RefreshCcw :class="['mr-2 h-4 w-4', { 'animate-spin': syncing }]" />
+        同步状态
       </Button>
     </div>
 
@@ -245,6 +309,17 @@ onMounted(() => {
                 <Loader2 v-if="processingDocs.has(doc.id)" class="mr-2 h-4 w-4 animate-spin" />
                 <Play v-else class="mr-2 h-4 w-4" />
                 {{ processingDocs.has(doc.id) ? '处理中...' : '开始解析' }}
+              </Button>
+
+              <!-- 重新解析按钮（处理中或失败时显示） -->
+              <Button
+                v-if="doc.status === 1 || doc.status === 3"
+                variant="outline"
+                size="sm"
+                @click="handleResetDocument(doc)"
+              >
+                <RefreshCw class="mr-2 h-4 w-4" />
+                重新解析
               </Button>
 
               <!-- 查看分块按钮 -->

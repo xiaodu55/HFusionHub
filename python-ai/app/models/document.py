@@ -23,6 +23,7 @@ class ParseRequest(BaseModel):
     file_path: str = Field(..., description="Path to the file")
     file_type: str = Field(..., description="File type: md, txt, pdf, docx")
     callback_url: Optional[str] = Field(None, description="Callback URL for notifications")
+    callback_secret: Optional[str] = Field(None, description="Secret for callback authentication")
 
 
 class ParsedBlock(BaseModel):

@@ -83,3 +83,5 @@ milvus-docker/.env
 # Python AI uploads
 python-ai/uploads/
 python-ai/milvus_data.db/
+python-ai/milvus_data_test.db/
+python-ai/chunks_store.json
