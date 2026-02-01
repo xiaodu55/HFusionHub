@@ -85,3 +85,8 @@ python-ai/uploads/
 python-ai/milvus_data.db/
 python-ai/milvus_data_test.db/
 python-ai/chunks_store.json
+
+# Test/Debug files
+test_response.json
+*_response.json
+*.response.json
