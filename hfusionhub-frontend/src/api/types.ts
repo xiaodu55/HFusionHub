@@ -1,0 +1,117 @@
+// 通用响应类型
+export interface ApiResponse<T = any> {
+  code: number
+  message: string
+  data: T
+}
+
+// 分页查询参数
+export interface PageQuery {
+  pageNum: number
+  pageSize: number
+}
+
+// 分页结果
+export interface PageResult<T> {
+  records: T[]
+  total: number
+  pageNum: number
+  pageSize: number
+  pages: number
+}
+
+// 用户相关类型
+export interface LoginForm {
+  username: string
+  password: string
+}
+
+export interface RegisterForm {
+  username: string
+  password: string
+  nickname?: string
+  email?: string
+  phone?: string
+}
+
+export interface UserInfo {
+  id: number
+  username: string
+  nickname: string
+  email: string
+  phone: string
+  avatar: string
+  status: number
+  createTime: string
+}
+
+// 知识库相关类型
+export interface KnowledgeBase {
+  id: number
+  name: string
+  description: string
+  userId: number
+  username?: string
+  status: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface KnowledgeBaseCreateDTO {
+  name: string
+  description?: string
+}
+
+export interface KnowledgeBaseUpdateDTO {
+  name?: string
+  description?: string
+}
+
+// 文档相关类型
+export interface Document {
+  id: number
+  knowledgeBaseId: number
+  knowledgeBaseName: string
+  title: string
+  fileType: string
+  fileSize: number
+  chunkCount: number
+  status: number
+  statusDesc: string
+  errorMessage: string
+  username?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface DocumentUploadDTO {
+  file: File
+  kbId: number
+}
+
+// 对话相关类型
+export interface Conversation {
+  id: number
+  title: string
+  kbId: number
+  userId: number
+  createTime: string
+}
+
+export interface Message {
+  id: number
+  conversationId: number
+  role: 'user' | 'assistant'
+  content: string
+  createTime: string
+}
+
+export interface ConversationCreateDTO {
+  title: string
+  kbId?: number
+}
+
+export interface MessageSendDTO {
+  conversationId: number
+  content: string
+}
