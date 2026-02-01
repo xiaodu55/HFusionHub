@@ -9,7 +9,7 @@ import type {
 } from './types'
 
 // 创建对话
-export const createConversation = (data: ConversationCreateDTO): Promise<ApiResponse<number>> => {
+export const createConversation = (data: ConversationCreateDTO): Promise<ApiResponse<Conversation>> => {
   return post('/conversation', data)
 }
 
@@ -45,9 +45,6 @@ export const sendMessage = (data: MessageSendDTO): Promise<ApiResponse<Message>>
 }
 
 // 获取对话消息列表
-export const getConversationMessages = (conversationId: number, params?: {
-  pageNum?: number
-  pageSize?: number
-}): Promise<ApiResponse<PageResult<Message>>> => {
-  return get(`/conversation/${conversationId}/messages`, params)
+export const getConversationMessages = (conversationId: number): Promise<ApiResponse<Message[]>> => {
+  return get(`/conversation/${conversationId}/messages`)
 }

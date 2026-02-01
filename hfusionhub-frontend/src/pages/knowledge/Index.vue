@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Plus, Search, Edit, Trash2, BookOpen } from 'lucide-vue-next'
+import { formatDateTime } from '@/utils/date'
 
 const router = useRouter()
 
@@ -208,7 +209,7 @@ onMounted(() => {
         </CardHeader>
         <CardContent>
           <p class="text-sm text-muted-foreground">
-            创建时间：{{ new Date(kb.createdAt).toLocaleDateString() }}
+            创建时间：{{ formatDateTime(kb.createdAt) }}
           </p>
           <p v-if="kb.username" class="text-sm text-muted-foreground">
             创建者：{{ kb.username }}

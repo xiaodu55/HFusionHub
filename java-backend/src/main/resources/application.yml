@@ -80,6 +80,11 @@ python-ai:
   callback-base-url: http://localhost:${server.port}${server.servlet.context-path}
   callback-secret: ${CALLBACK_SECRET:hfusionhub-callback-secret-key}
 
+# AI 服务配置
+ai-service:
+  base-url: ${AI_SERVICE_URL:http://localhost:8001}
+  timeout: ${AI_SERVICE_TIMEOUT:120000}
+
 # MinIO 配置
 minio:
   endpoint: http://localhost:9000

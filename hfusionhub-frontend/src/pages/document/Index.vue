@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Plus, Search, FileText, Trash2, Upload, Play, Eye, Loader2, RefreshCw, RefreshCcw } from 'lucide-vue-next'
+import { formatDateTime } from '@/utils/date'
 
 const router = useRouter()
 const toast = useToast()
@@ -319,7 +320,7 @@ onBeforeUnmount(() => {
           <div>
             <p class="font-medium">{{ doc.title }}</p>
             <p class="text-sm text-muted-foreground">
-              {{ doc.knowledgeBaseName }} · {{ formatFileSize(doc.fileSize) }} · {{ new Date(doc.createdAt).toLocaleDateString() }}
+              {{ doc.knowledgeBaseName }} · {{ formatFileSize(doc.fileSize) }} · {{ formatDateTime(doc.createdAt) }}
             </p>
             <p v-if="doc.username" class="text-sm text-muted-foreground">
               上传者：{{ doc.username }}

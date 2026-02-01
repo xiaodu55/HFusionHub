@@ -6,8 +6,10 @@ import com.hfusionhub.dto.ConversationInfoDTO;
 import com.hfusionhub.dto.ConversationQueryDTO;
 import com.hfusionhub.dto.MessageInfoDTO;
 import com.hfusionhub.dto.MessageSendDTO;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 对话服务接口
@@ -70,4 +72,31 @@ public interface ConversationService {
      * @return 消息列表
      */
     List<MessageInfoDTO> getMessages(Long conversationId);
+
+    /**
+     * 发送消息（流式响应）
+     *
+     * @param dto 消息内容
+     * @param emitter SSE emitter
+     */
+    void sendMessageStream(MessageSendDTO dto, SseEmitter emitter);
+
+    /**
+     * 发送消息（流式响应，指定用户ID，用于异步线程）
+     *
+     * @param dto 消息内容
+     * @param emitter SSE emitter
+     * @param currentUserId 当前用户ID
+     */
+    void sendMessageStream(MessageSendDTO dto, SseEmitter emitter, Long currentUserId);
+
+    /**
+     * 发送消息（流式响应，支持取消）
+     *
+     * @param dto 消息内容
+     * @param emitter SSE emitter
+     * @param currentUserId 当前用户ID
+     * @param cancelled 取消标志，客户端断开时设为true
+     */
+    void sendMessageStream(MessageSendDTO dto, SseEmitter emitter, Long currentUserId, AtomicBoolean cancelled);
 }

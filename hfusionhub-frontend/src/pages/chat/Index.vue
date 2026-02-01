@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import * as conversationApi from '@/api/conversation'
 import * as knowledgeBaseApi from '@/api/knowledgeBase'
@@ -16,7 +16,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Plus, MessageSquare, Trash2 } from 'lucide-vue-next'
+import { Plus, MessageSquare, Trash2, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { formatDateTime } from '@/utils/date'
 
 const router = useRouter()
 
@@ -26,17 +27,25 @@ const loading = ref(false)
 const isCreateDialogOpen = ref(false)
 const createForm = ref({
   title: '',
-  kbId: undefined as number | undefined,
+  knowledgeBaseId: undefined as number | undefined,
 })
+
+// 分页状态
+const currentPage = ref(1)
+const pageSize = ref(12)
+const total = ref(0)
+
+const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
 
 const loadConversations = async () => {
   loading.value = true
   try {
     const res = await conversationApi.getMyConversations({
-      pageNum: 1,
-      pageSize: 100,
+      pageNum: currentPage.value,
+      pageSize: pageSize.value,
     })
     conversations.value = res.data.records
+    total.value = res.data.total
   } catch (error) {
     console.error('加载对话列表失败:', error)
   } finally {
@@ -56,17 +65,26 @@ const loadKnowledgeBases = async () => {
   }
 }
 
+const handlePageChange = (page: number) => {
+  currentPage.value = page
+  loadConversations()
+}
+
 const handleCreate = async () => {
   if (!createForm.value.title) return
 
   try {
     const res = await conversationApi.createConversation({
       title: createForm.value.title,
-      kbId: createForm.value.kbId,
+      knowledgeBaseId: createForm.value.knowledgeBaseId,
     })
     isCreateDialogOpen.value = false
-    createForm.value = { title: '', kbId: undefined }
-    router.push(`/chat/${res.data}`)
+    createForm.value = { title: '', knowledgeBaseId: undefined }
+    // 后端返回完整 ConversationInfoDTO，提取 id
+    const conversationId = res.data?.id
+    if (conversationId) {
+      router.push(`/chat/${conversationId}`)
+    }
   } catch (error) {
     console.error('创建对话失败:', error)
   }
@@ -87,9 +105,8 @@ const goToChat = (id: number) => {
   router.push(`/chat/${id}`)
 }
 
-const getKnowledgeBaseName = (kbId: number) => {
-  const kb = knowledgeBases.value.find(k => k.id === kbId)
-  return kb?.name || '通用对话'
+const getKnowledgeBaseName = (conversation: Conversation) => {
+  return conversation.knowledgeBaseName || '通用对话'
 }
 
 onMounted(() => {
@@ -132,17 +149,18 @@ onMounted(() => {
             <div class="space-y-1">
               <CardTitle class="text-lg">{{ conversation.title }}</CardTitle>
               <CardDescription>
-                {{ getKnowledgeBaseName(conversation.kbId) }}
+                {{ getKnowledgeBaseName(conversation) }}
               </CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent>
-          <p class="text-sm text-muted-foreground">
-            创建时间：{{ new Date(conversation.createTime).toLocaleDateString() }}
-          </p>
+          <div class="flex items-center justify-between text-sm text-muted-foreground">
+            <span v-if="conversation.userName">{{ conversation.userName }}</span>
+            <span>{{ formatDateTime(conversation.createdAt) }}</span>
+          </div>
         </CardContent>
-        <CardFooter className="flex justify-end">
+        <CardFooter class="flex justify-end">
           <Button
             variant="ghost"
             size="icon"
@@ -152,6 +170,29 @@ onMounted(() => {
           </Button>
         </CardFooter>
       </Card>
+    </div>
+
+    <!-- 分页控件 -->
+    <div v-if="totalPages > 1" class="flex items-center justify-center gap-2 mt-6">
+      <Button
+        variant="outline"
+        size="sm"
+        :disabled="currentPage === 1"
+        @click="handlePageChange(currentPage - 1)"
+      >
+        <ChevronLeft class="h-4 w-4" />
+      </Button>
+      <span class="text-sm text-muted-foreground">
+        第 {{ currentPage }} / {{ totalPages }} 页
+      </span>
+      <Button
+        variant="outline"
+        size="sm"
+        :disabled="currentPage === totalPages"
+        @click="handlePageChange(currentPage + 1)"
+      >
+        <ChevronRight class="h-4 w-4" />
+      </Button>
     </div>
 
     <!-- 新建对话对话框 -->
@@ -174,7 +215,7 @@ onMounted(() => {
             <Label for="kb-select">选择知识库（可选）</Label>
             <select
               id="kb-select"
-              v-model="createForm.kbId"
+              v-model="createForm.knowledgeBaseId"
               class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <option :value="undefined">通用对话</option>

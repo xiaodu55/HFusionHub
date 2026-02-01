@@ -28,6 +28,9 @@ public class ConversationInfoDTO {
     @Schema(description = "用户ID")
     private Long userId;
 
+    @Schema(description = "创建人名称")
+    private String userName;
+
     @Schema(description = "对话标题")
     private String title;
 

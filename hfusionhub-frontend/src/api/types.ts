@@ -78,7 +78,7 @@ export interface Document {
   chunkCount: number
   status: number
   statusDesc: string
-  errorMessage: string
+  errorMessage: string | null
   username?: string
   createdAt: string
   updatedAt: string
@@ -93,9 +93,14 @@ export interface DocumentUploadDTO {
 export interface Conversation {
   id: number
   title: string
-  kbId: number
+  knowledgeBaseId: number
+  knowledgeBaseName?: string
   userId: number
-  createTime: string
+  userName?: string
+  messageCount?: number
+  lastMessage?: string
+  createdAt: string
+  updatedAt: string
 }
 
 export interface Message {
@@ -103,12 +108,14 @@ export interface Message {
   conversationId: number
   role: 'user' | 'assistant'
   content: string
-  createTime: string
+  tokenCount?: number
+  model?: string
+  createdAt: string
 }
 
 export interface ConversationCreateDTO {
   title: string
-  kbId?: number
+  knowledgeBaseId?: number
 }
 
 export interface MessageSendDTO {

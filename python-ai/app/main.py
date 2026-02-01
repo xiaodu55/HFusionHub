@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.utils.config import config
 from app.api.vectorization import router as vectorization_router
+from app.api.chat import router as chat_router
 from app.api.exception_handlers import (
     hfusionhub_exception_handler,
     http_exception_handler,
@@ -46,6 +47,7 @@ def create_app() -> FastAPI:
 
     # Include routers
     app.include_router(vectorization_router)
+    app.include_router(chat_router)
 
     @app.get("/")
     async def root():
