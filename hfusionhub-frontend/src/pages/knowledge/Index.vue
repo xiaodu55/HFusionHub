@@ -214,6 +214,9 @@ onMounted(() => {
           <p v-if="kb.username" class="text-sm text-muted-foreground">
             创建者：{{ kb.username }}
           </p>
+          <p class="text-sm text-muted-foreground">
+            文档数量：{{ kb.documentCount || 0 }} 篇
+          </p>
         </CardContent>
         <CardFooter class="flex justify-end gap-2">
           <Button

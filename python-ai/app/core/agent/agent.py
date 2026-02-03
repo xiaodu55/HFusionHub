@@ -24,6 +24,7 @@ class AgentResponse:
     model: str = ""
     token_count: int = 0
     finish_reason: str = "stop"
+    sources: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class Agent(ABC):

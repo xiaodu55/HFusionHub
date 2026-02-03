@@ -53,6 +53,7 @@ export interface KnowledgeBase {
   userId: number
   username?: string
   status: number
+  documentCount?: number
   createdAt: string
   updatedAt: string
 }
@@ -110,6 +111,11 @@ export interface Message {
   content: string
   tokenCount?: number
   model?: string
+  sources?: Array<{
+    document_name: string
+    content: string
+    score: number
+  }>
   createdAt: string
 }
 

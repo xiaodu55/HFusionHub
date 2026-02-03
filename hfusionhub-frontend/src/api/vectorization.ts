@@ -1,10 +1,17 @@
 import request from '@/api/request'
 
 /**
+ * 获取可用的嵌入模型列表
+ */
+export function getAvailableModels() {
+  return request.get('/vectorize/models')
+}
+
+/**
  * 触发文档向量化（使用较长超时时间，因为解析可能较慢）
  */
-export function startVectorization(documentId: number) {
-  return request.post(`/vectorize/${documentId}`, null, { timeout: 120000 })
+export function startVectorization(documentId: number, model?: string) {
+  return request.post(`/vectorize/${documentId}`, { model }, { timeout: 120000 })
 }
 
 /**

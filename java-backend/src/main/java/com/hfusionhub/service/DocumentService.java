@@ -2,6 +2,7 @@ package com.hfusionhub.service;
 
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.dto.DocumentInfoDTO;
+import com.hfusionhub.dto.DocumentNameDTO;
 import com.hfusionhub.dto.DocumentQueryDTO;
 import com.hfusionhub.dto.DocumentUpdateDTO;
 import org.springframework.web.multipart.MultipartFile;
@@ -80,4 +81,12 @@ public interface DocumentService {
      * @return 分页结果
      */
     PageResult<DocumentInfoDTO> listByCurrentUser(Long knowledgeBaseId, DocumentQueryDTO queryDTO);
+
+    /**
+     * 获取文档名称
+     *
+     * @param id 文档ID
+     * @return 文档名称信息
+     */
+    DocumentNameDTO getDocumentName(Long id);
 }

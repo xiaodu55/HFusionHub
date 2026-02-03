@@ -5,6 +5,7 @@ Embedding 模块 - 支持多种 Embedding 服务
 import os
 import random
 import logging
+import asyncio
 from typing import List, Optional
 
 from app.core.embedding.deepseek import DeepSeekEmbedding
@@ -85,6 +86,52 @@ class EmbeddingService:
         logger.warning("Using random vectors as fallback")
         return self._generate_random_vector()
 
+    def get_embedding(self, text: str) -> List[float]:
+        """
+        同步版本 - 获取单个文本的 Embedding
+        用于非异步环境（如 Milvus search_similar）
+
+        Args:
+            text: 输入文本
+
+        Returns:
+            Embedding 向量
+        """
+        try:
+            # 尝试获取当前事件循环
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 如果循环正在运行，使用 run_until_complete
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    return pool.submit(asyncio.run, self.generate(text)).result()
+            else:
+                return loop.run_until_complete(self.generate(text))
+        except RuntimeError:
+            # 没有事件循环，创建一个新的
+            return asyncio.run(self.generate(text))
+
+    def get_embedding_batch(self, texts: List[str]) -> List[List[float]]:
+        """
+        同步版本 - 批量获取 Embedding
+
+        Args:
+            texts: 输入文本列表
+
+        Returns:
+            Embedding 向量列表
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    return pool.submit(asyncio.run, self.generate_batch(texts)).result()
+            else:
+                return loop.run_until_complete(self.generate_batch(texts))
+        except RuntimeError:
+            return asyncio.run(self.generate_batch(texts))
+
     async def generate_batch(self, texts: List[str]) -> List[List[float]]:
         """
         批量生成 Embedding
@@ -144,8 +191,33 @@ def get_embedding_service() -> EmbeddingService:
             deepseek_api_key=os.getenv("DEEPSEEK_API_KEY"),
             deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-            ollama_model=os.getenv("OLLAMA_EMBEDDING_MODEL", "bge-m3")
+            ollama_model=os.getenv("OLLAMA_EMBEDDING_MODEL", "qwen3-embedding:8b-fp16")
         )
+
+        # Check if Ollama is available
+        import httpx
+        try:
+            response = httpx.get(f"{_embedding_service._ollama.base_url}/api/tags", timeout=5.0)
+            if response.status_code == 200:
+                models = response.json().get("models", [])
+                model_names = [m["name"] for m in models]
+                # Check if the configured model exists
+                if _embedding_service._ollama.model in model_names:
+                    _embedding_service._ollama.set_available(True)
+                    logger.info(f"Ollama embedding available with model: {_embedding_service._ollama.model}")
+                elif any("embedding" in name.lower() for name in model_names):
+                    # Use the first embedding model found
+                    embedding_model = next(name for name in model_names if "embedding" in name.lower())
+                    _embedding_service._ollama.model = embedding_model
+                    _embedding_service._ollama.set_available(True)
+                    logger.info(f"Ollama embedding available with model: {embedding_model}")
+                else:
+                    logger.warning(f"Ollama available but no embedding models found: {model_names}")
+            else:
+                logger.warning(f"Ollama not available: {response.status_code}")
+        except Exception as e:
+            logger.warning(f"Ollama connection failed: {e}")
+
     return _embedding_service
 
 

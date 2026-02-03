@@ -196,6 +196,7 @@ public class ConversationServiceImpl implements ConversationService {
             assistantMessage.setContent(aiResponse.getContent());
             assistantMessage.setModel(aiResponse.getModel());
             assistantMessage.setTokenCount(aiResponse.getTokenCount());
+            assistantMessage.setSources(aiResponse.getSources());
             messageMapper.insert(assistantMessage);
 
             // 6. 更新对话标题（如果是第一条消息）
@@ -515,6 +516,7 @@ public class ConversationServiceImpl implements ConversationService {
                 .content(message.getContent())
                 .tokenCount(message.getTokenCount())
                 .model(message.getModel())
+                .sources(message.getSources())
                 .createdAt(message.getCreatedAt())
                 .build();
     }

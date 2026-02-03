@@ -12,6 +12,7 @@ import com.hfusionhub.dto.KnowledgeBaseQueryDTO;
 import com.hfusionhub.dto.KnowledgeBaseUpdateDTO;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.entity.User;
+import com.hfusionhub.mapper.DocumentMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.KnowledgeBaseService;
@@ -21,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -35,6 +37,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final UserMapper userMapper;
+    private final DocumentMapper documentMapper;
     private final JwtUtils jwtUtils;
 
     /**
@@ -154,40 +157,14 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     }
 
     /**
-     * 分页查询知识库列表
+     * 分页查询知识库列表（所有知识库）
      *
      * @param queryDTO 查询条件
      * @return 分页结果
      */
     @Override
     public PageResult<KnowledgeBaseInfoDTO> list(KnowledgeBaseQueryDTO queryDTO) {
-        queryDTO.validate();
-
-        LambdaQueryWrapper<KnowledgeBase> wrapper = new LambdaQueryWrapper<>();
-
-        // 名称模糊查询
-        if (StringUtils.hasText(queryDTO.getName())) {
-            wrapper.like(KnowledgeBase::getName, queryDTO.getName());
-        }
-
-        // 状态查询
-        if (queryDTO.getStatus() != null) {
-            wrapper.eq(KnowledgeBase::getStatus, queryDTO.getStatus());
-        }
-
-        // 排序
-        wrapper.orderByDesc(KnowledgeBase::getCreatedAt);
-
-        // 分页查询
-        Page<KnowledgeBase> page = new Page<>(queryDTO.getPage(), queryDTO.getPageSize());
-        Page<KnowledgeBase> result = knowledgeBaseMapper.selectPage(page, wrapper);
-
-        // 转换为 DTO
-        List<KnowledgeBaseInfoDTO> records = result.getRecords().stream()
-                .map(this::convertToInfoDTO)
-                .collect(Collectors.toList());
-
-        return PageResult.of(result.getCurrent(), result.getSize(), result.getTotal(), records);
+        return listInternal(null, queryDTO);
     }
 
     /**
@@ -198,12 +175,26 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
      */
     @Override
     public PageResult<KnowledgeBaseInfoDTO> listByCurrentUser(KnowledgeBaseQueryDTO queryDTO) {
+        Long userId = jwtUtils.getCurrentUserId();
+        return listInternal(userId, queryDTO);
+    }
+
+    /**
+     * 内部统一分页查询方法（避免N+1查询）
+     *
+     * @param userId   用户ID（为null则查询所有）
+     * @param queryDTO 查询条件
+     * @return 分页结果
+     */
+    private PageResult<KnowledgeBaseInfoDTO> listInternal(Long userId, KnowledgeBaseQueryDTO queryDTO) {
         queryDTO.validate();
 
-        Long userId = jwtUtils.getCurrentUserId();
-
         LambdaQueryWrapper<KnowledgeBase> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(KnowledgeBase::getUserId, userId);
+
+        // 按用户过滤
+        if (userId != null) {
+            wrapper.eq(KnowledgeBase::getUserId, userId);
+        }
 
         // 名称模糊查询
         if (StringUtils.hasText(queryDTO.getName())) {
@@ -222,16 +213,61 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         Page<KnowledgeBase> page = new Page<>(queryDTO.getPage(), queryDTO.getPageSize());
         Page<KnowledgeBase> result = knowledgeBaseMapper.selectPage(page, wrapper);
 
-        // 转换为 DTO
+        if (result.getRecords().isEmpty()) {
+            return PageResult.of(result.getCurrent(), result.getSize(), result.getTotal(), List.of());
+        }
+
+        // 批量预加载用户信息（避免N+1）
+        List<Long> userIds = result.getRecords().stream()
+                .map(KnowledgeBase::getUserId)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, String> usernameMap = Map.of();
+        if (!userIds.isEmpty()) {
+            List<User> users = userMapper.selectBatchIds(userIds);
+            usernameMap = users.stream()
+                    .collect(java.util.stream.Collectors.toMap(User::getId, User::getUsername));
+        }
+
+        // 批量预加载文档数量（避免N+1）
+        List<Long> kbIds = result.getRecords().stream()
+                .map(KnowledgeBase::getId)
+                .collect(Collectors.toList());
+        Map<Long, Long> docCountMap = Map.of();
+        if (!kbIds.isEmpty()) {
+            // 使用SQL分组查询获取每个知识库的文档数
+            LambdaQueryWrapper<com.hfusionhub.entity.Document> docWrapper = new LambdaQueryWrapper<>();
+            docWrapper.in(com.hfusionhub.entity.Document::getKnowledgeBaseId, kbIds)
+                    .select(com.hfusionhub.entity.Document::getKnowledgeBaseId);
+            List<com.hfusionhub.entity.Document> docs = documentMapper.selectList(docWrapper);
+            docCountMap = docs.stream()
+                    .collect(java.util.stream.Collectors.groupingBy(
+                            com.hfusionhub.entity.Document::getKnowledgeBaseId,
+                            java.util.stream.Collectors.counting()));
+        }
+
+        // 转换为 DTO（使用预查询数据）
+        final Map<Long, String> finalUsernameMap = usernameMap;
+        final Map<Long, Long> finalDocCountMap = docCountMap;
         List<KnowledgeBaseInfoDTO> records = result.getRecords().stream()
-                .map(this::convertToInfoDTO)
+                .map(kb -> KnowledgeBaseInfoDTO.builder()
+                        .id(kb.getId())
+                        .name(kb.getName())
+                        .description(kb.getDescription())
+                        .userId(kb.getUserId())
+                        .username(finalUsernameMap.getOrDefault(kb.getUserId(), "unknown"))
+                        .status(kb.getStatus())
+                        .documentCount(finalDocCountMap.getOrDefault(kb.getId(), 0L).intValue())
+                        .createdAt(kb.getCreatedAt())
+                        .updatedAt(kb.getUpdatedAt())
+                        .build())
                 .collect(Collectors.toList());
 
         return PageResult.of(result.getCurrent(), result.getSize(), result.getTotal(), records);
     }
 
     /**
-     * KnowledgeBase 实体转换为 KnowledgeBaseInfoDTO
+     * KnowledgeBase 实体转换为 KnowledgeBaseInfoDTO（单条转换，用于getById/create/update）
      *
      * @param knowledgeBase 知识库实体
      * @return 知识库信息DTO
@@ -241,6 +277,11 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         User user = userMapper.selectById(knowledgeBase.getUserId());
         String username = user != null ? user.getUsername() : "unknown";
 
+        // 查询文档数量
+        LambdaQueryWrapper<com.hfusionhub.entity.Document> docWrapper = new LambdaQueryWrapper<>();
+        docWrapper.eq(com.hfusionhub.entity.Document::getKnowledgeBaseId, knowledgeBase.getId());
+        Long documentCount = documentMapper.selectCount(docWrapper);
+
         return KnowledgeBaseInfoDTO.builder()
                 .id(knowledgeBase.getId())
                 .name(knowledgeBase.getName())
@@ -248,7 +289,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                 .userId(knowledgeBase.getUserId())
                 .username(username)
                 .status(knowledgeBase.getStatus())
-                .documentCount(0) // TODO: 查询文档数量
+                .documentCount(documentCount.intValue())
                 .createdAt(knowledgeBase.getCreatedAt())
                 .updatedAt(knowledgeBase.getUpdatedAt())
                 .build();

@@ -3,6 +3,7 @@ package com.hfusionhub.controller;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.dto.DocumentInfoDTO;
+import com.hfusionhub.dto.DocumentNameDTO;
 import com.hfusionhub.dto.DocumentQueryDTO;
 import com.hfusionhub.dto.DocumentUpdateDTO;
 import com.hfusionhub.service.DocumentService;
@@ -93,5 +94,13 @@ public class DocumentController {
             DocumentQueryDTO queryDTO) {
         PageResult<DocumentInfoDTO> result = documentService.listByCurrentUser(knowledgeBaseId, queryDTO);
         return R.ok(result);
+    }
+
+    @Operation(summary = "获取文档名称", description = "根据文档ID获取文档名称，用于向量化搜索结果显示")
+    @GetMapping("/{id}/name")
+    public R<DocumentNameDTO> getDocumentName(
+            @Parameter(description = "文档ID") @PathVariable Long id) {
+        DocumentNameDTO nameDTO = documentService.getDocumentName(id);
+        return R.ok(nameDTO);
     }
 }

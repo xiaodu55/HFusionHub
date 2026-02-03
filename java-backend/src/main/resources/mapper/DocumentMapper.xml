@@ -25,4 +25,12 @@
         chunk_count, status, error_message, created_at, updated_at, deleted
     </sql>
 
+    <!-- 根据知识库ID统计文档数量 -->
+    <select id="countByKnowledgeBaseId" resultType="int">
+        SELECT COUNT(*)
+        FROM document
+        WHERE knowledge_base_id = #{knowledgeBaseId}
+        AND deleted = 0
+    </select>
+
 </mapper>

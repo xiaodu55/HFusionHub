@@ -74,6 +74,30 @@ def validate_file_path(file_path: str) -> None:
             }
         )
 
+    # Try to resolve relative paths from project root
+    if not os.path.isabs(file_path):
+        # Try from project root (parent of python-ai)
+        # __file__ is python-ai/app/utils/validators.py
+        # Go up 4 levels to get to project root
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        abs_path = os.path.join(project_root, file_path)
+        print(f"[Validator] Project root: {project_root}")
+        print(f"[Validator] Absolute path: {abs_path}")
+        print(f"[Validator] Exists: {os.path.exists(abs_path)}")
+        if os.path.exists(abs_path):
+            file_path = abs_path
+        # Also try from current working directory
+        elif os.path.exists(file_path):
+            pass  # Use as-is
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": 10001,
+                    "message": f"文件不存在: {file_path}"
+                }
+            )
+
     if not os.path.exists(file_path):
         raise HTTPException(
             status_code=404,

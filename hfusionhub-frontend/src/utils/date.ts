@@ -16,8 +16,8 @@ export const parseServerTime = (dateStr: string | null | undefined): Date | null
       return new Date(y, m - 1, d, h, min, s)
     }
 
-    // 提取时间部分（避免时区转换）
-    const match = String(dateStr).match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/)
+    // 提取时间部分（避免时区转换）- 支持 T 分隔符和空格分隔符
+    const match = String(dateStr).match(/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/)
     if (match) {
       const [, y, m, d, h, min, s] = match
       return new Date(Number(y), Number(m) - 1, Number(d), Number(h), Number(min), Number(s))

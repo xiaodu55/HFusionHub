@@ -19,14 +19,26 @@ from app.core.chunker.text_chunker import VectorChunk
 # Collection name
 COLLECTION_NAME = "knowledge_chunks"
 
-# Embedding dimension (BGE-M3 uses 1024)
-EMBEDDING_DIM = 1024
+# Use config for embedding dimension
+from app.utils.config import config as app_config
 
 # Milvus Lite database path
 MILVUS_LITE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "milvus_data.db")
 
 # Global client
 _client: Optional[MilvusClient] = None
+
+# Lazy import embedding service
+_embedding_service = None
+
+
+def _get_embedding_service():
+    """Lazy import embedding service"""
+    global _embedding_service
+    if _embedding_service is None:
+        from app.core.embedding import get_embedding_service
+        _embedding_service = get_embedding_service()
+    return _embedding_service
 
 
 def get_milvus_client() -> Optional[MilvusClient]:
@@ -43,8 +55,24 @@ def get_milvus_client() -> Optional[MilvusClient]:
         return None
 
 
+def drop_collection():
+    """Drop collection (for schema migration)"""
+    try:
+        client = get_milvus_client()
+        if client is None:
+            return False
+
+        if client.has_collection(COLLECTION_NAME):
+            client.drop_collection(COLLECTION_NAME)
+            print(f"Dropped collection: {COLLECTION_NAME}")
+        return True
+    except Exception as e:
+        print(f"Failed to drop collection: {e}")
+        return False
+
+
 def create_collection():
-    """Create collection if not exists"""
+    """Create collection if not exists, or recreate if schema incompatible"""
     try:
         client = get_milvus_client()
         if client is None:
@@ -52,17 +80,31 @@ def create_collection():
 
         # Check if collection exists
         if client.has_collection(COLLECTION_NAME):
-            return client
+            # Verify schema has knowledge_base_id field
+            try:
+                schema = client.describe_collection(COLLECTION_NAME)
+                fields = [f.name for f in schema.get("fields", [])]
+                if "knowledge_base_id" not in fields:
+                    print(f"[Milvus] Schema incompatible, need to recreate collection")
+                    # Don't drop here - will be handled by caller if needed
+                    return client
+                else:
+                    return client
+            except Exception as e:
+                print(f"[Milvus] Schema check failed: {e}, but keeping collection")
+                # Don't drop collection during normal operations
+                return client
 
         # Define fields
         fields = [
             FieldSchema(name="chunk_id", dtype=DataType.VARCHAR, is_primary=True, max_length=128),
             FieldSchema(name="document_id", dtype=DataType.VARCHAR, max_length=64),
+            FieldSchema(name="knowledge_base_id", dtype=DataType.INT64),
             FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=65535),
             FieldSchema(name="block_type", dtype=DataType.VARCHAR, max_length=20),
             FieldSchema(name="outline_path", dtype=DataType.VARCHAR, max_length=2000),
             FieldSchema(name="metadata", dtype=DataType.VARCHAR, max_length=4000),
-            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=EMBEDDING_DIM)
+            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=app_config.EMBEDDING_DIMENSION)
         ]
 
         # Create schema
@@ -92,7 +134,7 @@ def create_collection():
         return None
 
 
-def insert_chunks(chunks: List[VectorChunk], embeddings: List[List[float]], document_id: str) -> bool:
+def insert_chunks(chunks: List[VectorChunk], embeddings: List[List[float]], document_id: str, knowledge_base_id: int = None) -> bool:
     """Insert chunks with embeddings into Milvus"""
     try:
         client = create_collection()
@@ -108,6 +150,7 @@ def insert_chunks(chunks: List[VectorChunk], embeddings: List[List[float]], docu
             data.append({
                 "chunk_id": chunk.chunk_id,
                 "document_id": document_id,
+                "knowledge_base_id": knowledge_base_id or 0,
                 "content": chunk.content,
                 "block_type": chunk.block_type,
                 "outline_path": outline_path_str,
@@ -130,6 +173,7 @@ def insert_chunks(chunks: List[VectorChunk], embeddings: List[List[float]], docu
             store_records.append({
                 "chunk_id": chunk.chunk_id,
                 "document_id": document_id,
+                "knowledge_base_id": knowledge_base_id or 0,
                 "content": chunk.content,
                 "block_type": chunk.block_type,
                 "outline_path": outline_path_str,
@@ -144,11 +188,40 @@ def insert_chunks(chunks: List[VectorChunk], embeddings: List[List[float]], docu
         return False
 
 
-def search_similar(query_embedding: List[float], top_k: int = 5, document_id: Optional[str] = None) -> List[Dict]:
-    """Search for similar chunks"""
+def search_similar(
+    query_text: Optional[str] = None,
+    query_embedding: Optional[List[float]] = None,
+    top_k: int = 5,
+    document_id: Optional[str] = None,
+    knowledge_base_id: Optional[int] = None
+) -> List[Dict]:
+    """
+    Search for similar chunks
+
+    Args:
+        query_text: Search query text (will be converted to embedding)
+        query_embedding: Pre-computed embedding vector
+        top_k: Number of results to return
+        document_id: Filter by document ID
+        knowledge_base_id: Filter by knowledge base ID
+
+    Returns:
+        List of search results
+    """
     try:
         client = get_milvus_client()
         if client is None:
+            return []
+
+        # Generate embedding from query_text if not provided
+        if query_text and query_embedding is None:
+            embedding_service = _get_embedding_service()
+            query_embedding = embedding_service.get_embedding(query_text)
+            if query_embedding is None:
+                print(f"Failed to generate embedding for query: {query_text[:50]}...")
+                return []
+
+        if query_embedding is None:
             return []
 
         # Load collection before search
@@ -160,10 +233,14 @@ def search_similar(query_embedding: List[float], top_k: int = 5, document_id: Op
             "params": {"nprobe": 16}
         }
 
-        # Build filter
-        filter_expr = None
+        # Build filter expressions
+        filters = []
         if document_id:
-            filter_expr = f'document_id == "{document_id}"'
+            filters.append(f'document_id == "{document_id}"')
+        if knowledge_base_id:
+            filters.append(f'knowledge_base_id == {knowledge_base_id}')
+
+        filter_expr = " and ".join(filters) if filters else None
 
         # Search
         results = client.search(
@@ -171,7 +248,7 @@ def search_similar(query_embedding: List[float], top_k: int = 5, document_id: Op
             data=[query_embedding],
             limit=top_k,
             search_params=search_params,
-            output_fields=["chunk_id", "document_id", "content", "block_type", "outline_path", "metadata"],
+            output_fields=["chunk_id", "document_id", "knowledge_base_id", "content", "block_type", "outline_path", "metadata"],
             filter=filter_expr
         )
 
@@ -190,6 +267,7 @@ def search_similar(query_embedding: List[float], top_k: int = 5, document_id: Op
                 formatted_results.append({
                     "chunk_id": hit.get("chunk_id"),
                     "document_id": hit.get("document_id"),
+                    "knowledge_base_id": hit.get("knowledge_base_id"),
                     "content": hit.get("content"),
                     "block_type": hit.get("block_type"),
                     "outline_path": outline_path,

@@ -4,9 +4,17 @@ HFusionHub Python AI Engine - FastAPI Application
 
 import os
 import sys
+import logging
 
 # Add project root to Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Configure logging so background task logs are visible
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -60,10 +68,6 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health():
         return {"status": "healthy"}
-
-    @app.post("/test-post")
-    async def test_post(data: dict):
-        return {"received": data}
 
     return app
 

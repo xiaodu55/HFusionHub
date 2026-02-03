@@ -28,7 +28,7 @@ class OllamaEmbedding:
             dimension: 向量维度
         """
         self.base_url = (base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
-        self.model = model or os.getenv("OLLAMA_EMBEDDING_MODEL", "bge-m3")
+        self.model = model or os.getenv("OLLAMA_EMBEDDING_MODEL", "qwen3-embedding:8b-fp16")
         self.dimension = dimension
         # 默认不可用，启动时异步检查
         self._is_available = False
@@ -71,25 +71,46 @@ class OllamaEmbedding:
         return embeddings
 
     async def _call_api(self, text: str) -> List[float]:
-        """调用 Ollama API"""
-        url = f"{self.base_url}/api/embed"
+        """调用 Ollama API with retry"""
+        url = f"{self.base_url}/api/embeddings"
 
         payload = {
             "model": self.model,
-            "input": text
+            "prompt": text
         }
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload, timeout=30.0)
-            response.raise_for_status()
-            result = response.json()
+        max_retries = int(os.getenv("EMBEDDING_MAX_RETRIES", "3"))
+        retry_delay = float(os.getenv("EMBEDDING_RETRY_DELAY", "1.0"))
 
-            # Ollama 返回格式: {"embeddings": [[...]]}
-            embeddings = result.get("embeddings", [])
-            if not embeddings or not embeddings[0]:
-                raise ValueError(f"Ollama returned empty embeddings: {result}")
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(url, json=payload, timeout=60.0)
+                    response.raise_for_status()
+                    result = response.json()
 
-            return embeddings[0]
+                    # Ollama 返回格式: {"embedding": [...]}
+                    embedding = result.get("embedding", [])
+                    if not embedding:
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Ollama returned empty embedding (attempt {attempt + 1}/{max_retries}), retrying...")
+                            await asyncio.sleep(retry_delay)
+                            continue
+                        raise ValueError(f"Ollama returned empty embedding after {max_retries} attempts: {result}")
+
+                    return embedding
+            except httpx.TimeoutException:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Ollama timeout (attempt {attempt + 1}/{max_retries}), retrying...")
+                    await asyncio.sleep(retry_delay)
+                    continue
+                raise
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Ollama error (attempt {attempt + 1}/{max_retries}): {e}, retrying...")
+                    await asyncio.sleep(retry_delay)
+                    continue
+                raise
 
     @property
     def is_available(self) -> bool:

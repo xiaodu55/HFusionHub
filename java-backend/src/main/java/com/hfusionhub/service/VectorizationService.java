@@ -1,5 +1,7 @@
 package com.hfusionhub.service;
 
+import com.hfusionhub.entity.Document;
+
 /**
  * 向量化服务接口
  *
@@ -11,8 +13,9 @@ public interface VectorizationService {
      * 触发文档向量化
      *
      * @param documentId 文档ID
+     * @param model      嵌入模型（可选）
      */
-    void startVectorization(Long documentId);
+    void startVectorization(Long documentId, String model);
 
     /**
      * 获取文档分块列表
@@ -48,4 +51,18 @@ public interface VectorizationService {
      * @param documentId 文档ID
      */
     void syncDocumentStatus(Long documentId);
+
+    /**
+     * 同步所有待处理文档的状态
+     *
+     * @return 同步的文档数量
+     */
+    int syncAllDocuments();
+
+    /**
+     * 重置文档状态为待解析
+     *
+     * @param documentId 文档ID
+     */
+    void resetDocument(Long documentId);
 }

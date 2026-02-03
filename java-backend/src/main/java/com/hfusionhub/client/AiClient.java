@@ -10,6 +10,8 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -180,8 +182,10 @@ public class AiClient {
     public static class ChatResponse {
         private String content;
         private String model;
+        @JsonProperty("token_count")
         private int tokenCount;
         private List<Map<String, Object>> steps;
+        private List<Map<String, Object>> sources;
 
         public ChatResponse() {}
 
@@ -196,5 +200,8 @@ public class AiClient {
 
         public List<Map<String, Object>> getSteps() { return steps; }
         public void setSteps(List<Map<String, Object>> steps) { this.steps = steps; }
+
+        public List<Map<String, Object>> getSources() { return sources; }
+        public void setSources(List<Map<String, Object>> sources) { this.sources = sources; }
     }
 }

@@ -58,33 +58,6 @@ public interface CommonConstants {
     int KB_STATUS_DISABLED = 1;
 
     /**
-     * 文档状态：处理中
-     */
-    int DOC_STATUS_PROCESSING = 0;
-
-    /**
-     * 文档状态：成功
-     */
-    int DOC_STATUS_SUCCESS = 1;
-
-    /**
-     * 文档状态：失败
-     */
-    int DOC_STATUS_FAILED = 2;
-
-    /**
-     * 文件大小限制：10MB
-     */
-    long MAX_FILE_SIZE = 10 * 1024 * 1024;
-
-    /**
-     * 支持的文件类型
-     */
-    String[] SUPPORTED_FILE_TYPES = {
-            "pdf", "doc", "docx", "txt", "md"
-    };
-
-    /**
      * 角色：普通用户
      */
     String ROLE_USER = "user";

@@ -1,5 +1,6 @@
 package com.hfusionhub.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.entity.Document;
 import com.hfusionhub.enums.DocumentStatus;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -38,7 +40,7 @@ public class VectorizationServiceImpl implements VectorizationService {
     private String callbackSecret;
 
     @Override
-    public void startVectorization(Long documentId) {
+    public void startVectorization(Long documentId, String model) {
         // 1. 查询文档
         Document document = documentMapper.selectById(documentId);
         if (document == null) {
@@ -57,7 +59,7 @@ public class VectorizationServiceImpl implements VectorizationService {
 
         // 4. 异步调用Python引擎进行处理
         try {
-            callPythonEngine(document);
+            callPythonEngine(document, model);
         } catch (Exception e) {
             log.error("调用Python引擎失败", e);
             document.setStatus(DocumentStatus.FAILED.getCode());
@@ -155,10 +157,51 @@ public class VectorizationServiceImpl implements VectorizationService {
         }
     }
 
+    @Override
+    public int syncAllDocuments() {
+        // 查询所有待处理或处理中的文档
+        LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<>();
+        wrapper.in(Document::getStatus,
+                DocumentStatus.PENDING.getCode(),
+                DocumentStatus.PROCESSING.getCode());
+        List<Document> pendingDocs = documentMapper.selectList(wrapper);
+
+        int updated = 0;
+        for (Document doc : pendingDocs) {
+            try {
+                syncDocumentStatus(doc.getId());
+                updated++;
+            } catch (Exception e) {
+                log.warn("同步文档状态失败: {}", doc.getId(), e);
+            }
+        }
+        return updated;
+    }
+
+    @Override
+    public void resetDocument(Long documentId) {
+        Document document = documentMapper.selectById(documentId);
+        if (document == null) {
+            throw new BusinessException("文档不存在");
+        }
+
+        // 只有处理中或失败的状态才允许重置
+        if (document.getStatus() != null
+                && document.getStatus() != DocumentStatus.PROCESSING.getCode()
+                && document.getStatus() != DocumentStatus.FAILED.getCode()) {
+            throw new BusinessException("当前状态不允许重置");
+        }
+
+        document.setStatus(DocumentStatus.PENDING.getCode());
+        document.setErrorMessage(null);
+        documentMapper.updateById(document);
+        log.info("文档状态已重置为待解析: {}", documentId);
+    }
+
     /**
      * 调用Python引擎
      */
-    private void callPythonEngine(Document document) {
+    private void callPythonEngine(Document document, String model) {
         String url = pythonEngineUrl + "/api/parse";
 
         // 构建回调URL，用于Python引擎处理完成后通知Java后端
@@ -168,8 +211,10 @@ public class VectorizationServiceImpl implements VectorizationService {
                 "document_id", String.valueOf(document.getId()),
                 "file_path", document.getFilePath(),
                 "file_type", document.getFileType() != null ? document.getFileType() : "md",
+                "knowledge_base_id", document.getKnowledgeBaseId() != null ? document.getKnowledgeBaseId() : 0,
                 "callback_url", callbackUrl,
-                "callback_secret", callbackSecret
+                "callback_secret", callbackSecret,
+                "embedding_model", model != null ? model : "ollama"
         );
 
         HttpHeaders headers = new HttpHeaders();
@@ -178,7 +223,7 @@ public class VectorizationServiceImpl implements VectorizationService {
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
 
-        log.info("调用Python引擎: {}, 回调URL: {}", url, callbackUrl);
+        log.info("调用Python引擎: {}, 回调URL: {}, 模型: {}", url, callbackUrl, model);
         ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
         log.info("Python引擎响应: {}", response.getBody());
     }

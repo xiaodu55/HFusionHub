@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 消息信息返回
@@ -36,4 +38,7 @@ public class MessageInfoDTO {
 
     @Schema(description = "创建时间")
     private LocalDateTime createdAt;
+
+    @Schema(description = "知识来源")
+    private List<Map<String, Object>> sources;
 }

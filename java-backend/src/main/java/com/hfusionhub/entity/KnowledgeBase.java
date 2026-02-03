@@ -1,6 +1,7 @@
 package com.hfusionhub.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -48,4 +49,11 @@ public class KnowledgeBase extends BaseEntity {
      */
     @Schema(description = "状态：0-正常，1-禁用")
     private Integer status;
+
+    /**
+     * 文档数量（非数据库字段）
+     */
+    @TableField(exist = false)
+    @Schema(description = "文档数量")
+    private Integer documentCount;
 }

@@ -19,6 +19,7 @@ pymilvus==2.4.0
 
 # HTTP Client
 requests==2.31.0
+httpx==0.27.0
 
 # Text Processing
 regex==2023.10.3

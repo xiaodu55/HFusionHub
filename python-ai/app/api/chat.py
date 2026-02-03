@@ -35,6 +35,7 @@ class ChatResponse(BaseModel):
     model: str = Field("", description="Model used")
     token_count: int = Field(0, description="Token count")
     steps: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Agent steps")
+    sources: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Knowledge sources used in response")
 
 
 @router.post("/api/chat")
@@ -85,7 +86,8 @@ async def chat(request: ChatRequest):
                         "observation": step.observation
                     }
                     for step in response.steps
-                ]
+                ],
+                sources=response.sources
             )
 
     except Exception as e:

@@ -9,6 +9,7 @@ import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.dto.DocumentInfoDTO;
+import com.hfusionhub.dto.DocumentNameDTO;
 import com.hfusionhub.dto.DocumentQueryDTO;
 import com.hfusionhub.dto.DocumentUpdateDTO;
 import com.hfusionhub.entity.Document;
@@ -52,12 +53,18 @@ public class DocumentServiceImpl implements DocumentService {
 
     private static final String UPLOAD_DIR = "uploads/documents";
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+    // 允许的文件扩展名（优先使用扩展名检查，比MIME类型更可靠）
+    private static final List<String> ALLOWED_EXTENSIONS = List.of(
+            ".pdf", ".doc", ".docx", ".txt", ".md"
+    );
+    // 允许的MIME类型（作为辅助验证）
     private static final List<String> ALLOWED_TYPES = List.of(
             "application/pdf",
             "application/msword",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "text/plain",
-            "text/markdown"
+            "text/markdown",
+            "application/octet-stream"  // 允许通用二进制流（由扩展名验证）
     );
 
     @Override
@@ -80,9 +87,31 @@ public class DocumentServiceImpl implements DocumentService {
         if (file.getSize() > MAX_FILE_SIZE) {
             throw new BusinessException("文件大小不能超过10MB");
         }
+        // 验证文件扩展名（优先）和MIME类型（辅助）
+        String originalFilename = file.getOriginalFilename();
         String contentType = file.getContentType();
-        if (contentType == null || !ALLOWED_TYPES.contains(contentType)) {
-            throw new BusinessException("不支持的文件类型");
+        boolean fileValid = false;
+
+        // 方法1: 检查文件扩展名
+        if (originalFilename != null) {
+            String lowerFilename = originalFilename.toLowerCase();
+            for (String ext : ALLOWED_EXTENSIONS) {
+                if (lowerFilename.endsWith(ext)) {
+                    fileValid = true;
+                    break;
+                }
+            }
+        }
+
+        // 方法2: 如果扩展名检查失败，检查MIME类型
+        if (!fileValid && contentType != null) {
+            fileValid = ALLOWED_TYPES.contains(contentType);
+        }
+
+        log.debug("文件验证: filename='{}', contentType='{}', valid={}", originalFilename, contentType, fileValid);
+
+        if (!fileValid) {
+            throw new BusinessException("不支持的文件类型: " + originalFilename + " (" + contentType + ")");
         }
 
         // 3. 保存文件
@@ -258,13 +287,22 @@ public class DocumentServiceImpl implements DocumentService {
         Page<Document> page = new Page<>(queryDTO.getPage(), queryDTO.getPageSize());
         Page<Document> result = documentMapper.selectPage(page, wrapper);
 
-        // 4. 转换为 DTO
+        if (result.getRecords().isEmpty()) {
+            return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), result.getTotal(), List.of());
+        }
+
+        // 4. 批量预加载用户信息（避免N+1）
+        User kbOwner = userMapper.selectById(kb.getUserId());
+        String ownerUsername = kbOwner != null ? kbOwner.getUsername() : "unknown";
+        Map<Long, String> usernameMap = Map.of(kb.getUserId(), ownerUsername);
+
+        // 5. 转换为 DTO（使用预查询数据）
         String kbName = kb.getName();
         List<DocumentInfoDTO> records = result.getRecords().stream()
-                .map(doc -> convertToInfoDTO(doc, kbName))
+                .map(doc -> convertToInfoDTO(doc, kbName, kb, usernameMap))
                 .collect(Collectors.toList());
 
-        // 5. 返回分页结果
+        // 6. 返回分页结果
         return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), result.getTotal(), records);
     }
 
@@ -320,6 +358,18 @@ public class DocumentServiceImpl implements DocumentService {
         return listByKnowledgeBase(knowledgeBaseId, queryDTO);
     }
 
+    @Override
+    public DocumentNameDTO getDocumentName(Long id) {
+        Document document = documentMapper.selectById(id);
+        if (document == null) {
+            throw new BusinessException("文档不存在");
+        }
+        return DocumentNameDTO.builder()
+                .id(document.getId())
+                .name(document.getTitle())
+                .build();
+    }
+
     /**
      * 保存文件到磁盘
      */
@@ -357,7 +407,7 @@ public class DocumentServiceImpl implements DocumentService {
      */
     private String getFileExtension(String filename) {
         if (filename != null && filename.contains(".")) {
-            return filename.substring(filename.lastIndexOf(".") + 1);
+            return filename.substring(filename.lastIndexOf("."));
         }
         return "";
     }
@@ -377,6 +427,7 @@ public class DocumentServiceImpl implements DocumentService {
                 .knowledgeBaseId(document.getKnowledgeBaseId())
                 .knowledgeBaseName(knowledgeBaseName)
                 .title(document.getTitle())
+                .filePath(document.getFilePath())
                 .fileType(document.getFileType())
                 .fileSize(document.getFileSize())
                 .chunkCount(document.getChunkCount())

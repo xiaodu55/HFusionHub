@@ -24,6 +24,8 @@ class ParseRequest(BaseModel):
     file_type: str = Field(..., description="File type: md, txt, pdf, docx")
     callback_url: Optional[str] = Field(None, description="Callback URL for notifications")
     callback_secret: Optional[str] = Field(None, description="Secret for callback authentication")
+    knowledge_base_id: Optional[int] = Field(None, description="Knowledge base ID")
+    embedding_model: Optional[str] = Field(None, description="Embedding model to use: ollama, deepseek, or random")
 
 
 class ParsedBlock(BaseModel):
@@ -77,6 +79,7 @@ class SearchRequest(BaseModel):
     query: str = Field(..., description="Search query")
     top_k: int = Field(5, description="Number of results to return")
     collection_name: Optional[str] = Field(None, description="Collection name")
+    knowledge_base_id: Optional[int] = Field(None, description="Filter by knowledge base ID")
 
 
 class SearchResult(BaseModel):

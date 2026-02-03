@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as knowledgeBaseApi from '@/api/knowledgeBase'
 import * as documentApi from '@/api/document'
 import * as vectorizationApi from '@/api/vectorization'
 import { useToast } from '@/composables/useToast'
+import { useDocumentProcessor } from '@/composables/useDocumentProcessor'
+import { formatFileSize, getStatusBadge } from '@/utils/format'
 import type { KnowledgeBase, Document } from '@/api/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Dialog,
   DialogContent,
@@ -25,24 +28,27 @@ const route = useRoute()
 const toast = useToast()
 const router = useRouter()
 
+// 使用文档处理器 composable
+const {
+  processingDocs,
+  isModelDialogOpen,
+  selectedDocForVectorize,
+  availableModels,
+  selectedModel,
+  loadingModels,
+  openModelDialog,
+  pollDocumentStatus,
+  startVectorization,
+  resetDocument,
+} = useDocumentProcessor()
+
 const knowledgeBase = ref<KnowledgeBase | null>(null)
 const documents = ref<Document[]>([])
 const loading = ref(false)
 const isUploadDialogOpen = ref(false)
 const uploadFile = ref<File | null>(null)
 const uploading = ref(false)
-const processingDocs = ref<Set<number>>(new Set())
-const pollingTimers = new Set<ReturnType<typeof setTimeout>>()
-const addProcessing = (id: number) => {
-  const s = new Set(processingDocs.value)
-  s.add(id)
-  processingDocs.value = s
-}
-const removeProcessing = (id: number) => {
-  const s = new Set(processingDocs.value)
-  s.delete(id)
-  processingDocs.value = s
-}
+const syncing = ref(false)
 
 const loadKnowledgeBase = async () => {
   const id = Number(route.params.id)
@@ -118,32 +124,31 @@ const handleDeleteDocument = async (doc: Document) => {
 }
 
 const handleStartVectorization = async (doc: Document) => {
-  addProcessing(doc.id)
+  openModelDialog(doc)
+}
+
+const confirmStartVectorization = async () => {
+  if (!selectedDocForVectorize.value) return
+
   try {
-    await vectorizationApi.startVectorization(doc.id)
-    // 更新文档状态为处理中
-    doc.status = 1
-    // 轮询检查处理状态
-    pollDocumentStatus(doc.id)
+    await startVectorization(selectedDocForVectorize.value, {
+      onSuccess: () => loadDocuments(),
+    })
+    toast.success('开始解析')
   } catch (error) {
     console.error('启动向量化失败:', error)
     toast.error('启动向量化失败')
-    removeProcessing(doc.id)
   }
 }
 
 const handleResetDocument = async (doc: Document) => {
   try {
-    await vectorizationApi.resetDocument(doc.id)
-    doc.status = 0
-    doc.errorMessage = null
+    await resetDocument(doc)
   } catch (error) {
-    console.error('重置文档失败:', error)
     toast.error('重置文档失败')
   }
 }
 
-const syncing = ref(false)
 const handleSyncStatus = async () => {
   syncing.value = true
   try {
@@ -158,65 +163,8 @@ const handleSyncStatus = async () => {
   }
 }
 
-const pollDocumentStatus = async (docId: number) => {
-  const maxAttempts = 60 // 最多轮询60次，每次2秒
-  let attempts = 0
-
-  const checkStatus = async () => {
-    if (attempts >= maxAttempts) {
-      removeProcessing(docId)
-      return
-    }
-
-    try {
-      const res = await vectorizationApi.getVectorizationStatus(docId)
-      const status = res.data?.status
-
-      if (status === 2 || status === 3) {
-        // 完成或失败，停止轮询
-        removeProcessing(docId)
-        await loadDocuments() // 刷新列表
-        return
-      }
-
-      attempts++
-      const timer = setTimeout(checkStatus, 2000)
-      pollingTimers.add(timer)
-    } catch (error) {
-      console.error('查询状态失败:', error)
-      toast.error('查询状态失败')
-      removeProcessing(docId)
-    }
-  }
-
-  checkStatus()
-}
-
 const handleViewChunks = (doc: Document) => {
   router.push(`/knowledge-base/${route.params.id}/chunks/${doc.id}`)
-}
-
-const getStatusBadge = (status: number) => {
-  switch (status) {
-    case 0:
-      return { text: '待解析', variant: 'outline' as const }
-    case 1:
-      return { text: '解析中...', variant: 'secondary' as const }
-    case 2:
-      return { text: '已完成', variant: 'default' as const }
-    case 3:
-      return { text: '解析失败', variant: 'destructive' as const }
-    default:
-      return { text: '未知', variant: 'outline' as const }
-  }
-}
-
-const formatFileSize = (bytes: number) => {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
 const goBack = () => {
@@ -226,11 +174,6 @@ const goBack = () => {
 onMounted(() => {
   loadKnowledgeBase()
   loadDocuments()
-})
-
-onBeforeUnmount(() => {
-  pollingTimers.forEach(timer => clearTimeout(timer))
-  pollingTimers.clear()
 })
 </script>
 
@@ -377,6 +320,59 @@ onBeforeUnmount(() => {
           </Button>
           <Button :disabled="!uploadFile || uploading" @click="handleUpload">
             {{ uploading ? '上传中...' : '上传' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 模型选择对话框 -->
+    <Dialog v-model:open="isModelDialogOpen">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>选择嵌入模型</DialogTitle>
+          <DialogDescription>
+            选择用于向量化的嵌入模型。文档：{{ selectedDocForVectorize?.title }}
+          </DialogDescription>
+        </DialogHeader>
+        <div class="space-y-4">
+          <div v-if="loadingModels" class="text-center py-4">
+            <Loader2 class="h-6 w-6 animate-spin mx-auto" />
+            <p class="text-sm text-muted-foreground mt-2">加载模型列表...</p>
+          </div>
+          <div v-else class="space-y-3">
+            <Label>可用模型</Label>
+            <div class="space-y-2">
+              <div
+                v-for="model in availableModels"
+                :key="model.id"
+                class="flex items-center space-x-3 rounded-lg border p-3 cursor-pointer hover:bg-muted"
+                :class="{ 'border-primary bg-muted': selectedModel === model.id }"
+                @click="selectedModel = model.id"
+              >
+                <input
+                  type="radio"
+                  :value="model.id"
+                  v-model="selectedModel"
+                  class="h-4 w-4"
+                />
+                <div class="flex-1">
+                  <p class="font-medium">{{ model.name }}</p>
+                  <p class="text-sm text-muted-foreground">{{ model.description }}</p>
+                  <p class="text-xs text-muted-foreground">
+                    类型：{{ model.type === 'local' ? '本地' : model.type === 'cloud' ? '云端' : '降级' }}
+                    · 维度：{{ model.dimension }}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="isModelDialogOpen = false">
+            取消
+          </Button>
+          <Button @click="confirmStartVectorization" :disabled="!selectedModel || loadingModels">
+            开始解析
           </Button>
         </DialogFooter>
       </DialogContent>

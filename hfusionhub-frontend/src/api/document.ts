@@ -62,3 +62,8 @@ export const getMyDocumentsByKbId = (kbId: number, params?: {
 }): Promise<ApiResponse<PageResult<Document>>> => {
   return get(`/document/my/${kbId}`, params)
 }
+
+// 解析文档
+export const parseDocument = (id: number, model?: string): Promise<ApiResponse<string>> => {
+  return post(`/document/${id}/parse`, { model })
+}

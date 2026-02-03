@@ -110,6 +110,7 @@ CREATE TABLE `message` (
     `content` TEXT NOT NULL COMMENT '消息内容',
     `token_count` INT DEFAULT 0 COMMENT 'Token数量',
     `model` VARCHAR(50) DEFAULT NULL COMMENT '使用的模型',
+    `sources` JSON DEFAULT NULL COMMENT '知识来源（JSON格式）',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     PRIMARY KEY (`id`),
     KEY `idx_conv_id` (`conversation_id`),

@@ -3,10 +3,14 @@ package com.hfusionhub.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.hfusionhub.handler.JsonTypeHandler;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 消息实体
@@ -56,8 +60,16 @@ public class Message {
     private String model;
 
     /**
+     * 知识来源
+     */
+    @TableField(typeHandler = JsonTypeHandler.class)
+    @Schema(description = "知识来源")
+    private List<Map<String, Object>> sources;
+
+    /**
      * 创建时间
      */
+    @TableField(fill = com.baomidou.mybatisplus.annotation.FieldFill.INSERT)
     @Schema(description = "创建时间")
     private LocalDateTime createdAt;
 }

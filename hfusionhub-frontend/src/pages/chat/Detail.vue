@@ -369,6 +369,14 @@ onMounted(() => {
               <template v-else>
                 <template v-if="message.role === 'assistant'">
                   <MarkdownRenderer :content="message.content" class="text-sm" />
+                  <!-- 显示知识来源 -->
+                  <div v-if="message.sources && message.sources.length > 0" class="mt-2 pt-2 border-t border-secondary-foreground/20">
+                    <p class="text-xs font-medium mb-1">📚 知识来源：</p>
+                    <div v-for="(source, index) in message.sources" :key="index" class="text-xs opacity-80">
+                      <span class="font-medium">{{ source.document_name }}</span>
+                      <span class="ml-1 opacity-60">(相关度: {{ (source.score * 100).toFixed(0) }}%)</span>
+                    </div>
+                  </div>
                 </template>
                 <template v-else>
                   <p class="whitespace-pre-wrap text-sm">{{ message.content }}</p>
