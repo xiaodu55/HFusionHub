@@ -58,11 +58,13 @@ class VectorChannel:
         """
         try:
             search_fn = self._get_store()
+            logger.debug(f"[VectorChannel] Searching with knowledge_base_id={knowledge_base_id}, top_k={top_k}")
             results = search_fn(
                 query_text=query,
                 top_k=top_k,
                 knowledge_base_id=knowledge_base_id
             )
+            logger.debug(f"[VectorChannel] Search returned {len(results)} results")
 
             # 标记来源
             for r in results:
@@ -73,6 +75,8 @@ class VectorChannel:
 
         except Exception as e:
             logger.error(f"Vector search failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return []
 
 

@@ -36,6 +36,7 @@ target/
 # OS
 .DS_Store
 Thumbs.db
+*.bat
 
 # Python
 __pycache__/

@@ -112,9 +112,10 @@ export interface Message {
   tokenCount?: number
   model?: string
   sources?: Array<{
-    document_name: string
+    title: string
     content: string
     score: number
+    source?: string
   }>
   createdAt: string
 }

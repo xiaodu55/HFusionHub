@@ -2,6 +2,10 @@
 -- HFusionHub 数据库初始化脚本
 -- =====================================================
 
+-- 确保使用 UTF-8 字符集
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
+
 -- 创建数据库
 CREATE DATABASE IF NOT EXISTS `hfusionhub` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -112,6 +116,7 @@ CREATE TABLE `message` (
     `model` VARCHAR(50) DEFAULT NULL COMMENT '使用的模型',
     `sources` JSON DEFAULT NULL COMMENT '知识来源（JSON格式）',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
     KEY `idx_conv_id` (`conversation_id`),
     KEY `idx_created_at` (`created_at`),
@@ -142,4 +147,4 @@ CREATE TABLE `tool` (
 -- 密码: admin123 (BCrypt加密)
 -- =====================================================
 INSERT INTO `sys_user` (`username`, `password`, `nickname`, `role`, `status`)
-VALUES ('admin', '$2a$10$hLsOQw/IutrOdOFEdZL2JO/0F0DQHtO6ioO3g0R4v.2dOeqoHcENC', '管理员', 'admin', 0);
+VALUES ('admin', '$2a$10$hLsOQw/IutrOdOFEdZL2JO/0F0DQHtO6ioO3g0R4v.2dOeqoHcENC', _utf8mb4'管理员', 'admin', 0);

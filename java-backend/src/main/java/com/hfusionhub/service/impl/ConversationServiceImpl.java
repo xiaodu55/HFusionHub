@@ -22,9 +22,12 @@ import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.ConversationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.HashMap;
 import java.util.List;
@@ -48,6 +51,10 @@ public class ConversationServiceImpl implements ConversationService {
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final UserMapper userMapper;
     private final AiClient aiClient;
+    private final WebClient webClient;
+
+    @Value("${ai-service.base-url:http://localhost:8001}")
+    private String baseUrl;
 
     @Override
     @Transactional
@@ -199,7 +206,14 @@ public class ConversationServiceImpl implements ConversationService {
             assistantMessage.setSources(aiResponse.getSources());
             messageMapper.insert(assistantMessage);
 
-            // 6. 更新对话标题（如果是第一条消息）
+            // 6. 如果 Python AI 自动检测到了知识库，更新对话的知识库 ID
+            if (aiResponse.getAutoDetectedKbId() != null && conversation.getKnowledgeBaseId() == null) {
+                conversation.setKnowledgeBaseId(aiResponse.getAutoDetectedKbId());
+                conversationMapper.updateById(conversation);
+                log.info("Auto-detected knowledge base {} for conversation {}", aiResponse.getAutoDetectedKbId(), conversation.getId());
+            }
+
+            // 7. 更新对话标题（如果是第一条消息）
             if ("新对话".equals(conversation.getTitle()) && StringUtils.hasText(dto.getContent())) {
                 String title = dto.getContent();
                 if (title.length() > 50) {
@@ -209,7 +223,7 @@ public class ConversationServiceImpl implements ConversationService {
                 conversationMapper.updateById(conversation);
             }
 
-            // 7. 返回助手消息
+            // 8. 返回助手消息
             return convertToMessageInfoDTO(assistantMessage);
 
         } catch (Exception e) {
@@ -263,11 +277,8 @@ public class ConversationServiceImpl implements ConversationService {
             throw new BusinessException("无权访问该对话");
         }
 
-        // 3. 查询消息列表
-        LambdaQueryWrapper<Message> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Message::getConversationId, conversationId)
-                .orderByAsc(Message::getCreatedAt);
-        List<Message> messages = messageMapper.selectList(wrapper);
+        // 3. 查询消息列表（使用自定义 XML 查询，确保 sources JSON 正确反序列化）
+        List<Message> messages = messageMapper.selectByConversationId(conversationId);
 
         // 4. 转换为 DTO
         return messages.stream()
@@ -311,58 +322,196 @@ public class ConversationServiceImpl implements ConversationService {
         // 4. 获取对话历史
         List<Map<String, String>> history = getChatHistory(conversation.getId());
 
-        // 5. 调用 Python AI 服务获取流式响应
+        // 5. 使用 HttpURLConnection 实现真正的流式响应（简单可靠）
+        String requestId = java.util.UUID.randomUUID().toString();
+        StringBuilder responseBuilder = new StringBuilder();
+        java.util.List<Map<String, Object>> accumulatedSources = new java.util.ArrayList<>();
+
         try {
-            String response = aiClient.chatStream(
-                    dto.getContent(),
-                    dto.getConversationId(),
-                    conversation.getKnowledgeBaseId(),
-                    history
-            );
+            // 构建请求体
+            com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            long startTime = System.currentTimeMillis();
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("message", dto.getContent());
+            requestBody.put("conversation_id", dto.getConversationId());
+            requestBody.put("knowledge_base_id", conversation.getKnowledgeBaseId());
+            requestBody.put("history", history != null ? history : List.of());
+            requestBody.put("stream", true);
+            requestBody.put("request_id", requestId);
 
-            // 模拟流式输出：逐字发送响应
-            int chunkSize = 3; // 每次发送3个字符
-            for (int i = 0; i < response.length(); i += chunkSize) {
-                // 检查是否被取消
-                if (cancelled.get()) {
-                    log.info("Stream cancelled by client disconnect");
-                    return;
-                }
+            String url = baseUrl + "/api/chat/stream";
+            log.info("Starting streaming request to Python AI: {}, requestId: {}, kbId: {}", url, requestId, conversation.getKnowledgeBaseId());
 
-                int end = Math.min(i + chunkSize, response.length());
-                String chunk = response.substring(i, end);
+            // 使用 HttpURLConnection 进行流式请求
+            java.net.URL apiUrl = new java.net.URL(url);
+            java.net.HttpURLConnection connection = (java.net.HttpURLConnection) apiUrl.openConnection();
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            connection.setRequestProperty("Accept", "text/event-stream");
+            connection.setDoOutput(true);
+            connection.setConnectTimeout(10000);
+            connection.setReadTimeout(300000); // 5 minutes - RAG pipeline can be slow
 
-                // 发送 SSE 事件
-                Map<String, String> eventData = new HashMap<>();
-                eventData.put("content", chunk);
-                emitter.send(SseEmitter.event().data(eventData));
-
-                // 短暂延迟，模拟流式效果
-                Thread.sleep(30);
+            // 发送请求体
+            byte[] bodyBytes = objectMapper.writeValueAsBytes(requestBody);
+            try (java.io.OutputStream os = connection.getOutputStream()) {
+                os.write(bodyBytes);
+                os.flush();
             }
 
-            // 发送完成标记
-            emitter.send(SseEmitter.event().data("[DONE]"));
-            emitter.complete();
+            // 读取流式响应
+            int responseCode = connection.getResponseCode();
+            if (responseCode != 200) {
+                log.error("Python AI returned status: {}", responseCode);
+                throw new RuntimeException("Python AI service returned status: " + responseCode);
+            }
 
-            // 保存助手消息
-            Message assistantMessage = new Message();
-            assistantMessage.setConversationId(dto.getConversationId());
-            assistantMessage.setRole("assistant");
-            assistantMessage.setContent(response);
-            assistantMessage.setModel("streaming");
-            assistantMessage.setTokenCount(0);
-            messageMapper.insert(assistantMessage);
+            try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(connection.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+                String line;
+                int lineCount = 0;
+                long firstContentTime = 0;
+                while ((line = reader.readLine()) != null) {
+                    lineCount++;
+                    // 检查是否被取消
+                    if (cancelled.get()) {
+                        log.info("Stream cancelled by client, cancelling Python AI request: {}", requestId);
+                        aiClient.cancelRequest(requestId);
+                        break;
+                    }
+
+                    // 解析 SSE 数据
+                    if (line.startsWith("data: ")) {
+                        String data = line.substring(6).trim();
+                        if ("[DONE]".equals(data)) {
+                            log.info("Stream completed, received {} lines, requestId: {}", lineCount, requestId);
+                            // 流式响应完成
+                            emitter.send(SseEmitter.event().data("[DONE]"));
+                            emitter.complete();
+
+                            // 保存助手消息（包含 sources）
+                            Message assistantMessage = new Message();
+                            assistantMessage.setConversationId(dto.getConversationId());
+                            assistantMessage.setRole("assistant");
+                            assistantMessage.setContent(responseBuilder.toString());
+                            assistantMessage.setModel("streaming");
+                            assistantMessage.setTokenCount(0);
+                            assistantMessage.setSources(accumulatedSources);
+                            log.info("Saving assistant message - content length: {}, sources count: {}, requestId: {}",
+                                    responseBuilder.length(), accumulatedSources.size(), requestId);
+                            messageMapper.insert(assistantMessage);
+                            log.info("Saved assistant message successfully, requestId: {}", requestId);
+                        } else if (!data.isEmpty()) {
+                            try {
+                                // 解析 JSON 数据
+                                com.fasterxml.jackson.databind.JsonNode jsonNode = objectMapper.readTree(data);
+                                String content = jsonNode.has("content") ? jsonNode.get("content").asText() : "";
+                                boolean isCancelled = jsonNode.has("cancelled") && jsonNode.get("cancelled").asBoolean();
+                                com.fasterxml.jackson.databind.JsonNode sourcesNode = jsonNode.get("sources");
+
+                                // 调试日志：记录接收到的数据类型
+                                if (sourcesNode != null || !content.isEmpty()) {
+                                    log.debug("Received chunk - content length: {}, hasSources: {}, requestId: {}",
+                                            content.length(), sourcesNode != null, requestId);
+                                }
+
+                                if (isCancelled) {
+                                    log.info("Python AI request cancelled: {}", requestId);
+                                    emitter.send(SseEmitter.event().data("[DONE]"));
+                                    emitter.complete();
+                                    break;
+                                }
+
+                                // 处理 sources 信息
+                                if (sourcesNode != null && sourcesNode.isArray() && sourcesNode.size() > 0) {
+                                    // 累积 sources 用于后续保存
+                                    List<Map<String, Object>> newSources = objectMapper.treeToValue(sourcesNode, List.class);
+                                    accumulatedSources.addAll(newSources);
+                                    // 转发 sources 给前端
+                                    Map<String, Object> sourcesEvent = new HashMap<>();
+                                    sourcesEvent.put("sources", newSources);
+                                    emitter.send(SseEmitter.event().data(sourcesEvent, MediaType.APPLICATION_JSON));
+                                    log.info("Forwarded {} sources to frontend, requestId: {}, total accumulated: {}", sourcesNode.size(), requestId, accumulatedSources.size());
+                                } else if (sourcesNode != null) {
+                                    log.debug("Sources node present but empty or not array, requestId: {}", requestId);
+                                }
+
+                                if (!content.isEmpty()) {
+                                    if (firstContentTime == 0) {
+                                        firstContentTime = System.currentTimeMillis();
+                                        log.info("First content chunk received after {}ms, requestId: {}", firstContentTime - startTime, requestId);
+                                    }
+                                    responseBuilder.append(content);
+                                    // 发送 SSE 事件给前端（确保格式与 Python AI 一致）
+                                    Map<String, String> eventData = new HashMap<>();
+                                    eventData.put("content", content);
+                                    emitter.send(SseEmitter.event().data(eventData, MediaType.APPLICATION_JSON));
+                                    if (lineCount % 50 == 0) {
+                                        log.debug("Processed {} lines, content length: {}, requestId: {}", lineCount, responseBuilder.length(), requestId);
+                                    }
+                                }
+                            } catch (Exception e) {
+                                log.warn("Failed to parse chunk: {}", data);
+                            }
+                        }
+                    }
+                }
+            } finally {
+                connection.disconnect();
+            }
+
+            // 确保 emitter 总是关闭（如果 [DONE] 没有被正确发送）
+            if (responseBuilder.length() > 0) {
+                try {
+                    // 如果有内容但没收到 [DONE]，手动补发
+                    emitter.send(SseEmitter.event().data("[DONE]"));
+                    emitter.complete();
+                    log.info("Manually completed stream, content length: {}, requestId: {}", responseBuilder.length(), requestId);
+                } catch (IllegalStateException alreadyComplete) {
+                    // emitter 已经关闭，忽略
+                }
+                // 检查是否已经保存过消息（避免重复保存）
+                LambdaQueryWrapper<Message> checkWrapper = new LambdaQueryWrapper<>();
+                checkWrapper.eq(Message::getConversationId, dto.getConversationId())
+                        .eq(Message::getContent, responseBuilder.toString())
+                        .last("LIMIT 1");
+                Message existingMessage = messageMapper.selectOne(checkWrapper);
+                if (existingMessage == null) {
+                    // 保存助手消息（如果之前没有保存）
+                    try {
+                        Message assistantMessage = new Message();
+                        assistantMessage.setConversationId(dto.getConversationId());
+                        assistantMessage.setRole("assistant");
+                        assistantMessage.setContent(responseBuilder.toString());
+                        assistantMessage.setModel("streaming");
+                        assistantMessage.setTokenCount(0);
+                        assistantMessage.setSources(accumulatedSources);
+                        messageMapper.insert(assistantMessage);
+                        log.info("Saved assistant message (fallback) with {} sources, requestId: {}", accumulatedSources.size(), requestId);
+                    } catch (Exception saveEx) {
+                        log.error("Failed to save assistant message: {}", saveEx.getMessage());
+                    }
+                } else {
+                    log.info("Message already exists, skipping save, requestId: {}", requestId);
+                }
+            } else {
+                try {
+                    emitter.send(SseEmitter.event().data("[DONE]"));
+                    emitter.complete();
+                } catch (IllegalStateException alreadyComplete) {
+                    // 忽略
+                }
+            }
 
         } catch (Exception e) {
-            log.error("Failed to get AI stream response: {}", e.getMessage(), e);
+            log.error("Failed to start streaming: {}", e.getMessage(), e);
             try {
                 String errorMessage = "抱歉，AI服务暂时不可用。请稍后再试。";
                 emitter.send(SseEmitter.event().data(errorMessage));
                 emitter.send(SseEmitter.event().data("[DONE]"));
                 emitter.complete();
 
-                // 保存错误消息到数据库，确保刷新后数据一致
+                // 保存错误消息到数据库
                 Message assistantMessage = new Message();
                 assistantMessage.setConversationId(dto.getConversationId());
                 assistantMessage.setRole("assistant");
