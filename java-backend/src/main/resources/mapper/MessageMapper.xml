@@ -10,12 +10,22 @@
         <result column="content" property="content"/>
         <result column="token_count" property="tokenCount"/>
         <result column="model" property="model"/>
+        <result column="sources" property="sources" typeHandler="com.hfusionhub.handler.JsonTypeHandler"/>
         <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
     </resultMap>
 
     <!-- 通用查询结果列 -->
     <sql id="Base_Column_List">
-        id, conversation_id, role, content, token_count, model, created_at
+        id, conversation_id, role, content, token_count, model, sources, created_at, updated_at
     </sql>
+
+    <!-- 按对话ID查询消息列表（使用 BaseResultMap 以正确反序列化 sources JSON） -->
+    <select id="selectByConversationId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM message
+        WHERE conversation_id = #{conversationId}
+        ORDER BY created_at ASC
+    </select>
 
 </mapper>

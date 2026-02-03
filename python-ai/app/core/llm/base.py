@@ -26,6 +26,20 @@ class LLMResponse:
 class BaseLLM(ABC):
     """Abstract base class for LLM implementations"""
 
+    async def ainvoke(self, prompt: str, **kwargs) -> LLMResponse:
+        """
+        Invoke LLM with a prompt (LangChain compatibility)
+
+        Args:
+            prompt: The prompt to send to the LLM
+            **kwargs: Additional parameters
+
+        Returns:
+            LLMResponse with generated content
+        """
+        messages = [ChatMessage(role="user", content=prompt)]
+        return await self.chat(messages=messages, **kwargs)
+
     @abstractmethod
     async def chat(
         self,

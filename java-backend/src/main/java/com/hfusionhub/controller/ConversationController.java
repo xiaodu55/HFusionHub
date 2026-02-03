@@ -93,8 +93,15 @@ public class ConversationController {
 
     @Operation(summary = "发送消息（流式响应）", description = "向对话发送消息，返回SSE流式响应")
     @PostMapping(value = "/message/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter sendMessageStream(@Valid @RequestBody MessageSendDTO dto) throws Exception {
-        SseEmitter emitter = new SseEmitter(120000L); // 2 minutes timeout
+    public SseEmitter sendMessageStream(
+            @Valid @RequestBody MessageSendDTO dto,
+            jakarta.servlet.http.HttpServletResponse response) throws Exception {
+        // 禁用 SSE 缓冲，确保实时推送
+        response.setHeader("X-Accel-Buffering", "no");
+        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader("Connection", "keep-alive");
+
+        SseEmitter emitter = new SseEmitter(300000L); // 5 minutes timeout
 
         // 在请求线程中提取用户ID
         Long currentUserId = JwtUtils.getCurrentUserId();

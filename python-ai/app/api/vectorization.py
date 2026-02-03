@@ -108,12 +108,12 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
 
     # Validate request synchronously (fast)
     validate_document_id(request.document_id)
-    _, resolved_path = validate_file_upload(
+    file_type, resolved_path = validate_file_upload(
         file_path=request.file_path,
         file_type=request.file_type,
         check_size=True
     )
-    logger.info(f"[Vectorization] Validation passed, resolved path: {resolved_path}")
+    logger.info(f"[Vectorization] Validation passed, resolved path: {resolved_path}, file_type: {file_type}")
 
     # Initialize task status
     _task_status_store[request.document_id] = {
@@ -130,7 +130,7 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
         _process_document_background,
         document_id=request.document_id,
         file_path=resolved_path,
-        file_type=request.file_type,
+        file_type=file_type,
         knowledge_base_id=request.knowledge_base_id,
         callback_url=request.callback_url,
         callback_secret=request.callback_secret,

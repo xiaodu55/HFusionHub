@@ -20,6 +20,7 @@ import com.hfusionhub.mapper.DocumentMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.DocumentService;
+import com.hfusionhub.service.VectorizationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import java.io.File;
@@ -50,6 +51,7 @@ public class DocumentServiceImpl implements DocumentService {
     private final DocumentMapper documentMapper;
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final UserMapper userMapper;
+    private final VectorizationService vectorizationService;
 
     private static final String UPLOAD_DIR = "uploads/documents";
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -368,6 +370,25 @@ public class DocumentServiceImpl implements DocumentService {
                 .id(document.getId())
                 .name(document.getTitle())
                 .build();
+    }
+
+    @Override
+    public void parseDocument(Long id, String model) {
+        // 1. 查询文档
+        Document document = documentMapper.selectById(id);
+        if (document == null) {
+            throw new BusinessException("文档不存在");
+        }
+
+        // 2. 验证权限
+        Long currentUserId = JwtUtils.getCurrentUserId();
+        KnowledgeBase kb = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
+        if (kb == null || !kb.getUserId().equals(currentUserId)) {
+            throw new BusinessException("无权操作该文档");
+        }
+
+        // 3. 调用向量化服务
+        vectorizationService.startVectorization(id, model);
     }
 
     /**

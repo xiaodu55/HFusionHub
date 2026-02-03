@@ -89,4 +89,12 @@ public interface DocumentService {
      * @return 文档名称信息
      */
     DocumentNameDTO getDocumentName(Long id);
+
+    /**
+     * 解析文档（触发向量化）
+     *
+     * @param id    文档ID
+     * @param model 嵌入模型（可选）
+     */
+    void parseDocument(Long id, String model);
 }

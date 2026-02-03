@@ -121,4 +121,12 @@ public class VectorizationController {
         vectorizationService.resetDocument(documentId);
         return R.ok("已重置为待解析状态");
     }
+
+    @Operation(summary = "查询文档处理任务状态")
+    @GetMapping("/{documentId}/status")
+    public R<String> getTaskStatus(
+            @Parameter(description = "文档ID") @PathVariable Long documentId) {
+        String status = vectorizationService.getTaskStatus(documentId);
+        return R.ok(status);
+    }
 }

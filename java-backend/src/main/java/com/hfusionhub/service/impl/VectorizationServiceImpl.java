@@ -198,6 +198,18 @@ public class VectorizationServiceImpl implements VectorizationService {
         log.info("文档状态已重置为待解析: {}", documentId);
     }
 
+    @Override
+    public String getTaskStatus(Long documentId) {
+        try {
+            String url = pythonEngineUrl + "/api/task-status/" + documentId;
+            ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
+            return response.getBody();
+        } catch (Exception e) {
+            log.error("获取任务状态失败: {}", documentId, e);
+            return "{\"status\":\"ERROR\",\"message\":\"" + e.getMessage() + "\"}";
+        }
+    }
+
     /**
      * 调用Python引擎
      */

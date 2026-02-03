@@ -61,25 +61,28 @@ const handleSend = async () => {
   abortController = new AbortController()
 
   try {
-    // 1. 立即添加用户消息到列表
+    // 1. 立即添加用户消息到列表（使用北京时间，格式与后端一致）
+    const now = new Date()
+    const beijingTime = new Date(now.getTime() + (now.getTimezoneOffset() + 480) * 60000)
+    const timeStr = `${beijingTime.getFullYear()}-${String(beijingTime.getMonth() + 1).padStart(2, '0')}-${String(beijingTime.getDate()).padStart(2, '0')} ${String(beijingTime.getHours()).padStart(2, '0')}:${String(beijingTime.getMinutes()).padStart(2, '0')}:${String(beijingTime.getSeconds()).padStart(2, '0')}`
     const userMessage: Message = {
       id: Date.now(),
       conversationId: Number(route.params.id),
       role: 'user',
       content,
-      createdAt: new Date().toISOString(),
+      createdAt: timeStr,
     }
     messages.value.push(userMessage)
     await scrollToBottom()
 
-    // 2. 立即添加一个"思考中"的 assistant 消息占位符
+    // 2. 立即添加一个"思考中"的 assistant 消息占位符（使用北京时间）
     const pendingId = Date.now() + 1
     const pendingMessage: Message = {
       id: pendingId,
       conversationId: Number(route.params.id),
       role: 'assistant',
       content: '',
-      createdAt: new Date().toISOString(),
+      createdAt: timeStr,
     }
     messages.value.push(pendingMessage)
     streamingMessageId.value = pendingId
@@ -131,6 +134,8 @@ const handleSend = async () => {
             try {
               const parsed = JSON.parse(data)
               const content = parsed.content || ''
+              const sources = parsed.sources || []
+
               if (content) {
                 hasContent = true
                 // 更新已存在的消息内容
@@ -139,6 +144,14 @@ const handleSend = async () => {
                   msg.content += content
                 }
                 await scrollToBottom()
+              }
+
+              // 处理 sources 信息
+              if (sources.length > 0) {
+                const msg = messages.value.find(m => m.id === pendingId)
+                if (msg) {
+                  msg.sources = sources
+                }
               }
             } catch (e) {
               if (data) {
@@ -370,11 +383,27 @@ onMounted(() => {
                 <template v-if="message.role === 'assistant'">
                   <MarkdownRenderer :content="message.content" class="text-sm" />
                   <!-- 显示知识来源 -->
-                  <div v-if="message.sources && message.sources.length > 0" class="mt-2 pt-2 border-t border-secondary-foreground/20">
-                    <p class="text-xs font-medium mb-1">📚 知识来源：</p>
-                    <div v-for="(source, index) in message.sources" :key="index" class="text-xs opacity-80">
-                      <span class="font-medium">{{ source.document_name }}</span>
-                      <span class="ml-1 opacity-60">(相关度: {{ (source.score * 100).toFixed(0) }}%)</span>
+                  <div v-if="message.sources && message.sources.length > 0" class="mt-3 pt-3 border-t border-secondary-foreground/20">
+                    <p class="text-xs font-medium mb-2 flex items-center gap-1">
+                      <span>📚</span>
+                      <span>知识来源</span>
+                      <span class="opacity-60">({{ message.sources.length }}条)</span>
+                    </p>
+                    <div class="space-y-1.5">
+                      <div v-for="(source, index) in message.sources" :key="index"
+                           class="text-xs bg-secondary-foreground/5 rounded px-2 py-1.5">
+                        <div class="flex items-center justify-between gap-2">
+                          <span class="font-medium truncate flex-1" :title="source.title">
+                            {{ source.title || '文档片段' }}
+                          </span>
+                          <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                            {{ (source.score * 100).toFixed(0) }}%
+                          </span>
+                        </div>
+                        <p v-if="source.content" class="mt-1 text-[11px] opacity-60 line-clamp-2">
+                          {{ source.content }}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </template>

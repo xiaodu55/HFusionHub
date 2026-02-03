@@ -73,16 +73,16 @@ knife4j:
 
 # Python AI 服务配置
 python-ai:
-  base-url: http://localhost:8001
+  base-url: http://localhost:9000
   timeout: 60000
   engine:
-    url: http://localhost:8001
+    url: http://localhost:9000
   callback-base-url: http://localhost:${server.port}${server.servlet.context-path}
   callback-secret: ${CALLBACK_SECRET:hfusionhub-callback-secret-key}
 
 # AI 服务配置
 ai-service:
-  base-url: ${AI_SERVICE_URL:http://localhost:8001}
+  base-url: ${AI_SERVICE_URL:http://localhost:9000}
   timeout: ${AI_SERVICE_TIMEOUT:120000}
 
 # MinIO 配置

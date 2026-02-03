@@ -65,4 +65,12 @@ public interface VectorizationService {
      * @param documentId 文档ID
      */
     void resetDocument(Long documentId);
+
+    /**
+     * 获取文档处理任务状态（从Python引擎查询）
+     *
+     * @param documentId 文档ID
+     * @return 任务状态JSON
+     */
+    String getTaskStatus(Long documentId);
 }

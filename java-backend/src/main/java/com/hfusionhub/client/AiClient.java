@@ -102,13 +102,16 @@ public class AiClient {
      * @param history Chat history
      * @return Streaming response
      */
-    public String chatStream(
+    public StreamResponse chatStream(
             String message,
             Long conversationId,
             Long knowledgeBaseId,
             List<Map<String, String>> history
     ) {
         try {
+            // Generate request ID for cancellation tracking
+            String requestId = java.util.UUID.randomUUID().toString();
+
             // Build request
             Map<String, Object> request = new HashMap<>();
             request.put("message", message);
@@ -116,6 +119,7 @@ public class AiClient {
             request.put("knowledge_base_id", knowledgeBaseId);
             request.put("history", history != null ? history : List.of());
             request.put("stream", true);
+            request.put("request_id", requestId);
 
             // Set headers
             HttpHeaders headers = new HttpHeaders();
@@ -127,7 +131,7 @@ public class AiClient {
             // Call Python AI service (non-streaming for simplicity)
             // In production, you might want to use WebFlux or similar for true streaming
             String url = baseUrl + "/api/chat";
-            log.info("Calling AI service: {}", url);
+            log.info("Calling AI service: {}, requestId: {}", url, requestId);
 
             // Change stream to false for non-streaming response
             request.put("stream", false);
@@ -141,7 +145,7 @@ public class AiClient {
             );
 
             if (response.getBody() != null) {
-                return response.getBody().getContent();
+                return new StreamResponse(response.getBody().getContent(), requestId);
             }
 
             throw new BusinessException("AI service returned empty response");
@@ -177,6 +181,28 @@ public class AiClient {
     }
 
     /**
+     * Cancel an ongoing chat request
+     *
+     * @param requestId Request ID to cancel
+     * @return true if cancelled successfully
+     */
+    public boolean cancelRequest(String requestId) {
+        try {
+            String url = baseUrl + "/api/chat/cancel?request_id=" + requestId;
+            ResponseEntity<Map> response = restTemplate.postForEntity(url, null, Map.class);
+
+            if (response.getBody() != null) {
+                Object status = response.getBody().get("status");
+                return "cancelled".equals(status);
+            }
+            return false;
+        } catch (Exception e) {
+            log.warn("Cancel request failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Chat response data model
      */
     public static class ChatResponse {
@@ -186,6 +212,8 @@ public class AiClient {
         private int tokenCount;
         private List<Map<String, Object>> steps;
         private List<Map<String, Object>> sources;
+        @JsonProperty("auto_detected_kb_id")
+        private Long autoDetectedKbId;
 
         public ChatResponse() {}
 
@@ -203,5 +231,24 @@ public class AiClient {
 
         public List<Map<String, Object>> getSources() { return sources; }
         public void setSources(List<Map<String, Object>> sources) { this.sources = sources; }
+
+        public Long getAutoDetectedKbId() { return autoDetectedKbId; }
+        public void setAutoDetectedKbId(Long autoDetectedKbId) { this.autoDetectedKbId = autoDetectedKbId; }
+    }
+
+    /**
+     * Stream response with request ID for cancellation
+     */
+    public static class StreamResponse {
+        private final String content;
+        private final String requestId;
+
+        public StreamResponse(String content, String requestId) {
+            this.content = content;
+            this.requestId = requestId;
+        }
+
+        public String getContent() { return content; }
+        public String getRequestId() { return requestId; }
     }
 }

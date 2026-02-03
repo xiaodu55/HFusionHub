@@ -25,6 +25,9 @@ class AgentResponse:
     token_count: int = 0
     finish_reason: str = "stop"
     sources: List[Dict[str, Any]] = field(default_factory=list)
+    intent: Optional[Dict[str, Any]] = None  # 意图分类结果
+    decomposition: Optional[Dict[str, Any]] = None  # 问题分解结果
+    auto_detected_kb_id: Optional[int] = None  # 自动检测的知识库 ID
 
 
 class Agent(ABC):

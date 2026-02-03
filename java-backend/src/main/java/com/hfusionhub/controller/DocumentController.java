@@ -103,4 +103,14 @@ public class DocumentController {
         DocumentNameDTO nameDTO = documentService.getDocumentName(id);
         return R.ok(nameDTO);
     }
+
+    @Operation(summary = "解析文档", description = "触发文档解析和向量化")
+    @PostMapping("/{id}/parse")
+    public R<String> parseDocument(
+            @Parameter(description = "文档ID") @PathVariable Long id,
+            @RequestBody(required = false) java.util.Map<String, String> body) {
+        String model = body != null ? body.get("model") : null;
+        documentService.parseDocument(id, model);
+        return R.ok("开始解析");
+    }
 }
