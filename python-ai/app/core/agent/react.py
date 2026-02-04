@@ -7,6 +7,7 @@ import json
 import re
 import logging
 import os
+import time
 import requests
 from typing import List, Dict, Any, Optional, AsyncGenerator
 
@@ -19,6 +20,7 @@ from ..rag import (
     get_query_decomposer,
     get_compressor,
     get_reflector,
+    get_evaluator,
     IntentResult,
     DecompositionResult,
     SubQuestionStatus,
@@ -26,6 +28,8 @@ from ..rag import (
     CompressionConfig,
     ReflectionStrategyType,
     ReflectionConfig,
+    EvaluationStrategyType,
+    EvaluationSample,
 )
 
 logger = logging.getLogger(__name__)
@@ -945,6 +949,41 @@ class ReactAgent(Agent):
                     "sources": formatted_sources
                 }
                 yield json.dumps(sources_event, ensure_ascii=False)
+
+            # 评估答案质量
+            try:
+                evaluator = get_evaluator(EvaluationStrategyType.RULE_BASED)
+                eval_sample = EvaluationSample(
+                    query_id=str(int(time.time() * 1000)),
+                    query=query,
+                    response=final_answer if 'final_answer' in locals() else "",
+                    context=context,
+                    sources=sources,
+                    metadata={
+                        "knowledge_base_id": self.knowledge_base_id,
+                        "auto_detected_kb_id": auto_detected_kb_id,
+                    }
+                )
+                eval_result = await evaluator.evaluate(eval_sample)
+
+                logger.info(
+                    f"Answer evaluated: overall_score={eval_result.overall_score:.2f}, "
+                    f"scores={eval_result.scores}"
+                )
+
+                # 将评估结果添加到响应中
+                evaluation_event = {
+                    "content": "",
+                    "evaluation": {
+                        "overall_score": eval_result.overall_score,
+                        "scores": eval_result.scores,
+                        "strategy_used": eval_result.strategy_used,
+                    }
+                }
+                yield json.dumps(evaluation_event, ensure_ascii=False)
+
+            except Exception as eval_error:
+                logger.warning(f"Answer evaluation failed: {eval_error}")
 
         except Exception as e:
             logger.error(f"[RAG] run_stream failed: {e}", exc_info=True)

@@ -34,6 +34,8 @@ from .utils import (
     calculate_text_similarity,
     truncate_text,
 )
+from .cache import CacheManager, reflection_cache
+from .base import BaseReflectionStrategy
 
 
 # ==================== 枚举定义 ====================
@@ -182,7 +184,7 @@ class ReflectionConfig:
 
 # ==================== LLM 反思策略 ====================
 
-class LLMReflectionStrategy:
+class LLMReflectionStrategy(BaseReflectionStrategy):
     """
     LLM 反思策略
 
@@ -201,6 +203,14 @@ class LLMReflectionStrategy:
         """初始化"""
         self.llm = llm
         self.name = "llm"
+
+    def get_strategy_name(self) -> str:
+        """获取策略名称"""
+        return self.name
+
+    def get_strategy_type(self) -> ReflectionStrategyType:
+        """获取策略类型"""
+        return ReflectionStrategyType.LLM
 
     async def reflect(
         self,
@@ -471,7 +481,7 @@ Optimized answer:"""
 
 # ==================== 规则反思策略 ====================
 
-class RuleBasedReflectionStrategy:
+class RuleBasedReflectionStrategy(BaseReflectionStrategy):
     """
     规则反思策略
 
@@ -488,6 +498,14 @@ class RuleBasedReflectionStrategy:
     def __init__(self, **kwargs):
         """初始化"""
         self.name = "rule_based"
+
+    def get_strategy_name(self) -> str:
+        """获取策略名称"""
+        return self.name
+
+    def get_strategy_type(self) -> ReflectionStrategyType:
+        """获取策略类型"""
+        return ReflectionStrategyType.RULE_BASED
 
     async def reflect(
         self,
@@ -666,7 +684,7 @@ class RuleBasedReflectionStrategy:
 
 # ==================== 混合反思策略 ====================
 
-class HybridReflectionStrategy:
+class HybridReflectionStrategy(BaseReflectionStrategy):
     """
     混合反思策略
 
@@ -685,6 +703,14 @@ class HybridReflectionStrategy:
         self.rule_based = RuleBasedReflectionStrategy()
         self.llm_strategy = LLMReflectionStrategy(llm=llm)
         self.name = "hybrid"
+
+    def get_strategy_name(self) -> str:
+        """获取策略名称"""
+        return self.name
+
+    def get_strategy_type(self) -> ReflectionStrategyType:
+        """获取策略类型"""
+        return ReflectionStrategyType.HYBRID
 
     async def reflect(
         self,
@@ -750,6 +776,7 @@ class SelfReflector:
         cache_enabled: bool = True,
         cache_ttl: int = 3600,
         llm=None,
+        cache: Optional[CacheManager] = None,
         **kwargs
     ):
         """
@@ -760,6 +787,7 @@ class SelfReflector:
             cache_enabled: 是否启用缓存
             cache_ttl: 缓存过期时间（秒）
             llm: LLM 实例（可选）
+            cache: 缓存管理器实例（可选）
         """
         if strategy is None:
             self.strategy = LLMReflectionStrategy(llm=llm)
@@ -770,9 +798,20 @@ class SelfReflector:
         else:
             self.strategy = strategy
 
-        self.cache_enabled = cache_enabled
-        self.cache_ttl = cache_ttl
-        self._cache: Dict[str, Tuple[ReflectionResult, float]] = {}
+        # 使用提供的缓存管理器或创建新的
+        if cache is not None:
+            self._cache_manager = cache
+        else:
+            self._cache_manager = CacheManager(
+                enabled=cache_enabled,
+                ttl=cache_ttl,
+                max_size=500,
+                name="self_reflector"
+            )
+
+        # 保持向后兼容
+        self.cache_enabled = self._cache_manager.enabled
+        self.cache_ttl = self._cache_manager.ttl
 
     def _create_strategy(
         self,
@@ -816,12 +855,10 @@ class SelfReflector:
             config = ReflectionConfig()
 
         # 1. 检查缓存
-        if self.cache_enabled:
-            cache_key = self._get_cache_key(query, answer, config)
-            if cache_key in self._cache:
-                result, timestamp = self._cache[cache_key]
-                if time.time() - timestamp < self.cache_ttl:
-                    return result
+        cache_key = self._get_cache_key(query, answer, config)
+        cached_result = self._cache_manager.get(cache_key)
+        if cached_result is not None:
+            return cached_result
 
         # 2. 执行反思
         try:
@@ -838,9 +875,7 @@ class SelfReflector:
             )
 
         # 3. 缓存结果
-        if self.cache_enabled:
-            cache_key = self._get_cache_key(query, answer, config)
-            self._cache[cache_key] = (result, time.time())
+        self._cache_manager.set(cache_key, result)
 
         return result
 
@@ -979,11 +1014,15 @@ class SelfReflector:
 
     def clear_cache(self):
         """清空缓存"""
-        self._cache.clear()
+        self._cache_manager.clear()
 
     def get_cache_size(self) -> int:
         """获取缓存大小"""
-        return len(self._cache)
+        return self._cache_manager.get_stats().size
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """获取缓存统计"""
+        return self._cache_manager.get_stats().to_dict()
 
 
 # ==================== 工厂类 ====================

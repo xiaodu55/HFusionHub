@@ -2,6 +2,14 @@
 Intent Classifier - 意图分类器
 
 包含工厂类和主类，提供完整的意图分类功能
+
+设计模式：
+- 策略模式：支持多种分类策略
+- 工厂模式：统一创建分类器实例
+- 缓存模式：减少重复分类计算
+
+作者：Claude
+日期：2026-07-22
 """
 
 import time
@@ -16,6 +24,8 @@ from .strategies import (
     RuleClassificationStrategy,
     HybridClassificationStrategy
 )
+from .cache import CacheManager, classification_cache
+from .config import get_config
 from ..llm import BaseLLM
 
 logger = logging.getLogger(__name__)
@@ -96,13 +106,28 @@ class IntentClassifier:
     意图分类器主类
 
     提供完整的意图分类功能，支持缓存和日志
+
+    使用示例：
+        # 使用默认配置
+        classifier = IntentClassifier()
+
+        # 自定义配置
+        classifier = IntentClassifier(
+            strategy=IntentClassifierFactory.create(ClassificationStrategyType.LLM),
+            cache_enabled=True,
+            cache_ttl=7200
+        )
+
+        # 分类查询
+        result = await classifier.classify("什么是RAG？")
     """
 
     def __init__(
         self,
         strategy: Optional[ClassificationStrategy] = None,
         cache_enabled: bool = True,
-        cache_ttl: int = 3600  # 1小时
+        cache_ttl: int = 3600,
+        cache: Optional[CacheManager] = None
     ):
         """
         初始化意图分类器
@@ -111,13 +136,26 @@ class IntentClassifier:
             strategy: 分类策略（默认使用混合策略）
             cache_enabled: 是否启用缓存
             cache_ttl: 缓存过期时间（秒）
+            cache: 缓存管理器实例（可选）
         """
         self.strategy = strategy or IntentClassifierFactory.create(
             ClassificationStrategyType.HYBRID
         )
-        self.cache_enabled = cache_enabled
-        self.cache_ttl = cache_ttl
-        self._cache: Dict[str, tuple] = {}  # key -> (result, timestamp)
+
+        # 使用提供的缓存管理器或创建新的
+        if cache is not None:
+            self._cache_manager = cache
+        else:
+            self._cache_manager = CacheManager(
+                enabled=cache_enabled,
+                ttl=cache_ttl,
+                max_size=500,
+                name="intent_classifier"
+            )
+
+        # 保持向后兼容
+        self.cache_enabled = self._cache_manager.enabled
+        self.cache_ttl = self._cache_manager.ttl
 
     async def classify(
         self,
@@ -137,21 +175,17 @@ class IntentClassifier:
         """
 
         # 检查缓存
-        if self.cache_enabled:
-            cache_key = self._get_cache_key(query, history)
-            if cache_key in self._cache:
-                result, timestamp = self._cache[cache_key]
-                if time.time() - timestamp < self.cache_ttl:
-                    logger.debug(f"Cache hit for query: {query[:30]}...")
-                    return result
+        cache_key = self._get_cache_key(query, history)
+        cached_result = self._cache_manager.get(cache_key)
+        if cached_result is not None:
+            logger.debug(f"Cache hit for query: {query[:30]}...")
+            return cached_result
 
         # 执行分类
         result = await self.strategy.classify(query, history, **kwargs)
 
         # 更新缓存
-        if self.cache_enabled:
-            cache_key = self._get_cache_key(query, history)
-            self._cache[cache_key] = (result, time.time())
+        self._cache_manager.set(cache_key, result)
 
         # 记录日志
         self._log_classification(query, result)
@@ -223,24 +257,12 @@ class IntentClassifier:
 
     def clear_cache(self):
         """清空缓存"""
-        self._cache.clear()
+        self._cache_manager.clear()
         logger.debug("Intent classifier cache cleared")
 
     def get_cache_stats(self) -> Dict[str, Any]:
         """获取缓存统计"""
-        now = time.time()
-
-        total = len(self._cache)
-        valid = sum(
-            1 for _, (_, ts) in self._cache.items()
-            if now - ts < self.cache_ttl
-        )
-
-        return {
-            "total": total,
-            "valid": valid,
-            "expired": total - valid
-        }
+        return self._cache_manager.get_stats().to_dict()
 
     def get_strategy_name(self) -> str:
         """获取当前策略名称"""

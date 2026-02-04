@@ -34,6 +34,8 @@ from .utils import (
     MIN_SENTENCE_LENGTH,
     MAX_KEY_PHRASES,
 )
+from .cache import CacheManager, compression_cache
+from .base import BaseCompressionStrategy
 
 
 # ==================== 枚举定义 ====================
@@ -138,7 +140,7 @@ class CompressionConfig:
 
 # ==================== 抽取式压缩策略 ====================
 
-class ExtractiveCompressionStrategy:
+class ExtractiveCompressionStrategy(BaseCompressionStrategy):
     """
     抽取式压缩策略
 
@@ -156,6 +158,14 @@ class ExtractiveCompressionStrategy:
     def __init__(self, **kwargs):
         """初始化"""
         self.name = "extractive"
+
+    def get_strategy_name(self) -> str:
+        """获取策略名称"""
+        return self.name
+
+    def get_strategy_type(self) -> CompressionStrategyType:
+        """获取策略类型"""
+        return CompressionStrategyType.EXTRACTIVE
 
     async def compress(
         self,
@@ -291,7 +301,7 @@ class ExtractiveCompressionStrategy:
 
 # ==================== 生成式压缩策略 ====================
 
-class AbstractiveCompressionStrategy:
+class AbstractiveCompressionStrategy(BaseCompressionStrategy):
     """
     生成式压缩策略
 
@@ -315,6 +325,14 @@ class AbstractiveCompressionStrategy:
         """
         self.llm = llm
         self.name = "abstractive"
+
+    def get_strategy_name(self) -> str:
+        """获取策略名称"""
+        return self.name
+
+    def get_strategy_type(self) -> CompressionStrategyType:
+        """获取策略类型"""
+        return CompressionStrategyType.ABSTRACTIVE
 
     async def compress(
         self,
@@ -420,7 +438,7 @@ Compressed text:"""
 
 # ==================== 混合压缩策略 ====================
 
-class HybridCompressionStrategy:
+class HybridCompressionStrategy(BaseCompressionStrategy):
     """
     混合压缩策略
 
@@ -437,6 +455,14 @@ class HybridCompressionStrategy:
         self.llm = llm
         self.extractive = ExtractiveCompressionStrategy()
         self.name = "hybrid"
+
+    def get_strategy_name(self) -> str:
+        """获取策略名称"""
+        return self.name
+
+    def get_strategy_type(self) -> CompressionStrategyType:
+        """获取策略类型"""
+        return CompressionStrategyType.HYBRID
 
     async def compress(
         self,
@@ -562,7 +588,7 @@ Optimized text:"""
 
 # ==================== 递归压缩策略 ====================
 
-class RecursiveCompressionStrategy:
+class RecursiveCompressionStrategy(BaseCompressionStrategy):
     """
     递归压缩策略
 
@@ -576,6 +602,14 @@ class RecursiveCompressionStrategy:
         """初始化"""
         self.extractive = ExtractiveCompressionStrategy()
         self.name = "recursive"
+
+    def get_strategy_name(self) -> str:
+        """获取策略名称"""
+        return self.name
+
+    def get_strategy_type(self) -> CompressionStrategyType:
+        """获取策略类型"""
+        return CompressionStrategyType.RECURSIVE
 
     async def compress(
         self,
@@ -672,6 +706,7 @@ class ContextCompressor:
         cache_enabled: bool = True,
         cache_ttl: int = 3600,
         llm=None,
+        cache: Optional[CacheManager] = None,
         **kwargs
     ):
         """
@@ -682,6 +717,7 @@ class ContextCompressor:
             cache_enabled: 是否启用缓存
             cache_ttl: 缓存过期时间（秒）
             llm: LLM 实例（可选）
+            cache: 缓存管理器实例（可选）
         """
         if strategy is None:
             self.strategy = ExtractiveCompressionStrategy(llm=llm)
@@ -692,9 +728,20 @@ class ContextCompressor:
         else:
             self.strategy = strategy
 
-        self.cache_enabled = cache_enabled
-        self.cache_ttl = cache_ttl
-        self._cache: Dict[str, Tuple[CompressionResult, float]] = {}
+        # 使用提供的缓存管理器或创建新的
+        if cache is not None:
+            self._cache_manager = cache
+        else:
+            self._cache_manager = CacheManager(
+                enabled=cache_enabled,
+                ttl=cache_ttl,
+                max_size=500,
+                name="context_compressor"
+            )
+
+        # 保持向后兼容
+        self.cache_enabled = self._cache_manager.enabled
+        self.cache_ttl = self._cache_manager.ttl
 
     def _create_strategy(
         self,
@@ -735,12 +782,10 @@ class ContextCompressor:
             config = CompressionConfig()
 
         # 1. 检查缓存
-        if self.cache_enabled:
-            cache_key = self._get_cache_key(text, config)
-            if cache_key in self._cache:
-                result, timestamp = self._cache[cache_key]
-                if time.time() - timestamp < self.cache_ttl:
-                    return result
+        cache_key = self._get_cache_key(text, config)
+        cached_result = self._cache_manager.get(cache_key)
+        if cached_result is not None:
+            return cached_result
 
         # 2. 执行压缩
         try:
@@ -760,9 +805,7 @@ class ContextCompressor:
             )
 
         # 3. 缓存结果
-        if self.cache_enabled:
-            cache_key = self._get_cache_key(text, config)
-            self._cache[cache_key] = (result, time.time())
+        self._cache_manager.set(cache_key, result)
 
         return result
 
@@ -800,11 +843,15 @@ class ContextCompressor:
 
     def clear_cache(self):
         """清空缓存"""
-        self._cache.clear()
+        self._cache_manager.clear()
 
     def get_cache_size(self) -> int:
         """获取缓存大小"""
-        return len(self._cache)
+        return self._cache_manager.get_stats().size
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """获取缓存统计"""
+        return self._cache_manager.get_stats().to_dict()
 
 
 # ==================== 工厂类 ====================

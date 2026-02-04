@@ -13,6 +13,9 @@ RAG Module - 检索增强生成模块
 - QueryRewriter: 问题重写器
 - MultiChannelRetriever: 多通道检索器
 - Postprocessor: 后处理器
+- MultimodalRAG: 多模态检索增强生成
+- ConversationMemory: 对话记忆管理
+- AgentWorkflow: 工作流引擎
 - Utils: 公共工具函数
 """
 
@@ -144,6 +147,99 @@ from .knowledge_graph import (
 from .query_rewriter import QueryRewriter, get_query_rewriter, RewriteResult
 from .retriever import MultiChannelRetriever, get_retriever, RetrievalResult
 from .postprocessor import Postprocessor, get_postprocessor, ProcessedResult
+from .answer_quality_evaluator import (
+    AnswerQualityEvaluator,
+    AnswerQualityEvaluatorFactory,
+    EvaluationStrategyType,
+    EvaluationDimension,
+    EvaluationStatus,
+    EvaluationSample,
+    EvaluationResult,
+    MetricResult,
+    EvaluationConfig,
+    BaseEvaluationStrategy,
+    RuleBasedEvaluationStrategy,
+    LLMEvaluationStrategy,
+    HybridEvaluationStrategy,
+    get_evaluator,
+    reset_evaluator,
+)
+from .multimodal_rag import (
+    MultimodalRAG,
+    MultimodalRAGFactory,
+    ImageEmbeddingModel,
+    ModalityType,
+    ImageSource,
+    ChunkType,
+    ImageInfo,
+    ImageEmbedding,
+    MultimodalChunk,
+    MultimodalSearchResult,
+    MultimodalSearchResponse,
+    MultimodalConfig,
+    BaseImageEmbedder,
+    CLIPImageEmbedder,
+    ChineseCLIPImageEmbedder,
+    RandomImageEmbedder,
+    ImageEmbedderFactory,
+    MultimodalDocumentParser,
+    ImageChunker,
+    CrossModalRetriever,
+    get_multimodal_rag,
+    reset_multimodal_rag,
+)
+from .conversation_memory import (
+    ConversationMemory,
+    ConversationMemoryFactory,
+    MemoryType,
+    MemoryStrategyType,
+    MessageRole,
+    MemoryEventType,
+    Message,
+    ConversationSession,
+    MemoryConfig,
+    MemorySearchResult,
+    MemorySearchResponse,
+    MemoryStats,
+    BaseMemoryStrategy,
+    SlidingWindowMemory,
+    TokenBasedMemory,
+    SummaryMemory,
+    ImportanceBasedMemory,
+    HybridMemory,
+    MemoryStrategyFactory,
+    MemoryEmbedder,
+    MemoryStorage,
+    MemoryRetriever,
+    get_conversation_memory,
+    reset_conversation_memory,
+)
+from .agent_workflow import (
+    Workflow,
+    WorkflowEngine,
+    WorkflowBuilder,
+    WorkflowFactory,
+    WorkflowStatus,
+    NodeType,
+    NodeStatus,
+    WorkflowEventType,
+    WorkflowContext,
+    NodeResult,
+    WorkflowResult,
+    WorkflowConfig,
+    WorkflowEvent,
+    WorkflowHistory,
+    BaseWorkflowNode,
+    StartNode,
+    EndNode,
+    TaskNode,
+    ConditionNode,
+    ParallelNode,
+    LoopNode,
+    MergeNode,
+    get_workflow_engine,
+    reset_workflow_engine,
+)
 
 __all__ = [
     # 公共工具函数
@@ -270,6 +366,95 @@ __all__ = [
     "Postprocessor",
     "get_postprocessor",
     "ProcessedResult",
+    # 答案质量评估器
+    "AnswerQualityEvaluator",
+    "AnswerQualityEvaluatorFactory",
+    "EvaluationStrategyType",
+    "EvaluationDimension",
+    "EvaluationStatus",
+    "EvaluationSample",
+    "EvaluationResult",
+    "MetricResult",
+    "EvaluationConfig",
+    "BaseEvaluationStrategy",
+    "RuleBasedEvaluationStrategy",
+    "LLMEvaluationStrategy",
+    "HybridEvaluationStrategy",
+    "get_evaluator",
+    "reset_evaluator",
+    # 多模态RAG
+    "MultimodalRAG",
+    "MultimodalRAGFactory",
+    "ImageEmbeddingModel",
+    "ModalityType",
+    "ImageSource",
+    "ChunkType",
+    "ImageInfo",
+    "ImageEmbedding",
+    "MultimodalChunk",
+    "MultimodalSearchResult",
+    "MultimodalSearchResponse",
+    "MultimodalConfig",
+    "BaseImageEmbedder",
+    "CLIPImageEmbedder",
+    "ChineseCLIPImageEmbedder",
+    "RandomImageEmbedder",
+    "ImageEmbedderFactory",
+    "MultimodalDocumentParser",
+    "ImageChunker",
+    "CrossModalRetriever",
+    "get_multimodal_rag",
+    "reset_multimodal_rag",
+    # 对话记忆管理
+    "ConversationMemory",
+    "ConversationMemoryFactory",
+    "MemoryType",
+    "MemoryStrategyType",
+    "MessageRole",
+    "MemoryEventType",
+    "Message",
+    "ConversationSession",
+    "MemoryConfig",
+    "MemorySearchResult",
+    "MemorySearchResponse",
+    "MemoryStats",
+    "BaseMemoryStrategy",
+    "SlidingWindowMemory",
+    "TokenBasedMemory",
+    "SummaryMemory",
+    "ImportanceBasedMemory",
+    "HybridMemory",
+    "MemoryStrategyFactory",
+    "MemoryEmbedder",
+    "MemoryStorage",
+    "MemoryRetriever",
+    "get_conversation_memory",
+    "reset_conversation_memory",
+    # 工作流引擎
+    "Workflow",
+    "WorkflowEngine",
+    "WorkflowBuilder",
+    "WorkflowFactory",
+    "WorkflowStatus",
+    "NodeType",
+    "NodeStatus",
+    "WorkflowEventType",
+    "WorkflowContext",
+    "NodeResult",
+    "WorkflowResult",
+    "WorkflowConfig",
+    "WorkflowEvent",
+    "WorkflowHistory",
+    "BaseWorkflowNode",
+    "StartNode",
+    "EndNode",
+    "TaskNode",
+    "ConditionNode",
+    "ParallelNode",
+    "LoopNode",
+    "MergeNode",
+    "get_workflow_engine",
+    "reset_workflow_engine",
 ]
 
 
@@ -400,3 +585,133 @@ def reset_reflector():
     """重置全局自我反思器（用于测试）"""
     global _reflector
     _reflector = None
+
+
+# 全局答案质量评估器实例
+_evaluator: Optional["AnswerQualityEvaluator"] = None
+
+
+def get_evaluator(
+    strategy_type: EvaluationStrategyType = EvaluationStrategyType.HYBRID,
+    **kwargs
+) -> "AnswerQualityEvaluator":
+    """
+    获取全局答案质量评估器
+
+    Args:
+        strategy_type: 策略类型（默认混合策略）
+        **kwargs: 其他参数
+
+    Returns:
+        答案质量评估器实例
+    """
+    global _evaluator
+
+    if _evaluator is None:
+        _evaluator = AnswerQualityEvaluatorFactory.create(strategy_type, **kwargs)
+
+    return _evaluator
+
+
+def reset_evaluator():
+    """重置全局答案质量评估器（用于测试）"""
+    global _evaluator
+    _evaluator = None
+
+
+# 全局 MultimodalRAG 实例
+_multimodal_rag: Optional["MultimodalRAG"] = None
+
+
+def get_multimodal_rag_instance(
+    model_type: ImageEmbeddingModel = ImageEmbeddingModel.RANDOM,
+    **kwargs
+) -> "MultimodalRAG":
+    """
+    获取全局 MultimodalRAG 实例
+
+    Args:
+        model_type: 图片嵌入模型类型
+        **kwargs: 其他参数
+
+    Returns:
+        MultimodalRAG 实例
+    """
+    global _multimodal_rag
+
+    if _multimodal_rag is None:
+        _multimodal_rag = MultimodalRAGFactory.create(model_type, **kwargs)
+
+    return _multimodal_rag
+
+
+def reset_multimodal_rag_instance():
+    """重置全局 MultimodalRAG（用于测试）"""
+    global _multimodal_rag
+    if _multimodal_rag:
+        _multimodal_rag.clear_all()
+    _multimodal_rag = None
+
+
+# 全局 ConversationMemory 实例
+_conversation_memory: Optional["ConversationMemory"] = None
+
+
+def get_conversation_memory_instance(
+    config: Optional["MemoryConfig"] = None
+) -> "ConversationMemory":
+    """
+    获取全局 ConversationMemory 实例
+
+    Args:
+        config: 记忆配置
+
+    Returns:
+        ConversationMemory 实例
+    """
+    global _conversation_memory
+
+    if _conversation_memory is None:
+        _conversation_memory = ConversationMemoryFactory.create(config)
+
+    return _conversation_memory
+
+
+def reset_conversation_memory_instance():
+    """重置全局 ConversationMemory（用于测试）"""
+    global _conversation_memory
+    if _conversation_memory:
+        _conversation_memory.clear_all()
+    _conversation_memory = None
+
+
+# 全局 WorkflowEngine 实例
+_workflow_engine: Optional["WorkflowEngine"] = None
+
+
+def get_workflow_engine_instance(
+    config: Optional["WorkflowConfig"] = None
+) -> "WorkflowEngine":
+    """
+    获取全局 WorkflowEngine 实例
+
+    Args:
+        config: 工作流配置
+
+    Returns:
+        WorkflowEngine 实例
+    """
+    global _workflow_engine
+
+    if _workflow_engine is None:
+        _workflow_engine = WorkflowFactory.create_engine(config)
+
+    return _workflow_engine
+
+
+def reset_workflow_engine_instance():
+    """重置全局 WorkflowEngine（用于测试）"""
+    global _workflow_engine
+    if _workflow_engine:
+        _workflow_engine.clear_history()
+    _workflow_engine = None

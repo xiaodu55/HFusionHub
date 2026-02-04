@@ -20,6 +20,8 @@ from typing import List, Optional, Dict, Any, Set, Tuple
 from loguru import logger
 
 from .models import IntentResult, ComplexityLevel
+from .cache import CacheManager, decomposition_cache
+from .base import BaseDecompositionStrategy
 
 
 class DecompositionStrategyType(str, Enum):
@@ -242,7 +244,7 @@ class DecompositionResult:
         )
 
 
-class DecompositionStrategy(ABC):
+class DecompositionStrategy(BaseDecompositionStrategy):
     """
     分解策略基类
 
