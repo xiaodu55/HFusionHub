@@ -251,6 +251,16 @@ class DecompositionStrategy(BaseDecompositionStrategy):
     定义分解策略的通用接口
     """
 
+    strategy_type: DecompositionStrategyType
+
+    def get_strategy_name(self) -> str:
+        """Return the stable strategy name used in logs and diagnostics."""
+        return self.strategy_type.value
+
+    def get_strategy_type(self) -> DecompositionStrategyType:
+        """Return the strategy enum required by BaseStrategy."""
+        return self.strategy_type
+
     @abstractmethod
     async def decompose(
         self,
@@ -280,6 +290,8 @@ class LLMDecompositionStrategy(DecompositionStrategy):
 
     使用大语言模型理解查询并分解为子问题
     """
+
+    strategy_type = DecompositionStrategyType.LLM
 
     def __init__(self, llm=None):
         self.llm = llm
@@ -496,6 +508,8 @@ class RuleDecompositionStrategy(DecompositionStrategy):
     使用预定义规则分解简单查询
     """
 
+    strategy_type = DecompositionStrategyType.RULE
+
     def __init__(self):
         # 分解触发词
         self.decomposition_triggers = {
@@ -575,6 +589,8 @@ class HybridDecompositionStrategy(DecompositionStrategy):
 
     先规则，复杂查询再用 LLM
     """
+
+    strategy_type = DecompositionStrategyType.HYBRID
 
     def __init__(self, llm=None):
         self.rule_strategy = RuleDecompositionStrategy()

@@ -30,7 +30,7 @@ class Config:
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")
 
     # Java Backend
-    JAVA_BACKEND_URL = os.getenv("JAVA_BACKEND_URL", "http://localhost:8088")
+    JAVA_BACKEND_URL = os.getenv("JAVA_BACKEND_URL", "http://localhost:8080")
 
     # Chunking Configuration
     CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))  # characters

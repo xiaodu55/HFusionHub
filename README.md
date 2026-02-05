@@ -141,30 +141,40 @@ HFusionHub/
 - Python 3.10+
 - MySQL 8.0 (Docker)
 - Redis 7.x (Docker)
-- Node.js 18+（前端）
+- Node.js 20.19+ 或 22.12+（Vite 8 要求）
 
 ### 启动步骤
 
 ```bash
-# 1. 克隆项目
+# 1. 克隆项目并启动 MySQL、Redis
 git clone https://github.com/xiaodu55/HFusionHub.git
 cd HFusionHub
+cd docker
+docker compose up -d
+```
 
-# 2. 启动数据库
-docker start mysql8 redis7
+数据库启动后，在三个独立终端中分别运行：
 
-# 3. 启动 Java 后端
-cd java-backend
+```bash
+# 终端 1：Java 后端
+cd HFusionHub/java-backend
 mvn spring-boot:run
+```
 
-# 4. 启动 Python AI 层
-cd python-ai
+```bash
+# 终端 2：Python AI 层
+cd HFusionHub/python-ai
+python -m venv .venv
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 python -m app.main
+```
 
-# 5. 启动前端
-cd hfusionhub-frontend
-npm install
+```bash
+# 终端 3：前端
+cd HFusionHub/hfusionhub-frontend
+npm ci
 npm run dev
 ```
 

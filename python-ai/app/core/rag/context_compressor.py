@@ -742,6 +742,7 @@ class ContextCompressor:
         # 保持向后兼容
         self.cache_enabled = self._cache_manager.enabled
         self.cache_ttl = self._cache_manager.ttl
+        self._cache = self._cache_manager._cache
 
     def _create_strategy(
         self,

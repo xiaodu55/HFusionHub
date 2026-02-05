@@ -58,6 +58,9 @@ class CacheStats:
             "hits": self.hits,
             "misses": self.misses,
             "size": self.size,
+            # Backward-compatible names used by the original RAG modules.
+            "total": self.size,
+            "valid": self.size,
             "evictions": self.evictions,
             "hit_rate": round(self.hit_rate, 4),
         }
