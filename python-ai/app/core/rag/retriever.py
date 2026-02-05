@@ -8,12 +8,14 @@ Multi-Channel Retriever - 多通道检索器
 3. 图谱检索 - 预留 GraphRAG 接口
 """
 
+import asyncio
 import logging
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
 
 from .query_rewriter import QueryRewriter, get_query_rewriter, RewriteResult
 from .postprocessor import Postprocessor, get_postprocessor, ProcessedResult
+from .query_router import QueryRouter, get_router
 
 logger = logging.getLogger(__name__)
 
@@ -135,13 +137,14 @@ class MultiChannelRetriever:
         """
         self.query_rewriter = query_rewriter or get_query_rewriter()
         self.postprocessor = postprocessor or get_postprocessor()
+        self.router: QueryRouter = get_router()
 
         # 初始化各通道
         self.vector_channel = VectorChannel()
         self.keyword_channel = KeywordChannel()
         self.graph_channel = GraphChannel()
 
-    def retrieve(
+    async def retrieve(
         self,
         query: str,
         knowledge_base_id: Optional[int] = None,
@@ -174,39 +177,25 @@ class MultiChannelRetriever:
         else:
             queries = [query]
 
-        # 2. 多通道并行检索
+        # 2. 按查询类型路由到向量、关键词或图谱通道。QueryRouter 的通道
+        # 均为异步实现，Milvus Lite 的同步调用会在线程池中执行。
         all_results = []
 
         for q in queries:
-            # 向量检索
-            vector_results = self.vector_channel.search(
-                q,
+            merged = await self.router.search(
+                query=q,
                 knowledge_base_id=knowledge_base_id,
-                top_k=top_k
+                top_k=top_k,
             )
-
-            # 关键词检索（预留）
-            keyword_results = self.keyword_channel.search(
-                q,
-                knowledge_base_id=knowledge_base_id,
-                top_k=top_k
-            )
-
-            # 图谱检索（预留）
-            graph_results = self.graph_channel.search(
-                q,
-                knowledge_base_id=knowledge_base_id,
-                top_k=top_k
-            )
-
-            # 合并结果
-            merged = self.postprocessor.merge_results(
-                vector_results=vector_results,
-                keyword_results=keyword_results,
-                graph_results=graph_results
-            )
-
-            all_results.extend(merged)
+            all_results.extend({
+                "content": item.content,
+                "score": item.score,
+                "document_id": item.document_id,
+                "knowledge_base_id": item.metadata.get("knowledge_base_id", knowledge_base_id),
+                "outline_path": item.metadata.get("outline_path", []),
+                "source": item.source.value,
+                "metadata": item.metadata,
+            } for item in merged.results)
 
         # 3. 后处理（去重、排序）
         processed = self.postprocessor.process(all_results, top_k=top_k)
@@ -230,7 +219,7 @@ class MultiChannelRetriever:
 
         return result
 
-    def retrieve_for_prompt(
+    async def retrieve_for_prompt(
         self,
         query: str,
         knowledge_base_id: Optional[int] = None,
@@ -249,7 +238,7 @@ class MultiChannelRetriever:
         Returns:
             格式化的上下文文本
         """
-        result = self.retrieve(
+        result = await self.retrieve(
             query=query,
             knowledge_base_id=knowledge_base_id,
             conversation_history=conversation_history,

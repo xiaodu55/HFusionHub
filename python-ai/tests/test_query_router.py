@@ -172,15 +172,12 @@ class TestVectorChannel:
         config = ChannelConfig(channel_type=ChannelType.VECTOR)
         channel = VectorChannel(config)
 
-        # Mock Milvus store
-        mock_store = AsyncMock()
-        mock_store.search.return_value = [
+        # Mock Milvus Lite 同步搜索函数
+        mock_search = MagicMock(return_value=[
             {"content": "测试文档", "score": 0.9, "document_id": 1}
-        ]
-
-        # Mock the import inside the method
+        ])
         mock_milvus = MagicMock()
-        mock_milvus.get_milvus_store.return_value = mock_store
+        mock_milvus.search_similar = mock_search
 
         with patch.dict("sys.modules", {"app.core.vectorstore.milvus_store": mock_milvus}):
             results = await channel.search(
@@ -218,17 +215,29 @@ class TestKeywordChannel:
 
     @pytest.mark.asyncio
     async def test_keyword_channel_search(self):
-        """测试关键词检索（预留）"""
+        """测试基于本地 chunk store 的关键词检索"""
         config = ChannelConfig(channel_type=ChannelType.KEYWORD)
         channel = KeywordChannel(config)
 
-        results = await channel.search(
-            query="测试查询",
-            knowledge_base_id=1,
-            top_k=5
-        )
+        mock_milvus = MagicMock()
+        mock_milvus._load_chunks_store.return_value = {
+            "1": [{
+                "chunk_id": "chunk-1",
+                "document_id": "1",
+                "knowledge_base_id": 1,
+                "content": "Python 查询路由器支持关键词检索",
+            }]
+        }
+        with patch.dict("sys.modules", {"app.core.vectorstore.milvus_store": mock_milvus}):
+            results = await channel.search(
+                query="Python 查询",
+                knowledge_base_id=1,
+                top_k=5
+            )
 
-        assert results == []
+        assert len(results) == 1
+        assert results[0].source == ChannelType.KEYWORD
+        assert results[0].document_id == "1"
 
 
 class TestGraphChannel:

@@ -15,6 +15,8 @@
 - 责任链模式: 多个通道按权重执行
 """
 
+import asyncio
+import re
 import time
 import logging
 from enum import Enum
@@ -151,15 +153,16 @@ class VectorChannel(BaseChannel):
         top_k: int = 10,
         **kwargs
     ) -> List[SearchResult]:
-        """向量检索"""
+        """向量检索（兼容 Milvus Lite 的同步搜索接口）"""
         try:
-            from app.core.vectorstore.milvus_store import get_milvus_store
-            store = get_milvus_store()
+            from app.core.vectorstore.milvus_store import search_similar
 
-            results = await store.search(
-                query=query,
-                collection_name=f"kb_{knowledge_base_id}",
-                top_k=top_k
+            # Milvus Lite 的客户端为同步接口；转到线程中，避免阻塞 FastAPI 事件循环。
+            results = await asyncio.to_thread(
+                search_similar,
+                query_text=query,
+                knowledge_base_id=knowledge_base_id,
+                top_k=top_k,
             )
 
             return [
@@ -187,9 +190,67 @@ class KeywordChannel(BaseChannel):
         top_k: int = 10,
         **kwargs
     ) -> List[SearchResult]:
-        """关键词检索 - 预留 Elasticsearch 集成"""
-        logger.info(f"Keyword search not implemented: {query}")
-        return []
+        """关键词检索。
+
+        优先使用项目在文档入库时维护的 ``chunks_store.json``，因此本地开发
+        不依赖 Elasticsearch。部署 Elasticsearch 后，可在该通道前增加专用
+        索引实现，而不会改变路由器接口。
+        """
+        try:
+            from app.core.vectorstore.milvus_store import _load_chunks_store
+
+            store = await asyncio.to_thread(_load_chunks_store)
+            terms = self._tokenize(query)
+            if not terms:
+                return []
+
+            scored: List[SearchResult] = []
+            for document_id, chunks in store.items():
+                for chunk in chunks:
+                    if (knowledge_base_id is not None and
+                            chunk.get("knowledge_base_id") != knowledge_base_id):
+                        continue
+
+                    content = chunk.get("content", "")
+                    score = self._score(terms, content)
+                    if score <= 0:
+                        continue
+
+                    scored.append(SearchResult(
+                        content=content,
+                        score=score,
+                        source=ChannelType.KEYWORD,
+                        document_id=chunk.get("document_id", document_id),
+                        metadata={
+                            "chunk_id": chunk.get("chunk_id"),
+                            "knowledge_base_id": chunk.get("knowledge_base_id"),
+                            "outline_path": chunk.get("outline_path", []),
+                            "match_terms": [term for term in terms if term.lower() in content.lower()],
+                        },
+                    ))
+
+            scored.sort(key=lambda item: item.score, reverse=True)
+            return scored[:top_k]
+        except Exception as e:
+            logger.error("Keyword search failed: %s", e)
+            return []
+
+    @staticmethod
+    def _tokenize(text: str) -> List[str]:
+        """提取英文词、数字和单个中文字符，适配中英文混合文档。"""
+        tokens = re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]", text.lower())
+        return list(dict.fromkeys(token for token in tokens if len(token) > 1 or "\u4e00" <= token <= "\u9fff"))
+
+    @staticmethod
+    def _score(terms: List[str], content: str) -> float:
+        if not content:
+            return 0.0
+        lowered = content.lower()
+        matches = sum(1 for term in terms if term in lowered)
+        # 覆盖率为主，轻微奖励多次出现，保持得分在 0 到 1。
+        coverage = matches / len(terms)
+        frequency_bonus = min(sum(lowered.count(term) for term in terms) / 100, 0.1)
+        return min(coverage + frequency_bonus, 1.0)
 
 
 class GraphChannel(BaseChannel):

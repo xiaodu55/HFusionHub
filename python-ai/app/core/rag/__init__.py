@@ -124,6 +124,12 @@ from .multi_turn_strategy import (
     get_manager,
     reset_manager,
 )
+from .adaptive_retrieval import (
+    RetrievalPlan,
+    AdaptiveRetrievalPlanner,
+    get_adaptive_retrieval_planner,
+    reset_adaptive_retrieval_planner,
+)
 from .knowledge_graph import (
     EntityType,
     RelationType,
@@ -335,6 +341,10 @@ __all__ = [
     "AdaptiveMultiTurnStrategy",
     "get_manager",
     "reset_manager",
+    "RetrievalPlan",
+    "AdaptiveRetrievalPlanner",
+    "get_adaptive_retrieval_planner",
+    "reset_adaptive_retrieval_planner",
     # 知识图谱
     "EntityType",
     "RelationType",

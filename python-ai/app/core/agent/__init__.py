@@ -4,8 +4,22 @@ Agent Core Module - ReAct Loop Implementation
 
 from .agent import Agent, AgentResponse
 from .react import ReactAgent
+from .collaboration import (
+    ExpertRole,
+    CollaborationTask,
+    ExpertContribution,
+    CollaborationResult,
+    ExpertAgent,
+    CallableExpertAgent,
+    MultiAgentCoordinator,
+)
 
-__all__ = ['Agent', 'AgentResponse', 'ReactAgent', 'get_agent']
+__all__ = [
+    'Agent', 'AgentResponse', 'ReactAgent', 'get_agent',
+    'ExpertRole', 'CollaborationTask', 'ExpertContribution',
+    'CollaborationResult', 'ExpertAgent', 'CallableExpertAgent',
+    'MultiAgentCoordinator',
+]
 
 
 def get_agent(

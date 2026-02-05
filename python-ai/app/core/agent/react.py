@@ -30,6 +30,7 @@ from ..rag import (
     ReflectionConfig,
     EvaluationStrategyType,
     EvaluationSample,
+    get_adaptive_retrieval_planner,
 )
 
 logger = logging.getLogger(__name__)
@@ -222,7 +223,7 @@ class ReactAgent(Agent):
             sources=[]
         )
 
-    def _retrieve_context(
+    async def _retrieve_context(
         self,
         query: str,
         history: Optional[List[Dict]] = None,
@@ -241,12 +242,17 @@ class ReactAgent(Agent):
         """
         try:
             retriever = get_retriever()
-            logger.info(f"[RAG] Calling retriever with knowledge_base_id={self.knowledge_base_id}")
-            result = retriever.retrieve(
+            plan = await get_adaptive_retrieval_planner().plan(
                 query=query,
+                history=history,
+                intent_result=intent_result,
+            )
+            logger.info(f"[RAG] Calling retriever with knowledge_base_id={self.knowledge_base_id}")
+            result = await retriever.retrieve(
+                query=plan.query,
                 knowledge_base_id=self.knowledge_base_id,
                 conversation_history=history,
-                top_k=3
+                top_k=plan.top_k,
             )
             logger.info(f"[RAG] Retriever returned {len(result.results)} results")
 
@@ -493,7 +499,7 @@ class ReactAgent(Agent):
 
         try:
             # 检索相关上下文
-            rag_context, rag_sources, _ = self._retrieve_context(
+            rag_context, rag_sources, _ = await self._retrieve_context(
                 sub_question.content, history
             )
 
@@ -624,7 +630,7 @@ class ReactAgent(Agent):
 
         # RAG: 检索相关知识
         logger.info(f"[RAG] Starting retrieval for query: {query[:50]}..., knowledge_base_id: {self.knowledge_base_id}")
-        rag_context, rag_sources, auto_detected_kb_id = self._retrieve_context(query, history, intent_result)
+        rag_context, rag_sources, auto_detected_kb_id = await self._retrieve_context(query, history, intent_result)
         logger.info(f"[RAG] Retrieved context length: {len(rag_context)}, sources count: {len(rag_sources)}, auto_detected_kb_id: {auto_detected_kb_id}")
 
         # 压缩检索结果
@@ -833,7 +839,7 @@ class ReactAgent(Agent):
                     if decomposition_result and decomposition_result.sub_questions:
                         all_results = []
                         for sub_q in decomposition_result.sub_questions:
-                            result = retriever.retrieve(
+                            result = await retriever.retrieve(
                                 query=sub_q.content if hasattr(sub_q, 'content') else str(sub_q),
                                 knowledge_base_id=self.knowledge_base_id,
                                 top_k=3
@@ -869,7 +875,7 @@ class ReactAgent(Agent):
                             sources = unique_results
                     else:
                         # 直接检索
-                        result = retriever.retrieve(
+                        result = await retriever.retrieve(
                             query=query,
                             knowledge_base_id=self.knowledge_base_id,
                             top_k=3
