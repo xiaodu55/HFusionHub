@@ -832,6 +832,11 @@ class ReactAgent(Agent):
             # 如果知识库 ID 有效，尝试检索
             if self.knowledge_base_id and self.knowledge_base_id > 0:
                 try:
+                    retrieval_plan = await get_adaptive_retrieval_planner().plan(
+                        query=query,
+                        history=history,
+                        intent_result=intent_result,
+                    )
                     # Query Decomposition
                     query_decomposer = get_query_decomposer()
                     decomposition_result = await query_decomposer.decompose(query, intent_result, history)
@@ -839,10 +844,16 @@ class ReactAgent(Agent):
                     if decomposition_result and decomposition_result.sub_questions:
                         all_results = []
                         for sub_q in decomposition_result.sub_questions:
+                            sub_query = sub_q.content if hasattr(sub_q, 'content') else str(sub_q)
+                            sub_plan = await get_adaptive_retrieval_planner().plan(
+                                query=sub_query,
+                                history=history,
+                                intent_result=intent_result,
+                            )
                             result = await retriever.retrieve(
-                                query=sub_q.content if hasattr(sub_q, 'content') else str(sub_q),
+                                query=sub_plan.query,
                                 knowledge_base_id=self.knowledge_base_id,
-                                top_k=3
+                                top_k=sub_plan.top_k,
                             )
                             if result and result.results:
                                 for item in result.results:
@@ -876,9 +887,9 @@ class ReactAgent(Agent):
                     else:
                         # 直接检索
                         result = await retriever.retrieve(
-                            query=query,
+                            query=retrieval_plan.query,
                             knowledge_base_id=self.knowledge_base_id,
-                            top_k=3
+                            top_k=retrieval_plan.top_k,
                         )
                         if result and result.results:
                             results = []

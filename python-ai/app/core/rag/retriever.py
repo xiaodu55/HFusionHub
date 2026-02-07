@@ -2,13 +2,9 @@
 Multi-Channel Retriever - 多通道检索器
 参考 Ragent 项目的 Multi-Channel Retrieval 设计
 
-功能:
-1. 向量检索 - Milvus 语义相似度搜索
-2. 关键词检索 - 预留 ES 接口
-3. 图谱检索 - 预留 GraphRAG 接口
+通过 QueryRouter 路由到向量、关键词和知识图谱检索通道。
 """
 
-import asyncio
 import logging
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
@@ -29,97 +25,6 @@ class RetrievalResult:
     metadata: Dict = field(default_factory=dict)
 
 
-class VectorChannel:
-    """向量检索通道"""
-
-    def __init__(self):
-        self._store = None
-
-    def _get_store(self):
-        if self._store is None:
-            from app.core.vectorstore.milvus_store import search_similar
-            self._store = search_similar
-        return self._store
-
-    def search(
-        self,
-        query: str,
-        knowledge_base_id: Optional[int] = None,
-        top_k: int = 10
-    ) -> List[Dict]:
-        """
-        向量检索
-
-        Args:
-            query: 查询文本
-            knowledge_base_id: 知识库 ID
-            top_k: 返回数量
-
-        Returns:
-            检索结果列表
-        """
-        try:
-            search_fn = self._get_store()
-            logger.debug(f"[VectorChannel] Searching with knowledge_base_id={knowledge_base_id}, top_k={top_k}")
-            results = search_fn(
-                query_text=query,
-                top_k=top_k,
-                knowledge_base_id=knowledge_base_id
-            )
-            logger.debug(f"[VectorChannel] Search returned {len(results)} results")
-
-            # 标记来源
-            for r in results:
-                r["source"] = "vector"
-
-            logger.info(f"Vector search: {len(results)} results for '{query[:30]}...'")
-            return results
-
-        except Exception as e:
-            logger.error(f"Vector search failed: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return []
-
-
-class KeywordChannel:
-    """关键词检索通道（预留 ES 接口）"""
-
-    def search(
-        self,
-        query: str,
-        knowledge_base_id: Optional[int] = None,
-        top_k: int = 10
-    ) -> List[Dict]:
-        """
-        关键词检索（预留实现）
-
-        TODO: 集成 Elasticsearch
-        """
-        # 预留接口，暂返回空
-        logger.info("Keyword search not implemented yet")
-        return []
-
-
-class GraphChannel:
-    """图谱检索通道（预留 GraphRAG 接口）"""
-
-    def search(
-        self,
-        query: str,
-        knowledge_base_id: Optional[int] = None,
-        top_k: int = 10
-    ) -> List[Dict]:
-        """
-        图谱检索（预留实现）
-
-        TODO: 集成 GraphRAG / Neo4j
-        """
-        # 预留接口，暂返回空
-        logger.info("Graph search not implemented yet")
-        return []
-
-
 class MultiChannelRetriever:
     """多通道检索器"""
 
@@ -138,11 +43,6 @@ class MultiChannelRetriever:
         self.query_rewriter = query_rewriter or get_query_rewriter()
         self.postprocessor = postprocessor or get_postprocessor()
         self.router: QueryRouter = get_router()
-
-        # 初始化各通道
-        self.vector_channel = VectorChannel()
-        self.keyword_channel = KeywordChannel()
-        self.graph_channel = GraphChannel()
 
     async def retrieve(
         self,

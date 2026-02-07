@@ -20,6 +20,14 @@ logger = logging.getLogger(__name__)
 active_requests: Dict[str, asyncio.Task] = {}
 
 
+def _track_active_request(request_id: str) -> Optional[asyncio.Task]:
+    """Register the task serving an SSE stream so the cancel endpoint can stop it."""
+    task = asyncio.current_task()
+    if task is not None:
+        active_requests[request_id] = task
+    return task
+
+
 class ChatMessage(BaseModel):
     """Chat message model"""
     role: str = Field(..., description="Message role: 'user' or 'assistant'")
@@ -147,6 +155,7 @@ async def chat_stream(request: ChatRequest):
 
         # 直接流式响应（真正的流式）
         async def event_generator():
+            serving_task = _track_active_request(request_id)
             try:
                 async for chunk in agent.run_stream(
                     query=request.message,
@@ -179,26 +188,8 @@ async def chat_stream(request: ChatRequest):
                 except Exception:
                     pass
                 # 清理活跃请求
-                active_requests.pop(request_id, None)
-
-        # 存储到活跃请求列表（用于取消）
-        # 创建一个包装任务来支持取消
-        async def cancellable_generator():
-            """可取消的生成器包装"""
-            gen = event_generator()
-            try:
-                async for chunk in gen:
-                    yield chunk
-            except asyncio.CancelledError:
-                # 当任务被取消时，生成器会自动停止
-                pass
-
-        # 创建任务以支持取消
-        async def run_and_store():
-            chunks = []
-            async for chunk in cancellable_generator():
-                chunks.append(chunk)
-            return chunks
+                if active_requests.get(request_id) is serving_task:
+                    active_requests.pop(request_id, None)
 
         # 直接返回流式响应，不预收集
         return StreamingResponse(
@@ -214,14 +205,6 @@ async def chat_stream(request: ChatRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat stream error: {str(e)}")
-
-
-async def _collect_generator(gen) -> List[str]:
-    """收集生成器的所有输出"""
-    chunks = []
-    async for chunk in gen:
-        chunks.append(chunk)
-    return chunks
 
 
 @router.get("/api/chat/health")

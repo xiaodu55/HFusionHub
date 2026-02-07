@@ -25,6 +25,15 @@ class Config:
     SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
     SERVER_PORT = int(os.getenv("SERVER_PORT", "9000"))
     SERVER_DEBUG = os.getenv("SERVER_DEBUG", "true").lower() == "true"
+    # Comma-separated browser origins. Use "*" only for public, credential-free APIs.
+    CORS_ORIGINS = [
+        origin.strip()
+        for origin in os.getenv(
+            "CORS_ORIGINS",
+            "http://localhost:5173,http://127.0.0.1:5173",
+        ).split(",")
+        if origin.strip()
+    ]
 
     # File Storage
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")

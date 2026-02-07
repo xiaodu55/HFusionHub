@@ -39,11 +39,13 @@ def create_app() -> FastAPI:
         version="1.0.0"
     )
 
-    # CORS middleware
+    # Browsers reject credentialed requests with a wildcard origin. Keep the
+    # development defaults explicit and make production origins configurable.
+    allow_all_origins = config.CORS_ORIGINS == ["*"]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=config.CORS_ORIGINS,
+        allow_credentials=not allow_all_origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )
