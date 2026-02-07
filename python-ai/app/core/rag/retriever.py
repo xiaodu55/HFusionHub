@@ -6,12 +6,14 @@ Multi-Channel Retriever - 多通道检索器
 """
 
 import logging
+import time
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
 
 from .query_rewriter import QueryRewriter, get_query_rewriter, RewriteResult
 from .postprocessor import Postprocessor, get_postprocessor, ProcessedResult
 from .query_router import QueryRouter, get_router
+from .observability import RetrievalTrace, get_trace_store
 
 logger = logging.getLogger(__name__)
 
@@ -65,59 +67,80 @@ class MultiChannelRetriever:
         Returns:
             RetrievalResult 检索结果
         """
+        started_at = time.perf_counter()
         rewrite_result = None
+        routes: List[Dict[str, Any]] = []
+        processed: List[ProcessedResult] = []
+        queries = [query]
+        error: Optional[str] = None
 
-        # 1. 问题重写
-        if enable_rewrite and conversation_history:
-            rewrite_result = self.query_rewriter.rewrite(
-                query,
-                conversation_history
+        try:
+            # 1. 问题重写
+            if enable_rewrite and conversation_history:
+                rewrite_result = self.query_rewriter.rewrite(query, conversation_history)
+                queries = rewrite_result.rewritten_queries or [query]
+
+            # 2. 路由到向量、关键词或图谱通道。
+            all_results = []
+            for rewritten_query in queries:
+                merged = await self.router.search(
+                    query=rewritten_query,
+                    knowledge_base_id=knowledge_base_id,
+                    top_k=top_k,
+                )
+                route = merged.metadata.get("route_result", {})
+                routes.append({"query": rewritten_query, **route})
+                all_results.extend({
+                    "content": item.content,
+                    "score": item.score,
+                    "document_id": item.document_id,
+                    "knowledge_base_id": item.metadata.get("knowledge_base_id", knowledge_base_id),
+                    "outline_path": item.metadata.get("outline_path", []),
+                    "source": item.source.value,
+                    "metadata": item.metadata,
+                } for item in merged.results)
+
+            # 3. 后处理（去重、排序）
+            processed = self.postprocessor.process(all_results, top_k=top_k)
+            result = RetrievalResult(
+                query=query,
+                results=processed,
+                rewrite_result=rewrite_result,
+                metadata={
+                    "knowledge_base_id": knowledge_base_id,
+                    "query_count": len(queries),
+                    "total_results": len(all_results),
+                },
             )
-            queries = rewrite_result.rewritten_queries
-        else:
-            queries = [query]
-
-        # 2. 按查询类型路由到向量、关键词或图谱通道。QueryRouter 的通道
-        # 均为异步实现，Milvus Lite 的同步调用会在线程池中执行。
-        all_results = []
-
-        for q in queries:
-            merged = await self.router.search(
-                query=q,
+            logger.info(
+                f"Retrieved {len(processed)} results for '{query[:30]}...' "
+                f"(queries: {len(queries)}, total: {len(all_results)})"
+            )
+            return result
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            raise
+        finally:
+            trace_results = [
+                {
+                    "document_id": result.document_id,
+                    "score": round(result.score, 4),
+                    "source": result.source,
+                    "content_preview": result.content[:500],
+                    "outline_path": result.outline_path,
+                }
+                for result in processed
+            ]
+            get_trace_store().record(RetrievalTrace(
+                query=query,
                 knowledge_base_id=knowledge_base_id,
                 top_k=top_k,
-            )
-            all_results.extend({
-                "content": item.content,
-                "score": item.score,
-                "document_id": item.document_id,
-                "knowledge_base_id": item.metadata.get("knowledge_base_id", knowledge_base_id),
-                "outline_path": item.metadata.get("outline_path", []),
-                "source": item.source.value,
-                "metadata": item.metadata,
-            } for item in merged.results)
-
-        # 3. 后处理（去重、排序）
-        processed = self.postprocessor.process(all_results, top_k=top_k)
-
-        # 4. 构建结果
-        result = RetrievalResult(
-            query=query,
-            results=processed,
-            rewrite_result=rewrite_result,
-            metadata={
-                "knowledge_base_id": knowledge_base_id,
-                "query_count": len(queries),
-                "total_results": len(all_results)
-            }
-        )
-
-        logger.info(
-            f"Retrieved {len(processed)} results for '{query[:30]}...' "
-            f"(queries: {len(queries)}, total: {len(all_results)})"
-        )
-
-        return result
+                routes=routes,
+                results=trace_results,
+                rewrite_count=len(queries),
+                latency_ms=round((time.perf_counter() - started_at) * 1000, 2),
+                error=error,
+            ))
 
     async def retrieve_for_prompt(
         self,

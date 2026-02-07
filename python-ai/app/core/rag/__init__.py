@@ -130,6 +130,17 @@ from .adaptive_retrieval import (
     get_adaptive_retrieval_planner,
     reset_adaptive_retrieval_planner,
 )
+from .observability import (
+    RetrievalTrace,
+    RetrievalTraceStore,
+    get_trace_store,
+    reset_trace_store,
+)
+from .evaluation import (
+    EvaluationCase,
+    EvaluationCaseResult,
+    RetrievalEvaluator,
+)
 from .knowledge_graph import (
     EntityType,
     RelationType,
@@ -345,6 +356,13 @@ __all__ = [
     "AdaptiveRetrievalPlanner",
     "get_adaptive_retrieval_planner",
     "reset_adaptive_retrieval_planner",
+    "RetrievalTrace",
+    "RetrievalTraceStore",
+    "get_trace_store",
+    "reset_trace_store",
+    "EvaluationCase",
+    "EvaluationCaseResult",
+    "RetrievalEvaluator",
     # 知识图谱
     "EntityType",
     "RelationType",

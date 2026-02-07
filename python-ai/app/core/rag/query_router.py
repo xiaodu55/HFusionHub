@@ -651,7 +651,10 @@ class QueryRouter:
                 "route_result": {
                     "query_type": route_result.query_type.value,
                     "strategy": route_result.strategy.value,
-                    "confidence": route_result.confidence
+                    "confidence": route_result.confidence,
+                    "selected_channels": [
+                        channel.value for channel in route_result.selected_channels
+                    ],
                 }
             }
         )
