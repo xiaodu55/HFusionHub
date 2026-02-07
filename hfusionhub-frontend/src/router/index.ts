@@ -56,6 +56,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/chat/Detail.vue'),
       },
       {
+        path: 'rag',
+        name: 'RagObservability',
+        component: () => import('@/pages/rag/Index.vue'),
+      },
+      {
         path: 'profile',
         name: 'Profile',
         component: () => import('@/pages/profile/Index.vue'),

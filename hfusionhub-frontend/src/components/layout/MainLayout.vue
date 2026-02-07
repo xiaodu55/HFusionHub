@@ -11,6 +11,7 @@ import {
   BookOpen,
   FileText,
   MessageSquare,
+  Activity,
   User,
   LogOut,
   Moon,
@@ -29,6 +30,7 @@ const menuItems = [
   { path: '/knowledge-base', label: '知识库', icon: BookOpen },
   { path: '/document', label: '文档', icon: FileText },
   { path: '/chat', label: '对话', icon: MessageSquare },
+  { path: '/rag', label: 'RAG 调试', icon: Activity },
 ]
 
 const toggleSidebar = () => {
