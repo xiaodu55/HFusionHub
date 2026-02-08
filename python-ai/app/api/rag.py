@@ -26,13 +26,56 @@ class EvaluationRequest(BaseModel):
 
 
 @router.get("/traces")
-async def list_traces(limit: int = Query(default=50, ge=1, le=200)):
-    return {"traces": get_trace_store().list(limit)}
+async def list_traces(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0, le=1000),
+    knowledge_base_id: Optional[int] = Query(default=None, ge=1),
+    error_only: bool = Query(default=False),
+    query: Optional[str] = Query(default=None, max_length=4000),
+    source: Optional[str] = Query(default=None, max_length=64),
+):
+    trace_store = get_trace_store()
+    return {
+        "traces": trace_store.list(
+            limit=limit,
+            offset=offset,
+            query=query,
+            knowledge_base_id=knowledge_base_id,
+            error_only=error_only,
+            source=source,
+        ),
+        "total": trace_store.count(
+            query=query,
+            knowledge_base_id=knowledge_base_id,
+            error_only=error_only,
+            source=source,
+        ),
+    }
 
 
 @router.get("/traces/stats")
-async def trace_stats():
-    return get_trace_store().stats()
+async def trace_stats(days: int = Query(default=7, ge=1, le=30)):
+    return get_trace_store().stats(window_days=days)
+
+
+@router.get("/traces/export")
+async def export_traces(
+    format: str = Query(default="json", pattern="^(json|csv)$"),
+    knowledge_base_id: Optional[int] = Query(default=None, ge=1),
+    error_only: bool = Query(default=False),
+    query: Optional[str] = Query(default=None, max_length=4000),
+    source: Optional[str] = Query(default=None, max_length=64),
+):
+    try:
+        return get_trace_store().export(
+            format=format,
+            query=query,
+            knowledge_base_id=knowledge_base_id,
+            error_only=error_only,
+            source=source,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/traces/{trace_id}")

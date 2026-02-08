@@ -32,8 +32,45 @@ export interface RetrievalTrace {
 export interface TraceStats {
   total_traces: number
   failed_traces: number
+  hit_traces: number
+  hit_rate: number
   average_latency_ms: number
   result_source_counts: Record<string, number>
+  recent_failures: Array<{
+    trace_id: string
+    created_at: string
+    query: string
+    knowledge_base_id: number | null
+    latency_ms: number
+    error: string | null
+    top_k: number
+  }>
+  daily_metrics: TraceDailyMetric[]
+  window_days: number
+}
+
+export interface TraceDailyMetric {
+  date: string
+  total_traces: number
+  failed_traces: number
+  hit_traces: number
+  hit_rate: number
+  average_latency_ms: number
+}
+
+export interface TraceFilters {
+  limit?: number
+  offset?: number
+  knowledge_base_id?: number
+  error_only?: boolean
+  query?: string
+  source?: string
+}
+
+export interface TraceExport {
+  filename: string
+  mime_type: string
+  content: string
 }
 
 export interface EvaluationCaseInput {
@@ -63,11 +100,18 @@ export interface EvaluationReport {
   }>
 }
 
-export const getTraces = (limit = 50) =>
-  get<{ data: { traces: RetrievalTrace[] } }>('/rag/traces', { limit })
+export const getTraces = (params: TraceFilters = {}) =>
+  get<{ data: { traces: RetrievalTrace[], total: number } }>('/rag/traces', {
+    limit: 50,
+    offset: 0,
+    ...params,
+  })
 
-export const getTraceStats = () =>
-  get<{ data: TraceStats }>('/rag/traces/stats')
+export const getTraceStats = (days = 7) =>
+  get<{ data: TraceStats }>('/rag/traces/stats', { days })
+
+export const exportTraces = (format: 'json' | 'csv', filters: Omit<TraceFilters, 'limit' | 'offset'> = {}) =>
+  get<{ data: TraceExport }>('/rag/traces/export', { format, ...filters })
 
 export const evaluateRetrieval = (data: {
   knowledge_base_id?: number

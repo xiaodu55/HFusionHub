@@ -38,20 +38,58 @@ public class RagObservabilityController {
     private String aiServiceBaseUrl;
 
     @GetMapping("/traces")
-    public R<Map> listTraces(@RequestParam(defaultValue = "50") int limit) {
+    public R<Map> listTraces(
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "0") int offset,
+            @RequestParam(required = false) Long knowledgeBaseId,
+            @RequestParam(defaultValue = "false") boolean errorOnly,
+            @RequestParam(required = false) String query,
+            @RequestParam(required = false) String source
+    ) {
         if (limit < 1 || limit > 200) {
             throw new BusinessException("limit 必须在 1 到 200 之间");
         }
-        String url = UriComponentsBuilder.fromHttpUrl(aiServiceBaseUrl)
-                .path("/api/rag/traces")
+        if (offset < 0 || offset > 1000) {
+            throw new BusinessException("offset 必须在 0 到 1000 之间");
+        }
+        return R.ok(get(getTraceResourceBuilder("/api/rag/traces")
                 .queryParam("limit", limit)
-                .toUriString();
-        return R.ok(get(url));
+                .queryParam("offset", offset)
+                .queryParamIfPresent("knowledge_base_id", java.util.Optional.ofNullable(knowledgeBaseId))
+                .queryParam("error_only", errorOnly)
+                .queryParamIfPresent("query", java.util.Optional.ofNullable(query))
+                .queryParamIfPresent("source", java.util.Optional.ofNullable(source))
+                .toUriString()));
     }
 
     @GetMapping("/traces/stats")
-    public R<Map> traceStats() {
-        return R.ok(get(aiServiceBaseUrl + "/api/rag/traces/stats"));
+    public R<Map> traceStats(@RequestParam(defaultValue = "7") int days) {
+        if (days < 1 || days > 30) {
+            throw new BusinessException("days 必须在 1 到 30 之间");
+        }
+        return R.ok(get(getTraceResourceBuilder("/api/rag/traces/stats")
+                .queryParam("days", days)
+                .toUriString()));
+    }
+
+    @GetMapping("/traces/export")
+    public R<Map> exportTraces(
+            @RequestParam(defaultValue = "json") String format,
+            @RequestParam(required = false) Long knowledgeBaseId,
+            @RequestParam(defaultValue = "false") boolean errorOnly,
+            @RequestParam(required = false) String query,
+            @RequestParam(required = false) String source
+    ) {
+        if (!"json".equalsIgnoreCase(format) && !"csv".equalsIgnoreCase(format)) {
+            throw new BusinessException("format 只能是 json 或 csv");
+        }
+        return R.ok(get(getTraceResourceBuilder("/api/rag/traces/export")
+                .queryParam("format", format)
+                .queryParamIfPresent("knowledge_base_id", java.util.Optional.ofNullable(knowledgeBaseId))
+                .queryParam("error_only", errorOnly)
+                .queryParamIfPresent("query", java.util.Optional.ofNullable(query))
+                .queryParamIfPresent("source", java.util.Optional.ofNullable(source))
+                .toUriString()));
     }
 
     @GetMapping("/traces/{traceId}")
@@ -89,5 +127,9 @@ public class RagObservabilityController {
             log.error("RAG observability request failed: {}", url, exception);
             throw new BusinessException("RAG 调试服务不可用：" + exception.getMessage());
         }
+    }
+
+    private UriComponentsBuilder getTraceResourceBuilder(String path) {
+        return UriComponentsBuilder.fromHttpUrl(aiServiceBaseUrl).path(path);
     }
 }

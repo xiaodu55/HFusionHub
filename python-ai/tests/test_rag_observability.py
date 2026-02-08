@@ -96,6 +96,50 @@ def test_trace_api_exposes_trace_and_stats():
     assert stats.json()["total_traces"] == 1
 
 
+def test_trace_api_filters_paginates_and_exports_records():
+    reset_trace_store()
+    trace_store = get_trace_store()
+    trace_store.record(RetrievalTrace(
+        query="vector search",
+        knowledge_base_id=1,
+        top_k=3,
+        latency_ms=10,
+        results=[{"source": "vector", "document_id": 1}],
+    ))
+    trace_store.record(RetrievalTrace(
+        query="broken graph search",
+        knowledge_base_id=2,
+        top_k=3,
+        latency_ms=20,
+        error="graph unavailable",
+        results=[{"source": "graph", "document_id": 2}],
+    ))
+    client = TestClient(create_app())
+
+    listed = client.get("/api/rag/traces", params={
+        "query": "vector",
+        "knowledge_base_id": 1,
+        "source": "vector",
+        "limit": 1,
+        "offset": 0,
+    })
+    stats = client.get("/api/rag/traces/stats", params={"days": 3})
+    exported_json = client.get("/api/rag/traces/export", params={"format": "json", "error_only": "true"})
+    exported_csv = client.get("/api/rag/traces/export", params={"format": "csv"})
+
+    assert listed.status_code == 200
+    assert listed.json()["total"] == 1
+    assert listed.json()["traces"][0]["query"] == "vector search"
+    assert stats.json()["hit_traces"] == 2
+    assert stats.json()["hit_rate"] == 1.0
+    assert len(stats.json()["daily_metrics"]) == 3
+    assert stats.json()["recent_failures"][0]["error"] == "graph unavailable"
+    assert exported_json.json()["filename"].endswith(".json")
+    assert "broken graph search" in exported_json.json()["content"]
+    assert exported_csv.json()["filename"].endswith(".csv")
+    assert "trace_id" in exported_csv.json()["content"]
+
+
 def test_evaluation_api_uses_retrieval_evaluator(monkeypatch):
     monkeypatch.setattr(rag_api, "get_retriever", lambda: FakeRetriever())
     client = TestClient(create_app())
