@@ -393,13 +393,16 @@ onMounted(() => {
                       <div v-for="(source, index) in message.sources" :key="index"
                            class="text-xs bg-secondary-foreground/5 rounded px-2 py-1.5">
                         <div class="flex items-center justify-between gap-2">
-                          <span class="font-medium truncate flex-1" :title="source.title">
-                            {{ source.title || '文档片段' }}
+                          <span class="font-medium truncate flex-1" :title="source.document_name || source.title">
+                            {{ source.document_name || source.title || `文档 #${source.document_id ?? '未知'}` }}
                           </span>
                           <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
                             {{ (source.score * 100).toFixed(0) }}%
                           </span>
                         </div>
+                        <p v-if="source.outline_path && source.outline_path.length" class="mt-1 text-[10px] opacity-60 truncate">
+                          {{ source.outline_path.join(' > ') }}
+                        </p>
                         <p v-if="source.content" class="mt-1 text-[11px] opacity-60 line-clamp-2">
                           {{ source.content }}
                         </p>

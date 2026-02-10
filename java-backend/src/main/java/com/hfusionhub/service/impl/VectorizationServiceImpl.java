@@ -224,6 +224,7 @@ public class VectorizationServiceImpl implements VectorizationService {
                 "file_path", document.getFilePath(),
                 "file_type", document.getFileType() != null ? document.getFileType() : "md",
                 "knowledge_base_id", document.getKnowledgeBaseId() != null ? document.getKnowledgeBaseId() : 0,
+                "document_title", document.getTitle(),
                 "callback_url", callbackUrl,
                 "callback_secret", callbackSecret,
                 "embedding_model", model != null ? model : "ollama"

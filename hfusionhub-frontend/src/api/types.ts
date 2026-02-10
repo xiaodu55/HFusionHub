@@ -112,8 +112,14 @@ export interface Message {
   tokenCount?: number
   model?: string
   sources?: Array<{
-    title: string
+    document_id?: string | number
+    chunk_id?: string
+    knowledge_base_id?: number
+    title?: string
+    document_name?: string
+    outline_path?: string[]
     content: string
+    excerpt?: string
     score: number
     source?: string
   }>

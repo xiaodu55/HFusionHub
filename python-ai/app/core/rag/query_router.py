@@ -171,7 +171,12 @@ class VectorChannel(BaseChannel):
                     score=r.get("score", 0.0),
                     source=ChannelType.VECTOR,
                     document_id=r.get("document_id"),
-                    metadata=r.get("metadata", {})
+                    metadata={
+                        **(r.get("metadata") or {}),
+                        "chunk_id": r.get("chunk_id"),
+                        "knowledge_base_id": r.get("knowledge_base_id"),
+                        "outline_path": r.get("outline_path", []),
+                    }
                 )
                 for r in results
             ]
@@ -282,6 +287,12 @@ class GraphChannel(BaseChannel):
         2. 关系搜索：查找实体间的关系
         3. 子图搜索：获取相关实体的子图
         """
+        # The graph store is not partitioned by knowledge_base_id yet. Returning
+        # any graph entity for a scoped chat would bypass the authorization
+        # filter applied by vector and keyword retrieval.
+        if knowledge_base_id is not None:
+            logger.warning("Graph retrieval is disabled for scoped knowledge-base chat until graph ACL filtering is available")
+            return []
         try:
             manager = self._get_manager()
             if not manager._initialized:
@@ -357,7 +368,10 @@ class QueryRouter:
             ),
             ChannelType.GRAPH: ChannelConfig(
                 channel_type=ChannelType.GRAPH,
-                weight=DEFAULT_CHANNEL_WEIGHT * 0.3
+                weight=DEFAULT_CHANNEL_WEIGHT * 0.3,
+                # Keep GraphRAG out of the production default path until its
+                # index carries the same knowledge-base ACL metadata.
+                enabled=False,
             ),
         }
 

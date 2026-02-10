@@ -25,6 +25,7 @@ class ParseRequest(BaseModel):
     callback_url: Optional[str] = Field(None, description="Callback URL for notifications")
     callback_secret: Optional[str] = Field(None, description="Secret for callback authentication")
     knowledge_base_id: Optional[int] = Field(None, description="Knowledge base ID")
+    document_title: Optional[str] = Field(None, description="Document title for citations")
     embedding_model: Optional[str] = Field(None, description="Embedding model to use: ollama, deepseek, or random")
 
 

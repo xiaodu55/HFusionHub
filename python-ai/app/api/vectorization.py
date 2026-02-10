@@ -132,6 +132,7 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
         file_path=resolved_path,
         file_type=file_type,
         knowledge_base_id=request.knowledge_base_id,
+        document_title=request.document_title,
         callback_url=request.callback_url,
         callback_secret=request.callback_secret,
     )
@@ -165,6 +166,7 @@ async def _process_document_background(
     file_path: str,
     file_type: str,
     knowledge_base_id: int,
+    document_title: Optional[str] = None,
     callback_url: str = None,
     callback_secret: str = None,
 ):
@@ -196,6 +198,10 @@ async def _process_document_background(
 
         # Step 2: Chunk blocks
         chunks = chunk_blocks(blocks, document_id)
+        # Preserve a stable human-readable document title with every chunk so
+        # chat citations do not depend on a separate Java HTTP request.
+        for chunk in chunks:
+            chunk.metadata["document_title"] = document_title or f"文档 #{document_id}"
         logger.info(f"[Vectorization] Created {len(chunks)} chunks")
         _update_status("PROCESSING", f"Created {len(chunks)} chunks, generating embeddings...")
 

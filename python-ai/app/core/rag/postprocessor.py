@@ -30,14 +30,14 @@ class Postprocessor:
     def __init__(
         self,
         dedup_threshold: float = 0.95,
-        min_score: float = 0.0
+        min_score: float = 0.35
     ):
         """
         初始化后处理器
 
         Args:
             dedup_threshold: 去重阈值（相似度高于此值视为重复）
-            min_score: 最小分数阈值
+            min_score: 最小证据分数阈值；低于该值的片段不得注入回答上下文
         """
         self.dedup_threshold = dedup_threshold
         self.min_score = min_score

@@ -206,14 +206,7 @@ public class ConversationServiceImpl implements ConversationService {
             assistantMessage.setSources(aiResponse.getSources());
             messageMapper.insert(assistantMessage);
 
-            // 6. 如果 Python AI 自动检测到了知识库，更新对话的知识库 ID
-            if (aiResponse.getAutoDetectedKbId() != null && conversation.getKnowledgeBaseId() == null) {
-                conversation.setKnowledgeBaseId(aiResponse.getAutoDetectedKbId());
-                conversationMapper.updateById(conversation);
-                log.info("Auto-detected knowledge base {} for conversation {}", aiResponse.getAutoDetectedKbId(), conversation.getId());
-            }
-
-            // 7. 更新对话标题（如果是第一条消息）
+            // 6. 更新对话标题（如果是第一条消息）
             if ("新对话".equals(conversation.getTitle()) && StringUtils.hasText(dto.getContent())) {
                 String title = dto.getContent();
                 if (title.length() > 50) {
@@ -223,7 +216,7 @@ public class ConversationServiceImpl implements ConversationService {
                 conversationMapper.updateById(conversation);
             }
 
-            // 8. 返回助手消息
+            // 7. 返回助手消息
             return convertToMessageInfoDTO(assistantMessage);
 
         } catch (Exception e) {

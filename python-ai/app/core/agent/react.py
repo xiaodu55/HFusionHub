@@ -35,6 +35,8 @@ from ..rag import (
 
 logger = logging.getLogger(__name__)
 
+NO_SUFFICIENT_EVIDENCE_REPLY = "我在当前知识库中未检索到足够依据，无法基于资料回答这个问题。"
+
 
 # System prompt for ReAct agent
 REACT_SYSTEM_PROMPT = """你是一个智能助手，能够使用工具来回答问题。
@@ -88,6 +90,30 @@ class ReactAgent(Agent):
         if not self.tools:
             self.tools = get_tools(knowledge_base_id=self.knowledge_base_id)
         return self.tools
+
+    def _has_selected_knowledge_base(self) -> bool:
+        """Only a Java-authorized conversation may enable knowledge-base RAG."""
+        return self.knowledge_base_id is not None and self.knowledge_base_id > 0
+
+    @staticmethod
+    def _citation_from_result(result: Any) -> Dict[str, Any]:
+        """Build the API citation contract from an already retrieved chunk."""
+        metadata = getattr(result, "metadata", {}) or {}
+        document_id = getattr(result, "document_id", None)
+        outline_path = getattr(result, "outline_path", None) or metadata.get("outline_path", []) or []
+        document_name = metadata.get("document_title") or f"文档 #{document_id}"
+        return {
+            "document_id": document_id,
+            "chunk_id": metadata.get("chunk_id"),
+            "knowledge_base_id": getattr(result, "knowledge_base_id", None) or metadata.get("knowledge_base_id"),
+            "title": document_name,
+            "document_name": document_name,
+            "outline_path": outline_path,
+            "content": getattr(result, "content", "")[:200],
+            "excerpt": getattr(result, "content", "")[:200],
+            "score": getattr(result, "score", 0),
+            "source": getattr(result, "source", "vector"),
+        }
 
     def _format_tools_description(self) -> str:
         """Format tools description for system prompt"""
@@ -275,82 +301,14 @@ class ReactAgent(Agent):
                     f"[{i}] ({source_label}, 相似度: {r.score:.2f})\n{r.content}"
                 )
 
-                # 收集来源信息
-                document_name = self._get_document_name(r.document_id)
-                sources.append({
-                    "document_id": r.document_id,
-                    "document_name": document_name,
-                    "content": r.content[:200],  # 前200字符
-                    "score": r.score,
-                    "source": r.source
-                })
+                # Sources are derived from retrieved chunks, never model text.
+                sources.append(self._citation_from_result(r))
 
             return "\n\n".join(context_parts), sources, self.knowledge_base_id
 
         except Exception as e:
             logger.error(f"RAG retrieval failed: {e}")
             return "", [], self.knowledge_base_id
-
-    def _auto_detect_knowledge_base(self, query: str) -> Optional[int]:
-        """
-        自动检测最相关的知识库
-
-        当用户没有选择知识库时，搜索所有知识库并选择最相关的
-
-        Args:
-            query: 用户查询
-
-        Returns:
-            最相关的知识库 ID，如果没有找到则返回 None
-        """
-        try:
-            from app.core.vectorstore.milvus_store import search_similar
-
-            # 搜索所有知识库（不带 knowledge_base_id 过滤）
-            results = search_similar(
-                query_text=query,
-                top_k=10,  # 获取更多结果以便选择
-                knowledge_base_id=None  # 不过滤，搜索所有
-            )
-
-            if not results:
-                return None
-
-            # 统计每个知识库的匹配结果数量和平均分数
-            kb_scores = {}
-            for r in results:
-                kb_id = r.get("knowledge_base_id")
-                if kb_id and kb_id > 0:  # 忽略无效的 knowledge_base_id
-                    if kb_id not in kb_scores:
-                        kb_scores[kb_id] = {"count": 0, "total_score": 0}
-                    kb_scores[kb_id]["count"] += 1
-                    kb_scores[kb_id]["total_score"] += r.get("score", 0)
-
-            if not kb_scores:
-                return None
-
-            # 选择平均分数最高的知识库
-            best_kb_id = None
-            best_avg_score = -1
-
-            for kb_id, stats in kb_scores.items():
-                avg_score = stats["total_score"] / stats["count"]
-                # 考虑结果数量和分数
-                # 如果有多个高分结果，优先选择
-                if avg_score > best_avg_score and stats["count"] >= 1:
-                    best_avg_score = avg_score
-                    best_kb_id = kb_id
-
-            logger.info(
-                f"Auto-detected knowledge bases: {kb_scores}, "
-                f"selected: {best_kb_id} (avg_score: {best_avg_score:.2f})"
-            )
-
-            return best_kb_id
-
-        except Exception as e:
-            logger.error(f"Auto-detect knowledge base failed: {e}")
-            return None
 
     def _parse_action(self, text: str) -> Optional[tuple]:
         """Parse action and action input from text"""
@@ -574,19 +532,13 @@ class ReactAgent(Agent):
         llm = self._get_llm()
         tools = self._get_tools()
 
-        # 如果没有指定知识库，先尝试自动检测
+        # A conversation without a selected knowledge base is ordinary chat.
+        # Never inspect every knowledge base to infer one: Python does not own
+        # the user's permission scope.
+        has_selected_kb = self._has_selected_knowledge_base()
         auto_detected_kb_id = None
-        if self.knowledge_base_id is None:
-            auto_detected_kb_id = self._auto_detect_knowledge_base(query)
-            if auto_detected_kb_id:
-                self.knowledge_base_id = auto_detected_kb_id
-                logger.info(f"[RAG] Auto-detected knowledge base: {auto_detected_kb_id}")
-
-        # 如果自动检测到了知识库，跳过意图分类，直接使用 RAG 检索路径
-        if auto_detected_kb_id:
-            logger.info(f"[RAG] Auto-detected KB, using RAG path directly")
-            intent_result = None
-        else:
+        intent_result = None
+        if not has_selected_kb:
             # 意图分类
             intent_classifier = get_intent_classifier()
             intent_result = await intent_classifier.classify(query, history)
@@ -606,6 +558,11 @@ class ReactAgent(Agent):
             if intent_result.needs_tool():
                 # 操作指令需要使用工具
                 return await self._handle_operation(query, history, llm, tools)
+
+            # A general conversation has no authorized retrieval scope. Keep it
+            # as direct LLM chat instead of calling the retriever with a null KB.
+            if not has_selected_kb:
+                return await self._handle_chitchat(query, history, llm)
 
             # 对于需要检索的复杂问题，使用 QueryDecomposer
             if intent_result.needs_retrieval() and intent_result.should_decompose():
@@ -646,9 +603,20 @@ class ReactAgent(Agent):
                 f"{compression_result.original_tokens} -> {compression_result.compressed_tokens} tokens"
             )
 
+        if has_selected_kb and not rag_context:
+            return AgentResponse(
+                content=NO_SUFFICIENT_EVIDENCE_REPLY,
+                steps=[],
+                model=llm.model if hasattr(llm, 'model') else "unknown",
+                token_count=0,
+                finish_reason="insufficient_evidence",
+                sources=[],
+                intent=intent_result.to_dict() if intent_result else None,
+            )
+
         if rag_context:
             # 将检索到的上下文添加到用户查询中
-            enhanced_query = f"""请根据以下参考资料回答用户问题。你必须优先使用参考资料中的信息来回答，不要说"信息有限"或"没有相关内容"。如果参考资料中确实有相关信息，请直接引用并回答。
+            enhanced_query = f"""请仅根据以下参考资料回答用户问题。不要补充资料中没有的信息；若资料不足以支持答案，请明确说明“未检索到足够依据”。
 
 【参考资料】
 {rag_context}
@@ -656,10 +624,7 @@ class ReactAgent(Agent):
 【用户问题】
 {query}
 
-请基于参考资料提供详细、准确的回答。回答时请：
-1. 直接引用参考资料中的具体内容
-2. 如果有多条相关信息，请综合整理
-3. 在回答末尾标注来源文档名称"""
+请基于参考资料提供准确回答，并在适用处说明依据。"""
         else:
             enhanced_query = query
 
@@ -725,12 +690,12 @@ class ReactAgent(Agent):
         if final_answer is None:
             final_answer = assistant_text if 'assistant_text' in locals() else "无法生成回答"
 
-        # Deduplicate sources by document_name
+        # Keep separate chunks from the same document traceable.
         unique_sources = {}
         for source in sources:
-            doc_name = source["document_name"]
-            if doc_name not in unique_sources:
-                unique_sources[doc_name] = source
+            source_key = source.get("chunk_id") or f"{source.get('document_id')}:{source.get('content', '')}"
+            if source_key not in unique_sources:
+                unique_sources[source_key] = source
 
         # 使用 SelfReflector 评估答案质量
         if final_answer and rag_context:
@@ -783,25 +748,17 @@ class ReactAgent(Agent):
         from ..rag import get_intent_classifier, get_query_decomposer, get_compressor, get_reflector
 
         try:
-            # 获取自动检测的知识库 ID
+            # General chat must never become a cross-knowledge-base search.
+            has_selected_kb = self._has_selected_knowledge_base()
             auto_detected_kb_id = None
-            if self.knowledge_base_id is None:
-                auto_detected_kb_id = self._auto_detect_knowledge_base(query)
-                if auto_detected_kb_id:
-                    self.knowledge_base_id = auto_detected_kb_id
-                    logger.info(f"[RAG] Auto-detected knowledge base: {auto_detected_kb_id}")
-
-            # 如果自动检测到了知识库，跳过意图分类，直接使用 RAG 检索路径
-            if auto_detected_kb_id:
-                logger.info(f"[RAG] Auto-detected KB, using RAG path directly")
-                intent_result = None
-            else:
+            intent_result = None
+            if not has_selected_kb:
                 # 意图分类
                 intent_classifier = get_intent_classifier()
                 intent_result = await intent_classifier.classify(query, history)
 
             # 意图是闲聊，直接流式输出
-            if intent_result and intent_result.intent == "chitchat":
+            if not has_selected_kb and intent_result and intent_result.intent == "chitchat":
                 llm = get_llm()
                 messages = [
                     ChatMessage(role="system", content="你是一个友好的AI助手，可以进行日常闲聊。"),
@@ -812,7 +769,7 @@ class ReactAgent(Agent):
                 return
 
             # 意图是操作，也直接流式输出
-            if intent_result and intent_result.intent == "operation":
+            if not has_selected_kb and intent_result and intent_result.intent == "operation":
                 llm = get_llm()
                 messages = [
                     ChatMessage(role="system", content="你是一个智能助手，请回答用户的问题。"),
@@ -829,8 +786,8 @@ class ReactAgent(Agent):
             # 获取检索器
             retriever = get_retriever()
 
-            # 如果知识库 ID 有效，尝试检索
-            if self.knowledge_base_id and self.knowledge_base_id > 0:
+            # A selected knowledge base always uses the evidence-first RAG path.
+            if has_selected_kb:
                 try:
                     retrieval_plan = await get_adaptive_retrieval_planner().plan(
                         query=query,
@@ -862,7 +819,9 @@ class ReactAgent(Agent):
                                         "score": item.score,
                                         "document_id": item.document_id,
                                         "knowledge_base_id": item.knowledge_base_id,
-                                        "source": item.source
+                                        "source": item.source,
+                                        "outline_path": item.outline_path or [],
+                                        "metadata": item.metadata or {},
                                     })
 
                         # 去重
@@ -900,7 +859,8 @@ class ReactAgent(Agent):
                                     "document_id": item.document_id,
                                     "knowledge_base_id": item.knowledge_base_id,
                                     "source": item.source,
-                                    "outline_path": item.outline_path or []
+                                    "outline_path": item.outline_path or [],
+                                    "metadata": item.metadata or {},
                                 })
                             # Context Compression
                             compressor = get_compressor(CompressionStrategyType.EXTRACTIVE)
@@ -916,16 +876,20 @@ class ReactAgent(Agent):
                     logger.error(f"[RAG] Retrieval failed, falling back to direct LLM: {e}", exc_info=True)
                     # 检索失败，继续使用直接 LLM 模式
 
+            if has_selected_kb and not context:
+                yield NO_SUFFICIENT_EVIDENCE_REPLY
+                return
+
             # 构建提示词
             if context:
-                prompt = f"""请基于以下参考资料回答问题。
+                prompt = f"""请仅根据以下参考资料回答问题。不要补充资料中没有的信息；若资料不足以支持答案，请明确说明“未检索到足够依据”。
 
 参考资料：
 {context}
 
 用户问题：{query}
 
-请用中文回答，直接给出答案，不要说"根据参考资料"。"""
+请用中文回答，并只陈述可由资料支持的结论。"""
             else:
                 prompt = query
 
@@ -945,20 +909,20 @@ class ReactAgent(Agent):
                 # 格式化 sources 以便前端显示
                 formatted_sources = []
                 for s in sources:
-                    # 生成标题：优先使用 outline_path，否则从内容提取
-                    outline_path = s.get("outline_path", [])
-                    if outline_path:
-                        title = " > ".join(outline_path)
-                    else:
-                        # 从内容第一行提取标题
-                        content = s.get("content", "")
-                        first_line = content.split("\n")[0].strip()[:50]
-                        title = first_line if first_line else "参考片段"
+                    metadata = s.get("metadata", {}) or {}
+                    document_id = s.get("document_id")
+                    document_name = metadata.get("document_title") or f"文档 #{document_id}"
                     formatted_sources.append({
-                        "title": title,
+                        "document_id": document_id,
+                        "chunk_id": s.get("chunk_id") or metadata.get("chunk_id"),
+                        "knowledge_base_id": s.get("knowledge_base_id") or metadata.get("knowledge_base_id"),
+                        "title": document_name,
+                        "document_name": document_name,
+                        "outline_path": s.get("outline_path", []) or metadata.get("outline_path", []),
+                        "content": s.get("content", "")[:200],
+                        "excerpt": s.get("content", "")[:200],
                         "score": s.get("score", 0),
-                        "content": s.get("content", "")[:150],  # 只保留前150字符
-                        "source": s.get("source", "vector")
+                        "source": s.get("source", "vector"),
                     })
                 # 使用特殊标记嵌入 sources，前端解析时识别
                 sources_event = {
