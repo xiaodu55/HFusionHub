@@ -368,17 +368,26 @@ def get_chunk_detail(chunk_id: str) -> Optional[Dict]:
 
 
 def delete_document_chunks(document_id: str) -> bool:
-    """Delete all chunks for a document"""
+    """Delete all chunks for a document from both vector and local stores."""
     try:
         client = get_milvus_client()
         if client is None:
             return False
 
-        # Delete by filter
-        client.delete(
-            collection_name=COLLECTION_NAME,
-            filter=f'document_id == "{document_id}"'
-        )
+        # A first-time delete is valid and must be idempotent so a new document
+        # can be indexed without requiring a pre-existing collection.
+        if client.has_collection(COLLECTION_NAME):
+            client.delete(
+                collection_name=COLLECTION_NAME,
+                filter=f'document_id == "{document_id}"'
+            )
+
+        # Keep the keyword fallback and chunk browsing data consistent with
+        # Milvus.  Previously this JSON entry survived deletion and could be
+        # retrieved after a document had been removed.
+        store = _load_chunks_store()
+        store.pop(str(document_id), None)
+        _save_chunks_store(store)
 
         print(f"Deleted chunks for document: {document_id}")
         return True

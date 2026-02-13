@@ -78,6 +78,12 @@ python-ai:
   engine:
     url: http://localhost:8001
 
+rag:
+  index:
+    stale-after-minutes: ${RAG_INDEX_STALE_AFTER_MINUTES:30}
+    max-attempts: ${RAG_INDEX_MAX_ATTEMPTS:3}
+    recovery-delay-ms: ${RAG_INDEX_RECOVERY_DELAY_MS:300000}
+
 # MinIO 配置
 minio:
   endpoint: http://localhost:9000

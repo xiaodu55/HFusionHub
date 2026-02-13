@@ -1,6 +1,7 @@
 package com.hfusionhub.controller;
 
 import com.hfusionhub.common.result.R;
+import com.hfusionhub.dto.DocumentIndexCallbackDTO;
 import com.hfusionhub.service.VectorizationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -85,17 +86,14 @@ public class VectorizationController {
     @PostMapping("/{documentId}/callback")
     public R<String> updateStatus(
             @Parameter(description = "文档ID") @PathVariable Long documentId,
-            @RequestBody Map<String, Object> body,
+            @RequestBody DocumentIndexCallbackDTO body,
             @RequestHeader(value = "X-Callback-Secret", required = false) String secret) {
         // 验证回调密钥
         if (!callbackSecret.equals(secret)) {
             log.warn("回调密钥验证失败: documentId={}, secret={}", documentId, secret);
             return R.fail("回调密钥无效");
         }
-        String status = body.get("status") != null ? String.valueOf(body.get("status")) : null;
-        Object chunkCountObj = body.get("chunkCount");
-        Integer chunkCount = chunkCountObj != null ? Integer.parseInt(String.valueOf(chunkCountObj)) : null;
-        vectorizationService.updateDocumentStatus(documentId, status, chunkCount);
+        vectorizationService.updateDocumentStatus(documentId, body);
         return R.ok("状态已更新");
     }
 

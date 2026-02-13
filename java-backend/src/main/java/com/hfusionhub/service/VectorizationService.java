@@ -1,6 +1,6 @@
 package com.hfusionhub.service;
 
-import com.hfusionhub.entity.Document;
+import com.hfusionhub.dto.DocumentIndexCallbackDTO;
 
 /**
  * 向量化服务接口
@@ -43,7 +43,13 @@ public interface VectorizationService {
      * @param status     状态
      * @param chunkCount 分块数量
      */
-    void updateDocumentStatus(Long documentId, String status, Integer chunkCount);
+    void updateDocumentStatus(Long documentId, DocumentIndexCallbackDTO callback);
+
+    /** Remove a document's vector entries and durable chunk metadata. */
+    void deleteDocumentIndex(Long documentId);
+
+    /** Re-submit interrupted indexing jobs that have exceeded the stale timeout. */
+    int recoverStaleIndexJobs();
 
     /**
      * 同步文档状态：从Python引擎查询实际分块数，更新数据库状态

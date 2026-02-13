@@ -80,6 +80,14 @@ python-ai:
   callback-base-url: http://localhost:${server.port}${server.servlet.context-path}
   callback-secret: ${CALLBACK_SECRET:hfusionhub-callback-secret-key}
 
+# Durable document-index job recovery. A task running longer than this timeout
+# is re-submitted with a new version; old worker callbacks are rejected.
+rag:
+  index:
+    stale-after-minutes: ${RAG_INDEX_STALE_AFTER_MINUTES:30}
+    max-attempts: ${RAG_INDEX_MAX_ATTEMPTS:3}
+    recovery-delay-ms: ${RAG_INDEX_RECOVERY_DELAY_MS:300000}
+
 # AI 服务配置
 ai-service:
   base-url: ${AI_SERVICE_URL:http://localhost:9000}

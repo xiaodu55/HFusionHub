@@ -178,7 +178,12 @@ public class DocumentServiceImpl implements DocumentService {
             throw new BusinessException("无权删除该文档");
         }
 
-        // 3. 清理磁盘文件
+        // 3. Delete retrievable data first.  If the vector worker is
+        // unavailable, keep the document record so it cannot remain searchable
+        // after the user believes it was deleted.
+        vectorizationService.deleteDocumentIndex(id);
+
+        // 4. 清理磁盘文件
         if (document.getFilePath() != null) {
             File file = new File(document.getFilePath());
             if (file.exists()) {
@@ -190,7 +195,7 @@ public class DocumentServiceImpl implements DocumentService {
             }
         }
 
-        // 4. 逻辑删除
+        // 5. 逻辑删除
         documentMapper.deleteById(id);
     }
 

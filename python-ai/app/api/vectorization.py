@@ -6,6 +6,7 @@ Handles document parsing, chunking, and vectorization
 import os
 import time
 import logging
+import json
 import httpx
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, BackgroundTasks
@@ -122,7 +123,8 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
         "chunks_count": 0,
         "start_time": time.time(),
         "end_time": None,
-        "error": None
+        "error": None,
+        "index_version": request.index_version,
     }
 
     # Move heavy processing to background task (use resolved path)
@@ -133,6 +135,7 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
         file_type=file_type,
         knowledge_base_id=request.knowledge_base_id,
         document_title=request.document_title,
+        index_version=request.index_version,
         callback_url=request.callback_url,
         callback_secret=request.callback_secret,
     )
@@ -157,7 +160,8 @@ async def get_task_status(document_id: str):
         "message": status["message"],
         "chunks_count": status["chunks_count"],
         "elapsed_seconds": round(time.time() - status["start_time"], 1) if status["start_time"] else 0,
-        "error": status["error"]
+        "error": status["error"],
+        "index_version": status.get("index_version"),
     }
 
 
@@ -167,6 +171,7 @@ async def _process_document_background(
     file_type: str,
     knowledge_base_id: int,
     document_title: Optional[str] = None,
+    index_version: str = "",
     callback_url: str = None,
     callback_secret: str = None,
 ):
@@ -179,7 +184,8 @@ async def _process_document_background(
             "chunks_count": chunks_count,
             "start_time": _task_status_store.get(document_id, {}).get("start_time", time.time()),
             "end_time": time.time() if status in ("COMPLETED", "FAILED") else None,
-            "error": error
+            "error": error,
+            "index_version": index_version,
         }
 
     try:
@@ -222,7 +228,12 @@ async def _process_document_background(
         # Step 5: Insert into Milvus
         _update_status("PROCESSING", f"Inserting {len(chunks)} chunks into Milvus...")
         embeddings = [c['embedding'] for c in chunks_with_embeddings]
-        insert_chunks(chunks, embeddings, document_id, knowledge_base_id)
+        # Keep old data reachable while parsing and embedding.  Replacement is
+        # performed immediately before insertion, rather than at task start.
+        if not delete_document_chunks(document_id):
+            raise MilvusException(f"Failed to remove the previous index for document {document_id}")
+        if not insert_chunks(chunks, embeddings, document_id, knowledge_base_id):
+            raise MilvusException(f"Failed to insert chunks for document {document_id}")
 
         # Step 6: Notify Java backend
         _update_status("PROCESSING", "Notifying Java backend...")
@@ -233,7 +244,9 @@ async def _process_document_background(
                 document_id=document_id,
                 success=True,
                 message=f"Successfully parsed document into {len(chunks)} chunks",
-                chunks_count=len(chunks)
+                chunks_count=len(chunks),
+                index_version=index_version,
+                chunks=_callback_chunk_metadata(chunks),
             )
 
         _update_status("COMPLETED", f"Successfully processed {len(chunks)} chunks", chunks_count=len(chunks))
@@ -254,7 +267,8 @@ async def _process_document_background(
                     document_id=document_id,
                     success=False,
                     message=f"Parsing failed: {str(e)}",
-                    chunks_count=0
+                    chunks_count=0,
+                    index_version=index_version,
                 )
             except Exception as callback_error:
                 logger.error(f"[Vectorization] Callback also failed: {callback_error}")
@@ -349,6 +363,16 @@ async def search_chunks(request: SearchRequest):
         raise VectorizationException(str(e))
 
 
+@router.delete("/api/documents/{document_id}/chunks")
+async def remove_document_chunks(document_id: str):
+    """Remove a document's vector entries and local metadata before deletion."""
+    validate_document_id(document_id)
+    if not delete_document_chunks(document_id):
+        raise MilvusException(f"删除文档 {document_id} 的分块失败")
+    _task_status_store.pop(document_id, None)
+    return {"success": True, "document_id": document_id}
+
+
 async def _generate_embedding(text: str) -> List[float]:
     """
     Generate embedding using multi-strategy service
@@ -364,6 +388,8 @@ async def _notify_callback_async(
     success: bool,
     message: str,
     chunks_count: int,
+    index_version: str,
+    chunks: Optional[List[Dict[str, Any]]] = None,
     callback_secret: str = None
 ):
     """Notify Java backend about processing completion (async, non-blocking)"""
@@ -374,7 +400,9 @@ async def _notify_callback_async(
             "document_id": document_id,
             "status": status,
             "chunkCount": chunks_count,
-            "message": message
+            "message": message,
+            "indexVersion": index_version,
+            "chunks": chunks or [],
         }
 
         headers = {"Content-Type": "application/json"}
@@ -395,3 +423,24 @@ async def _notify_callback_async(
         logger.warning(f"[Callback] Connection failed: {callback_url}")
     except Exception as e:
         logger.error(f"[Callback] Failed to notify: {str(e)}")
+
+
+def _callback_chunk_metadata(chunks: List[VectorChunk]) -> List[Dict[str, Any]]:
+    """Build a bounded callback payload; full text stays in the vector store."""
+    return [
+        {
+            "chunkId": chunk.chunk_id,
+            "index": chunk.index,
+            "blockType": chunk.block_type,
+            "outlinePath": chunk.outline_path,
+            "contentExcerpt": chunk.content[:1000],
+            "charCount": len(chunk.content),
+            "metadata": _json_safe_metadata(chunk.metadata),
+        }
+        for chunk in chunks
+    ]
+
+
+def _json_safe_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Avoid losing the whole callback because one parser value is not JSON serializable."""
+    return json.loads(json.dumps(metadata or {}, ensure_ascii=False, default=str))
