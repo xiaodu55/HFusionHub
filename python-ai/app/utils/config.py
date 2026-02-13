@@ -50,5 +50,17 @@ class Config:
     EMBEDDING_MAX_RETRIES = int(os.getenv("EMBEDDING_MAX_RETRIES", "3"))
     EMBEDDING_RETRY_DELAY = float(os.getenv("EMBEDDING_RETRY_DELAY", "1.0"))
 
+    # Hybrid retrieval configuration.  RRF combines ranks rather than the
+    # incomparable raw scores returned by vector and keyword search.
+    RAG_HYBRID_ENABLED = os.getenv("RAG_HYBRID_ENABLED", "true").lower() == "true"
+    RAG_RRF_K = int(os.getenv("RAG_RRF_K", "60"))
+    RAG_RETRIEVAL_CANDIDATE_MULTIPLIER = int(
+        os.getenv("RAG_RETRIEVAL_CANDIDATE_MULTIPLIER", "3")
+    )
+    RAG_RETRIEVAL_MAX_CANDIDATES = int(
+        os.getenv("RAG_RETRIEVAL_MAX_CANDIDATES", "30")
+    )
+    RAG_MIN_EVIDENCE_SCORE = float(os.getenv("RAG_MIN_EVIDENCE_SCORE", "0.35"))
+
 
 config = Config()

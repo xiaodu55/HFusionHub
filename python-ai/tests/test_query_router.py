@@ -239,6 +239,45 @@ class TestKeywordChannel:
         assert results[0].source == ChannelType.KEYWORD
         assert results[0].document_id == "1"
 
+    @pytest.mark.asyncio
+    async def test_keyword_channel_uses_bm25_and_knowledge_base_scope(self):
+        config = ChannelConfig(channel_type=ChannelType.KEYWORD)
+        channel = KeywordChannel(config)
+
+        mock_milvus = MagicMock()
+        mock_milvus._load_chunks_store.return_value = {
+            "1": [
+                {
+                    "chunk_id": "common",
+                    "document_id": "1",
+                    "knowledge_base_id": 7,
+                    "content": "部署 部署 部署 部署",
+                },
+                {
+                    "chunk_id": "specific",
+                    "document_id": "1",
+                    "knowledge_base_id": 7,
+                    "content": "部署时使用 bluegreen 发布策略",
+                },
+            ],
+            "2": [{
+                "chunk_id": "foreign-kb",
+                "document_id": "2",
+                "knowledge_base_id": 8,
+                "content": "bluegreen 发布策略只属于另一个知识库",
+            }],
+        }
+        with patch.dict("sys.modules", {"app.core.vectorstore.milvus_store": mock_milvus}):
+            results = await channel.search(
+                query="bluegreen 部署",
+                knowledge_base_id=7,
+                top_k=5,
+            )
+
+        assert [result.metadata["chunk_id"] for result in results] == ["specific", "common"]
+        assert all(result.metadata["knowledge_base_id"] == 7 for result in results)
+        assert results[0].metadata["bm25_score"] > results[1].metadata["bm25_score"]
+
 
 class TestGraphChannel:
     """GraphChannel 测试"""
@@ -437,8 +476,14 @@ class TestQueryRouterSearch:
     """QueryRouter 多通道检索测试"""
 
     def setup_method(self):
-        """每个测试前重置"""
+        """每个测试前重置，并隔离本地关键词索引。"""
         self.router = QueryRouter()
+        # KeywordChannel now reads the local chunk store. These router unit tests
+        # only exercise their explicitly configured channels, so the default
+        # keyword channel must not leak fixture data into their assertions.
+        mock_keyword = AsyncMock(spec=KeywordChannel)
+        mock_keyword.search.return_value = []
+        self.router.channels[ChannelType.KEYWORD] = mock_keyword
 
     @pytest.mark.asyncio
     async def test_search_basic(self):
@@ -541,6 +586,71 @@ class TestQueryRouterSearch:
         )
 
         assert result.metadata["route_result"]["query_type"] == "comparison"
+
+    def test_rrf_merges_duplicate_chunk_and_preserves_evidence_score(self):
+        route = RouteResult(
+            query_type=QueryType.FACTUAL,
+            selected_channels=[ChannelType.VECTOR, ChannelType.KEYWORD],
+            channel_weights={ChannelType.VECTOR: 0.7, ChannelType.KEYWORD: 0.3},
+            strategy=RouteStrategy.MULTI,
+        )
+        merged = self.router._merge_results(
+            {
+                ChannelType.VECTOR: [
+                    SearchResult(
+                        content="版本 2.0 在 2026 年发布",
+                        score=0.72,
+                        source=ChannelType.VECTOR,
+                        document_id=1,
+                        metadata={"chunk_id": "shared"},
+                    ),
+                    SearchResult(
+                        content="不相关的向量候选",
+                        score=0.95,
+                        source=ChannelType.VECTOR,
+                        document_id=1,
+                        metadata={"chunk_id": "vector-only"},
+                    ),
+                ],
+                ChannelType.KEYWORD: [
+                    SearchResult(
+                        content="版本 2.0 在 2026 年发布",
+                        score=0.90,
+                        source=ChannelType.KEYWORD,
+                        document_id=1,
+                        metadata={"chunk_id": "shared"},
+                    ),
+                ],
+            },
+            top_k=5,
+            route_result=route,
+        )
+
+        assert merged.merge_strategy == "rrf"
+        assert merged.total_count == 2
+        assert merged.results[0].metadata["chunk_id"] == "shared"
+        assert merged.results[0].source == ChannelType.HYBRID
+        assert merged.results[0].metadata["channels"] == ["vector", "keyword"]
+        assert merged.results[0].metadata["evidence_score"] == 0.90
+
+    def test_rrf_candidate_limit_is_configurable(self):
+        router = QueryRouter(rrf_k=20, candidate_multiplier=4, max_candidates=12)
+        route = RouteResult(
+            query_type=QueryType.GENERAL,
+            selected_channels=[ChannelType.VECTOR],
+            channel_weights={ChannelType.VECTOR: 1.0},
+            strategy=RouteStrategy.SINGLE,
+        )
+        merged = router._merge_results(
+            {ChannelType.VECTOR: [
+                SearchResult("evidence", 0.9, ChannelType.VECTOR, metadata={"chunk_id": "1"})
+            ]},
+            top_k=5,
+            route_result=route,
+        )
+
+        assert merged.metadata["rrf_k"] == 20
+        assert merged.metadata["candidate_top_k"] == 12
 
 
 # =============================================================================

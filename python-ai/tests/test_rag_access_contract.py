@@ -81,3 +81,25 @@ def test_postprocessor_rejects_low_confidence_context():
     ])
 
     assert [result.document_id for result in results] == ["2"]
+
+
+def test_rrf_rank_does_not_bypass_the_evidence_threshold():
+    """RRF ordering and P0's evidence safety gate use distinct scores."""
+    processor = Postprocessor(min_score=0.35)
+
+    results = processor.process([
+        {
+            "content": "keyword-only but well supported",
+            "score": 0.30,
+            "document_id": "1",
+            "metadata": {"evidence_score": 0.91},
+        },
+        {
+            "content": "weak raw evidence",
+            "score": 0.99,
+            "document_id": "2",
+            "metadata": {"evidence_score": 0.20},
+        },
+    ])
+
+    assert [result.document_id for result in results] == ["1"]

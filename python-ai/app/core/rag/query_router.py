@@ -16,6 +16,7 @@
 """
 
 import asyncio
+import math
 import re
 import time
 import logging
@@ -35,6 +36,7 @@ from .utils import (
     ENTITY_MATCH_BASE_SCORE,
     NEIGHBOR_RELATION_SCORE,
 )
+from app.utils.config import config as app_config
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +188,13 @@ class VectorChannel(BaseChannel):
 
 
 class KeywordChannel(BaseChannel):
-    """关键词检索通道"""
+    """知识库范围内的 BM25 关键词检索通道。
+
+    The document ingestion path already maintains ``chunks_store.json`` for
+    local development. Building BM25 from that scoped corpus means the first
+    hybrid-retrieval release has no Elasticsearch dependency and, crucially,
+    applies exactly the same knowledge-base boundary as vector retrieval.
+    """
 
     async def search(
         self,
@@ -195,12 +203,7 @@ class KeywordChannel(BaseChannel):
         top_k: int = 10,
         **kwargs
     ) -> List[SearchResult]:
-        """关键词检索。
-
-        优先使用项目在文档入库时维护的 ``chunks_store.json``，因此本地开发
-        不依赖 Elasticsearch。部署 Elasticsearch 后，可在该通道前增加专用
-        索引实现，而不会改变路由器接口。
-        """
+        """Return normalized BM25 candidates from the scoped local corpus."""
         try:
             from app.core.vectorstore.milvus_store import _load_chunks_store
 
@@ -209,33 +212,69 @@ class KeywordChannel(BaseChannel):
             if not terms:
                 return []
 
-            scored: List[SearchResult] = []
+            documents: List[Tuple[str, Dict, List[str]]] = []
             for document_id, chunks in store.items():
                 for chunk in chunks:
                     if (knowledge_base_id is not None and
                             chunk.get("knowledge_base_id") != knowledge_base_id):
                         continue
-
                     content = chunk.get("content", "")
-                    score = self._score(terms, content)
-                    if score <= 0:
-                        continue
+                    tokens = self._tokenize(content)
+                    if content and tokens:
+                        documents.append((document_id, chunk, tokens))
 
-                    scored.append(SearchResult(
-                        content=content,
-                        score=score,
-                        source=ChannelType.KEYWORD,
-                        document_id=chunk.get("document_id", document_id),
-                        metadata={
-                            "chunk_id": chunk.get("chunk_id"),
-                            "knowledge_base_id": chunk.get("knowledge_base_id"),
-                            "outline_path": chunk.get("outline_path", []),
-                            "match_terms": [term for term in terms if term.lower() in content.lower()],
-                        },
-                    ))
+            if not documents:
+                return []
 
-            scored.sort(key=lambda item: item.score, reverse=True)
-            return scored[:top_k]
+            document_frequency = {
+                term: sum(1 for _, _, tokens in documents if term in set(tokens))
+                for term in terms
+            }
+            average_length = sum(len(tokens) for _, _, tokens in documents) / len(documents)
+            scored: List[Tuple[float, str, Dict]] = []
+            for document_id, chunk, tokens in documents:
+                raw_score = self._bm25_score(
+                    terms=terms,
+                    tokens=tokens,
+                    document_frequency=document_frequency,
+                    document_count=len(documents),
+                    average_length=average_length,
+                )
+                if raw_score > 0:
+                    scored.append((raw_score, document_id, chunk))
+
+            if not scored:
+                return []
+
+            max_score = max(score for score, _, _ in scored)
+            results: List[SearchResult] = []
+            for raw_score, document_id, chunk in sorted(scored, reverse=True, key=lambda item: item[0])[:top_k]:
+                content = chunk.get("content", "")
+                content_tokens = self._tokenize(content)
+                matched_terms = [term for term in terms if term in content_tokens]
+                # BM25 is only comparable within this one corpus. Combine its
+                # local normalization with term coverage so a document that
+                # happens to match one character of a multi-term query does
+                # not satisfy the evidence threshold by itself.
+                score = (raw_score / max_score) * (len(matched_terms) / len(terms))
+                metadata = self._metadata(chunk.get("metadata"))
+                outline_path = self._outline_path(chunk.get("outline_path"))
+                results.append(SearchResult(
+                    content=content,
+                    score=score,
+                    source=ChannelType.KEYWORD,
+                    document_id=chunk.get("document_id", document_id),
+                    metadata={
+                        **metadata,
+                        "chunk_id": chunk.get("chunk_id"),
+                        "knowledge_base_id": chunk.get("knowledge_base_id"),
+                        "outline_path": outline_path,
+                        "match_terms": matched_terms,
+                        "keyword_coverage": len(matched_terms) / len(terms),
+                        "bm25_score": raw_score,
+                    },
+                ))
+            return results
         except Exception as e:
             logger.error("Keyword search failed: %s", e)
             return []
@@ -247,15 +286,54 @@ class KeywordChannel(BaseChannel):
         return list(dict.fromkeys(token for token in tokens if len(token) > 1 or "\u4e00" <= token <= "\u9fff"))
 
     @staticmethod
-    def _score(terms: List[str], content: str) -> float:
-        if not content:
+    def _bm25_score(
+        terms: List[str],
+        tokens: List[str],
+        document_frequency: Dict[str, int],
+        document_count: int,
+        average_length: float,
+        k1: float = 1.5,
+        b: float = 0.75,
+    ) -> float:
+        """Calculate BM25 without a runtime dependency on Elasticsearch."""
+        if not tokens or not average_length:
             return 0.0
-        lowered = content.lower()
-        matches = sum(1 for term in terms if term in lowered)
-        # 覆盖率为主，轻微奖励多次出现，保持得分在 0 到 1。
-        coverage = matches / len(terms)
-        frequency_bonus = min(sum(lowered.count(term) for term in terms) / 100, 0.1)
-        return min(coverage + frequency_bonus, 1.0)
+        score = 0.0
+        length_normalizer = k1 * (1 - b + b * len(tokens) / average_length)
+        for term in terms:
+            frequency = tokens.count(term)
+            if not frequency:
+                continue
+            df = document_frequency.get(term, 0)
+            idf = math.log(1 + (document_count - df + 0.5) / (df + 0.5))
+            score += idf * (frequency * (k1 + 1)) / (frequency + length_normalizer)
+        return score
+
+    @staticmethod
+    def _metadata(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                import json
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, dict) else {}
+            except (TypeError, ValueError):
+                return {}
+        return {}
+
+    @staticmethod
+    def _outline_path(value: Any) -> List[str]:
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            try:
+                import json
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, list) else []
+            except (TypeError, ValueError):
+                return []
+        return []
 
 
 class GraphChannel(BaseChannel):
@@ -355,7 +433,28 @@ class GraphChannel(BaseChannel):
 class QueryRouter:
     """查询路由器 - 智能选择检索通道"""
 
-    def __init__(self, channels: Optional[Dict[ChannelType, BaseChannel]] = None):
+    def __init__(
+        self,
+        channels: Optional[Dict[ChannelType, BaseChannel]] = None,
+        rrf_k: Optional[int] = None,
+        candidate_multiplier: Optional[int] = None,
+        max_candidates: Optional[int] = None,
+    ):
+        self.rrf_k = rrf_k if rrf_k is not None else app_config.RAG_RRF_K
+        self.candidate_multiplier = (
+            candidate_multiplier
+            if candidate_multiplier is not None
+            else app_config.RAG_RETRIEVAL_CANDIDATE_MULTIPLIER
+        )
+        self.max_candidates = (
+            max_candidates
+            if max_candidates is not None
+            else app_config.RAG_RETRIEVAL_MAX_CANDIDATES
+        )
+        if self.rrf_k < 1:
+            raise ValueError("rrf_k must be positive")
+        if self.candidate_multiplier < 1 or self.max_candidates < 1:
+            raise ValueError("candidate limits must be positive")
         # 默认通道配置
         self.channel_configs: Dict[ChannelType, ChannelConfig] = {
             ChannelType.VECTOR: ChannelConfig(
@@ -364,7 +463,8 @@ class QueryRouter:
             ),
             ChannelType.KEYWORD: ChannelConfig(
                 channel_type=ChannelType.KEYWORD,
-                weight=DEFAULT_CHANNEL_WEIGHT * 0.5
+                weight=DEFAULT_CHANNEL_WEIGHT * 0.5,
+                enabled=app_config.RAG_HYBRID_ENABLED,
             ),
             ChannelType.GRAPH: ChannelConfig(
                 channel_type=ChannelType.GRAPH,
@@ -587,8 +687,13 @@ class QueryRouter:
             f"strategy: {route_result.strategy.value}"
         )
 
-        # 2. 执行检索
-        all_results: List[SearchResult] = []
+        # 2. Execute every selected channel against a larger candidate set.
+        # This lets RRF recover a good result that is not each channel's top 1.
+        candidate_top_k = min(
+            max(top_k, top_k * self.candidate_multiplier),
+            self.max_candidates,
+        )
+        results_by_channel: Dict[ChannelType, List[SearchResult]] = {}
 
         if route_result.strategy == RouteStrategy.CASCADING:
             # 级联检索：第一个通道结果足够则不查第二个
@@ -598,69 +703,116 @@ class QueryRouter:
                     results = await channel.search(
                         query=query,
                         knowledge_base_id=knowledge_base_id,
-                        top_k=top_k,
+                        top_k=candidate_top_k,
                         **kwargs
                     )
-                    all_results.extend(results)
+                    results_by_channel[channel_type] = results
 
                     # 如果结果足够，停止检索
-                    if len(all_results) >= top_k:
+                    if len(results) >= candidate_top_k:
                         break
         else:
             # 并行检索
             import asyncio
-            tasks = []
+            tasks: List[Tuple[ChannelType, Any]] = []
             for channel_type in route_result.selected_channels:
                 channel = self.channels.get(channel_type)
                 if channel:
-                    tasks.append(
+                    tasks.append((
+                        channel_type,
                         channel.search(
                             query=query,
                             knowledge_base_id=knowledge_base_id,
-                            top_k=top_k,
+                            top_k=candidate_top_k,
                             **kwargs
-                        )
-                    )
+                        ),
+                    ))
 
             if tasks:
-                results_list = await asyncio.gather(*tasks, return_exceptions=True)
-                for results in results_list:
+                results_list = await asyncio.gather(
+                    *(task for _, task in tasks), return_exceptions=True
+                )
+                for (channel_type, _), results in zip(tasks, results_list):
                     if isinstance(results, list):
-                        all_results.extend(results)
+                        results_by_channel[channel_type] = results
 
         # 3. 合并结果
-        merged = self._merge_results(all_results, top_k, route_result)
+        merged = self._merge_results(results_by_channel, top_k, route_result)
 
         return merged
 
     def _merge_results(
         self,
-        results: List[SearchResult],
+        results_by_channel: Dict[ChannelType, List[SearchResult]],
         top_k: int,
         route_result: RouteResult
     ) -> MergedResult:
-        """合并多通道结果"""
-        if not results:
+        """Fuse channel rankings with weighted Reciprocal Rank Fusion (RRF)."""
+        if not results_by_channel:
             return MergedResult(
                 results=[],
                 total_count=0,
-                channels_used=[]
+                channels_used=[],
+                merge_strategy="rrf",
             )
 
-        # 按分数排序
-        sorted_results = sorted(results, key=lambda x: x.score, reverse=True)
+        fused: Dict[str, Dict[str, Any]] = {}
+        active_weight = sum(
+            route_result.channel_weights.get(channel_type, 1.0)
+            for channel_type, results in results_by_channel.items()
+            if results
+        )
+        maximum_rrf = active_weight / (self.rrf_k + 1)
 
-        # 取 top_k
-        final_results = sorted_results[:top_k]
+        for channel_type, results in results_by_channel.items():
+            weight = route_result.channel_weights.get(channel_type, 1.0)
+            for rank, result in enumerate(results, start=1):
+                key = self._result_key(result)
+                entry = fused.setdefault(key, {
+                    "result": result,
+                    "rrf_score": 0.0,
+                    "evidence_score": 0.0,
+                    "source_scores": {},
+                    "channels": [],
+                })
+                entry["rrf_score"] += weight / (self.rrf_k + rank)
+                entry["evidence_score"] = max(entry["evidence_score"], result.score)
+                entry["source_scores"][channel_type.value] = result.score
+                if channel_type not in entry["channels"]:
+                    entry["channels"].append(channel_type)
 
-        # 统计使用的通道
-        channels_used = list(set(r.source for r in final_results))
+        final_results: List[SearchResult] = []
+        for entry in fused.values():
+            result = entry["result"]
+            channels = entry["channels"]
+            fused_score = entry["rrf_score"] / maximum_rrf if maximum_rrf else 0.0
+            final_results.append(SearchResult(
+                content=result.content,
+                score=min(fused_score, 1.0),
+                source=ChannelType.HYBRID if len(channels) > 1 else channels[0],
+                document_id=result.document_id,
+                metadata={
+                    **result.metadata,
+                    "fusion_method": "rrf",
+                    "rrf_score": entry["rrf_score"],
+                    "evidence_score": entry["evidence_score"],
+                    "source_scores": entry["source_scores"],
+                    "channels": [channel.value for channel in channels],
+                },
+            ))
+
+        final_results.sort(key=lambda result: result.score, reverse=True)
+        final_results = final_results[:top_k]
+        channels_used = [
+            channel for channel in results_by_channel
+            if results_by_channel[channel]
+        ]
 
         return MergedResult(
             results=final_results,
             total_count=len(final_results),
             channels_used=channels_used,
-            merge_strategy="score_based",
+            merge_strategy="rrf",
             metadata={
                 "route_result": {
                     "query_type": route_result.query_type.value,
@@ -669,9 +821,22 @@ class QueryRouter:
                     "selected_channels": [
                         channel.value for channel in route_result.selected_channels
                     ],
-                }
+                },
+                "rrf_k": self.rrf_k,
+                "candidate_top_k": min(
+                    max(top_k, top_k * self.candidate_multiplier),
+                    self.max_candidates,
+                ),
             }
         )
+
+    @staticmethod
+    def _result_key(result: SearchResult) -> str:
+        """Use the stable chunk identifier before falling back to content."""
+        chunk_id = result.metadata.get("chunk_id")
+        if chunk_id:
+            return f"chunk:{chunk_id}"
+        return f"content:{result.document_id}:{result.content.strip()}"
 
     def update_channel_weight(
         self,

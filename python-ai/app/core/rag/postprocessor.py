@@ -11,6 +11,8 @@ Postprocessor - 后处理模块
 from typing import List, Dict, Optional
 from dataclasses import dataclass, field
 
+from app.utils.config import config
+
 
 @dataclass
 class ProcessedResult:
@@ -30,7 +32,7 @@ class Postprocessor:
     def __init__(
         self,
         dedup_threshold: float = 0.95,
-        min_score: float = 0.35
+        min_score: Optional[float] = None,
     ):
         """
         初始化后处理器
@@ -40,7 +42,9 @@ class Postprocessor:
             min_score: 最小证据分数阈值；低于该值的片段不得注入回答上下文
         """
         self.dedup_threshold = dedup_threshold
-        self.min_score = min_score
+        self.min_score = (
+            config.RAG_MIN_EVIDENCE_SCORE if min_score is None else min_score
+        )
 
     def process(
         self,
@@ -60,8 +64,14 @@ class Postprocessor:
         # 1. 转换为 ProcessedResult
         processed = [self._to_processed(r) for r in results]
 
-        # 2. 过滤低分结果
-        processed = [r for r in processed if r.score >= self.min_score]
+        # 2. 过滤低质量证据。Hybrid RRF score represents rank and is not a
+        # confidence score, so use the best original channel score when it is
+        # present. This keeps P0's "no sufficient evidence" safety contract
+        # intact while allowing rank fusion to decide result order.
+        processed = [
+            r for r in processed
+            if r.metadata.get("evidence_score", r.score) >= self.min_score
+        ]
 
         # 3. 去重
         processed = self._deduplicate(processed)
