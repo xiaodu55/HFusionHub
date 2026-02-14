@@ -24,6 +24,7 @@ from app.models.document import (
 )
 from app.core.parser.base import BaseParser
 from app.core.chunker.text_chunker import chunk_blocks
+from app.core.chunker.quality import assess_chunk_quality
 from app.core.embedding import get_embedding_service
 from app.core.exceptions import (
     ParsingException,
@@ -125,6 +126,7 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
         "end_time": None,
         "error": None,
         "index_version": request.index_version,
+        "chunk_quality": None,
     }
 
     # Move heavy processing to background task (use resolved path)
@@ -162,6 +164,7 @@ async def get_task_status(document_id: str):
         "elapsed_seconds": round(time.time() - status["start_time"], 1) if status["start_time"] else 0,
         "error": status["error"],
         "index_version": status.get("index_version"),
+        "chunk_quality": status.get("chunk_quality"),
     }
 
 
@@ -176,7 +179,13 @@ async def _process_document_background(
     callback_secret: str = None,
 ):
     """Background task to process document parsing, chunking, and vectorization"""
-    def _update_status(status: str, message: str, chunks_count: int = 0, error: str = None):
+    def _update_status(
+        status: str,
+        message: str,
+        chunks_count: int = 0,
+        error: str = None,
+        chunk_quality: Optional[Dict[str, Any]] = None,
+    ):
         """Update task status in the store"""
         _task_status_store[document_id] = {
             "status": status,
@@ -186,6 +195,7 @@ async def _process_document_background(
             "end_time": time.time() if status in ("COMPLETED", "FAILED") else None,
             "error": error,
             "index_version": index_version,
+            "chunk_quality": chunk_quality if chunk_quality is not None else _task_status_store.get(document_id, {}).get("chunk_quality"),
         }
 
     try:
@@ -204,12 +214,18 @@ async def _process_document_background(
 
         # Step 2: Chunk blocks
         chunks = chunk_blocks(blocks, document_id)
+        quality = assess_chunk_quality(blocks, chunks).to_dict()
         # Preserve a stable human-readable document title with every chunk so
         # chat citations do not depend on a separate Java HTTP request.
         for chunk in chunks:
             chunk.metadata["document_title"] = document_title or f"文档 #{document_id}"
         logger.info(f"[Vectorization] Created {len(chunks)} chunks")
-        _update_status("PROCESSING", f"Created {len(chunks)} chunks, generating embeddings...")
+        quality_suffix = f"；质量告警：{', '.join(quality['warnings'])}" if quality["warnings"] else ""
+        _update_status(
+            "PROCESSING",
+            f"Created {len(chunks)} chunks, generating embeddings...{quality_suffix}",
+            chunk_quality=quality,
+        )
 
         # Step 3: Create/update Milvus collection
         create_collection()
@@ -249,7 +265,12 @@ async def _process_document_background(
                 chunks=_callback_chunk_metadata(chunks),
             )
 
-        _update_status("COMPLETED", f"Successfully processed {len(chunks)} chunks", chunks_count=len(chunks))
+        _update_status(
+            "COMPLETED",
+            f"Successfully processed {len(chunks)} chunks",
+            chunks_count=len(chunks),
+            chunk_quality=quality,
+        )
         logger.info(f"[Vectorization] Completed: {len(chunks)} chunks stored")
 
     except Exception as e:

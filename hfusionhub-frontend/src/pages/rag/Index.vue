@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/composables/useToast'
 import * as ragApi from '@/api/rag'
-import type { EvaluationReport, RetrievalTrace, TraceFilters, TraceStats } from '@/api/rag'
+import type { EvaluationReport, EvaluationRun, RetrievalTrace, TraceFilters, TraceStats } from '@/api/rag'
 
 const PAGE_SIZE = 20
 const toast = useToast()
@@ -37,6 +37,7 @@ const topK = ref(5)
 const evaluationQuery = ref('')
 const expectedDocumentIds = ref('')
 const evaluationReport = ref<EvaluationReport | null>(null)
+const evaluationRuns = ref<EvaluationRun[]>([])
 
 const sourceSummary = computed(() => Object.entries(stats.value.result_source_counts)
   .map(([source, count]) => `${source}: ${count}`)
@@ -59,12 +60,18 @@ const refreshStats = async () => {
   stats.value = response.data
 }
 
+const loadEvaluationRuns = async () => {
+  const response = await ragApi.getEvaluationRuns({ limit: 20, knowledge_base_id: knowledgeBaseId.value })
+  evaluationRuns.value = response.data.runs
+}
+
 const loadData = async () => {
   loading.value = true
   try {
     const [tracesResponse] = await Promise.all([
       ragApi.getTraces(buildFilters()),
       refreshStats(),
+      loadEvaluationRuns(),
     ])
     traces.value = tracesResponse.data.traces
     totalTraces.value = tracesResponse.data.total
@@ -157,6 +164,7 @@ const submitEvaluation = async () => {
     })
     evaluationReport.value = response.data
     toast.success('评测完成')
+    await loadEvaluationRuns()
     await loadData()
   } catch (error) {
     console.error('RAG 评测失败:', error)
@@ -228,6 +236,17 @@ onMounted(loadData)
           <label class="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"><input v-model="errorsOnly" type="checkbox" />仅看失败记录</label>
         </div>
         <div class="flex flex-wrap gap-2"><Button @click="applyFilters"><Filter class="mr-2 h-4 w-4" />应用筛选</Button><Button variant="outline" @click="clearFilters">清除筛选</Button><span class="self-center text-sm text-muted-foreground">共 {{ totalTraces }} 条匹配记录</span></div>
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader><CardTitle class="flex items-center gap-2"><BarChart3 class="h-5 w-5" />评测历史</CardTitle><CardDescription>仅保留聚合指标与失败用例 ID；原始问题和文档内容不会写入运行记录。</CardDescription></CardHeader>
+      <CardContent>
+        <div v-if="evaluationRuns.length === 0" class="py-6 text-center text-muted-foreground">暂无已持久化的评测记录。</div>
+        <div v-for="run in evaluationRuns" :key="run.run_id" class="mb-2 rounded-lg border p-3 text-sm">
+          <div class="flex flex-wrap items-center justify-between gap-2"><span class="font-medium">{{ run.label || '手动评测' }}</span><span class="text-xs text-muted-foreground">{{ run.created_at }}</span></div>
+          <div class="mt-2 grid gap-2 text-muted-foreground md:grid-cols-4"><span>KB {{ run.knowledge_base_id ?? '自动' }} · {{ run.case_count }} 题</span><span>Recall@{{ run.top_k }} {{ run.recall_at_k.toFixed(3) }}</span><span>MRR {{ run.mean_reciprocal_rank.toFixed(3) }}</span><span :class="run.failed_case_ids.length ? 'text-amber-600' : 'text-emerald-600'">{{ run.failed_case_ids.length ? `失败：${run.failed_case_ids.join('、')}` : '全部命中' }}</span></div>
+        </div>
       </CardContent>
     </Card>
 

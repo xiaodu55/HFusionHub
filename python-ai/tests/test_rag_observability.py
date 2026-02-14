@@ -3,10 +3,12 @@ from fastapi.testclient import TestClient
 
 from app.api import rag as rag_api
 from app.core.rag.evaluation import EvaluationCase, RetrievalEvaluator
+from app.core.rag.evaluation_runs import EvaluationRunStore
 from app.core.rag.observability import RetrievalTrace, get_trace_store, reset_trace_store
 from app.core.rag.postprocessor import ProcessedResult, get_postprocessor
 from app.core.rag.query_router import ChannelType, MergedResult, SearchResult
 from app.core.rag.retriever import MultiChannelRetriever, RetrievalResult
+from app.core.rag.reranker import LexicalReranker
 from app.main import create_app
 
 
@@ -73,6 +75,20 @@ async def test_retriever_records_route_and_result_trace():
     assert traces[0]["debug"]["channel_candidates"][0]["candidates"]["vector"][0]["chunk_id"] == "chunk-42"
     assert traces[0]["debug"]["postprocessing"][0]["decision"] == "accepted"
     assert traces[0]["debug"]["stage_timings_ms"]["postprocess"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_retriever_records_optional_reranker_decision():
+    reset_trace_store()
+    retriever = MultiChannelRetriever(postprocessor=get_postprocessor(), reranker=LexicalReranker())
+    retriever.router = FakeRouter()
+
+    result = await retriever.retrieve("RAG observability", knowledge_base_id=7, top_k=3)
+    trace = get_trace_store().get(result.metadata["trace_id"])
+
+    assert trace["debug"]["reranker"]["applied"] is True
+    assert trace["debug"]["reranker"]["reranker"] == "lexical"
+    assert "rerank" in trace["debug"]["stage_timings_ms"]
 
 
 @pytest.mark.asyncio
@@ -177,6 +193,8 @@ def test_trace_api_filters_paginates_and_exports_records():
 
 def test_evaluation_api_uses_retrieval_evaluator(monkeypatch):
     monkeypatch.setattr(rag_api, "get_retriever", lambda: FakeRetriever())
+    store = EvaluationRunStore(":memory:")
+    monkeypatch.setattr(rag_api, "get_evaluation_run_store", lambda: store)
     client = TestClient(create_app())
 
     response = client.post("/api/rag/evaluate", json={
@@ -191,3 +209,8 @@ def test_evaluation_api_uses_retrieval_evaluator(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["summary"]["recall_at_k"] == 1.0
+    assert response.json()["run"]["case_count"] == 1
+
+    history = client.get("/api/rag/evaluation-runs", params={"knowledge_base_id": 1})
+    assert history.status_code == 200
+    assert history.json()["runs"][0]["run_id"] == response.json()["run"]["run_id"]

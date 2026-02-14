@@ -98,6 +98,20 @@ export interface EvaluationReport {
     recall_at_k: number
     reciprocal_rank: number
   }>
+  run?: EvaluationRun
+}
+
+export interface EvaluationRun {
+  run_id: string
+  created_at: string
+  knowledge_base_id: number | null
+  label: string | null
+  top_k: number
+  case_count: number
+  precision_at_k: number
+  recall_at_k: number
+  mean_reciprocal_rank: number
+  failed_case_ids: string[]
 }
 
 export const getTraces = (params: TraceFilters = {}) =>
@@ -116,5 +130,9 @@ export const exportTraces = (format: 'json' | 'csv', filters: Omit<TraceFilters,
 export const evaluateRetrieval = (data: {
   knowledge_base_id?: number
   top_k: number
+  label?: string
   cases: EvaluationCaseInput[]
 }) => post<{ data: EvaluationReport }>('/rag/evaluate', data)
+
+export const getEvaluationRuns = (params: { limit?: number, knowledge_base_id?: number } = {}) =>
+  get<{ data: { runs: EvaluationRun[] } }>('/rag/evaluation-runs', params)

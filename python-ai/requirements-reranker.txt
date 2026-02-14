@@ -1,0 +1,3 @@
+# Optional P6 cross-encoder reranking. It is intentionally not in the default
+# runtime requirements because it downloads a model and adds a large ML stack.
+sentence-transformers>=3.0,<4

@@ -114,6 +114,20 @@ public class RagObservabilityController {
         }
     }
 
+    @GetMapping("/evaluation-runs")
+    public R<Map> listEvaluationRuns(
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(required = false) Long knowledgeBaseId
+    ) {
+        if (limit < 1 || limit > 200) {
+            throw new BusinessException("limit 必须在 1 到 200 之间");
+        }
+        return R.ok(get(getTraceResourceBuilder("/api/rag/evaluation-runs")
+                .queryParam("limit", limit)
+                .queryParamIfPresent("knowledge_base_id", java.util.Optional.ofNullable(knowledgeBaseId))
+                .toUriString()));
+    }
+
     private Map get(String url) {
         try {
             Map response = restTemplate.getForObject(url, Map.class);

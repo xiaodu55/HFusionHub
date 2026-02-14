@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.rag.evaluation import EvaluationCase, RetrievalEvaluator
+from app.core.rag.evaluation_runs import get_evaluation_run_store
 from app.core.rag.observability import get_trace_store
 from app.core.rag.retriever import get_retriever
 
@@ -22,6 +23,7 @@ class EvaluationCaseRequest(BaseModel):
 class EvaluationRequest(BaseModel):
     knowledge_base_id: Optional[int] = None
     top_k: int = Field(default=5, ge=1, le=20)
+    label: Optional[str] = Field(default=None, max_length=120)
     cases: List[EvaluationCaseRequest] = Field(min_length=1, max_length=200)
 
 
@@ -126,10 +128,30 @@ async def evaluate_retrieval(request: EvaluationRequest):
         for item in request.cases
     ]
     try:
-        return await evaluator.evaluate(
+        report = await evaluator.evaluate(
             cases=cases,
             knowledge_base_id=request.knowledge_base_id,
             top_k=request.top_k,
         )
+        run = get_evaluation_run_store().record(
+            report,
+            knowledge_base_id=request.knowledge_base_id,
+            label=request.label,
+        )
+        return {**report, "run": run.to_dict()}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/evaluation-runs")
+async def list_evaluation_runs(
+    limit: int = Query(default=50, ge=1, le=200),
+    knowledge_base_id: Optional[int] = Query(default=None, ge=1),
+):
+    """Return durable metric history and sanitized failed-case identifiers."""
+    return {
+        "runs": get_evaluation_run_store().list(
+            limit=limit,
+            knowledge_base_id=knowledge_base_id,
+        )
+    }

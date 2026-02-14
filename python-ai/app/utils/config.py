@@ -62,5 +62,19 @@ class Config:
     )
     RAG_MIN_EVIDENCE_SCORE = float(os.getenv("RAG_MIN_EVIDENCE_SCORE", "0.35"))
 
+    # Evaluation summaries survive AI-service restarts.  The store never
+    # persists benchmark queries or chunk content, only aggregate metrics and
+    # case identifiers for failed examples.
+    RAG_EVALUATION_DB_PATH = os.getenv(
+        "RAG_EVALUATION_DB_PATH", "./data/rag_evaluation_runs.db"
+    )
+
+    # Second-stage reranking is opt-in. ``lexical`` is a deterministic local
+    # baseline; ``cross_encoder`` needs sentence-transformers and an explicitly
+    # configured model name.
+    RAG_RERANKER_MODE = os.getenv("RAG_RERANKER_MODE", "disabled")
+    RAG_RERANKER_MODEL = os.getenv("RAG_RERANKER_MODEL", "BAAI/bge-reranker-base")
+    RAG_RERANK_CANDIDATE_COUNT = int(os.getenv("RAG_RERANK_CANDIDATE_COUNT", "20"))
+
 
 config = Config()

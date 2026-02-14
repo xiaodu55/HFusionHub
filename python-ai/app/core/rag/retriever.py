@@ -14,6 +14,8 @@ from .query_rewriter import QueryRewriter, get_query_rewriter, RewriteResult
 from .postprocessor import Postprocessor, get_postprocessor, ProcessedResult
 from .query_router import QueryRouter, get_router
 from .observability import RetrievalTrace, get_trace_store
+from .reranker import Reranker, get_reranker
+from app.utils.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,8 @@ class MultiChannelRetriever:
     def __init__(
         self,
         query_rewriter: Optional[QueryRewriter] = None,
-        postprocessor: Optional[Postprocessor] = None
+        postprocessor: Optional[Postprocessor] = None,
+        reranker: Optional[Reranker] = None,
     ):
         """
         初始化多通道检索器
@@ -44,6 +47,7 @@ class MultiChannelRetriever:
         """
         self.query_rewriter = query_rewriter or get_query_rewriter()
         self.postprocessor = postprocessor or get_postprocessor()
+        self.reranker = reranker or get_reranker()
         self.router: QueryRouter = get_router()
 
     async def retrieve(
@@ -75,6 +79,7 @@ class MultiChannelRetriever:
         channel_candidates: List[Dict[str, Any]] = []
         postprocessing: List[Dict[str, Any]] = []
         stage_timings_ms: Dict[str, float] = {}
+        rerank_debug: Dict[str, Any] = {"applied": False, "reranker": "not_started"}
         error: Optional[str] = None
 
         try:
@@ -89,12 +94,15 @@ class MultiChannelRetriever:
 
             # 2. 路由到向量、关键词或图谱通道。
             all_results = []
+            candidate_top_k = top_k
+            if self.reranker.name != "disabled":
+                candidate_top_k = max(top_k, config.RAG_RERANK_CANDIDATE_COUNT)
             for rewritten_query in queries:
                 router_started_at = time.perf_counter()
                 merged = await self.router.search(
                     query=rewritten_query,
                     knowledge_base_id=knowledge_base_id,
-                    top_k=top_k,
+                    top_k=candidate_top_k,
                 )
                 route = merged.metadata.get("route_result", {})
                 routes.append({
@@ -122,7 +130,15 @@ class MultiChannelRetriever:
                     "metadata": item.metadata,
                 } for item in merged.results)
 
-            # 3. 后处理（去重、排序）
+            # 3. Optional second-stage reranking. A disabled or unavailable
+            # model leaves the first-stage order intact and records why.
+            rerank_started_at = time.perf_counter()
+            all_results, rerank_debug = await self.reranker.rerank(query, all_results)
+            stage_timings_ms["rerank"] = round(
+                (time.perf_counter() - rerank_started_at) * 1000, 2
+            )
+
+            # 4. 后处理（去重、排序）
             postprocess_started_at = time.perf_counter()
             processed, postprocessing = self.postprocessor.process_with_debug(
                 all_results, top_k=top_k
@@ -139,6 +155,7 @@ class MultiChannelRetriever:
                     "query_count": len(queries),
                     "total_results": len(all_results),
                     "rewritten_queries": queries,
+                    "reranker": rerank_debug,
                 },
             )
             logger.info(
@@ -171,6 +188,7 @@ class MultiChannelRetriever:
                     "channel_candidates": channel_candidates,
                     "postprocessing": postprocessing,
                     "stage_timings_ms": stage_timings_ms,
+                    "reranker": rerank_debug,
                 },
                 rewrite_count=len(queries),
                 latency_ms=round((time.perf_counter() - started_at) * 1000, 2),
