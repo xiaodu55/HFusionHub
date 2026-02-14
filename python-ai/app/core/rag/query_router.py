@@ -337,18 +337,17 @@ class KeywordChannel(BaseChannel):
 
 
 class GraphChannel(BaseChannel):
-    """图谱检索通道 - 基于知识图谱的实体关系检索"""
+    """KB-scoped GraphRAG channel backed by source chunks.
 
-    def __init__(self, config: ChannelConfig):
+    Do not use the legacy global ``knowledge_graph`` manager here: it has no
+    KB ACL metadata and would make a selected-KB chat capable of leaking
+    entities from another KB.
+    """
+
+    def __init__(self, config: ChannelConfig, graph_store=None, chunk_loader=None):
         super().__init__(config)
-        self._manager = None
-
-    def _get_manager(self):
-        """延迟加载 KnowledgeGraphManager"""
-        if self._manager is None:
-            from app.core.rag.knowledge_graph import get_knowledge_graph_manager
-            self._manager = get_knowledge_graph_manager()
-        return self._manager
+        self._graph_store = graph_store
+        self._chunk_loader = chunk_loader
 
     async def search(
         self,
@@ -357,73 +356,40 @@ class GraphChannel(BaseChannel):
         top_k: int = 10,
         **kwargs
     ) -> List[SearchResult]:
-        """
-        图谱检索
-
-        检索策略：
-        1. 实体搜索：查找与查询相关的实体
-        2. 关系搜索：查找实体间的关系
-        3. 子图搜索：获取相关实体的子图
-        """
-        # The graph store is not partitioned by knowledge_base_id yet. Returning
-        # any graph entity for a scoped chat would bypass the authorization
-        # filter applied by vector and keyword retrieval.
+        """Return only chunk-backed graph evidence from the selected KB."""
         if knowledge_base_id is not None:
-            logger.warning("Graph retrieval is disabled for scoped knowledge-base chat until graph ACL filtering is available")
-            return []
-        try:
-            manager = self._get_manager()
-            if not manager._initialized:
-                await manager.initialize()
+            try:
+                from app.core.rag.scoped_graph import get_scoped_graph_store
+                from app.core.vectorstore.milvus_store import _load_chunks_store
 
-            results = []
-
-            # 1. 实体搜索
-            entities = await manager.search_entities(
-                query=query,
-                limit=top_k
-            )
-
-            for entity in entities:
-                results.append(SearchResult(
-                    content=f"{entity.name}: {entity.description or 'No description'}",
-                    score=ENTITY_MATCH_BASE_SCORE,
-                    source=ChannelType.GRAPH,
-                    document_id=None,
-                    metadata={
-                        "entity_id": entity.id,
-                        "entity_type": entity.entity_type.value,
-                        "entity_name": entity.name
-                    }
-                ))
-
-            # 2. 获取实体的邻居关系
-            for entity in entities[:3]:  # 限制前3个实体
-                neighbors, relations = await manager.get_neighbors(
-                    entity_id=entity.id,
-                    depth=1
+                graph_store = self._graph_store or get_scoped_graph_store(
+                    app_config.RAG_GRAPH_INDEX_PATH
                 )
-
-                for neighbor in neighbors:
-                    results.append(SearchResult(
-                        content=f"{entity.name} -> {neighbor.name}: {neighbor.description or 'Related entity'}",
-                        score=NEIGHBOR_RELATION_SCORE,
+                chunk_loader = self._chunk_loader or _load_chunks_store
+                candidates = await asyncio.to_thread(
+                    graph_store.search,
+                    query,
+                    knowledge_base_id,
+                    await asyncio.to_thread(chunk_loader),
+                    top_k,
+                )
+                return [
+                    SearchResult(
+                        content=candidate["content"],
+                        score=candidate["score"],
                         source=ChannelType.GRAPH,
-                        document_id=None,
-                        metadata={
-                            "source_entity": entity.id,
-                            "target_entity": neighbor.id,
-                            "relation_type": "neighbor"
-                        }
-                    ))
-
-            # 3. 按分数排序，取 top_k
-            results.sort(key=lambda x: x.score, reverse=True)
-            return results[:top_k]
-
-        except Exception as e:
-            logger.error(f"Graph search failed: {e}")
-            return []
+                        document_id=candidate.get("document_id"),
+                        metadata=candidate.get("metadata", {}),
+                    )
+                    for candidate in candidates
+                ]
+            except Exception as error:
+                # Graph retrieval is an enhancement: a broken or unavailable
+                # index must never make scoped vector/BM25 retrieval unsafe.
+                logger.warning("Scoped graph search unavailable: %s", error)
+                return []
+        logger.warning("Graph retrieval requires an explicit knowledge_base_id")
+        return []
 
 
 # =============================================================================
@@ -469,9 +435,7 @@ class QueryRouter:
             ChannelType.GRAPH: ChannelConfig(
                 channel_type=ChannelType.GRAPH,
                 weight=DEFAULT_CHANNEL_WEIGHT * 0.3,
-                # Keep GraphRAG out of the production default path until its
-                # index carries the same knowledge-base ACL metadata.
-                enabled=False,
+                enabled=app_config.RAG_GRAPH_ENABLED,
             ),
         }
 
@@ -788,6 +752,7 @@ class QueryRouter:
                     "knowledge_base_id": result.metadata.get("knowledge_base_id"),
                     "score": round(result.score, 6),
                     "content_preview": result.content[:500],
+                    "graph": result.metadata.get("graph") if channel_type == ChannelType.GRAPH else None,
                 }
                 for rank, result in enumerate(results, start=1)
             ]

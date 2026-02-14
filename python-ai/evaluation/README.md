@@ -27,3 +27,17 @@ failed case IDs are retained, never the test questions or chunk contents.
 For P6, first establish a baseline with the reranker disabled. Then compare it
 against `RAG_RERANKER_MODE=lexical`; install the optional cross-encoder extra
 only if the real benchmark improves without an unacceptable latency increase.
+
+## P7 GraphRAG guardrails
+
+`RAG_GRAPH_ENABLED` remains `false` by default.  The graph index is built
+after a document's chunks have been inserted and stores `knowledge_base_id`,
+`document_id`, and `chunk_id` evidence for every entity and relation.  It uses
+deterministic co-occurrence extraction for this MVP, so it is repeatable and
+does not add an LLM call to ingestion.
+
+When enabling it for a benchmark, re-index the documents in that knowledge
+base first, then compare the existing metrics and `graph_hit_rate` from the
+evaluation response.  A graph candidate is eligible only if its source chunk
+still exists in the selected KB; missing, stale, or malformed graph data is
+discarded rather than falling back to a global graph.

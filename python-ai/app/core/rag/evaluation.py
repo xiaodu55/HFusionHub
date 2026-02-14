@@ -28,6 +28,7 @@ class EvaluationCaseResult:
     precision_at_k: float
     recall_at_k: float
     reciprocal_rank: float
+    graph_hit: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -59,6 +60,14 @@ class RetrievalEvaluator:
             retrieved_ids = [str(item.document_id) for item in retrieval.results]
             expected_ids = {str(item) for item in case.expected_document_ids}
             matched_ids = [item for item in retrieved_ids if item in expected_ids]
+            graph_hit = any(
+                str(item.document_id) in expected_ids
+                and (
+                    item.source == "graph"
+                    or "graph" in (item.metadata.get("channels") or [])
+                )
+                for item in retrieval.results
+            )
             first_rank = next(
                 (index + 1 for index, item in enumerate(retrieved_ids) if item in expected_ids),
                 None,
@@ -71,6 +80,7 @@ class RetrievalEvaluator:
                 precision_at_k=round(len(matched_ids) / max(len(retrieved_ids), 1), 4),
                 recall_at_k=round(len(set(matched_ids)) / max(len(expected_ids), 1), 4),
                 reciprocal_rank=round(1 / first_rank, 4) if first_rank else 0.0,
+                graph_hit=graph_hit,
             ))
 
         count = len(results)
@@ -81,6 +91,7 @@ class RetrievalEvaluator:
                 "precision_at_k": round(sum(item.precision_at_k for item in results) / count, 4),
                 "recall_at_k": round(sum(item.recall_at_k for item in results) / count, 4),
                 "mean_reciprocal_rank": round(sum(item.reciprocal_rank for item in results) / count, 4),
+                "graph_hit_rate": round(sum(item.graph_hit for item in results) / count, 4),
             },
             "cases": [item.to_dict() for item in results],
         }

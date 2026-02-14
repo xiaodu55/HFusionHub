@@ -251,6 +251,19 @@ async def _process_document_background(
         if not insert_chunks(chunks, embeddings, document_id, knowledge_base_id):
             raise MilvusException(f"Failed to insert chunks for document {document_id}")
 
+        # Build a bounded, source-backed graph only after the new chunks are
+        # durable.  Graph search remains opt-in; an indexing failure therefore
+        # cannot turn a successful vector index into a failed document job.
+        try:
+            from app.core.rag.scoped_graph import get_scoped_graph_store
+            get_scoped_graph_store(config.RAG_GRAPH_INDEX_PATH).replace_document(
+                knowledge_base_id=knowledge_base_id,
+                document_id=document_id,
+                chunks=chunks,
+            )
+        except Exception as graph_error:
+            logger.warning("[Vectorization] Scoped graph index unavailable for %s: %s", document_id, graph_error)
+
         # Step 6: Notify Java backend
         _update_status("PROCESSING", "Notifying Java backend...")
         if callback_url:
@@ -390,6 +403,11 @@ async def remove_document_chunks(document_id: str):
     validate_document_id(document_id)
     if not delete_document_chunks(document_id):
         raise MilvusException(f"删除文档 {document_id} 的分块失败")
+    try:
+        from app.core.rag.scoped_graph import get_scoped_graph_store
+        get_scoped_graph_store(config.RAG_GRAPH_INDEX_PATH).remove_document_from_all_scopes(document_id)
+    except Exception as graph_error:
+        logger.warning("[Vectorization] Scoped graph cleanup unavailable for %s: %s", document_id, graph_error)
     _task_status_store.pop(document_id, None)
     return {"success": True, "document_id": document_id}
 

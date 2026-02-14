@@ -9,6 +9,7 @@ from app.core.rag.postprocessor import ProcessedResult, get_postprocessor
 from app.core.rag.query_router import ChannelType, MergedResult, SearchResult
 from app.core.rag.retriever import MultiChannelRetriever, RetrievalResult
 from app.core.rag.reranker import LexicalReranker
+from app.core.rag.scoped_graph import ScopedGraphStore
 from app.main import create_app
 
 
@@ -54,6 +55,8 @@ class FakeRetriever:
                 content="expected content",
                 score=0.9,
                 document_id="doc-1",
+                source="hybrid",
+                metadata={"channels": ["vector", "graph"]},
             )],
         )
 
@@ -104,6 +107,7 @@ async def test_retrieval_evaluator_calculates_rank_metrics():
     assert report["summary"]["precision_at_k"] == 1.0
     assert report["summary"]["recall_at_k"] == 1.0
     assert report["summary"]["mean_reciprocal_rank"] == 1.0
+    assert report["summary"]["graph_hit_rate"] == 1.0
 
 
 def test_trace_api_exposes_trace_and_stats():

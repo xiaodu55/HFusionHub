@@ -62,6 +62,11 @@ class Config:
     )
     RAG_MIN_EVIDENCE_SCORE = float(os.getenv("RAG_MIN_EVIDENCE_SCORE", "0.35"))
 
+    # Graph retrieval is opt-in.  The GraphRAG channel only reads the scoped
+    # graph index whose nodes and edges are backed by chunks in this KB.
+    RAG_GRAPH_ENABLED = os.getenv("RAG_GRAPH_ENABLED", "false").lower() == "true"
+    RAG_GRAPH_INDEX_PATH = os.getenv("RAG_GRAPH_INDEX_PATH", "./data/rag_scoped_graph.json")
+
     # Evaluation summaries survive AI-service restarts.  The store never
     # persists benchmark queries or chunk content, only aggregate metrics and
     # case identifiers for failed examples.
