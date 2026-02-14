@@ -61,28 +61,68 @@ class Postprocessor:
         Returns:
             处理后的结果列表
         """
-        # 1. 转换为 ProcessedResult
+        processed, _ = self.process_with_debug(results, top_k=top_k)
+        return processed
+
+    def process_with_debug(
+        self,
+        results: List[Dict],
+        top_k: int = 5,
+    ) -> tuple[List[ProcessedResult], List[Dict]]:
+        """Process results and retain an auditable decision for every input."""
         processed = [self._to_processed(r) for r in results]
+        decisions = [
+            {
+                "input_rank": rank,
+                "chunk_id": result.metadata.get("chunk_id"),
+                "document_id": result.document_id,
+                "source": result.source,
+                "score": round(result.score, 6),
+                "evidence_score": round(result.metadata.get("evidence_score", result.score), 6),
+                "decision": "pending",
+            }
+            for rank, result in enumerate(processed, start=1)
+        ]
 
         # 2. 过滤低质量证据。Hybrid RRF score represents rank and is not a
         # confidence score, so use the best original channel score when it is
         # present. This keeps P0's "no sufficient evidence" safety contract
         # intact while allowing rank fusion to decide result order.
-        processed = [
-            r for r in processed
-            if r.metadata.get("evidence_score", r.score) >= self.min_score
-        ]
+        evidence_accepted: List[tuple[ProcessedResult, int]] = []
+        for index, result in enumerate(processed):
+            if result.metadata.get("evidence_score", result.score) < self.min_score:
+                decisions[index]["decision"] = "filtered_low_evidence"
+            else:
+                evidence_accepted.append((result, index))
 
         # 3. 去重
-        processed = self._deduplicate(processed)
+        deduplicated: List[tuple[ProcessedResult, int]] = []
+        for result, index in evidence_accepted:
+            duplicate_of = next((
+                existing_index
+                for existing, existing_index in deduplicated
+                if self._calculate_similarity(result.content, existing.content) >= self.dedup_threshold
+            ), None)
+            if duplicate_of is not None:
+                decisions[index]["decision"] = "filtered_duplicate"
+                decisions[index]["duplicate_of_input_rank"] = duplicate_of + 1
+            else:
+                deduplicated.append((result, index))
 
         # 4. 排序
-        processed = self._sort(processed)
+        deduplicated.sort(key=lambda item: item[0].score, reverse=True)
 
         # 5. 截取 top_k
-        processed = processed[:top_k]
+        accepted: List[ProcessedResult] = []
+        for rank, (result, index) in enumerate(deduplicated, start=1):
+            if rank <= top_k:
+                decisions[index]["decision"] = "accepted"
+                decisions[index]["final_rank"] = rank
+                accepted.append(result)
+            else:
+                decisions[index]["decision"] = "trimmed_top_k"
 
-        return processed
+        return accepted, decisions
 
     def _to_processed(self, result: Dict) -> ProcessedResult:
         """将字典转换为 ProcessedResult"""

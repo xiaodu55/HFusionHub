@@ -679,6 +679,8 @@ class QueryRouter:
         Returns:
             MergedResult 合并后的结果
         """
+        started_at = time.perf_counter()
+
         # 1. 路由
         route_result = self.route(query, query_type, strategy)
 
@@ -694,12 +696,14 @@ class QueryRouter:
             self.max_candidates,
         )
         results_by_channel: Dict[ChannelType, List[SearchResult]] = {}
+        channel_latencies_ms: Dict[str, float] = {}
 
         if route_result.strategy == RouteStrategy.CASCADING:
             # 级联检索：第一个通道结果足够则不查第二个
             for channel_type in route_result.selected_channels:
                 channel = self.channels.get(channel_type)
                 if channel:
+                    channel_started_at = time.perf_counter()
                     results = await channel.search(
                         query=query,
                         knowledge_base_id=knowledge_base_id,
@@ -707,6 +711,9 @@ class QueryRouter:
                         **kwargs
                     )
                     results_by_channel[channel_type] = results
+                    channel_latencies_ms[channel_type.value] = round(
+                        (time.perf_counter() - channel_started_at) * 1000, 2
+                    )
 
                     # 如果结果足够，停止检索
                     if len(results) >= candidate_top_k:
@@ -720,11 +727,12 @@ class QueryRouter:
                 if channel:
                     tasks.append((
                         channel_type,
-                        channel.search(
+                        self._search_channel(
+                            channel=channel,
                             query=query,
                             knowledge_base_id=knowledge_base_id,
                             top_k=candidate_top_k,
-                            **kwargs
+                            **kwargs,
                         ),
                     ))
 
@@ -732,14 +740,59 @@ class QueryRouter:
                 results_list = await asyncio.gather(
                     *(task for _, task in tasks), return_exceptions=True
                 )
-                for (channel_type, _), results in zip(tasks, results_list):
-                    if isinstance(results, list):
+                for (channel_type, _), result in zip(tasks, results_list):
+                    if isinstance(result, tuple):
+                        results, latency_ms = result
                         results_by_channel[channel_type] = results
+                        channel_latencies_ms[channel_type.value] = latency_ms
 
         # 3. 合并结果
         merged = self._merge_results(results_by_channel, top_k, route_result)
+        merged.metadata.update({
+            "channel_candidates": self._debug_candidates(results_by_channel),
+            "channel_latencies_ms": channel_latencies_ms,
+            "router_latency_ms": round((time.perf_counter() - started_at) * 1000, 2),
+        })
 
         return merged
+
+    @staticmethod
+    async def _search_channel(
+        channel: BaseChannel,
+        query: str,
+        knowledge_base_id: int,
+        top_k: int,
+        **kwargs,
+    ) -> Tuple[List[SearchResult], float]:
+        """Execute one channel and retain its latency for the debug trace."""
+        started_at = time.perf_counter()
+        results = await channel.search(
+            query=query,
+            knowledge_base_id=knowledge_base_id,
+            top_k=top_k,
+            **kwargs,
+        )
+        return results, round((time.perf_counter() - started_at) * 1000, 2)
+
+    @staticmethod
+    def _debug_candidates(
+        results_by_channel: Dict[ChannelType, List[SearchResult]],
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Normalize raw channel candidates without exposing full chunk text."""
+        return {
+            channel_type.value: [
+                {
+                    "rank": rank,
+                    "chunk_id": result.metadata.get("chunk_id"),
+                    "document_id": result.document_id,
+                    "knowledge_base_id": result.metadata.get("knowledge_base_id"),
+                    "score": round(result.score, 6),
+                    "content_preview": result.content[:500],
+                }
+                for rank, result in enumerate(results, start=1)
+            ]
+            for channel_type, results in results_by_channel.items()
+        }
 
     def _merge_results(
         self,

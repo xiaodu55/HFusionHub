@@ -72,24 +72,46 @@ class MultiChannelRetriever:
         routes: List[Dict[str, Any]] = []
         processed: List[ProcessedResult] = []
         queries = [query]
+        channel_candidates: List[Dict[str, Any]] = []
+        postprocessing: List[Dict[str, Any]] = []
+        stage_timings_ms: Dict[str, float] = {}
         error: Optional[str] = None
 
         try:
             # 1. 问题重写
             if enable_rewrite and conversation_history:
+                rewrite_started_at = time.perf_counter()
                 rewrite_result = self.query_rewriter.rewrite(query, conversation_history)
                 queries = rewrite_result.rewritten_queries or [query]
+                stage_timings_ms["rewrite"] = round(
+                    (time.perf_counter() - rewrite_started_at) * 1000, 2
+                )
 
             # 2. 路由到向量、关键词或图谱通道。
             all_results = []
             for rewritten_query in queries:
+                router_started_at = time.perf_counter()
                 merged = await self.router.search(
                     query=rewritten_query,
                     knowledge_base_id=knowledge_base_id,
                     top_k=top_k,
                 )
                 route = merged.metadata.get("route_result", {})
-                routes.append({"query": rewritten_query, **route})
+                routes.append({
+                    "query": rewritten_query,
+                    **route,
+                    "router_latency_ms": merged.metadata.get("router_latency_ms"),
+                    "channel_latencies_ms": merged.metadata.get("channel_latencies_ms", {}),
+                })
+                channel_candidates.append({
+                    "query": rewritten_query,
+                    "candidates": merged.metadata.get("channel_candidates", {}),
+                })
+                stage_timings_ms["router"] = round(
+                    stage_timings_ms.get("router", 0.0)
+                    + (time.perf_counter() - router_started_at) * 1000,
+                    2,
+                )
                 all_results.extend({
                     "content": item.content,
                     "score": item.score,
@@ -101,7 +123,13 @@ class MultiChannelRetriever:
                 } for item in merged.results)
 
             # 3. 后处理（去重、排序）
-            processed = self.postprocessor.process(all_results, top_k=top_k)
+            postprocess_started_at = time.perf_counter()
+            processed, postprocessing = self.postprocessor.process_with_debug(
+                all_results, top_k=top_k
+            )
+            stage_timings_ms["postprocess"] = round(
+                (time.perf_counter() - postprocess_started_at) * 1000, 2
+            )
             result = RetrievalResult(
                 query=query,
                 results=processed,
@@ -110,6 +138,7 @@ class MultiChannelRetriever:
                     "knowledge_base_id": knowledge_base_id,
                     "query_count": len(queries),
                     "total_results": len(all_results),
+                    "rewritten_queries": queries,
                 },
             )
             logger.info(
@@ -131,16 +160,24 @@ class MultiChannelRetriever:
                 }
                 for result in processed
             ]
-            get_trace_store().record(RetrievalTrace(
+            trace = get_trace_store().record(RetrievalTrace(
                 query=query,
                 knowledge_base_id=knowledge_base_id,
                 top_k=top_k,
                 routes=routes,
                 results=trace_results,
+                debug={
+                    "rewritten_queries": queries,
+                    "channel_candidates": channel_candidates,
+                    "postprocessing": postprocessing,
+                    "stage_timings_ms": stage_timings_ms,
+                },
                 rewrite_count=len(queries),
                 latency_ms=round((time.perf_counter() - started_at) * 1000, 2),
                 error=error,
             ))
+            if 'result' in locals():
+                result.metadata["trace_id"] = trace.trace_id
 
     async def retrieve_for_prompt(
         self,

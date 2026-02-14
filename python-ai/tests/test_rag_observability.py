@@ -28,7 +28,18 @@ class FakeRouter:
                     "strategy": "multi",
                     "confidence": 0.8,
                     "selected_channels": ["vector"],
-                }
+                },
+                "channel_candidates": {
+                    "vector": [{
+                        "rank": 1,
+                        "chunk_id": "chunk-42",
+                        "document_id": 42,
+                        "knowledge_base_id": knowledge_base_id,
+                        "score": 0.92,
+                    }]
+                },
+                "channel_latencies_ms": {"vector": 1.5},
+                "router_latency_ms": 2.0,
             },
         )
 
@@ -59,6 +70,9 @@ async def test_retriever_records_route_and_result_trace():
     assert traces[0]["knowledge_base_id"] == 7
     assert traces[0]["routes"][0]["selected_channels"] == ["vector"]
     assert traces[0]["results"][0]["document_id"] == 42
+    assert traces[0]["debug"]["channel_candidates"][0]["candidates"]["vector"][0]["chunk_id"] == "chunk-42"
+    assert traces[0]["debug"]["postprocessing"][0]["decision"] == "accepted"
+    assert traces[0]["debug"]["stage_timings_ms"]["postprocess"] >= 0
 
 
 @pytest.mark.asyncio
@@ -94,6 +108,27 @@ def test_trace_api_exposes_trace_and_stats():
     assert listed.json()["traces"][0]["trace_id"] == trace.trace_id
     assert detail.status_code == 200
     assert stats.json()["total_traces"] == 1
+
+
+def test_debug_search_api_returns_a_scoped_full_trace(monkeypatch):
+    reset_trace_store()
+    retriever = MultiChannelRetriever(postprocessor=get_postprocessor())
+    retriever.router = FakeRouter()
+    monkeypatch.setattr(rag_api, "get_retriever", lambda: retriever)
+    client = TestClient(create_app())
+
+    response = client.post("/api/rag/debug/search", json={
+        "query": "What is RAG?",
+        "knowledge_base_id": 7,
+        "top_k": 3,
+        "enable_rewrite": False,
+    })
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["knowledge_base_id"] == 7
+    assert payload["debug"]["channel_candidates"][0]["candidates"]["vector"][0]["chunk_id"] == "chunk-42"
+    assert payload["debug"]["postprocessing"][0]["decision"] == "accepted"
 
 
 def test_trace_api_filters_paginates_and_exports_records():

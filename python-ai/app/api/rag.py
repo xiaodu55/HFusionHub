@@ -25,6 +25,16 @@ class EvaluationRequest(BaseModel):
     cases: List[EvaluationCaseRequest] = Field(min_length=1, max_length=200)
 
 
+class RetrievalDebugRequest(BaseModel):
+    """Execute one scoped retrieval and return its full diagnostic trace."""
+
+    query: str = Field(min_length=1, max_length=4000)
+    knowledge_base_id: int = Field(ge=1)
+    top_k: int = Field(default=5, ge=1, le=20)
+    conversation_history: Optional[List[Dict[str, Any]]] = Field(default=None, max_length=50)
+    enable_rewrite: bool = True
+
+
 @router.get("/traces")
 async def list_traces(
     limit: int = Query(default=50, ge=1, le=200),
@@ -83,6 +93,23 @@ async def get_trace(trace_id: str):
     trace = get_trace_store().get(trace_id)
     if trace is None:
         raise HTTPException(status_code=404, detail="Retrieval trace not found")
+    return trace
+
+
+@router.post("/debug/search")
+async def debug_search(request: RetrievalDebugRequest):
+    """Run an explicitly scoped retrieval and expose why each result survived."""
+    retrieval = await get_retriever().retrieve(
+        query=request.query,
+        knowledge_base_id=request.knowledge_base_id,
+        conversation_history=request.conversation_history,
+        top_k=request.top_k,
+        enable_rewrite=request.enable_rewrite,
+    )
+    trace_id = retrieval.metadata.get("trace_id")
+    trace = get_trace_store().get(trace_id) if trace_id else None
+    if trace is None:
+        raise HTTPException(status_code=500, detail="Retrieval debug trace was not recorded")
     return trace
 
 

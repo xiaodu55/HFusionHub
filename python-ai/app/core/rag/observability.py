@@ -22,6 +22,7 @@ class RetrievalTrace:
     top_k: int
     routes: List[Dict[str, Any]] = field(default_factory=list)
     results: List[Dict[str, Any]] = field(default_factory=list)
+    debug: Dict[str, Any] = field(default_factory=dict)
     rewrite_count: int = 1
     latency_ms: float = 0.0
     error: Optional[str] = None
