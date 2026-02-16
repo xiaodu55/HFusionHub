@@ -753,6 +753,7 @@ class QueryRouter:
                     "score": round(result.score, 6),
                     "content_preview": result.content[:500],
                     "graph": result.metadata.get("graph") if channel_type == ChannelType.GRAPH else None,
+                    "multimodal": result.metadata.get("multimodal"),
                 }
                 for rank, result in enumerate(results, start=1)
             ]

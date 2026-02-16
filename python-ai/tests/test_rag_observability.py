@@ -61,6 +61,20 @@ class FakeRetriever:
         )
 
 
+class FakeMultimodalRetriever:
+    async def retrieve(self, query, **kwargs):
+        return RetrievalResult(
+            query=query,
+            results=[ProcessedResult(
+                content="[Image OCR] revenue 42",
+                score=0.9,
+                document_id="doc-visual",
+                source="vector",
+                metadata={"multimodal": {"kind": "image_ocr", "page_number": 1}},
+            )],
+        )
+
+
 @pytest.mark.asyncio
 async def test_retriever_records_route_and_result_trace():
     reset_trace_store()
@@ -108,6 +122,20 @@ async def test_retrieval_evaluator_calculates_rank_metrics():
     assert report["summary"]["recall_at_k"] == 1.0
     assert report["summary"]["mean_reciprocal_rank"] == 1.0
     assert report["summary"]["graph_hit_rate"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_retrieval_evaluator_records_multimodal_hits():
+    evaluator = RetrievalEvaluator(FakeMultimodalRetriever())
+
+    report = await evaluator.evaluate(
+        cases=[EvaluationCase(query="What is in the diagram?", expected_document_ids=["doc-visual"])],
+        knowledge_base_id=1,
+        top_k=3,
+    )
+
+    assert report["summary"]["multimodal_hit_rate"] == 1.0
+    assert report["cases"][0]["multimodal_hit"] is True
 
 
 def test_trace_api_exposes_trace_and_stats():

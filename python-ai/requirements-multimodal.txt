@@ -1,0 +1,4 @@
+# P8 optional multimodal evidence extraction.
+# Install only when RAG_MULTIMODAL_ENABLED and RAG_MULTIMODAL_OCR_ENABLED are enabled.
+# Tesseract itself is a separately installed executable; see evaluation/README.md.
+pypdf>=5.0.0

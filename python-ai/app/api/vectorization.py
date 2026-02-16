@@ -25,6 +25,7 @@ from app.models.document import (
 from app.core.parser.base import BaseParser
 from app.core.chunker.text_chunker import chunk_blocks
 from app.core.chunker.quality import assess_chunk_quality
+from app.core.parser.multimodal_evidence import MultimodalEvidenceExtractor
 from app.core.embedding import get_embedding_service
 from app.core.exceptions import (
     ParsingException,
@@ -127,6 +128,7 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
         "error": None,
         "index_version": request.index_version,
         "chunk_quality": None,
+        "multimodal": None,
     }
 
     # Move heavy processing to background task (use resolved path)
@@ -165,6 +167,7 @@ async def get_task_status(document_id: str):
         "error": status["error"],
         "index_version": status.get("index_version"),
         "chunk_quality": status.get("chunk_quality"),
+        "multimodal": status.get("multimodal"),
     }
 
 
@@ -185,6 +188,7 @@ async def _process_document_background(
         chunks_count: int = 0,
         error: str = None,
         chunk_quality: Optional[Dict[str, Any]] = None,
+        multimodal: Optional[Dict[str, Any]] = None,
     ):
         """Update task status in the store"""
         _task_status_store[document_id] = {
@@ -196,6 +200,7 @@ async def _process_document_background(
             "error": error,
             "index_version": index_version,
             "chunk_quality": chunk_quality if chunk_quality is not None else _task_status_store.get(document_id, {}).get("chunk_quality"),
+            "multimodal": multimodal if multimodal is not None else _task_status_store.get(document_id, {}).get("multimodal"),
         }
 
     try:
@@ -209,8 +214,24 @@ async def _process_document_background(
 
         parser = BaseParser.get_parser(file_type)
         blocks = parser.parse(file_path)
+        extractor = MultimodalEvidenceExtractor(
+            enabled=config.RAG_MULTIMODAL_ENABLED,
+            ocr_enabled=config.RAG_MULTIMODAL_OCR_ENABLED,
+            ocr_command=config.RAG_MULTIMODAL_OCR_COMMAND,
+            ocr_language=config.RAG_MULTIMODAL_OCR_LANGUAGE,
+            max_images_per_document=config.RAG_MULTIMODAL_MAX_IMAGES_PER_DOCUMENT,
+            max_image_bytes=config.RAG_MULTIMODAL_MAX_IMAGE_BYTES,
+            max_ocr_characters=config.RAG_MULTIMODAL_MAX_OCR_CHARACTERS,
+            ocr_timeout_seconds=config.RAG_MULTIMODAL_OCR_TIMEOUT_SECONDS,
+        )
+        blocks, multimodal_report = extractor.enrich(file_path, file_type, blocks)
+        multimodal = multimodal_report.to_dict()
         logger.info(f"[Vectorization] Parsed {len(blocks)} blocks")
-        _update_status("PROCESSING", f"Parsed {len(blocks)} blocks, chunking...")
+        _update_status(
+            "PROCESSING",
+            f"Parsed {len(blocks)} blocks, chunking...",
+            multimodal=multimodal,
+        )
 
         # Step 2: Chunk blocks
         chunks = chunk_blocks(blocks, document_id)
@@ -225,6 +246,7 @@ async def _process_document_background(
             "PROCESSING",
             f"Created {len(chunks)} chunks, generating embeddings...{quality_suffix}",
             chunk_quality=quality,
+            multimodal=multimodal,
         )
 
         # Step 3: Create/update Milvus collection
@@ -283,6 +305,7 @@ async def _process_document_background(
             f"Successfully processed {len(chunks)} chunks",
             chunks_count=len(chunks),
             chunk_quality=quality,
+            multimodal=multimodal,
         )
         logger.info(f"[Vectorization] Completed: {len(chunks)} chunks stored")
 

@@ -29,6 +29,7 @@ class EvaluationCaseResult:
     recall_at_k: float
     reciprocal_rank: float
     graph_hit: bool = False
+    multimodal_hit: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -68,6 +69,11 @@ class RetrievalEvaluator:
                 )
                 for item in retrieval.results
             )
+            multimodal_hit = any(
+                str(item.document_id) in expected_ids
+                and bool((item.metadata.get("multimodal") or {}).get("kind"))
+                for item in retrieval.results
+            )
             first_rank = next(
                 (index + 1 for index, item in enumerate(retrieved_ids) if item in expected_ids),
                 None,
@@ -81,6 +87,7 @@ class RetrievalEvaluator:
                 recall_at_k=round(len(set(matched_ids)) / max(len(expected_ids), 1), 4),
                 reciprocal_rank=round(1 / first_rank, 4) if first_rank else 0.0,
                 graph_hit=graph_hit,
+                multimodal_hit=multimodal_hit,
             ))
 
         count = len(results)
@@ -92,6 +99,7 @@ class RetrievalEvaluator:
                 "recall_at_k": round(sum(item.recall_at_k for item in results) / count, 4),
                 "mean_reciprocal_rank": round(sum(item.reciprocal_rank for item in results) / count, 4),
                 "graph_hit_rate": round(sum(item.graph_hit for item in results) / count, 4),
+                "multimodal_hit_rate": round(sum(item.multimodal_hit for item in results) / count, 4),
             },
             "cases": [item.to_dict() for item in results],
         }

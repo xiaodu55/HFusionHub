@@ -41,3 +41,28 @@ base first, then compare the existing metrics and `graph_hit_rate` from the
 evaluation response.  A graph candidate is eligible only if its source chunk
 still exists in the selected KB; missing, stale, or malformed graph data is
 discarded rather than falling back to a global graph.
+
+## P8 multimodal evidence guardrails
+
+P8 uses the normal scoped chunk index rather than a global image index.  Native
+DOCX/Markdown tables and optional OCR output are stored as regular chunks with
+source metadata (`kind`, image hash, DOCX part or PDF page).  This keeps the
+current citation, knowledge-base scope, deletion and debug trace guarantees.
+
+It is disabled by default.  To benchmark it, install the optional Python
+package and a local Tesseract executable, then configure the OCR language and
+enable both flags before re-indexing representative documents:
+
+```bash
+pip install -r requirements-multimodal.txt
+# Windows: set RAG_MULTIMODAL_OCR_COMMAND to the full tesseract.exe path if it is not on PATH
+RAG_MULTIMODAL_ENABLED=true
+RAG_MULTIMODAL_OCR_ENABLED=true
+RAG_MULTIMODAL_OCR_LANGUAGE=eng
+```
+
+The implementation hard-limits images per document, image byte size, OCR
+output and per-image execution time.  A missing `pypdf`, a missing OCR engine,
+a corrupted image or OCR timeout only skips that enrichment; the source text
+and tables continue indexing.  Compare P8's `multimodal_hit_rate` with the
+existing Recall@k and MRR before keeping it enabled.

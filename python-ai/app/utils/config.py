@@ -81,5 +81,26 @@ class Config:
     RAG_RERANKER_MODEL = os.getenv("RAG_RERANKER_MODEL", "BAAI/bge-reranker-base")
     RAG_RERANK_CANDIDATE_COUNT = int(os.getenv("RAG_RERANK_CANDIDATE_COUNT", "20"))
 
+    # P8 multimodal evidence is opt-in.  OCR output is converted to regular
+    # source-backed chunks, therefore it retains all existing KB scope,
+    # citation, deletion and trace behaviour.  A missing binary or optional
+    # package only skips enrichment; text/table indexing still completes.
+    RAG_MULTIMODAL_ENABLED = os.getenv("RAG_MULTIMODAL_ENABLED", "false").lower() == "true"
+    RAG_MULTIMODAL_OCR_ENABLED = os.getenv("RAG_MULTIMODAL_OCR_ENABLED", "false").lower() == "true"
+    RAG_MULTIMODAL_OCR_COMMAND = os.getenv("RAG_MULTIMODAL_OCR_COMMAND", "tesseract")
+    RAG_MULTIMODAL_OCR_LANGUAGE = os.getenv("RAG_MULTIMODAL_OCR_LANGUAGE", "eng")
+    RAG_MULTIMODAL_MAX_IMAGES_PER_DOCUMENT = int(
+        os.getenv("RAG_MULTIMODAL_MAX_IMAGES_PER_DOCUMENT", "20")
+    )
+    RAG_MULTIMODAL_MAX_IMAGE_BYTES = int(
+        os.getenv("RAG_MULTIMODAL_MAX_IMAGE_BYTES", str(10 * 1024 * 1024))
+    )
+    RAG_MULTIMODAL_MAX_OCR_CHARACTERS = int(
+        os.getenv("RAG_MULTIMODAL_MAX_OCR_CHARACTERS", "3000")
+    )
+    RAG_MULTIMODAL_OCR_TIMEOUT_SECONDS = int(
+        os.getenv("RAG_MULTIMODAL_OCR_TIMEOUT_SECONDS", "20")
+    )
+
 
 config = Config()
