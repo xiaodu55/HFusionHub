@@ -28,6 +28,8 @@ class AgentResponse:
     intent: Optional[Dict[str, Any]] = None  # 意图分类结果
     decomposition: Optional[Dict[str, Any]] = None  # 问题分解结果
     auto_detected_kb_id: Optional[int] = None  # 自动检测的知识库 ID
+    agent_run_id: Optional[str] = None  # P9 workflow run ID (no prompt content)
+    agent_status: Optional[str] = None  # completed / insufficient_evidence / failed
 
 
 class Agent(ABC):

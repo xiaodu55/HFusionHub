@@ -11,7 +11,7 @@ import asyncio
 import logging
 from uuid import uuid4
 
-from app.core.agent import get_agent
+from app.core.agent import get_agent, get_agent_run_store
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -53,6 +53,8 @@ class ChatResponse(BaseModel):
     steps: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Agent steps")
     sources: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Knowledge sources used in response")
     auto_detected_kb_id: Optional[int] = Field(None, description="Auto-detected knowledge base ID if none was selected")
+    agent_run_id: Optional[str] = Field(None, description="P9 bounded agent workflow run ID")
+    agent_status: Optional[str] = Field(None, description="P9 bounded agent workflow status")
 
 
 @router.post("/api/chat")
@@ -125,7 +127,9 @@ async def chat(request: ChatRequest):
                     for step in response.steps
                 ],
                 sources=response.sources,
-                auto_detected_kb_id=response.auto_detected_kb_id
+                auto_detected_kb_id=response.auto_detected_kb_id,
+                agent_run_id=response.agent_run_id,
+                agent_status=response.agent_status,
             )
 
     except Exception as e:
@@ -205,6 +209,20 @@ async def chat_stream(request: ChatRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat stream error: {str(e)}")
+
+
+@router.get("/api/chat/agent-runs")
+async def list_agent_runs(limit: int = 50, knowledge_base_id: Optional[int] = None):
+    """Operational metadata only; prompts and retrieved text are never stored."""
+    return {"items": get_agent_run_store().list(limit=limit, knowledge_base_id=knowledge_base_id)}
+
+
+@router.get("/api/chat/agent-runs/{run_id}")
+async def get_agent_run(run_id: str):
+    run = get_agent_run_store().get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    return run
 
 
 @router.get("/api/chat/health")

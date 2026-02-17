@@ -102,5 +102,21 @@ class Config:
         os.getenv("RAG_MULTIMODAL_OCR_TIMEOUT_SECONDS", "20")
     )
 
+    # P9 is an explicit rollout switch for the bounded single-agent runtime.
+    # It wraps the existing read-only React agent; it does not add write tools.
+    RAG_AGENT_WORKFLOW_ENABLED = os.getenv("RAG_AGENT_WORKFLOW_ENABLED", "false").lower() == "true"
+    RAG_AGENT_TIMEOUT_SECONDS = float(os.getenv("RAG_AGENT_TIMEOUT_SECONDS", "45"))
+    RAG_AGENT_MAX_RETRIES = int(os.getenv("RAG_AGENT_MAX_RETRIES", "1"))
+    RAG_AGENT_RETRY_DELAY_SECONDS = float(os.getenv("RAG_AGENT_RETRY_DELAY_SECONDS", "0.2"))
+    RAG_AGENT_MAX_STEPS = int(os.getenv("RAG_AGENT_MAX_STEPS", "5"))
+    RAG_AGENT_TOOL_TIMEOUT_SECONDS = float(os.getenv("RAG_AGENT_TOOL_TIMEOUT_SECONDS", "10"))
+    RAG_AGENT_MAX_SEARCH_RESULTS = int(os.getenv("RAG_AGENT_MAX_SEARCH_RESULTS", "5"))
+    RAG_AGENT_ALLOWED_TOOLS = tuple(
+        item.strip() for item in os.getenv(
+            "RAG_AGENT_ALLOWED_TOOLS",
+            "search_knowledge_base,get_current_time,calculate",
+        ).split(",") if item.strip()
+    )
+
 
 config = Config()

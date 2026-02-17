@@ -2,15 +2,60 @@
 Tools Module - Tool definitions and execution
 """
 
-from typing import List, Dict, Any, Optional
+from dataclasses import dataclass
+from typing import List, Dict, Any, Optional, Set
 import json
+import asyncio
 
 from .search_tool import SearchTool
 from .time_tool import TimeTool
 from .calculator_tool import CalculatorTool
 
 
-__all__ = ['get_tools', 'execute_tool', 'SearchTool', 'TimeTool', 'CalculatorTool']
+__all__ = ['get_tools', 'execute_tool', 'ToolExecutionPolicy', 'SearchTool', 'TimeTool', 'CalculatorTool']
+
+
+class ToolPolicyError(ValueError):
+    """A tool call did not satisfy the single-agent safety policy."""
+
+
+@dataclass(frozen=True)
+class ToolExecutionPolicy:
+    """Allow only bounded, read-only tools and normalise their inputs."""
+
+    allowed_names: Set[str]
+    knowledge_base_id: Optional[int] = None
+    timeout_seconds: float = 10.0
+    max_search_results: int = 5
+    max_input_characters: int = 512
+
+    def normalize(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+        if tool_name not in self.allowed_names:
+            raise ToolPolicyError(f"tool_not_allowed:{tool_name}")
+        if not isinstance(tool_input, dict):
+            raise ToolPolicyError("invalid_tool_input")
+        normalized = dict(tool_input)
+        if tool_name == "search_knowledge_base":
+            if not self.knowledge_base_id:
+                raise ToolPolicyError("knowledge_base_required")
+            normalized.pop("knowledge_base_id", None)
+            query = str(normalized.get("query", "")).strip()
+            if not query or len(query) > self.max_input_characters:
+                raise ToolPolicyError("invalid_search_query")
+            try:
+                requested_top_k = int(normalized.get("top_k", self.max_search_results))
+            except (TypeError, ValueError) as error:
+                raise ToolPolicyError("invalid_top_k") from error
+            normalized["query"] = query
+            normalized["top_k"] = max(1, min(requested_top_k, self.max_search_results))
+        elif tool_name == "calculate":
+            expression = str(normalized.get("expression", ""))
+            if not expression or len(expression) > self.max_input_characters:
+                raise ToolPolicyError("invalid_expression")
+            normalized["expression"] = expression
+        elif normalized:
+            raise ToolPolicyError("unexpected_tool_arguments")
+        return normalized
 
 
 def get_tools(
@@ -68,7 +113,8 @@ def get_tools(
 async def execute_tool(
     tool_name: str,
     tool_input: Dict[str, Any],
-    tools: List[Dict[str, Any]]
+    tools: List[Dict[str, Any]],
+    policy: Optional[ToolExecutionPolicy] = None,
 ) -> str:
     """
     Execute a tool
@@ -81,6 +127,11 @@ async def execute_tool(
     Returns:
         Tool execution result as string
     """
+    try:
+        safe_input = policy.normalize(tool_name, tool_input) if policy else tool_input
+    except ToolPolicyError as error:
+        return f"错误：工具调用被安全策略拒绝（{error}）"
+
     # Find the tool
     tool_instance = None
     for tool in tools:
@@ -93,7 +144,13 @@ async def execute_tool(
 
     try:
         # Execute the tool
-        result = await tool_instance.execute(**tool_input)
+        if policy:
+            result = await asyncio.wait_for(
+                tool_instance.execute(**safe_input),
+                timeout=max(0.1, policy.timeout_seconds),
+            )
+        else:
+            result = await tool_instance.execute(**safe_input)
 
         # Convert result to string if needed
         if isinstance(result, dict):
@@ -103,5 +160,7 @@ async def execute_tool(
         else:
             return str(result)
 
+    except asyncio.TimeoutError:
+        return "工具执行错误：工具调用超时"
     except Exception as e:
         return f"工具执行错误：{str(e)}"

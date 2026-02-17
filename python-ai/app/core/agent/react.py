@@ -13,7 +13,7 @@ from typing import List, Dict, Any, Optional, AsyncGenerator
 
 from .agent import Agent, AgentResponse, AgentStep
 from ..llm import get_llm, ChatMessage, BaseLLM
-from ..tools import get_tools, execute_tool
+from ..tools import get_tools, execute_tool, ToolExecutionPolicy
 from ..rag import (
     get_retriever,
     get_intent_classifier,
@@ -71,11 +71,13 @@ class ReactAgent(Agent):
         knowledge_base_id: int = None,
         model: str = None,
         max_steps: int = 5,
+        tool_policy: Optional[ToolExecutionPolicy] = None,
         **kwargs
     ):
         self.knowledge_base_id = knowledge_base_id
         self.model = model
         self.max_steps = max_steps
+        self.tool_policy = tool_policy
         self.llm: BaseLLM = None
         self.tools: List[Dict[str, Any]] = []
 
@@ -214,7 +216,7 @@ class ReactAgent(Agent):
 
             if action_result:
                 action, action_input = action_result
-                observation = await execute_tool(action, action_input, tools)
+                observation = await execute_tool(action, action_input, tools, policy=self.tool_policy)
 
                 thought_match = re.search(r'Thought:\s*(.+?)(?:\n|$)', assistant_text)
                 thought = thought_match.group(1).strip() if thought_match else ""
@@ -648,7 +650,7 @@ class ReactAgent(Agent):
                 action, action_input = action_result
 
                 # Execute tool
-                observation = await execute_tool(action, action_input, tools)
+                observation = await execute_tool(action, action_input, tools, policy=self.tool_policy)
 
                 # Collect sources from search results
                 if action == "search_knowledge_base" and isinstance(observation, list):
@@ -968,6 +970,11 @@ class ReactAgent(Agent):
 
         except Exception as e:
             logger.error(f"[RAG] run_stream failed: {e}", exc_info=True)
+            if self._has_selected_knowledge_base():
+                # A scoped RAG failure must not silently turn into an
+                # ungrounded model answer.
+                yield NO_SUFFICIENT_EVIDENCE_REPLY
+                return
             # 降级：直接用 LLM 回答
             try:
                 llm = get_llm()
