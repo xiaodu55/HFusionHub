@@ -5,6 +5,7 @@ Agent Core Module - ReAct Loop Implementation
 from .agent import Agent, AgentResponse
 from .react import ReactAgent
 from .workflow_runtime import SingleAgentWorkflow, get_agent_run_store
+from .multi_agent_runtime import BoundedMultiAgentWorkflow
 from ..tools import ToolExecutionPolicy
 from app.utils.config import config
 from .collaboration import (
@@ -18,7 +19,7 @@ from .collaboration import (
 )
 
 __all__ = [
-    'Agent', 'AgentResponse', 'ReactAgent', 'SingleAgentWorkflow', 'get_agent', 'get_agent_run_store',
+    'Agent', 'AgentResponse', 'ReactAgent', 'SingleAgentWorkflow', 'BoundedMultiAgentWorkflow', 'get_agent', 'get_agent_run_store',
     'ExpertRole', 'CollaborationTask', 'ExpertContribution',
     'CollaborationResult', 'ExpertAgent', 'CallableExpertAgent',
     'MultiAgentCoordinator',
@@ -57,10 +58,17 @@ def get_agent(
     )
     if not config.RAG_AGENT_WORKFLOW_ENABLED:
         return agent
-    return SingleAgentWorkflow(
+    bounded_agent = SingleAgentWorkflow(
         delegate=agent,
         knowledge_base_id=knowledge_base_id,
         timeout_seconds=config.RAG_AGENT_TIMEOUT_SECONDS,
         max_retries=config.RAG_AGENT_MAX_RETRIES,
         retry_delay_seconds=config.RAG_AGENT_RETRY_DELAY_SECONDS,
+    )
+    if not (config.RAG_MULTI_AGENT_ENABLED and knowledge_base_id and knowledge_base_id > 0):
+        return bounded_agent
+    return BoundedMultiAgentWorkflow(
+        delegate=bounded_agent,
+        knowledge_base_id=knowledge_base_id,
+        timeout_seconds=config.RAG_MULTI_AGENT_TIMEOUT_SECONDS,
     )

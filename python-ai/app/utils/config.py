@@ -118,5 +118,13 @@ class Config:
         ).split(",") if item.strip()
     )
 
+    # P10 collaboration remains disabled unless P9 is already enabled.  It is
+    # an evidence-review wrapper around the bounded, read-only workflow, not a
+    # route to autonomous or cross-knowledge-base tool calls.
+    RAG_MULTI_AGENT_ENABLED = os.getenv("RAG_MULTI_AGENT_ENABLED", "false").lower() == "true"
+    RAG_MULTI_AGENT_TIMEOUT_SECONDS = float(
+        os.getenv("RAG_MULTI_AGENT_TIMEOUT_SECONDS", "60")
+    )
+
 
 config = Config()
