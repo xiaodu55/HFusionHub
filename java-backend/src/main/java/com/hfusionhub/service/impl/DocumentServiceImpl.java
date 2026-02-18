@@ -423,7 +423,6 @@ public class DocumentServiceImpl implements DocumentService {
                 .knowledgeBaseId(document.getKnowledgeBaseId())
                 .knowledgeBaseName(knowledgeBaseName)
                 .title(document.getTitle())
-                .filePath(document.getFilePath())
                 .fileType(document.getFileType())
                 .fileSize(document.getFileSize())
                 .chunkCount(document.getChunkCount())

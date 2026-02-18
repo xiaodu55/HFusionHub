@@ -455,6 +455,10 @@ async def _notify_callback_async(
     callback_secret: str = None
 ):
     """Notify Java backend about processing completion (async, non-blocking)"""
+    import hmac
+    import hashlib
+    import base64
+
     try:
         # Convert to Java backend expected format
         status = "COMPLETED" if success else "FAILED"
@@ -467,12 +471,24 @@ async def _notify_callback_async(
             "chunks": chunks or [],
         }
 
+        # Serialize payload to JSON for HMAC signing
+        payload_json = json.dumps(payload, ensure_ascii=False)
+
         headers = {"Content-Type": "application/json"}
         if callback_secret:
             headers["X-Callback-Secret"] = callback_secret
+            # Compute HMAC-SHA256 signature over the raw JSON body
+            signature = base64.b64encode(
+                hmac.new(
+                    callback_secret.encode("utf-8"),
+                    payload_json.encode("utf-8"),
+                    hashlib.sha256,
+                ).digest()
+            ).decode("ascii")
+            headers["X-Callback-Signature"] = signature
 
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(callback_url, json=payload, headers=headers)
+            response = await client.post(callback_url, content=payload_json, headers=headers)
 
         if response.status_code >= 400:
             logger.warning(f"[Callback] Warning: {callback_url} returned {response.status_code}")

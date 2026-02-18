@@ -1,5 +1,6 @@
 package com.hfusionhub.controller;
 
+import cn.dev33.satoken.annotation.SaCheckRole;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.dto.UserInfoDTO;
 import com.hfusionhub.dto.UserLoginDTO;
@@ -94,6 +95,7 @@ public class UserController {
      * @param userId 用户ID
      * @return 用户信息
      */
+    @SaCheckRole("admin")
     @GetMapping("/{userId}")
     @Operation(summary = "根据ID获取用户信息", description = "根据用户ID获取用户信息（管理员接口）")
     public R<UserInfoDTO> getUserById(@PathVariable Long userId) {

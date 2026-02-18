@@ -1,5 +1,6 @@
 package com.hfusionhub.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.dto.DocumentIndexCallbackDTO;
 import com.hfusionhub.service.VectorizationService;
@@ -11,7 +12,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +35,7 @@ import java.util.Map;
 public class VectorizationController {
 
     private final VectorizationService vectorizationService;
+    private final ObjectMapper objectMapper;
 
     @Value("${python-ai.callback-secret:}")
     private String callbackSecret;
@@ -86,15 +93,56 @@ public class VectorizationController {
     @PostMapping("/{documentId}/callback")
     public R<String> updateStatus(
             @Parameter(description = "文档ID") @PathVariable Long documentId,
-            @RequestBody DocumentIndexCallbackDTO body,
-            @RequestHeader(value = "X-Callback-Secret", required = false) String secret) {
-        // 验证回调密钥
-        if (callbackSecret == null || callbackSecret.isBlank() || !callbackSecret.equals(secret)) {
+            @RequestBody String rawBody,
+            @RequestHeader(value = "X-Callback-Secret", required = false) String secret,
+            @RequestHeader(value = "X-Callback-Signature", required = false) String signature) {
+        // 1. 验证回调密钥（常量时间比较）
+        if (callbackSecret == null || callbackSecret.isBlank()
+                || secret == null
+                || !MessageDigest.isEqual(
+                       callbackSecret.getBytes(StandardCharsets.UTF_8),
+                       secret.getBytes(StandardCharsets.UTF_8))) {
             log.warn("回调密钥验证失败: documentId={}", documentId);
             return R.fail("回调密钥无效");
         }
-        vectorizationService.updateDocumentStatus(documentId, body);
-        return R.ok("状态已更新");
+
+        // 2. 验证 HMAC-SHA256 签名
+        if (!verifyHmacSignature(rawBody, callbackSecret, signature)) {
+            log.warn("回调签名验证失败: documentId={}", documentId);
+            return R.fail("回调签名无效");
+        }
+
+        // 3. 反序列化并处理
+        try {
+            DocumentIndexCallbackDTO body = objectMapper.readValue(rawBody, DocumentIndexCallbackDTO.class);
+            vectorizationService.updateDocumentStatus(documentId, body);
+            return R.ok("状态已更新");
+        } catch (Exception e) {
+            log.error("回调请求体反序列化失败: documentId={}", documentId, e);
+            return R.fail("回调请求体格式错误");
+        }
+    }
+
+    /**
+     * 验证 HMAC-SHA256 签名
+     */
+    private boolean verifyHmacSignature(String payload, String secret, String signature) {
+        if (signature == null || signature.isBlank()) {
+            return false;
+        }
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            SecretKeySpec keySpec = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+            mac.init(keySpec);
+            byte[] computed = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
+            String expected = Base64.getEncoder().encodeToString(computed);
+            return MessageDigest.isEqual(
+                    expected.getBytes(StandardCharsets.UTF_8),
+                    signature.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            log.error("HMAC 签名验证失败", e);
+            return false;
+        }
     }
 
     @Operation(summary = "同步文档状态 - 从Python引擎查询实际分块数更新状态")

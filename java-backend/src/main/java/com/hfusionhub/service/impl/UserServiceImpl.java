@@ -2,6 +2,7 @@ package com.hfusionhub.service.impl;
 
 import cn.hutool.crypto.digest.BCrypt;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
@@ -179,13 +180,18 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
-     * 根据用户ID获取用户信息
+     * 根据用户ID获取用户信息（管理员或本人）
      *
      * @param userId 用户ID
      * @return 用户信息
      */
     @Override
     public UserInfoDTO getUserById(Long userId) {
+        // 权限校验：管理员可查看任意用户，普通用户只能查看自己
+        Long currentUserId = JwtUtils.getCurrentUserId();
+        if (!JwtUtils.hasRole(CommonConstants.ROLE_ADMIN) && !currentUserId.equals(userId)) {
+            throw new BusinessException(StatusCode.FORBIDDEN, "无权查看其他用户信息");
+        }
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BusinessException(StatusCode.NOT_FOUND, "用户不存在");

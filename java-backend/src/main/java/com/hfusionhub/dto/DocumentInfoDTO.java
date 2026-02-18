@@ -28,9 +28,6 @@ public class DocumentInfoDTO {
     @Schema(description = "文档标题")
     private String title;
 
-    @Schema(description = "文件路径")
-    private String filePath;
-
     @Schema(description = "文件类型")
     private String fileType;
 

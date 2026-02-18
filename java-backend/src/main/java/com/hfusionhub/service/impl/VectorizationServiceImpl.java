@@ -9,6 +9,7 @@ import com.hfusionhub.dto.DocumentIndexCallbackDTO;
 import com.hfusionhub.entity.Document;
 import com.hfusionhub.entity.DocumentChunk;
 import com.hfusionhub.entity.DocumentIndexJob;
+import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.enums.DocumentStatus;
 import com.hfusionhub.mapper.DocumentChunkMapper;
 import com.hfusionhub.mapper.DocumentIndexJobMapper;
@@ -324,11 +325,29 @@ public class VectorizationServiceImpl implements VectorizationService {
 
     @Override
     public int syncAllDocuments() {
-        // 查询所有待处理或处理中的文档
+        // 要求登录
+        if (!JwtUtils.isLogin()) {
+            throw new BusinessException("未登录");
+        }
+        Long currentUserId = JwtUtils.getCurrentUserId();
+
+        // 查询当前用户所有知识库
+        LambdaQueryWrapper<KnowledgeBase> kbWrapper = new LambdaQueryWrapper<>();
+        kbWrapper.eq(KnowledgeBase::getUserId, currentUserId);
+        List<KnowledgeBase> userKbs = knowledgeBaseMapper.selectList(kbWrapper);
+
+        if (userKbs.isEmpty()) {
+            return 0;
+        }
+
+        List<Long> kbIds = userKbs.stream().map(KnowledgeBase::getId).collect(java.util.stream.Collectors.toList());
+
+        // 仅查询当前用户知识库下待处理或处理中的文档
         LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<>();
-        wrapper.in(Document::getStatus,
-                DocumentStatus.PENDING.getCode(),
-                DocumentStatus.PROCESSING.getCode());
+        wrapper.in(Document::getKnowledgeBaseId, kbIds)
+                .in(Document::getStatus,
+                        DocumentStatus.PENDING.getCode(),
+                        DocumentStatus.PROCESSING.getCode());
         List<Document> pendingDocs = documentMapper.selectList(wrapper);
 
         int updated = 0;
@@ -469,11 +488,10 @@ public class VectorizationServiceImpl implements VectorizationService {
     }
 
     private void assertDocumentOwnerWhenUserRequest(Document document) {
-        // Recovery jobs and authenticated worker callbacks execute without a
-        // user session.  Every browser path is protected by Sa-Token and is
-        // therefore additionally checked against the document's KB owner.
+        // 所有浏览器路径已由 Sa-Token 保护，回调路径通过 X-Callback-Secret 单独认证。
+        // 此处始终要求已登录并校验文档所有权。
         if (!JwtUtils.isLogin()) {
-            return;
+            throw new BusinessException("未登录");
         }
         var knowledgeBase = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
         if (knowledgeBase == null || !JwtUtils.getCurrentUserId().equals(knowledgeBase.getUserId())) {

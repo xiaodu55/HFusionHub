@@ -3,6 +3,8 @@ package com.hfusionhub.common.utils;
 import cn.dev33.satoken.stp.StpInterface;
 import cn.dev33.satoken.stp.StpUtil;
 import com.hfusionhub.common.constant.CommonConstants;
+import com.hfusionhub.entity.User;
+import com.hfusionhub.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -18,6 +20,8 @@ import java.util.List;
 @Component
 @RequiredArgsConstructor
 public class JwtUtils implements StpInterface {
+
+    private final UserMapper userMapper;
 
     /**
      * 返回一个账号所拥有的权限码集合
@@ -42,8 +46,16 @@ public class JwtUtils implements StpInterface {
      */
     @Override
     public List<String> getRoleList(Object loginId, String loginType) {
-        // 这里可以查询数据库获取用户角色
-        // 暂时返回普通用户角色
+        // 从数据库加载用户真实角色
+        try {
+            Long userId = Long.parseLong(loginId.toString());
+            User user = userMapper.selectById(userId);
+            if (user != null && user.getRole() != null) {
+                return List.of(user.getRole());
+            }
+        } catch (Exception e) {
+            log.warn("获取用户角色失败: loginId={}", loginId, e);
+        }
         return List.of(CommonConstants.ROLE_USER);
     }
 
