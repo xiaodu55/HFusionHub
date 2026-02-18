@@ -142,6 +142,7 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
         index_version=request.index_version,
         callback_url=request.callback_url,
         callback_secret=request.callback_secret,
+        embedding_model=request.embedding_model,
     )
 
     return ParseResponse(
@@ -180,6 +181,7 @@ async def _process_document_background(
     index_version: str = "",
     callback_url: str = None,
     callback_secret: str = None,
+    embedding_model: Optional[str] = None,
 ):
     """Background task to process document parsing, chunking, and vectorization"""
     def _update_status(
@@ -255,7 +257,7 @@ async def _process_document_background(
         # Step 4: Generate embeddings and store
         chunks_with_embeddings = []
         for i, chunk in enumerate(chunks):
-            embedding = await _generate_embedding(chunk.content)
+            embedding = await _generate_embedding(chunk.content, model=embedding_model)
             chunk_dict = chunk.to_dict()
             chunk_dict['embedding'] = embedding
             chunks_with_embeddings.append(chunk_dict)
@@ -309,11 +311,11 @@ async def _process_document_background(
         )
         logger.info(f"[Vectorization] Completed: {len(chunks)} chunks stored")
 
-    except Exception as e:
+    except EmbeddingException as e:
         import traceback
         error_detail = f"{str(e)}\n{traceback.format_exc()}"
-        logger.error(f"[Vectorization] Background task failed: {error_detail}")
-        _update_status("FAILED", f"Parsing failed: {str(e)}", error=str(e))
+        logger.error(f"[Vectorization] Embedding failed: {error_detail}")
+        _update_status("FAILED", f"向量嵌入失败: {str(e)}", error=str(e))
 
         # Notify failure
         if callback_url:
@@ -323,7 +325,28 @@ async def _process_document_background(
                     callback_secret=callback_secret,
                     document_id=document_id,
                     success=False,
-                    message=f"Parsing failed: {str(e)}",
+                    message=f"向量嵌入失败: {str(e)}",
+                    chunks_count=0,
+                    index_version=index_version,
+                )
+            except Exception as callback_error:
+                logger.error(f"[Vectorization] Callback also failed: {callback_error}")
+
+    except Exception as e:
+        import traceback
+        error_detail = f"{str(e)}\n{traceback.format_exc()}"
+        logger.error(f"[Vectorization] Background task failed: {error_detail}")
+        _update_status("FAILED", f"Processing failed: {str(e)}", error=str(e))
+
+        # Notify failure
+        if callback_url:
+            try:
+                await _notify_callback_async(
+                    callback_url=callback_url,
+                    callback_secret=callback_secret,
+                    document_id=document_id,
+                    success=False,
+                    message=f"Processing failed: {str(e)}",
                     chunks_count=0,
                     index_version=index_version,
                 )
@@ -435,13 +458,17 @@ async def remove_document_chunks(document_id: str):
     return {"success": True, "document_id": document_id}
 
 
-async def _generate_embedding(text: str) -> List[float]:
+async def _generate_embedding(text: str, model: Optional[str] = None) -> List[float]:
     """
     Generate embedding using multi-strategy service
-    Strategy: Ollama BGE-M3 -> DeepSeek API -> Random vectors
+    Strategy: Ollama BGE-M3 -> DeepSeek API
+
+    Args:
+        text: Input text
+        model: Embedding model name (e.g. "ollama", "deepseek")
     """
     service = get_embedding_service()
-    return await service.generate(text)
+    return await service.generate(text, model=model)
 
 
 async def _notify_callback_async(

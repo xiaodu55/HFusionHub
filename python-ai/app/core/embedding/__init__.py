@@ -10,6 +10,8 @@ from typing import List, Optional
 
 from app.core.embedding.deepseek import DeepSeekEmbedding
 from app.core.embedding.ollama import OllamaEmbedding
+from app.core.exceptions import EmbeddingException
+from app.utils.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +53,20 @@ class EmbeddingService:
             dimension=dimension
         )
 
-    async def generate(self, text: str) -> List[float]:
+    async def generate(self, text: str, model: str = None) -> List[float]:
         """
         生成单个文本的 Embedding
-        策略: Ollama -> DeepSeek -> 随机向量
+        策略: Ollama -> DeepSeek -> (测试环境) 随机向量
 
         Args:
             text: 输入文本
+            model: 指定使用的模型 (ollama/deepseek)，None 则按默认策略
 
         Returns:
             Embedding 向量
+
+        Raises:
+            EmbeddingException: 所有嵌入服务均不可用
         """
         # 1. 尝试 Ollama BGE-M3
         if self._ollama.is_available:
@@ -80,11 +86,15 @@ class EmbeddingService:
             logger.info("DeepSeek embedding successful")
             return embedding
         except Exception as e:
-            logger.warning(f"DeepSeek failed: {e}, using random vectors...")
+            logger.warning(f"DeepSeek failed: {e}")
 
-        # 3. 降级为随机向量
-        logger.warning("Using random vectors as fallback")
-        return self._generate_random_vector()
+        # 3. 仅在测试配置下允许随机向量降级
+        if config.EMBEDDING_ALLOW_FALLBACK:
+            logger.warning("Using random vectors as fallback (test mode)")
+            return self._generate_random_vector()
+
+        logger.error("All embedding providers failed, no fallback available")
+        raise EmbeddingException("无法生成向量嵌入：所有嵌入服务均不可用")
 
     def get_embedding(self, text: str) -> List[float]:
         """
@@ -141,6 +151,9 @@ class EmbeddingService:
 
         Returns:
             Embedding 向量列表
+
+        Raises:
+            EmbeddingException: 所有嵌入服务均不可用
         """
         # 1. 尝试 Ollama BGE-M3
         if self._ollama.is_available:
@@ -160,11 +173,15 @@ class EmbeddingService:
             logger.info("DeepSeek batch embedding successful")
             return embeddings
         except Exception as e:
-            logger.warning(f"DeepSeek batch failed: {e}, using random vectors...")
+            logger.warning(f"DeepSeek batch failed: {e}")
 
-        # 3. 降级为随机向量
-        logger.warning("Using random vectors as fallback")
-        return [self._generate_random_vector() for _ in texts]
+        # 3. 仅在测试配置下允许随机向量降级
+        if config.EMBEDDING_ALLOW_FALLBACK:
+            logger.warning("Using random vectors as fallback (test mode)")
+            return [self._generate_random_vector() for _ in texts]
+
+        logger.error("All embedding providers failed, no fallback available")
+        raise EmbeddingException("无法生成向量嵌入：所有嵌入服务均不可用")
 
     def _generate_random_vector(self) -> List[float]:
         """生成随机归一化向量（作为最终降级方案）"""

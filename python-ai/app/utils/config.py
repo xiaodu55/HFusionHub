@@ -59,6 +59,9 @@ class Config:
     EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", "1024"))
     EMBEDDING_MAX_RETRIES = int(os.getenv("EMBEDDING_MAX_RETRIES", "3"))
     EMBEDDING_RETRY_DELAY = float(os.getenv("EMBEDDING_RETRY_DELAY", "1.0"))
+    # Allow random-vector fallback ONLY in test environments.  Production must
+    # fail-closed when every real embedding provider is unavailable.
+    EMBEDDING_ALLOW_FALLBACK = os.getenv("EMBEDDING_ALLOW_FALLBACK", "false").lower() == "true"
 
     # Hybrid retrieval configuration.  RRF combines ranks rather than the
     # incomparable raw scores returned by vector and keyword search.

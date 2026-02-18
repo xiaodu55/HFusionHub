@@ -48,7 +48,7 @@ public class RagObservabilityController {
     public R<Map> listTraces(
             @RequestParam(defaultValue = "50") int limit,
             @RequestParam(defaultValue = "0") int offset,
-            @RequestParam(required = false) Long knowledgeBaseId,
+            @RequestParam Long knowledgeBaseId,
             @RequestParam(defaultValue = "false") boolean errorOnly,
             @RequestParam(required = false) String query,
             @RequestParam(required = false) String source
@@ -63,7 +63,7 @@ public class RagObservabilityController {
         return R.ok(get(getTraceResourceBuilder("/api/rag/traces")
                 .queryParam("limit", limit)
                 .queryParam("offset", offset)
-                .queryParamIfPresent("knowledge_base_id", java.util.Optional.ofNullable(knowledgeBaseId))
+                .queryParam("knowledge_base_id", knowledgeBaseId)
                 .queryParam("error_only", errorOnly)
                 .queryParamIfPresent("query", java.util.Optional.ofNullable(query))
                 .queryParamIfPresent("source", java.util.Optional.ofNullable(source))
@@ -87,7 +87,7 @@ public class RagObservabilityController {
     @GetMapping("/traces/export")
     public R<Map> exportTraces(
             @RequestParam(defaultValue = "json") String format,
-            @RequestParam(required = false) Long knowledgeBaseId,
+            @RequestParam Long knowledgeBaseId,
             @RequestParam(defaultValue = "false") boolean errorOnly,
             @RequestParam(required = false) String query,
             @RequestParam(required = false) String source
@@ -98,7 +98,7 @@ public class RagObservabilityController {
         }
         return R.ok(get(getTraceResourceBuilder("/api/rag/traces/export")
                 .queryParam("format", format)
-                .queryParamIfPresent("knowledge_base_id", java.util.Optional.ofNullable(knowledgeBaseId))
+                .queryParam("knowledge_base_id", knowledgeBaseId)
                 .queryParam("error_only", errorOnly)
                 .queryParamIfPresent("query", java.util.Optional.ofNullable(query))
                 .queryParamIfPresent("source", java.util.Optional.ofNullable(source))
@@ -144,7 +144,7 @@ public class RagObservabilityController {
     @GetMapping("/evaluation-runs")
     public R<Map> listEvaluationRuns(
             @RequestParam(defaultValue = "50") int limit,
-            @RequestParam(required = false) Long knowledgeBaseId
+            @RequestParam Long knowledgeBaseId
     ) {
         requireOwnedKnowledgeBase(knowledgeBaseId);
         if (limit < 1 || limit > 200) {
@@ -152,7 +152,7 @@ public class RagObservabilityController {
         }
         return R.ok(get(getTraceResourceBuilder("/api/rag/evaluation-runs")
                 .queryParam("limit", limit)
-                .queryParamIfPresent("knowledge_base_id", java.util.Optional.ofNullable(knowledgeBaseId))
+                .queryParam("knowledge_base_id", knowledgeBaseId)
                 .toUriString()));
     }
 

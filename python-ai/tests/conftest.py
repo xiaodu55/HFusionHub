@@ -17,3 +17,4 @@ pytest_plugins = ['pytest_asyncio']
 from app.utils.config import config
 
 config.INTERNAL_API_TOKEN = "test-internal-token"
+config.EMBEDDING_ALLOW_FALLBACK = True

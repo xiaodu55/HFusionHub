@@ -106,7 +106,7 @@ class SingleAgentWorkflow(Agent):
     ):
         self.delegate = delegate
         self.knowledge_base_id = knowledge_base_id
-        self.timeout_seconds = max(1.0, timeout_seconds)
+        self.timeout_seconds = max(0.001, timeout_seconds)
         self.max_retries = max(0, max_retries)
         self.retry_delay_seconds = max(0.0, retry_delay_seconds)
         self.run_store = run_store or get_agent_run_store()

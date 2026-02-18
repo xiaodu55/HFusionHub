@@ -23,7 +23,7 @@ class EvaluationCaseRequest(BaseModel):
 
 
 class EvaluationRequest(BaseModel):
-    knowledge_base_id: Optional[int] = None
+    knowledge_base_id: int = Field(ge=1)
     top_k: int = Field(default=5, ge=1, le=20)
     label: Optional[str] = Field(default=None, max_length=120)
     cases: List[EvaluationCaseRequest] = Field(min_length=1, max_length=200)
@@ -43,7 +43,7 @@ class RetrievalDebugRequest(BaseModel):
 async def list_traces(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0, le=1000),
-    knowledge_base_id: Optional[int] = Query(default=None, ge=1),
+    knowledge_base_id: int = Query(ge=1),
     error_only: bool = Query(default=False),
     query: Optional[str] = Query(default=None, max_length=4000),
     source: Optional[str] = Query(default=None, max_length=64),
@@ -82,7 +82,7 @@ async def trace_stats(
 @router.get("/traces/export")
 async def export_traces(
     format: str = Query(default="json", pattern="^(json|csv)$"),
-    knowledge_base_id: Optional[int] = Query(default=None, ge=1),
+    knowledge_base_id: int = Query(ge=1),
     error_only: bool = Query(default=False),
     query: Optional[str] = Query(default=None, max_length=4000),
     source: Optional[str] = Query(default=None, max_length=64),
@@ -167,7 +167,7 @@ async def evaluate_retrieval(request: EvaluationRequest):
 @router.get("/evaluation-runs")
 async def list_evaluation_runs(
     limit: int = Query(default=50, ge=1, le=200),
-    knowledge_base_id: Optional[int] = Query(default=None, ge=1),
+    knowledge_base_id: int = Query(ge=1),
 ):
     """Return durable metric history and sanitized failed-case identifiers."""
     return {

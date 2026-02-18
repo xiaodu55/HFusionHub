@@ -80,16 +80,33 @@ def create_collection():
 
         # Check if collection exists
         if client.has_collection(COLLECTION_NAME):
-            # Verify schema has knowledge_base_id field
+            # Verify schema compatibility
             try:
                 schema = client.describe_collection(COLLECTION_NAME)
-                fields = [f.name for f in schema.get("fields", [])]
-                if "knowledge_base_id" not in fields:
-                    print(f"[Milvus] Schema incompatible, need to recreate collection")
-                    # Don't drop here - will be handled by caller if needed
-                    return client
+                field_map = {f.get("name"): f for f in schema.get("fields", [])}
+
+                # Check required fields exist
+                required_fields = {
+                    "chunk_id", "document_id", "knowledge_base_id",
+                    "content", "embedding",
+                }
+                missing = required_fields - set(field_map.keys())
+                if missing:
+                    print(f"[Milvus] Schema incompatible - missing fields: {missing}")
+                    print("[Milvus] Dropping and recreating collection...")
+                    client.drop_collection(COLLECTION_NAME)
+
+                # Check embedding dimension matches current config
+                embedding_field = field_map.get("embedding")
+                if embedding_field:
+                    params = embedding_field.get("params", {})
+                    dim = params.get("dim") or embedding_field.get("dim")
+                    if dim is not None and dim != app_config.EMBEDDING_DIMENSION:
+                        print(f"[Milvus] Dimension mismatch: collection has {dim}, config expects {app_config.EMBEDDING_DIMENSION}")
+                        print("[Milvus] Dropping and recreating collection...")
+                        client.drop_collection(COLLECTION_NAME)
                 else:
-                    return client
+                    return client  # Already valid
             except Exception as e:
                 print(f"[Milvus] Schema check failed: {e}, but keeping collection")
                 # Don't drop collection during normal operations
