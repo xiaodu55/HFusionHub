@@ -30,7 +30,9 @@ public class SaTokenConfig implements WebMvcConfigurer {
                     .notMatch(
                             "/user/login",
                             "/user/register",
-                            "/vectorize/**/callback",
+                            "/health",
+                            "/vectorize/*/callback",
+                            "/vectorize/**",
                             "/doc.html",
                             "/swagger-ui.html",
                             "/swagger-ui/**",

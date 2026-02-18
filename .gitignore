@@ -1,44 +1,44 @@
-# Compiled class file
+# --- Compiled / Build output ---
 *.class
-
-# Log file
-*.log
-
-# BlueJ files
-*.ctxt
-
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
-
-# Package Files #
 *.jar
 *.war
 *.nar
 *.ear
+target/
+
+# --- Package files (sources only, no binaries) ---
 *.zip
 *.tar.gz
 *.rar
 
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
+# --- Crash / Debug dumps ---
 hs_err_pid*
 replay_pid*
+*.hprof
+heapdump*.dump
+threaddump*.txt
 
-# Maven
-target/
-!.mvn/wrapper/maven-wrapper.jar
+# --- Logs ---
+*.log
+logs/
 
-# IDE
+# --- IDE / Editor ---
 .idea/
 *.iws
 *.iml
 *.ipr
+.vscode/settings.json
+*.swp
+*.swo
+*~
 
-# OS
+# --- OS junk ---
 .DS_Store
 Thumbs.db
 *.bat
+*.cmd
 
-# Python
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
@@ -48,32 +48,35 @@ env/
 venv/
 ENV/
 .venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+.coverage.*
+*.db
 
-# Node
+# --- Node ---
 node_modules/
 dist/
 .npm
 
-# Vue
+# --- Vue / Vite ---
 *.local
 
-# Docker
+# --- Docker ---
 docker-compose.override.yml
 
-# Uploads
+# --- Uploads ---
 uploads/
 
-# Logs
-*.log
-logs/
-
-# Claude
+# --- Claude ---
 .claude/
 
-# Documentation (local only)
+# --- Local documentation (not committed) ---
 docs/
 
-# Environment files (contain secrets)
+# --- Environment files (contain secrets) ---
 .env
 .env.local
 .env.*.local
@@ -82,13 +85,14 @@ java-backend/.env
 python-ai/.env
 milvus-docker/.env
 
-# Python AI uploads
+# --- Python AI generated data ---
 python-ai/uploads/
 python-ai/milvus_data.db/
 python-ai/milvus_data_test.db/
 python-ai/chunks_store.json
+python-ai/data/
 
-# Test/Debug files
+# --- Test / Debug files ---
 test_response.json
 *_response.json
 *.response.json
