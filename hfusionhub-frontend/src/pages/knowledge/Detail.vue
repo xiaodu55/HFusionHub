@@ -50,6 +50,9 @@ const uploadFile = ref<File | null>(null)
 const uploading = ref(false)
 const syncing = ref(false)
 
+const errorMessage = (error: unknown, fallback: string) =>
+  error instanceof Error && error.message ? `${fallback}：${error.message}` : fallback
+
 const loadKnowledgeBase = async () => {
   const id = Number(route.params.id)
   try {
@@ -66,13 +69,13 @@ const loadDocuments = async () => {
   const id = Number(route.params.id)
   try {
     const res = await documentApi.getMyDocumentsByKbId(id, {
-      pageNum: 1,
+      page: 1,
       pageSize: 100,
     })
     documents.value = res.data.records
   } catch (error) {
     console.error('加载文档失败:', error)
-    toast.error('加载文档失败')
+    toast.error(errorMessage(error, '加载文档失败'))
   } finally {
     loading.value = false
   }
@@ -105,7 +108,7 @@ const handleUpload = async () => {
     await loadDocuments()
   } catch (error) {
     console.error('上传文档失败:', error)
-    toast.error('上传文档失败')
+    toast.error(errorMessage(error, '上传文档失败'))
   } finally {
     uploading.value = false
   }

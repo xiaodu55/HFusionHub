@@ -29,7 +29,7 @@ export const getKnowledgeBase = (id: number): Promise<ApiResponse<KnowledgeBase>
 
 // 分页查询知识库列表
 export const getKnowledgeBaseList = (params: {
-  pageNum: number
+  page: number
   pageSize: number
   name?: string
 }): Promise<ApiResponse<PageResult<KnowledgeBase>>> => {
@@ -38,7 +38,7 @@ export const getKnowledgeBaseList = (params: {
 
 // 获取当前用户的知识库列表
 export const getMyKnowledgeBaseList = (params?: {
-  pageNum?: number
+  page?: number
   pageSize?: number
 }): Promise<ApiResponse<PageResult<KnowledgeBase>>> => {
   return get('/knowledge-base/my', params)

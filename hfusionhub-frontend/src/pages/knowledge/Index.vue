@@ -43,7 +43,7 @@ const loadKnowledgeBases = async () => {
   loading.value = true
   try {
     const res = await knowledgeBaseApi.getMyKnowledgeBaseList({
-      pageNum: 1,
+      page: 1,
       pageSize: 100,
     })
     knowledgeBases.value = res.data.records

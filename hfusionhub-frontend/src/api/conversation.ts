@@ -25,7 +25,7 @@ export const getConversation = (id: number): Promise<ApiResponse<Conversation>> 
 
 // 分页查询对话列表
 export const getConversationList = (params: {
-  pageNum: number
+  page: number
   pageSize: number
 }): Promise<ApiResponse<PageResult<Conversation>>> => {
   return get('/conversation/list', params)
@@ -33,7 +33,7 @@ export const getConversationList = (params: {
 
 // 获取当前用户的对话列表
 export const getMyConversations = (params?: {
-  pageNum?: number
+  page?: number
   pageSize?: number
 }): Promise<ApiResponse<PageResult<Conversation>>> => {
   return get('/conversation/my', params)

@@ -7,7 +7,7 @@ export interface ApiResponse<T = any> {
 
 // 分页查询参数
 export interface PageQuery {
-  pageNum: number
+  page: number
   pageSize: number
 }
 
@@ -15,9 +15,11 @@ export interface PageQuery {
 export interface PageResult<T> {
   records: T[]
   total: number
-  pageNum: number
+  page: number
   pageSize: number
-  pages: number
+  totalPages: number
+  hasPrevious: boolean
+  hasNext: boolean
 }
 
 // 用户相关类型

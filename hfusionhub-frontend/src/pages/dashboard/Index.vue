@@ -27,9 +27,9 @@ const quickActions = [
 const loadStats = async () => {
   try {
     const [kbRes, docRes, convRes] = await Promise.all([
-      knowledgeBaseApi.getMyKnowledgeBaseList({ pageNum: 1, pageSize: 1 }),
-      documentApi.getMyDocumentsByKbId(0, { pageNum: 1, pageSize: 1 }),
-      conversationApi.getMyConversations({ pageNum: 1, pageSize: 1 }),
+      knowledgeBaseApi.getMyKnowledgeBaseList({ page: 1, pageSize: 1 }),
+      documentApi.getMyDocumentsByKbId(0, { page: 1, pageSize: 1 }),
+      conversationApi.getMyConversations({ page: 1, pageSize: 1 }),
     ])
     stats.value[0].value = kbRes.data.total || 0
     stats.value[1].value = docRes.data.total || 0

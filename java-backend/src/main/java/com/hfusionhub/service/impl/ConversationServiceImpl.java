@@ -214,17 +214,30 @@ public class ConversationServiceImpl implements ConversationService {
         } catch (Exception e) {
             log.error("Failed to get AI response: {}", e.getMessage(), e);
 
-            // Fallback to mock response if AI service fails
+            // Keep the user-facing message actionable without exposing remote
+            // service responses, credentials, or stack traces.
             Message assistantMessage = new Message();
             assistantMessage.setConversationId(dto.getConversationId());
             assistantMessage.setRole("assistant");
-            assistantMessage.setContent("抱歉，AI服务暂时不可用。请稍后再试。");
+            assistantMessage.setContent(aiUnavailableMessage(e));
             assistantMessage.setModel("fallback");
             assistantMessage.setTokenCount(0);
             messageMapper.insert(assistantMessage);
 
             return convertToMessageInfoDTO(assistantMessage);
         }
+    }
+
+    private String aiUnavailableMessage(Exception error) {
+        String message = error.getMessage();
+        if (message != null && message.contains("PYTHON_AI_INTERNAL_TOKEN 未配置")) {
+            return "AI 服务尚未配置：请在启动 Java 后端和 Python AI 服务的两个终端中设置相同的 PYTHON_AI_INTERNAL_TOKEN，然后重启两个服务。";
+        }
+        if (error instanceof org.springframework.web.client.ResourceAccessException
+                || (message != null && message.contains("AI service is unavailable"))) {
+            return "AI 服务暂时不可用：Python AI 服务未启动或无法连接。请确认 http://localhost:9000/health 可访问后重试。";
+        }
+        return "抱歉，AI 服务暂时不可用。请稍后重试；若问题持续，请检查 Java 后端日志中的 AI 服务调用错误。";
     }
 
     /**
@@ -495,7 +508,7 @@ public class ConversationServiceImpl implements ConversationService {
         } catch (Exception e) {
             log.error("Failed to start streaming: {}", e.getMessage(), e);
             try {
-                String errorMessage = "抱歉，AI服务暂时不可用。请稍后再试。";
+                String errorMessage = aiUnavailableMessage(e);
                 emitter.send(SseEmitter.event().data(errorMessage));
                 emitter.send(SseEmitter.event().data("[DONE]"));
                 emitter.complete();

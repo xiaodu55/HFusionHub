@@ -367,15 +367,34 @@ public class VectorizationServiceImpl implements VectorizationService {
     @Override
     public String getTaskStatus(Long documentId) {
         try {
-            assertDocumentOwnerWhenUserRequest(requireDocument(documentId));
-            String url = pythonEngineUrl + "/api/task-status/" + documentId;
-            ResponseEntity<String> response = restTemplate.exchange(
-                    url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), String.class);
-            return response.getBody();
+            Document document = requireDocument(documentId);
+            assertDocumentOwnerWhenUserRequest(document);
+
+            // The Python worker's in-memory task store disappears whenever it
+            // restarts.  The UI must instead poll the durable job created by
+            // startVectorization(), otherwise an already-running index task
+            // is incorrectly displayed as NOT_FOUND or ERROR.
+            DocumentIndexJob job = documentIndexJobMapper.selectLatestByDocumentId(documentId);
+            Map<String, Object> response = new HashMap<>();
+            response.put("document_id", String.valueOf(documentId));
+            response.put("status", job == null ? statusName(document.getStatus()) : job.getStatus());
+            response.put("message", job == null
+                    ? "文档尚未开始索引"
+                    : (job.getErrorMessage() == null ? "索引任务状态已同步" : job.getErrorMessage()));
+            response.put("chunks_count", job == null
+                    ? (document.getChunkCount() == null ? 0 : document.getChunkCount())
+                    : job.getChunkCount());
+            response.put("index_version", job == null ? null : job.getIndexVersion());
+            return objectMapper.writeValueAsString(response);
         } catch (Exception e) {
             log.error("获取任务状态失败: {}", documentId, e);
             return "{\"status\":\"ERROR\",\"message\":\"任务状态暂不可用\"}";
         }
+    }
+
+    private String statusName(Integer statusCode) {
+        DocumentStatus status = DocumentStatus.fromCode(statusCode);
+        return status == null ? "PENDING" : status.name();
     }
 
     /**

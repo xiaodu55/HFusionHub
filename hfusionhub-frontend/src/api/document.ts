@@ -40,7 +40,7 @@ export const getDocumentContent = (id: number): Promise<ApiResponse<string>> => 
 
 // 分页查询文档列表
 export const getDocumentList = (params: {
-  pageNum: number
+  page: number
   pageSize: number
   name?: string
 }): Promise<ApiResponse<PageResult<Document>>> => {
@@ -49,7 +49,7 @@ export const getDocumentList = (params: {
 
 // 根据知识库ID获取文档列表
 export const getDocumentsByKbId = (kbId: number, params?: {
-  pageNum?: number
+  page?: number
   pageSize?: number
 }): Promise<ApiResponse<PageResult<Document>>> => {
   return get(`/document/list/${kbId}`, params)
@@ -57,7 +57,7 @@ export const getDocumentsByKbId = (kbId: number, params?: {
 
 // 获取当前用户在指定知识库的文档列表
 export const getMyDocumentsByKbId = (kbId: number, params?: {
-  pageNum?: number
+  page?: number
   pageSize?: number
 }): Promise<ApiResponse<PageResult<Document>>> => {
   return get(`/document/my/${kbId}`, params)

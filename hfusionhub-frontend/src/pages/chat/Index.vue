@@ -41,7 +41,7 @@ const loadConversations = async () => {
   loading.value = true
   try {
     const res = await conversationApi.getMyConversations({
-      pageNum: currentPage.value,
+      page: currentPage.value,
       pageSize: pageSize.value,
     })
     conversations.value = res.data.records
@@ -56,7 +56,7 @@ const loadConversations = async () => {
 const loadKnowledgeBases = async () => {
   try {
     const res = await knowledgeBaseApi.getMyKnowledgeBaseList({
-      pageNum: 1,
+      page: 1,
       pageSize: 100,
     })
     knowledgeBases.value = res.data.records

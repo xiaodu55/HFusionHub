@@ -55,25 +55,28 @@ const uploadForm = ref({
 const uploading = ref(false)
 const syncing = ref(false)
 
+const errorMessage = (error: unknown, fallback: string) =>
+  error instanceof Error && error.message ? `${fallback}：${error.message}` : fallback
+
 const loadDocuments = async () => {
   loading.value = true
   try {
     let res
     if (selectedKbId.value > 0) {
       res = await documentApi.getMyDocumentsByKbId(selectedKbId.value, {
-        pageNum: 1,
+        page: 1,
         pageSize: 100,
       })
     } else {
       res = await documentApi.getMyDocumentsByKbId(0, {
-        pageNum: 1,
+        page: 1,
         pageSize: 100,
       })
     }
     documents.value = res.data.records
   } catch (error) {
     console.error('加载文档失败:', error)
-    toast.error('加载文档失败')
+    toast.error(errorMessage(error, '加载文档失败'))
   } finally {
     loading.value = false
   }
@@ -82,7 +85,7 @@ const loadDocuments = async () => {
 const loadKnowledgeBases = async () => {
   try {
     const res = await knowledgeBaseApi.getMyKnowledgeBaseList({
-      pageNum: 1,
+      page: 1,
       pageSize: 100,
     })
     knowledgeBases.value = res.data.records
@@ -119,7 +122,7 @@ const handleUpload = async () => {
     await loadDocuments()
   } catch (error) {
     console.error('上传文档失败:', error)
-    toast.error('上传文档失败')
+    toast.error(errorMessage(error, '上传文档失败'))
   } finally {
     uploading.value = false
   }
