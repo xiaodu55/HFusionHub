@@ -56,6 +56,9 @@ public class ConversationServiceImpl implements ConversationService {
     @Value("${ai-service.base-url:http://localhost:8001}")
     private String baseUrl;
 
+    @Value("${python-ai.internal-token:}")
+    private String internalApiToken;
+
     @Override
     @Transactional
     public ConversationInfoDTO create(ConversationCreateDTO dto) {
@@ -115,6 +118,9 @@ public class ConversationServiceImpl implements ConversationService {
         if (conversation == null) {
             throw new BusinessException("对话不存在");
         }
+        if (!conversation.getUserId().equals(JwtUtils.getCurrentUserId())) {
+            throw new BusinessException("无权访问该对话");
+        }
 
         // 2. 转换为 DTO
         return convertToInfoDTO(conversation);
@@ -122,21 +128,7 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Override
     public PageResult<ConversationInfoDTO> list(ConversationQueryDTO queryDTO) {
-        // 1. 构建查询条件
-        LambdaQueryWrapper<Conversation> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(queryDTO.getKnowledgeBaseId() != null, Conversation::getKnowledgeBaseId, queryDTO.getKnowledgeBaseId())
-                .like(StringUtils.hasText(queryDTO.getTitle()), Conversation::getTitle, queryDTO.getTitle())
-                .orderByDesc(Conversation::getCreatedAt);
-
-        // 2. 分页查询
-        Page<Conversation> page = new Page<>(queryDTO.getPage(), queryDTO.getPageSize());
-        Page<Conversation> result = conversationMapper.selectPage(page, wrapper);
-
-        // 3. 批量转换为 DTO（优化 N+1 查询）
-        List<ConversationInfoDTO> records = batchConvertToInfoDTO(result.getRecords());
-
-        // 4. 返回分页结果
-        return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), result.getTotal(), records);
+        return listByCurrentUser(queryDTO);
     }
 
     @Override
@@ -341,6 +333,10 @@ public class ConversationServiceImpl implements ConversationService {
             connection.setRequestMethod("POST");
             connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
             connection.setRequestProperty("Accept", "text/event-stream");
+            if (internalApiToken == null || internalApiToken.isBlank()) {
+                throw new BusinessException("PYTHON_AI_INTERNAL_TOKEN 未配置");
+            }
+            connection.setRequestProperty("X-Internal-Token", internalApiToken);
             connection.setDoOutput(true);
             connection.setConnectTimeout(10000);
             connection.setReadTimeout(300000); // 5 minutes - RAG pipeline can be slow

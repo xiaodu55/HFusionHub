@@ -2,10 +2,12 @@
 Global exception handlers for FastAPI
 """
 
-import traceback
+import logging
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from app.core.exceptions import HFusionHubException
+
+logger = logging.getLogger(__name__)
 
 
 async def hfusionhub_exception_handler(
@@ -15,9 +17,7 @@ async def hfusionhub_exception_handler(
     """
     Handle HFusionHub custom exceptions
     """
-    print(f"[Exception] {exc.__class__.__name__}: {exc.message}")
-    if exc.details:
-        print(f"[Exception] Details: {exc.details}")
+    logger.warning("Handled %s: %s", exc.__class__.__name__, exc.message)
 
     return JSONResponse(
         status_code=exc.code,
@@ -32,7 +32,7 @@ async def http_exception_handler(
     """
     Handle FastAPI HTTP exceptions
     """
-    print(f"[HTTPException] {exc.status_code}: {exc.detail}")
+    logger.warning("HTTP %s: %s", exc.status_code, exc.detail)
 
     return JSONResponse(
         status_code=exc.status_code,
@@ -50,14 +50,14 @@ async def general_exception_handler(
     """
     Handle all other exceptions
     """
-    # Log the full traceback
-    print(f"[Exception] Unexpected error: {exc}")
-    print(f"[Exception] Traceback:\n{traceback.format_exc()}")
+    # Keep traceback details in server logs; never return implementation
+    # details, filesystem paths, or dependency errors to clients.
+    logger.exception("Unexpected server error")
 
     return JSONResponse(
         status_code=500,
         content={
             "code": 500,
-            "message": f"服务器内部错误: {str(exc)}"
+            "message": "服务器内部错误，请稍后重试"
         }
     )

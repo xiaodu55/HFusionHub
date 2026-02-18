@@ -24,16 +24,20 @@ public class SaTokenConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new SaInterceptor(handle -> {
             // 登录验证 - 除登录接口外，其他接口都需要登录
-            SaRouter.match("/api/**")
+            // Spring removes server.servlet.context-path before interceptor
+            // matching.  These patterns must therefore be relative to /api.
+            SaRouter.match("/**")
                     .notMatch(
-                            "/api/user/login",
-                            "/api/user/register",
-                            "/api/doc.html",
-                            "/api/swagger-ui/**",
-                            "/api/v3/api-docs/**",
-                            "/api/webjars/**"
+                            "/user/login",
+                            "/user/register",
+                            "/vectorize/**/callback",
+                            "/doc.html",
+                            "/swagger-ui.html",
+                            "/swagger-ui/**",
+                            "/v3/api-docs/**",
+                            "/webjars/**"
                     )
                     .check(r -> StpUtil.checkLogin());
-        })).addPathPatterns("/api/**");
+        })).addPathPatterns("/**");
     }
 }

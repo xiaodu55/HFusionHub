@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.utils.config import config
@@ -30,6 +30,7 @@ from app.api.exception_handlers import (
     general_exception_handler
 )
 from app.core.exceptions import HFusionHubException
+from app.api.internal_auth import require_internal_token
 
 
 def create_app() -> FastAPI:
@@ -57,9 +58,12 @@ def create_app() -> FastAPI:
     app.add_exception_handler(Exception, general_exception_handler)
 
     # Include routers
-    app.include_router(vectorization_router)
-    app.include_router(chat_router)
-    app.include_router(rag_router)
+    # Every operational route is called by the Java application service.  Keep
+    # only /health unauthenticated so infrastructure can probe availability.
+    internal_dependencies = [Depends(require_internal_token)]
+    app.include_router(vectorization_router, dependencies=internal_dependencies)
+    app.include_router(chat_router, dependencies=internal_dependencies)
+    app.include_router(rag_router, dependencies=internal_dependencies)
 
     @app.get("/")
     async def root():

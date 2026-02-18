@@ -11,3 +11,9 @@ sys.path.insert(0, str(project_root))
 
 # 配置 pytest-asyncio
 pytest_plugins = ['pytest_asyncio']
+
+# HTTP route tests emulate the Java application service.  Production has no
+# fallback token; the test process supplies an explicit, non-secret value.
+from app.utils.config import config
+
+config.INTERNAL_API_TOKEN = "test-internal-token"

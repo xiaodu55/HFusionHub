@@ -8,7 +8,7 @@ from app.main import create_app
 
 def test_cancel_registered_stream_task():
     app = create_app()
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
     task = MagicMock()
     task.done.return_value = False
     active_requests["test-request"] = task
@@ -23,7 +23,7 @@ def test_cancel_registered_stream_task():
 
 def test_cancel_unknown_stream_task_returns_not_found():
     app = create_app()
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
 
     response = client.post("/api/chat/cancel?request_id=missing-request")
 

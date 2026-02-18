@@ -41,6 +41,16 @@ class Config:
     # Java Backend
     JAVA_BACKEND_URL = os.getenv("JAVA_BACKEND_URL", "http://localhost:8080")
 
+    # Required shared secret for Java -> Python requests.  Do not provide a
+    # development default: an accidentally exposed worker must fail closed.
+    INTERNAL_API_TOKEN = os.getenv("PYTHON_AI_INTERNAL_TOKEN", "")
+
+    # Java owns uploaded files.  The worker may only parse a real file below
+    # this mounted/shared directory, never an arbitrary readable host path.
+    DOCUMENT_STORAGE_ROOT = os.getenv(
+        "DOCUMENT_STORAGE_ROOT", "../java-backend/uploads/documents"
+    )
+
     # Chunking Configuration
     CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))  # characters
     CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))  # characters

@@ -6,9 +6,7 @@ Implements Reasoning + Acting loop for complex tasks
 import json
 import re
 import logging
-import os
 import time
-import requests
 from typing import List, Dict, Any, Optional, AsyncGenerator
 
 from .agent import Agent, AgentResponse, AgentStep
@@ -132,31 +130,6 @@ class ReactAgent(Agent):
             descriptions.append(desc)
 
         return "\n".join(descriptions)
-
-    def _get_document_name(self, document_id: str) -> str:
-        """
-        从 Java 后端获取文档名称
-
-        Args:
-            document_id: 文档ID
-
-        Returns:
-            文档名称
-        """
-        try:
-            java_backend_url = os.getenv("JAVA_BACKEND_URL", "http://localhost:8080")
-            response = requests.get(
-                f"{java_backend_url}/api/document/{document_id}/name",
-                timeout=5
-            )
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("code") == 200:
-                    return data.get("data", {}).get("name", "未知文档")
-        except Exception as e:
-            logger.warning(f"Failed to get document name: {e}")
-
-        return f"文档-{document_id}"
 
     async def _handle_chitchat(
         self,

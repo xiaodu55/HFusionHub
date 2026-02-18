@@ -12,7 +12,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/hfusionhub?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: ${DB_USERNAME:root}
-    password: ${DB_PASSWORD:root123456}
+    password: ${DB_PASSWORD:}
 
   # Redis 配置
   data:
@@ -42,7 +42,7 @@ mybatis-plus:
       logic-not-delete-value: 0
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
 
 # Sa-Token 配置
 sa-token:
@@ -78,7 +78,8 @@ python-ai:
   engine:
     url: http://localhost:9000
   callback-base-url: http://localhost:${server.port}${server.servlet.context-path}
-  callback-secret: ${CALLBACK_SECRET:hfusionhub-callback-secret-key}
+  callback-secret: ${CALLBACK_SECRET:}
+  internal-token: ${PYTHON_AI_INTERNAL_TOKEN:}
 
 # Durable document-index job recovery. A task running longer than this timeout
 # is re-submitted with a new version; old worker callbacks are rejected.
@@ -96,13 +97,13 @@ ai-service:
 # MinIO 配置
 minio:
   endpoint: http://localhost:9000
-  access-key: ${MINIO_ACCESS_KEY:minioadmin}
-  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  access-key: ${MINIO_ACCESS_KEY:}
+  secret-key: ${MINIO_SECRET_KEY:}
   bucket-name: hfusionhub
 
 # 日志配置
 logging:
   level:
     root: INFO
-    com.hfusionhub: DEBUG
-    com.hfusionhub.mapper: DEBUG
+    com.hfusionhub: INFO
+    com.hfusionhub.mapper: INFO

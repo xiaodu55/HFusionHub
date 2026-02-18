@@ -30,7 +30,7 @@ public class VectorizationController {
 
     private final VectorizationService vectorizationService;
 
-    @Value("${python-ai.callback-secret:hfusionhub-callback-secret-key}")
+    @Value("${python-ai.callback-secret:}")
     private String callbackSecret;
 
     @Operation(summary = "获取可用的嵌入模型列表")
@@ -89,8 +89,8 @@ public class VectorizationController {
             @RequestBody DocumentIndexCallbackDTO body,
             @RequestHeader(value = "X-Callback-Secret", required = false) String secret) {
         // 验证回调密钥
-        if (!callbackSecret.equals(secret)) {
-            log.warn("回调密钥验证失败: documentId={}, secret={}", documentId, secret);
+        if (callbackSecret == null || callbackSecret.isBlank() || !callbackSecret.equals(secret)) {
+            log.warn("回调密钥验证失败: documentId={}", documentId);
             return R.fail("回调密钥无效");
         }
         vectorizationService.updateDocumentStatus(documentId, body);

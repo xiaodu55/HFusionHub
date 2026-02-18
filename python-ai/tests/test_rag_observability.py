@@ -146,11 +146,11 @@ def test_trace_api_exposes_trace_and_stats():
         top_k=3,
         latency_ms=12.5,
     ))
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-Internal-Token": "test-internal-token"})
 
-    listed = client.get("/api/rag/traces")
-    detail = client.get(f"/api/rag/traces/{trace.trace_id}")
-    stats = client.get("/api/rag/traces/stats")
+    listed = client.get("/api/rag/traces", params={"knowledge_base_id": 1})
+    detail = client.get(f"/api/rag/traces/{trace.trace_id}", params={"knowledge_base_id": 1})
+    stats = client.get("/api/rag/traces/stats", params={"knowledge_base_id": 1})
 
     assert listed.status_code == 200
     assert listed.json()["traces"][0]["trace_id"] == trace.trace_id
@@ -163,7 +163,7 @@ def test_debug_search_api_returns_a_scoped_full_trace(monkeypatch):
     retriever = MultiChannelRetriever(postprocessor=get_postprocessor())
     retriever.router = FakeRouter()
     monkeypatch.setattr(rag_api, "get_retriever", lambda: retriever)
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-Internal-Token": "test-internal-token"})
 
     response = client.post("/api/rag/debug/search", json={
         "query": "What is RAG?",
@@ -197,7 +197,7 @@ def test_trace_api_filters_paginates_and_exports_records():
         error="graph unavailable",
         results=[{"source": "graph", "document_id": 2}],
     ))
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-Internal-Token": "test-internal-token"})
 
     listed = client.get("/api/rag/traces", params={
         "query": "vector",
@@ -206,17 +206,17 @@ def test_trace_api_filters_paginates_and_exports_records():
         "limit": 1,
         "offset": 0,
     })
-    stats = client.get("/api/rag/traces/stats", params={"days": 3})
-    exported_json = client.get("/api/rag/traces/export", params={"format": "json", "error_only": "true"})
-    exported_csv = client.get("/api/rag/traces/export", params={"format": "csv"})
+    stats = client.get("/api/rag/traces/stats", params={"days": 3, "knowledge_base_id": 1})
+    exported_json = client.get("/api/rag/traces/export", params={"format": "json", "error_only": "true", "knowledge_base_id": 2})
+    exported_csv = client.get("/api/rag/traces/export", params={"format": "csv", "knowledge_base_id": 1})
 
     assert listed.status_code == 200
     assert listed.json()["total"] == 1
     assert listed.json()["traces"][0]["query"] == "vector search"
-    assert stats.json()["hit_traces"] == 2
+    assert stats.json()["hit_traces"] == 1
     assert stats.json()["hit_rate"] == 1.0
     assert len(stats.json()["daily_metrics"]) == 3
-    assert stats.json()["recent_failures"][0]["error"] == "graph unavailable"
+    assert stats.json()["recent_failures"] == []
     assert exported_json.json()["filename"].endswith(".json")
     assert "broken graph search" in exported_json.json()["content"]
     assert exported_csv.json()["filename"].endswith(".csv")
@@ -227,7 +227,7 @@ def test_evaluation_api_uses_retrieval_evaluator(monkeypatch):
     monkeypatch.setattr(rag_api, "get_retriever", lambda: FakeRetriever())
     store = EvaluationRunStore(":memory:")
     monkeypatch.setattr(rag_api, "get_evaluation_run_store", lambda: store)
-    client = TestClient(create_app())
+    client = TestClient(create_app(), headers={"X-Internal-Token": "test-internal-token"})
 
     response = client.post("/api/rag/evaluate", json={
         "knowledge_base_id": 1,

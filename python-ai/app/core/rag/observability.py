@@ -137,8 +137,12 @@ class RetrievalTraceStore:
                 return trace.to_dict()
         return None
 
-    def stats(self, window_days: int = 7) -> Dict[str, Any]:
-        traces = self._snapshot()
+    def stats(
+        self,
+        window_days: int = 7,
+        knowledge_base_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        traces = self._filtered(knowledge_base_id=knowledge_base_id)
 
         total = len(traces)
         source_counts = Counter(
@@ -195,6 +199,7 @@ class RetrievalTraceStore:
                 metric["average_latency_ms"] = 0.0
 
         return {
+            "knowledge_base_id": knowledge_base_id,
             "total_traces": total,
             "failed_traces": len(failure_traces),
             "hit_traces": hit_count,

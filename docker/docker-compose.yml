@@ -5,17 +5,18 @@ services:
     image: mysql:8.0
     container_name: mysql8
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
       MYSQL_DATABASE: hfusionhub
       MYSQL_USER: hfusionhub
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-hfusionhub123}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set}
     ports:
       - "3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
       - ../java-backend/src/main/resources/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ../java-backend/src/main/resources/sql/V2__document_index_persistence.sql:/docker-entrypoint-initdb.d/02-document-index.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-root123456}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 5s
       timeout: 5s
       retries: 20

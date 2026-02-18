@@ -42,7 +42,7 @@ mybatis-plus:
       logic-not-delete-value: 0
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
 
 # Sa-Token 配置
 sa-token:
@@ -73,10 +73,13 @@ knife4j:
 
 # Python AI 服务配置
 python-ai:
-  base-url: http://localhost:8001
+  base-url: http://localhost:9000
   timeout: 60000
   engine:
-    url: http://localhost:8001
+    url: http://localhost:9000
+  callback-base-url: http://localhost:${server.port}${server.servlet.context-path}
+  callback-secret: ${CALLBACK_SECRET:}
+  internal-token: ${PYTHON_AI_INTERNAL_TOKEN:}
 
 rag:
   index:
@@ -87,13 +90,13 @@ rag:
 # MinIO 配置
 minio:
   endpoint: http://localhost:9000
-  access-key: ${MINIO_ACCESS_KEY:minioadmin}
-  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  access-key: ${MINIO_ACCESS_KEY:}
+  secret-key: ${MINIO_SECRET_KEY:}
   bucket-name: hfusionhub
 
 # 日志配置
 logging:
   level:
     root: INFO
-    com.hfusionhub: DEBUG
-    com.hfusionhub.mapper: DEBUG
+    com.hfusionhub: INFO
+    com.hfusionhub.mapper: INFO

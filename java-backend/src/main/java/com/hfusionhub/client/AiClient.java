@@ -32,6 +32,9 @@ public class AiClient {
     @Value("${ai-service.base-url:http://localhost:8001}")
     private String baseUrl;
 
+    @Value("${python-ai.internal-token:}")
+    private String internalApiToken;
+
     public AiClient(RestTemplate restTemplate, WebClient webClient) {
         this.restTemplate = restTemplate;
         this.webClient = webClient;
@@ -64,6 +67,7 @@ public class AiClient {
             // Set headers
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
+            addInternalToken(headers);
 
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
 
@@ -125,6 +129,7 @@ public class AiClient {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("Accept", "text/event-stream");
+            addInternalToken(headers);
 
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
 
@@ -167,7 +172,8 @@ public class AiClient {
     public boolean isHealthy() {
         try {
             String url = baseUrl + "/api/chat/health";
-            ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class);
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), Map.class);
 
             if (response.getBody() != null) {
                 Object status = response.getBody().get("status");
@@ -189,7 +195,8 @@ public class AiClient {
     public boolean cancelRequest(String requestId) {
         try {
             String url = baseUrl + "/api/chat/cancel?request_id=" + requestId;
-            ResponseEntity<Map> response = restTemplate.postForEntity(url, null, Map.class);
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(internalHeaders()), Map.class);
 
             if (response.getBody() != null) {
                 Object status = response.getBody().get("status");
@@ -200,6 +207,19 @@ public class AiClient {
             log.warn("Cancel request failed: {}", e.getMessage());
             return false;
         }
+    }
+
+    private HttpHeaders internalHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        addInternalToken(headers);
+        return headers;
+    }
+
+    private void addInternalToken(HttpHeaders headers) {
+        if (internalApiToken == null || internalApiToken.isBlank()) {
+            throw new BusinessException("PYTHON_AI_INTERNAL_TOKEN 未配置");
+        }
+        headers.set("X-Internal-Token", internalApiToken);
     }
 
     /**

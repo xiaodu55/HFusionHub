@@ -3,6 +3,7 @@ package com.hfusionhub.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.hfusionhub.common.exception.BusinessException;
+import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.dto.DocumentChunkCallbackDTO;
 import com.hfusionhub.dto.DocumentIndexCallbackDTO;
 import com.hfusionhub.entity.Document;
@@ -12,6 +13,7 @@ import com.hfusionhub.enums.DocumentStatus;
 import com.hfusionhub.mapper.DocumentChunkMapper;
 import com.hfusionhub.mapper.DocumentIndexJobMapper;
 import com.hfusionhub.mapper.DocumentMapper;
+import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.service.VectorizationService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -41,6 +43,7 @@ import java.util.UUID;
 public class VectorizationServiceImpl implements VectorizationService {
 
     private final DocumentMapper documentMapper;
+    private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final DocumentIndexJobMapper documentIndexJobMapper;
     private final DocumentChunkMapper documentChunkMapper;
     private final RestTemplate restTemplate;
@@ -52,8 +55,11 @@ public class VectorizationServiceImpl implements VectorizationService {
     @Value("${python-ai.callback-base-url:http://localhost:8080/api}")
     private String callbackBaseUrl;
 
-    @Value("${python-ai.callback-secret:hfusionhub-callback-secret-key}")
+    @Value("${python-ai.callback-secret:}")
     private String callbackSecret;
+
+    @Value("${python-ai.internal-token:}")
+    private String internalApiToken;
 
     @Value("${rag.index.stale-after-minutes:30}")
     private long staleAfterMinutes;
@@ -68,6 +74,7 @@ public class VectorizationServiceImpl implements VectorizationService {
         if (document == null) {
             throw new BusinessException("文档不存在");
         }
+        assertDocumentOwnerWhenUserRequest(document);
 
         // 2. 检查状态 - 允许重新处理处于 PROCESSING 状态的文档（修复之前的卡住问题）
         if (document.getStatus() != null && document.getStatus() == DocumentStatus.PROCESSING.getCode()) {
@@ -119,6 +126,7 @@ public class VectorizationServiceImpl implements VectorizationService {
     @Override
     public String getDocumentChunks(Long documentId, Integer page, Integer size, String blockType) {
         try {
+            assertDocumentOwnerWhenUserRequest(requireDocument(documentId));
             int safePage = page == null || page < 1 ? 1 : page;
             int safeSize = size == null || size < 1 ? 20 : Math.min(size, 100);
             long persistedCount = documentChunkMapper.countByDocumentId(documentId, blockType);
@@ -144,11 +152,12 @@ public class VectorizationServiceImpl implements VectorizationService {
                 url += "&block_type=" + blockType;
             }
 
-            ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), String.class);
             return response.getBody();
         } catch (Exception e) {
             log.error("获取分块列表失败", e);
-            return "{\"code\":500,\"error\":\"" + e.getMessage() + "\"}";
+            return "{\"code\":500,\"error\":\"获取分块列表失败\"}";
         }
     }
 
@@ -157,14 +166,13 @@ public class VectorizationServiceImpl implements VectorizationService {
         try {
             DocumentChunk persistedChunk = documentChunkMapper.selectById(chunkId);
             if (persistedChunk != null) {
+                assertDocumentOwnerWhenUserRequest(requireDocument(persistedChunk.getDocumentId()));
                 return objectMapper.writeValueAsString(toChunkResponse(persistedChunk));
             }
-            String url = pythonEngineUrl + "/api/chunks/" + chunkId;
-            ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
-            return response.getBody();
+            throw new BusinessException("分块不存在；请重新索引旧文档后重试");
         } catch (Exception e) {
             log.error("获取分块详情失败", e);
-            return "{\"code\":500,\"error\":\"" + e.getMessage() + "\"}";
+            return "{\"code\":500,\"error\":\"获取分块详情失败\"}";
         }
     }
 
@@ -237,7 +245,7 @@ public class VectorizationServiceImpl implements VectorizationService {
             ResponseEntity<String> response = restTemplate.exchange(
                     pythonEngineUrl + "/api/documents/" + documentId + "/chunks",
                     HttpMethod.DELETE,
-                    new HttpEntity<>(callbackHeaders()),
+                    new HttpEntity<>(internalHeaders()),
                     String.class);
             if (!response.getStatusCode().is2xxSuccessful()) {
                 throw new BusinessException("向量索引删除失败");
@@ -290,6 +298,7 @@ public class VectorizationServiceImpl implements VectorizationService {
         if (document == null) {
             throw new BusinessException("文档不存在");
         }
+        assertDocumentOwnerWhenUserRequest(document);
         DocumentIndexJob job = documentIndexJobMapper.selectLatestByDocumentId(documentId);
         if (job == null) {
             throw new BusinessException("文档没有持久化索引任务");
@@ -340,6 +349,7 @@ public class VectorizationServiceImpl implements VectorizationService {
         if (document == null) {
             throw new BusinessException("文档不存在");
         }
+        assertDocumentOwnerWhenUserRequest(document);
 
         // 只有处理中或失败的状态才允许重置
         if (document.getStatus() != null
@@ -357,12 +367,14 @@ public class VectorizationServiceImpl implements VectorizationService {
     @Override
     public String getTaskStatus(Long documentId) {
         try {
+            assertDocumentOwnerWhenUserRequest(requireDocument(documentId));
             String url = pythonEngineUrl + "/api/task-status/" + documentId;
-            ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), String.class);
             return response.getBody();
         } catch (Exception e) {
             log.error("获取任务状态失败: {}", documentId, e);
-            return "{\"status\":\"ERROR\",\"message\":\"" + e.getMessage() + "\"}";
+            return "{\"status\":\"ERROR\",\"message\":\"任务状态暂不可用\"}";
         }
     }
 
@@ -370,6 +382,9 @@ public class VectorizationServiceImpl implements VectorizationService {
      * 调用Python引擎
      */
     private void callPythonEngine(Document document, DocumentIndexJob job) {
+        if (callbackSecret == null || callbackSecret.isBlank()) {
+            throw new BusinessException("CALLBACK_SECRET 未配置");
+        }
         String url = pythonEngineUrl + "/api/parse";
 
         // 构建回调URL，用于Python引擎处理完成后通知Java后端
@@ -387,7 +402,7 @@ public class VectorizationServiceImpl implements VectorizationService {
                 "embedding_model", job.getEmbeddingModel()
         );
 
-        HttpHeaders headers = callbackHeaders();
+        HttpHeaders headers = internalHeaders();
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
 
@@ -416,11 +431,35 @@ public class VectorizationServiceImpl implements VectorizationService {
         return chunk;
     }
 
-    private HttpHeaders callbackHeaders() {
+    private HttpHeaders internalHeaders() {
+        if (internalApiToken == null || internalApiToken.isBlank()) {
+            throw new BusinessException("PYTHON_AI_INTERNAL_TOKEN 未配置");
+        }
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("X-Callback-Secret", callbackSecret);
+        headers.set("X-Internal-Token", internalApiToken);
         return headers;
+    }
+
+    private Document requireDocument(Long documentId) {
+        Document document = documentMapper.selectById(documentId);
+        if (document == null) {
+            throw new BusinessException("文档不存在");
+        }
+        return document;
+    }
+
+    private void assertDocumentOwnerWhenUserRequest(Document document) {
+        // Recovery jobs and authenticated worker callbacks execute without a
+        // user session.  Every browser path is protected by Sa-Token and is
+        // therefore additionally checked against the document's KB owner.
+        if (!JwtUtils.isLogin()) {
+            return;
+        }
+        var knowledgeBase = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
+        if (knowledgeBase == null || !JwtUtils.getCurrentUserId().equals(knowledgeBase.getUserId())) {
+            throw new BusinessException("无权访问该文档");
+        }
     }
 
     private String toJson(Object value) {

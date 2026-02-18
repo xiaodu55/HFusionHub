@@ -2,9 +2,10 @@
 File and request validators
 """
 
-import os
+from pathlib import Path
 from typing import Optional, Tuple
 from fastapi import HTTPException
+from app.utils.config import config
 
 
 # Supported file types
@@ -55,7 +56,7 @@ def validate_file_type(file_type: str) -> None:
         )
 
 
-def validate_file_path(file_path: str) -> None:
+def validate_file_path(file_path: str) -> str:
     """
     Validate file path exists and is accessible
 
@@ -74,40 +75,25 @@ def validate_file_path(file_path: str) -> None:
             }
         )
 
-    # Try to resolve relative paths from project root
-    if not os.path.isabs(file_path):
-        # Try from project root (parent of python-ai)
-        # __file__ is python-ai/app/utils/validators.py
-        # Go up 4 levels to get to project root
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        abs_path = os.path.join(project_root, file_path)
-        print(f"[Validator] Project root: {project_root}")
-        print(f"[Validator] Absolute path: {abs_path}")
-        print(f"[Validator] Exists: {os.path.exists(abs_path)}")
-        if os.path.exists(abs_path):
-            file_path = abs_path
-        # Also try from current working directory
-        elif os.path.exists(file_path):
-            pass  # Use as-is
-        else:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "code": 10001,
-                    "message": f"文件不存在: {file_path}"
-                }
-            )
-
-    if not os.path.exists(file_path):
+    storage_root = Path(config.DOCUMENT_STORAGE_ROOT).expanduser().resolve()
+    candidate = Path(file_path).expanduser()
+    # Java normally supplies an absolute path.  Relative paths are retained for
+    # container setups but are resolved solely below the configured root.
+    if not candidate.is_absolute():
+        candidate = storage_root / candidate
+    try:
+        resolved_path = candidate.resolve(strict=True)
+        resolved_path.relative_to(storage_root)
+    except (FileNotFoundError, ValueError, OSError):
         raise HTTPException(
-            status_code=404,
+            status_code=400,
             detail={
                 "code": 10001,
-                "message": f"文件不存在: {file_path}"
+                "message": "文件不存在或不在允许的上传目录中"
             }
         )
 
-    if not os.path.isfile(file_path):
+    if not resolved_path.is_file():
         raise HTTPException(
             status_code=400,
             detail={
@@ -116,7 +102,10 @@ def validate_file_path(file_path: str) -> None:
             }
         )
 
-    if not os.access(file_path, os.R_OK):
+    try:
+        with resolved_path.open("rb"):
+            pass
+    except OSError:
         raise HTTPException(
             status_code=403,
             detail={
@@ -124,6 +113,7 @@ def validate_file_path(file_path: str) -> None:
                 "message": f"文件不可读: {file_path}"
             }
         )
+    return str(resolved_path)
 
 
 def validate_file_size(file_path: str, max_size: Optional[int] = None) -> None:
@@ -139,7 +129,7 @@ def validate_file_size(file_path: str, max_size: Optional[int] = None) -> None:
     """
     max_size = max_size or MAX_FILE_SIZE
 
-    file_size = os.path.getsize(file_path)
+    file_size = Path(file_path).stat().st_size
 
     if file_size < MIN_FILE_SIZE:
         raise HTTPException(
@@ -241,10 +231,10 @@ def validate_file_upload(
 
     # Run all validations
     validate_file_type(file_type)
-    validate_file_path(file_path)
+    resolved_path = validate_file_path(file_path)
     validate_filename(filename)
 
     if check_size:
-        validate_file_size(file_path)
+        validate_file_size(resolved_path)
 
-    return file_type, file_path
+    return file_type, resolved_path

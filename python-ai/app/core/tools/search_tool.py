@@ -2,8 +2,6 @@
 Search Tool - Search knowledge base documents
 """
 
-import os
-import requests
 from typing import Any, Dict, List, Optional
 
 from .base import BaseTool
@@ -55,20 +53,11 @@ class SearchTool(BaseTool):
             for result in results:
                 document_id = result.get("document_id")
 
-                # Try to get document name from Java backend
-                document_name = "未知文档"
-                try:
-                    java_backend_url = os.getenv("JAVA_BACKEND_URL", "http://localhost:8080")
-                    response = requests.get(
-                        f"{java_backend_url}/api/document/{document_id}/name",
-                        timeout=5
-                    )
-                    if response.status_code == 200:
-                        data = response.json()
-                        document_name = data.get("name", "未知文档")
-                except Exception:
-                    # Fallback: use document_id as name
-                    document_name = f"文档-{document_id}"
+                # The title is persisted with the vector chunk at indexing
+                # time.  Avoid an unauthenticated Python -> Java lookup that
+                # could bypass document ownership checks.
+                metadata = result.get("metadata") or {}
+                document_name = metadata.get("document_title") or f"文档-{document_id}"
 
                 formatted_results.append({
                     "content": result.get("content", ""),

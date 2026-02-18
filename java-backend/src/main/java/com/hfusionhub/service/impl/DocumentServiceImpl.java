@@ -207,9 +207,10 @@ public class DocumentServiceImpl implements DocumentService {
             throw new BusinessException("文档不存在");
         }
 
-        // 2. 获取知识库名称
+        // 2. 验证文档所属知识库属于当前用户
         KnowledgeBase kb = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
-        String kbName = kb != null ? kb.getName() : "未知知识库";
+        assertOwnedKnowledgeBase(kb);
+        String kbName = kb.getName();
 
         // 3. 转换为 DTO
         return convertToInfoDTO(document, kbName);
@@ -221,58 +222,15 @@ public class DocumentServiceImpl implements DocumentService {
         if (document == null) {
             throw new BusinessException("文档不存在");
         }
+        assertOwnedKnowledgeBase(knowledgeBaseMapper.selectById(document.getKnowledgeBaseId()));
         return document.getContent();
     }
 
     @Override
     public PageResult<DocumentInfoDTO> list(DocumentQueryDTO queryDTO) {
-        // 1. 构建查询条件
-        LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<>();
-        wrapper.like(StringUtils.hasText(queryDTO.getTitle()), Document::getTitle, queryDTO.getTitle())
-                .eq(queryDTO.getStatus() != null, Document::getStatus, queryDTO.getStatus())
-                .orderByDesc(Document::getCreatedAt);
+        // A user-facing "all" list must still be scoped to that user's KBs.
+        return listByCurrentUser(null, queryDTO);
 
-        // 2. 分页查询
-        Page<Document> page = new Page<>(queryDTO.getPage(), queryDTO.getPageSize());
-        Page<Document> result = documentMapper.selectPage(page, wrapper);
-
-        // 3. 批量查询知识库（避免 N+1）
-        List<Long> kbIds = result.getRecords().stream()
-                .map(Document::getKnowledgeBaseId)
-                .distinct()
-                .collect(Collectors.toList());
-        final Map<Long, KnowledgeBase> kbMap;
-        final Map<Long, String> kbNameMap;
-        if (!kbIds.isEmpty()) {
-            List<KnowledgeBase> kbs = knowledgeBaseMapper.selectBatchIds(kbIds);
-            kbMap = kbs.stream().collect(Collectors.toMap(KnowledgeBase::getId, k -> k));
-            kbNameMap = kbs.stream().collect(Collectors.toMap(KnowledgeBase::getId, KnowledgeBase::getName));
-        } else {
-            kbMap = Map.of();
-            kbNameMap = Map.of();
-        }
-
-        // 4. 批量查询用户（避免 N+1）
-        List<Long> userIds = kbMap.values().stream()
-                .map(KnowledgeBase::getUserId)
-                .distinct()
-                .collect(Collectors.toList());
-        final Map<Long, String> usernameMap;
-        if (!userIds.isEmpty()) {
-            List<User> users = userMapper.selectBatchIds(userIds);
-            usernameMap = users.stream().collect(Collectors.toMap(User::getId, User::getUsername));
-        } else {
-            usernameMap = Map.of();
-        }
-
-        // 5. 转换为 DTO
-        List<DocumentInfoDTO> records = result.getRecords().stream()
-                .map(doc -> convertToInfoDTO(doc, kbNameMap.getOrDefault(doc.getKnowledgeBaseId(), "未知知识库"),
-                        kbMap.get(doc.getKnowledgeBaseId()), usernameMap))
-                .collect(Collectors.toList());
-
-        // 6. 返回分页结果
-        return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), result.getTotal(), records);
     }
 
     @Override
@@ -282,6 +240,7 @@ public class DocumentServiceImpl implements DocumentService {
         if (kb == null) {
             throw new BusinessException("知识库不存在");
         }
+        assertOwnedKnowledgeBase(kb);
 
         // 2. 构建查询条件
         LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<>();
@@ -336,6 +295,9 @@ public class DocumentServiceImpl implements DocumentService {
             if (queryDTO.getTitle() != null && !queryDTO.getTitle().isBlank()) {
                 docQuery.like("title", queryDTO.getTitle());
             }
+            if (queryDTO.getStatus() != null) {
+                docQuery.eq("status", queryDTO.getStatus());
+            }
             docQuery.orderByDesc("created_at");
 
             long total = documentMapper.selectCount(docQuery);
@@ -371,6 +333,7 @@ public class DocumentServiceImpl implements DocumentService {
         if (document == null) {
             throw new BusinessException("文档不存在");
         }
+        assertOwnedKnowledgeBase(knowledgeBaseMapper.selectById(document.getKnowledgeBaseId()));
         return DocumentNameDTO.builder()
                 .id(document.getId())
                 .name(document.getTitle())
@@ -425,6 +388,13 @@ public class DocumentServiceImpl implements DocumentService {
         } catch (IOException e) {
             log.error("文件保存失败", e);
             throw new BusinessException("文件保存失败");
+        }
+    }
+
+    private void assertOwnedKnowledgeBase(KnowledgeBase knowledgeBase) {
+        Long currentUserId = JwtUtils.getCurrentUserId();
+        if (knowledgeBase == null || !knowledgeBase.getUserId().equals(currentUserId)) {
+            throw new BusinessException("无权访问该知识库");
         }
     }
 

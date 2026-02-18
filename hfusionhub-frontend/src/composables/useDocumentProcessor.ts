@@ -91,9 +91,14 @@ export function useDocumentProcessor() {
 
       try {
         const res = await vectorizationApi.getVectorizationStatus(docId)
-        const status = res.data?.status
+        const rawStatus = res.data
+        // Java returns the worker payload as a JSON string inside R.data.
+        const payload = typeof rawStatus === 'string'
+          ? JSON.parse(rawStatus)
+          : rawStatus
+        const status = payload?.status
 
-        if (status === 2 || status === 3) {
+        if (status === 'COMPLETED' || status === 'FAILED' || status === 'NOT_FOUND' || status === 'ERROR') {
           // 完成或失败，停止轮询
           removeProcessing(docId)
           onStatusChange?.()
@@ -129,7 +134,6 @@ export function useDocumentProcessor() {
       await vectorizationApi.startVectorization(doc.id, selectedModel.value)
       doc.status = 1
       pollDocumentStatus(doc.id, options?.onSuccess)
-      options?.onSuccess?.()
     } catch (error) {
       console.error('启动向量化失败:', error)
       removeProcessing(doc.id)

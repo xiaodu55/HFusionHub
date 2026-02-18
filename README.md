@@ -149,6 +149,12 @@ HFusionHub/
 # 1. 克隆项目并启动 MySQL、Redis
 git clone https://github.com/xiaodu55/HFusionHub.git
 cd HFusionHub
+# 必须使用自己的随机值；请勿提交 .env 文件
+export MYSQL_ROOT_PASSWORD='replace-with-a-strong-password'
+export MYSQL_PASSWORD='replace-with-a-strong-password'
+export DB_PASSWORD="$MYSQL_ROOT_PASSWORD"
+export CALLBACK_SECRET='replace-with-a-long-random-secret'
+export PYTHON_AI_INTERNAL_TOKEN='replace-with-a-second-long-random-secret'
 cd docker
 docker compose up -d
 ```
@@ -190,7 +196,7 @@ npm run dev
 **启动后访问**：
 - 前端：http://localhost:3000
 - Java API：http://localhost:8080
-- Python API：http://localhost:9000
+- Python AI 健康检查：http://localhost:9000/health（业务接口仅接受 Java 服务携带的内部令牌）
 - API文档：http://localhost:8080/doc.html
 
 ### 默认账号

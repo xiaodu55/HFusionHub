@@ -153,6 +153,9 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         if (knowledgeBase == null) {
             throw new BusinessException(StatusCode.KNOWLEDGE_BASE_NOT_FOUND, "知识库不存在");
         }
+        if (!knowledgeBase.getUserId().equals(jwtUtils.getCurrentUserId())) {
+            throw new BusinessException(StatusCode.FORBIDDEN, "无权访问此知识库");
+        }
         return convertToInfoDTO(knowledgeBase);
     }
 
@@ -164,7 +167,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
      */
     @Override
     public PageResult<KnowledgeBaseInfoDTO> list(KnowledgeBaseQueryDTO queryDTO) {
-        return listInternal(null, queryDTO);
+        return listByCurrentUser(queryDTO);
     }
 
     /**

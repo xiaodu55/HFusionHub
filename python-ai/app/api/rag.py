@@ -68,8 +68,15 @@ async def list_traces(
 
 
 @router.get("/traces/stats")
-async def trace_stats(days: int = Query(default=7, ge=1, le=30)):
-    return get_trace_store().stats(window_days=days)
+async def trace_stats(
+    days: int = Query(default=7, ge=1, le=30),
+    knowledge_base_id: int = Query(ge=1),
+):
+    # Aggregate only the selected KB.  The gateway authenticates ownership.
+    return get_trace_store().stats(
+        window_days=days,
+        knowledge_base_id=knowledge_base_id,
+    )
 
 
 @router.get("/traces/export")
@@ -93,9 +100,11 @@ async def export_traces(
 
 
 @router.get("/traces/{trace_id}")
-async def get_trace(trace_id: str):
+async def get_trace(trace_id: str, knowledge_base_id: int = Query(ge=1)):
     trace = get_trace_store().get(trace_id)
     if trace is None:
+        raise HTTPException(status_code=404, detail="Retrieval trace not found")
+    if trace.get("knowledge_base_id") != knowledge_base_id:
         raise HTTPException(status_code=404, detail="Retrieval trace not found")
     return trace
 
