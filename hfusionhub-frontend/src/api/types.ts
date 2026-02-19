@@ -136,4 +136,5 @@ export interface ConversationCreateDTO {
 export interface MessageSendDTO {
   conversationId: number
   content: string
+  requestId?: string
 }

@@ -21,4 +21,7 @@ public class MessageSendDTO {
     @NotBlank(message = "消息内容不能为空")
     @Schema(description = "消息内容", requiredMode = Schema.RequiredMode.REQUIRED, example = "你好，请帮我分析一下这个文档")
     private String content;
+
+    @Schema(description = "客户端请求幂等ID，用于SSE重连去重")
+    private String requestId;
 }

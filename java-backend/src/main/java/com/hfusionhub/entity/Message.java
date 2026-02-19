@@ -80,4 +80,10 @@ public class Message {
     @TableField(fill = FieldFill.INSERT_UPDATE)
     @Schema(description = "更新时间")
     private LocalDateTime updatedAt;
+
+    /**
+     * 客户端请求幂等ID
+     */
+    @Schema(description = "客户端请求幂等ID")
+    private String requestId;
 }

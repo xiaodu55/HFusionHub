@@ -1,0 +1,11 @@
+-- Add requestId column for client-side idempotency, plus performance indexes.
+-- Apply to existing HFusionHub databases before deploying the V4 chat refactoring.
+
+ALTER TABLE `message`
+    ADD COLUMN IF NOT EXISTS `request_id` VARCHAR(64) DEFAULT NULL COMMENT '客户端请求幂等ID' AFTER `updated_at`;
+
+ALTER TABLE `message`
+    ADD UNIQUE INDEX IF NOT EXISTS `uk_request_id` (`request_id`);
+
+ALTER TABLE `message`
+    ADD INDEX IF NOT EXISTS `idx_conv_created_id` (`conversation_id`, `created_at`, `id`);

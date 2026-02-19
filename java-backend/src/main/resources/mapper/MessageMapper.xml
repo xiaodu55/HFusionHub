@@ -28,4 +28,20 @@
         ORDER BY created_at ASC
     </select>
 
+    <!-- 批量聚合：一次查询获取每个对话的消息数量和最新消息 -->
+    <select id="aggregateByConversationIds" resultType="java.util.HashMap">
+        SELECT
+            m1.conversation_id AS conversationId,
+            COUNT(*) AS msgCount,
+            (SELECT m2.content FROM message m2
+             WHERE m2.conversation_id = m1.conversation_id
+             ORDER BY m2.created_at DESC LIMIT 1) AS lastMessage
+        FROM message m1
+        WHERE m1.conversation_id IN
+        <foreach item="id" collection="ids" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+        GROUP BY m1.conversation_id
+    </select>
+
 </mapper>

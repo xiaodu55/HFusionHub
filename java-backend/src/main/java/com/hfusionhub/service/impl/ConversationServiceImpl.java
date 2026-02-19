@@ -155,88 +155,83 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     @Override
-    @Transactional
     public MessageInfoDTO sendMessage(MessageSendDTO dto) {
-        // 1. 查询对话
+        // 幂等检查：如果 requestId 已存在，直接返回已保存的响应
+        if (dto.getRequestId() != null && !dto.getRequestId().isBlank()) {
+            Message existing = messageMapper.selectOne(
+                    new LambdaQueryWrapper<Message>().eq(Message::getRequestId, dto.getRequestId()));
+            if (existing != null) {
+                return convertToMessageInfoDTO(existing);
+            }
+        }
+
+        // 阶段 1: 验证 + 保存用户消息（短事务）
+        Message userMessage = saveUserMessage(dto);
         Conversation conversation = conversationMapper.selectById(dto.getConversationId());
-        if (conversation == null) {
-            throw new BusinessException("对话不存在");
+        List<Map<String, String>> history = getChatHistory(conversation.getId());
+
+        // 阶段 2: 事务外调用 AI（释放数据库连接）
+        AiClient.ChatResponse aiResponse;
+        try {
+            aiResponse = aiClient.chat(
+                    dto.getContent(), dto.getConversationId(),
+                    conversation.getKnowledgeBaseId(), history);
+        } catch (Exception e) {
+            log.error("Failed to get AI response: {}", e.getMessage(), e);
+            return saveAssistantMessage(dto.getConversationId(),
+                    aiUnavailableMessage(e), "fallback", 0, conversation, dto.getContent());
         }
 
-        // 2. 验证权限
+        // 阶段 3: 保存助手消息 + 更新标题（短事务）
+        return saveAssistantMessage(dto.getConversationId(),
+                aiResponse.getContent(), aiResponse.getModel(), aiResponse.getTokenCount(),
+                conversation, dto.getContent());
+    }
+
+    /**
+     * 阶段 1: 短事务保存用户消息
+     */
+    @Transactional
+    public Message saveUserMessage(MessageSendDTO dto) {
         Long currentUserId = JwtUtils.getCurrentUserId();
-        if (!conversation.getUserId().equals(currentUserId)) {
-            throw new BusinessException("无权发送消息");
-        }
-
-        // 2.5. 重新验证关联知识库存在、启用且属于当前用户
+        Conversation conversation = conversationMapper.selectById(dto.getConversationId());
+        if (conversation == null) throw new BusinessException("对话不存在");
+        if (!conversation.getUserId().equals(currentUserId)) throw new BusinessException("无权发送消息");
         if (conversation.getKnowledgeBaseId() != null) {
             KnowledgeBase kb = knowledgeBaseMapper.selectById(conversation.getKnowledgeBaseId());
-            if (kb == null || kb.getDeleted() == 1 || kb.getStatus() != 0) {
+            if (kb == null || kb.getDeleted() == 1 || kb.getStatus() != 0)
                 throw new BusinessException("关联的知识库已被删除或禁用");
-            }
-            if (!kb.getUserId().equals(currentUserId)) {
+            if (!kb.getUserId().equals(currentUserId))
                 throw new BusinessException("无权访问关联的知识库");
-            }
         }
-
-        // 3. 保存用户消息
         Message userMessage = new Message();
         userMessage.setConversationId(dto.getConversationId());
         userMessage.setRole("user");
         userMessage.setContent(dto.getContent());
+        userMessage.setRequestId(dto.getRequestId());
         messageMapper.insert(userMessage);
+        return userMessage;
+    }
 
-        // 4. 获取对话历史
-        List<Map<String, String>> history = getChatHistory(conversation.getId());
-
-        // 5. 调用 Python AI 服务获取回复
-        try {
-            AiClient.ChatResponse aiResponse = aiClient.chat(
-                    dto.getContent(),
-                    dto.getConversationId(),
-                    conversation.getKnowledgeBaseId(),
-                    history
-            );
-
-            // 保存助手消息
-            Message assistantMessage = new Message();
-            assistantMessage.setConversationId(dto.getConversationId());
-            assistantMessage.setRole("assistant");
-            assistantMessage.setContent(aiResponse.getContent());
-            assistantMessage.setModel(aiResponse.getModel());
-            assistantMessage.setTokenCount(aiResponse.getTokenCount());
-            assistantMessage.setSources(aiResponse.getSources());
-            messageMapper.insert(assistantMessage);
-
-            // 6. 更新对话标题（如果是第一条消息）
-            if ("新对话".equals(conversation.getTitle()) && StringUtils.hasText(dto.getContent())) {
-                String title = dto.getContent();
-                if (title.length() > 50) {
-                    title = title.substring(0, 50) + "...";
-                }
-                conversation.setTitle(title);
-                conversationMapper.updateById(conversation);
-            }
-
-            // 7. 返回助手消息
-            return convertToMessageInfoDTO(assistantMessage);
-
-        } catch (Exception e) {
-            log.error("Failed to get AI response: {}", e.getMessage(), e);
-
-            // Keep the user-facing message actionable without exposing remote
-            // service responses, credentials, or stack traces.
-            Message assistantMessage = new Message();
-            assistantMessage.setConversationId(dto.getConversationId());
-            assistantMessage.setRole("assistant");
-            assistantMessage.setContent(aiUnavailableMessage(e));
-            assistantMessage.setModel("fallback");
-            assistantMessage.setTokenCount(0);
-            messageMapper.insert(assistantMessage);
-
-            return convertToMessageInfoDTO(assistantMessage);
+    /**
+     * 阶段 3: 短事务保存助手消息并更新对话标题
+     */
+    @Transactional
+    public MessageInfoDTO saveAssistantMessage(Long conversationId,
+            String content, String model, int tokenCount,
+            Conversation conversation, String userContent) {
+        Message msg = new Message();
+        msg.setConversationId(conversationId);
+        msg.setRole("assistant");
+        msg.setContent(content);
+        msg.setModel(model);
+        msg.setTokenCount(tokenCount);
+        messageMapper.insert(msg);
+        if ("新对话".equals(conversation.getTitle()) && StringUtils.hasText(userContent)) {
+            conversation.setTitle(userContent.length() > 50 ? userContent.substring(0, 50) + "..." : userContent);
+            conversationMapper.updateById(conversation);
         }
+        return convertToMessageInfoDTO(msg);
     }
 
     private String aiUnavailableMessage(Exception error) {
@@ -252,15 +247,16 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     /**
-     * Get chat history for conversation
+     * Get last 20 messages for chat context (newest first, returns oldest→newest order)
      */
     private List<Map<String, String>> getChatHistory(Long conversationId) {
         LambdaQueryWrapper<Message> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Message::getConversationId, conversationId)
-                .orderByAsc(Message::getCreatedAt)
-                .last("LIMIT 20");  // Keep last 20 messages for context
+                .orderByDesc(Message::getCreatedAt)
+                .last("LIMIT 20");
 
         List<Message> messages = messageMapper.selectList(wrapper);
+        java.util.Collections.reverse(messages); // return in chronological order
 
         return messages.stream()
                 .map(m -> {
@@ -334,18 +330,33 @@ public class ConversationServiceImpl implements ConversationService {
             }
         }
 
-        // 3. 保存用户消息
+        // 3. 幂等检查
+        String requestId = dto.getRequestId() != null && !dto.getRequestId().isBlank()
+                ? dto.getRequestId() : java.util.UUID.randomUUID().toString();
+        if (dto.getRequestId() != null && !dto.getRequestId().isBlank()) {
+            Message existing = messageMapper.selectOne(
+                    new LambdaQueryWrapper<Message>().eq(Message::getRequestId, dto.getRequestId()));
+            if (existing != null) {
+                try {
+                    emitter.send(SseEmitter.event().data("[DONE]"));
+                    emitter.complete();
+                } catch (Exception ignored) {}
+                return;
+            }
+        }
+
+        // 4. 保存用户消息
         Message userMessage = new Message();
         userMessage.setConversationId(dto.getConversationId());
         userMessage.setRole("user");
         userMessage.setContent(dto.getContent());
+        userMessage.setRequestId(requestId);
         messageMapper.insert(userMessage);
 
-        // 4. 获取对话历史
+        // 5. 获取对话历史
         List<Map<String, String>> history = getChatHistory(conversation.getId());
 
-        // 5. 使用 HttpURLConnection 实现真正的流式响应（简单可靠）
-        String requestId = java.util.UUID.randomUUID().toString();
+        // 6. 使用 HttpURLConnection 实现真正的流式响应
         StringBuilder responseBuilder = new StringBuilder();
         java.util.List<Map<String, Object>> accumulatedSources = new java.util.ArrayList<>();
 
@@ -423,6 +434,7 @@ public class ConversationServiceImpl implements ConversationService {
                             assistantMessage.setModel("streaming");
                             assistantMessage.setTokenCount(0);
                             assistantMessage.setSources(accumulatedSources);
+                            assistantMessage.setRequestId(requestId);
                             log.info("Saving assistant message - content length: {}, sources count: {}, requestId: {}",
                                     responseBuilder.length(), accumulatedSources.size(), requestId);
                             messageMapper.insert(assistantMessage);
@@ -489,36 +501,27 @@ public class ConversationServiceImpl implements ConversationService {
             // 确保 emitter 总是关闭（如果 [DONE] 没有被正确发送）
             if (responseBuilder.length() > 0) {
                 try {
-                    // 如果有内容但没收到 [DONE]，手动补发
                     emitter.send(SseEmitter.event().data("[DONE]"));
                     emitter.complete();
                     log.info("Manually completed stream, content length: {}, requestId: {}", responseBuilder.length(), requestId);
                 } catch (IllegalStateException alreadyComplete) {
                     // emitter 已经关闭，忽略
                 }
-                // 检查是否已经保存过消息（避免重复保存）
-                LambdaQueryWrapper<Message> checkWrapper = new LambdaQueryWrapper<>();
-                checkWrapper.eq(Message::getConversationId, dto.getConversationId())
-                        .eq(Message::getContent, responseBuilder.toString())
-                        .last("LIMIT 1");
-                Message existingMessage = messageMapper.selectOne(checkWrapper);
-                if (existingMessage == null) {
-                    // 保存助手消息（如果之前没有保存）
-                    try {
-                        Message assistantMessage = new Message();
-                        assistantMessage.setConversationId(dto.getConversationId());
-                        assistantMessage.setRole("assistant");
-                        assistantMessage.setContent(responseBuilder.toString());
-                        assistantMessage.setModel("streaming");
-                        assistantMessage.setTokenCount(0);
-                        assistantMessage.setSources(accumulatedSources);
-                        messageMapper.insert(assistantMessage);
-                        log.info("Saved assistant message (fallback) with {} sources, requestId: {}", accumulatedSources.size(), requestId);
-                    } catch (Exception saveEx) {
-                        log.error("Failed to save assistant message: {}", saveEx.getMessage());
-                    }
-                } else {
-                    log.info("Message already exists, skipping save, requestId: {}", requestId);
+                // 保存助手消息（幂等由 normal [DONE] 路径保证）
+                try {
+                    Message assistantMessage = new Message();
+                    assistantMessage.setConversationId(dto.getConversationId());
+                    assistantMessage.setRole("assistant");
+                    assistantMessage.setContent(responseBuilder.toString());
+                    assistantMessage.setModel("streaming");
+                    assistantMessage.setTokenCount(0);
+                    assistantMessage.setSources(accumulatedSources);
+                    assistantMessage.setRequestId(requestId);
+                    messageMapper.insert(assistantMessage);
+                    log.info("Saved assistant message (fallback), requestId: {}", requestId);
+                } catch (Exception saveEx) {
+                    // 唯一约束冲突 = 已由 [DONE] 路径保存，忽略
+                    log.info("Assistant message already saved (unique key), requestId: {}", requestId);
                 }
             } else {
                 try {
@@ -552,81 +555,48 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     /**
-     * 批量转换 Conversation 为 ConversationInfoDTO（优化 N+1 查询）
+     * 批量转换 Conversation → DTO。通过一次 SQL 聚合获取消息数量和最新消息。
      */
     private List<ConversationInfoDTO> batchConvertToInfoDTO(List<Conversation> conversations) {
         if (conversations.isEmpty()) {
             return List.of();
         }
 
-        // 1. 收集所有 ID
-        List<Long> conversationIds = conversations.stream()
-                .map(Conversation::getId)
-                .collect(Collectors.toList());
+        List<Long> conversationIds = conversations.stream().map(Conversation::getId).collect(Collectors.toList());
+        List<Long> kbIds = conversations.stream().map(Conversation::getKnowledgeBaseId).filter(id -> id != null).distinct().collect(Collectors.toList());
+        List<Long> userIds = conversations.stream().map(Conversation::getUserId).filter(id -> id != null).distinct().collect(Collectors.toList());
 
-        List<Long> kbIds = conversations.stream()
-                .map(Conversation::getKnowledgeBaseId)
-                .filter(id -> id != null)
-                .distinct()
-                .collect(Collectors.toList());
-
-        List<Long> userIds = conversations.stream()
-                .map(Conversation::getUserId)
-                .filter(id -> id != null)
-                .distinct()
-                .collect(Collectors.toList());
-
-        // 2. 批量查询知识库
+        // 批量查询知识库名称
         Map<Long, String> kbNameMap = new HashMap<>();
         if (!kbIds.isEmpty()) {
-            List<KnowledgeBase> kbs = knowledgeBaseMapper.selectBatchIds(kbIds);
-            kbs.forEach(kb -> kbNameMap.put(kb.getId(), kb.getName()));
+            knowledgeBaseMapper.selectBatchIds(kbIds).forEach(kb -> kbNameMap.put(kb.getId(), kb.getName()));
         }
 
-        // 3. 批量查询用户
+        // 批量查询用户名
         Map<Long, String> userNameMap = new HashMap<>();
         if (!userIds.isEmpty()) {
-            List<User> users = userMapper.selectBatchIds(userIds);
-            users.forEach(user -> {
-                String name = user.getNickname() != null ? user.getNickname() : user.getUsername();
-                userNameMap.put(user.getId(), name);
-            });
+            userMapper.selectBatchIds(userIds).forEach(u -> userNameMap.put(u.getId(),
+                    u.getNickname() != null ? u.getNickname() : u.getUsername()));
         }
 
-        // 4. 批量查询消息数量
+        // 一次 SQL 聚合：消息数量 + 最新消息
         Map<Long, Long> messageCountMap = new HashMap<>();
-        LambdaQueryWrapper<Message> countWrapper = new LambdaQueryWrapper<>();
-        countWrapper.in(Message::getConversationId, conversationIds);
-        countWrapper.select(Message::getConversationId, Message::getId);
-        List<Message> allMessages = messageMapper.selectList(countWrapper);
-        allMessages.forEach(m -> {
-            messageCountMap.merge(m.getConversationId(), 1L, Long::sum);
-        });
-
-        // 5. 批量查询最后一条消息
         Map<Long, String> lastMessageMap = new HashMap<>();
-        if (!conversationIds.isEmpty()) {
-            // 使用子查询获取每个对话的最新消息
-            for (Long convId : conversationIds) {
-                LambdaQueryWrapper<Message> lastWrapper = new LambdaQueryWrapper<>();
-                lastWrapper.eq(Message::getConversationId, convId)
-                        .orderByDesc(Message::getCreatedAt)
-                        .last("LIMIT 1");
-                Message lastMessage = messageMapper.selectOne(lastWrapper);
-                if (lastMessage != null) {
-                    lastMessageMap.put(convId, lastMessage.getContent());
-                }
-            }
+        List<Map<String, Object>> aggregates = messageMapper.aggregateByConversationIds(conversationIds);
+        for (Map<String, Object> row : aggregates) {
+            Long convId = toLong(row.get("conversationId"));
+            if (convId == null) continue;
+            messageCountMap.put(convId, toLong(row.get("msgCount")));
+            lastMessageMap.put(convId, (String) row.get("lastMessage"));
         }
 
-        // 6. 组装结果
         return conversations.stream()
                 .map(conv -> ConversationInfoDTO.builder()
                         .id(conv.getId())
                         .knowledgeBaseId(conv.getKnowledgeBaseId())
                         .knowledgeBaseName(conv.getKnowledgeBaseId() != null ? kbNameMap.getOrDefault(conv.getKnowledgeBaseId(), "未知知识库") : null)
                         .userId(conv.getUserId())
-                        .userName(conv.getUserId() != null ? userNameMap.getOrDefault(conv.getUserId(), "未知用户") : null)
+                        .userName(userNameMap.getOrDefault(conv.getUserId(), "未知用户"))
                         .title(conv.getTitle())
                         .messageCount(messageCountMap.getOrDefault(conv.getId(), 0L).intValue())
                         .lastMessage(lastMessageMap.get(conv.getId()))
@@ -634,6 +604,12 @@ public class ConversationServiceImpl implements ConversationService {
                         .updatedAt(conv.getUpdatedAt())
                         .build())
                 .collect(Collectors.toList());
+    }
+
+    private static Long toLong(Object value) {
+        if (value instanceof Number n) return n.longValue();
+        if (value instanceof String s) try { return Long.valueOf(s); } catch (NumberFormatException ignored) {}
+        return null;
     }
 
     /**

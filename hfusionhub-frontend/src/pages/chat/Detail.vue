@@ -89,6 +89,7 @@ const handleSend = async () => {
     await scrollToBottom()
 
     // 3. 使用 fetch API 处理流式响应
+    const requestId = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const response = await fetch('/api/conversation/message/stream', {
       method: 'POST',
       headers: {
@@ -98,6 +99,7 @@ const handleSend = async () => {
       body: JSON.stringify({
         conversationId: Number(route.params.id),
         content,
+        requestId,
       }),
       signal: abortController.signal,
     })
@@ -201,6 +203,7 @@ const handleSend = async () => {
       const res = await conversationApi.sendMessage({
         conversationId: Number(route.params.id),
         content,
+        requestId,
       })
       messages.value.push(res.data)
       await scrollToBottom()
