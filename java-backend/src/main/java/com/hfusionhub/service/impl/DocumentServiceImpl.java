@@ -116,20 +116,25 @@ public class DocumentServiceImpl implements DocumentService {
             throw new BusinessException("不支持的文件类型: " + originalFilename + " (" + contentType + ")");
         }
 
-        // 3. 保存文件
-        String filePath = saveFile(file);
+        // 3. 保存文件到临时目录
+        String tempPath = saveFile(file);
 
         // 4. 创建文档记录
         Document document = new Document();
         document.setKnowledgeBaseId(kbId);
         document.setTitle(title);
-        document.setFilePath(filePath);
+        // 转换为正式路径存入数据库
+        String finalPath = tempToFinalPath(tempPath);
+        document.setFilePath(finalPath);
         document.setFileType(getFileExtension(file.getOriginalFilename()));
         document.setFileSize(file.getSize());
         document.setStatus(DocumentStatus.PENDING.getCode()); // 待解析
         documentMapper.insert(document);
 
-        // 5. 转换为 DTO
+        // 5. 数据库提交成功 → 原子移动文件到正式目录
+        commitFile(tempPath);
+
+        // 6. 转换为 DTO
         return convertToInfoDTO(document, kb.getName());
     }
 
@@ -360,13 +365,17 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     /**
-     * 保存文件到磁盘
+     * 保存文件到临时目录，数据库提交后再原子移动到正式目录。
+     * 返回临时路径；调用方应在事务成功后调用 commitFile()。
      */
     private String saveFile(MultipartFile file) {
         try {
-            // 创建上传目录（使用绝对路径）
             String userDir = System.getProperty("user.dir");
             Path uploadPath = Paths.get(userDir, UPLOAD_DIR);
+            Path tempPath = uploadPath.resolve("temp");
+            if (!Files.exists(tempPath)) {
+                Files.createDirectories(tempPath);
+            }
             if (!Files.exists(uploadPath)) {
                 Files.createDirectories(uploadPath);
             }
@@ -379,15 +388,33 @@ public class DocumentServiceImpl implements DocumentService {
             }
             String filename = UUID.randomUUID().toString() + extension;
 
-            // 保存文件（使用 Files.copy 替代 transferTo，更可靠）
-            Path filePath = uploadPath.resolve(filename);
-            Files.copy(file.getInputStream(), filePath);
+            // 写入临时目录
+            Path tempFile = tempPath.resolve(filename);
+            Files.copy(file.getInputStream(), tempFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
 
-            log.info("文件保存成功: {}", filePath);
-            return filePath.toString();
+            log.info("文件写入临时目录: {}", tempFile);
+            return tempFile.toString();
         } catch (IOException e) {
             log.error("文件保存失败", e);
             throw new BusinessException("文件保存失败");
+        }
+    }
+
+    /**
+     * 数据库事务提交后调用——将文件从 temp 目录原子移动到正式目录。
+     */
+    @Override
+    public void commitFile(String tempPath) {
+        if (tempPath == null) return;
+        try {
+            Path tempFile = Path.of(tempPath);
+            Path finalDir = tempFile.getParent().getParent(); // uploads/documents
+            Path finalFile = finalDir.resolve(tempFile.getFileName());
+            Files.move(tempFile, finalFile, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            log.info("文件已提交到正式目录: {}", finalFile);
+        } catch (IOException e) {
+            log.error("文件提交失败: {}", tempPath, e);
         }
     }
 
@@ -396,6 +423,16 @@ public class DocumentServiceImpl implements DocumentService {
         if (knowledgeBase == null || !knowledgeBase.getUserId().equals(currentUserId)) {
             throw new BusinessException("无权访问该知识库");
         }
+    }
+
+    /**
+     * 将临时路径转换为正式路径
+     */
+    private String tempToFinalPath(String tempPath) {
+        if (tempPath == null) return null;
+        Path tempFile = Path.of(tempPath);
+        Path finalDir = tempFile.getParent().getParent(); // uploads/documents
+        return finalDir.resolve(tempFile.getFileName()).toString();
     }
 
     /**

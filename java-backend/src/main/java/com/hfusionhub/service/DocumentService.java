@@ -97,4 +97,11 @@ public interface DocumentService {
      * @param model 嵌入模型（可选）
      */
     void parseDocument(Long id, String model);
+
+    /**
+     * 将文件从临时目录原子移动到正式目录（数据库事务提交后调用）
+     *
+     * @param tempPath 临时文件路径
+     */
+    void commitFile(String tempPath);
 }

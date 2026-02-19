@@ -2,6 +2,7 @@ package com.hfusionhub.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.exception.BusinessException;
@@ -15,6 +16,7 @@ import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.DocumentMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.UserMapper;
+import com.hfusionhub.service.DeletionService;
 import com.hfusionhub.service.KnowledgeBaseService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,6 +41,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     private final UserMapper userMapper;
     private final DocumentMapper documentMapper;
     private final JwtUtils jwtUtils;
+    private final DeletionService deletionService;
 
     /**
      * 创建知识库
@@ -119,7 +122,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     }
 
     /**
-     * 删除知识库
+     * 删除知识库（创建异步删除任务，由调度器执行级联清理）
      *
      * @param id 知识库ID
      */
@@ -136,9 +139,18 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
             throw new BusinessException(StatusCode.FORBIDDEN, "无权操作此知识库");
         }
 
-        knowledgeBaseMapper.deleteById(id);
+        if (knowledgeBase.getStatus() != null && knowledgeBase.getStatus() != CommonConstants.KB_STATUS_NORMAL) {
+            throw new BusinessException("知识库状态不允许删除");
+        }
 
-        log.info("知识库删除成功，id: {}", id);
+        // 标记KB为DELETING状态，阻止新操作
+        knowledgeBase.setStatus(CommonConstants.KB_STATUS_DELETING);
+        knowledgeBaseMapper.updateById(knowledgeBase);
+
+        // 创建异步删除任务（Outbox）
+        deletionService.createTask("KB_DELETE", id);
+
+        log.info("知识库删除任务已创建，id: {}", id);
     }
 
     /**

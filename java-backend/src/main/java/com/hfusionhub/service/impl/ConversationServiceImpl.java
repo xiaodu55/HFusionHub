@@ -169,6 +169,17 @@ public class ConversationServiceImpl implements ConversationService {
             throw new BusinessException("无权发送消息");
         }
 
+        // 2.5. 重新验证关联知识库存在、启用且属于当前用户
+        if (conversation.getKnowledgeBaseId() != null) {
+            KnowledgeBase kb = knowledgeBaseMapper.selectById(conversation.getKnowledgeBaseId());
+            if (kb == null || kb.getDeleted() == 1 || kb.getStatus() != 0) {
+                throw new BusinessException("关联的知识库已被删除或禁用");
+            }
+            if (!kb.getUserId().equals(currentUserId)) {
+                throw new BusinessException("无权访问关联的知识库");
+            }
+        }
+
         // 3. 保存用户消息
         Message userMessage = new Message();
         userMessage.setConversationId(dto.getConversationId());
@@ -308,6 +319,19 @@ public class ConversationServiceImpl implements ConversationService {
         if (!conversation.getUserId().equals(currentUserId)) {
             emitter.completeWithError(new BusinessException("无权发送消息"));
             return;
+        }
+
+        // 2.5. 重新验证关联知识库
+        if (conversation.getKnowledgeBaseId() != null) {
+            KnowledgeBase kb = knowledgeBaseMapper.selectById(conversation.getKnowledgeBaseId());
+            if (kb == null || kb.getDeleted() == 1 || kb.getStatus() != 0) {
+                emitter.completeWithError(new BusinessException("关联的知识库已被删除或禁用"));
+                return;
+            }
+            if (!kb.getUserId().equals(currentUserId)) {
+                emitter.completeWithError(new BusinessException("无权访问关联的知识库"));
+                return;
+            }
         }
 
         // 3. 保存用户消息

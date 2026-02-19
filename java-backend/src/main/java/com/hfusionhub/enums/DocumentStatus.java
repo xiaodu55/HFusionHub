@@ -15,7 +15,9 @@ public enum DocumentStatus {
     PENDING(0, "待解析"),
     PROCESSING(1, "解析中"),
     COMPLETED(2, "已完成"),
-    FAILED(3, "失败");
+    FAILED(3, "失败"),
+    DELETING(4, "删除中"),
+    DELETE_FAILED(5, "删除失败");
 
     private final Integer code;
     private final String description;

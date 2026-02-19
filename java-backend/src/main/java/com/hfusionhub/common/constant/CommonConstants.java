@@ -58,6 +58,16 @@ public interface CommonConstants {
     int KB_STATUS_DISABLED = 1;
 
     /**
+     * 知识库状态：删除中
+     */
+    int KB_STATUS_DELETING = 2;
+
+    /**
+     * 知识库状态：删除失败
+     */
+    int KB_STATUS_DELETE_FAILED = 3;
+
+    /**
      * 角色：普通用户
      */
     String ROLE_USER = "user";
