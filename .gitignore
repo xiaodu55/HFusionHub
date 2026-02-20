@@ -83,7 +83,6 @@ docs/
 docker/.env
 java-backend/.env
 python-ai/.env
-milvus-docker/.env
 
 # --- Python AI generated data ---
 python-ai/uploads/

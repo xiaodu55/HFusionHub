@@ -1,6 +1,13 @@
 """
 Milvus vector store for storing and retrieving document chunks
 Using Milvus Lite for local development
+
+To switch to a standalone Milvus server for multi-instance or production:
+    1. Start a Milvus standalone instance (e.g. via Docker)
+    2. Set environment variables: MILVUS_HOST, MILVUS_PORT
+    3. Replace the MilvusClient line below:
+       _client = MilvusClient(uri=f"http://{config.MILVUS_HOST}:{config.MILVUS_PORT}")
+    4. Remove or archive the local milvus_data.db file
 """
 
 import json
