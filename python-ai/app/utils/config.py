@@ -24,7 +24,7 @@ class Config:
     # Server Configuration
     SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
     SERVER_PORT = int(os.getenv("SERVER_PORT", "9000"))
-    SERVER_DEBUG = os.getenv("SERVER_DEBUG", "true").lower() == "true"
+    SERVER_DEBUG = os.getenv("SERVER_DEBUG", "false").lower() == "true"
     # Comma-separated browser origins. Use "*" only for public, credential-free APIs.
     CORS_ORIGINS = [
         origin.strip()

@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
+import com.hfusionhub.common.limiter.LoginRateLimiter;
+import com.hfusionhub.common.utils.IpUtils;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.dto.UserInfoDTO;
 import com.hfusionhub.dto.UserLoginDTO;
@@ -16,6 +18,8 @@ import com.hfusionhub.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDateTime;
 
@@ -31,6 +35,7 @@ public class UserServiceImpl implements UserService {
 
     private final UserMapper userMapper;
     private final JwtUtils jwtUtils;
+    private final LoginRateLimiter rateLimiter;
 
     /**
      * 用户登录
@@ -40,23 +45,31 @@ public class UserServiceImpl implements UserService {
      */
     @Override
     public String login(UserLoginDTO loginDTO) {
+        String ip = getClientIp();
+        String username = loginDTO.getUsername();
+
         // 根据用户名查询用户
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(User::getUsername, loginDTO.getUsername());
+        wrapper.eq(User::getUsername, username);
         User user = userMapper.selectOne(wrapper);
 
         // 校验用户是否存在
         if (user == null) {
+            rateLimiter.recordFailedAttempt(ip);
+            log.warn("AUTH_LOGIN_FAILED user={} ip={} reason=user_not_found", username, ip);
             throw new BusinessException(StatusCode.LOGIN_ERROR, "用户名或密码错误");
         }
 
         // 校验用户状态
         if (user.getStatus() == 1) {
+            log.warn("AUTH_LOGIN_FAILED user={} ip={} reason=user_disabled", username, ip);
             throw new BusinessException(StatusCode.USER_DISABLED, "用户已被禁用");
         }
 
         // 校验密码
         if (!BCrypt.checkpw(loginDTO.getPassword(), user.getPassword())) {
+            rateLimiter.recordFailedAttempt(ip);
+            log.warn("AUTH_LOGIN_FAILED user={} ip={} reason=bad_password", username, ip);
             throw new BusinessException(StatusCode.LOGIN_ERROR, "用户名或密码错误");
         }
 
@@ -64,10 +77,12 @@ public class UserServiceImpl implements UserService {
         user.setLastLoginTime(LocalDateTime.now());
         userMapper.updateById(user);
 
-        // 登录
+        // 登录成功 — 清除失败计数
+        rateLimiter.recordSuccess(ip);
+
         jwtUtils.login(user.getId());
 
-        log.info("用户登录成功，userId: {}, username: {}", user.getId(), user.getUsername());
+        log.info("AUTH_LOGIN_SUCCESS userId={} username={} ip={}", user.getId(), username, ip);
         return jwtUtils.getTokenValue();
     }
 
@@ -109,7 +124,8 @@ public class UserServiceImpl implements UserService {
 
         userMapper.insert(user);
 
-        log.info("用户注册成功，userId: {}, username: {}", user.getId(), user.getUsername());
+        String ip = getClientIp();
+        log.info("AUTH_REGISTER_SUCCESS userId={} username={} ip={}", user.getId(), user.getUsername(), ip);
         return convertToUserInfoDTO(user);
     }
 
@@ -214,6 +230,19 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException(StatusCode.NOT_FOUND, "用户不存在");
         }
         return convertToUserInfoDTO(user);
+    }
+
+    /**
+     * Extract client IP from the current HTTP request context.
+     */
+    private String getClientIp() {
+        try {
+            ServletRequestAttributes attrs =
+                    (ServletRequestAttributes) RequestContextHolder.currentRequestAttributes();
+            return IpUtils.getClientIp(attrs.getRequest());
+        } catch (IllegalStateException e) {
+            return "unknown";
+        }
     }
 
     /**

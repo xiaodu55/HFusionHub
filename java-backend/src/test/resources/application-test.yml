@@ -1,0 +1,108 @@
+# =====================================================
+# HFusionHub Java Backend — Test Configuration
+# Uses H2 in MySQL compatibility mode for fast unit tests.
+# No external MySQL/Redis required.
+# =====================================================
+
+spring:
+  datasource:
+    driver-class-name: org.h2.Driver
+    url: jdbc:h2:mem:testdb;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password:
+
+  flyway:
+    enabled: false
+
+  # Use H2-compatible schema SQL instead of Flyway MySQL migrations
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema-h2.sql
+
+  # Disable Redis auto-configuration — tests use in-memory mock
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
+
+  main:
+    allow-bean-definition-overriding: true
+
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    serialization:
+      write-dates-as-timestamps: false
+
+# MyBatis Plus — same as production
+mybatis-plus:
+  mapper-locations: classpath:mapper/**/*.xml
+  type-aliases-package: com.hfusionhub.entity
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+
+# Sa-Token — test configuration (in-memory, no Redis)
+sa-token:
+  token-name: satoken
+  timeout: 86400
+  active-timeout: 1800
+  is-concurrent: true
+  token-style: uuid
+  is-log: false
+  # Use in-memory DAO instead of Redis
+  alone-redis: false
+
+# Disable knife4j in tests
+knife4j:
+  enable: false
+
+springdoc:
+  api-docs:
+    enabled: false
+
+# No actual external services in tests
+python-ai:
+  base-url: http://localhost:9001
+  timeout: 60000
+  engine:
+    url: http://localhost:9001
+  callback-base-url: http://localhost:8080/api
+  callback-secret: test-callback-secret
+  internal-token: test-internal-token
+
+ai-service:
+  base-url: http://localhost:9001
+  timeout: 120000
+
+minio:
+  endpoint: http://localhost:9000
+  access-key: test
+  secret-key: test
+  bucket-name: hfusionhub-test
+
+rag:
+  index:
+    stale-after-minutes: 5
+    max-attempts: 1
+    recovery-delay-ms: 60000
+
+# Admin init — empty by default in tests, set via test properties when needed
+app:
+  admin:
+    username: admin
+    password: ${ADMIN_PASSWORD:}
+
+logging:
+  level:
+    root: WARN
+    com.hfusionhub: DEBUG
+    org.springframework.test: INFO
+    org.springframework.boot.test: INFO

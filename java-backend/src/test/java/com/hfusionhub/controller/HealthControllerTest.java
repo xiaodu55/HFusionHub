@@ -8,6 +8,10 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+/**
+ * Pure unit test for {@link HealthController}.
+ * The health endpoint is a simple POJO call — no Spring context needed.
+ */
 class HealthControllerTest {
 
     @Test
