@@ -15,11 +15,13 @@ class Config:
     # DeepSeek API
     DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
     DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
     # Milvus
     MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
     MILVUS_PORT = int(os.getenv("MILVUS_PORT", "19530"))
     MILVUS_COLLECTION = os.getenv("MILVUS_COLLECTION", "hfusionhub_chunks")
+    MILVUS_LITE_PATH = os.getenv("MILVUS_LITE_PATH", "./milvus_data.db")
 
     # Server Configuration
     SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")

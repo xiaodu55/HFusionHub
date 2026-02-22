@@ -61,7 +61,7 @@ export interface TraceDailyMetric {
 export interface TraceFilters {
   limit?: number
   offset?: number
-  knowledge_base_id?: number
+  knowledge_base_id: number
   error_only?: boolean
   query?: string
   source?: string
@@ -114,25 +114,39 @@ export interface EvaluationRun {
   failed_case_ids: string[]
 }
 
-export const getTraces = (params: TraceFilters = {}) =>
+const toJavaQueryParams = (params: TraceFilters) => {
+  const { knowledge_base_id, ...rest } = params
+  return {
+    ...rest,
+    knowledgeBaseId: knowledge_base_id,
+  }
+}
+
+export const getTraces = (params: TraceFilters) =>
   get<{ data: { traces: RetrievalTrace[], total: number } }>('/rag/traces', {
     limit: 50,
     offset: 0,
-    ...params,
+    ...toJavaQueryParams(params),
   })
 
-export const getTraceStats = (days = 7) =>
-  get<{ data: TraceStats }>('/rag/traces/stats', { days })
+export const getTraceStats = (days: number, knowledgeBaseId: number) =>
+  get<{ data: TraceStats }>('/rag/traces/stats', { days, knowledgeBaseId })
 
-export const exportTraces = (format: 'json' | 'csv', filters: Omit<TraceFilters, 'limit' | 'offset'> = {}) =>
-  get<{ data: TraceExport }>('/rag/traces/export', { format, ...filters })
+export const exportTraces = (format: 'json' | 'csv', filters: Omit<TraceFilters, 'limit' | 'offset'>) =>
+  get<{ data: TraceExport }>('/rag/traces/export', {
+    format,
+    ...toJavaQueryParams(filters),
+  })
 
 export const evaluateRetrieval = (data: {
-  knowledge_base_id?: number
+  knowledge_base_id: number
   top_k: number
   label?: string
   cases: EvaluationCaseInput[]
 }) => post<{ data: EvaluationReport }>('/rag/evaluate', data)
 
-export const getEvaluationRuns = (params: { limit?: number, knowledge_base_id?: number } = {}) =>
-  get<{ data: { runs: EvaluationRun[] } }>('/rag/evaluation-runs', params)
+export const getEvaluationRuns = (params: { limit?: number, knowledge_base_id: number }) =>
+  get<{ data: { runs: EvaluationRun[] } }>('/rag/evaluation-runs', {
+    limit: params.limit,
+    knowledgeBaseId: params.knowledge_base_id,
+  })

@@ -5,7 +5,7 @@ Uses DeepSeek API for chat completion
 
 import httpx
 import json
-from typing import List, AsyncGenerator
+from typing import List, AsyncGenerator, NoReturn
 
 from .base import BaseLLM, ChatMessage, LLMResponse
 
@@ -17,12 +17,29 @@ class DeepSeekLLM(BaseLLM):
         self,
         api_key: str,
         base_url: str = "https://api.deepseek.com",
-        model: str = "deepseek-chat"
+        model: str = "deepseek-v4-flash"
     ):
         self.api_key = api_key
-        self.base_url = base_url
+        self.base_url = base_url.rstrip("/")
         self.model = model
         self._available = True
+
+    @staticmethod
+    def _raise_api_error(response: httpx.Response) -> NoReturn:
+        try:
+            payload = response.json()
+            message = payload.get("error", {}).get("message") or response.text
+        except (ValueError, AttributeError):
+            message = response.text
+        detail = (message or "unknown upstream error").strip()[:1000]
+        raise RuntimeError(
+            f"DeepSeek API request failed ({response.status_code}): {detail}"
+        )
+
+    @classmethod
+    def _ensure_success(cls, response: httpx.Response) -> None:
+        if response.is_error:
+            cls._raise_api_error(response)
 
     async def chat(
         self,
@@ -57,7 +74,7 @@ class DeepSeekLLM(BaseLLM):
                 headers=headers,
                 json=payload
             )
-            response.raise_for_status()
+            self._ensure_success(response)
             data = response.json()
 
         # Extract response
@@ -107,7 +124,7 @@ class DeepSeekLLM(BaseLLM):
                 headers=headers,
                 json=payload
             ) as response:
-                response.raise_for_status()
+                self._ensure_success(response)
 
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):

@@ -44,7 +44,8 @@ class OllamaEmbedding:
             Embedding 向量
         """
         try:
-            return await self._call_api(text)
+            embeddings = await self._call_api([text])
+            return embeddings[0]
         except Exception as e:
             logger.error(f"Ollama embedding failed: {e}")
             raise
@@ -59,24 +60,22 @@ class OllamaEmbedding:
         Returns:
             Embedding 向量列表
         """
-        # Ollama API 支持单个文本，批量需要逐个调用
-        embeddings = []
-        for text in texts:
-            try:
-                embedding = await self._call_api(text)
-                embeddings.append(embedding)
-            except Exception as e:
-                logger.error(f"Ollama batch embedding failed for text: {text[:50]}... Error: {e}")
-                raise
-        return embeddings
+        if not texts:
+            return []
+        try:
+            return await self._call_api(texts)
+        except Exception as e:
+            logger.error(f"Ollama batch embedding failed: {e}")
+            raise
 
-    async def _call_api(self, text: str) -> List[float]:
-        """调用 Ollama API with retry"""
-        url = f"{self.base_url}/api/embeddings"
+    async def _call_api(self, texts: List[str]) -> List[List[float]]:
+        """Call Ollama's batch embedding API with retry and dimension checks."""
+        url = f"{self.base_url}/api/embed"
 
         payload = {
             "model": self.model,
-            "prompt": text
+            "input": texts,
+            "dimensions": self.dimension,
         }
 
         max_retries = int(os.getenv("EMBEDDING_MAX_RETRIES", "3"))
@@ -89,16 +88,36 @@ class OllamaEmbedding:
                     response.raise_for_status()
                     result = response.json()
 
-                    # Ollama 返回格式: {"embedding": [...]}
-                    embedding = result.get("embedding", [])
-                    if not embedding:
+                    embeddings = result.get("embeddings", [])
+                    if len(embeddings) != len(texts):
                         if attempt < max_retries - 1:
-                            logger.warning(f"Ollama returned empty embedding (attempt {attempt + 1}/{max_retries}), retrying...")
+                            logger.warning(
+                                "Ollama returned %s embeddings for %s inputs "
+                                "(attempt %s/%s), retrying...",
+                                len(embeddings),
+                                len(texts),
+                                attempt + 1,
+                                max_retries,
+                            )
                             await asyncio.sleep(retry_delay)
                             continue
-                        raise ValueError(f"Ollama returned empty embedding after {max_retries} attempts: {result}")
+                        raise ValueError(
+                            f"Ollama returned {len(embeddings)} embeddings "
+                            f"for {len(texts)} inputs"
+                        )
 
-                    return embedding
+                    invalid_dimensions = [
+                        len(embedding)
+                        for embedding in embeddings
+                        if len(embedding) != self.dimension
+                    ]
+                    if invalid_dimensions:
+                        raise ValueError(
+                            "Ollama embedding dimension mismatch: "
+                            f"expected {self.dimension}, got {invalid_dimensions[0]}"
+                        )
+
+                    return embeddings
             except httpx.TimeoutException:
                 if attempt < max_retries - 1:
                     logger.warning(f"Ollama timeout (attempt {attempt + 1}/{max_retries}), retrying...")

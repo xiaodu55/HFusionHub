@@ -5,7 +5,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/composables/useToast'
 import * as ragApi from '@/api/rag'
+import * as knowledgeBaseApi from '@/api/knowledgeBase'
 import type { EvaluationReport, EvaluationRun, RetrievalTrace, TraceFilters, TraceStats } from '@/api/rag'
+import type { KnowledgeBase } from '@/api/types'
 
 const PAGE_SIZE = 20
 const toast = useToast()
@@ -28,16 +30,16 @@ const stats = ref<TraceStats>({
 })
 const selectedTrace = ref<RetrievalTrace | null>(null)
 const filterQuery = ref('')
-const filterKnowledgeBaseId = ref<number | undefined>()
 const filterSource = ref('')
 const errorsOnly = ref(false)
 const trendDays = ref(7)
-const knowledgeBaseId = ref<number | undefined>()
 const topK = ref(5)
 const evaluationQuery = ref('')
 const expectedDocumentIds = ref('')
 const evaluationReport = ref<EvaluationReport | null>(null)
 const evaluationRuns = ref<EvaluationRun[]>([])
+const knowledgeBases = ref<KnowledgeBase[]>([])
+const selectedKnowledgeBaseId = ref<number | undefined>()
 
 const sourceSummary = computed(() => Object.entries(stats.value.result_source_counts)
   .map(([source, count]) => `${source}: ${count}`)
@@ -46,26 +48,42 @@ const hitRatePercent = computed(() => `${Math.round(stats.value.hit_rate * 100)}
 const hasMore = computed(() => traces.value.length < totalTraces.value)
 const maxDailyTotal = computed(() => Math.max(1, ...stats.value.daily_metrics.map(metric => metric.total_traces)))
 
+const requireKnowledgeBaseId = () => {
+  if (!selectedKnowledgeBaseId.value) {
+    throw new Error('请先选择知识库')
+  }
+  return selectedKnowledgeBaseId.value
+}
+
 const buildFilters = (offset = 0): TraceFilters => ({
   limit: PAGE_SIZE,
   offset,
   query: filterQuery.value.trim() || undefined,
-  knowledge_base_id: filterKnowledgeBaseId.value,
+  knowledge_base_id: requireKnowledgeBaseId(),
   error_only: errorsOnly.value || undefined,
   source: filterSource.value.trim() || undefined,
 })
 
 const refreshStats = async () => {
-  const response = await ragApi.getTraceStats(trendDays.value)
+  const response = await ragApi.getTraceStats(trendDays.value, requireKnowledgeBaseId())
   stats.value = response.data
 }
 
 const loadEvaluationRuns = async () => {
-  const response = await ragApi.getEvaluationRuns({ limit: 20, knowledge_base_id: knowledgeBaseId.value })
+  const response = await ragApi.getEvaluationRuns({
+    limit: 20,
+    knowledge_base_id: requireKnowledgeBaseId(),
+  })
   evaluationRuns.value = response.data.runs
 }
 
 const loadData = async () => {
+  if (!selectedKnowledgeBaseId.value) {
+    traces.value = []
+    totalTraces.value = 0
+    evaluationRuns.value = []
+    return
+  }
   loading.value = true
   try {
     const [tracesResponse] = await Promise.all([
@@ -80,7 +98,7 @@ const loadData = async () => {
     }
   } catch (error) {
     console.error('加载 RAG 调试数据失败:', error)
-    toast.error('加载 RAG 调试数据失败，请确认 Python AI 服务已启动')
+    toast.error('加载 RAG 调试数据失败，请检查后端服务或知识库权限')
   } finally {
     loading.value = false
   }
@@ -108,10 +126,24 @@ const applyFilters = () => {
 
 const clearFilters = () => {
   filterQuery.value = ''
-  filterKnowledgeBaseId.value = undefined
   filterSource.value = ''
   errorsOnly.value = false
   applyFilters()
+}
+
+const loadKnowledgeBases = async () => {
+  const response = await knowledgeBaseApi.getMyKnowledgeBaseList({
+    page: 1,
+    pageSize: 100,
+  })
+  knowledgeBases.value = response.data.records
+  selectedKnowledgeBaseId.value = knowledgeBases.value[0]?.id
+}
+
+const changeKnowledgeBase = () => {
+  selectedTrace.value = null
+  evaluationReport.value = null
+  loadData()
 }
 
 const selectTrace = (trace: RetrievalTrace) => {
@@ -142,6 +174,10 @@ const exportTraces = async (format: 'json' | 'csv') => {
 }
 
 const submitEvaluation = async () => {
+  if (!selectedKnowledgeBaseId.value) {
+    toast.error('请先选择知识库')
+    return
+  }
   const documentIds = expectedDocumentIds.value
     .split(',')
     .map(item => item.trim())
@@ -154,7 +190,7 @@ const submitEvaluation = async () => {
   evaluating.value = true
   try {
     const response = await ragApi.evaluateRetrieval({
-      knowledge_base_id: knowledgeBaseId.value,
+      knowledge_base_id: selectedKnowledgeBaseId.value,
       top_k: topK.value,
       cases: [{
         case_id: `manual-${Date.now()}`,
@@ -174,7 +210,15 @@ const submitEvaluation = async () => {
   }
 }
 
-onMounted(loadData)
+onMounted(async () => {
+  try {
+    await loadKnowledgeBases()
+    await loadData()
+  } catch (error) {
+    console.error('初始化 RAG 调试中心失败:', error)
+    toast.error('初始化 RAG 调试中心失败，请检查后端服务')
+  }
+})
 </script>
 
 <template>
@@ -185,9 +229,20 @@ onMounted(loadData)
         <p class="text-muted-foreground">定位检索命中原因、追踪失败请求，并用真实问题持续评测知识库质量。</p>
       </div>
       <div class="flex flex-wrap gap-2">
-        <Button variant="outline" :disabled="exporting" @click="exportTraces('csv')"><Download class="mr-2 h-4 w-4" />导出 CSV</Button>
-        <Button variant="outline" :disabled="exporting" @click="exportTraces('json')"><Download class="mr-2 h-4 w-4" />导出 JSON</Button>
-        <Button variant="outline" :disabled="loading" @click="loadData"><RefreshCw class="mr-2 h-4 w-4" :class="{ 'animate-spin': loading }" />刷新数据</Button>
+        <select
+          v-model.number="selectedKnowledgeBaseId"
+          class="min-w-48 rounded-md border bg-background px-3 py-2 text-sm"
+          :disabled="knowledgeBases.length === 0"
+          @change="changeKnowledgeBase"
+        >
+          <option v-if="knowledgeBases.length === 0" :value="undefined">暂无知识库</option>
+          <option v-for="knowledgeBase in knowledgeBases" :key="knowledgeBase.id" :value="knowledgeBase.id">
+            {{ knowledgeBase.name }}
+          </option>
+        </select>
+        <Button variant="outline" :disabled="exporting || !selectedKnowledgeBaseId" @click="exportTraces('csv')"><Download class="mr-2 h-4 w-4" />导出 CSV</Button>
+        <Button variant="outline" :disabled="exporting || !selectedKnowledgeBaseId" @click="exportTraces('json')"><Download class="mr-2 h-4 w-4" />导出 JSON</Button>
+        <Button variant="outline" :disabled="loading || !selectedKnowledgeBaseId" @click="loadData"><RefreshCw class="mr-2 h-4 w-4" :class="{ 'animate-spin': loading }" />刷新数据</Button>
       </div>
     </div>
 
@@ -229,9 +284,8 @@ onMounted(loadData)
     <Card>
       <CardHeader><CardTitle class="flex items-center gap-2"><Filter class="h-5 w-5" />检索记录筛选</CardTitle><CardDescription>筛选条件会同时作用于页面列表与导出的数据。</CardDescription></CardHeader>
       <CardContent class="space-y-4">
-        <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div class="grid gap-3 md:grid-cols-3">
           <input v-model="filterQuery" class="rounded-md border bg-background px-3 py-2 text-sm" placeholder="按问题关键词筛选" @keyup.enter="applyFilters" />
-          <input v-model.number="filterKnowledgeBaseId" type="number" min="1" class="rounded-md border bg-background px-3 py-2 text-sm" placeholder="知识库 ID" @keyup.enter="applyFilters" />
           <input v-model="filterSource" class="rounded-md border bg-background px-3 py-2 text-sm" placeholder="结果来源，如 vector / graph" @keyup.enter="applyFilters" />
           <label class="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"><input v-model="errorsOnly" type="checkbox" />仅看失败记录</label>
         </div>
@@ -281,9 +335,9 @@ onMounted(loadData)
     <Card>
       <CardHeader><CardTitle class="flex items-center gap-2"><BarChart3 class="h-5 w-5" />快速检索评测</CardTitle><CardDescription>输入一个问题和正确应命中的文档 ID，得到当前知识库的检索指标。</CardDescription></CardHeader>
       <CardContent class="space-y-4">
-        <div class="grid gap-4 md:grid-cols-3"><label class="space-y-1 text-sm">知识库 ID（可选）<input v-model.number="knowledgeBaseId" type="number" min="1" class="w-full rounded-md border bg-background px-3 py-2" placeholder="例如：1" /></label><label class="space-y-1 text-sm">Top K<input v-model.number="topK" type="number" min="1" max="20" class="w-full rounded-md border bg-background px-3 py-2" /></label><label class="space-y-1 text-sm">期望文档 ID（逗号分隔）<input v-model="expectedDocumentIds" class="w-full rounded-md border bg-background px-3 py-2" placeholder="例如：12,15" /></label></div>
+        <div class="grid gap-4 md:grid-cols-2"><label class="space-y-1 text-sm">Top K<input v-model.number="topK" type="number" min="1" max="20" class="w-full rounded-md border bg-background px-3 py-2" /></label><label class="space-y-1 text-sm">期望文档 ID（逗号分隔）<input v-model="expectedDocumentIds" class="w-full rounded-md border bg-background px-3 py-2" placeholder="例如：12,15" /></label></div>
         <label class="block space-y-1 text-sm">测试问题<textarea v-model="evaluationQuery" rows="3" class="w-full rounded-md border bg-background px-3 py-2" placeholder="例如：RAG 的检索流程是什么？" /></label>
-        <Button :disabled="evaluating" @click="submitEvaluation"><Send class="mr-2 h-4 w-4" />{{ evaluating ? '评测中...' : '运行评测' }}</Button>
+        <Button :disabled="evaluating || !selectedKnowledgeBaseId" @click="submitEvaluation"><Send class="mr-2 h-4 w-4" />{{ evaluating ? '评测中...' : '运行评测' }}</Button>
         <div v-if="evaluationReport" class="grid gap-3 rounded-lg bg-muted p-4 md:grid-cols-3"><div>Precision@{{ evaluationReport.summary.top_k }}<p class="text-xl font-bold">{{ evaluationReport.summary.precision_at_k }}</p></div><div>Recall@{{ evaluationReport.summary.top_k }}<p class="text-xl font-bold">{{ evaluationReport.summary.recall_at_k }}</p></div><div>MRR<p class="text-xl font-bold">{{ evaluationReport.summary.mean_reciprocal_rank }}</p></div></div>
       </CardContent>
     </Card>

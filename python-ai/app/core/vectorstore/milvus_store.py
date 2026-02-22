@@ -12,6 +12,7 @@ To switch to a standalone Milvus server for multi-instance or production:
 
 import json
 import os
+from pathlib import Path
 from typing import List, Optional, Dict, Any
 from pymilvus import (
     FieldSchema,
@@ -24,13 +25,13 @@ from app.core.chunker.text_chunker import VectorChunk
 
 
 # Collection name
-COLLECTION_NAME = "knowledge_chunks"
+COLLECTION_NAME = config.MILVUS_COLLECTION
 
-# Use config for embedding dimension
-from app.utils.config import config as app_config
-
-# Milvus Lite database path
-MILVUS_LITE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "milvus_data.db")
+# Resolve relative storage paths from the Python service root, not the caller's cwd.
+PYTHON_AI_ROOT = Path(__file__).resolve().parents[3]
+MILVUS_LITE_PATH = Path(config.MILVUS_LITE_PATH)
+if not MILVUS_LITE_PATH.is_absolute():
+    MILVUS_LITE_PATH = (PYTHON_AI_ROOT / MILVUS_LITE_PATH).resolve()
 
 # Global client
 _client: Optional[MilvusClient] = None
@@ -54,7 +55,8 @@ def get_milvus_client() -> Optional[MilvusClient]:
     try:
         if _client is None:
             # Use Milvus Lite for local development
-            _client = MilvusClient(uri=MILVUS_LITE_PATH)
+            MILVUS_LITE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            _client = MilvusClient(uri=str(MILVUS_LITE_PATH))
             print(f"[Milvus] Connected to Milvus Lite at {MILVUS_LITE_PATH}")
         return _client
     except Exception as e:
@@ -98,22 +100,26 @@ def create_collection():
                     "content", "embedding",
                 }
                 missing = required_fields - set(field_map.keys())
+                incompatible_reason = None
                 if missing:
-                    print(f"[Milvus] Schema incompatible - missing fields: {missing}")
-                    print("[Milvus] Dropping and recreating collection...")
-                    client.drop_collection(COLLECTION_NAME)
-
-                # Check embedding dimension matches current config
-                embedding_field = field_map.get("embedding")
-                if embedding_field:
+                    incompatible_reason = f"missing fields: {sorted(missing)}"
+                else:
+                    # Check embedding dimension matches current config.
+                    embedding_field = field_map["embedding"]
                     params = embedding_field.get("params", {})
                     dim = params.get("dim") or embedding_field.get("dim")
-                    if dim is not None and dim != app_config.EMBEDDING_DIMENSION:
-                        print(f"[Milvus] Dimension mismatch: collection has {dim}, config expects {app_config.EMBEDDING_DIMENSION}")
-                        print("[Milvus] Dropping and recreating collection...")
-                        client.drop_collection(COLLECTION_NAME)
+                    if dim is not None and dim != config.EMBEDDING_DIMENSION:
+                        incompatible_reason = (
+                            f"embedding dimension is {dim}, "
+                            f"expected {config.EMBEDDING_DIMENSION}"
+                        )
+
+                if incompatible_reason:
+                    print(f"[Milvus] Schema incompatible - {incompatible_reason}")
+                    print("[Milvus] Dropping and recreating collection...")
+                    client.drop_collection(COLLECTION_NAME)
                 else:
-                    return client  # Already valid
+                    return client
             except Exception as e:
                 print(f"[Milvus] Schema check failed: {e}, but keeping collection")
                 # Don't drop collection during normal operations
@@ -128,7 +134,7 @@ def create_collection():
             FieldSchema(name="block_type", dtype=DataType.VARCHAR, max_length=20),
             FieldSchema(name="outline_path", dtype=DataType.VARCHAR, max_length=2000),
             FieldSchema(name="metadata", dtype=DataType.VARCHAR, max_length=4000),
-            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=app_config.EMBEDDING_DIMENSION)
+            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=config.EMBEDDING_DIMENSION)
         ]
 
         # Create schema

@@ -92,7 +92,7 @@ def main():
     print(f"API documentation: http://{config.SERVER_HOST}:{config.SERVER_PORT}/docs")
     print(f"API host: {config.SERVER_HOST}, API port: {config.SERVER_PORT}")
     print(f"DeepSeek API: {config.DEEPSEEK_BASE_URL}")
-    print(f"Milvus: {config.MILVUS_HOST}:{config.MILVUS_PORT}")
+    print(f"Milvus Lite: {config.MILVUS_LITE_PATH}")
 
     uvicorn.run(
         "app.main:app",

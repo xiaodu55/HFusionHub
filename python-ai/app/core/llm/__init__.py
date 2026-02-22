@@ -32,7 +32,7 @@ def get_llm(model: str = None) -> BaseLLM:
             llm = DeepSeekLLM(
                 api_key=deepseek_api_key,
                 base_url=deepseek_base_url,
-                model=model or "deepseek-chat"
+                model=model or config.DEEPSEEK_MODEL
             )
             # Test availability with a simple request
             if llm.is_available():
