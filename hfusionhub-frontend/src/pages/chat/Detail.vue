@@ -59,6 +59,7 @@ const handleSend = async () => {
 
   // 创建新的 AbortController
   abortController = new AbortController()
+  const requestId = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
 
   try {
     // 1. 立即添加用户消息到列表（使用北京时间，格式与后端一致）
@@ -89,7 +90,6 @@ const handleSend = async () => {
     await scrollToBottom()
 
     // 3. 使用 fetch API 处理流式响应
-    const requestId = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const response = await fetch('/api/conversation/message/stream', {
       method: 'POST',
       headers: {
