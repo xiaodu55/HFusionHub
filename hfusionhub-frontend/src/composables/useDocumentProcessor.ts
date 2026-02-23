@@ -2,6 +2,19 @@ import { ref, onBeforeUnmount } from 'vue'
 import * as vectorizationApi from '@/api/vectorization'
 import type { Document } from '@/api/types'
 
+export interface ProcessingStatus {
+  status?: string
+  message?: string
+  stage?: string
+  progress?: number
+  elapsedSeconds?: number
+  estimatedSeconds?: number
+  remainingSeconds?: number
+  processedChunks?: number
+  totalChunks?: number
+  chunksCount?: number
+}
+
 /**
  * 文档处理相关的组合式函数
  * 包含模型加载、状态轮询、处理状态管理等复用逻辑
@@ -9,6 +22,8 @@ import type { Document } from '@/api/types'
 export function useDocumentProcessor() {
   // 处理中的文档ID集合
   const processingDocs = ref<Set<number>>(new Set())
+  const processingStatus = ref<Record<number, ProcessingStatus>>({})
+  const activePollingDocs = new Set<number>()
 
   // 轮询定时器集合
   const pollingTimers = new Set<ReturnType<typeof setTimeout>>()
@@ -36,6 +51,76 @@ export function useDocumentProcessor() {
     const s = new Set(processingDocs.value)
     s.delete(id)
     processingDocs.value = s
+  }
+
+  const toNumber = (value: unknown): number | undefined => {
+    if (value === null || value === undefined || value === '') return undefined
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+
+  const normalizeStatus = (payload: any): ProcessingStatus => ({
+    status: payload?.status,
+    message: payload?.message,
+    stage: payload?.stage,
+    progress: toNumber(payload?.progress),
+    elapsedSeconds: toNumber(payload?.elapsed_seconds),
+    estimatedSeconds: toNumber(payload?.estimated_seconds),
+    remainingSeconds: toNumber(payload?.remaining_seconds),
+    processedChunks: toNumber(payload?.processed_chunks),
+    totalChunks: toNumber(payload?.total_chunks),
+    chunksCount: toNumber(payload?.chunks_count),
+  })
+
+  const parseStatusPayload = (rawStatus: any) => {
+    if (typeof rawStatus === 'string') {
+      return JSON.parse(rawStatus)
+    }
+    return rawStatus
+  }
+
+  const updateProcessingStatus = (id: number, payload: any) => {
+    processingStatus.value = {
+      ...processingStatus.value,
+      [id]: normalizeStatus(payload),
+    }
+  }
+
+  const clearProcessingStatus = (id: number) => {
+    const next = { ...processingStatus.value }
+    delete next[id]
+    processingStatus.value = next
+  }
+
+  const processingProgress = (id: number) => {
+    const progress = processingStatus.value[id]?.progress ?? 5
+    return Math.max(0, Math.min(100, Math.round(progress)))
+  }
+
+  const formatProcessingTime = (seconds?: number | null) => {
+    if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return '计算中'
+    const total = Math.max(0, Math.round(seconds))
+    if (total < 60) return `${total}秒`
+    const minutes = Math.floor(total / 60)
+    const restSeconds = total % 60
+    if (minutes < 60) return restSeconds > 0 ? `${minutes}分${restSeconds}秒` : `${minutes}分钟`
+    const hours = Math.floor(minutes / 60)
+    const restMinutes = minutes % 60
+    return restMinutes > 0 ? `${hours}小时${restMinutes}分钟` : `${hours}小时`
+  }
+
+  const getStageText = (stage?: string) => {
+    const stageMap: Record<string, string> = {
+      queued: '排队中',
+      parsing: '解析文档',
+      chunking: '生成分块',
+      embedding: '生成向量',
+      storing: '写入索引',
+      callback: '同步状态',
+      completed: '已完成',
+      failed: '处理失败',
+    }
+    return stageMap[stage || 'queued'] || '处理中'
   }
 
   /**
@@ -79,28 +164,34 @@ export function useDocumentProcessor() {
   const pollDocumentStatus = async (
     docId: number,
     onStatusChange?: () => void,
-    maxAttempts = 60
+    maxAttempts = 600
   ) => {
+    if (activePollingDocs.has(docId)) {
+      return
+    }
+    activePollingDocs.add(docId)
     let attempts = 0
 
     const checkStatus = async () => {
       if (attempts >= maxAttempts) {
         removeProcessing(docId)
+        activePollingDocs.delete(docId)
         return
       }
 
       try {
         const res = await vectorizationApi.getVectorizationStatus(docId)
-        const rawStatus = res.data
-        // Java returns the worker payload as a JSON string inside R.data.
-        const payload = typeof rawStatus === 'string'
-          ? JSON.parse(rawStatus)
-          : rawStatus
+        const payload = parseStatusPayload(res.data)
+        updateProcessingStatus(docId, payload)
         const status = payload?.status
 
         if (status === 'COMPLETED' || status === 'FAILED' || status === 'NOT_FOUND' || status === 'ERROR') {
           // 完成或失败，停止轮询
           removeProcessing(docId)
+          activePollingDocs.delete(docId)
+          if (status === 'COMPLETED' || status === 'NOT_FOUND') {
+            clearProcessingStatus(docId)
+          }
           onStatusChange?.()
           return
         }
@@ -111,6 +202,7 @@ export function useDocumentProcessor() {
       } catch (error) {
         console.error('查询状态失败:', error)
         removeProcessing(docId)
+        activePollingDocs.delete(docId)
       }
     }
 
@@ -128,6 +220,12 @@ export function useDocumentProcessor() {
     }
   ) => {
     addProcessing(doc.id)
+    updateProcessingStatus(doc.id, {
+      status: 'PROCESSING',
+      stage: 'queued',
+      progress: 3,
+      message: '已提交解析任务，正在估算处理时间',
+    })
     isModelDialogOpen.value = false
 
     try {
@@ -137,9 +235,25 @@ export function useDocumentProcessor() {
     } catch (error) {
       console.error('启动向量化失败:', error)
       removeProcessing(doc.id)
+      clearProcessingStatus(doc.id)
       options?.onError?.(error)
       throw error
     }
+  }
+
+  const trackProcessingDocuments = (docs: Document[], onStatusChange?: () => void) => {
+    docs.filter(doc => doc.status === 1).forEach(doc => {
+      addProcessing(doc.id)
+      if (!processingStatus.value[doc.id]) {
+        updateProcessingStatus(doc.id, {
+          status: 'PROCESSING',
+          stage: 'queued',
+          progress: 5,
+          message: '正在同步解析进度',
+        })
+      }
+      pollDocumentStatus(doc.id, onStatusChange)
+    })
   }
 
   /**
@@ -162,6 +276,7 @@ export function useDocumentProcessor() {
   const clearAllTimers = () => {
     pollingTimers.forEach(timer => clearTimeout(timer))
     pollingTimers.clear()
+    activePollingDocs.clear()
   }
 
   // 组件卸载时清理定时器
@@ -172,6 +287,7 @@ export function useDocumentProcessor() {
   return {
     // 状态
     processingDocs,
+    processingStatus,
     isModelDialogOpen,
     selectedDocForVectorize,
     availableModels,
@@ -181,9 +297,13 @@ export function useDocumentProcessor() {
     // 方法
     addProcessing,
     removeProcessing,
+    processingProgress,
+    formatProcessingTime,
+    getStageText,
     loadModels,
     openModelDialog,
     pollDocumentStatus,
+    trackProcessingDocuments,
     startVectorization,
     resetDocument,
     clearAllTimers,

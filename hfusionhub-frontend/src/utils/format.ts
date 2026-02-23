@@ -26,6 +26,10 @@ export function getStatusBadge(status: number): { text: string; variant: 'outlin
       return { text: '已完成', variant: 'default' }
     case 3:
       return { text: '解析失败', variant: 'destructive' }
+    case 4:
+      return { text: '删除中...', variant: 'secondary' }
+    case 5:
+      return { text: '删除失败', variant: 'destructive' }
     default:
       return { text: '未知', variant: 'outline' }
   }

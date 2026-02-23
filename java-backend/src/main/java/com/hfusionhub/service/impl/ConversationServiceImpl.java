@@ -24,11 +24,14 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -58,6 +61,9 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Value("${python-ai.internal-token:}")
     private String internalApiToken;
+
+    private static final int REQUEST_ID_MAX_LENGTH = 64;
+    private static final String ASSISTANT_REQUEST_SUFFIX = ":assistant";
 
     @Override
     @Transactional
@@ -157,16 +163,15 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     public MessageInfoDTO sendMessage(MessageSendDTO dto) {
         // 幂等检查：如果 requestId 已存在，直接返回已保存的响应
-        if (dto.getRequestId() != null && !dto.getRequestId().isBlank()) {
-            Message existing = messageMapper.selectOne(
-                    new LambdaQueryWrapper<Message>().eq(Message::getRequestId, dto.getRequestId()));
-            if (existing != null) {
-                return convertToMessageInfoDTO(existing);
-            }
+        String requestId = normalizeRequestId(dto.getRequestId());
+        String assistantRequestId = assistantRequestId(requestId);
+        Message existingAssistant = findAssistantByRequestId(assistantRequestId);
+        if (existingAssistant != null) {
+            return convertToMessageInfoDTO(existingAssistant);
         }
 
         // 阶段 1: 验证 + 保存用户消息（短事务）
-        Message userMessage = saveUserMessage(dto);
+        Message userMessage = saveUserMessage(dto, requestId);
         Conversation conversation = conversationMapper.selectById(dto.getConversationId());
         List<Map<String, String>> history = getChatHistory(conversation.getId());
 
@@ -179,13 +184,13 @@ public class ConversationServiceImpl implements ConversationService {
         } catch (Exception e) {
             log.error("Failed to get AI response: {}", e.getMessage(), e);
             return saveAssistantMessage(dto.getConversationId(),
-                    aiUnavailableMessage(e), "fallback", 0, conversation, dto.getContent());
+                    aiUnavailableMessage(e), "fallback", 0, conversation, dto.getContent(), assistantRequestId);
         }
 
         // 阶段 3: 保存助手消息 + 更新标题（短事务）
         return saveAssistantMessage(dto.getConversationId(),
                 aiResponse.getContent(), aiResponse.getModel(), aiResponse.getTokenCount(),
-                conversation, dto.getContent());
+                conversation, dto.getContent(), assistantRequestId);
     }
 
     /**
@@ -193,6 +198,11 @@ public class ConversationServiceImpl implements ConversationService {
      */
     @Transactional
     public Message saveUserMessage(MessageSendDTO dto) {
+        return saveUserMessage(dto, normalizeRequestId(dto.getRequestId()));
+    }
+
+    @Transactional
+    public Message saveUserMessage(MessageSendDTO dto, String requestId) {
         Long currentUserId = JwtUtils.getCurrentUserId();
         Conversation conversation = conversationMapper.selectById(dto.getConversationId());
         if (conversation == null) throw new BusinessException("对话不存在");
@@ -204,12 +214,24 @@ public class ConversationServiceImpl implements ConversationService {
             if (!kb.getUserId().equals(currentUserId))
                 throw new BusinessException("无权访问关联的知识库");
         }
+        Message existingUser = findUserByRequestId(requestId);
+        if (existingUser != null) {
+            return existingUser;
+        }
         Message userMessage = new Message();
         userMessage.setConversationId(dto.getConversationId());
         userMessage.setRole("user");
         userMessage.setContent(dto.getContent());
-        userMessage.setRequestId(dto.getRequestId());
-        messageMapper.insert(userMessage);
+        userMessage.setRequestId(requestId);
+        try {
+            messageMapper.insert(userMessage);
+        } catch (DuplicateKeyException e) {
+            existingUser = findUserByRequestId(requestId);
+            if (existingUser != null) {
+                return existingUser;
+            }
+            throw e;
+        }
         return userMessage;
     }
 
@@ -220,18 +242,145 @@ public class ConversationServiceImpl implements ConversationService {
     public MessageInfoDTO saveAssistantMessage(Long conversationId,
             String content, String model, int tokenCount,
             Conversation conversation, String userContent) {
+        return saveAssistantMessage(conversationId, content, model, tokenCount, conversation, userContent, null);
+    }
+
+    @Transactional
+    public MessageInfoDTO saveAssistantMessage(Long conversationId,
+            String content, String model, int tokenCount,
+            Conversation conversation, String userContent, String requestId) {
+        Message existingAssistant = findAssistantByRequestId(requestId);
+        if (existingAssistant != null) {
+            return convertToMessageInfoDTO(existingAssistant);
+        }
         Message msg = new Message();
         msg.setConversationId(conversationId);
         msg.setRole("assistant");
         msg.setContent(content);
         msg.setModel(model);
         msg.setTokenCount(tokenCount);
-        messageMapper.insert(msg);
+        msg.setRequestId(requestId);
+        try {
+            messageMapper.insert(msg);
+        } catch (DuplicateKeyException e) {
+            existingAssistant = findAssistantByRequestId(requestId);
+            if (existingAssistant != null) {
+                return convertToMessageInfoDTO(existingAssistant);
+            }
+            throw e;
+        }
         if ("新对话".equals(conversation.getTitle()) && StringUtils.hasText(userContent)) {
             conversation.setTitle(userContent.length() > 50 ? userContent.substring(0, 50) + "..." : userContent);
             conversationMapper.updateById(conversation);
         }
         return convertToMessageInfoDTO(msg);
+    }
+
+    static String normalizeRequestId(String requestId) {
+        if (!StringUtils.hasText(requestId)) {
+            return null;
+        }
+        String trimmed = requestId.trim();
+        if (trimmed.length() <= REQUEST_ID_MAX_LENGTH) {
+            return trimmed;
+        }
+        return hashedRequestId("r:", trimmed);
+    }
+
+    static String assistantRequestId(String requestId) {
+        if (!StringUtils.hasText(requestId)) {
+            return null;
+        }
+        String candidate = requestId + ASSISTANT_REQUEST_SUFFIX;
+        if (candidate.length() <= REQUEST_ID_MAX_LENGTH) {
+            return candidate;
+        }
+        return hashedRequestId("a:", requestId);
+    }
+
+    private static String hashedRequestId(String prefix, String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(bytes.length * 2);
+            for (byte b : bytes) {
+                String part = Integer.toHexString(b & 0xff);
+                if (part.length() == 1) {
+                    hex.append('0');
+                }
+                hex.append(part);
+            }
+            int hashLength = REQUEST_ID_MAX_LENGTH - prefix.length();
+            return prefix + hex.substring(0, hashLength);
+        } catch (Exception e) {
+            throw new IllegalStateException("Unable to hash request id", e);
+        }
+    }
+
+    private Message findUserByRequestId(String requestId) {
+        return findMessageByRequestId("user", requestId);
+    }
+
+    private Message findAssistantByRequestId(String requestId) {
+        return findMessageByRequestId("assistant", requestId);
+    }
+
+    private Message findMessageByRequestId(String role, String requestId) {
+        if (!StringUtils.hasText(requestId)) {
+            return null;
+        }
+        return messageMapper.selectOne(new LambdaQueryWrapper<Message>()
+                .eq(Message::getRole, role)
+                .eq(Message::getRequestId, requestId));
+    }
+
+    private boolean saveStreamAssistantMessage(Long conversationId,
+            String content,
+            String model,
+            List<Map<String, Object>> sources,
+            String requestId) {
+        Message existingAssistant = findAssistantByRequestId(requestId);
+        if (existingAssistant != null) {
+            return true;
+        }
+
+        Message assistantMessage = new Message();
+        assistantMessage.setConversationId(conversationId);
+        assistantMessage.setRole("assistant");
+        assistantMessage.setContent(content != null ? content : "");
+        assistantMessage.setModel(model);
+        assistantMessage.setTokenCount(0);
+        assistantMessage.setSources(sources);
+        assistantMessage.setRequestId(requestId);
+        try {
+            messageMapper.insert(assistantMessage);
+            return true;
+        } catch (DuplicateKeyException e) {
+            existingAssistant = findAssistantByRequestId(requestId);
+            if (existingAssistant != null) {
+                return true;
+            }
+            throw e;
+        }
+    }
+
+    private void sendExistingAssistantAndComplete(SseEmitter emitter, Message message) {
+        try {
+            if (message.getSources() != null && !message.getSources().isEmpty()) {
+                Map<String, Object> sourcesEvent = new HashMap<>();
+                sourcesEvent.put("sources", message.getSources());
+                emitter.send(SseEmitter.event().data(sourcesEvent, MediaType.APPLICATION_JSON));
+            }
+            if (StringUtils.hasText(message.getContent())) {
+                Map<String, String> eventData = new HashMap<>();
+                eventData.put("content", message.getContent());
+                emitter.send(SseEmitter.event().data(eventData, MediaType.APPLICATION_JSON));
+            }
+            emitter.send(SseEmitter.event().data("[DONE]"));
+            emitter.complete();
+        } catch (Exception e) {
+            emitter.completeWithError(e);
+        }
     }
 
     private String aiUnavailableMessage(Exception error) {
@@ -330,28 +479,35 @@ public class ConversationServiceImpl implements ConversationService {
             }
         }
 
-        // 3. 幂等检查
-        String requestId = dto.getRequestId() != null && !dto.getRequestId().isBlank()
-                ? dto.getRequestId() : java.util.UUID.randomUUID().toString();
-        if (dto.getRequestId() != null && !dto.getRequestId().isBlank()) {
-            Message existing = messageMapper.selectOne(
-                    new LambdaQueryWrapper<Message>().eq(Message::getRequestId, dto.getRequestId()));
-            if (existing != null) {
-                try {
-                    emitter.send(SseEmitter.event().data("[DONE]"));
-                    emitter.complete();
-                } catch (Exception ignored) {}
-                return;
-            }
+        // 3. Idempotency check. User and assistant messages must not share the same unique request_id.
+        String requestId = normalizeRequestId(dto.getRequestId());
+        if (requestId == null) {
+            requestId = java.util.UUID.randomUUID().toString();
+        }
+        String assistantRequestId = assistantRequestId(requestId);
+        Message existingAssistant = findAssistantByRequestId(assistantRequestId);
+        if (existingAssistant != null) {
+            sendExistingAssistantAndComplete(emitter, existingAssistant);
+            return;
         }
 
         // 4. 保存用户消息
-        Message userMessage = new Message();
-        userMessage.setConversationId(dto.getConversationId());
-        userMessage.setRole("user");
-        userMessage.setContent(dto.getContent());
-        userMessage.setRequestId(requestId);
-        messageMapper.insert(userMessage);
+        Message userMessage = findUserByRequestId(requestId);
+        if (userMessage == null) {
+            userMessage = new Message();
+            userMessage.setConversationId(dto.getConversationId());
+            userMessage.setRole("user");
+            userMessage.setContent(dto.getContent());
+            userMessage.setRequestId(requestId);
+            try {
+                messageMapper.insert(userMessage);
+            } catch (DuplicateKeyException e) {
+                userMessage = findUserByRequestId(requestId);
+                if (userMessage == null) {
+                    throw e;
+                }
+            }
+        }
 
         // 5. 获取对话历史
         List<Map<String, String>> history = getChatHistory(conversation.getId());
@@ -359,6 +515,7 @@ public class ConversationServiceImpl implements ConversationService {
         // 6. 使用 HttpURLConnection 实现真正的流式响应
         StringBuilder responseBuilder = new StringBuilder();
         java.util.List<Map<String, Object>> accumulatedSources = new java.util.ArrayList<>();
+        boolean assistantSaved = false;
 
         try {
             // 构建请求体
@@ -426,19 +583,14 @@ public class ConversationServiceImpl implements ConversationService {
                             emitter.send(SseEmitter.event().data("[DONE]"));
                             emitter.complete();
 
-                            // 保存助手消息（包含 sources）
-                            Message assistantMessage = new Message();
-                            assistantMessage.setConversationId(dto.getConversationId());
-                            assistantMessage.setRole("assistant");
-                            assistantMessage.setContent(responseBuilder.toString());
-                            assistantMessage.setModel("streaming");
-                            assistantMessage.setTokenCount(0);
-                            assistantMessage.setSources(accumulatedSources);
-                            assistantMessage.setRequestId(requestId);
-                            log.info("Saving assistant message - content length: {}, sources count: {}, requestId: {}",
-                                    responseBuilder.length(), accumulatedSources.size(), requestId);
-                            messageMapper.insert(assistantMessage);
-                            log.info("Saved assistant message successfully, requestId: {}", requestId);
+                            assistantSaved = saveStreamAssistantMessage(
+                                    dto.getConversationId(),
+                                    responseBuilder.toString(),
+                                    "streaming",
+                                    accumulatedSources,
+                                    assistantRequestId);
+                            log.info("Saved assistant message successfully, requestId: {}", assistantRequestId);
+                            break;
                         } else if (!data.isEmpty()) {
                             try {
                                 // 解析 JSON 数据
@@ -507,21 +659,14 @@ public class ConversationServiceImpl implements ConversationService {
                 } catch (IllegalStateException alreadyComplete) {
                     // emitter 已经关闭，忽略
                 }
-                // 保存助手消息（幂等由 normal [DONE] 路径保证）
-                try {
-                    Message assistantMessage = new Message();
-                    assistantMessage.setConversationId(dto.getConversationId());
-                    assistantMessage.setRole("assistant");
-                    assistantMessage.setContent(responseBuilder.toString());
-                    assistantMessage.setModel("streaming");
-                    assistantMessage.setTokenCount(0);
-                    assistantMessage.setSources(accumulatedSources);
-                    assistantMessage.setRequestId(requestId);
-                    messageMapper.insert(assistantMessage);
-                    log.info("Saved assistant message (fallback), requestId: {}", requestId);
-                } catch (Exception saveEx) {
-                    // 唯一约束冲突 = 已由 [DONE] 路径保存，忽略
-                    log.info("Assistant message already saved (unique key), requestId: {}", requestId);
+                if (!assistantSaved) {
+                    assistantSaved = saveStreamAssistantMessage(
+                            dto.getConversationId(),
+                            responseBuilder.toString(),
+                            "streaming",
+                            accumulatedSources,
+                            assistantRequestId);
+                    log.info("Saved assistant message (fallback), requestId: {}", assistantRequestId);
                 }
             } else {
                 try {
@@ -541,13 +686,12 @@ public class ConversationServiceImpl implements ConversationService {
                 emitter.complete();
 
                 // 保存错误消息到数据库
-                Message assistantMessage = new Message();
-                assistantMessage.setConversationId(dto.getConversationId());
-                assistantMessage.setRole("assistant");
-                assistantMessage.setContent(errorMessage);
-                assistantMessage.setModel("error");
-                assistantMessage.setTokenCount(0);
-                messageMapper.insert(assistantMessage);
+                saveStreamAssistantMessage(
+                        dto.getConversationId(),
+                        errorMessage,
+                        "error",
+                        List.of(),
+                        assistantRequestId);
             } catch (Exception ex) {
                 emitter.completeWithError(ex);
             }

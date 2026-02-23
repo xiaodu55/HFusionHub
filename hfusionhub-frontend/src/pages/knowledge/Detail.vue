@@ -36,10 +36,15 @@ const {
   availableModels,
   selectedModel,
   loadingModels,
+  processingStatus,
   openModelDialog,
   pollDocumentStatus,
   startVectorization,
   resetDocument,
+  trackProcessingDocuments,
+  processingProgress,
+  formatProcessingTime,
+  getStageText,
 } = useDocumentProcessor()
 
 const knowledgeBase = ref<KnowledgeBase | null>(null)
@@ -73,6 +78,7 @@ const loadDocuments = async () => {
       pageSize: 100,
     })
     documents.value = res.data.records
+    trackProcessingDocuments(documents.value, () => loadDocuments())
   } catch (error) {
     console.error('加载文档失败:', error)
     toast.error(errorMessage(error, '加载文档失败'))
@@ -119,6 +125,7 @@ const handleDeleteDocument = async (doc: Document) => {
 
   try {
     await documentApi.deleteDocument(doc.id)
+    toast.success('已提交删除任务')
     await loadDocuments()
   } catch (error) {
     console.error('删除文档失败:', error)
@@ -238,6 +245,17 @@ onMounted(() => {
                 <p v-if="doc.username" class="text-sm text-muted-foreground">
                   上传者：{{ doc.username }}
                 </p>
+                <div v-if="processingDocs.has(doc.id)" class="mt-2 w-full max-w-md space-y-1">
+                  <div class="h-2 rounded bg-muted">
+                    <div
+                      class="h-2 rounded bg-primary transition-all"
+                      :style="{ width: `${processingProgress(doc.id)}%` }"
+                    />
+                  </div>
+                  <p class="text-xs text-muted-foreground">
+                    {{ getStageText(processingStatus[doc.id]?.stage) }} · {{ processingProgress(doc.id) }}% · 已用 {{ formatProcessingTime(processingStatus[doc.id]?.elapsedSeconds) }} · 预计剩余 {{ formatProcessingTime(processingStatus[doc.id]?.remainingSeconds) }}
+                  </p>
+                </div>
               </div>
             </div>
             <div class="flex items-center gap-2">
@@ -283,9 +301,11 @@ onMounted(() => {
               <Button
                 variant="ghost"
                 size="icon"
+                :disabled="doc.status === 4"
                 @click="handleDeleteDocument(doc)"
               >
-                <Trash2 class="h-4 w-4 text-destructive" />
+                <Loader2 v-if="doc.status === 4" class="h-4 w-4 animate-spin" />
+                <Trash2 v-else class="h-4 w-4 text-destructive" />
               </Button>
             </div>
           </div>

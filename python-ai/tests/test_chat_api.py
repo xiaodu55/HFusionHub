@@ -1,9 +1,33 @@
+import json
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
-from app.api.chat import active_requests
+from app.api.chat import _agent_chunk_to_sse, active_requests
 from app.main import create_app
+
+
+def _sse_payload(event: str):
+    assert event.startswith("data: ")
+    return json.loads(event.removeprefix("data: ").strip())
+
+
+def test_agent_chunk_to_sse_wraps_content():
+    event = _agent_chunk_to_sse("hello")
+
+    assert _sse_payload(event) == {"content": "hello"}
+
+
+def test_agent_chunk_to_sse_preserves_sources():
+    event = _agent_chunk_to_sse('{"sources":[{"document_id":1}]}')
+
+    assert _sse_payload(event) == {"sources": [{"document_id": 1}]}
+
+
+def test_agent_chunk_to_sse_drops_evaluation_events():
+    event = _agent_chunk_to_sse('{"content":"","evaluation":{"score":0.9}}')
+
+    assert event is None
 
 
 def test_cancel_registered_stream_task():

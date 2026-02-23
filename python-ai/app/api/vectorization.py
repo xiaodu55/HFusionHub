@@ -31,7 +31,6 @@ from app.core.exceptions import (
     ParsingException,
     VectorizationException,
     EmbeddingException,
-    CallbackException,
     MilvusException
 )
 from app.core.vectorstore.milvus_store import (
@@ -53,6 +52,39 @@ logger = logging.getLogger(__name__)
 # In-memory task status store for tracking background task progress
 # Key: document_id, Value: {status, message, chunks_count, start_time, end_time, error}
 _task_status_store: Dict[str, Dict[str, Any]] = {}
+
+
+def _estimate_processing_seconds(file_path: str, file_type: str) -> int:
+    """Return a conservative user-facing indexing estimate."""
+    try:
+        size_mb = os.path.getsize(file_path) / (1024 * 1024)
+    except OSError:
+        size_mb = 1
+    base_seconds = {
+        "pdf": 45,
+        ".pdf": 45,
+        "docx": 35,
+        ".docx": 35,
+        "doc": 35,
+        ".doc": 35,
+        "txt": 15,
+        ".txt": 15,
+        "md": 15,
+        ".md": 15,
+    }.get((file_type or "").lower(), 30)
+    estimate = base_seconds + int(size_mb * 25)
+    return max(15, min(900, estimate))
+
+
+def _remaining_seconds(status: Dict[str, Any]) -> int:
+    if status.get("status") in ("COMPLETED", "FAILED"):
+        return 0
+    start_time = status.get("start_time")
+    estimated_seconds = status.get("estimated_seconds")
+    if not start_time or not estimated_seconds:
+        return 0
+    elapsed = time.time() - start_time
+    return max(0, int(round(estimated_seconds - elapsed)))
 
 
 @router.get("/api/models")
@@ -118,10 +150,12 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
     )
     logger.info(f"[Vectorization] Validation passed, resolved path: {resolved_path}, file_type: {file_type}")
 
+    estimated_seconds = _estimate_processing_seconds(resolved_path, file_type)
+
     # Initialize task status
     _task_status_store[request.document_id] = {
         "status": "PROCESSING",
-        "message": "Task started",
+        "message": f"Task started. Estimated processing time: about {estimated_seconds} seconds",
         "chunks_count": 0,
         "start_time": time.time(),
         "end_time": None,
@@ -129,6 +163,11 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
         "index_version": request.index_version,
         "chunk_quality": None,
         "multimodal": None,
+        "stage": "queued",
+        "progress": 3,
+        "estimated_seconds": estimated_seconds,
+        "processed_chunks": 0,
+        "total_chunks": None,
     }
 
     # Move heavy processing to background task (use resolved path)
@@ -165,6 +204,12 @@ async def get_task_status(document_id: str):
         "message": status["message"],
         "chunks_count": status["chunks_count"],
         "elapsed_seconds": round(time.time() - status["start_time"], 1) if status["start_time"] else 0,
+        "estimated_seconds": status.get("estimated_seconds"),
+        "remaining_seconds": _remaining_seconds(status),
+        "stage": status.get("stage"),
+        "progress": status.get("progress"),
+        "processed_chunks": status.get("processed_chunks"),
+        "total_chunks": status.get("total_chunks"),
         "error": status["error"],
         "index_version": status.get("index_version"),
         "chunk_quality": status.get("chunk_quality"),
@@ -191,24 +236,38 @@ async def _process_document_background(
         error: str = None,
         chunk_quality: Optional[Dict[str, Any]] = None,
         multimodal: Optional[Dict[str, Any]] = None,
+        stage: Optional[str] = None,
+        progress: Optional[int] = None,
+        processed_chunks: Optional[int] = None,
+        total_chunks: Optional[int] = None,
     ):
         """Update task status in the store"""
+        previous = _task_status_store.get(document_id, {})
+        previous_progress = previous.get("progress") or 0
+        next_progress = progress if progress is not None else previous_progress
+        if status not in ("COMPLETED", "FAILED"):
+            next_progress = max(previous_progress, min(next_progress, 95))
         _task_status_store[document_id] = {
             "status": status,
             "message": message,
             "chunks_count": chunks_count,
-            "start_time": _task_status_store.get(document_id, {}).get("start_time", time.time()),
+            "start_time": previous.get("start_time", time.time()),
             "end_time": time.time() if status in ("COMPLETED", "FAILED") else None,
             "error": error,
             "index_version": index_version,
-            "chunk_quality": chunk_quality if chunk_quality is not None else _task_status_store.get(document_id, {}).get("chunk_quality"),
-            "multimodal": multimodal if multimodal is not None else _task_status_store.get(document_id, {}).get("multimodal"),
+            "chunk_quality": chunk_quality if chunk_quality is not None else previous.get("chunk_quality"),
+            "multimodal": multimodal if multimodal is not None else previous.get("multimodal"),
+            "stage": stage if stage is not None else previous.get("stage"),
+            "progress": 100 if status in ("COMPLETED", "FAILED") else next_progress,
+            "estimated_seconds": previous.get("estimated_seconds"),
+            "processed_chunks": processed_chunks if processed_chunks is not None else previous.get("processed_chunks", 0),
+            "total_chunks": total_chunks if total_chunks is not None else previous.get("total_chunks"),
         }
 
     try:
         # Step 1: Parse document
         logger.info(f"[Vectorization] Parsing document: {document_id}, file: {file_path}")
-        _update_status("PROCESSING", "Parsing document...")
+        _update_status("PROCESSING", "Parsing document...", stage="parsing", progress=10)
 
         # Verify file exists before parsing
         if not os.path.exists(file_path):
@@ -228,15 +287,21 @@ async def _process_document_background(
         )
         blocks, multimodal_report = extractor.enrich(file_path, file_type, blocks)
         multimodal = multimodal_report.to_dict()
+        if not blocks:
+            raise ParsingException("未提取到可索引文本，请确认文档包含可复制文字；扫描件或图片型 PDF 需要先 OCR。")
         logger.info(f"[Vectorization] Parsed {len(blocks)} blocks")
         _update_status(
             "PROCESSING",
             f"Parsed {len(blocks)} blocks, chunking...",
             multimodal=multimodal,
+            stage="chunking",
+            progress=25,
         )
 
         # Step 2: Chunk blocks
         chunks = chunk_blocks(blocks, document_id)
+        if not chunks:
+            raise ParsingException("文档解析后没有生成可索引分块，请检查文档文本内容是否为空或格式异常。")
         quality = assess_chunk_quality(blocks, chunks).to_dict()
         # Preserve a stable human-readable document title with every chunk so
         # chat citations do not depend on a separate Java HTTP request.
@@ -249,6 +314,9 @@ async def _process_document_background(
             f"Created {len(chunks)} chunks, generating embeddings...{quality_suffix}",
             chunk_quality=quality,
             multimodal=multimodal,
+            stage="embedding",
+            progress=35,
+            total_chunks=len(chunks),
         )
 
         # Step 3: Create/update Milvus collection
@@ -261,12 +329,27 @@ async def _process_document_background(
             chunk_dict = chunk.to_dict()
             chunk_dict['embedding'] = embedding
             chunks_with_embeddings.append(chunk_dict)
-            if (i + 1) % 10 == 0:
+            if (i + 1) % 5 == 0 or i + 1 == len(chunks):
                 logger.info(f"[Vectorization] Processed {i + 1}/{len(chunks)} chunks")
-                _update_status("PROCESSING", f"Generated {i + 1}/{len(chunks)} embeddings...")
+                embedding_progress = 40 + int(((i + 1) / max(len(chunks), 1)) * 45)
+                _update_status(
+                    "PROCESSING",
+                    f"Generated {i + 1}/{len(chunks)} embeddings...",
+                    stage="embedding",
+                    progress=embedding_progress,
+                    processed_chunks=i + 1,
+                    total_chunks=len(chunks),
+                )
 
         # Step 5: Insert into Milvus
-        _update_status("PROCESSING", f"Inserting {len(chunks)} chunks into Milvus...")
+        _update_status(
+            "PROCESSING",
+            f"Inserting {len(chunks)} chunks into Milvus...",
+            stage="storing",
+            progress=90,
+            processed_chunks=len(chunks),
+            total_chunks=len(chunks),
+        )
         embeddings = [c['embedding'] for c in chunks_with_embeddings]
         # Keep old data reachable while parsing and embedding.  Replacement is
         # performed immediately before insertion, rather than at task start.
@@ -289,7 +372,7 @@ async def _process_document_background(
             logger.warning("[Vectorization] Scoped graph index unavailable for %s: %s", document_id, graph_error)
 
         # Step 6: Notify Java backend
-        _update_status("PROCESSING", "Notifying Java backend...")
+        _update_status("PROCESSING", "Notifying Java backend...", stage="callback", progress=95)
         if callback_url:
             await _notify_callback_async(
                 callback_url=callback_url,
@@ -308,6 +391,10 @@ async def _process_document_background(
             chunks_count=len(chunks),
             chunk_quality=quality,
             multimodal=multimodal,
+            stage="completed",
+            progress=100,
+            processed_chunks=len(chunks),
+            total_chunks=len(chunks),
         )
         logger.info(f"[Vectorization] Completed: {len(chunks)} chunks stored")
 
@@ -315,7 +402,7 @@ async def _process_document_background(
         import traceback
         error_detail = f"{str(e)}\n{traceback.format_exc()}"
         logger.error(f"[Vectorization] Embedding failed: {error_detail}")
-        _update_status("FAILED", f"向量嵌入失败: {str(e)}", error=str(e))
+        _update_status("FAILED", f"向量嵌入失败: {str(e)}", error=str(e), stage="failed", progress=100)
 
         # Notify failure
         if callback_url:
@@ -336,7 +423,7 @@ async def _process_document_background(
         import traceback
         error_detail = f"{str(e)}\n{traceback.format_exc()}"
         logger.error(f"[Vectorization] Background task failed: {error_detail}")
-        _update_status("FAILED", f"Processing failed: {str(e)}", error=str(e))
+        _update_status("FAILED", f"Processing failed: {str(e)}", error=str(e), stage="failed", progress=100)
 
         # Notify failure
         if callback_url:

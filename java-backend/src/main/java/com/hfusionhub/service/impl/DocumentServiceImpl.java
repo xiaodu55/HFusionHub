@@ -19,11 +19,11 @@ import com.hfusionhub.enums.DocumentStatus;
 import com.hfusionhub.mapper.DocumentMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.UserMapper;
+import com.hfusionhub.service.DeletionService;
 import com.hfusionhub.service.DocumentService;
 import com.hfusionhub.service.VectorizationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import java.io.File;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -52,6 +52,7 @@ public class DocumentServiceImpl implements DocumentService {
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final UserMapper userMapper;
     private final VectorizationService vectorizationService;
+    private final DeletionService deletionService;
 
     private static final String UPLOAD_DIR = "uploads/documents";
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -183,25 +184,15 @@ public class DocumentServiceImpl implements DocumentService {
             throw new BusinessException("无权删除该文档");
         }
 
-        // 3. Delete retrievable data first.  If the vector worker is
-        // unavailable, keep the document record so it cannot remain searchable
-        // after the user believes it was deleted.
-        vectorizationService.deleteDocumentIndex(id);
-
-        // 4. 清理磁盘文件
-        if (document.getFilePath() != null) {
-            File file = new File(document.getFilePath());
-            if (file.exists()) {
-                if (file.delete()) {
-                    log.info("已删除磁盘文件: {}", document.getFilePath());
-                } else {
-                    log.warn("删除磁盘文件失败: {}", document.getFilePath());
-                }
-            }
+        if (DocumentStatus.DELETING.getCode().equals(document.getStatus())) {
+            return;
         }
 
-        // 5. 逻辑删除
-        documentMapper.deleteById(id);
+        // 3. 删除动作交给 outbox 任务执行，避免 Python/Milvus 临时失败直接阻断用户删除。
+        document.setStatus(DocumentStatus.DELETING.getCode());
+        document.setErrorMessage(null);
+        documentMapper.updateById(document);
+        deletionService.createTask("DOCUMENT_DELETE", id);
     }
 
     @Override

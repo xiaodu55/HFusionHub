@@ -2,22 +2,38 @@
 Chat API Routes - Chat with AI agent
 """
 
+import asyncio
+import json
+import logging
+from typing import Any, Dict, List, Optional
+from uuid import uuid4
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
-import json
-import asyncio
-import logging
-from uuid import uuid4
 
 from app.core.agent import get_agent, get_agent_run_store
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# 存储活跃的请求任务，用于取消操作
 active_requests: Dict[str, asyncio.Task] = {}
+
+
+def _agent_chunk_to_sse(chunk: str) -> Optional[str]:
+    """Convert one agent chunk into a browser-facing SSE event."""
+    try:
+        parsed = json.loads(chunk)
+        if isinstance(parsed, dict):
+            sources = parsed.get("sources")
+            if sources:
+                return f"data: {json.dumps({'sources': sources}, ensure_ascii=False)}\n\n"
+            if "evaluation" in parsed:
+                return None
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+
+    return f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
 
 
 def _track_active_request(request_id: str) -> Optional[asyncio.Task]:
@@ -30,12 +46,14 @@ def _track_active_request(request_id: str) -> Optional[asyncio.Task]:
 
 class ChatMessage(BaseModel):
     """Chat message model"""
+
     role: str = Field(..., description="Message role: 'user' or 'assistant'")
     content: str = Field(..., description="Message content")
 
 
 class ChatRequest(BaseModel):
     """Chat request model"""
+
     message: str = Field(..., description="User message")
     conversation_id: Optional[int] = Field(None, description="Conversation ID")
     knowledge_base_id: Optional[int] = Field(None, description="Knowledge base ID for RAG")
@@ -47,6 +65,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     """Chat response model"""
+
     content: str = Field(..., description="AI response content")
     model: str = Field("", description="Model used")
     token_count: int = Field(0, description="Token count")
@@ -60,142 +79,111 @@ class ChatResponse(BaseModel):
 @router.post("/api/chat")
 async def chat(request: ChatRequest):
     """
-    Chat with AI agent
+    Chat with AI agent.
 
-    Supports both regular and streaming responses
+    Supports both regular and streaming responses.
     """
     try:
-        # Convert history to dict format
         history = [
             {"role": msg.role, "content": msg.content}
             for msg in request.history
         ]
 
-        # Get agent instance
         agent = get_agent(
             knowledge_base_id=request.knowledge_base_id,
-            model=request.model
+            model=request.model,
         )
 
         if request.stream:
-            # Streaming response with SSE format
             async def sse_generator():
                 try:
                     async for chunk in agent.run_stream(
                         query=request.message,
-                        history=history
+                        history=history,
                     ):
-                        # 检查是否是 JSON 格式的 sources 信息
-                        try:
-                            parsed = json.loads(chunk)
-                            if isinstance(parsed, dict) and "sources" in parsed:
-                                # sources 信息，按原始格式发送
-                                yield f"data: {chunk}\n\n"
-                                continue
-                        except (json.JSONDecodeError, ValueError):
-                            pass
-                        # 普通内容，包装为 SSE 格式
-                        yield f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+                        event = _agent_chunk_to_sse(chunk)
+                        if event is not None:
+                            yield event
                 except Exception as e:
-                    logger.error(f"Streaming error: {e}")
+                    logger.error("Streaming error: %s", e)
                     yield f"data: {json.dumps({'content': '', 'error': str(e)}, ensure_ascii=False)}\n\n"
                 finally:
                     yield "data: [DONE]\n\n"
 
             return StreamingResponse(
                 sse_generator(),
-                media_type="text/event-stream"
-            )
-        else:
-            # Regular response
-            response = await agent.run(
-                query=request.message,
-                history=history
+                media_type="text/event-stream",
             )
 
-            return ChatResponse(
-                content=response.content,
-                model=response.model,
-                token_count=response.token_count,
-                steps=[
-                    {
-                        "thought": step.thought,
-                        "action": step.action,
-                        "action_input": step.action_input,
-                        "observation": step.observation
-                    }
-                    for step in response.steps
-                ],
-                sources=response.sources,
-                auto_detected_kb_id=response.auto_detected_kb_id,
-                agent_run_id=response.agent_run_id,
-                agent_status=response.agent_status,
-            )
+        response = await agent.run(
+            query=request.message,
+            history=history,
+        )
+
+        return ChatResponse(
+            content=response.content,
+            model=response.model,
+            token_count=response.token_count,
+            steps=[
+                {
+                    "thought": step.thought,
+                    "action": step.action,
+                    "action_input": step.action_input,
+                    "observation": step.observation,
+                }
+                for step in response.steps
+            ],
+            sources=response.sources,
+            auto_detected_kb_id=response.auto_detected_kb_id,
+            agent_run_id=response.agent_run_id,
+            agent_status=response.agent_status,
+        )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}") from e
 
 
 @router.post("/api/chat/stream")
 async def chat_stream(request: ChatRequest):
-    """
-    Chat with AI agent (streaming only)
-    """
+    """Chat with AI agent (streaming only)."""
     try:
-        # Convert history to dict format
         history = [
             {"role": msg.role, "content": msg.content}
             for msg in request.history
         ]
 
-        # Get agent instance
         agent = get_agent(
             knowledge_base_id=request.knowledge_base_id,
-            model=request.model
+            model=request.model,
         )
 
-        # Generate request ID if not provided
         request_id = request.request_id or str(uuid4())
 
-        # 直接流式响应（真正的流式）
         async def event_generator():
             serving_task = _track_active_request(request_id)
             try:
                 async for chunk in agent.run_stream(
                     query=request.message,
-                    history=history
+                    history=history,
                 ):
-                    # 检查是否是 JSON 格式的 sources 信息
-                    try:
-                        parsed = json.loads(chunk)
-                        # 处理包含 sources 的事件（必须是 dict 类型）
-                        if isinstance(parsed, dict) and "sources" in parsed and parsed["sources"]:
-                            # 发送 sources 事件
-                            yield f"data: {json.dumps({'sources': parsed['sources']}, ensure_ascii=False)}\n\n"
-                            continue
-                    except (json.JSONDecodeError, ValueError):
-                        pass
-
-                    # 普通内容 chunk
-                    yield f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+                    event = _agent_chunk_to_sse(chunk)
+                    if event is not None:
+                        yield event
 
             except asyncio.CancelledError:
-                logger.info(f"Request {request_id} was cancelled")
+                logger.info("Request %s was cancelled", request_id)
                 yield f"data: {json.dumps({'content': '', 'cancelled': True}, ensure_ascii=False)}\n\n"
             except Exception as e:
-                logger.error(f"Streaming error for request {request_id}: {e}", exc_info=True)
+                logger.error("Streaming error for request %s: %s", request_id, e, exc_info=True)
                 yield f"data: {json.dumps({'content': '', 'error': str(e)}, ensure_ascii=False)}\n\n"
             finally:
-                # 确保 [DONE] 总是被发送
                 try:
                     yield "data: [DONE]\n\n"
                 except Exception:
                     pass
-                # 清理活跃请求
                 if active_requests.get(request_id) is serving_task:
                     active_requests.pop(request_id, None)
 
-        # 直接返回流式响应，不预收集
         return StreamingResponse(
             event_generator(),
             media_type="text/event-stream",
@@ -203,12 +191,12 @@ async def chat_stream(request: ChatRequest):
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",
-                "X-Request-ID": request_id
-            }
+                "X-Request-ID": request_id,
+            },
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Chat stream error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Chat stream error: {str(e)}") from e
 
 
 @router.get("/api/chat/agent-runs")
@@ -234,18 +222,13 @@ async def chat_health():
     return {
         "status": "healthy",
         "llm_available": llm.is_available(),
-        "llm_model": llm.model if hasattr(llm, 'model') else "unknown"
+        "llm_model": llm.model if hasattr(llm, "model") else "unknown",
     }
 
 
 @router.post("/api/chat/cancel")
 async def cancel_chat(request_id: str):
-    """
-    Cancel an ongoing chat request
-
-    Args:
-        request_id: The request ID to cancel
-    """
+    """Cancel an ongoing chat request."""
     if request_id in active_requests:
         task = active_requests[request_id]
         if not task.done():

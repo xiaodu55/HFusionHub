@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.entity.*;
+import com.hfusionhub.enums.DocumentStatus;
 import com.hfusionhub.mapper.*;
 import com.hfusionhub.service.DeletionService;
 import com.hfusionhub.service.VectorizationService;
@@ -66,6 +67,7 @@ public class DeletionServiceImpl implements DeletionService {
         if (task.getRetryCount() >= task.getMaxRetries()) {
             task.setStatus("FAILED");
             log.error("删除任务耗尽重试次数: taskId={}, targetId={}", task.getId(), task.getTargetId());
+            markDocumentDeleteFailed(task, errorMessage);
         } else {
             task.setStatus("RETRYING");
             log.warn("删除任务将重试: taskId={}, retryCount={}/{}", task.getId(), task.getRetryCount(), task.getMaxRetries());
@@ -248,6 +250,7 @@ public class DeletionServiceImpl implements DeletionService {
     private void advanceStep(DeletionTask task, String stepName) {
         task.setStep(stepName);
         task.setStepIndex(task.getStepIndex() + 1);
+        task.setStatus("PENDING");
         deletionTaskMapper.updateById(task);
     }
 
@@ -262,5 +265,18 @@ public class DeletionServiceImpl implements DeletionService {
     private String truncate(String value, int maxLength) {
         if (value == null) return null;
         return value.length() <= maxLength ? value : value.substring(0, maxLength);
+    }
+
+    private void markDocumentDeleteFailed(DeletionTask task, String errorMessage) {
+        if (!"DOCUMENT_DELETE".equals(task.getTaskType())) {
+            return;
+        }
+        Document doc = documentMapper.selectById(task.getTargetId());
+        if (doc == null) {
+            return;
+        }
+        doc.setStatus(DocumentStatus.DELETE_FAILED.getCode());
+        doc.setErrorMessage(truncate(errorMessage, 1000));
+        documentMapper.updateById(doc);
     }
 }
