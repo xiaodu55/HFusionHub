@@ -47,7 +47,14 @@ service.interceptors.response.use(
       userStore.logout()
       router.push('/login')
     }
-    return Promise.reject(error)
+    const data = error.response?.data
+    const message =
+      data?.message ||
+      data?.detail?.message ||
+      data?.error ||
+      error.message ||
+      '请求失败'
+    return Promise.reject(new Error(message))
   }
 )
 

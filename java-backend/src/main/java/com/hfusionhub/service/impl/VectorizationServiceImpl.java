@@ -25,10 +25,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -90,6 +94,8 @@ public class VectorizationServiceImpl implements VectorizationService {
             log.warn("文档 {} 处于处理中状态，允许重新处理", documentId);
         }
 
+        ensureSourceFileAvailable(document);
+
         // A new request supersedes any callback from an older worker.  The
         // version is sent to Python and checked again when it calls back.
         documentIndexJobMapper.update(
@@ -120,15 +126,16 @@ public class VectorizationServiceImpl implements VectorizationService {
         try {
             callPythonEngine(document, job);
         } catch (Exception e) {
+            String failureMessage = describeEngineStartFailure(e);
             log.error("调用Python引擎失败", e);
             document.setStatus(DocumentStatus.FAILED.getCode());
-            document.setErrorMessage("调用AI引擎失败: " + e.getMessage());
+            document.setErrorMessage(failureMessage);
             documentMapper.updateById(document);
             job.setStatus("FAILED");
-            job.setErrorMessage(truncate(e.getMessage(), 1000));
+            job.setErrorMessage(truncate(failureMessage, 1000));
             job.setCompletedAt(LocalDateTime.now());
             documentIndexJobMapper.updateById(job);
-            throw new BusinessException("启动向量化失败: " + e.getMessage());
+            throw new BusinessException(failureMessage);
         }
     }
 
@@ -317,8 +324,20 @@ public class VectorizationServiceImpl implements VectorizationService {
         }
         try {
             DocumentStatus status = DocumentStatus.valueOf(job.getStatus());
+            int chunkCount = job.getChunkCount() == null ? 0 : job.getChunkCount();
+            long persistedChunkCount = documentChunkMapper.countByDocumentId(documentId, null);
+            if (status == DocumentStatus.COMPLETED
+                    && (chunkCount <= 0 || persistedChunkCount <= 0 || persistedChunkCount < chunkCount)) {
+                document.setStatus(DocumentStatus.PENDING.getCode());
+                document.setChunkCount(0);
+                document.setProcessedAt(null);
+                document.setErrorMessage(
+                        "\u7d22\u5f15\u4efb\u52a1\u66fe\u5b8c\u6210\uff0c\u4f46\u5206\u5757\u6570\u636e\u7f3a\u5931\uff0c\u8bf7\u91cd\u65b0\u5206\u5757");
+                documentMapper.updateById(document);
+                return;
+            }
             document.setStatus(status.getCode());
-            document.setChunkCount(job.getChunkCount());
+            document.setChunkCount(chunkCount);
             if (status == DocumentStatus.COMPLETED && job.getCompletedAt() != null) {
                 document.setProcessedAt(job.getCompletedAt());
             }
@@ -404,6 +423,15 @@ public class VectorizationServiceImpl implements VectorizationService {
             DocumentIndexJob job = documentIndexJobMapper.selectLatestByDocumentId(documentId);
             Map<String, Object> response = new HashMap<>();
             String status = job == null ? statusName(document.getStatus()) : job.getStatus();
+            int chunksCount = job == null
+                    ? (document.getChunkCount() == null ? 0 : document.getChunkCount())
+                    : (job.getChunkCount() == null ? 0 : job.getChunkCount());
+            long persistedChunkCount = documentChunkMapper.countByDocumentId(documentId, null);
+            boolean completedButMissingChunks = "COMPLETED".equals(status)
+                    && (chunksCount <= 0 || persistedChunkCount <= 0 || persistedChunkCount < chunksCount);
+            if (completedButMissingChunks) {
+                status = "PENDING";
+            }
             response.put("document_id", String.valueOf(documentId));
             response.put("status", status);
             response.put("message", job == null
@@ -413,8 +441,15 @@ public class VectorizationServiceImpl implements VectorizationService {
                     ? (document.getChunkCount() == null ? 0 : document.getChunkCount())
                     : job.getChunkCount());
             response.put("index_version", job == null ? null : job.getIndexVersion());
+            if (completedButMissingChunks) {
+                response.put("message",
+                        "\u7d22\u5f15\u4efb\u52a1\u66fe\u5b8c\u6210\uff0c\u4f46\u5206\u5757\u6570\u636e\u7f3a\u5931\uff0c\u8bf7\u91cd\u65b0\u5206\u5757");
+                response.put("chunks_count", 0);
+            }
             enrichWithEstimatedProgress(response, document, job, status);
-            mergePythonTaskStatus(response, documentId, job);
+            if (!completedButMissingChunks) {
+                mergePythonTaskStatus(response, documentId, job);
+            }
             return objectMapper.writeValueAsString(response);
         } catch (Exception e) {
             log.error("获取任务状态失败: {}", documentId, e);
@@ -573,6 +608,88 @@ public class VectorizationServiceImpl implements VectorizationService {
 
     private boolean isTerminalStatus(String status) {
         return "COMPLETED".equals(status) || "FAILED".equals(status) || "ERROR".equals(status);
+    }
+
+    private void ensureSourceFileAvailable(Document document) {
+        String filePath = document.getFilePath();
+        if (filePath == null || filePath.isBlank()) {
+            failDocumentBeforeStart(document,
+                    "\u6587\u6863\u6e90\u6587\u4ef6\u8def\u5f84\u4e3a\u7a7a\uff0c\u8bf7\u91cd\u65b0\u4e0a\u4f20\u540e\u518d\u89e3\u6790");
+        }
+        try {
+            Path path = Path.of(filePath);
+            if (!Files.isRegularFile(path)) {
+                failDocumentBeforeStart(document,
+                        "\u6587\u6863\u6e90\u6587\u4ef6\u4e0d\u5b58\u5728\uff0c\u8bf7\u91cd\u65b0\u4e0a\u4f20\u540e\u518d\u89e3\u6790");
+            }
+            if (!Files.isReadable(path)) {
+                failDocumentBeforeStart(document,
+                        "\u6587\u6863\u6e90\u6587\u4ef6\u4e0d\u53ef\u8bfb\uff0c\u8bf7\u68c0\u67e5\u6743\u9650\u6216\u91cd\u65b0\u4e0a\u4f20");
+            }
+        } catch (InvalidPathException e) {
+            failDocumentBeforeStart(document,
+                    "\u6587\u6863\u6e90\u6587\u4ef6\u8def\u5f84\u65e0\u6548\uff0c\u8bf7\u91cd\u65b0\u4e0a\u4f20\u540e\u518d\u89e3\u6790");
+        }
+    }
+
+    private void failDocumentBeforeStart(Document document, String message) {
+        document.setStatus(DocumentStatus.FAILED.getCode());
+        document.setChunkCount(0);
+        document.setErrorMessage(message);
+        documentMapper.updateById(document);
+        throw new BusinessException(message);
+    }
+
+    private String describeEngineStartFailure(Exception e) {
+        if (e instanceof BusinessException) {
+            return e.getMessage();
+        }
+        if (e instanceof RestClientResponseException restError) {
+            String responseBody = restError.getResponseBodyAsString();
+            String extracted = extractErrorMessage(responseBody);
+            if (extracted != null && !extracted.isBlank()) {
+                return "\u542f\u52a8\u5411\u91cf\u5316\u5931\u8d25\uff1a" + extracted;
+            }
+        }
+        String fallback = e.getMessage();
+        if (fallback == null || fallback.isBlank()) {
+            fallback = e.getClass().getSimpleName();
+        }
+        return "\u542f\u52a8\u5411\u91cf\u5316\u5931\u8d25\uff1a" + fallback;
+    }
+
+    private String extractErrorMessage(String responseBody) {
+        if (responseBody == null || responseBody.isBlank()) {
+            return null;
+        }
+        try {
+            Map<?, ?> payload = objectMapper.readValue(responseBody, Map.class);
+            Object detail = payload.get("detail");
+            String detailMessage = extractErrorMessageValue(detail);
+            if (detailMessage != null && !detailMessage.isBlank()) {
+                return detailMessage;
+            }
+            return extractErrorMessageValue(payload.get("message"));
+        } catch (Exception ignored) {
+            return responseBody;
+        }
+    }
+
+    private String extractErrorMessageValue(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Object message = map.get("message");
+            if (message == null) {
+                message = map.get("error");
+            }
+            return message == null ? map.toString() : String.valueOf(message);
+        }
+        if (value instanceof List<?> list && !list.isEmpty()) {
+            return extractErrorMessageValue(list.get(0));
+        }
+        return String.valueOf(value);
     }
 
     /**

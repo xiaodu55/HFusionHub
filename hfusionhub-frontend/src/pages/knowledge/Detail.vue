@@ -169,7 +169,7 @@ const confirmStartVectorization = async () => {
     toast.success('开始解析')
   } catch (error) {
     console.error('启动向量化失败:', error)
-    toast.error('启动向量化失败')
+    toast.error(errorMessage(error, '启动向量化失败'))
   }
 }
 

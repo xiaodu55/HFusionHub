@@ -5,7 +5,7 @@ from app.api import rag as rag_api
 from app.core.rag.evaluation import EvaluationCase, RetrievalEvaluator
 from app.core.rag.evaluation_runs import EvaluationRunStore
 from app.core.rag.observability import RetrievalTrace, get_trace_store, reset_trace_store
-from app.core.rag.postprocessor import ProcessedResult, get_postprocessor
+from app.core.rag.postprocessor import Postprocessor, ProcessedResult, get_postprocessor
 from app.core.rag.query_router import ChannelType, MergedResult, SearchResult
 from app.core.rag.retriever import MultiChannelRetriever, RetrievalResult
 from app.core.rag.reranker import LexicalReranker
@@ -156,6 +156,30 @@ def test_trace_api_exposes_trace_and_stats():
     assert listed.json()["traces"][0]["trace_id"] == trace.trace_id
     assert detail.status_code == 200
     assert stats.json()["total_traces"] == 1
+
+
+def test_postprocessor_filters_low_query_coverage_false_positive():
+    postprocessor = Postprocessor(min_score=0.0)
+    processed, decisions = postprocessor.process_with_debug([
+        {
+            "content": "虚拟机管理软件安装成功之后，就可以新建虚拟机了。",
+            "score": 0.99,
+            "document_id": "linux",
+            "source": "vector",
+            "metadata": {"chunk_id": "linux-1", "evidence_score": 0.99},
+        },
+        {
+            "content": "Java 虚拟线程是 JDK 提供的轻量级线程，用于降低并发任务创建成本。",
+            "score": 0.7,
+            "document_id": "java",
+            "source": "vector",
+            "metadata": {"chunk_id": "java-1", "evidence_score": 0.7},
+        },
+    ], top_k=3, query="Java 虚拟线程是什么")
+
+    assert [result.document_id for result in processed] == ["java"]
+    assert decisions[0]["decision"] == "filtered_query_mismatch"
+    assert decisions[1]["decision"] == "accepted"
 
 
 def test_debug_search_api_returns_a_scoped_full_trace(monkeypatch):

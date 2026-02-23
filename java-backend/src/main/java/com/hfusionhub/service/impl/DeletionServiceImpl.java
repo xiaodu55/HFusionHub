@@ -135,6 +135,7 @@ public class DeletionServiceImpl implements DeletionService {
 
         switch (task.getStepIndex()) {
             case 0 -> {
+                resetKbDocumentsForDisable(kb);
                 for (Document doc : getKbDocuments(kb.getId())) {
                     try {
                         vectorizationService.deleteDocumentIndex(doc.getId());
@@ -340,6 +341,19 @@ public class DeletionServiceImpl implements DeletionService {
 
     private List<Document> getKbDocuments(Long kbId) {
         return documentMapper.selectByKnowledgeBaseIncludingDeleted(kbId);
+    }
+
+    private void resetKbDocumentsForDisable(KnowledgeBase kb) {
+        for (Document doc : getKbDocuments(kb.getId())) {
+            if (doc.getDeleted() != null && doc.getDeleted() == 1) {
+                continue;
+            }
+            doc.setStatus(DocumentStatus.PENDING.getCode());
+            doc.setChunkCount(0);
+            doc.setProcessedAt(null);
+            doc.setErrorMessage("\u77e5\u8bc6\u5e93\u5df2\u7981\u7528\uff0c\u542f\u7528\u540e\u53ef\u91cd\u65b0\u5206\u5757");
+            documentMapper.updateById(doc);
+        }
     }
 
     private void advanceStep(DeletionTask task, String stepName) {

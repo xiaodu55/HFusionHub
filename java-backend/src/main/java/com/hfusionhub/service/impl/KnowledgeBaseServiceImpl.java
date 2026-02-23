@@ -1,6 +1,7 @@
 package com.hfusionhub.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.common.constant.StatusCode;
@@ -11,6 +12,7 @@ import com.hfusionhub.dto.KnowledgeBaseCreateDTO;
 import com.hfusionhub.dto.KnowledgeBaseInfoDTO;
 import com.hfusionhub.dto.KnowledgeBaseQueryDTO;
 import com.hfusionhub.dto.KnowledgeBaseUpdateDTO;
+import com.hfusionhub.entity.Document;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.DocumentMapper;
@@ -37,6 +39,9 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
+
+    private static final String KB_DISABLED_DOCUMENT_MESSAGE =
+            "\u77e5\u8bc6\u5e93\u5df2\u7981\u7528\uff0c\u542f\u7528\u540e\u53ef\u91cd\u65b0\u5206\u5757";
 
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final UserMapper userMapper;
@@ -130,9 +135,23 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                 && knowledgeBase.getStatus() == CommonConstants.KB_STATUS_DISABLED) {
             deletionService.createTask("KB_DISABLE", id);
         }
+        if (previousStatus != null
+                && previousStatus == CommonConstants.KB_STATUS_DISABLED
+                && knowledgeBase.getStatus() != null
+                && knowledgeBase.getStatus() == CommonConstants.KB_STATUS_NORMAL) {
+            clearKbDisabledDocumentMessage(id);
+        }
 
         log.info("知识库更新成功，id: {}", id);
         return convertToInfoDTO(knowledgeBase);
+    }
+
+    private void clearKbDisabledDocumentMessage(Long knowledgeBaseId) {
+        documentMapper.update(null, new LambdaUpdateWrapper<Document>()
+                .eq(Document::getKnowledgeBaseId, knowledgeBaseId)
+                .eq(Document::getDeleted, 0)
+                .eq(Document::getErrorMessage, KB_DISABLED_DOCUMENT_MESSAGE)
+                .set(Document::getErrorMessage, null));
     }
 
     /**

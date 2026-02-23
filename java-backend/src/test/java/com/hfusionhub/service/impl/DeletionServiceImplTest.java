@@ -167,6 +167,10 @@ class DeletionServiceImplTest {
         service.executeStep(task);
         verify(vectorizationService).deleteDocumentIndex(21L);
         verify(vectorizationService).deleteDocumentIndex(22L);
+        verify(documentMapper).updateById(liveDocument);
+        assertEquals(DocumentStatus.PENDING.getCode(), liveDocument.getStatus());
+        assertEquals(0, liveDocument.getChunkCount());
+        assertEquals(null, liveDocument.getProcessedAt());
         assertEquals("KB_DISABLE_VECTORS_DELETED", task.getStep());
         assertEquals(1, task.getStepIndex());
 
@@ -182,7 +186,7 @@ class DeletionServiceImplTest {
         assertEquals(3, task.getStepIndex());
 
         service.executeStep(task);
-        verify(documentMapper).updateById(liveDocument);
+        verify(documentMapper, times(2)).updateById(liveDocument);
         assertEquals(DocumentStatus.PENDING.getCode(), liveDocument.getStatus());
         assertEquals(0, liveDocument.getChunkCount());
         assertEquals(null, liveDocument.getProcessedAt());

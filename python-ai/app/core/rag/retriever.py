@@ -141,7 +141,7 @@ class MultiChannelRetriever:
             # 4. 后处理（去重、排序）
             postprocess_started_at = time.perf_counter()
             processed, postprocessing = self.postprocessor.process_with_debug(
-                all_results, top_k=top_k
+                all_results, top_k=top_k, query=query
             )
             stage_timings_ms["postprocess"] = round(
                 (time.perf_counter() - postprocess_started_at) * 1000, 2

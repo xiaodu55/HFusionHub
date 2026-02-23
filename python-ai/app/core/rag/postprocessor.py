@@ -8,6 +8,7 @@ Postprocessor - 后处理模块
 3. 结果排序 - 按相关性排序
 """
 
+import re
 from typing import List, Dict, Optional
 from dataclasses import dataclass, field
 
@@ -68,9 +69,11 @@ class Postprocessor:
         self,
         results: List[Dict],
         top_k: int = 5,
+        query: Optional[str] = None,
     ) -> tuple[List[ProcessedResult], List[Dict]]:
         """Process results and retain an auditable decision for every input."""
         processed = [self._to_processed(r) for r in results]
+        query_terms = self._query_terms(query)
         decisions = [
             {
                 "input_rank": rank,
@@ -79,6 +82,8 @@ class Postprocessor:
                 "source": result.source,
                 "score": round(result.score, 6),
                 "evidence_score": round(result.metadata.get("evidence_score", result.score), 6),
+                "query_coverage": round(self._query_coverage(query_terms, result.content), 6)
+                if query_terms else None,
                 "decision": "pending",
             }
             for rank, result in enumerate(processed, start=1)
@@ -92,6 +97,8 @@ class Postprocessor:
         for index, result in enumerate(processed):
             if result.metadata.get("evidence_score", result.score) < self.min_score:
                 decisions[index]["decision"] = "filtered_low_evidence"
+            elif not self._passes_query_coverage(query_terms, result.content):
+                decisions[index]["decision"] = "filtered_query_mismatch"
             else:
                 evidence_accepted.append((result, index))
 
@@ -176,6 +183,48 @@ class Postprocessor:
         union = len(set1 | set2)
 
         return intersection / union if union > 0 else 0.0
+
+    @staticmethod
+    def _query_terms(query: Optional[str]) -> List[str]:
+        if not query:
+            return []
+        stopwords = {
+            "什么", "怎么", "如何", "为什么", "是否", "多少", "哪里", "哪个",
+            "请", "帮", "我", "一下", "这个", "那个", "文档", "内容", "知识库",
+            "是", "的", "了", "吗", "呢", "和", "与", "或", "在", "中", "对", "把", "个",
+            "什", "么", "怎", "哪", "为", "一", "下", "这", "那", "文", "档", "内", "容",
+            "what", "how", "why", "where", "which", "who", "when", "is", "are", "was", "were",
+            "the", "a", "an", "of", "in", "on", "for", "to", "do", "does", "did", "please",
+            "tell", "me", "about",
+        }
+        raw_terms = re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]", query.lower())
+        terms: List[str] = []
+        for term in raw_terms:
+            if term in stopwords:
+                continue
+            if len(term) == 1 and not ("\u4e00" <= term <= "\u9fff"):
+                continue
+            if term not in terms:
+                terms.append(term)
+        return terms
+
+    @classmethod
+    def _query_coverage(cls, query_terms: List[str], content: str) -> float:
+        if not query_terms:
+            return 1.0
+        content_terms = set(cls._query_terms(content))
+        if not content_terms:
+            return 0.0
+        return len(set(query_terms) & content_terms) / len(query_terms)
+
+    @classmethod
+    def _passes_query_coverage(cls, query_terms: List[str], content: str) -> bool:
+        if not query_terms:
+            return True
+        coverage = cls._query_coverage(query_terms, content)
+        if len(query_terms) <= 2:
+            return coverage >= 0.5
+        return coverage >= 0.45
 
     def _sort(self, results: List[ProcessedResult]) -> List[ProcessedResult]:
         """
