@@ -25,6 +25,7 @@ const streamingMessageId = ref<number | null>(null) // 正在流式输出的消�
 
 // 用于取消流式请求的 AbortController
 let abortController: AbortController | null = null
+let activeRequestId: string | null = null
 
 const loadConversation = async () => {
   const id = Number(route.params.id)
@@ -60,6 +61,7 @@ const handleSend = async () => {
   // 创建新的 AbortController
   abortController = new AbortController()
   const requestId = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  let pendingId: number | null = null
 
   try {
     // 1. 立即添加用户消息到列表（使用北京时间，格式与后端一致）
@@ -77,7 +79,7 @@ const handleSend = async () => {
     await scrollToBottom()
 
     // 2. 立即添加一个"思考中"的 assistant 消息占位符（使用北京时间）
-    const pendingId = Date.now() + 1
+    pendingId = Date.now() + 1
     const pendingMessage: Message = {
       id: pendingId,
       conversationId: Number(route.params.id),
@@ -87,6 +89,7 @@ const handleSend = async () => {
     }
     messages.value.push(pendingMessage)
     streamingMessageId.value = pendingId
+    activeRequestId = requestId
     await scrollToBottom()
 
     // 3. 使用 fetch API 处理流式响应
@@ -183,6 +186,10 @@ const handleSend = async () => {
   } catch (error: any) {
     // 如果是用户取消，不显示错误
     if (error.name === 'AbortError') {
+      const index = pendingId === null ? -1 : messages.value.findIndex(m => m.id === pendingId)
+      if (index !== -1 && !messages.value[index].content) {
+        messages.value.splice(index, 1)
+      }
       console.log('Stream request cancelled')
       return
     }
@@ -216,6 +223,9 @@ const handleSend = async () => {
     sending.value = false
     streamingMessageId.value = null
     abortController = null
+    if (activeRequestId === requestId) {
+      activeRequestId = null
+    }
   }
 }
 
@@ -233,11 +243,23 @@ const goBack = () => {
 }
 
 // 停止生成
-const handleStopGeneration = () => {
-  if (abortController) {
-    abortController.abort()
-    abortController = null
+const cancelRemoteStream = async () => {
+  const requestId = activeRequestId
+  if (!requestId) return
+
+  try {
+    await conversationApi.cancelStream(requestId)
+  } catch (error) {
+    // 浏览器断开时后端也会收到 SSE completion，远程取消失败不应阻塞本地停止。
+    console.warn('远程取消流式请求失败:', error)
   }
+}
+
+const handleStopGeneration = async () => {
+  const controller = abortController
+  await cancelRemoteStream()
+  controller?.abort()
+  abortController = null
   // 保留已生成的内容，只停止流式输出
   streamingMessageId.value = null
   sending.value = false
@@ -279,11 +301,11 @@ watch(
 )
 
 // 取消正在进行的流式请求
-const cancelOngoingRequests = () => {
-  if (abortController) {
-    abortController.abort()
-    abortController = null
-  }
+const cancelOngoingRequests = async () => {
+  const controller = abortController
+  await cancelRemoteStream()
+  controller?.abort()
+  abortController = null
   streamingMessageId.value = null
   sending.value = false
 }
@@ -295,7 +317,7 @@ onUnmounted(() => {
 
 // 路由离开时取消请求
 onBeforeRouteLeave(() => {
-  cancelOngoingRequests()
+  return cancelOngoingRequests()
 })
 
 onMounted(() => {

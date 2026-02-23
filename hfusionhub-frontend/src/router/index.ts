@@ -46,6 +46,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/document/Index.vue'),
       },
       {
+        path: 'document/recycle-bin',
+        name: 'DocumentRecycleBin',
+        component: () => import('@/pages/document/RecycleBin.vue'),
+      },
+      {
         path: 'chat',
         name: 'Chat',
         component: () => import('@/pages/chat/Index.vue'),

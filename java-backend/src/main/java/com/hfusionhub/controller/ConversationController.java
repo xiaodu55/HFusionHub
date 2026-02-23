@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -138,5 +139,18 @@ public class ConversationController {
         });
 
         return emitter;
+    }
+
+    @Operation(summary = "取消流式消息生成")
+    @PostMapping("/message/stream/cancel")
+    public R<Boolean> cancelMessageStream(@RequestBody Map<String, String> body) {
+        String requestId = body == null ? null : body.get("requestId");
+        if (requestId == null || requestId.isBlank()) {
+            return R.fail("requestId 不能为空");
+        }
+        boolean cancelled = conversationService.cancelMessageStream(
+                requestId,
+                JwtUtils.getCurrentUserId());
+        return R.ok(cancelled);
     }
 }

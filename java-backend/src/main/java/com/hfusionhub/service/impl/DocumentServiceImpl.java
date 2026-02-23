@@ -33,6 +33,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -81,6 +82,9 @@ public class DocumentServiceImpl implements DocumentService {
         }
         if (!kb.getUserId().equals(currentUserId)) {
             throw new BusinessException("无权访问该知识库");
+        }
+        if (kb.getStatus() == null || kb.getStatus() != CommonConstants.KB_STATUS_NORMAL) {
+            throw new BusinessException("知识库已禁用，无法上传文档");
         }
 
         // 2. 验证文件
@@ -196,6 +200,59 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     @Override
+    public PageResult<DocumentInfoDTO> listRecycleBin(DocumentQueryDTO queryDTO) {
+        queryDTO.validate();
+        Long currentUserId = JwtUtils.getCurrentUserId();
+        String title = StringUtils.hasText(queryDTO.getTitle()) ? queryDTO.getTitle().trim() : null;
+        long total = documentMapper.countRecycle(currentUserId, title);
+        if (total == 0) {
+            return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), 0, List.of());
+        }
+
+        List<Document> records = documentMapper.selectRecyclePage(
+                currentUserId,
+                title,
+                (queryDTO.getPage() - 1) * queryDTO.getPageSize(),
+                queryDTO.getPageSize());
+        List<DocumentInfoDTO> result = records.stream()
+                .map(document -> {
+                    KnowledgeBase kb = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
+                    return convertToInfoDTO(document, kb == null ? "已删除知识库" : kb.getName());
+                })
+                .collect(Collectors.toList());
+        return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), total, result);
+    }
+
+    @Override
+    @Transactional
+    public void restore(Long id) {
+        Document document = documentMapper.selectIncludingDeleted(id);
+        if (document == null || document.getDeleted() == null || document.getDeleted() != 1) {
+            throw new BusinessException("回收站中不存在该文档");
+        }
+        KnowledgeBase kb = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
+        assertOwnedKnowledgeBase(kb);
+        if (document.getRecycleExpiresAt() != null
+                && document.getRecycleExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new BusinessException("该文档已超过回收站保留期限");
+        }
+        if (documentMapper.restoreFromRecycle(id, DocumentStatus.PENDING.getCode()) != 1) {
+            throw new BusinessException("恢复文档失败");
+        }
+    }
+
+    @Override
+    public void purge(Long id) {
+        Document document = documentMapper.selectIncludingDeleted(id);
+        if (document == null || document.getDeleted() == null || document.getDeleted() != 1) {
+            throw new BusinessException("回收站中不存在该文档");
+        }
+        KnowledgeBase kb = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
+        assertOwnedKnowledgeBase(kb);
+        deletionService.createTask("DOCUMENT_PURGE", id);
+    }
+
+    @Override
     public DocumentInfoDTO getById(Long id) {
         // 1. 查询文档
         Document document = documentMapper.selectById(id);
@@ -277,7 +334,6 @@ public class DocumentServiceImpl implements DocumentService {
             // 查询当前用户的所有知识库
             QueryWrapper<KnowledgeBase> kbQuery = new QueryWrapper<>();
             kbQuery.eq("user_id", currentUserId);
-            kbQuery.eq("status", 0); // 只查正常状态的知识库
             List<KnowledgeBase> userKbs = knowledgeBaseMapper.selectList(kbQuery);
 
             if (userKbs.isEmpty()) {
@@ -460,6 +516,8 @@ public class DocumentServiceImpl implements DocumentService {
                 .username(username)
                 .createdAt(document.getCreatedAt())
                 .updatedAt(document.getUpdatedAt())
+                .recycledAt(document.getRecycledAt())
+                .recycleExpiresAt(document.getRecycleExpiresAt())
                 .build();
     }
 

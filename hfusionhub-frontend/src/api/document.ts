@@ -28,6 +28,22 @@ export const deleteDocument = (id: number): Promise<ApiResponse<void>> => {
   return del(`/document/${id}`)
 }
 
+export const getRecycleBin = (params?: {
+  page?: number
+  pageSize?: number
+  title?: string
+}): Promise<ApiResponse<PageResult<Document>>> => {
+  return get('/document/recycle-bin', params)
+}
+
+export const restoreDocument = (id: number): Promise<ApiResponse<void>> => {
+  return post(`/document/${id}/restore`)
+}
+
+export const purgeDocument = (id: number): Promise<ApiResponse<void>> => {
+  return del(`/document/${id}/purge`)
+}
+
 // 获取文档详情
 export const getDocument = (id: number): Promise<ApiResponse<Document>> => {
   return get(`/document/${id}`)

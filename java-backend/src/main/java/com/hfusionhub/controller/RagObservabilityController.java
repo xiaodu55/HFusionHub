@@ -185,6 +185,10 @@ public class RagObservabilityController {
         if (knowledgeBase == null || !knowledgeBase.getUserId().equals(JwtUtils.getCurrentUserId())) {
             throw new BusinessException("无权访问该知识库");
         }
+        if (knowledgeBase.getStatus() == null
+                || knowledgeBase.getStatus() != com.hfusionhub.common.constant.CommonConstants.KB_STATUS_NORMAL) {
+            throw new BusinessException("知识库已禁用，无法检索");
+        }
     }
 
     private Long requiredKnowledgeBaseId(Object value) {

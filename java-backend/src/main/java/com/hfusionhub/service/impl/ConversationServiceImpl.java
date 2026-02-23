@@ -36,6 +36,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -64,6 +68,7 @@ public class ConversationServiceImpl implements ConversationService {
 
     private static final int REQUEST_ID_MAX_LENGTH = 64;
     private static final String ASSISTANT_REQUEST_SUFFIX = ":assistant";
+    private final ConcurrentMap<String, StreamCancellation> activeStreamRequests = new ConcurrentHashMap<>();
 
     @Override
     @Transactional
@@ -334,6 +339,35 @@ public class ConversationServiceImpl implements ConversationService {
                 .eq(Message::getRequestId, requestId));
     }
 
+    @Override
+    public boolean cancelMessageStream(String rawRequestId, Long currentUserId) {
+        String requestId = normalizeRequestId(rawRequestId);
+        if (requestId == null) {
+            return false;
+        }
+
+        StreamCancellation stream = activeStreamRequests.get(requestId);
+        if (stream == null) {
+            return false;
+        }
+        if (stream.userId != null && !stream.userId.equals(currentUserId)) {
+            throw new BusinessException("无权取消该流式请求");
+        }
+
+        stream.cancelled.set(true);
+        // Cancel the Python task first so it stops producing new tokens, then
+        // close the Java socket to unblock a readLine waiting for the next SSE
+        // event.  The worker's finally block persists the partial response.
+        aiClient.cancelRequest(requestId);
+        stream.closeConnection();
+        try {
+            stream.completed.get(3, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.debug("等待流式请求 {} 完成取消超时: {}", requestId, e.getMessage());
+        }
+        return true;
+    }
+
     private boolean saveStreamAssistantMessage(Long conversationId,
             String content,
             String model,
@@ -490,6 +524,8 @@ public class ConversationServiceImpl implements ConversationService {
             sendExistingAssistantAndComplete(emitter, existingAssistant);
             return;
         }
+        StreamCancellation streamCancellation = new StreamCancellation(cancelled, currentUserId);
+        activeStreamRequests.put(requestId, streamCancellation);
 
         // 4. 保存用户消息
         Message userMessage = findUserByRequestId(requestId);
@@ -535,6 +571,7 @@ public class ConversationServiceImpl implements ConversationService {
             // 使用 HttpURLConnection 进行流式请求
             java.net.URL apiUrl = new java.net.URL(url);
             java.net.HttpURLConnection connection = (java.net.HttpURLConnection) apiUrl.openConnection();
+            streamCancellation.setConnection(connection);
             connection.setRequestMethod("POST");
             connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
             connection.setRequestProperty("Accept", "text/event-stream");
@@ -545,6 +582,11 @@ public class ConversationServiceImpl implements ConversationService {
             connection.setDoOutput(true);
             connection.setConnectTimeout(10000);
             connection.setReadTimeout(300000); // 5 minutes - RAG pipeline can be slow
+
+            if (cancelled.get()) {
+                streamCancellation.closeConnection();
+                return;
+            }
 
             // 发送请求体
             byte[] bodyBytes = objectMapper.writeValueAsBytes(requestBody);
@@ -678,6 +720,25 @@ public class ConversationServiceImpl implements ConversationService {
             }
 
         } catch (Exception e) {
+            if (cancelled.get()) {
+                log.info("流式请求已取消，保存已接收内容: requestId={}, contentLength={}",
+                        requestId, responseBuilder.length());
+                try {
+                    if (!assistantSaved && responseBuilder.length() > 0) {
+                        assistantSaved = saveStreamAssistantMessage(
+                                dto.getConversationId(),
+                                responseBuilder.toString(),
+                                "streaming",
+                                accumulatedSources,
+                                assistantRequestId);
+                    }
+                    emitter.send(SseEmitter.event().data("[DONE]"));
+                    emitter.complete();
+                } catch (Exception completeError) {
+                    log.debug("取消流式请求完成通知失败: {}", completeError.getMessage());
+                }
+                return;
+            }
             log.error("Failed to start streaming: {}", e.getMessage(), e);
             try {
                 String errorMessage = aiUnavailableMessage(e);
@@ -694,6 +755,32 @@ public class ConversationServiceImpl implements ConversationService {
                         assistantRequestId);
             } catch (Exception ex) {
                 emitter.completeWithError(ex);
+            }
+        } finally {
+            activeStreamRequests.remove(requestId, streamCancellation);
+            streamCancellation.completed.complete(null);
+        }
+    }
+
+    private static final class StreamCancellation {
+        private final AtomicBoolean cancelled;
+        private final Long userId;
+        private final CompletableFuture<Void> completed = new CompletableFuture<>();
+        private volatile java.net.HttpURLConnection connection;
+
+        private StreamCancellation(AtomicBoolean cancelled, Long userId) {
+            this.cancelled = cancelled;
+            this.userId = userId;
+        }
+
+        private void setConnection(java.net.HttpURLConnection connection) {
+            this.connection = connection;
+        }
+
+        private void closeConnection() {
+            java.net.HttpURLConnection current = connection;
+            if (current != null) {
+                current.disconnect();
             }
         }
     }

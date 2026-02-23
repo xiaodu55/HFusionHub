@@ -16,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Plus, Search, Edit, Trash2, BookOpen } from 'lucide-vue-next'
+import { Plus, Search, Edit, Trash2, BookOpen, Power, PowerOff, Loader2 } from 'lucide-vue-next'
 import { formatDateTime } from '@/utils/date'
 
 const router = useRouter()
@@ -28,6 +28,7 @@ const isCreateDialogOpen = ref(false)
 const isEditDialogOpen = ref(false)
 const isDeleteDialogOpen = ref(false)
 const currentItem = ref<KnowledgeBase | null>(null)
+const statusUpdatingId = ref<number | null>(null)
 
 const createForm = ref({
   name: '',
@@ -82,6 +83,22 @@ const handleUpdate = async () => {
     await loadKnowledgeBases()
   } catch (error) {
     console.error('更新知识库失败:', error)
+  }
+}
+
+const handleToggleStatus = async (item: KnowledgeBase) => {
+  if (item.status !== 0 && item.status !== 1) return
+
+  statusUpdatingId.value = item.id
+  try {
+    await knowledgeBaseApi.updateKnowledgeBase(item.id, {
+      status: item.status === 0 ? 1 : 0,
+    })
+    await loadKnowledgeBases()
+  } catch (error) {
+    console.error('更新知识库状态失败', error)
+  } finally {
+    statusUpdatingId.value = null
   }
 }
 
@@ -219,6 +236,18 @@ onMounted(() => {
           </p>
         </CardContent>
         <CardFooter class="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            :disabled="statusUpdatingId === kb.id || (kb.status !== 0 && kb.status !== 1)"
+            :title="kb.status === 0 ? '禁用知识库' : '启用知识库'"
+            @click.stop="handleToggleStatus(kb)"
+          >
+            <Loader2 v-if="statusUpdatingId === kb.id" class="mr-2 h-4 w-4 animate-spin" />
+            <PowerOff v-else-if="kb.status === 0" class="mr-2 h-4 w-4" />
+            <Power v-else class="mr-2 h-4 w-4" />
+            {{ kb.status === 0 ? '禁用' : '启用' }}
+          </Button>
           <Button
             variant="ghost"
             size="icon"

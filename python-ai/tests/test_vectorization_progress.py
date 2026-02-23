@@ -34,3 +34,31 @@ def test_remaining_seconds_is_zero_for_terminal_status():
     }
 
     assert _remaining_seconds(status) == 0
+
+
+def test_remaining_seconds_uses_observed_progress_when_initial_estimate_is_overrun():
+    now = 1000.0
+    status = {
+        "status": "PROCESSING",
+        "start_time": now - 64,
+        "estimated_seconds": 70,
+        "progress": 35,
+    }
+
+    remaining = _remaining_seconds(status, now=now)
+
+    # 64 seconds at 35% implies about 183 seconds total, so the ETA must not
+    # be zero even though the initial 70-second estimate has elapsed.
+    assert 100 <= remaining <= 125
+
+
+def test_remaining_seconds_keeps_at_least_one_second_for_non_terminal_tasks():
+    now = 1000.0
+    status = {
+        "status": "PROCESSING",
+        "start_time": now - 60,
+        "estimated_seconds": 20,
+        "progress": 95,
+    }
+
+    assert _remaining_seconds(status, now=now) >= 1

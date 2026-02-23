@@ -42,6 +42,10 @@ public class DeletionServiceImpl implements DeletionService {
     @Override
     @Transactional
     public DeletionTask createTask(String taskType, Long targetId) {
+        DeletionTask activeTask = deletionTaskMapper.selectActiveTask(taskType, targetId);
+        if (activeTask != null) {
+            return activeTask;
+        }
         DeletionTask task = new DeletionTask();
         task.setTaskType(taskType);
         task.setTargetId(targetId);
@@ -84,8 +88,12 @@ public class DeletionServiceImpl implements DeletionService {
         try {
             if ("KB_DELETE".equals(task.getTaskType())) {
                 executeKbDeleteStep(task);
+            } else if ("KB_DISABLE".equals(task.getTaskType())) {
+                executeKbDisableStep(task);
             } else if ("DOCUMENT_DELETE".equals(task.getTaskType())) {
                 executeDocumentDeleteStep(task);
+            } else if ("DOCUMENT_PURGE".equals(task.getTaskType())) {
+                executeDocumentPurgeStep(task);
             }
         } catch (Exception e) {
             log.error("删除任务执行失败: taskId={}, step={}", task.getId(), task.getStepIndex(), e);
@@ -115,6 +123,55 @@ public class DeletionServiceImpl implements DeletionService {
             case 7 -> logicalDeleteKnowledgeBase(kb, task);
             case 8 -> completeTask(task);
             default -> throw new BusinessException("未知删除步骤: " + task.getStepIndex());
+        }
+    }
+
+    private void executeKbDisableStep(DeletionTask task) {
+        KnowledgeBase kb = knowledgeBaseMapper.selectById(task.getTargetId());
+        if (kb == null) {
+            completeTask(task);
+            return;
+        }
+
+        switch (task.getStepIndex()) {
+            case 0 -> {
+                for (Document doc : getKbDocuments(kb.getId())) {
+                    try {
+                        vectorizationService.deleteDocumentIndex(doc.getId());
+                    } catch (Exception e) {
+                        log.warn("禁用知识库时删除向量失败: documentId={}", doc.getId(), e);
+                    }
+                }
+                advanceStep(task, "KB_DISABLE_VECTORS_DELETED");
+            }
+            case 1 -> {
+                for (Document doc : getKbDocuments(kb.getId())) {
+                    documentChunkMapper.deleteByDocumentId(doc.getId());
+                }
+                advanceStep(task, "KB_DISABLE_CHUNKS_DELETED");
+            }
+            case 2 -> {
+                for (Document doc : getKbDocuments(kb.getId())) {
+                    documentIndexJobMapper.delete(new LambdaQueryWrapper<DocumentIndexJob>()
+                            .eq(DocumentIndexJob::getDocumentId, doc.getId()));
+                }
+                advanceStep(task, "KB_DISABLE_INDEX_JOBS_DELETED");
+            }
+            case 3 -> {
+                for (Document doc : getKbDocuments(kb.getId())) {
+                    if (doc.getDeleted() != null && doc.getDeleted() == 1) {
+                        continue;
+                    }
+                    doc.setStatus(DocumentStatus.PENDING.getCode());
+                    doc.setChunkCount(0);
+                    doc.setProcessedAt(null);
+                    doc.setErrorMessage("知识库已禁用，启用后可重新分块");
+                    documentMapper.updateById(doc);
+                }
+                advanceStep(task, "KB_DISABLE_DOCUMENTS_RESET");
+            }
+            case 4 -> completeTask(task);
+            default -> throw new BusinessException("未知禁用知识库步骤: " + task.getStepIndex());
         }
     }
 
@@ -224,27 +281,65 @@ public class DeletionServiceImpl implements DeletionService {
                 advanceStep(task, "INDEX_JOBS_DELETED");
             }
             case 3 -> {
+                LocalDateTime recycledAt = LocalDateTime.now();
+                int updated = documentMapper.markRecycled(
+                        doc.getId(),
+                        recycledAt,
+                        recycledAt.plusDays(7),
+                        DocumentStatus.PENDING.getCode(),
+                        "文档已移入回收站，恢复后可重新分块");
+                if (updated != 1) {
+                    throw new BusinessException("文档移入回收站失败");
+                }
+                advanceStep(task, "DOCUMENT_RECYCLED");
+            }
+            case 4 -> completeTask(task);
+            default -> throw new BusinessException("未知删除步骤: " + task.getStepIndex());
+        }
+    }
+
+    private void executeDocumentPurgeStep(DeletionTask task) {
+        Document doc = documentMapper.selectIncludingDeleted(task.getTargetId());
+        if (doc == null) {
+            completeTask(task);
+            return;
+        }
+
+        switch (task.getStepIndex()) {
+            case 0 -> {
+                vectorizationService.deleteDocumentIndex(doc.getId());
+                advanceStep(task, "VECTORS_DELETED");
+            }
+            case 1 -> {
+                documentChunkMapper.deleteByDocumentId(doc.getId());
+                advanceStep(task, "CHUNKS_DELETED");
+            }
+            case 2 -> {
+                documentIndexJobMapper.purgeByDocumentId(doc.getId());
+                advanceStep(task, "INDEX_JOBS_PURGED");
+            }
+            case 3 -> {
                 if (doc.getFilePath() != null) {
                     File file = new File(doc.getFilePath());
-                    if (file.exists()) file.delete();
+                    if (file.exists() && !file.delete()) {
+                        throw new BusinessException("磁盘文件删除失败");
+                    }
                 }
                 advanceStep(task, "DISK_FILE_DELETED");
             }
             case 4 -> {
-                documentMapper.deleteById(doc.getId());
-                advanceStep(task, "DOCUMENT_DELETED");
+                documentMapper.purgeById(doc.getId());
+                advanceStep(task, "DOCUMENT_PURGED");
             }
             case 5 -> completeTask(task);
-            default -> throw new BusinessException("未知删除步骤: " + task.getStepIndex());
+            default -> throw new BusinessException("未知彻底删除步骤: " + task.getStepIndex());
         }
     }
 
     // ──────────────── 辅助方法 ────────────────
 
     private List<Document> getKbDocuments(Long kbId) {
-        LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Document::getKnowledgeBaseId, kbId);
-        return documentMapper.selectList(wrapper);
+        return documentMapper.selectByKnowledgeBaseIncludingDeleted(kbId);
     }
 
     private void advanceStep(DeletionTask task, String stepName) {

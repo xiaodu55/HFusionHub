@@ -48,3 +48,8 @@ export const sendMessage = (data: MessageSendDTO): Promise<ApiResponse<Message>>
 export const getConversationMessages = (conversationId: number): Promise<ApiResponse<Message[]>> => {
   return get(`/conversation/${conversationId}/messages`)
 }
+
+// 取消正在生成的流式消息，并让后端保存已生成的部分内容
+export const cancelStream = (requestId: string): Promise<ApiResponse<boolean>> => {
+  return post('/conversation/message/stream/cancel', { requestId })
+}

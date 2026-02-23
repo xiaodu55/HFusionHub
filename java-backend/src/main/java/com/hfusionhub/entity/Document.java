@@ -86,4 +86,8 @@ public class Document extends BaseEntity {
      */
     @Schema(description = "处理完成时间")
     private LocalDateTime processedAt;
+
+    private LocalDateTime recycledAt;
+
+    private LocalDateTime recycleExpiresAt;
 }

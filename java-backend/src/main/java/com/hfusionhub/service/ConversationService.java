@@ -99,4 +99,9 @@ public interface ConversationService {
      * @param cancelled 取消标志，客户端断开时设为true
      */
     void sendMessageStream(MessageSendDTO dto, SseEmitter emitter, Long currentUserId, AtomicBoolean cancelled);
+
+    /**
+     * 主动取消指定的流式请求，并等待服务端保存已接收的部分结果。
+     */
+    boolean cancelMessageStream(String requestId, Long currentUserId);
 }

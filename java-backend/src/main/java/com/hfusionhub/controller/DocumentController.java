@@ -55,6 +55,26 @@ public class DocumentController {
         return R.ok();
     }
 
+    @Operation(summary = "回收站文档列表")
+    @GetMapping("/recycle-bin")
+    public R<PageResult<DocumentInfoDTO>> listRecycleBin(DocumentQueryDTO queryDTO) {
+        return R.ok(documentService.listRecycleBin(queryDTO));
+    }
+
+    @Operation(summary = "恢复回收站文档")
+    @PostMapping("/{id}/restore")
+    public R<Void> restore(@Parameter(description = "文档ID") @PathVariable Long id) {
+        documentService.restore(id);
+        return R.ok();
+    }
+
+    @Operation(summary = "彻底删除回收站文档")
+    @DeleteMapping("/{id}/purge")
+    public R<Void> purge(@Parameter(description = "文档ID") @PathVariable Long id) {
+        documentService.purge(id);
+        return R.ok();
+    }
+
     @Operation(summary = "获取文档详情", description = "获取指定文档的详细信息")
     @GetMapping("/{id}")
     public R<DocumentInfoDTO> getById(

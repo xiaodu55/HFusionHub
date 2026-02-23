@@ -21,4 +21,14 @@ public interface DeletionTaskMapper extends BaseMapper<DeletionTask> {
 
     @Select("SELECT * FROM deletion_task WHERE status = 'FAILED' AND retry_count < max_retries ORDER BY created_at ASC LIMIT #{limit}")
     List<DeletionTask> selectRetryableTasks(@Param("limit") int limit);
+
+    @Select("""
+            SELECT * FROM deletion_task
+            WHERE task_type = #{taskType}
+              AND target_id = #{targetId}
+              AND status IN ('PENDING', 'PROCESSING', 'RETRYING')
+            ORDER BY id DESC
+            LIMIT 1
+            """)
+    DeletionTask selectActiveTask(@Param("taskType") String taskType, @Param("targetId") Long targetId);
 }

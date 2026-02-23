@@ -22,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -83,6 +84,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
      * @return 知识库信息
      */
     @Override
+    @Transactional
     public KnowledgeBaseInfoDTO update(Long id, KnowledgeBaseUpdateDTO updateDTO) {
         KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectById(id);
         if (knowledgeBase == null) {
@@ -111,11 +113,23 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         if (updateDTO.getDescription() != null) {
             knowledgeBase.setDescription(updateDTO.getDescription());
         }
+        Integer previousStatus = knowledgeBase.getStatus();
         if (updateDTO.getStatus() != null) {
+            if (updateDTO.getStatus() != CommonConstants.KB_STATUS_NORMAL
+                    && updateDTO.getStatus() != CommonConstants.KB_STATUS_DISABLED) {
+                throw new BusinessException("知识库状态无效");
+            }
             knowledgeBase.setStatus(updateDTO.getStatus());
         }
 
         knowledgeBaseMapper.updateById(knowledgeBase);
+
+        if (previousStatus != null
+                && previousStatus == CommonConstants.KB_STATUS_NORMAL
+                && knowledgeBase.getStatus() != null
+                && knowledgeBase.getStatus() == CommonConstants.KB_STATUS_DISABLED) {
+            deletionService.createTask("KB_DISABLE", id);
+        }
 
         log.info("知识库更新成功，id: {}", id);
         return convertToInfoDTO(knowledgeBase);

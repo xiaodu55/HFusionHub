@@ -46,7 +46,7 @@ public class OrphanCleanupScheduler {
         if (!Files.exists(uploadPath)) return;
 
         // 1. 获取数据库中所有非删除文档的 filePath 集合
-        List<Document> allDocs = documentMapper.selectList(new LambdaQueryWrapper<>());
+        List<Document> allDocs = documentMapper.selectAllIncludingDeleted();
         Set<String> knownPaths = allDocs.stream()
                 .map(Document::getFilePath)
                 .filter(p -> p != null && !p.isBlank())

@@ -68,6 +68,7 @@ export interface KnowledgeBaseCreateDTO {
 export interface KnowledgeBaseUpdateDTO {
   name?: string
   description?: string
+  status?: number
 }
 
 // 文档相关类型
@@ -85,6 +86,8 @@ export interface Document {
   username?: string
   createdAt: string
   updatedAt: string
+  recycledAt?: string | null
+  recycleExpiresAt?: string | null
 }
 
 export interface DocumentUploadDTO {

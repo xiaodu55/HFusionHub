@@ -40,6 +40,12 @@ public interface DocumentService {
      */
     void delete(Long id);
 
+    PageResult<DocumentInfoDTO> listRecycleBin(DocumentQueryDTO queryDTO);
+
+    void restore(Long id);
+
+    void purge(Long id);
+
     /**
      * 获取文档详情
      *

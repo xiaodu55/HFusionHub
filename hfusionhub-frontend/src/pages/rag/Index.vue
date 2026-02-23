@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Activity, AlertTriangle, BarChart3, Clock3, Download, Filter, RefreshCw, Search, Send, TrendingUp, XCircle } from 'lucide-vue-next'
+import { Activity, AlertTriangle, BarChart3, ChevronLeft, ChevronRight, Clock3, Download, Filter, RefreshCw, Search, Send, TrendingUp, XCircle } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/composables/useToast'
@@ -12,11 +12,11 @@ import type { KnowledgeBase } from '@/api/types'
 const PAGE_SIZE = 20
 const toast = useToast()
 const loading = ref(false)
-const loadingMore = ref(false)
 const exporting = ref(false)
 const evaluating = ref(false)
 const traces = ref<RetrievalTrace[]>([])
 const totalTraces = ref(0)
+const currentPage = ref(1)
 const stats = ref<TraceStats>({
   total_traces: 0,
   failed_traces: 0,
@@ -45,7 +45,9 @@ const sourceSummary = computed(() => Object.entries(stats.value.result_source_co
   .map(([source, count]) => `${source}: ${count}`)
   .join(' · ') || '暂无结果')
 const hitRatePercent = computed(() => `${Math.round(stats.value.hit_rate * 100)}%`)
-const hasMore = computed(() => traces.value.length < totalTraces.value)
+const totalPages = computed(() => Math.max(1, Math.ceil(totalTraces.value / PAGE_SIZE)))
+const canGoPrevious = computed(() => currentPage.value > 1)
+const canGoNext = computed(() => currentPage.value < totalPages.value)
 const maxDailyTotal = computed(() => Math.max(1, ...stats.value.daily_metrics.map(metric => metric.total_traces)))
 
 const requireKnowledgeBaseId = () => {
@@ -55,9 +57,9 @@ const requireKnowledgeBaseId = () => {
   return selectedKnowledgeBaseId.value
 }
 
-const buildFilters = (offset = 0): TraceFilters => ({
+const buildFilters = (page = currentPage.value): TraceFilters => ({
   limit: PAGE_SIZE,
-  offset,
+  offset: (page - 1) * PAGE_SIZE,
   query: filterQuery.value.trim() || undefined,
   knowledge_base_id: requireKnowledgeBaseId(),
   error_only: errorsOnly.value || undefined,
@@ -77,22 +79,24 @@ const loadEvaluationRuns = async () => {
   evaluationRuns.value = response.data.runs
 }
 
-const loadData = async () => {
+const loadData = async (page = 1) => {
   if (!selectedKnowledgeBaseId.value) {
     traces.value = []
     totalTraces.value = 0
+    currentPage.value = 1
     evaluationRuns.value = []
     return
   }
   loading.value = true
   try {
     const [tracesResponse] = await Promise.all([
-      ragApi.getTraces(buildFilters()),
+      ragApi.getTraces(buildFilters(page)),
       refreshStats(),
       loadEvaluationRuns(),
     ])
     traces.value = tracesResponse.data.traces
     totalTraces.value = tracesResponse.data.total
+    currentPage.value = Math.min(Math.max(1, page), totalPages.value)
     if (selectedTrace.value) {
       selectedTrace.value = traces.value.find(item => item.trace_id === selectedTrace.value?.trace_id) || null
     }
@@ -104,24 +108,15 @@ const loadData = async () => {
   }
 }
 
-const loadMore = async () => {
-  if (!hasMore.value || loadingMore.value) return
-  loadingMore.value = true
-  try {
-    const response = await ragApi.getTraces(buildFilters(traces.value.length))
-    traces.value.push(...response.data.traces)
-    totalTraces.value = response.data.total
-  } catch (error) {
-    console.error('加载更多检索记录失败:', error)
-    toast.error('加载更多检索记录失败')
-  } finally {
-    loadingMore.value = false
-  }
+const goToPage = async (page: number) => {
+  if (loading.value || page < 1 || page > totalPages.value || page === currentPage.value) return
+  selectedTrace.value = null
+  await loadData(page)
 }
 
 const applyFilters = () => {
   selectedTrace.value = null
-  loadData()
+  loadData(1)
 }
 
 const clearFilters = () => {
@@ -143,7 +138,7 @@ const loadKnowledgeBases = async () => {
 const changeKnowledgeBase = () => {
   selectedTrace.value = null
   evaluationReport.value = null
-  loadData()
+  loadData(1)
 }
 
 const selectTrace = (trace: RetrievalTrace) => {
@@ -315,7 +310,29 @@ onMounted(async () => {
             <div class="mt-1 text-xs text-muted-foreground">KB {{ trace.knowledge_base_id ?? '自动' }} · {{ trace.results.length }} 条结果 · {{ trace.routes[0]?.selected_channels?.join(' / ') || '未知通道' }}</div>
             <p v-if="trace.error" class="mt-1 truncate text-xs text-red-600">{{ trace.error }}</p>
           </button>
-          <Button v-if="hasMore" variant="outline" class="mt-2 w-full" :disabled="loadingMore" @click="loadMore">{{ loadingMore ? '加载中...' : `加载更多（已显示 ${traces.length}/${totalTraces}）` }}</Button>
+          <div v-if="totalTraces > 0" class="mt-4 flex items-center justify-between gap-3 border-t pt-4">
+            <Button
+              variant="outline"
+              size="sm"
+              :disabled="loading || !canGoPrevious"
+              @click="goToPage(currentPage - 1)"
+            >
+              <ChevronLeft class="mr-1 h-4 w-4" />
+              上一页
+            </Button>
+            <span class="text-sm text-muted-foreground">
+              第 {{ currentPage }} / {{ totalPages }} 页，共 {{ totalTraces }} 条
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              :disabled="loading || !canGoNext"
+              @click="goToPage(currentPage + 1)"
+            >
+              下一页
+              <ChevronRight class="ml-1 h-4 w-4" />
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

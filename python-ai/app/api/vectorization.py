@@ -76,15 +76,58 @@ def _estimate_processing_seconds(file_path: str, file_type: str) -> int:
     return max(15, min(900, estimate))
 
 
-def _remaining_seconds(status: Dict[str, Any]) -> int:
+def _dynamic_estimated_seconds(status: Dict[str, Any], now: Optional[float] = None) -> int:
+    """Estimate total processing time from the observed progress.
+
+    The initial estimate is intentionally conservative, but it cannot account
+    for a slow embedding model or a busy local service.  Once a meaningful
+    progress value is available, the elapsed time/progress ratio gives a
+    better estimate and prevents the ETA from reaching zero while work is
+    still in progress.
+    """
+    initial_estimate = status.get("estimated_seconds")
+    if not initial_estimate:
+        return 0
+
+    start_time = status.get("start_time")
+    if not start_time:
+        return int(initial_estimate)
+
+    current_time = time.time() if now is None else now
+    elapsed = max(0.0, current_time - start_time)
+    progress = status.get("progress")
+    try:
+        progress = float(progress)
+    except (TypeError, ValueError):
+        progress = 0.0
+
+    # Early queue/parse states do not provide enough signal to infer a stable
+    # total.  Keep the original estimate until progress is measurable.
+    if progress <= 5 or elapsed < 1:
+        return int(initial_estimate)
+
+    observed_total = elapsed * 100.0 / min(progress, 99.0)
+    # Do not let a short-lived fast sample cut the user's original estimate in
+    # half, but allow slower real-world processing to extend it immediately.
+    dynamic_total = max(initial_estimate * 0.75, observed_total)
+    return int(round(min(900, max(15, dynamic_total))))
+
+
+def _remaining_seconds(status: Dict[str, Any], now: Optional[float] = None) -> int:
     if status.get("status") in ("COMPLETED", "FAILED"):
         return 0
     start_time = status.get("start_time")
-    estimated_seconds = status.get("estimated_seconds")
-    if not start_time or not estimated_seconds:
+    if not start_time:
         return 0
-    elapsed = time.time() - start_time
-    return max(0, int(round(estimated_seconds - elapsed)))
+
+    current_time = time.time() if now is None else now
+    elapsed = max(0.0, current_time - start_time)
+    estimated_total = _dynamic_estimated_seconds(status, now=current_time)
+    if not estimated_total:
+        return 0
+
+    # A non-terminal task should never tell the user that no time remains.
+    return max(1, int(round(estimated_total - elapsed)))
 
 
 @router.get("/api/models")
@@ -199,12 +242,14 @@ async def get_task_status(document_id: str):
     status = _task_status_store.get(document_id)
     if status is None:
         return {"status": "NOT_FOUND", "message": "No task found for this document"}
+    dynamic_estimated_seconds = _dynamic_estimated_seconds(status)
     return {
         "status": status["status"],
         "message": status["message"],
         "chunks_count": status["chunks_count"],
         "elapsed_seconds": round(time.time() - status["start_time"], 1) if status["start_time"] else 0,
-        "estimated_seconds": status.get("estimated_seconds"),
+        "estimated_seconds": dynamic_estimated_seconds,
+        "initial_estimated_seconds": status.get("estimated_seconds"),
         "remaining_seconds": _remaining_seconds(status),
         "stage": status.get("stage"),
         "progress": status.get("progress"),

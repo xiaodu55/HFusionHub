@@ -2,6 +2,7 @@ package com.hfusionhub.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.dto.DocumentChunkCallbackDTO;
@@ -77,6 +78,12 @@ public class VectorizationServiceImpl implements VectorizationService {
             throw new BusinessException("文档不存在");
         }
         assertDocumentOwnerWhenUserRequest(document);
+        KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
+        if (knowledgeBase == null
+                || knowledgeBase.getStatus() == null
+                || knowledgeBase.getStatus() != CommonConstants.KB_STATUS_NORMAL) {
+            throw new BusinessException("知识库已禁用，无法解析文档");
+        }
 
         // 2. 检查状态 - 允许重新处理处于 PROCESSING 状态的文档（修复之前的卡住问题）
         if (document.getStatus() != null && document.getStatus() == DocumentStatus.PROCESSING.getCode()) {
@@ -424,17 +431,23 @@ public class VectorizationServiceImpl implements VectorizationService {
             Document document,
             DocumentIndexJob job,
             String status) {
-        int estimatedSeconds = estimateProcessingSeconds(document);
+        int initialEstimatedSeconds = estimateProcessingSeconds(document);
         int elapsedSeconds = elapsedSeconds(job);
-        int progress = estimateProgress(status, elapsedSeconds, estimatedSeconds);
+        int progress = estimateProgress(status, elapsedSeconds, initialEstimatedSeconds);
+        int estimatedSeconds = dynamicEstimatedSeconds(
+                status,
+                elapsedSeconds,
+                progress,
+                initialEstimatedSeconds);
         int remainingSeconds = isTerminalStatus(status)
                 ? 0
-                : Math.max(0, estimatedSeconds - elapsedSeconds);
+                : Math.max(1, estimatedSeconds - elapsedSeconds);
 
         response.put("stage", stageForStatus(status, progress));
         response.put("progress", progress);
         response.put("elapsed_seconds", elapsedSeconds);
         response.put("estimated_seconds", estimatedSeconds);
+        response.put("initial_estimated_seconds", initialEstimatedSeconds);
         response.put("remaining_seconds", remainingSeconds);
     }
 
@@ -521,6 +534,19 @@ public class VectorizationServiceImpl implements VectorizationService {
         }
         int progress = 5 + (int) Math.floor((elapsedSeconds / (double) estimatedSeconds) * 80);
         return Math.max(5, Math.min(90, progress));
+    }
+
+    private int dynamicEstimatedSeconds(String status,
+            int elapsedSeconds,
+            int progress,
+            int initialEstimatedSeconds) {
+        if (isTerminalStatus(status) || progress <= 5 || elapsedSeconds < 1) {
+            return initialEstimatedSeconds;
+        }
+
+        double observedTotal = elapsedSeconds * 100.0 / Math.min(progress, 99);
+        double dynamicTotal = Math.max(initialEstimatedSeconds * 0.75, observedTotal);
+        return (int) Math.max(15, Math.min(900, Math.round(dynamicTotal)));
     }
 
     private String stageForStatus(String status, int progress) {

@@ -21,7 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Plus, Search, FileText, Trash2, Upload, Play, Eye, Loader2, RefreshCw, RefreshCcw } from 'lucide-vue-next'
+import { Plus, Search, FileText, Trash2, Upload, Play, Eye, Loader2, RefreshCw, RefreshCcw, Archive } from 'lucide-vue-next'
 import { formatDateTime } from '@/utils/date'
 
 const router = useRouter()
@@ -59,6 +59,7 @@ const uploadForm = ref({
 })
 const uploading = ref(false)
 const syncing = ref(false)
+const hasEnabledKnowledgeBase = computed(() => knowledgeBases.value.some((kb) => kb.status === 0))
 
 const errorMessage = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? `${fallback}：${error.message}` : fallback
@@ -112,6 +113,11 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 
 const handleUpload = async () => {
   if (!uploadForm.value.file || !uploadForm.value.kbId) return
+  const selectedKnowledgeBase = knowledgeBases.value.find((kb) => kb.id === uploadForm.value.kbId)
+  if (!selectedKnowledgeBase || selectedKnowledgeBase.status !== 0) {
+    toast.error('知识库已禁用，无法上传文档')
+    return
+  }
 
   // 文件大小校验
   if (uploadForm.value.file.size > MAX_FILE_SIZE) {
@@ -139,7 +145,7 @@ const handleDelete = async (doc: Document) => {
 
   try {
     await documentApi.deleteDocument(doc.id)
-    toast.success('已提交删除任务')
+    toast.success('已提交移入回收站任务')
     await loadDocuments()
   } catch (error) {
     console.error('删除文档失败:', error)
@@ -189,6 +195,9 @@ const handleReparsen = async (doc: Document) => {
   openModelDialog(doc)
 }
 
+const isKnowledgeBaseEnabled = (doc: Document) =>
+  knowledgeBases.value.find((kb) => kb.id === doc.knowledgeBaseId)?.status === 0
+
 const handleSyncAll = async () => {
   syncing.value = true
   try {
@@ -230,11 +239,15 @@ onMounted(() => {
         <p class="text-muted-foreground">上传和管理文档</p>
       </div>
       <div class="flex items-center gap-2">
+        <Button variant="outline" @click="router.push('/document/recycle-bin')">
+          <Archive class="mr-2 h-4 w-4" />
+          回收站
+        </Button>
         <Button variant="outline" @click="handleSyncAll" :disabled="syncing">
           <RefreshCcw :class="['mr-2 h-4 w-4', { 'animate-spin': syncing }]" />
           同步状态
         </Button>
-        <Button @click="isUploadDialogOpen = true">
+        <Button :disabled="!hasEnabledKnowledgeBase" @click="isUploadDialogOpen = true">
           <Upload class="mr-2 h-4 w-4" />
           上传文档
         </Button>
@@ -315,7 +328,7 @@ onMounted(() => {
             v-if="doc.status === 0"
             variant="outline"
             size="sm"
-            :disabled="processingDocs.has(doc.id)"
+            :disabled="!isKnowledgeBaseEnabled(doc) || processingDocs.has(doc.id)"
             @click="handleStartVectorization(doc)"
           >
             <Loader2 v-if="processingDocs.has(doc.id)" class="mr-2 h-4 w-4 animate-spin" />
@@ -328,6 +341,7 @@ onMounted(() => {
             v-if="doc.status === 1 || doc.status === 3"
             variant="outline"
             size="sm"
+            :disabled="!isKnowledgeBaseEnabled(doc)"
             @click="handleResetDocument(doc)"
           >
             <RefreshCw class="mr-2 h-4 w-4" />
@@ -350,7 +364,7 @@ onMounted(() => {
             v-if="doc.status === 2"
             variant="outline"
             size="sm"
-            :disabled="processingDocs.has(doc.id)"
+            :disabled="!isKnowledgeBaseEnabled(doc) || processingDocs.has(doc.id)"
             @click="handleReparsen(doc)"
           >
             <Loader2 v-if="processingDocs.has(doc.id)" class="mr-2 h-4 w-4 animate-spin" />
@@ -391,8 +405,9 @@ onMounted(() => {
                 v-for="kb in knowledgeBases"
                 :key="kb.id"
                 :value="kb.id"
+                :disabled="kb.status !== 0"
               >
-                {{ kb.name }}
+                {{ kb.name }}{{ kb.status === 0 ? '' : '（已禁用）' }}
               </option>
             </select>
           </div>
@@ -426,7 +441,7 @@ onMounted(() => {
             取消
           </Button>
           <Button
-            :disabled="!uploadForm.file || !uploadForm.kbId || !uploadForm.title || uploading"
+            :disabled="!uploadForm.file || !uploadForm.kbId || !uploadForm.title || uploading || knowledgeBases.find((kb) => kb.id === uploadForm.kbId)?.status !== 0"
             @click="handleUpload"
           >
             {{ uploading ? '上传中...' : '上传' }}

@@ -21,7 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { ArrowLeft, Plus, FileText, Trash2, Upload, Play, Eye, Loader2, RefreshCw, RefreshCcw } from 'lucide-vue-next'
+import { ArrowLeft, Plus, FileText, Trash2, Upload, Play, Eye, Loader2, RefreshCw, RefreshCcw, Power, PowerOff } from 'lucide-vue-next'
 import { formatDateTime } from '@/utils/date'
 
 const route = useRoute()
@@ -54,6 +54,7 @@ const isUploadDialogOpen = ref(false)
 const uploadFile = ref<File | null>(null)
 const uploading = ref(false)
 const syncing = ref(false)
+const statusUpdating = ref(false)
 
 const errorMessage = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? `${fallback}：${error.message}` : fallback
@@ -87,6 +88,23 @@ const loadDocuments = async () => {
   }
 }
 
+const handleToggleStatus = async () => {
+  if (!knowledgeBase.value) return
+
+  const nextStatus = knowledgeBase.value.status === 0 ? 1 : 0
+  statusUpdating.value = true
+  try {
+    await knowledgeBaseApi.updateKnowledgeBase(knowledgeBase.value.id, { status: nextStatus })
+    toast.success(nextStatus === 0 ? '知识库已启用' : '知识库已禁用，正在清理分块和索引')
+    await Promise.all([loadKnowledgeBase(), loadDocuments()])
+  } catch (error) {
+    console.error('更新知识库状态失败:', error)
+    toast.error(errorMessage(error, '更新知识库状态失败'))
+  } finally {
+    statusUpdating.value = false
+  }
+}
+
 const handleFileSelect = (event: Event) => {
   const input = event.target as HTMLInputElement
   if (input.files && input.files[0]) {
@@ -98,6 +116,10 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 
 const handleUpload = async () => {
   if (!uploadFile.value || !knowledgeBase.value) return
+  if (knowledgeBase.value.status !== 0) {
+    toast.error('知识库已禁用，无法上传文档')
+    return
+  }
 
   // 文件大小校验
   if (uploadFile.value.size > MAX_FILE_SIZE) {
@@ -205,9 +227,24 @@ onMounted(() => {
           {{ knowledgeBase.description || '暂无描述' }}
         </p>
       </div>
-      <Button @click="isUploadDialogOpen = true">
+      <Button
+        :disabled="!knowledgeBase || knowledgeBase.status !== 0"
+        @click="isUploadDialogOpen = true"
+      >
         <Upload class="mr-2 h-4 w-4" />
         上传文档
+      </Button>
+      <Button
+        v-if="knowledgeBase"
+        variant="outline"
+        :disabled="statusUpdating"
+        :title="knowledgeBase.status === 0 ? '禁用知识库并清理分块与索引' : '启用知识库'"
+        @click="handleToggleStatus"
+      >
+        <Loader2 v-if="statusUpdating" class="mr-2 h-4 w-4 animate-spin" />
+        <PowerOff v-else-if="knowledgeBase.status === 0" class="mr-2 h-4 w-4" />
+        <Power v-else class="mr-2 h-4 w-4" />
+        {{ knowledgeBase.status === 0 ? '禁用知识库' : '启用知识库' }}
       </Button>
       <Button variant="outline" @click="handleSyncStatus" :disabled="syncing">
         <RefreshCcw :class="['mr-2 h-4 w-4', { 'animate-spin': syncing }]" />
@@ -268,7 +305,7 @@ onMounted(() => {
                 v-if="doc.status === 0"
                 variant="outline"
                 size="sm"
-                :disabled="processingDocs.has(doc.id)"
+                :disabled="knowledgeBase?.status !== 0 || processingDocs.has(doc.id)"
                 @click="handleStartVectorization(doc)"
               >
                 <Loader2 v-if="processingDocs.has(doc.id)" class="mr-2 h-4 w-4 animate-spin" />
@@ -281,6 +318,7 @@ onMounted(() => {
                 v-if="doc.status === 1 || doc.status === 3"
                 variant="outline"
                 size="sm"
+                :disabled="knowledgeBase?.status !== 0"
                 @click="handleResetDocument(doc)"
               >
                 <RefreshCw class="mr-2 h-4 w-4" />
@@ -296,6 +334,18 @@ onMounted(() => {
               >
                 <Eye class="mr-2 h-4 w-4" />
                 查看分块
+              </Button>
+
+              <Button
+                v-if="doc.status === 2"
+                variant="outline"
+                size="sm"
+                :disabled="knowledgeBase?.status !== 0 || processingDocs.has(doc.id)"
+                @click="handleStartVectorization(doc)"
+              >
+                <Loader2 v-if="processingDocs.has(doc.id)" class="mr-2 h-4 w-4 animate-spin" />
+                <RefreshCw v-else class="mr-2 h-4 w-4" />
+                {{ processingDocs.has(doc.id) ? '处理中...' : '重新分块' }}
               </Button>
 
               <Button
@@ -341,7 +391,7 @@ onMounted(() => {
           <Button variant="outline" @click="isUploadDialogOpen = false">
             取消
           </Button>
-          <Button :disabled="!uploadFile || uploading" @click="handleUpload">
+          <Button :disabled="!uploadFile || uploading || knowledgeBase?.status !== 0" @click="handleUpload">
             {{ uploading ? '上传中...' : '上传' }}
           </Button>
         </DialogFooter>
