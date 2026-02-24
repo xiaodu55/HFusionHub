@@ -1,0 +1,101 @@
+# Python AI Service Development Guide
+
+> FastAPI + Milvus Lite + DeepSeek API + ReAct Agent + Multi-Channel RAG
+
+## Architecture
+
+The Python AI service owns the **read/intelligence path** — document parsing, chunking, embedding, vector search, RAG retrieval, agent reasoning, and LLM interaction.
+
+```
+app/
+├── api/              # FastAPI route modules (chat, knowledge, health)
+├── core/
+│   ├── agent/        # Agent system (ReAct, multi-agent, workflow runtime)
+│   ├── chunker/      # Semantic text chunking + quality assessment
+│   ├── embedding/    # Embedding services (DeepSeek API, Ollama, fallback)
+│   ├── llm/          # LLM interfaces (DeepSeek, Ollama, mock)
+│   ├── parser/       # Document parsers (PDF, DOCX, Markdown, TXT)
+│   ├── rag/          # RAG engine (~23 modules)
+│   ├── tools/        # Tool system (search, calculator, time)
+│   ├── vectorstore/  # Milvus Lite + BM25 keyword index
+│   └── exceptions.py
+├── models/           # Pydantic models
+└── utils/            # Configuration, validators
+```
+
+## RAG Pipeline (in order)
+
+1. Intent Classification → 2. Query Rewriting → 3. Query Routing → 4. Multi-Channel Retrieval (Vector + BM25 + GraphRAG) → 5. RRF Fusion → 6. Optional Reranking → 7. Postprocessing → 8. Context Compression → 9. ReAct Agent Loop → 10. Self-Reflection → 11. Source Citation
+
+## Feature Flags
+
+All advanced features are gated via environment variables (see `.env.example`):
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `RAG_HYBRID_ENABLED` | `true` | Vector + BM25 hybrid retrieval with RRF |
+| `RAG_GRAPH_ENABLED` | `false` | Scoped GraphRAG channel (P7) |
+| `RAG_RERANKER_MODE` | `disabled` | Second-stage reranking (P6) |
+| `RAG_MULTIMODAL_ENABLED` | `false` | OCR/image evidence (P8) |
+| `RAG_AGENT_WORKFLOW_ENABLED` | `false` | Bounded single-agent workflow (P9) |
+| `RAG_MULTI_AGENT_ENABLED` | `false` | Multi-agent collaboration (P10) |
+
+## Setup
+
+```bash
+cd python-ai
+
+# Create virtual environment
+python -m venv .venv
+
+# Activate (Windows PowerShell)
+.\.venv\Scripts\Activate.ps1
+
+# Activate (macOS/Linux)
+source .venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Optional: install test deps
+pip install -r requirements-dev.txt
+```
+
+## Running
+
+```bash
+# From python-ai/ directory with venv activated
+python -m app.main
+
+# Or with explicit PYTHONPATH
+PYTHONPATH=. python -m app.main
+```
+
+Health check: `curl http://localhost:9000/health` → `{"status":"healthy"}`
+
+## Running Tests
+
+```bash
+pytest -q tests                    # All tests (636+)
+pytest -q tests/test_retriever.py  # Specific module
+```
+
+## Key Design Patterns
+
+| Pattern | Where | Purpose |
+|---------|-------|---------|
+| Strategy | Intent classifier, self-reflector, query router | Swappable LLM/Rule/Hybrid implementations |
+| Factory | QueryRouterFactory, IntentClassifierFactory | Configuration-driven creation |
+| Singleton | Retriever, config, trace store, graph store | Global instances |
+| Fallback chain | Embedding (Ollama → DeepSeek → random) | Graceful degradation |
+
+## SSE Output Format
+
+Python AI returns `text/event-stream` for streaming chat:
+```
+data: {"content": "token text..."}
+data: {"sources": [...]}
+data: [DONE]
+```
+
+Java backend reads this stream and forwards chunks to the frontend via `SseEmitter`.

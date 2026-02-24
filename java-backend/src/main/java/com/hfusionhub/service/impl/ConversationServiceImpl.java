@@ -2,7 +2,6 @@ package com.hfusionhub.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
@@ -23,13 +22,11 @@ import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.ConversationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
-import org.springframework.web.reactive.function.client.WebClient;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -59,13 +56,6 @@ public class ConversationServiceImpl implements ConversationService {
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final UserMapper userMapper;
     private final AiClient aiClient;
-    private final WebClient webClient;
-
-    @Value("${ai-service.base-url:http://localhost:8001}")
-    private String baseUrl;
-
-    @Value("${python-ai.internal-token:}")
-    private String internalApiToken;
 
     private static final int REQUEST_ID_MAX_LENGTH = 64;
     private static final String ASSISTANT_REQUEST_SUFFIX = ":assistant";
@@ -515,11 +505,14 @@ public class ConversationServiceImpl implements ConversationService {
         }
 
         // 3. Idempotency check. User and assistant messages must not share the same unique request_id.
-        String requestId = normalizeRequestId(dto.getRequestId());
-        if (requestId == null) {
+        final String requestId;
+        String rawRequestId = normalizeRequestId(dto.getRequestId());
+        if (rawRequestId == null) {
             requestId = java.util.UUID.randomUUID().toString();
+        } else {
+            requestId = rawRequestId;
         }
-        String assistantRequestId = assistantRequestId(requestId);
+        final String assistantRequestId = assistantRequestId(requestId);
         Message existingAssistant = findAssistantByRequestId(assistantRequestId);
         if (existingAssistant != null) {
             sendExistingAssistantAndComplete(emitter, existingAssistant);
@@ -549,239 +542,167 @@ public class ConversationServiceImpl implements ConversationService {
         // 5. 获取对话历史
         List<Map<String, String>> history = getChatHistory(conversation.getId());
 
-        // 6. 使用 HttpURLConnection 实现真正的流式响应
+        // 6. 使用 WebClient Flux 实现真正的流式响应
         StringBuilder responseBuilder = new StringBuilder();
         java.util.List<Map<String, Object>> accumulatedSources = new java.util.ArrayList<>();
-        boolean assistantSaved = false;
+        boolean[] assistantSaved = {false};
+        final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
-        try {
-            // 构建请求体
-            com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            long startTime = System.currentTimeMillis();
-            Map<String, Object> requestBody = new HashMap<>();
-            requestBody.put("message", dto.getContent());
-            requestBody.put("conversation_id", dto.getConversationId());
-            requestBody.put("knowledge_base_id", conversation.getKnowledgeBaseId());
-            requestBody.put("history", history != null ? history : List.of());
-            requestBody.put("stream", true);
-            requestBody.put("request_id", requestId);
+        reactor.core.publisher.Flux<String> sseFlux = aiClient.streamChat(
+                dto.getContent(), dto.getConversationId(),
+                conversation.getKnowledgeBaseId(), history, requestId)
+                .doFinally(signalType -> {
+                    // Cleanup: remove from active requests and signal completion
+                    activeStreamRequests.remove(requestId, streamCancellation);
+                    streamCancellation.completed.complete(null);
+                });
 
-            String url = baseUrl + "/api/chat/stream";
-            log.info("Starting streaming request to Python AI: {}, requestId: {}, kbId: {}", url, requestId, conversation.getKnowledgeBaseId());
-
-            // 使用 HttpURLConnection 进行流式请求
-            java.net.URL apiUrl = new java.net.URL(url);
-            java.net.HttpURLConnection connection = (java.net.HttpURLConnection) apiUrl.openConnection();
-            streamCancellation.setConnection(connection);
-            connection.setRequestMethod("POST");
-            connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
-            connection.setRequestProperty("Accept", "text/event-stream");
-            if (internalApiToken == null || internalApiToken.isBlank()) {
-                throw new BusinessException(StatusCode.INTERNAL_ERROR, "PYTHON_AI_INTERNAL_TOKEN 未配置");
-            }
-            connection.setRequestProperty("X-Internal-Token", internalApiToken);
-            connection.setDoOutput(true);
-            connection.setConnectTimeout(10000);
-            connection.setReadTimeout(300000); // 5 minutes - RAG pipeline can be slow
-
-            if (cancelled.get()) {
-                streamCancellation.closeConnection();
-                return;
-            }
-
-            // 发送请求体
-            byte[] bodyBytes = objectMapper.writeValueAsBytes(requestBody);
-            try (java.io.OutputStream os = connection.getOutputStream()) {
-                os.write(bodyBytes);
-                os.flush();
-            }
-
-            // 读取流式响应
-            int responseCode = connection.getResponseCode();
-            if (responseCode != 200) {
-                log.error("Python AI returned status: {}", responseCode);
-                throw new RuntimeException("Python AI service returned status: " + responseCode);
-            }
-
-            try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(connection.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
-                String line;
-                int lineCount = 0;
-                long firstContentTime = 0;
-                while ((line = reader.readLine()) != null) {
-                    lineCount++;
-                    // 检查是否被取消
+        reactor.core.Disposable subscription = sseFlux.subscribe(
+                line -> {
+                    // onNext: process each SSE line
+                    // If cancelled, subscription.dispose() has already been called,
+                    // so this callback will stop receiving events shortly.
                     if (cancelled.get()) {
-                        log.info("Stream cancelled by client, cancelling Python AI request: {}", requestId);
-                        aiClient.cancelRequest(requestId);
-                        break;
+                        return;
                     }
 
-                    // 解析 SSE 数据
                     if (line.startsWith("data: ")) {
                         String data = line.substring(6).trim();
                         if ("[DONE]".equals(data)) {
-                            log.info("Stream completed, received {} lines, requestId: {}", lineCount, requestId);
-                            // 流式响应完成
-                            emitter.send(SseEmitter.event().data("[DONE]"));
-                            emitter.complete();
-
-                            assistantSaved = saveStreamAssistantMessage(
+                            log.info("Stream completed, requestId: {}", requestId);
+                            try {
+                                emitter.send(SseEmitter.event().data("[DONE]"));
+                                emitter.complete();
+                            } catch (Exception ignored) {
+                                // emitter may already be closed
+                            }
+                            assistantSaved[0] = saveStreamAssistantMessage(
                                     dto.getConversationId(),
                                     responseBuilder.toString(),
                                     "streaming",
                                     accumulatedSources,
                                     assistantRequestId);
-                            log.info("Saved assistant message successfully, requestId: {}", assistantRequestId);
-                            break;
-                        } else if (!data.isEmpty()) {
+                            return;
+                        }
+                        if (!data.isEmpty()) {
                             try {
-                                // 解析 JSON 数据
                                 com.fasterxml.jackson.databind.JsonNode jsonNode = objectMapper.readTree(data);
                                 String content = jsonNode.has("content") ? jsonNode.get("content").asText() : "";
                                 boolean isCancelled = jsonNode.has("cancelled") && jsonNode.get("cancelled").asBoolean();
                                 com.fasterxml.jackson.databind.JsonNode sourcesNode = jsonNode.get("sources");
 
-                                // 调试日志：记录接收到的数据类型
-                                if (sourcesNode != null || !content.isEmpty()) {
-                                    log.debug("Received chunk - content length: {}, hasSources: {}, requestId: {}",
-                                            content.length(), sourcesNode != null, requestId);
-                                }
-
                                 if (isCancelled) {
                                     log.info("Python AI request cancelled: {}", requestId);
-                                    emitter.send(SseEmitter.event().data("[DONE]"));
-                                    emitter.complete();
-                                    break;
+                                    try {
+                                        emitter.send(SseEmitter.event().data("[DONE]"));
+                                        emitter.complete();
+                                    } catch (Exception ignored) {}
+                                    return;
                                 }
 
-                                // 处理 sources 信息
+                                // Forward sources to frontend
                                 if (sourcesNode != null && sourcesNode.isArray() && sourcesNode.size() > 0) {
-                                    // 累积 sources 用于后续保存
                                     List<Map<String, Object>> newSources = objectMapper.treeToValue(sourcesNode, List.class);
                                     accumulatedSources.addAll(newSources);
-                                    // 转发 sources 给前端
                                     Map<String, Object> sourcesEvent = new HashMap<>();
                                     sourcesEvent.put("sources", newSources);
                                     emitter.send(SseEmitter.event().data(sourcesEvent, MediaType.APPLICATION_JSON));
-                                    log.info("Forwarded {} sources to frontend, requestId: {}, total accumulated: {}", sourcesNode.size(), requestId, accumulatedSources.size());
-                                } else if (sourcesNode != null) {
-                                    log.debug("Sources node present but empty or not array, requestId: {}", requestId);
                                 }
 
                                 if (!content.isEmpty()) {
-                                    if (firstContentTime == 0) {
-                                        firstContentTime = System.currentTimeMillis();
-                                        log.info("First content chunk received after {}ms, requestId: {}", firstContentTime - startTime, requestId);
-                                    }
                                     responseBuilder.append(content);
-                                    // 发送 SSE 事件给前端（确保格式与 Python AI 一致）
                                     Map<String, String> eventData = new HashMap<>();
                                     eventData.put("content", content);
                                     emitter.send(SseEmitter.event().data(eventData, MediaType.APPLICATION_JSON));
-                                    if (lineCount % 50 == 0) {
-                                        log.debug("Processed {} lines, content length: {}, requestId: {}", lineCount, responseBuilder.length(), requestId);
-                                    }
                                 }
                             } catch (Exception e) {
-                                log.warn("Failed to parse chunk: {}", data);
+                                log.warn("Failed to parse SSE chunk: {}", data, e);
                             }
                         }
                     }
-                }
-            } finally {
-                connection.disconnect();
-            }
-
-            // 确保 emitter 总是关闭（如果 [DONE] 没有被正确发送）
-            if (responseBuilder.length() > 0) {
-                try {
-                    emitter.send(SseEmitter.event().data("[DONE]"));
-                    emitter.complete();
-                    log.info("Manually completed stream, content length: {}, requestId: {}", responseBuilder.length(), requestId);
-                } catch (IllegalStateException alreadyComplete) {
-                    // emitter 已经关闭，忽略
-                }
-                if (!assistantSaved) {
-                    assistantSaved = saveStreamAssistantMessage(
-                            dto.getConversationId(),
-                            responseBuilder.toString(),
-                            "streaming",
-                            accumulatedSources,
-                            assistantRequestId);
-                    log.info("Saved assistant message (fallback), requestId: {}", assistantRequestId);
-                }
-            } else {
-                try {
-                    emitter.send(SseEmitter.event().data("[DONE]"));
-                    emitter.complete();
-                } catch (IllegalStateException alreadyComplete) {
-                    // 忽略
-                }
-            }
-
-        } catch (Exception e) {
-            if (cancelled.get()) {
-                log.info("流式请求已取消，保存已接收内容: requestId={}, contentLength={}",
-                        requestId, responseBuilder.length());
-                try {
-                    if (!assistantSaved && responseBuilder.length() > 0) {
-                        assistantSaved = saveStreamAssistantMessage(
-                                dto.getConversationId(),
-                                responseBuilder.toString(),
-                                "streaming",
-                                accumulatedSources,
-                                assistantRequestId);
+                },
+                error -> {
+                    // onError
+                    if (cancelled.get()) {
+                        log.info("Stream cancelled by client, requestId: {}", requestId);
+                        try {
+                            if (!assistantSaved[0] && responseBuilder.length() > 0) {
+                                assistantSaved[0] = saveStreamAssistantMessage(
+                                        dto.getConversationId(),
+                                        responseBuilder.toString(),
+                                        "streaming",
+                                        accumulatedSources,
+                                        assistantRequestId);
+                            }
+                            emitter.send(SseEmitter.event().data("[DONE]"));
+                            emitter.complete();
+                        } catch (Exception completeError) {
+                            log.debug("Failed to complete emitter after cancel: {}", completeError.getMessage());
+                        }
+                        return;
                     }
-                    emitter.send(SseEmitter.event().data("[DONE]"));
-                    emitter.complete();
-                } catch (Exception completeError) {
-                    log.debug("取消流式请求完成通知失败: {}", completeError.getMessage());
+                    log.error("Streaming error: {}", error.getMessage(), error);
+                    try {
+                        String errorMessage = aiUnavailableMessage(error instanceof Exception ? (Exception) error : new RuntimeException(error));
+                        emitter.send(SseEmitter.event().data(Map.of("content", errorMessage)));
+                        emitter.send(SseEmitter.event().data("[DONE]"));
+                        emitter.complete();
+                        saveStreamAssistantMessage(dto.getConversationId(), errorMessage, "error", List.of(), assistantRequestId);
+                    } catch (Exception ex) {
+                        emitter.completeWithError(ex);
+                    }
+                },
+                () -> {
+                    // onComplete: ensure emitter is closed and assistant saved
+                    if (responseBuilder.length() > 0) {
+                        try {
+                            emitter.send(SseEmitter.event().data("[DONE]"));
+                            emitter.complete();
+                        } catch (Exception alreadyComplete) {
+                            // emitter already closed or IO error
+                        }
+                        if (!assistantSaved[0]) {
+                            assistantSaved[0] = saveStreamAssistantMessage(
+                                    dto.getConversationId(),
+                                    responseBuilder.toString(),
+                                    "streaming",
+                                    accumulatedSources,
+                                    assistantRequestId);
+                        }
+                    } else {
+                        try {
+                            emitter.send(SseEmitter.event().data("[DONE]"));
+                            emitter.complete();
+                        } catch (Exception alreadyComplete) {
+                            // ignore
+                        }
+                    }
                 }
-                return;
-            }
-            log.error("Failed to start streaming: {}", e.getMessage(), e);
-            try {
-                String errorMessage = aiUnavailableMessage(e);
-                emitter.send(SseEmitter.event().data(errorMessage));
-                emitter.send(SseEmitter.event().data("[DONE]"));
-                emitter.complete();
+        );
 
-                // 保存错误消息到数据库
-                saveStreamAssistantMessage(
-                        dto.getConversationId(),
-                        errorMessage,
-                        "error",
-                        List.of(),
-                        assistantRequestId);
-            } catch (Exception ex) {
-                emitter.completeWithError(ex);
-            }
-        } finally {
-            activeStreamRequests.remove(requestId, streamCancellation);
-            streamCancellation.completed.complete(null);
-        }
+        // Track the subscription for cancellation
+        streamCancellation.setSubscription(subscription);
     }
 
     private static final class StreamCancellation {
         private final AtomicBoolean cancelled;
         private final Long userId;
         private final CompletableFuture<Void> completed = new CompletableFuture<>();
-        private volatile java.net.HttpURLConnection connection;
+        private volatile reactor.core.Disposable subscription;
 
         private StreamCancellation(AtomicBoolean cancelled, Long userId) {
             this.cancelled = cancelled;
             this.userId = userId;
         }
 
-        private void setConnection(java.net.HttpURLConnection connection) {
-            this.connection = connection;
+        private void setSubscription(reactor.core.Disposable subscription) {
+            this.subscription = subscription;
         }
 
         private void closeConnection() {
-            java.net.HttpURLConnection current = connection;
-            if (current != null) {
-                current.disconnect();
+            reactor.core.Disposable current = subscription;
+            if (current != null && !current.isDisposed()) {
+                current.dispose();
             }
         }
     }

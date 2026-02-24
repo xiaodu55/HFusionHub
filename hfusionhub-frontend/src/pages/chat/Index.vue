@@ -18,12 +18,18 @@ import {
 } from '@/components/ui/dialog'
 import { Plus, MessageSquare, Trash2, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { formatDateTime } from '@/utils/date'
+import { useToast } from '@/composables/useToast'
+import EmptyState from '@/components/EmptyState.vue'
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import ErrorState from '@/components/ErrorState.vue'
 
 const router = useRouter()
+const toast = useToast()
 
 const conversations = ref<Conversation[]>([])
 const knowledgeBases = ref<KnowledgeBase[]>([])
 const loading = ref(false)
+const loadError = ref(false)
 const isCreateDialogOpen = ref(false)
 const createForm = ref({
   title: '',
@@ -39,6 +45,7 @@ const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
 
 const loadConversations = async () => {
   loading.value = true
+  loadError.value = false
   try {
     const res = await conversationApi.getMyConversations({
       page: currentPage.value,
@@ -48,6 +55,8 @@ const loadConversations = async () => {
     total.value = res.data.total
   } catch (error) {
     console.error('加载对话列表失败:', error)
+    loadError.value = true
+    toast.error('加载对话列表失败，请检查网络连接后重试')
   } finally {
     loading.value = false
   }
@@ -130,13 +139,21 @@ onMounted(() => {
     </div>
 
     <!-- 对话列表 -->
-    <div v-if="loading" class="text-center text-muted-foreground py-8">
-      加载中...
-    </div>
-    <div v-else-if="conversations.length === 0" class="text-center py-8">
-      <MessageSquare class="mx-auto h-12 w-12 text-muted-foreground" />
-      <p class="mt-4 text-muted-foreground">暂无对话，点击上方按钮新建</p>
-    </div>
+    <LoadingSkeleton v-if="loading" type="card" :count="6" />
+    <ErrorState
+      v-else-if="loadError"
+      message="加载对话列表失败"
+      @retry="loadConversations"
+    />
+    <EmptyState
+      v-else-if="conversations.length === 0"
+      :icon="MessageSquare"
+      title="暂无对话"
+      description="创建您的第一个对话，开始与 AI 交流"
+      action="新建对话"
+      :show-action="true"
+      @action="isCreateDialogOpen = true"
+    />
     <div v-else class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       <Card
         v-for="conversation in conversations"

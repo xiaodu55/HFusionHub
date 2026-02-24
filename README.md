@@ -198,7 +198,7 @@ npm run dev
 - 前端：http://localhost:3000
 - Java API：http://localhost:8080
 - Python AI 健康检查：http://localhost:9000/health（业务接口仅接受 Java 服务携带的内部令牌）
-- API文档：http://localhost:8080/doc.html
+- API 文档：http://localhost:8080/api/doc.html（Knife4j / Swagger UI）
 
 ### 默认账号
 - 用户名：admin
@@ -217,7 +217,14 @@ npm run dev
 | KnowledgeGraph | 知识图谱 | 59 |
 | Utils | 公共工具 | 36 |
 
-**总计：333个测试用例，100%通过**
+**RAG 模块：333 个测试用例，100% 通过 | Python AI 总计：636+ 测试用例**
+
+## 🚀 启动指南
+
+详细启动步骤请参阅：
+- [docs/启动重启1.md](docs/启动重启1.md) — 完整启动与重启指南（中文）
+- [docs/startup-guide.md](docs/startup-guide.md) — 首次启动完整指南
+- [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — 所有必需环境变量清单
 
 ## 📚 开发文档
 
@@ -225,6 +232,19 @@ npm run dev
 - [Python AI 层开发指南](docs/python-ai.md)
 - [数据库设计文档](docs/database.md)
 - [API 接口文档](docs/api.md)
+
+## 🧩 高级功能矩阵
+
+| 功能 | 状态 | 默认 | 依赖 |
+|------|------|------|------|
+| Hybrid Retrieval (Vector + BM25) | ✅ Stable | 开启 | 无额外依赖 |
+| GraphRAG (Scoped) | 🧪 Beta | 关闭 | `RAG_GRAPH_ENABLED=true` + 图谱索引 |
+| Reranker (第二-stage) | 🧪 Beta | 关闭 | `RAG_RERANKER_MODE=lexical/cross_encoder` |
+| Multimodal / OCR | 🔬 Experimental | 关闭 | Tesseract + `requirements-multimodal.txt` |
+| Single-Agent Workflow | 🧪 Beta | 关闭 | `RAG_AGENT_WORKFLOW_ENABLED=true` |
+| Multi-Agent Collaboration | 🔬 Experimental | 关闭 | 依赖 P9 + 明确选中的知识库 |
+
+> 详见 [python-ai/.env.example](python-ai/.env.example) 和 [docs/python-ai.md](docs/python-ai.md#feature-flags)
 
 ## 🤝 贡献
 

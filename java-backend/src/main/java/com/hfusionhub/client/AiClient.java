@@ -101,72 +101,81 @@ public class AiClient {
     }
 
     /**
-     * Chat with AI agent (streaming)
+     * Chat with AI agent (true streaming via WebClient).
      *
-     * @param message User message
+     * Returns a Flux of SSE data lines from the Python AI service.
+     * Each emission is one raw SSE line (including "data: " prefix and "[DONE]" sentinel).
+     * The returned Flux supports cancellation via the subscription's dispose().
+     *
+     * @param message       User message
      * @param conversationId Conversation ID
      * @param knowledgeBaseId Knowledge base ID (optional)
-     * @param history Chat history
-     * @return Streaming response
+     * @param history        Chat history
+     * @param requestId      Unique request ID (for idempotency + cancellation)
+     * @return Flux of raw SSE lines
      */
+    public reactor.core.publisher.Flux<String> streamChat(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String requestId
+    ) {
+        // Build request body
+        Map<String, Object> request = new HashMap<>();
+        request.put("message", message);
+        request.put("conversation_id", conversationId);
+        request.put("knowledge_base_id", knowledgeBaseId);
+        request.put("history", history != null ? history : List.of());
+        request.put("stream", true);
+        request.put("request_id", requestId);
+
+        String url = baseUrl + "/api/chat/stream";
+        log.info("Starting streaming request to Python AI: {}, requestId: {}", url, requestId);
+
+        return webClient.post()
+                .uri("/api/chat/stream")
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .headers(this::addInternalToken)
+                .bodyValue(request)
+                .retrieve()
+                .onStatus(
+                        status -> status.isError(),
+                        clientResponse -> clientResponse.bodyToMono(String.class)
+                                .flatMap(body -> reactor.core.publisher.Mono.error(
+                                        new BusinessException(StatusCode.SERVICE_UNAVAILABLE,
+                                                "Python AI returned status " + clientResponse.statusCode().value() + ": " + body)))
+                )
+                .bodyToFlux(String.class)
+                .doOnError(ResourceAccessException.class, e -> {
+                    log.error("AI service connection failed during streaming: {}", e.getMessage());
+                })
+                .doOnError(e -> {
+                    if (!(e instanceof ResourceAccessException)) {
+                        log.error("Stream chat with AI failed: {}", e.getMessage(), e);
+                    }
+                });
+    }
+
+    /**
+     * Chat with AI agent (streaming) — legacy synchronous wrapper.
+     *
+     * @deprecated Use {@link #streamChat(String, Long, Long, List, String)} for true streaming.
+     *             This method exists only for backward compatibility and does NOT stream.
+     */
+    @Deprecated
     public StreamResponse chatStream(
             String message,
             Long conversationId,
             Long knowledgeBaseId,
             List<Map<String, String>> history
     ) {
-        try {
-            // Generate request ID for cancellation tracking
-            String requestId = java.util.UUID.randomUUID().toString();
-
-            // Build request
-            Map<String, Object> request = new HashMap<>();
-            request.put("message", message);
-            request.put("conversation_id", conversationId);
-            request.put("knowledge_base_id", knowledgeBaseId);
-            request.put("history", history != null ? history : List.of());
-            request.put("stream", true);
-            request.put("request_id", requestId);
-
-            // Set headers
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("Accept", "text/event-stream");
-            addInternalToken(headers);
-
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
-
-            // Call Python AI service (non-streaming for simplicity)
-            // In production, you might want to use WebFlux or similar for true streaming
-            String url = baseUrl + "/api/chat";
-            log.info("Calling AI service: {}, requestId: {}", url, requestId);
-
-            // Change stream to false for non-streaming response
-            request.put("stream", false);
-            entity = new HttpEntity<>(request, headers);
-
-            ResponseEntity<ChatResponse> response = restTemplate.exchange(
-                    url,
-                    HttpMethod.POST,
-                    entity,
-                    ChatResponse.class
-            );
-
-            if (response.getBody() != null) {
-                return new StreamResponse(response.getBody().getContent(), requestId);
-            }
-
-            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "AI service returned empty response");
-
-        } catch (BusinessException e) {
-            throw e;
-        } catch (ResourceAccessException e) {
-            log.error("AI service connection failed: {}", e.getMessage());
-            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "AI service is unavailable. Please try again later.");
-        } catch (Exception e) {
-            log.error("Chat stream with AI failed: {}", e.getMessage(), e);
-            throw new BusinessException(StatusCode.INTERNAL_ERROR, "Failed to get AI response: " + e.getMessage());
-        }
+        // Delegate to the synchronous chat() method for backward compatibility.
+        // New code should use streamChat() with Flux for true SSE streaming.
+        String requestId = java.util.UUID.randomUUID().toString();
+        ChatResponse response = chat(message, conversationId, knowledgeBaseId, history);
+        return new StreamResponse(response.getContent(), requestId);
     }
 
     /**

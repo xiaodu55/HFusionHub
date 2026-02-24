@@ -1,0 +1,95 @@
+# Environment Variables
+
+> Required and optional environment variables for HFusionHub services.
+
+## Quick Reference (Windows PowerShell)
+
+```powershell
+# Copy-paste this block and replace placeholder values
+$env:MYSQL_ROOT_PASSWORD="replace-with-a-strong-root-password"
+$env:MYSQL_PASSWORD="replace-with-a-strong-db-password"
+$env:DB_USERNAME="hfusionhub"
+$env:DB_PASSWORD=$env:MYSQL_PASSWORD
+$env:CALLBACK_SECRET="replace-with-a-long-random-callback-secret"
+$env:PYTHON_AI_INTERNAL_TOKEN="replace-with-a-long-random-internal-token"
+$env:ADMIN_PASSWORD="replace-with-a-strong-admin-password"
+```
+
+## Docker Compose (`docker/.env`)
+
+Copy `docker/.env.example` to `docker/.env`:
+
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `MYSQL_ROOT_PASSWORD` | `root123456` | MySQL root password |
+| `MYSQL_PASSWORD` | `hfusionhub123` | MySQL app user password |
+| `REDIS_PASSWORD` | `your_redis_password` | Redis password (optional) |
+| `ADMIN_PASSWORD` | `changeme` | Bootstrap admin password |
+
+## Java Backend (`java-backend/`)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DB_USERNAME` | No | `hfusionhub` | MySQL username |
+| `DB_PASSWORD` | **Yes** | — | MySQL password (must match `MYSQL_PASSWORD`) |
+| `PYTHON_AI_INTERNAL_TOKEN` | **Yes** | — | Shared secret for Java ↔ Python |
+| `CALLBACK_SECRET` | **Yes** | — | HMAC secret for Python → Java callbacks |
+| `ADMIN_PASSWORD` | **Yes** | — | Bootstrap admin account password |
+| `AI_SERVICE_URL` | No | `http://localhost:9000` | Python AI service URL |
+| `AI_SERVICE_TIMEOUT` | No | `120000` | Timeout in ms |
+| `RAG_INDEX_STALE_AFTER_MINUTES` | No | `30` | Index job recovery threshold |
+| `RAG_INDEX_MAX_ATTEMPTS` | No | `3` | Max indexing retries |
+| `TRUSTED_PROXY_HEADERS` | No | `false` | Enable X-Forwarded-For (reverse proxy only) |
+
+## Python AI (`python-ai/.env`)
+
+Copy `python-ai/.env.example` to `python-ai/.env`:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DEEPSEEK_API_KEY` | **Yes** | — | DeepSeek API key |
+| `DEEPSEEK_BASE_URL` | No | `https://api.deepseek.com` | DeepSeek API endpoint |
+| `DEEPSEEK_MODEL` | No | `deepseek-v4-flash` | Model name |
+| `SERVER_HOST` | No | `0.0.0.0` | FastAPI bind address |
+| `SERVER_PORT` | No | `9000` | FastAPI port |
+| `CORS_ORIGINS` | No | `http://localhost:5173,...` | Allowed CORS origins |
+| `JAVA_BACKEND_URL` | No | `http://localhost:8080` | Callback target |
+| `CHUNK_SIZE` | No | `500` | Text chunk size |
+| `CHUNK_OVERLAP` | No | `50` | Chunk overlap |
+| `EMBEDDING_DIMENSION` | No | `1024` | Vector dimension |
+
+### Feature Flags (Python AI)
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `RAG_HYBRID_ENABLED` | `true` | Vector + BM25 hybrid retrieval |
+| `RAG_GRAPH_ENABLED` | `false` | Scoped GraphRAG (P7) |
+| `RAG_RERANKER_MODE` | `disabled` | Second-stage reranking (P6) |
+| `RAG_MULTIMODAL_ENABLED` | `false` | Multimodal OCR/image (P8) |
+| `RAG_AGENT_WORKFLOW_ENABLED` | `false` | Single-agent workflow (P9) |
+| `RAG_MULTI_AGENT_ENABLED` | `false` | Multi-agent collaboration (P10) |
+
+## Critical: PYTHON_AI_INTERNAL_TOKEN
+
+This token **must be identical** in both:
+1. Java backend terminal (`$env:PYTHON_AI_INTERNAL_TOKEN="..."`)
+2. Python AI terminal (`$env:PYTHON_AI_INTERNAL_TOKEN="..."`)
+
+If they differ, all Java → Python requests will fail with 401/403.
+
+## Critical: DB_PASSWORD = MYSQL_PASSWORD
+
+The Java `DB_PASSWORD` must match the `MYSQL_PASSWORD` used when starting Docker. Using Docker:
+```powershell
+# docker/.env (or inline env)
+MYSQL_PASSWORD=mysecurepassword
+
+# Java backend terminal
+$env:DB_PASSWORD="mysecurepassword"
+```
+
+## Security Notes
+
+- **Never commit** `.env` files or hardcoded secrets to Git
+- Use `docker/.env.example` and `python-ai/.env.example` as templates
+- For production, use a secrets manager (Vault, AWS Secrets Manager, etc.) or K8s Secrets

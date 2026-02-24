@@ -73,8 +73,8 @@ uploads/
 # --- Claude ---
 .claude/
 
-# --- Local documentation (not committed) ---
-docs/
+# --- Project documentation (committed) ---
+# docs/ directory is tracked; keep local-only notes in .claude/ or outside the repo
 
 # --- Environment files (contain secrets) ---
 .env

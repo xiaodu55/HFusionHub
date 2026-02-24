@@ -18,11 +18,17 @@ import {
 } from '@/components/ui/dialog'
 import { Plus, Search, Edit, Trash2, BookOpen, Power, PowerOff, Loader2 } from 'lucide-vue-next'
 import { formatDateTime } from '@/utils/date'
+import { useToast } from '@/composables/useToast'
+import EmptyState from '@/components/EmptyState.vue'
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import ErrorState from '@/components/ErrorState.vue'
 
 const router = useRouter()
+const toast = useToast()
 
 const knowledgeBases = ref<KnowledgeBase[]>([])
 const loading = ref(false)
+const loadError = ref(false)
 const searchQuery = ref('')
 const isCreateDialogOpen = ref(false)
 const isEditDialogOpen = ref(false)
@@ -42,6 +48,7 @@ const editForm = ref({
 
 const loadKnowledgeBases = async () => {
   loading.value = true
+  loadError.value = false
   try {
     const res = await knowledgeBaseApi.getMyKnowledgeBaseList({
       page: 1,
@@ -50,6 +57,8 @@ const loadKnowledgeBases = async () => {
     knowledgeBases.value = res.data.records
   } catch (error) {
     console.error('加载知识库失败:', error)
+    loadError.value = true
+    toast.error('加载知识库失败，请检查网络连接后重试')
   } finally {
     loading.value = false
   }
@@ -65,7 +74,12 @@ const handleCreate = async () => {
     await loadKnowledgeBases()
   } catch (error) {
     console.error('创建知识库失败:', error)
+    toast.error('创建知识库失败，请稍后重试')
   }
+}
+
+const handleCreateDialogOpen = () => {
+  isCreateDialogOpen.value = true
 }
 
 const handleEdit = (item: KnowledgeBase) => {
@@ -197,15 +211,21 @@ onMounted(() => {
     </div>
 
     <!-- 知识库列表 -->
-    <div v-if="loading" class="text-center text-muted-foreground py-8">
-      加载中...
-    </div>
-    <div v-else-if="filteredKnowledgeBases.length === 0" class="text-center py-8">
-      <BookOpen class="mx-auto h-12 w-12 text-muted-foreground" />
-      <p class="mt-4 text-muted-foreground">
-        {{ searchQuery ? '没有找到匹配的知识库' : '暂无知识库，点击上方按钮创建' }}
-      </p>
-    </div>
+    <LoadingSkeleton v-if="loading" type="card" :count="6" />
+    <ErrorState
+      v-else-if="loadError"
+      message="加载知识库失败"
+      @retry="loadKnowledgeBases"
+    />
+    <EmptyState
+      v-else-if="filteredKnowledgeBases.length === 0"
+      :icon="BookOpen"
+      :title="searchQuery ? '没有找到匹配的知识库' : '暂无知识库'"
+      :description="searchQuery ? '尝试更换搜索关键词' : '创建您的第一个知识库，开始上传文档'"
+      action="创建知识库"
+      :show-action="!searchQuery"
+      @action="handleCreateDialogOpen"
+    />
     <div v-else class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       <Card
         v-for="kb in filteredKnowledgeBases"
