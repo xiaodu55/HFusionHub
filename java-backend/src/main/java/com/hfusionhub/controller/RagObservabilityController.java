@@ -1,5 +1,6 @@
 package com.hfusionhub.controller;
 
+import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.common.utils.JwtUtils;
@@ -137,7 +138,7 @@ public class RagObservabilityController {
                 throw businessException;
             }
             log.error("RAG evaluation request failed", exception);
-            throw new BusinessException("RAG 评测服务不可用");
+            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "RAG 评测服务不可用");
         }
     }
 
@@ -162,14 +163,14 @@ public class RagObservabilityController {
                     url, org.springframework.http.HttpMethod.GET,
                     new HttpEntity<>(internalHeaders()), Map.class).getBody();
             if (response == null) {
-                throw new BusinessException("RAG 服务返回为空");
+                throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "RAG 服务返回为空");
             }
             return response;
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
             log.error("RAG observability request failed: {}", url, exception);
-            throw new BusinessException("RAG 调试服务不可用");
+            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "RAG 调试服务不可用");
         }
     }
 
@@ -213,7 +214,7 @@ public class RagObservabilityController {
 
     private void addInternalToken(HttpHeaders headers) {
         if (internalApiToken == null || internalApiToken.isBlank()) {
-            throw new BusinessException("PYTHON_AI_INTERNAL_TOKEN 未配置");
+            throw new BusinessException(StatusCode.INTERNAL_ERROR, "PYTHON_AI_INTERNAL_TOKEN 未配置");
         }
         headers.set("X-Internal-Token", internalApiToken);
     }

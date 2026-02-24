@@ -1,4 +1,5 @@
 import { get, post } from './request'
+import type { ApiResponse } from './types'
 
 export interface RetrievalTraceResult {
   document_id: string | number | null
@@ -122,18 +123,18 @@ const toJavaQueryParams = (params: TraceFilters) => {
   }
 }
 
-export const getTraces = (params: TraceFilters) =>
-  get<{ data: { traces: RetrievalTrace[], total: number } }>('/rag/traces', {
+export const getTraces = (params: TraceFilters): Promise<ApiResponse<{ traces: RetrievalTrace[], total: number }>> =>
+  get('/rag/traces', {
     limit: 50,
     offset: 0,
     ...toJavaQueryParams(params),
   })
 
-export const getTraceStats = (days: number, knowledgeBaseId: number) =>
-  get<{ data: TraceStats }>('/rag/traces/stats', { days, knowledgeBaseId })
+export const getTraceStats = (days: number, knowledgeBaseId: number): Promise<ApiResponse<TraceStats>> =>
+  get('/rag/traces/stats', { days, knowledgeBaseId })
 
-export const exportTraces = (format: 'json' | 'csv', filters: Omit<TraceFilters, 'limit' | 'offset'>) =>
-  get<{ data: TraceExport }>('/rag/traces/export', {
+export const exportTraces = (format: 'json' | 'csv', filters: Omit<TraceFilters, 'limit' | 'offset'>): Promise<ApiResponse<TraceExport>> =>
+  get('/rag/traces/export', {
     format,
     ...toJavaQueryParams(filters),
   })
@@ -143,10 +144,10 @@ export const evaluateRetrieval = (data: {
   top_k: number
   label?: string
   cases: EvaluationCaseInput[]
-}) => post<{ data: EvaluationReport }>('/rag/evaluate', data)
+}): Promise<ApiResponse<EvaluationReport>> => post('/rag/evaluate', data)
 
-export const getEvaluationRuns = (params: { limit?: number, knowledge_base_id: number }) =>
-  get<{ data: { runs: EvaluationRun[] } }>('/rag/evaluation-runs', {
+export const getEvaluationRuns = (params: { limit?: number, knowledge_base_id: number }): Promise<ApiResponse<{ runs: EvaluationRun[] }>> =>
+  get('/rag/evaluation-runs', {
     limit: params.limit,
     knowledgeBaseId: params.knowledge_base_id,
   })

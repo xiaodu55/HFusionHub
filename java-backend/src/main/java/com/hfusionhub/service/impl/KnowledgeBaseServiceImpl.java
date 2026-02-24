@@ -160,6 +160,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
      * @param id 知识库ID
      */
     @Override
+    @Transactional
     public void delete(Long id) {
         KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectById(id);
         if (knowledgeBase == null) {

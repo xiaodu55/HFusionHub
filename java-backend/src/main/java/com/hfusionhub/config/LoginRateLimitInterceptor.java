@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -21,10 +22,13 @@ public class LoginRateLimitInterceptor implements HandlerInterceptor {
 
     private final LoginRateLimiter rateLimiter;
 
+    @Value("${app.trusted-proxy-headers:false}")
+    private boolean trustedProxyHeaders;
+
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response,
                              Object handler) {
-        String ip = IpUtils.getClientIp(request);
+        String ip = IpUtils.getClientIp(request, trustedProxyHeaders);
         rateLimiter.checkBlocked(ip);
         return true;
     }

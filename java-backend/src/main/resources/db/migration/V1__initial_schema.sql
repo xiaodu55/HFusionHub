@@ -131,18 +131,5 @@ CREATE TABLE IF NOT EXISTS `tool` (
     KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工具表';
 
--- =====================================================
--- 插入默认管理员用户（幂等：仅当不存在时插入）
--- 密码: admin123 (BCrypt加密)
--- =====================================================
-INSERT IGNORE INTO `sys_user` (`username`, `password`, `nickname`, `role`, `status`)
-VALUES ('admin', '$2a$10$hLsOQw/IutrOdOFEdZL2JO/0F0DQHtO6ioO3g0R4v.2dOeqoHcENC', _utf8mb4'管理员', 'admin', 0);
-
--- =====================================================
--- 业务账号权限：从 ALL PRIVILEGES 缩减为必要权限
--- hfusionhub 用户由 MySQL Docker 镜像在启动时自动创建
--- 授予 DML（运行时 CRUD）+ DDL（Flyway 迁移）权限，但不授予 SUPER 等管理权限
--- =====================================================
-REVOKE ALL PRIVILEGES, GRANT OPTION FROM 'hfusionhub'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES ON `hfusionhub`.* TO 'hfusionhub'@'%';
-FLUSH PRIVILEGES;
+-- Admin users are bootstrapped by AdminInitializer from ADMIN_PASSWORD.
+-- Database user privileges are managed outside Flyway by the deployment layer.

@@ -130,13 +130,13 @@ onMounted(() => {
           <div class="space-y-2">
             <Label>注册时间</Label>
             <p class="text-sm text-muted-foreground">
-              {{ userStore.userInfo?.createTime ? new Date(userStore.userInfo.createTime).toLocaleDateString() : '-' }}
+              {{ userStore.userInfo?.createdAt ? new Date(userStore.userInfo.createdAt).toLocaleDateString() : '-' }}
             </p>
           </div>
           <div class="space-y-2">
             <Label>账户状态</Label>
             <p class="text-sm text-muted-foreground">
-              {{ userStore.userInfo?.status === 1 ? '正常' : '禁用' }}
+              {{ userStore.userInfo?.status === 0 ? '正常' : '禁用' }}
             </p>
           </div>
         </CardContent>

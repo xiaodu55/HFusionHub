@@ -2,7 +2,7 @@
 name = "hfusionhub-python-ai"
 version = "1.0.0"
 description = "HFusionHub Python AI Engine — RAG-powered intelligent retrieval service"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 
 [build-system]
 requires = ["pip-tools>=7.4"]

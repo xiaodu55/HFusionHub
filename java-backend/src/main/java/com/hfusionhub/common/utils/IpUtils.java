@@ -22,10 +22,23 @@ public final class IpUtils {
     }
 
     /**
-     * Extract the client IP from a servlet request, respecting common
-     * reverse-proxy headers.
+     * Extract the remote peer IP from a servlet request.
      */
     public static String getClientIp(HttpServletRequest request) {
+        return getClientIp(request, false);
+    }
+
+    /**
+     * Extract the client IP from a servlet request.
+     *
+     * <p>Proxy headers are user-controlled unless the application is deployed
+     * behind a trusted reverse proxy that sanitizes them.
+     */
+    public static String getClientIp(HttpServletRequest request, boolean trustProxyHeaders) {
+        if (!trustProxyHeaders) {
+            return request.getRemoteAddr();
+        }
+
         for (String header : IP_HEADER_CANDIDATES) {
             String ip = request.getHeader(header);
             if (ip != null && !ip.isBlank() && !"unknown".equalsIgnoreCase(ip)) {

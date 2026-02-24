@@ -44,7 +44,7 @@ export interface UserInfo {
   phone: string
   avatar: string
   status: number
-  createTime: string
+  createdAt: string
 }
 
 // 知识库相关类型

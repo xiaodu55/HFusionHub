@@ -6,7 +6,7 @@ public class HashGenerator {
     public static void main(String[] args) {
         if (args.length == 0) {
             System.out.println("Usage: java HashGenerator <password>");
-            System.out.println("Example: java HashGenerator admin123");
+            System.out.println("Example: java HashGenerator <strong-password>");
             return;
         }
 

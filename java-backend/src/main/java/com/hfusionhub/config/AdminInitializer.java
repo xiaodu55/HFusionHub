@@ -18,7 +18,7 @@ import org.springframework.stereotype.Component;
  *
  * <p>If {@code ADMIN_PASSWORD} is not set, admin creation is skipped and a
  * warning is logged.  The V5 Flyway migration removes the default
- * {@code admin / admin123} account, so a fresh deployment will have no admin
+ * historical default administrator account, so a fresh deployment will have no admin
  * user until this runner is supplied with a password.
  */
 @Slf4j

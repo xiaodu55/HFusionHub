@@ -7,6 +7,7 @@ import cn.dev33.satoken.context.model.SaResponse;
 import cn.dev33.satoken.context.model.SaStorage;
 import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
 import cn.dev33.satoken.stp.StpUtil;
+import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
@@ -71,12 +72,13 @@ class RagObservabilityControllerTest {
         KnowledgeBase kb = new KnowledgeBase();
         kb.setId(7L);
         kb.setUserId(2L); // Owned by user 2, not user 1
+        kb.setStatus(0);
         when(knowledgeBaseMapper.selectById(7L)).thenReturn(kb);
 
         try {
             controller.listTraces(25, 5, 7L, false, null, null);
         } catch (com.hfusionhub.common.exception.BusinessException e) {
-            assertEquals(500, e.getCode());
+            assertEquals(StatusCode.BAD_REQUEST, e.getCode());
         }
     }
 
@@ -86,6 +88,7 @@ class RagObservabilityControllerTest {
         KnowledgeBase kb = new KnowledgeBase();
         kb.setId(7L);
         kb.setUserId(1L); // Owned by user 1
+        kb.setStatus(0);
         when(knowledgeBaseMapper.selectById(7L)).thenReturn(kb);
 
         when(restTemplate.exchange(
@@ -107,6 +110,7 @@ class RagObservabilityControllerTest {
         KnowledgeBase kb = new KnowledgeBase();
         kb.setId(7L);
         kb.setUserId(1L);
+        kb.setStatus(0);
         when(knowledgeBaseMapper.selectById(7L)).thenReturn(kb);
 
         try {

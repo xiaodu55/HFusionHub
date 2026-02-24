@@ -1,5 +1,6 @@
 package com.hfusionhub.client;
 
+import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -86,14 +87,16 @@ public class AiClient {
                 return response.getBody();
             }
 
-            throw new BusinessException("AI service returned empty response");
+            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "AI service returned empty response");
 
+        } catch (BusinessException e) {
+            throw e;
         } catch (ResourceAccessException e) {
             log.error("AI service connection failed: {}", e.getMessage());
-            throw new BusinessException("AI service is unavailable. Please try again later.");
+            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "AI service is unavailable. Please try again later.");
         } catch (Exception e) {
             log.error("Chat with AI failed: {}", e.getMessage(), e);
-            throw new BusinessException("Failed to get AI response: " + e.getMessage());
+            throw new BusinessException(StatusCode.INTERNAL_ERROR, "Failed to get AI response: " + e.getMessage());
         }
     }
 
@@ -153,14 +156,16 @@ public class AiClient {
                 return new StreamResponse(response.getBody().getContent(), requestId);
             }
 
-            throw new BusinessException("AI service returned empty response");
+            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "AI service returned empty response");
 
+        } catch (BusinessException e) {
+            throw e;
         } catch (ResourceAccessException e) {
             log.error("AI service connection failed: {}", e.getMessage());
-            throw new BusinessException("AI service is unavailable. Please try again later.");
+            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "AI service is unavailable. Please try again later.");
         } catch (Exception e) {
             log.error("Chat stream with AI failed: {}", e.getMessage(), e);
-            throw new BusinessException("Failed to get AI response: " + e.getMessage());
+            throw new BusinessException(StatusCode.INTERNAL_ERROR, "Failed to get AI response: " + e.getMessage());
         }
     }
 
@@ -217,7 +222,7 @@ public class AiClient {
 
     private void addInternalToken(HttpHeaders headers) {
         if (internalApiToken == null || internalApiToken.isBlank()) {
-            throw new BusinessException("PYTHON_AI_INTERNAL_TOKEN 未配置");
+            throw new BusinessException(StatusCode.INTERNAL_ERROR, "PYTHON_AI_INTERNAL_TOKEN 未配置");
         }
         headers.set("X-Internal-Token", internalApiToken);
     }

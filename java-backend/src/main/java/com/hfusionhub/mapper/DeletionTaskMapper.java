@@ -5,7 +5,9 @@ import com.hfusionhub.entity.DeletionTask;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -18,6 +20,18 @@ public interface DeletionTaskMapper extends BaseMapper<DeletionTask> {
 
     @Select("SELECT * FROM deletion_task WHERE status IN ('PENDING','RETRYING') ORDER BY created_at ASC LIMIT #{limit}")
     List<DeletionTask> selectPendingTasks(@Param("limit") int limit);
+
+    @Update("""
+            UPDATE deletion_task
+            SET status = 'RETRYING',
+                error_message = #{errorMessage},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE status = 'PROCESSING'
+              AND updated_at < #{staleBefore}
+              AND retry_count < max_retries
+            """)
+    int recoverStaleProcessingTasks(@Param("staleBefore") LocalDateTime staleBefore,
+                                    @Param("errorMessage") String errorMessage);
 
     @Select("SELECT * FROM deletion_task WHERE status = 'FAILED' AND retry_count < max_retries ORDER BY created_at ASC LIMIT #{limit}")
     List<DeletionTask> selectRetryableTasks(@Param("limit") int limit);

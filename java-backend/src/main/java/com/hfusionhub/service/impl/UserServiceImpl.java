@@ -17,6 +17,7 @@ import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -36,6 +37,9 @@ public class UserServiceImpl implements UserService {
     private final UserMapper userMapper;
     private final JwtUtils jwtUtils;
     private final LoginRateLimiter rateLimiter;
+
+    @Value("${app.trusted-proxy-headers:false}")
+    private boolean trustedProxyHeaders;
 
     /**
      * 用户登录
@@ -239,7 +243,7 @@ public class UserServiceImpl implements UserService {
         try {
             ServletRequestAttributes attrs =
                     (ServletRequestAttributes) RequestContextHolder.currentRequestAttributes();
-            return IpUtils.getClientIp(attrs.getRequest());
+            return IpUtils.getClientIp(attrs.getRequest(), trustedProxyHeaders);
         } catch (IllegalStateException e) {
             return "unknown";
         }

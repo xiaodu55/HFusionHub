@@ -423,11 +423,11 @@ onMounted(() => {
             <Label>选择文件 *</Label>
             <Input
               type="file"
-              accept=".txt,.pdf,.doc,.docx,.md"
+              accept=".txt,.pdf,.docx,.md"
               @change="handleFileSelect"
             />
             <p class="text-sm text-muted-foreground">
-              支持 TXT、PDF、DOC、DOCX、MD 格式
+              支持 TXT、PDF、DOCX、MD 格式
             </p>
           </div>
           <div v-if="uploadForm.file" class="rounded-lg bg-muted p-3">

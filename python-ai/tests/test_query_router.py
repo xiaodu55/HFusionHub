@@ -286,7 +286,9 @@ class TestGraphChannel:
     async def test_graph_channel_search(self):
         """测试图谱检索（预留）"""
         config = ChannelConfig(channel_type=ChannelType.GRAPH)
-        channel = GraphChannel(config)
+        graph_store = MagicMock()
+        graph_store.search.return_value = []
+        channel = GraphChannel(config, graph_store=graph_store, chunk_loader=lambda: {})
 
         results = await channel.search(
             query="测试查询",
@@ -295,6 +297,7 @@ class TestGraphChannel:
         )
 
         assert results == []
+        graph_store.search.assert_called_once()
 
 
 # =============================================================================

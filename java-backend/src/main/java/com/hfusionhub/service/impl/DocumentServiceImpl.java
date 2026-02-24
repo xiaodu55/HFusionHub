@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hfusionhub.common.constant.CommonConstants;
+import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
@@ -26,10 +27,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -59,12 +63,11 @@ public class DocumentServiceImpl implements DocumentService {
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
     // 允许的文件扩展名（优先使用扩展名检查，比MIME类型更可靠）
     private static final List<String> ALLOWED_EXTENSIONS = List.of(
-            ".pdf", ".doc", ".docx", ".txt", ".md"
+            ".pdf", ".docx", ".txt", ".md"
     );
     // 允许的MIME类型（作为辅助验证）
     private static final List<String> ALLOWED_TYPES = List.of(
             "application/pdf",
-            "application/msword",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "text/plain",
             "text/markdown",
@@ -136,8 +139,8 @@ public class DocumentServiceImpl implements DocumentService {
         document.setStatus(DocumentStatus.PENDING.getCode()); // 待解析
         documentMapper.insert(document);
 
-        // 5. 数据库提交成功 → 原子移动文件到正式目录
-        commitFile(tempPath);
+        // 5. 注册事务提交后的文件提交动作
+        registerFileCommit(document.getId(), tempPath);
 
         // 6. 转换为 DTO
         return convertToInfoDTO(document, kb.getName());
@@ -413,7 +416,7 @@ public class DocumentServiceImpl implements DocumentService {
 
     /**
      * 保存文件到临时目录，数据库提交后再原子移动到正式目录。
-     * 返回临时路径；调用方应在事务成功后调用 commitFile()。
+     * 返回临时路径；调用方在事务提交后再移动到正式目录。
      */
     private String saveFile(MultipartFile file) {
         try {
@@ -448,20 +451,63 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     /**
-     * 数据库事务提交后调用——将文件从 temp 目录原子移动到正式目录。
+     * 注册数据库事务提交后的文件提交动作。
      */
-    @Override
-    public void commitFile(String tempPath) {
+    private void registerFileCommit(Long documentId, String tempPath) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            commitFile(documentId, tempPath);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                commitFile(documentId, tempPath);
+            }
+
+            @Override
+            public void afterCompletion(int status) {
+                if (status != STATUS_COMMITTED) {
+                    deleteTempFile(tempPath);
+                }
+            }
+        });
+    }
+
+    private void commitFile(Long documentId, String tempPath) {
         if (tempPath == null) return;
         try {
             Path tempFile = Path.of(tempPath);
             Path finalDir = tempFile.getParent().getParent(); // uploads/documents
             Path finalFile = finalDir.resolve(tempFile.getFileName());
-            Files.move(tempFile, finalFile, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            try {
+                Files.move(tempFile, finalFile, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(tempFile, finalFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
             log.info("文件已提交到正式目录: {}", finalFile);
         } catch (IOException e) {
             log.error("文件提交失败: {}", tempPath, e);
+            markUploadFailed(documentId, "文件提交失败");
+            deleteTempFile(tempPath);
+            throw new BusinessException(StatusCode.INTERNAL_ERROR, "文件提交失败");
+        }
+    }
+
+    private void markUploadFailed(Long documentId, String errorMessage) {
+        Document failed = new Document();
+        failed.setId(documentId);
+        failed.setStatus(DocumentStatus.FAILED.getCode());
+        failed.setErrorMessage(errorMessage);
+        documentMapper.updateById(failed);
+    }
+
+    private void deleteTempFile(String tempPath) {
+        if (tempPath == null) return;
+        try {
+            Files.deleteIfExists(Path.of(tempPath));
+        } catch (IOException e) {
+            log.warn("临时文件清理失败: {}", tempPath, e);
         }
     }
 

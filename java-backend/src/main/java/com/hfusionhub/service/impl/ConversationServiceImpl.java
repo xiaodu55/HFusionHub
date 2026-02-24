@@ -2,6 +2,7 @@ package com.hfusionhub.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
@@ -576,7 +577,7 @@ public class ConversationServiceImpl implements ConversationService {
             connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
             connection.setRequestProperty("Accept", "text/event-stream");
             if (internalApiToken == null || internalApiToken.isBlank()) {
-                throw new BusinessException("PYTHON_AI_INTERNAL_TOKEN 未配置");
+                throw new BusinessException(StatusCode.INTERNAL_ERROR, "PYTHON_AI_INTERNAL_TOKEN 未配置");
             }
             connection.setRequestProperty("X-Internal-Token", internalApiToken);
             connection.setDoOutput(true);

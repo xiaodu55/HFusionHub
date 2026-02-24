@@ -601,7 +601,7 @@ class MultimodalDocumentParser:
 
         if file_ext == ".pdf":
             return self._parse_pdf(file_path, document_id)
-        elif file_ext in [".docx", ".doc"]:
+        elif file_ext == ".docx":
             return self._parse_docx(file_path, document_id)
         elif file_ext in [".md", ".markdown"]:
             return self._parse_markdown(file_path, document_id)

@@ -6,6 +6,7 @@ import cn.dev33.satoken.exception.NotRoleException;
 import com.hfusionhub.common.result.R;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -28,10 +29,21 @@ public class GlobalExceptionHandler {
      * 业务异常
      */
     @ExceptionHandler(BusinessException.class)
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public R<?> handleBusinessException(BusinessException e) {
+    public ResponseEntity<R<?>> handleBusinessException(BusinessException e) {
         log.warn("业务异常: {}", e.getMessage());
-        return R.fail(e.getCode(), e.getMessage());
+        return ResponseEntity
+                .status(resolveBusinessHttpStatus(e.getCode()))
+                .body(R.fail(e.getCode(), e.getMessage()));
+    }
+
+    private HttpStatus resolveBusinessHttpStatus(int code) {
+        if (code >= 400 && code < 600) {
+            HttpStatus status = HttpStatus.resolve(code);
+            if (status != null) {
+                return status;
+            }
+        }
+        return HttpStatus.BAD_REQUEST;
     }
 
     /**

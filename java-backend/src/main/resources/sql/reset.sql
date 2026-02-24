@@ -1,6 +1,6 @@
 -- =====================================================
 -- HFusionHub 数据库重置脚本
--- 仅保留默认管理员账号，清空所有业务数据
+-- 清空业务数据与用户数据；管理员由 ADMIN_PASSWORD 重新引导创建
 -- =====================================================
 
 -- 确保使用 UTF-8 字符集
@@ -23,10 +23,8 @@ TRUNCATE TABLE `sys_user`;
 -- 启用外键检查
 SET FOREIGN_KEY_CHECKS = 1;
 
--- 插入默认管理员用户
--- 密码: admin123 (BCrypt加密)
-INSERT INTO `sys_user` (`username`, `password`, `nickname`, `role`, `status`)
-VALUES ('admin', '$2a$10$hLsOQw/IutrOdOFEdZL2JO/0F0DQHtO6ioO3g0R4v.2dOeqoHcENC', _utf8mb4'管理员', 'admin', 0);
+-- Admin users are bootstrapped by AdminInitializer from ADMIN_PASSWORD.
+-- Do not seed a default admin password in SQL scripts.
 
 -- 验证
 SELECT '数据库重置完成！' AS message;

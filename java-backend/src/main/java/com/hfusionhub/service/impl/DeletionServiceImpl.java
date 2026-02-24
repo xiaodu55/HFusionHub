@@ -38,6 +38,7 @@ public class DeletionServiceImpl implements DeletionService {
 
     private static final int DEFAULT_MAX_RETRIES = 5;
     private static final int TASK_BATCH_SIZE = 10;
+    private static final int PROCESSING_STALE_MINUTES = 10;
 
     @Override
     @Transactional
@@ -60,6 +61,13 @@ public class DeletionServiceImpl implements DeletionService {
 
     @Override
     public List<DeletionTask> getPendingTasks() {
+        LocalDateTime staleBefore = LocalDateTime.now().minusMinutes(PROCESSING_STALE_MINUTES);
+        int recovered = deletionTaskMapper.recoverStaleProcessingTasks(
+                staleBefore,
+                "任务执行超时，已恢复为可重试状态");
+        if (recovered > 0) {
+            log.warn("恢复 {} 个超时的删除任务", recovered);
+        }
         return deletionTaskMapper.selectPendingTasks(TASK_BATCH_SIZE);
     }
 
@@ -71,7 +79,7 @@ public class DeletionServiceImpl implements DeletionService {
         if (task.getRetryCount() >= task.getMaxRetries()) {
             task.setStatus("FAILED");
             log.error("删除任务耗尽重试次数: taskId={}, targetId={}", task.getId(), task.getTargetId());
-            markDocumentDeleteFailed(task, errorMessage);
+            markDeleteTargetFailed(task, errorMessage);
         } else {
             task.setStatus("RETRYING");
             log.warn("删除任务将重试: taskId={}, retryCount={}/{}", task.getId(), task.getRetryCount(), task.getMaxRetries());
@@ -376,16 +384,24 @@ public class DeletionServiceImpl implements DeletionService {
         return value.length() <= maxLength ? value : value.substring(0, maxLength);
     }
 
-    private void markDocumentDeleteFailed(DeletionTask task, String errorMessage) {
-        if (!"DOCUMENT_DELETE".equals(task.getTaskType())) {
+    private void markDeleteTargetFailed(DeletionTask task, String errorMessage) {
+        if ("DOCUMENT_DELETE".equals(task.getTaskType())) {
+            Document doc = documentMapper.selectById(task.getTargetId());
+            if (doc == null) {
+                return;
+            }
+            doc.setStatus(DocumentStatus.DELETE_FAILED.getCode());
+            doc.setErrorMessage(truncate(errorMessage, 1000));
+            documentMapper.updateById(doc);
             return;
         }
-        Document doc = documentMapper.selectById(task.getTargetId());
-        if (doc == null) {
-            return;
+        if ("KB_DELETE".equals(task.getTaskType())) {
+            KnowledgeBase kb = knowledgeBaseMapper.selectById(task.getTargetId());
+            if (kb == null) {
+                return;
+            }
+            kb.setStatus(CommonConstants.KB_STATUS_DELETE_FAILED);
+            knowledgeBaseMapper.updateById(kb);
         }
-        doc.setStatus(DocumentStatus.DELETE_FAILED.getCode());
-        doc.setErrorMessage(truncate(errorMessage, 1000));
-        documentMapper.updateById(doc);
     }
 }

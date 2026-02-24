@@ -142,9 +142,5 @@ CREATE TABLE `tool` (
     KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工具表';
 
--- =====================================================
--- 插入默认管理员用户
--- 密码: admin123 (BCrypt加密)
--- =====================================================
-INSERT INTO `sys_user` (`username`, `password`, `nickname`, `role`, `status`)
-VALUES ('admin', '$2a$10$hLsOQw/IutrOdOFEdZL2JO/0F0DQHtO6ioO3g0R4v.2dOeqoHcENC', _utf8mb4'管理员', 'admin', 0);
+-- Admin users are bootstrapped by AdminInitializer from ADMIN_PASSWORD.
+-- Do not seed a default admin password in SQL scripts.

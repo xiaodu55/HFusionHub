@@ -5,7 +5,7 @@ Chat API Routes - Chat with AI agent
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
@@ -18,6 +18,11 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 active_requests: Dict[str, asyncio.Task] = {}
+
+CHAT_MESSAGE_MAX_LENGTH = 4000
+CHAT_HISTORY_MAX_ITEMS = 50
+CHAT_REQUEST_ID_MAX_LENGTH = 80
+CHAT_MODEL_MAX_LENGTH = 100
 
 
 def _agent_chunk_to_sse(chunk: str) -> Optional[str]:
@@ -47,20 +52,20 @@ def _track_active_request(request_id: str) -> Optional[asyncio.Task]:
 class ChatMessage(BaseModel):
     """Chat message model"""
 
-    role: str = Field(..., description="Message role: 'user' or 'assistant'")
-    content: str = Field(..., description="Message content")
+    role: Literal["user", "assistant", "system"] = Field(..., description="Message role")
+    content: str = Field(..., min_length=1, max_length=CHAT_MESSAGE_MAX_LENGTH, description="Message content")
 
 
 class ChatRequest(BaseModel):
     """Chat request model"""
 
-    message: str = Field(..., description="User message")
-    conversation_id: Optional[int] = Field(None, description="Conversation ID")
-    knowledge_base_id: Optional[int] = Field(None, description="Knowledge base ID for RAG")
-    history: Optional[List[ChatMessage]] = Field(default_factory=list, description="Chat history")
-    model: Optional[str] = Field(None, description="LLM model name")
+    message: str = Field(..., min_length=1, max_length=CHAT_MESSAGE_MAX_LENGTH, description="User message")
+    conversation_id: Optional[int] = Field(None, ge=1, description="Conversation ID")
+    knowledge_base_id: Optional[int] = Field(None, ge=1, description="Knowledge base ID for RAG")
+    history: List[ChatMessage] = Field(default_factory=list, max_length=CHAT_HISTORY_MAX_ITEMS, description="Chat history")
+    model: Optional[str] = Field(None, max_length=CHAT_MODEL_MAX_LENGTH, description="LLM model name")
     stream: bool = Field(False, description="Enable streaming response")
-    request_id: Optional[str] = Field(None, description="Request ID for cancellation tracking")
+    request_id: Optional[str] = Field(None, max_length=CHAT_REQUEST_ID_MAX_LENGTH, description="Request ID for cancellation tracking")
 
 
 class ChatResponse(BaseModel):

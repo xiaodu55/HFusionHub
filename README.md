@@ -17,7 +17,7 @@ HFusionHub 是一个企业级 AI Agent 平台，结合 Java 后端的稳定性�
 ## 📋 功能模块
 
 ### 1. 知识库管理（Java）
-- 文档上传（PDF、Word、TXT、Markdown）
+- 文档上传（PDF、DOCX、TXT、Markdown）
 - 文档解析（Apache Tika）
 - 知识库 CRUD
 - 权限管理
@@ -138,7 +138,7 @@ HFusionHub/
 ### 环境要求
 
 - Java 17+
-- Python 3.10+
+- Python 3.11+
 - MySQL 8.0 (Docker)
 - Redis 7.x (Docker)
 - Node.js 20.19+ 或 22.12+（Vite 8 要求）
@@ -152,9 +152,10 @@ cd HFusionHub
 # 必须使用自己的随机值；请勿提交 .env 文件
 export MYSQL_ROOT_PASSWORD='replace-with-a-strong-password'
 export MYSQL_PASSWORD='replace-with-a-strong-password'
-export DB_PASSWORD="$MYSQL_ROOT_PASSWORD"
+export DB_PASSWORD="$MYSQL_PASSWORD"
 export CALLBACK_SECRET='replace-with-a-long-random-secret'
 export PYTHON_AI_INTERNAL_TOKEN='replace-with-a-second-long-random-secret'
+export ADMIN_PASSWORD='replace-with-a-strong-admin-password'
 cd docker
 docker compose up -d
 ```
@@ -201,7 +202,7 @@ npm run dev
 
 ### 默认账号
 - 用户名：admin
-- 密码：admin123
+- 密码：由 `ADMIN_PASSWORD` 决定
 
 ## 🧠 RAG 引擎模块
 

@@ -3,6 +3,7 @@ package com.hfusionhub.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.hfusionhub.common.constant.CommonConstants;
+import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.dto.DocumentChunkCallbackDTO;
@@ -538,7 +539,7 @@ public class VectorizationServiceImpl implements VectorizationService {
         String fileType = document.getFileType() == null ? "" : document.getFileType().toLowerCase();
         int base = switch (fileType) {
             case "pdf", ".pdf" -> 45;
-            case "doc", ".doc", "docx", ".docx" -> 35;
+            case "docx", ".docx" -> 35;
             case "txt", ".txt", "md", ".md" -> 15;
             default -> 30;
         };
@@ -697,7 +698,7 @@ public class VectorizationServiceImpl implements VectorizationService {
      */
     private void callPythonEngine(Document document, DocumentIndexJob job) {
         if (callbackSecret == null || callbackSecret.isBlank()) {
-            throw new BusinessException("CALLBACK_SECRET 未配置");
+            throw new BusinessException(StatusCode.INTERNAL_ERROR, "CALLBACK_SECRET 未配置");
         }
         String url = pythonEngineUrl + "/api/parse";
 
@@ -747,7 +748,7 @@ public class VectorizationServiceImpl implements VectorizationService {
 
     private HttpHeaders internalHeaders() {
         if (internalApiToken == null || internalApiToken.isBlank()) {
-            throw new BusinessException("PYTHON_AI_INTERNAL_TOKEN 未配置");
+            throw new BusinessException(StatusCode.INTERNAL_ERROR, "PYTHON_AI_INTERNAL_TOKEN 未配置");
         }
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);

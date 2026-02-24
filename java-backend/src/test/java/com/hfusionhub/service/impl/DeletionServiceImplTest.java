@@ -1,5 +1,6 @@
 package com.hfusionhub.service.impl;
 
+import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.entity.DeletionTask;
 import com.hfusionhub.entity.Document;
 import com.hfusionhub.entity.KnowledgeBase;
@@ -24,8 +25,88 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 
 class DeletionServiceImplTest {
+
+    @Test
+    void getPendingTasksRecoversStaleProcessingTasksBeforeSelectingPending() {
+        DeletionTaskMapper deletionTaskMapper = mock(DeletionTaskMapper.class);
+        KnowledgeBaseMapper knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentChunkMapper documentChunkMapper = mock(DocumentChunkMapper.class);
+        DocumentIndexJobMapper documentIndexJobMapper = mock(DocumentIndexJobMapper.class);
+        ConversationMapper conversationMapper = mock(ConversationMapper.class);
+        MessageMapper messageMapper = mock(MessageMapper.class);
+        VectorizationService vectorizationService = mock(VectorizationService.class);
+
+        DeletionServiceImpl service = new DeletionServiceImpl(
+                deletionTaskMapper,
+                knowledgeBaseMapper,
+                documentMapper,
+                documentChunkMapper,
+                documentIndexJobMapper,
+                conversationMapper,
+                messageMapper,
+                vectorizationService);
+
+        DeletionTask pending = new DeletionTask();
+        pending.setId(99L);
+        when(deletionTaskMapper.recoverStaleProcessingTasks(
+                any(LocalDateTime.class),
+                eq("任务执行超时，已恢复为可重试状态")))
+                .thenReturn(1);
+        when(deletionTaskMapper.selectPendingTasks(10)).thenReturn(List.of(pending));
+
+        List<DeletionTask> tasks = service.getPendingTasks();
+
+        assertEquals(List.of(pending), tasks);
+        verify(deletionTaskMapper).recoverStaleProcessingTasks(
+                any(LocalDateTime.class),
+                eq("任务执行超时，已恢复为可重试状态"));
+        verify(deletionTaskMapper).selectPendingTasks(10);
+    }
+
+    @Test
+    void markFailedMarksKbDeleteFailedWhenRetriesExhausted() {
+        DeletionTaskMapper deletionTaskMapper = mock(DeletionTaskMapper.class);
+        KnowledgeBaseMapper knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentChunkMapper documentChunkMapper = mock(DocumentChunkMapper.class);
+        DocumentIndexJobMapper documentIndexJobMapper = mock(DocumentIndexJobMapper.class);
+        ConversationMapper conversationMapper = mock(ConversationMapper.class);
+        MessageMapper messageMapper = mock(MessageMapper.class);
+        VectorizationService vectorizationService = mock(VectorizationService.class);
+
+        DeletionServiceImpl service = new DeletionServiceImpl(
+                deletionTaskMapper,
+                knowledgeBaseMapper,
+                documentMapper,
+                documentChunkMapper,
+                documentIndexJobMapper,
+                conversationMapper,
+                messageMapper,
+                vectorizationService);
+
+        KnowledgeBase kb = new KnowledgeBase();
+        kb.setId(11L);
+        kb.setStatus(CommonConstants.KB_STATUS_DELETING);
+        when(knowledgeBaseMapper.selectById(11L)).thenReturn(kb);
+
+        DeletionTask task = new DeletionTask();
+        task.setTaskType("KB_DELETE");
+        task.setTargetId(11L);
+        task.setRetryCount(4);
+        task.setMaxRetries(5);
+
+        service.markFailed(task, "vector cleanup failed");
+
+        assertEquals("FAILED", task.getStatus());
+        assertEquals(5, task.getRetryCount());
+        assertEquals(CommonConstants.KB_STATUS_DELETE_FAILED, kb.getStatus());
+        verify(knowledgeBaseMapper).updateById(kb);
+        verify(deletionTaskMapper).updateById(task);
+    }
 
     @Test
     void documentDeleteContinuesWhenVectorDeletionFails() {

@@ -1,5 +1,6 @@
 package com.hfusionhub.common.exception;
 
+import com.hfusionhub.common.constant.StatusCode;
 import lombok.Getter;
 
 /**
@@ -17,7 +18,7 @@ public class BusinessException extends RuntimeException {
 
     public BusinessException(String message) {
         super(message);
-        this.code = 500;
+        this.code = StatusCode.BAD_REQUEST;
     }
 
     public BusinessException(int code, String message) {

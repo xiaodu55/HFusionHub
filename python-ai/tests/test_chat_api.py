@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
-from app.api.chat import _agent_chunk_to_sse, active_requests
+from app.api.chat import CHAT_HISTORY_MAX_ITEMS, CHAT_MESSAGE_MAX_LENGTH, _agent_chunk_to_sse, active_requests
 from app.main import create_app
 
 
@@ -53,3 +53,22 @@ def test_cancel_unknown_stream_task_returns_not_found():
 
     assert response.status_code == 200
     assert response.json()["status"] == "not_found"
+
+
+def test_chat_rejects_oversized_message():
+    app = create_app()
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+
+    response = client.post("/api/chat", json={"message": "x" * (CHAT_MESSAGE_MAX_LENGTH + 1)})
+
+    assert response.status_code == 422
+
+
+def test_chat_rejects_oversized_history():
+    app = create_app()
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+    history = [{"role": "user", "content": "hello"}] * (CHAT_HISTORY_MAX_ITEMS + 1)
+
+    response = client.post("/api/chat", json={"message": "hello", "history": history})
+
+    assert response.status_code == 422

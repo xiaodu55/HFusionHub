@@ -3,6 +3,7 @@ package com.hfusionhub.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 /**
@@ -20,8 +21,10 @@ public class MessageSendDTO {
 
     @NotBlank(message = "消息内容不能为空")
     @Schema(description = "消息内容", requiredMode = Schema.RequiredMode.REQUIRED, example = "你好，请帮我分析一下这个文档")
+    @Size(max = 4000, message = "消息内容不能超过4000个字符")
     private String content;
 
     @Schema(description = "客户端请求幂等ID，用于SSE重连去重")
+    @Size(max = 80, message = "请求ID不能超过80个字符")
     private String requestId;
 }

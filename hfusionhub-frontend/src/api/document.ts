@@ -19,7 +19,7 @@ export const uploadDocument = (file: File, kbId: number, title?: string): Promis
 }
 
 // 更新文档
-export const updateDocument = (id: number, data: { name?: string }): Promise<ApiResponse<void>> => {
+export const updateDocument = (id: number, data: { title?: string; content?: string }): Promise<ApiResponse<void>> => {
   return put(`/document/${id}`, data)
 }
 
@@ -58,7 +58,7 @@ export const getDocumentContent = (id: number): Promise<ApiResponse<string>> => 
 export const getDocumentList = (params: {
   page: number
   pageSize: number
-  name?: string
+  title?: string
 }): Promise<ApiResponse<PageResult<Document>>> => {
   return get('/document/list', params)
 }

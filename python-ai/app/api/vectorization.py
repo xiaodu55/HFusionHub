@@ -65,8 +65,6 @@ def _estimate_processing_seconds(file_path: str, file_type: str) -> int:
         ".pdf": 45,
         "docx": 35,
         ".docx": 35,
-        "doc": 35,
-        ".doc": 35,
         "txt": 15,
         ".txt": 15,
         "md": 15,
