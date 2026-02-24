@@ -1,0 +1,65 @@
+{
+  "title": "HFusionHub — Service Dashboard",
+  "uid": "hfusionhub",
+  "panels": [
+    {
+      "title": "Chat Requests / min",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "rate(hfusionhub_chat_requests_total_total[5m]) * 60" }]
+    },
+    {
+      "title": "Chat Error Rate",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "rate(hfusionhub_chat_errors_total_total[5m]) / rate(hfusionhub_chat_requests_total_total[5m])" }]
+    },
+    {
+      "title": "Uptime",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "hfusionhub_uptime_seconds" }],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Embedding Requests / min",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "rate(hfusionhub_embedding_requests_total_total[5m]) * 60" }]
+    },
+    {
+      "title": "Chat Latency (p50/p95/p99)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "hfusionhub_chat_latency_seconds{quantile=\"0.5\"}", "legendFormat": "p50" },
+        { "expr": "hfusionhub_chat_latency_seconds{quantile=\"0.95\"}", "legendFormat": "p95" },
+        { "expr": "hfusionhub_chat_latency_seconds{quantile=\"0.99\"}", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "RAG Retrieval Latency (p50/p95/p99)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "hfusionhub_rag_retrieval_latency_seconds{quantile=\"0.5\"}", "legendFormat": "p50" },
+        { "expr": "hfusionhub_rag_retrieval_latency_seconds{quantile=\"0.95\"}", "legendFormat": "p95" },
+        { "expr": "hfusionhub_rag_retrieval_latency_seconds{quantile=\"0.99\"}", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Request Rate Overview",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 12, "w": 24, "h": 8 },
+      "targets": [
+        { "expr": "rate(hfusionhub_chat_requests_total_total[5m]) * 60", "legendFormat": "Chat" },
+        { "expr": "rate(hfusionhub_rag_retrievals_total_total[5m]) * 60", "legendFormat": "RAG Retrieval" },
+        { "expr": "rate(hfusionhub_embedding_requests_total_total[5m]) * 60", "legendFormat": "Embedding" }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" }
+}

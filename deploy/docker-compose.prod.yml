@@ -1,0 +1,133 @@
+# HFusionHub — Production Docker Compose
+#
+# Start:  docker compose -f deploy/docker-compose.prod.yml up -d
+# Stop:   docker compose -f deploy/docker-compose.prod.yml down
+# Logs:   docker compose -f deploy/docker-compose.prod.yml logs -f
+#
+# Requires a deploy/.env file with secrets (see deploy/.env.example).
+
+services:
+  # -----------------------------------------------------------------------
+  # Infrastructure
+  # -----------------------------------------------------------------------
+  mysql8:
+    image: mysql:8.0
+    container_name: hfusionhub-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
+      MYSQL_DATABASE: hfusionhub
+      MYSQL_USER: hfusionhub
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?required}
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+  redis7:
+    image: redis:7-alpine
+    container_name: hfusionhub-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - ../docker/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # -----------------------------------------------------------------------
+  # Application Services
+  # -----------------------------------------------------------------------
+  java-backend:
+    build:
+      context: ../java-backend
+      dockerfile: ../deploy/Dockerfile.java
+    container_name: hfusionhub-java
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      DB_USERNAME: hfusionhub
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?required}
+      CALLBACK_SECRET: ${CALLBACK_SECRET:?required}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?required}
+      AI_SERVICE_URL: http://python-ai:9000
+      JAVA_OPTS: "-Xmx512m -Xms256m"
+    depends_on:
+      mysql8:
+        condition: service_healthy
+      redis7:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  python-ai:
+    build:
+      context: ../python-ai
+      dockerfile: ../deploy/Dockerfile.python
+    container_name: hfusionhub-python
+    ports:
+      - "127.0.0.1:9000:9000"
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?required}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?required}
+      CALLBACK_SECRET: ${CALLBACK_SECRET:?required}
+      JAVA_BACKEND_URL: http://java-backend:8080
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "9000"
+      MILVUS_LITE_PATH: /data/milvus_data.db
+      UPLOAD_DIR: /data/uploads
+      RAG_HYBRID_ENABLED: "true"
+      RAG_GRAPH_ENABLED: ${RAG_GRAPH_ENABLED:-false}
+      RAG_RERANKER_MODE: ${RAG_RERANKER_MODE:-disabled}
+    volumes:
+      - python-data:/data
+    depends_on:
+      java-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../hfusionhub-frontend
+      dockerfile: ../deploy/Dockerfile.frontend
+    container_name: hfusionhub-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      java-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  python-data:

@@ -1,0 +1,105 @@
+# HFusionHub Helm Chart — Default Values
+
+# Global settings
+global:
+  imageRegistry: ""
+  storageClass: ""
+
+# --- MySQL ---
+mysql:
+  enabled: true
+  image: mysql:8.0
+  port: 3306
+  database: hfusionhub
+  username: hfusionhub
+  persistence:
+    size: 10Gi
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
+# --- Redis ---
+redis:
+  enabled: true
+  image: redis:7-alpine
+  port: 6379
+  persistence:
+    size: 1Gi
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+
+# --- Java Backend ---
+javaBackend:
+  enabled: true
+  image: hfusionhub/java-backend:latest
+  port: 8080
+  replicas: 1
+  javaOpts: "-Xmx512m -Xms256m"
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  service:
+    type: ClusterIP
+    port: 8080
+
+# --- Python AI ---
+pythonAi:
+  enabled: true
+  image: hfusionhub/python-ai:latest
+  port: 9000
+  replicas: 1
+  persistence:
+    size: 5Gi
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+# --- Frontend ---
+frontend:
+  enabled: true
+  image: hfusionhub/frontend:latest
+  port: 80
+  replicas: 1
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "50m"
+    limits:
+      memory: "128Mi"
+      cpu: "100m"
+  service:
+    type: ClusterIP
+    port: 80
+
+# --- Ingress (optional) ---
+ingress:
+  enabled: false
+  className: nginx
+  host: hfusionhub.local
+  tls: []
+
+# --- Secrets (REQUIRED — set via --set or sealed secrets) ---
+secrets:
+  mysqlRootPassword: ""
+  mysqlPassword: ""
+  pythonAiInternalToken: ""
+  callbackSecret: ""
+  adminPassword: ""
+  deepseekApiKey: ""

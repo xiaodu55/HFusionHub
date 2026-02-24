@@ -1,0 +1,10 @@
+{"query": "什么是RAG技术？", "expected_documents": ["rag_intro.pdf"], "expected_answer": "RAG是检索增强生成技术"}
+{"query": "如何使用Milvus进行向量搜索？", "expected_documents": ["milvus_guide.pdf"], "expected_answer": "通过创建collection并调用search接口"}
+{"query": "Spring Boot有哪些核心特性？", "expected_documents": ["spring_boot_overview.pdf"], "expected_answer": "自动配置、起步依赖、Actuator监控"}
+{"query": "如何配置DeepSeek API密钥？", "expected_documents": ["deepseek_setup.pdf"], "expected_answer": "设置DEEPSEEK_API_KEY环境变量"}
+{"query": "Python中如何实现异步HTTP请求？", "expected_documents": ["python_async.pdf"], "expected_answer": "使用httpx或aiohttp库"}
+{"query": "什么是向量嵌入？", "expected_documents": ["embeddings_guide.pdf"], "expected_answer": "将文本转换为高维数值向量"}
+{"query": "如何优化RAG检索精度？", "expected_documents": ["rag_optimization.pdf"], "expected_answer": "使用混合检索、重排序、查询重写"}
+{"query": "MySQL中如何创建索引？", "expected_documents": ["mysql_index.pdf"], "expected_answer": "使用CREATE INDEX语句"}
+{"query": "什么是ReAct Agent？", "expected_documents": ["react_agent.pdf"], "expected_answer": "Reasoning和Acting交替执行的AI代理"}
+{"query": "如何使用Docker部署服务？", "expected_documents": ["docker_deploy.pdf"], "expected_answer": "编写Dockerfile并使用docker compose编排"}
