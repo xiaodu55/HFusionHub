@@ -4,6 +4,8 @@ import { Activity, AlertTriangle, BarChart3, ChevronLeft, ChevronRight, Clock3, 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/composables/useToast'
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import ErrorState from '@/components/ErrorState.vue'
 import * as ragApi from '@/api/rag'
 import * as knowledgeBaseApi from '@/api/knowledgeBase'
 import type { EvaluationReport, EvaluationRun, RetrievalTrace, TraceFilters, TraceStats } from '@/api/rag'
@@ -12,6 +14,7 @@ import type { KnowledgeBase } from '@/api/types'
 const PAGE_SIZE = 20
 const toast = useToast()
 const loading = ref(false)
+const loadError = ref(false)
 const exporting = ref(false)
 const evaluating = ref(false)
 const traces = ref<RetrievalTrace[]>([])
@@ -303,8 +306,12 @@ onMounted(async () => {
       <Card>
         <CardHeader><CardTitle>检索记录</CardTitle><CardDescription>点击一条记录查看路由和命中文档。</CardDescription></CardHeader>
         <CardContent>
-          <div v-if="loading" class="py-8 text-center text-muted-foreground">加载中...</div>
-          <div v-else-if="traces.length === 0" class="py-8 text-center text-muted-foreground">没有匹配的检索记录。</div>
+          <LoadingSkeleton v-if="loading" type="list" :count="5" />
+          <div v-else-if="traces.length === 0" class="py-8 text-center">
+            <Search class="mx-auto h-10 w-10 text-muted-foreground" :stroke-width="1.5" />
+            <p class="mt-3 text-muted-foreground">没有匹配的检索记录</p>
+            <p class="mt-1 text-sm text-muted-foreground">选择知识库后发送消息，检索记录将显示在这里</p>
+          </div>
           <button v-for="trace in traces" :key="trace.trace_id" class="mb-2 w-full rounded-lg border p-3 text-left transition-colors hover:bg-accent" :class="{ 'border-primary bg-accent': selectedTrace?.trace_id === trace.trace_id, 'border-red-300': trace.error }" @click="selectTrace(trace)">
             <div class="flex items-center justify-between gap-3"><span class="truncate font-medium">{{ trace.query }}</span><span class="shrink-0 text-xs text-muted-foreground">{{ trace.latency_ms }} ms</span></div>
             <div class="mt-1 text-xs text-muted-foreground">KB {{ trace.knowledge_base_id ?? '自动' }} · {{ trace.results.length }} 条结果 · {{ trace.routes[0]?.selected_channels?.join(' / ') || '未知通道' }}</div>
