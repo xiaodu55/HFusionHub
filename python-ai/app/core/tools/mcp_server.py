@@ -147,7 +147,7 @@ async def handle_mcp_request(
 
         # Build safe execution policy
         policy = ToolExecutionPolicy(
-            allowed_names={"search_knowledge_base", "calculate", "get_current_time"},
+            allowed_names={"search_knowledge_base", "calculate", "get_current_time", "web_search"},
             knowledge_base_id=knowledge_base_id,
             timeout_seconds=30.0,
             max_search_results=10,

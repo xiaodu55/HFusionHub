@@ -10,9 +10,11 @@ import asyncio
 from .search_tool import SearchTool
 from .time_tool import TimeTool
 from .calculator_tool import CalculatorTool
+from .web_search_tool import WebSearchTool
 
 
-__all__ = ['get_tools', 'execute_tool', 'ToolExecutionPolicy', 'SearchTool', 'TimeTool', 'CalculatorTool']
+__all__ = ['get_tools', 'execute_tool', 'ToolExecutionPolicy',
+           'SearchTool', 'TimeTool', 'CalculatorTool', 'WebSearchTool']
 
 
 class ToolPolicyError(ValueError):
@@ -53,6 +55,16 @@ class ToolExecutionPolicy:
             if not expression or len(expression) > self.max_input_characters:
                 raise ToolPolicyError("invalid_expression")
             normalized["expression"] = expression
+        elif tool_name == "web_search":
+            query = str(normalized.get("query", "")).strip()
+            if not query or len(query) > self.max_input_characters:
+                raise ToolPolicyError("invalid_search_query")
+            try:
+                mr = int(normalized.get("max_results", 5))
+            except (TypeError, ValueError):
+                mr = 5
+            normalized["query"] = query
+            normalized["max_results"] = max(1, min(mr, 10))
         elif normalized:
             raise ToolPolicyError("unexpected_tool_arguments")
         return normalized
@@ -104,6 +116,22 @@ def get_tools(
                 }
             },
             "instance": CalculatorTool()
+        },
+        {
+            "name": "web_search",
+            "description": "搜索互联网获取最新信息。当用户询问知识库之外的信息或需要实时数据时使用。",
+            "parameters": {
+                "query": {
+                    "type": "string",
+                    "description": "搜索查询文本"
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "返回的最大结果数(1-10)",
+                    "default": 5
+                }
+            },
+            "instance": WebSearchTool()
         }
     ]
 

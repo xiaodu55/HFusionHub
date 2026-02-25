@@ -35,4 +35,44 @@ class ConversationServiceImplTest {
         assertTrue(assistantRequestId.startsWith("a:"));
         assertNotEquals(requestId, assistantRequestId);
     }
+
+    @Test
+    void emptyStringsAreTreatedAsBlank() {
+        assertNull(ConversationServiceImpl.normalizeRequestId(""));
+        assertNull(ConversationServiceImpl.normalizeRequestId("\t  \n"));
+    }
+
+    @Test
+    void exactlySixtyFourCharRequestIdStaysUnchanged() {
+        String exactly64 = "r".repeat(64);
+        String result = ConversationServiceImpl.normalizeRequestId(exactly64);
+        assertEquals(exactly64, result);
+    }
+
+    @Test
+    void assistantRequestIdAppendsSuffixForShortIds() {
+        String result = ConversationServiceImpl.assistantRequestId("abc");
+        assertEquals("abc:assistant", result);
+    }
+
+    @Test
+    void assistantRequestIdHashesLongClientIds() {
+        String longId = ConversationServiceImpl.normalizeRequestId("x".repeat(200));
+        String assistant = ConversationServiceImpl.assistantRequestId(longId);
+        assertTrue(assistant.length() <= 64);
+        assertTrue(assistant.startsWith("a:"));
+    }
+
+    @Test
+    void nullInputsReturnNullForBothMethods() {
+        assertNull(ConversationServiceImpl.normalizeRequestId(null));
+        assertNull(ConversationServiceImpl.assistantRequestId(null));
+    }
+
+    @Test
+    void differentInputsProduceDifferentHashes() {
+        String a = ConversationServiceImpl.normalizeRequestId("a".repeat(200));
+        String b = ConversationServiceImpl.normalizeRequestId("b".repeat(200));
+        assertNotEquals(a, b);
+    }
 }
