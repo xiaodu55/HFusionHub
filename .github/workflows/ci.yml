@@ -108,3 +108,35 @@ jobs:
         run: npm run build
       - name: Audit dependencies
         run: npm run audit
+
+  # ─── Production Docker 构建校验 ───
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build Java backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: java-backend
+          file: deploy/Dockerfile.java
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build Python AI image
+        uses: docker/build-push-action@v6
+        with:
+          context: python-ai
+          file: deploy/Dockerfile.python
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build Frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: hfusionhub-frontend
+          file: deploy/Dockerfile.frontend
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

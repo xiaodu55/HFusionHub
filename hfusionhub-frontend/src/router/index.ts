@@ -70,6 +70,11 @@ const routes: RouteRecordRaw[] = [
         name: 'Profile',
         component: () => import('@/pages/profile/Index.vue'),
       },
+      {
+        path: 'admin/flags',
+        name: 'FeatureFlags',
+        component: () => import('@/pages/admin/Flags.vue'),
+      },
     ],
   },
 ]

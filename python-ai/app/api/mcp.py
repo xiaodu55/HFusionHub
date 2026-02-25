@@ -1,8 +1,14 @@
 """
-MCP (Model Context Protocol) API endpoints.
+MCP (Model Context Protocol) API endpoints — JSON-RPC 2.0 over HTTP.
 
-Provides JSON-RPC 2.0 over HTTP POST for MCP-compatible clients.
-Connect with the MCP Inspector at http://localhost:9000/mcp
+Security boundary:
+  - initialize / tools/list — public (protocol handshake, schema discovery)
+  - tools/call              — requires X-Internal-Token (same as other Python routes)
+  - search_knowledge_base   — additionally requires X-HFusionHub-KB-ID header
+
+Connect with MCP Inspector:
+  npx @anthropic-ai/mcp-inspector http://localhost:9000/mcp
+  (add X-Internal-Token and X-HFusionHub-KB-ID headers for tool execution)
 """
 
 from __future__ import annotations
@@ -10,15 +16,19 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from pydantic import BaseModel
 
 from ..core.tools.mcp_server import mcp_sse_endpoint
 from ..core.tools.mcp_server import get_mcp_tool_schemas
+from .internal_auth import require_internal_token
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
+
+# Methods that do not require authentication
+_PUBLIC_METHODS = {"initialize", "notifications/initialized", "tools/list"}
 
 
 class MCPRequest(BaseModel):
@@ -28,29 +38,51 @@ class MCPRequest(BaseModel):
     id: Optional[int | str] = None
 
 
+def _extract_kb_id(http_request: Request) -> Optional[int]:
+    """Extract knowledge_base_id from X-HFusionHub-KB-ID header."""
+    kb_header = http_request.headers.get("X-HFusionHub-KB-ID")
+    if kb_header:
+        try:
+            return int(kb_header)
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
 @router.post("")
 async def mcp_handler(request: MCPRequest, http_request: Request):
     """
     MCP JSON-RPC 2.0 endpoint.
 
-    Supports:
-      - initialize          → protocol handshake
-      - notifications/initialized → post-handshake notification
-      - tools/list          → list available tools
-      - tools/call          → execute a tool
+    Public methods (no auth):
+      - initialize, notifications/initialized, tools/list
 
-    Connect with MCP Inspector: npx @anthropic-ai/mcp-inspector http://localhost:9000/mcp
+    Authenticated methods (require X-Internal-Token header):
+      - tools/call
     """
-    # Extract optional knowledge_base_id from headers or query params
-    knowledge_base_id: Optional[int] = None
-    kb_header = http_request.headers.get("X-HFusionHub-KB-ID")
-    if kb_header:
-        try:
-            knowledge_base_id = int(kb_header)
-        except (TypeError, ValueError):
-            pass
-
+    method = request.method
     body = request.model_dump(exclude_none=True)
+
+    # --- Auth check for non-public methods ---
+    if method not in _PUBLIC_METHODS:
+        token = http_request.headers.get("X-Internal-Token")
+        if not token:
+            raise HTTPException(status_code=401, detail="X-Internal-Token header required for tool execution")
+        from app.utils.config import config
+        import hmac as _hmac
+        expected = config.INTERNAL_API_TOKEN
+        if not expected or not _hmac.compare_digest(token, expected):
+            raise HTTPException(status_code=403, detail="Invalid internal token")
+
+    # --- KB ID extraction (for search_knowledge_base) ---
+    knowledge_base_id = _extract_kb_id(http_request)
+    if method == "tools/call" and request.params:
+        tool_name = request.params.get("name", "")
+        if tool_name == "search_knowledge_base" and knowledge_base_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="X-HFusionHub-KB-ID header required for search_knowledge_base tool"
+            )
 
     try:
         result = await mcp_sse_endpoint(body, knowledge_base_id=knowledge_base_id)
@@ -59,7 +91,6 @@ async def mcp_handler(request: MCPRequest, http_request: Request):
         raise HTTPException(status_code=500, detail=f"MCP error: {exc}")
 
     if result is None:
-        # Notification — return 202 with no body
         return {"jsonrpc": "2.0", "result": None}
 
     return result
@@ -67,7 +98,7 @@ async def mcp_handler(request: MCPRequest, http_request: Request):
 
 @router.get("/health")
 async def mcp_health():
-    """Health check for MCP endpoint."""
+    """Health check for MCP endpoint (public)."""
     tools = get_mcp_tool_schemas()
     return {
         "status": "healthy",
@@ -79,7 +110,7 @@ async def mcp_health():
 
 @router.get("/tools")
 async def mcp_list_tools():
-    """Convenience endpoint: list available MCP tools (non-JSON-RPC)."""
+    """List available MCP tools — schemas only, no data access (public)."""
     return {
         "tools": get_mcp_tool_schemas(),
     }
