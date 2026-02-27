@@ -3,9 +3,9 @@
 FROM python:3.11-slim
 WORKDIR /app
 
-# Install system deps for document parsing
+# Install system deps for document parsing + healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+    curl wget \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

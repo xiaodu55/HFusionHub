@@ -62,14 +62,17 @@ services:
       CALLBACK_SECRET: ${CALLBACK_SECRET:?required}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?required}
       AI_SERVICE_URL: http://python-ai:9000
+      PYTHON_AI_CALLBACK_BASE_URL: http://java-backend:8080/api
       JAVA_OPTS: "-Xmx512m -Xms256m"
+    volumes:
+      - uploads-data:/app/uploads
     depends_on:
       mysql8:
         condition: service_healthy
       redis7:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8080/api/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -94,16 +97,18 @@ services:
       SERVER_PORT: "9000"
       MILVUS_LITE_PATH: /data/milvus_data.db
       UPLOAD_DIR: /data/uploads
+      DOCUMENT_STORAGE_ROOT: /app/uploads/documents
       RAG_HYBRID_ENABLED: "true"
       RAG_GRAPH_ENABLED: ${RAG_GRAPH_ENABLED:-false}
       RAG_RERANKER_MODE: ${RAG_RERANKER_MODE:-disabled}
     volumes:
       - python-data:/data
+      - uploads-data:/app/uploads
     depends_on:
       java-backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:9000/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -121,7 +126,7 @@ services:
       java-backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:80/ || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -131,3 +136,4 @@ services:
 volumes:
   mysql-data:
   python-data:
+  uploads-data:

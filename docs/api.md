@@ -56,7 +56,8 @@ satoken: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ### User (`/api/user`)
 - `POST /login` — Login
 - `POST /register` — Register
-- `GET /profile` — Get user profile
+- `POST /logout` — Logout
+- `GET /info` — Get current user profile
 
 ### Knowledge Base (`/api/knowledge-base`)
 - `POST /` — Create knowledge base
@@ -76,8 +77,9 @@ satoken: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 - `POST /` — Create conversation
 - `GET /` — List conversations
 - `GET /{id}` — Get conversation with messages
+- `POST /message` — Send message (non-streaming)
 - `POST /message/stream` — Send message (SSE streaming)
-- `POST /message/cancel` — Cancel streaming response
+- `POST /message/stream/cancel` — Cancel streaming response
 
 ### RAG Observability (`/api/rag`)
 - `GET /debug-search` — Debug search with trace

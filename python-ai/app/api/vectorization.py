@@ -536,7 +536,7 @@ async def get_chunk_detail(chunk_id: str, document_id: str):
     try:
         validate_document_id(document_id)
 
-        chunks = get_document_chunks(config.MILVUS_COLLECTION, document_id)
+        chunks = get_document_chunks(document_id)
 
         for chunk in chunks:
             if chunk.get('chunk_id') == chunk_id:

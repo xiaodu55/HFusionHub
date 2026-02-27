@@ -167,10 +167,21 @@ const confirmStartVectorization = async () => {
         onSuccess: () => loadDocuments(),
       })
     } else {
-      // 已完成状态，调用重新解析
-      await documentApi.parseDocument(selectedDocForVectorize.value.id, selectedModel.value)
-      selectedDocForVectorize.value.status = 1
-      pollDocumentStatus(selectedDocForVectorize.value.id, () => loadDocuments())
+      // 已完成状态，调用重新解析 — 加入 processingDocs 以显示进度
+      const docId = selectedDocForVectorize.value.id
+      const s = new Set(processingDocs.value)
+      s.add(docId)
+      processingDocs.value = s
+      try {
+        await documentApi.parseDocument(docId, selectedModel.value)
+        selectedDocForVectorize.value.status = 1
+        pollDocumentStatus(docId, () => loadDocuments())
+      } catch (reparseError) {
+        const s2 = new Set(processingDocs.value)
+        s2.delete(docId)
+        processingDocs.value = s2
+        throw reparseError
+      }
     }
     toast.success('开始解析')
   } catch (error) {

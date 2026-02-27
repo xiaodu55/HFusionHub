@@ -875,9 +875,12 @@ class ReactAgent(Agent):
                 ChatMessage(role="user", content=prompt)
             ]
 
-            # 流式输出
+            # 流式输出，同时累积完整答案用于评估
+            final_answer_parts: list[str] = []
             async for chunk in llm.chat_stream(messages=messages, temperature=0.7, max_tokens=2048):
+                final_answer_parts.append(chunk)
                 yield chunk
+            final_answer = "".join(final_answer_parts)
 
             # 流式结束后，yield sources 信息（嵌入到 content 中）
             if sources:
@@ -912,7 +915,7 @@ class ReactAgent(Agent):
                 eval_sample = EvaluationSample(
                     query_id=str(int(time.time() * 1000)),
                     query=query,
-                    response=final_answer if 'final_answer' in locals() else "",
+                    response=final_answer,
                     context=context,
                     sources=sources,
                     metadata={

@@ -163,15 +163,24 @@ public class DocumentServiceImpl implements DocumentService {
         }
 
         // 3. 更新文档
+        boolean contentChanged = false;
         if (StringUtils.hasText(dto.getTitle())) {
             document.setTitle(dto.getTitle());
         }
         if (dto.getContent() != null) {
             document.setContent(dto.getContent());
+            contentChanged = true;
         }
         documentMapper.updateById(document);
 
-        // 4. 转换为 DTO
+        // 4. 内容变更时标记为 PENDING，触发重新向量化
+        if (contentChanged) {
+            document.setStatus(DocumentStatus.PENDING.getCode());
+            documentMapper.updateById(document);
+            log.info("Document {} content updated, marked PENDING for re-index", document.getId());
+        }
+
+        // 5. 转换为 DTO
         return convertToInfoDTO(document, kb.getName());
     }
 
