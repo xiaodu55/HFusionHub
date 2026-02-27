@@ -7,7 +7,7 @@
 - **Core**: Stable — Auth, KB CRUD, document upload/parsing, chat with RAG
 - **RAG**: Stable — Vector + BM25 hybrid retrieval with RRF
 - **Agent**: Stable — ReAct loop with tool calling, streaming
-- **Tests**: Python 636+ ✅ | Java 17 ✅ (needs expansion)
+- **Tests**: Python 655+ ✅ | Java 40 ✅ | Frontend 12 ✅ (Java/frontend coverage still needs expansion)
 - **Advanced features**: P6-P10 implemented, gated behind feature flags
 
 ## Phase 0 — Startup Stability ✅
@@ -22,8 +22,8 @@
 ## Phase 1 — Core Experience & Visibility (Jul–Aug 2026)
 
 - [x] **SSE streaming convergence** — Replace hand-rolled HttpURLConnection with unified WebClient Flux
-- [ ] **Java test expansion** — 17→60+ test cases, 30%+ core path coverage
-- [ ] **Documentation** — ARCHITECTURE.md, ROADMAP.md, CHANGELOG.md, Issue templates
+- [ ] **Java test expansion** — 40→60+ test cases, 30%+ core path coverage
+- [ ] **Documentation hardening** — startup guides are in place; issue templates and deployment notes still need polish
 - [ ] **Feature flag visibility** — FEATURE_FLAGS.md, admin UI for flag status
 - [ ] **Frontend UX polish** — Empty states, skeletons, error retry, streaming feedback
 

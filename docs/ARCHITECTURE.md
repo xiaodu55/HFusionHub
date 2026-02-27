@@ -102,7 +102,7 @@ HFusionHub uses a **CQRS-like three-tier architecture** where Java owns the writ
 | Strategy | Intent classifier, reflector, router | Swappable LLM/Rule/Hybrid implementations |
 | Idempotent indexing | document_index_job.index_version | Duplicate callbacks rejected |
 | Durable outbox | deletion_task table | Async cleanup survives restarts |
-| Fallback chain | Embedding (Ollama → DeepSeek → random) | Graceful degradation |
+| Provider fallback | LLM (DeepSeek → Ollama → optional mock), Embedding (Ollama → fail closed unless test fallback is enabled) | Avoid silent fake vectors in production |
 | Circuit breaker | Model router | Multi-model priority with health checks |
 
 ## Feature Flag Architecture

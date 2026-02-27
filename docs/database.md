@@ -17,11 +17,12 @@ The database `hfusionhub` is managed via Flyway migrations in `java-backend/src/
 | V5 | `V5__remove_default_admin.sql` | Remove hardcoded default admin |
 | V6 | `V6__add_document_processed_at.sql` | Document processing timestamps |
 | V7 | `V7__document_recycle_bin.sql` | Soft-delete recycle bin for documents |
+| V8 | `V8__persistent_memory.sql` | Persistent AI memory entries |
 
 ## Migration Rules
 
-1. **Historical migrations (V1–V7) are immutable.** Never modify them.
-2. **All future schema changes must use new V8+ scripts.**
+1. **Historical migrations (V1–V8) are immutable.** Never modify them.
+2. **All future schema changes must use new V9+ scripts.**
 3. **Production**: Never manually edit `flyway_schema_history`. Create new migration scripts.
 4. **Local dev reset**: `docker compose down -v && docker compose up -d` clears the database.
 
@@ -36,7 +37,7 @@ docker compose down -v
 docker compose up -d
 
 # OR: fix checksums (keep data)
-# See docs/启动重启1.md §9 for exact SQL commands
+# See docs/启动重启1.md, section 9, for exact reset commands
 ```
 
 ## Core Tables
@@ -51,6 +52,7 @@ docker compose up -d
 | `conversation` | Chat conversations |
 | `message` | Individual messages with source citations |
 | `deletion_task` | Durable deletion outbox for async cleanup |
+| `memory_entry` | Persistent conversation summaries, entity facts, and user preferences |
 
 ## Entity Relationships
 
@@ -74,6 +76,8 @@ spring:
     username: ${DB_USERNAME:hfusionhub}
     password: ${DB_PASSWORD:}
 ```
+
+For containerized deployments, override the local default URL with `SPRING_DATASOURCE_URL`, for example `jdbc:mysql://mysql8:3306/hfusionhub?...`. Production Docker Compose already sets this; the Helm template still needs the equivalent override before production use.
 
 ## ERD / Visual Schema
 

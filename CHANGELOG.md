@@ -14,12 +14,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `docs/ARCHITECTURE.md` — English architecture overview
 - `docs/ROADMAP.md` — Project roadmap and feature matrix
 - `docs/ENVIRONMENT.md` — Complete environment variables reference
+- `docs/startup-guide.md` — English startup and restart guide
+- `docs/启动重启1.md` — Chinese startup, restart, and troubleshooting guide
 - `CONTRIBUTING.md` — Contribution guidelines
 
 ### Changed
 - **SSE streaming**: Replaced hand-rolled `HttpURLConnection` in `ConversationServiceImpl` with unified `WebClient`-based `AiClient.streamChat()` returning `Flux<String>`
 - `AiClient.chatStream()` is now deprecated; new code should use `streamChat()`
 - Updated README: fixed API docs URL to `/api/doc.html`, added startup guide references, feature matrix
+- Updated environment, database, Java, Python, architecture, and roadmap docs to match current migrations, provider behavior, and test counts
 
 ### Fixed
 - Fixed broken documentation links in README (5 missing files now exist)
@@ -32,7 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Python FastAPI AI service with DeepSeek API integration
 - Vue 3 + TypeScript + Vite 8 frontend with Radix Vue + Tailwind CSS
 - MySQL 8.0 + Redis 7 via Docker Compose
-- Flyway database migrations (V1–V7)
+- Flyway database migrations (V1–V8)
 
 ### Features
 - User authentication (JWT via Sa-Token)
@@ -60,4 +63,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Durable outbox pattern (deletion_task table)
 - Idempotent indexing (index_version-based duplicate rejection)
 - Document index recovery scheduler (30-min stale threshold)
-- 636+ Python tests, CI pipeline (GitHub Actions, 4 parallel jobs)
+- 655+ Python tests, 40 Java tests, 12 frontend tests, CI pipeline (GitHub Actions, 4 parallel jobs)

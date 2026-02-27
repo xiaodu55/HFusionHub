@@ -61,7 +61,7 @@ The result is a system where:
 │  │ READ / INTELLIGENCE PATH                         │ │
 │  │ • Document parsing (PyMuPDF, python-docx, Tika) │ │
 │  │ • Semantic chunking (500/50)                    │ │
-│  │ • Embedding (DeepSeek API / Ollama / fallback)  │ │
+│  │ • Embedding (Ollama; test fallback only)        │ │
 │  │ • Milvus Lite vector store (COSINE, IVF_FLAT)   │ │
 │  │ • Multi-channel RAG: Vector + BM25 + GraphRAG   │ │
 │  │ • ReAct Agent loop (max 5 steps)                │ │

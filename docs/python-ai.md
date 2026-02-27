@@ -12,7 +12,7 @@ app/
 ├── core/
 │   ├── agent/        # Agent system (ReAct, multi-agent, workflow runtime)
 │   ├── chunker/      # Semantic text chunking + quality assessment
-│   ├── embedding/    # Embedding services (DeepSeek API, Ollama, fallback)
+│   ├── embedding/    # Embedding services (Ollama, DeepSeek placeholder, test fallback)
 │   ├── llm/          # LLM interfaces (DeepSeek, Ollama, mock)
 │   ├── parser/       # Document parsers (PDF, DOCX, Markdown, TXT)
 │   ├── rag/          # RAG engine (~23 modules)
@@ -76,7 +76,7 @@ Health check: `curl http://localhost:9000/health` → `{"status":"healthy"}`
 ## Running Tests
 
 ```bash
-pytest -q tests                    # All tests (636+)
+pytest -q tests                    # All tests (655+)
 pytest -q tests/test_retriever.py  # Specific module
 ```
 
@@ -87,7 +87,15 @@ pytest -q tests/test_retriever.py  # Specific module
 | Strategy | Intent classifier, self-reflector, query router | Swappable LLM/Rule/Hybrid implementations |
 | Factory | QueryRouterFactory, IntentClassifierFactory | Configuration-driven creation |
 | Singleton | Retriever, config, trace store, graph store | Global instances |
-| Fallback chain | Embedding (Ollama → DeepSeek → random) | Graceful degradation |
+| Provider fallback | LLM (DeepSeek → Ollama → optional mock) | Real provider first; mock only with `LLM_ALLOW_MOCK=true` |
+| Embedding strategy | Ollama → fail closed; random only with `EMBEDDING_ALLOW_FALLBACK=true` | Avoid silent fake vectors in production |
+
+## Provider Notes
+
+- `DEEPSEEK_API_KEY` is used for chat LLM calls.
+- DeepSeek does not currently provide the embedding API expected by this project; the DeepSeek embedding client raises an error unless test fallback is explicitly enabled.
+- For document indexing outside tests, run a real embedding provider such as Ollama and configure `OLLAMA_BASE_URL` plus `OLLAMA_EMBEDDING_MODEL`.
+- `LLM_ALLOW_MOCK=true` and `EMBEDDING_ALLOW_FALLBACK=true` are development/test switches. Keep both disabled in production.
 
 ## SSE Output Format
 

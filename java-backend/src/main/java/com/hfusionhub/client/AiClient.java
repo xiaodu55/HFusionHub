@@ -134,7 +134,7 @@ public class AiClient {
         log.info("Starting streaming request to Python AI: {}, requestId: {}", url, requestId);
 
         return webClient.post()
-                .uri("/api/chat/stream")
+                .uri(url)
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.TEXT_EVENT_STREAM)
                 .headers(this::addInternalToken)
@@ -148,6 +148,8 @@ public class AiClient {
                                                 "Python AI returned status " + clientResponse.statusCode().value() + ": " + body)))
                 )
                 .bodyToFlux(String.class)
+                .doOnNext(chunk -> log.info("SSE raw chunk ({}B): {}", chunk.length(),
+                    chunk.length() > 200 ? chunk.substring(0, 200) + "..." : chunk))
                 .doOnError(ResourceAccessException.class, e -> {
                     log.error("AI service connection failed during streaming: {}", e.getMessage());
                 })

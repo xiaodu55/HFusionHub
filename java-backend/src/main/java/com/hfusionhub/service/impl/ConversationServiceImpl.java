@@ -558,67 +558,54 @@ public class ConversationServiceImpl implements ConversationService {
                 });
 
         reactor.core.Disposable subscription = sseFlux.subscribe(
-                line -> {
-                    // onNext: process each SSE line
-                    // If cancelled, subscription.dispose() has already been called,
-                    // so this callback will stop receiving events shortly.
-                    if (cancelled.get()) {
+                chunk -> {
+                    if (cancelled.get()) return;
+
+                    // Python streaming emits one JSON event per chunk.
+                    // Each chunk is either a JSON object or [DONE] sentinel.
+                    String data = chunk.strip();
+                    if (data.isEmpty()) return;
+
+                        if ("[DONE]".equals(data)) {
+                        log.info("Stream completed, requestId: {}", requestId);
+                        try {
+                            emitter.send(SseEmitter.event().data("[DONE]"));
+                            emitter.complete();
+                        } catch (Exception ignored) {}
+                        assistantSaved[0] = saveStreamAssistantMessage(
+                                dto.getConversationId(), responseBuilder.toString(),
+                                "streaming", accumulatedSources, assistantRequestId);
                         return;
                     }
 
-                    if (line.startsWith("data: ")) {
-                        String data = line.substring(6).trim();
-                        if ("[DONE]".equals(data)) {
-                            log.info("Stream completed, requestId: {}", requestId);
-                            try {
-                                emitter.send(SseEmitter.event().data("[DONE]"));
-                                emitter.complete();
-                            } catch (Exception ignored) {
-                                // emitter may already be closed
-                            }
-                            assistantSaved[0] = saveStreamAssistantMessage(
-                                    dto.getConversationId(),
-                                    responseBuilder.toString(),
-                                    "streaming",
-                                    accumulatedSources,
-                                    assistantRequestId);
+                    try {
+                        com.fasterxml.jackson.databind.JsonNode jsonNode = objectMapper.readTree(data);
+                        String content = jsonNode.has("content") ? jsonNode.get("content").asText() : "";
+                        boolean isCancelled = jsonNode.has("cancelled") && jsonNode.get("cancelled").asBoolean();
+                        com.fasterxml.jackson.databind.JsonNode sourcesNode = jsonNode.get("sources");
+
+                        if (isCancelled) {
+                            log.info("Python AI request cancelled: {}", requestId);
+                            try { emitter.send(SseEmitter.event().data("[DONE]")); emitter.complete(); } catch (Exception ignored) {}
                             return;
                         }
-                        if (!data.isEmpty()) {
-                            try {
-                                com.fasterxml.jackson.databind.JsonNode jsonNode = objectMapper.readTree(data);
-                                String content = jsonNode.has("content") ? jsonNode.get("content").asText() : "";
-                                boolean isCancelled = jsonNode.has("cancelled") && jsonNode.get("cancelled").asBoolean();
-                                com.fasterxml.jackson.databind.JsonNode sourcesNode = jsonNode.get("sources");
 
-                                if (isCancelled) {
-                                    log.info("Python AI request cancelled: {}", requestId);
-                                    try {
-                                        emitter.send(SseEmitter.event().data("[DONE]"));
-                                        emitter.complete();
-                                    } catch (Exception ignored) {}
-                                    return;
-                                }
-
-                                // Forward sources to frontend
-                                if (sourcesNode != null && sourcesNode.isArray() && sourcesNode.size() > 0) {
-                                    List<Map<String, Object>> newSources = objectMapper.treeToValue(sourcesNode, List.class);
-                                    accumulatedSources.addAll(newSources);
-                                    Map<String, Object> sourcesEvent = new HashMap<>();
-                                    sourcesEvent.put("sources", newSources);
-                                    emitter.send(SseEmitter.event().data(sourcesEvent, MediaType.APPLICATION_JSON));
-                                }
-
-                                if (!content.isEmpty()) {
-                                    responseBuilder.append(content);
-                                    Map<String, String> eventData = new HashMap<>();
-                                    eventData.put("content", content);
-                                    emitter.send(SseEmitter.event().data(eventData, MediaType.APPLICATION_JSON));
-                                }
-                            } catch (Exception e) {
-                                log.warn("Failed to parse SSE chunk: {}", data, e);
-                            }
+                        if (sourcesNode != null && sourcesNode.isArray() && sourcesNode.size() > 0) {
+                            List<Map<String, Object>> newSources = objectMapper.treeToValue(sourcesNode, List.class);
+                            accumulatedSources.addAll(newSources);
+                            Map<String, Object> sourcesEvent = new HashMap<>();
+                            sourcesEvent.put("sources", newSources);
+                            emitter.send(SseEmitter.event().data(sourcesEvent, MediaType.APPLICATION_JSON));
                         }
+
+                        if (!content.isEmpty()) {
+                            responseBuilder.append(content);
+                            Map<String, String> eventData = new HashMap<>();
+                            eventData.put("content", content);
+                            emitter.send(SseEmitter.event().data(eventData, MediaType.APPLICATION_JSON));
+                        }
+                    } catch (Exception e) {
+                        log.warn("Failed to parse SSE chunk: {}", data, e);
                     }
                 },
                 error -> {

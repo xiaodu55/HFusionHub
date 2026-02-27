@@ -19,14 +19,14 @@ java-backend/src/main/java/com/hfusionhub/
 ├── client/          # AiClient — HTTP calls to Python AI service
 ├── common/          # Constants, exceptions, utils, DTOs
 ├── config/          # Spring config (Sa-Token, Admin init, etc.)
-├── controller/      # REST controllers (7 controllers)
-├── dto/             # Data transfer objects (17 classes)
-├── entity/          # JPA entities (8 classes)
-├── enums/           # DocumentStatus enum
-├── handler/         # JsonTypeHandler
-├── mapper/          # MyBatis Plus mappers (8 mappers)
-├── scheduler/       # Scheduled tasks (4 schedulers)
-└── service/         # Service interfaces + implementations (6 pairs)
+├── controller/      # REST controllers
+├── dto/             # Data transfer objects
+├── entity/          # MyBatis Plus entities
+├── enums/           # Domain enums
+├── handler/         # Type handlers
+├── mapper/          # MyBatis Plus mappers
+├── scheduler/       # Scheduled recovery/cleanup tasks
+└── service/         # Service interfaces + implementations
 ```
 
 ## Key Design Patterns
@@ -51,18 +51,23 @@ java-backend/src/main/java/com/hfusionhub/
 |----------|-------------|
 | `DB_USERNAME` | MySQL username (default: `hfusionhub`) |
 | `DB_PASSWORD` | MySQL password (must match `MYSQL_PASSWORD`) |
+| `SPRING_DATASOURCE_URL` | Required in containers; overrides local `localhost` MySQL URL |
+| `SPRING_DATA_REDIS_HOST` | Required in containers; overrides local Redis host |
+| `SPRING_DATA_REDIS_PORT` | Redis port (default: `6379`) |
 | `PYTHON_AI_INTERNAL_TOKEN` | Shared secret for Java ↔ Python communication |
 | `CALLBACK_SECRET` | HMAC secret for Python → Java callbacks |
 | `ADMIN_PASSWORD` | Bootstrap admin account password |
+| `AI_SERVICE_URL` | Python AI service URL used by `AiClient` |
+| `PYTHON_AI_CALLBACK_BASE_URL` | Java callback base URL reachable from Python |
 
 ## Flyway Migrations
 
-Current migrations: **V1–V7**
+Current migrations: **V1–V8**
 
 Rules:
-- **Historical migrations (V1–V7) must NOT be modified** — any schema changes go into new `V8+` scripts.
+- **Historical migrations (V1–V8) must NOT be modified** — any schema changes go into new `V9+` scripts.
 - In production, **never** manually edit `flyway_schema_history`.
-- For local dev reset: `docker compose down -v && docker compose up -d` (see `启动重启1.md` §9).
+- For local dev reset: `docker compose down -v && docker compose up -d` (see [启动重启1.md](启动重启1.md#9-本地重置数据库)).
 
 ## Running Tests
 

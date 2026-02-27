@@ -217,11 +217,13 @@ npm run dev
 | KnowledgeGraph | 知识图谱 | 59 |
 | Utils | 公共工具 | 36 |
 
-**RAG 模块：333 个测试用例，100% 通过 | Python AI 总计：636+ 测试用例**
+**RAG 模块：333 个测试用例，100% 通过 | Python AI 总计：655+ 测试用例**
 
 ## 🚀 启动指南
 
 详细启动步骤请参阅：
+- [docs/启动重启1.md](docs/启动重启1.md) — 中文启动、重启和排障指南
+- [docs/startup-guide.md](docs/startup-guide.md) — English startup and restart guide
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — 所有必需环境变量清单
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 架构全景图
 - 快速开始：按上方「启动步骤」依次启动 Docker → Java → Python → 前端
@@ -252,4 +254,4 @@ npm run dev
 
 ## 📄 许可证
 
-本项目基于 [Apache-2.0](LICENSE) 许可证开源。
+计划使用 Apache-2.0 许可证；正式公开发布前需要补齐根目录 `LICENSE` 文件。
