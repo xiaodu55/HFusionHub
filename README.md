@@ -222,9 +222,9 @@ npm run dev
 ## 🚀 启动指南
 
 详细启动步骤请参阅：
-- [docs/启动重启1.md](docs/启动重启1.md) — 完整启动与重启指南（中文）
-- [docs/startup-guide.md](docs/startup-guide.md) — 首次启动完整指南
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — 所有必需环境变量清单
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 架构全景图
+- 快速开始：按上方「启动步骤」依次启动 Docker → Java → Python → 前端
 
 ## 📚 开发文档
 

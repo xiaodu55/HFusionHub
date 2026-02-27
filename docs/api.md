@@ -82,9 +82,17 @@ satoken: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 - `POST /message/stream/cancel` — Cancel streaming response
 
 ### RAG Observability (`/api/rag`)
-- `GET /debug-search` — Debug search with trace
-- `GET /graph-status` — GraphRAG index status
-- Evaluation endpoints (if enabled)
+- `GET /traces` — List retrieval traces (with pagination and filters)
+- `GET /traces/stats` — Trace statistics
+- `GET /traces/export` — Export traces as CSV
+- `GET /traces/{traceId}` — Get single trace detail
+- `POST /evaluate` — Run retrieval evaluation
+- `GET /evaluation-runs` — List evaluation run history
+
+### Memory (`/api/memory`)
+- `GET /` — List memories (filter by type, conversationId)
+- `POST /` — Save a memory entry
+- `DELETE /{id}` — Delete a memory entry
 
 ### Health
 - `GET /api/health` — Service health check

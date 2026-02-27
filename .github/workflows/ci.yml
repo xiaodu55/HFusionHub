@@ -106,6 +106,8 @@ jobs:
         run: npm ci
       - name: Type-check and build
         run: npm run build
+      - name: Run frontend tests
+        run: npm run test
       - name: Audit dependencies
         run: npm run audit
 

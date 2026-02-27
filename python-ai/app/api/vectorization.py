@@ -536,15 +536,18 @@ async def get_chunk_detail(chunk_id: str, document_id: str):
     try:
         validate_document_id(document_id)
 
-        chunks = get_document_chunks(document_id)
+        result = get_document_chunks(document_id)
+        records = result.get("data", {}).get("records", []) if isinstance(result, dict) else []
 
-        for chunk in chunks:
+        for chunk in records:
             if chunk.get('chunk_id') == chunk_id:
                 return VectorChunkResponse(**chunk)
 
         from app.core.exceptions import ValidationException
         raise ValidationException(f"分块不存在: {chunk_id}", code=404)
 
+    except ValidationException:
+        raise
     except Exception as e:
         raise MilvusException(f"获取分块详情失败: {e}")
 

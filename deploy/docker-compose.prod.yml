@@ -45,6 +45,18 @@ services:
       retries: 20
     restart: unless-stopped
 
+  # Optional: Ollama for local embedding (uncomment to enable)
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: hfusionhub-ollama
+  #   ports:
+  #     - "127.0.0.1:11434:11434"
+  #   volumes:
+  #     - ollama-data:/root/.ollama
+  #   environment:
+  #     OLLAMA_KEEP_ALIVE: 24h
+  #   restart: unless-stopped
+
   # -----------------------------------------------------------------------
   # Application Services
   # -----------------------------------------------------------------------
@@ -58,6 +70,8 @@ services:
     environment:
       DB_USERNAME: hfusionhub
       DB_PASSWORD: ${MYSQL_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql8:3306/hfusionhub?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      SPRING_DATA_REDIS_HOST: redis7
       PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?required}
       CALLBACK_SECRET: ${CALLBACK_SECRET:?required}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?required}
@@ -101,6 +115,9 @@ services:
       RAG_HYBRID_ENABLED: "true"
       RAG_GRAPH_ENABLED: ${RAG_GRAPH_ENABLED:-false}
       RAG_RERANKER_MODE: ${RAG_RERANKER_MODE:-disabled}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      LLM_ALLOW_MOCK: "false"
+      EMBEDDING_ALLOW_FALLBACK: "false"
     volumes:
       - python-data:/data
       - uploads-data:/app/uploads

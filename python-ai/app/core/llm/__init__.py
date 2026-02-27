@@ -14,12 +14,14 @@ __all__ = ['BaseLLM', 'ChatMessage', 'LLMResponse', 'DeepSeekLLM', 'OllamaLLM', 
 
 def get_llm(model: str = None) -> BaseLLM:
     """
-    Get LLM instance with fallback strategy
+    Get LLM instance with fallback strategy.
 
     Priority:
     1. DeepSeek API (primary)
     2. Ollama (local fallback)
-    3. Mock LLM (testing fallback)
+    3. Mock LLM — only when LLM_ALLOW_MOCK=true (default: false in production)
+
+    Set LLM_ALLOW_MOCK=true for development without a real API key.
     """
     from app.utils.config import config
 
@@ -34,7 +36,6 @@ def get_llm(model: str = None) -> BaseLLM:
                 base_url=deepseek_base_url,
                 model=model or config.DEEPSEEK_MODEL
             )
-            # Test availability with a simple request
             if llm.is_available():
                 return llm
         except Exception as e:
@@ -52,7 +53,15 @@ def get_llm(model: str = None) -> BaseLLM:
             )
             return llm
     except Exception as e:
-        print(f"[LLM] Ollama failed: {e}, using Mock LLM...")
+        print(f"[LLM] Ollama failed: {e}")
 
-    # 3. Fallback to Mock LLM (testing)
-    return MockLLM()
+    # 3. Mock LLM — only for development/testing
+    allow_mock = os.getenv("LLM_ALLOW_MOCK", "false").lower() in ("true", "1", "yes")
+    if allow_mock:
+        print("[LLM] Using Mock LLM (LLM_ALLOW_MOCK=true)")
+        return MockLLM()
+
+    raise RuntimeError(
+        "No LLM provider available. Set DEEPSEEK_API_KEY or start Ollama, "
+        "or set LLM_ALLOW_MOCK=true for development."
+    )
