@@ -70,11 +70,13 @@ const buildFilters = (page = currentPage.value): TraceFilters => ({
 })
 
 const refreshStats = async () => {
+  if (!selectedKnowledgeBaseId.value) return
   const response = await ragApi.getTraceStats(trendDays.value, requireKnowledgeBaseId())
   stats.value = response.data
 }
 
 const loadEvaluationRuns = async () => {
+  if (!selectedKnowledgeBaseId.value) return
   const response = await ragApi.getEvaluationRuns({
     limit: 20,
     knowledge_base_id: requireKnowledgeBaseId(),
@@ -149,6 +151,10 @@ const selectTrace = (trace: RetrievalTrace) => {
 }
 
 const exportTraces = async (format: 'json' | 'csv') => {
+  if (!selectedKnowledgeBaseId.value) {
+    toast.error('请先选择知识库')
+    return
+  }
   exporting.value = true
   try {
     const response = await ragApi.exportTraces(format, buildFilters())
@@ -256,7 +262,18 @@ onMounted(async () => {
       <Card>
         <CardHeader><CardTitle class="flex items-center gap-2"><TrendingUp class="h-5 w-5" />{{ trendDays }} 日检索趋势</CardTitle><CardDescription>按天观察请求量、命中率、失败次数与平均耗时。</CardDescription></CardHeader>
         <CardContent>
-          <div class="mb-4 flex gap-2"><Button v-for="days in [7, 14, 30]" :key="days" size="sm" :variant="trendDays === days ? 'default' : 'outline'" @click="trendDays = days; refreshStats()">{{ days }} 天</Button></div>
+          <div class="mb-4 flex gap-2">
+            <Button
+              v-for="days in [7, 14, 30]"
+              :key="days"
+              size="sm"
+              :variant="trendDays === days ? 'default' : 'outline'"
+              :disabled="!selectedKnowledgeBaseId"
+              @click="trendDays = days; refreshStats()"
+            >
+              {{ days }} 天
+            </Button>
+          </div>
           <div class="space-y-3">
             <div v-for="metric in stats.daily_metrics" :key="metric.date" class="grid grid-cols-[72px_1fr_auto] items-center gap-3 text-xs">
               <span class="text-muted-foreground">{{ metric.date.slice(5) }}</span>
