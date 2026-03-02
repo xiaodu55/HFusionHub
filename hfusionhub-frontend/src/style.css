@@ -1,53 +1,433 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: hsl(0 0% 100%);
-  --color-foreground: hsl(222.2 84% 4.9%);
-  --color-card: hsl(0 0% 100%);
-  --color-card-foreground: hsl(222.2 84% 4.9%);
-  --color-popover: hsl(0 0% 100%);
-  --color-popover-foreground: hsl(222.2 84% 4.9%);
-  --color-primary: hsl(222.2 47.4% 11.2%);
-  --color-primary-foreground: hsl(210 40% 98%);
-  --color-secondary: hsl(210 40% 96.1%);
-  --color-secondary-foreground: hsl(222.2 47.4% 11.2%);
-  --color-muted: hsl(210 40% 96.1%);
-  --color-muted-foreground: hsl(215.4 16.3% 46.9%);
-  --color-accent: hsl(210 40% 96.1%);
-  --color-accent-foreground: hsl(222.2 47.4% 11.2%);
-  --color-destructive: hsl(0 84.2% 60.2%);
-  --color-destructive-foreground: hsl(210 40% 98%);
-  --color-border: hsl(214.3 31.8% 91.4%);
-  --color-input: hsl(214.3 31.8% 91.4%);
-  --color-ring: hsl(222.2 84% 4.9%);
+  --color-background: hsl(150 8% 3%);
+  --color-foreground: hsl(150 12% 94%);
+  --color-card: hsl(150 8% 7%);
+  --color-card-foreground: hsl(150 12% 94%);
+  --color-popover: hsl(150 8% 7%);
+  --color-popover-foreground: hsl(150 12% 94%);
+  --color-primary: hsl(151 84% 43%);
+  --color-primary-foreground: hsl(160 20% 4%);
+  --color-secondary: hsl(165 7% 13%);
+  --color-secondary-foreground: hsl(150 12% 94%);
+  --color-muted: hsl(165 7% 13%);
+  --color-muted-foreground: hsl(150 6% 62%);
+  --color-accent: hsl(160 24% 16%);
+  --color-accent-foreground: hsl(150 12% 94%);
+  --color-destructive: hsl(0 76% 58%);
+  --color-destructive-foreground: hsl(0 0% 100%);
+  --color-border: hsl(150 7% 18%);
+  --color-input: hsl(150 7% 18%);
+  --color-ring: hsl(151 84% 43%);
   --radius: 0.5rem;
 }
 
 .dark {
-  --color-background: hsl(222.2 84% 4.9%);
-  --color-foreground: hsl(210 40% 98%);
-  --color-card: hsl(222.2 84% 4.9%);
-  --color-card-foreground: hsl(210 40% 98%);
-  --color-popover: hsl(222.2 84% 4.9%);
-  --color-popover-foreground: hsl(210 40% 98%);
-  --color-primary: hsl(210 40% 98%);
-  --color-primary-foreground: hsl(222.2 47.4% 11.2%);
-  --color-secondary: hsl(217.2 32.6% 17.5%);
-  --color-secondary-foreground: hsl(210 40% 98%);
-  --color-muted: hsl(217.2 32.6% 17.5%);
-  --color-muted-foreground: hsl(215 20.2% 65.1%);
-  --color-accent: hsl(217.2 32.6% 17.5%);
-  --color-accent-foreground: hsl(210 40% 98%);
-  --color-destructive: hsl(0 62.8% 30.6%);
-  --color-destructive-foreground: hsl(210 40% 98%);
-  --color-border: hsl(217.2 32.6% 17.5%);
-  --color-input: hsl(217.2 32.6% 17.5%);
-  --color-ring: hsl(212.7 26.8% 83.9%);
+  --color-background: hsl(150 8% 3%);
+  --color-foreground: hsl(150 12% 94%);
+  --color-card: hsl(150 8% 7%);
+  --color-card-foreground: hsl(150 12% 94%);
+  --color-popover: hsl(150 8% 7%);
+  --color-popover-foreground: hsl(150 12% 94%);
+  --color-primary: hsl(151 84% 43%);
+  --color-primary-foreground: hsl(160 20% 4%);
+  --color-secondary: hsl(165 7% 13%);
+  --color-secondary-foreground: hsl(150 12% 94%);
+  --color-muted: hsl(165 7% 13%);
+  --color-muted-foreground: hsl(150 6% 62%);
+  --color-accent: hsl(160 24% 16%);
+  --color-accent-foreground: hsl(150 12% 94%);
+  --color-destructive: hsl(0 76% 58%);
+  --color-destructive-foreground: hsl(0 0% 100%);
+  --color-border: hsl(150 7% 18%);
+  --color-input: hsl(150 7% 18%);
+  --color-ring: hsl(151 84% 43%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+html {
+  background: #020403;
 }
 
 body {
+  margin: 0;
   background-color: var(--color-background);
   color: var(--color-foreground);
-  margin: 0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(52, 211, 153, 0.32);
+  color: #f8fafc;
+}
+
+.app-shell {
+  display: flex;
+  position: relative;
+  isolation: isolate;
+  background:
+    linear-gradient(145deg, rgba(1, 4, 3, 0.98) 0%, rgba(6, 9, 8, 0.98) 44%, rgba(17, 18, 17, 0.98) 100%),
+    linear-gradient(90deg, rgba(52, 211, 153, 0.08), rgba(34, 211, 238, 0.04), rgba(245, 158, 11, 0.05));
+}
+
+.app-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 56px 56px;
+  opacity: 0.34;
+  mask-image: linear-gradient(to bottom, black 0%, rgba(0, 0, 0, 0.72) 48%, transparent 100%);
+}
+
+.glass-sidebar {
+  background: linear-gradient(180deg, rgba(18, 22, 21, 0.9), rgba(6, 8, 8, 0.86));
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.03), 24px 0 60px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(24px);
+}
+
+.glass-header,
+.glass-panel,
+.glass-panel-soft {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius);
+  backdrop-filter: blur(22px);
+}
+
+.glass-header {
+  background: linear-gradient(120deg, rgba(20, 24, 23, 0.72), rgba(8, 10, 10, 0.66));
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.glass-panel {
+  background: linear-gradient(145deg, rgba(18, 23, 22, 0.8), rgba(8, 10, 10, 0.72));
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.glass-panel-soft {
+  background: linear-gradient(145deg, rgba(20, 25, 24, 0.68), rgba(9, 11, 11, 0.62));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.brand-mark,
+.user-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius);
+  border: 1px solid rgba(52, 211, 153, 0.34);
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.2), rgba(255, 255, 255, 0.06));
+  color: #d9f99d;
+  font-size: 0.85rem;
+  font-weight: 800;
+  box-shadow: 0 0 28px rgba(52, 211, 153, 0.16);
+}
+
+.user-avatar {
+  width: 2.25rem;
+  height: 2.25rem;
+  color: #f8fafc;
+}
+
+.nav-pill {
+  position: relative;
+}
+
+.nav-pill.is-active {
+  background:
+    linear-gradient(135deg, rgba(52, 211, 153, 0.22), rgba(52, 211, 153, 0.08)),
+    rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.32), 0 14px 40px rgba(16, 185, 129, 0.12);
+}
+
+.nav-pill.is-active::before {
+  content: "";
+  position: absolute;
+  left: -0.75rem;
+  top: 50%;
+  width: 0.2rem;
+  height: 1.4rem;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: #34d399;
+  box-shadow: 0 0 16px rgba(52, 211, 153, 0.9);
+}
+
+.user-chip {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.command-bar {
+  height: 2.75rem;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.24);
+  padding: 0 0.9rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.metric-card {
+  display: block;
+  min-height: 10.75rem;
+  padding: 1rem;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.metric-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(52, 211, 153, 0.28);
+  background: linear-gradient(145deg, rgba(26, 32, 31, 0.78), rgba(12, 14, 14, 0.68));
+}
+
+.task-stage {
+  position: relative;
+  min-height: 23rem;
+  perspective: 1000px;
+}
+
+.task-stage::before {
+  content: "";
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  top: 46%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+}
+
+.task-stack-card {
+  --stack-index: 0;
+  --stack-progress: 50%;
+  position: absolute;
+  left: calc(50% - 10rem);
+  top: calc(4.75rem + (var(--stack-index) * 0.15rem));
+  z-index: calc(20 - var(--stack-index));
+  width: min(21rem, 76%);
+  min-height: 12.5rem;
+  padding: 1rem;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: linear-gradient(145deg, rgba(27, 31, 30, 0.82), rgba(9, 10, 10, 0.74));
+  color: #f8fafc;
+  box-shadow: 0 26px 60px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transform:
+    translateX(calc((var(--stack-index) - 1.5) * 2.4rem))
+    translateY(calc(var(--stack-index) * 1.8rem))
+    rotateX(58deg)
+    rotateZ(-18deg);
+  transform-origin: center;
+  transition: transform 220ms ease, border-color 220ms ease, opacity 220ms ease;
+}
+
+.task-stack-card:hover,
+.task-stack-card.is-active {
+  border-color: rgba(52, 211, 153, 0.56);
+  opacity: 1;
+  transform:
+    translateX(calc((var(--stack-index) - 1.5) * 2.4rem))
+    translateY(calc(var(--stack-index) * 1.2rem))
+    rotateX(52deg)
+    rotateZ(-18deg)
+    scale(1.04);
+}
+
+.task-stack-icon,
+.task-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.task-stack-progress {
+  display: block;
+  width: var(--stack-progress);
+  height: 100%;
+  border-radius: 999px;
+}
+
+.task-stack-card.tone-green .task-stack-progress,
+.task-row-icon.tone-green,
+.timeline-item.tone-green .timeline-dot {
+  background: #34d399;
+}
+
+.task-stack-card.tone-cyan .task-stack-progress,
+.task-row-icon.tone-cyan,
+.timeline-item.tone-cyan .timeline-dot {
+  background: #22d3ee;
+}
+
+.task-stack-card.tone-amber .task-stack-progress,
+.task-row-icon.tone-amber,
+.timeline-item.tone-amber .timeline-dot {
+  background: #f59e0b;
+}
+
+.task-stack-card.tone-violet .task-stack-progress,
+.task-row-icon.tone-violet,
+.timeline-item.tone-violet .timeline-dot {
+  background: #a78bfa;
+}
+
+.task-stack-card.tone-green .task-stack-icon {
+  color: #6ee7b7;
+}
+
+.task-stack-card.tone-cyan .task-stack-icon {
+  color: #67e8f9;
+}
+
+.task-stack-card.tone-amber .task-stack-icon {
+  color: #fbbf24;
+}
+
+.task-stack-card.tone-violet .task-stack-icon {
+  color: #c4b5fd;
+}
+
+.selected-task-panel {
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025));
+  padding: 1rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.task-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 4.75rem;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+  padding: 0.85rem;
+  transition: border-color 180ms ease, background 180ms ease;
+}
+
+.task-row:hover,
+.task-row.is-selected {
+  border-color: rgba(52, 211, 153, 0.32);
+  background: rgba(52, 211, 153, 0.08);
+}
+
+.task-row-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  color: #020403;
+}
+
+.timeline-track {
+  position: relative;
+  display: grid;
+  gap: 1rem;
+  padding-left: 1.35rem;
+}
+
+.timeline-track::before {
+  content: "";
+  position: absolute;
+  left: 0.32rem;
+  top: 0.4rem;
+  bottom: 0.4rem;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.timeline-item {
+  position: relative;
+  display: flex;
+  gap: 0.75rem;
+}
+
+.timeline-dot {
+  position: absolute;
+  left: -1.35rem;
+  top: 0.25rem;
+  width: 0.68rem;
+  height: 0.68rem;
+  border-radius: 999px;
+  box-shadow: 0 0 18px currentColor;
+}
+
+main::-webkit-scrollbar {
+  width: 0.65rem;
+}
+
+main::-webkit-scrollbar-thumb {
+  border: 0.18rem solid transparent;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  background-clip: content-box;
+}
+
+main::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (max-width: 1024px) {
+  .task-stage {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+    gap: 0.75rem;
+    min-height: auto;
+  }
+
+  .task-stage::before {
+    display: none;
+  }
+
+  .task-stack-card,
+  .task-stack-card:hover,
+  .task-stack-card.is-active {
+    position: relative;
+    left: auto;
+    top: auto;
+    width: 100%;
+    min-height: 11.5rem;
+    transform: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .glass-sidebar {
+    width: 5rem !important;
+  }
+
+  .metric-card {
+    min-height: 9.5rem;
+  }
 }
