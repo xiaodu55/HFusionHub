@@ -15,12 +15,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Jupyter Notebook**: `notebooks/rag_evaluation.ipynb` for RAG evaluation
 - **Production Docker**: `deploy/docker-compose.prod.yml`, Dockerfiles, Helm chart
 - **Frontend shared components**: `EmptyState`, `LoadingSkeleton`, `ErrorState`
+- **Java test coverage**: Expanded from 39 to 79 cases across document ownership and lifecycle, vectorization callbacks and durable job state, and authentication boundaries
+- **Frontend test coverage**: Expanded from 12 to 32 cases across chat SSE parsing, document upload requests, and login state flows
 - **PR Template**: `.github/PULL_REQUEST_TEMPLATE.md`
 - **LICENSE**: Apache-2.0
 - Comprehensive project documentation (17 files)
 
 ### Changed
 - **SSE streaming**: Unified to `WebClient`-based `AiClient.streamChat()` with line-buffered parsing
+- Frontend chat streaming now uses a tested incremental SSE parser that preserves split frames and flushes a final line without a trailing newline
 - `AiClient.chatStream()` deprecated
 - Dashboard: removed fake trend percentages, timeline, and static progress values
 - RAG page: fixed-height trend chart, scrollable detail panel with `line-clamp-3`

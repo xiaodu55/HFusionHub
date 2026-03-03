@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
 import { ArrowLeft, Send, User, Bot, Loader2, RotateCcw, Square, RefreshCw } from 'lucide-vue-next'
 import { formatDateTime, formatTime } from '@/utils/date'
+import { SseDataParser, type SseDataEvent } from '@/utils/sse'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 
 const route = useRoute()
@@ -117,61 +118,55 @@ const handleSend = async () => {
     }
 
     const decoder = new TextDecoder()
-    let buffer = ''
+    const parser = new SseDataParser()
     let hasContent = false
+
+    const applyStreamEvents = async (events: SseDataEvent[]) => {
+      for (const event of events) {
+        if (event.type === 'done') {
+          streamingMessageId.value = null
+          continue
+        }
+
+        try {
+          const parsed = JSON.parse(event.data)
+          const contentDelta = parsed.content || ''
+          const sources = parsed.sources || []
+
+          if (contentDelta) {
+            hasContent = true
+            const msg = messages.value.find(m => m.id === pendingId)
+            if (msg) {
+              msg.content += contentDelta
+            }
+            await scrollToBottom()
+          }
+
+          if (sources.length > 0) {
+            const msg = messages.value.find(m => m.id === pendingId)
+            if (msg) {
+              msg.sources = sources
+            }
+          }
+        } catch {
+          hasContent = true
+          const msg = messages.value.find(m => m.id === pendingId)
+          if (msg) {
+            msg.content += event.data
+          }
+          await scrollToBottom()
+        }
+      }
+    }
 
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
 
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        // 支持 "data: " 和 "data:" 两种格式
-        if (line.startsWith('data:')) {
-          const data = line.slice(5).trim()
-          if (data === '[DONE]') {
-            // 流式响应完成，移除 streaming 状态
-            streamingMessageId.value = null
-          } else if (data) {
-            try {
-              const parsed = JSON.parse(data)
-              const content = parsed.content || ''
-              const sources = parsed.sources || []
-
-              if (content) {
-                hasContent = true
-                // 更新已存在的消息内容
-                const msg = messages.value.find(m => m.id === pendingId)
-                if (msg) {
-                  msg.content += content
-                }
-                await scrollToBottom()
-              }
-
-              // 处理 sources 信息
-              if (sources.length > 0) {
-                const msg = messages.value.find(m => m.id === pendingId)
-                if (msg) {
-                  msg.sources = sources
-                }
-              }
-            } catch (e) {
-              if (data) {
-                hasContent = true
-                const msg = messages.value.find(m => m.id === pendingId)
-                if (msg) {
-                  msg.content += data
-                }
-                await scrollToBottom()
-              }
-            }
-          }
-        }
-      }
+      await applyStreamEvents(parser.push(decoder.decode(value, { stream: true })))
     }
+    await applyStreamEvents(parser.push(decoder.decode()))
+    await applyStreamEvents(parser.flush())
 
     // 如果没有内容，移除占位消息
     if (!hasContent) {
