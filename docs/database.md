@@ -18,10 +18,11 @@ The database `hfusionhub` is managed via Flyway migrations in `java-backend/src/
 | V6 | `V6__add_document_processed_at.sql` | Document processing timestamps |
 | V7 | `V7__document_recycle_bin.sql` | Soft-delete recycle bin for documents |
 | V8 | `V8__persistent_memory.sql` | Persistent AI memory entries |
+| V9 | `V9__system_notice.sql` | System notices + notification read tracking |
 
 ## Migration Rules
 
-1. **Historical migrations (V1–V8) are immutable.** Never modify them.
+1. **Historical migrations (V1–V9) are immutable.** Never modify them.
 2. **All future schema changes must use new V9+ scripts.**
 3. **Production**: Never manually edit `flyway_schema_history`. Create new migration scripts.
 4. **Local dev reset**: `docker compose down -v && docker compose up -d` clears the database.
@@ -52,6 +53,9 @@ docker compose up -d
 | `conversation` | Chat conversations |
 | `message` | Individual messages with source citations |
 | `deletion_task` | Durable deletion outbox for async cleanup |
+| `memory_entry` | AI memory: entity facts, summaries, user preferences (V8) |
+| `system_notice` | Admin-published system notices (V9) |
+| `notice_recipient` | Per-user notification read tracking (V9) |
 | `memory_entry` | Persistent conversation summaries, entity facts, and user preferences |
 
 ## Entity Relationships

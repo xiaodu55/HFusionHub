@@ -94,8 +94,29 @@ satoken: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 - `POST /` — Save a memory entry
 - `DELETE /{id}` — Delete a memory entry
 
+### System Diagnostics (`/api/system`)
+- `GET /ai-health` — Preflight check: Python AI reachability, token config, upload directory, embedding status
+
+### Notifications (`/api/notifications`)
+- `GET /` — List active notices for current user
+- `GET /unread-count` — Get unread notification count
+- `POST /{id}/read` — Mark a notice as read
+
 ### Health
 - `GET /api/health` — Service health check
+
+## Python AI Public Endpoints
+
+### MCP (`/mcp`) — No internal token required for discovery
+- `POST /` — JSON-RPC 2.0 endpoint (initialize, tools/list, tools/call)
+- `GET /health` — MCP server health and tool count
+- `GET /tools` — List available tool schemas
+
+> `tools/call` requires `X-Internal-Token` header. `search_knowledge_base` additionally requires `X-HFusionHub-KB-ID`.
+
+### Metrics (`/metrics`)
+- `GET /` — Prometheus text format metrics (requests, latency, errors)
+- `GET /json` — Human-readable JSON snapshot
 
 ## Internal API (Python AI ↔ Java)
 

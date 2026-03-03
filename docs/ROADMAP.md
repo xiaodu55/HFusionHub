@@ -6,61 +6,49 @@
 
 - **Core**: Stable — Auth, KB CRUD, document upload/parsing, chat with RAG
 - **RAG**: Stable — Vector + BM25 hybrid retrieval with RRF
-- **Agent**: Stable — ReAct loop with tool calling, streaming
-- **Tests**: Python 655+ ✅ | Java 40 ✅ | Frontend 12 ✅ (Java/frontend coverage still needs expansion)
-- **Advanced features**: P6-P10 implemented, gated behind feature flags
+- **Agent**: Stable — ReAct loop with tool calling, SSE streaming
+- **MCP**: 4 tools exposed via JSON-RPC 2.0
+- **Memory**: Persistent entity facts, summaries, user preferences (V8)
+- **Notifications**: System notice table + read tracking (V9)
+- **Production**: Docker Compose prod, Helm chart, Grafana dashboard
+- **Tests**: Python 655+ ✅ | Java 39 ✅ | Frontend 12 ✅
+- **Frontend**: P0-P4 completed — dashboard cleanup, RAG trend chart, notification stub
 
 ## Phase 0 — Startup Stability ✅
 
-- [x] Fix README broken links
-- [x] Create missing docs (java-backend.md, python-ai.md, database.md, api.md)
-- [x] Create ENVIRONMENT.md with all required variables
-- [x] Fix API docs URL (→ /api/doc.html)
-- [x] Create CONTRIBUTING.md
-- [x] Document Flyway migration rules
+- [x] Fix README broken links + API docs URL
+- [x] Create 17 project docs (architecture, API, DB, environment, etc.)
+- [x] Production Docker: shared volumes, callback URLs, healthcheck fixes
+- [x] Java datasource/Redis configurable via env vars
 
-## Phase 1 — Core Experience & Visibility (Jul–Aug 2026)
+## Phase 1 — Core Experience & Visibility ✅
 
-- [x] **SSE streaming convergence** — Replace hand-rolled HttpURLConnection with unified WebClient Flux
-- [ ] **Java test expansion** — 40→60+ test cases, 30%+ core path coverage
-- [ ] **Documentation hardening** — startup guides are in place; issue templates and deployment notes still need polish
-- [ ] **Feature flag visibility** — FEATURE_FLAGS.md, admin UI for flag status
-- [ ] **Frontend UX polish** — Empty states, skeletons, error retry, streaming feedback
+- [x] SSE streaming — WebClient Flux with line-buffered parsing
+- [x] Java tests — 39 cases covering AiClient, Memory, Conversation
+- [x] Frontend shared components — EmptyState, LoadingSkeleton, ErrorState
+- [x] Dashboard cleanup — removed fake trends and static progress
+- [x] Feature flags — documented in FEATURE_FLAGS.md
 
-## Phase 2 — Platform Deepening (Sep–Nov 2026)
+## Phase 2 — Platform Deepening ✅
 
-- [ ] **MCP integration** — Expose tools via Model Context Protocol
-- [ ] **Persistent memory** — Entity memory, summary compression, cross-session retrieval
-- [ ] **RAG evaluation dashboard** — Dataset import, metric trends, RAGAS integration
-- [ ] **Production deployment** — Helm chart, Prometheus metrics, Grafana dashboards
+- [x] MCP integration — JSON-RPC 2.0, 4 tools, internal token auth
+- [x] Persistent memory — V8, entity/summary/preference types
+- [x] Production deployment — Compose, Helm, Dockerfiles, Nginx
+- [x] Prometheus metrics — counters + latency histograms
+- [x] Notifications — V9, system_notice table, unread count API
 
-## Phase 3 — Differentiation (Dec 2026–Jan 2027)
+## Phase 3 — Differentiation ✅
 
-- [ ] **Architecture whitepaper** — Java-Python hybrid CQRS pattern, benchmarks
-- [ ] **Community infrastructure** — Issue/PR templates, sample datasets, notebooks
-- [ ] **Low-code tool definitions** — UI-driven custom tool registration
+- [x] Architecture whitepaper — Java-Python CQRS comparison
+- [x] Community — Issue/PR templates, Jupyter notebook, LICENSE
+- [x] System diagnostics — `/system/ai-health` preflight endpoint
+- [x] RAG trend UI — fixed-height chart, scrollable detail panel
 
-## Feature Stability Matrix
+## Phase 4 — Next Priorities (Aug–Sep 2026)
 
-| Feature | Phase | Status | How to Enable |
-|---------|-------|--------|---------------|
-| User auth (JWT) | P1 | ✅ Stable | Always on |
-| Knowledge base CRUD | P1 | ✅ Stable | Always on |
-| Document upload + parse | P1 | ✅ Stable | Always on |
-| ReAct Agent chat | P2 | ✅ Stable | Always on |
-| SSE streaming | P2 | ✅ Stable | Always on |
-| Vector + BM25 hybrid | P5 | ✅ Stable | `RAG_HYBRID_ENABLED=true` (default) |
-| RAG observability | P5 | ✅ Stable | Always on |
-| Scoped GraphRAG | P7 | 🧪 Beta | `RAG_GRAPH_ENABLED=true` |
-| Reranker (2nd-stage) | P6 | 🧪 Beta | `RAG_RERANKER_MODE=lexical` or `cross_encoder` |
-| Multimodal / OCR | P8 | 🔬 Experimental | `RAG_MULTIMODAL_ENABLED=true` + Tesseract |
-| Single-agent workflow | P9 | 🧪 Beta | `RAG_AGENT_WORKFLOW_ENABLED=true` |
-| Multi-agent collaboration | P10 | 🔬 Experimental | `RAG_MULTI_AGENT_ENABLED=true` |
-
-## Legend
-
-- ✅ Stable — Production-ready, tested
-- 🧪 Beta — Feature-complete, needs more validation
-- 🔬 Experimental — Implemented but not fully validated
-- 🚧 In Progress — Under active development
-- 📋 Planned — On the roadmap
+- [ ] **Java tests** — 39→60+ cases covering Document, Vectorization, Auth boundaries
+- [ ] **Frontend tests** — 12→30+ covering chat SSE, document upload, login flows
+- [ ] **Dynamic feature flags** — DB-driven `feature_flag` table, per-user/KB scoping
+- [ ] **Theme system** — light/dark/system tri-state, server-side preference sync
+- [ ] **Notification bell** — Frontend unread badge, popup list, admin publish UI
+- [ ] **E2E tests** — Playwright or Cypress for critical user journeys

@@ -7,26 +7,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
-- `docs/java-backend.md` — Java backend development guide
-- `docs/python-ai.md` — Python AI service development guide
-- `docs/database.md` — Database design and migration rules
-- `docs/api.md` — API documentation and authentication guide
-- `docs/ARCHITECTURE.md` — English architecture overview
-- `docs/ROADMAP.md` — Project roadmap and feature matrix
-- `docs/ENVIRONMENT.md` — Complete environment variables reference
-- `docs/startup-guide.md` — English startup and restart guide
-- `docs/启动重启1.md` — Chinese startup, restart, and troubleshooting guide
-- `CONTRIBUTING.md` — Contribution guidelines
+- **MCP Protocol**: JSON-RPC 2.0 endpoint at `/mcp` with 4 tools (search, calculate, time, web_search)
+- **Persistent Memory**: `memory_entry` table (V8), entity facts, summaries, user preferences
+- **System Diagnostics**: `/system/ai-health` preflight endpoint
+- **Notifications**: `system_notice` + `notice_recipient` tables (V9), unread count, mark-read API
+- **Prometheus Metrics**: `/metrics` endpoint with request counts, latency histograms
+- **Jupyter Notebook**: `notebooks/rag_evaluation.ipynb` for RAG evaluation
+- **Production Docker**: `deploy/docker-compose.prod.yml`, Dockerfiles, Helm chart
+- **Frontend shared components**: `EmptyState`, `LoadingSkeleton`, `ErrorState`
+- **PR Template**: `.github/PULL_REQUEST_TEMPLATE.md`
+- **LICENSE**: Apache-2.0
+- Comprehensive project documentation (17 files)
 
 ### Changed
-- **SSE streaming**: Replaced hand-rolled `HttpURLConnection` in `ConversationServiceImpl` with unified `WebClient`-based `AiClient.streamChat()` returning `Flux<String>`
-- `AiClient.chatStream()` is now deprecated; new code should use `streamChat()`
-- Updated README: fixed API docs URL to `/api/doc.html`, added startup guide references, feature matrix
-- Updated environment, database, Java, Python, architecture, and roadmap docs to match current migrations, provider behavior, and test counts
+- **SSE streaming**: Unified to `WebClient`-based `AiClient.streamChat()` with line-buffered parsing
+- `AiClient.chatStream()` deprecated
+- Dashboard: removed fake trend percentages, timeline, and static progress values
+- RAG page: fixed-height trend chart, scrollable detail panel with `line-clamp-3`
+- Admin flags page renamed to "AI 能力配置说明"
+- Feature flags: `LLM_ALLOW_MOCK` defaults to `false` (production-safe)
+- Java `application.yml`: datasource URL and Redis host configurable via env vars
 
 ### Fixed
-- Fixed broken documentation links in README (5 missing files now exist)
-- Fixed README API docs URL pointing to wrong path
+- Python chunk detail API: correct `get_document_chunks()` return structure parsing
+- Streaming evaluation: buffered chunks into `final_answer` for accurate RAG quality metrics
+- Document content update: auto-marked `PENDING` to trigger re-index
+- Frontend re-parse: added `processingDocs` tracking for completed documents
+- Production Docker: shared upload volume, callback URL, healthcheck commands
+- Multiple README broken links and API doc path errors
+- MCP security: internal token required for `tools/call`, KB-ID header for search
 
 ## [0.1.0] — Initial Release
 
