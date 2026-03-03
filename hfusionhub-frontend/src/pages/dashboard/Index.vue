@@ -62,7 +62,7 @@ const stats = ref<StatCard[]>([
     title: '知识库',
     value: 0,
     caption: '已接入知识空间',
-    trend: '+20%',
+    trend: '--',
     path: '/knowledge-base',
     icon: BookOpen,
     dotClass: 'bg-emerald-400',
@@ -73,7 +73,7 @@ const stats = ref<StatCard[]>([
     title: '文档',
     value: 0,
     caption: '解析与索引对象',
-    trend: '+18%',
+    trend: '--',
     path: '/document',
     icon: FileText,
     dotClass: 'bg-cyan-400',
@@ -84,7 +84,7 @@ const stats = ref<StatCard[]>([
     title: '对话',
     value: 0,
     caption: '多轮问答会话',
-    trend: '+9%',
+    trend: '--',
     path: '/chat',
     icon: MessageSquare,
     dotClass: 'bg-violet-400',
@@ -130,9 +130,9 @@ const taskCards = computed<WorkTask[]>(() => {
       title: '知识库治理',
       caption: `${kb.value} 个知识空间待持续维护`,
       status: kb.value > 0 ? '进行中' : '待创建',
-      schedule: '今天 10:00',
+      schedule: kb.value > 0 ? `${kb.value} 个知识库` : '暂无',
       owner: 'Knowledge',
-      progress: clamp(52 + kb.value * 6),
+      progress: kb.value > 0 ? 100 : 0,
       route: '/knowledge-base',
       icon: BookOpen,
       tone: 'green',
@@ -143,9 +143,9 @@ const taskCards = computed<WorkTask[]>(() => {
       title: '文档解析与索引',
       caption: `${docs.value} 份文档进入检索资产池`,
       status: docs.value > 0 ? '解析中' : '待上传',
-      schedule: '今天 14:00',
+      schedule: docs.value > 0 ? `${docs.value} 份文档` : '暂无',
       owner: 'Index',
-      progress: clamp(45 + docs.value * 4),
+      progress: docs.value > 0 ? 100 : 0,
       route: '/document',
       icon: FileText,
       tone: 'cyan',
@@ -183,26 +183,9 @@ const activeTask = computed(() =>
   taskCards.value.find((task) => task.id === selectedTaskId.value) || taskCards.value[0]
 )
 
-const timeline = computed(() => [
-  {
-    time: '09:00',
-    label: '知识库更新',
-    description: `${stats.value[0].value} 个空间可用于检索`,
-    tone: 'green',
-  },
-  {
-    time: '10:30',
-    label: '文档索引',
-    description: `${stats.value[1].value} 份文档等待质量巡检`,
-    tone: 'cyan',
-  },
-  {
-    time: '14:00',
-    label: 'RAG 验证',
-    description: '执行召回率与答案一致性检查',
-    tone: 'amber',
-  },
-])
+// 任务时间线 — 后续由 document_index_job / deletion_task 真实数据驱动
+interface TimelineItem { time: string; label: string; description: string; tone: string }
+const timeline = computed<TimelineItem[]>(() => [])
 
 const healthItems = computed(() => [
   {
@@ -505,10 +488,14 @@ onMounted(async () => {
           </div>
           <span class="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-zinc-400">
             <Clock3 class="h-4 w-4 text-emerald-300" />
-            自动同步
+            任务状态
           </span>
         </div>
-        <div class="timeline-track mt-6">
+        <div class="mt-6 py-8 text-center" v-if="timeline.length === 0">
+          <p class="text-sm text-zinc-500">暂无任务数据</p>
+          <p class="mt-1 text-xs text-zinc-600">上传文档并开始解析后，任务时间线将显示在这里</p>
+        </div>
+        <div class="timeline-track mt-6" v-else>
           <div
             v-for="item in timeline"
             :key="item.time"

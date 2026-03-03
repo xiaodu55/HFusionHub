@@ -334,6 +334,13 @@ onMounted(() => {
             {{ getStatusBadge(doc.status).text }}
           </Badge>
 
+          <!-- 解析失败时显示错误信息 -->
+          <div v-if="doc.status === 3 && doc.errorMessage" class="mt-2 max-w-xs">
+            <p class="text-xs text-destructive line-clamp-2" :title="doc.errorMessage">
+              {{ doc.errorMessage }}
+            </p>
+          </div>
+
           <!-- 开始解析按钮 -->
           <Button
             v-if="doc.status === 0"

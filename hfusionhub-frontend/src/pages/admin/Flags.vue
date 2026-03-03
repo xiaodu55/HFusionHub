@@ -101,11 +101,11 @@ onMounted(async () => {
 <template>
   <div class="mx-auto max-w-4xl space-y-6 p-6">
     <div>
-      <h1 class="text-2xl font-bold">功能开关管理</h1>
+      <h1 class="text-2xl font-bold">AI 能力配置说明</h1>
       <p class="mt-1 text-muted-foreground">
-        当前状态仅展示配置文档中的默认值。要修改开关，请编辑
+        以下展示当前 AI 能力的配置状态。要修改开关，请编辑
         <code class="rounded bg-muted px-1 py-0.5 text-sm">python-ai/.env</code>
-        并重启 Python AI 服务。
+        并重启 Python AI 服务。动态开关功能（数据库驱动、无需重启）将在后续版本提供。
       </p>
     </div>
 

@@ -259,27 +259,29 @@ onMounted(async () => {
     </div>
 
     <div class="grid gap-6 xl:grid-cols-2">
-      <Card>
-        <CardHeader><CardTitle class="flex items-center gap-2"><TrendingUp class="h-5 w-5" />{{ trendDays }} 日检索趋势</CardTitle><CardDescription>按天观察请求量、命中率、失败次数与平均耗时。</CardDescription></CardHeader>
-        <CardContent>
-          <div class="mb-4 flex gap-2">
-            <Button
-              v-for="days in [7, 14, 30]"
-              :key="days"
-              size="sm"
-              :variant="trendDays === days ? 'default' : 'outline'"
-              :disabled="!selectedKnowledgeBaseId"
-              @click="trendDays = days; refreshStats()"
-            >
-              {{ days }} 天
-            </Button>
-          </div>
-          <div class="space-y-3">
-            <div v-for="metric in stats.daily_metrics" :key="metric.date" class="grid grid-cols-[72px_1fr_auto] items-center gap-3 text-xs">
-              <span class="text-muted-foreground">{{ metric.date.slice(5) }}</span>
-              <div class="h-2 overflow-hidden rounded-full bg-muted"><div class="h-full rounded-full bg-blue-500" :style="{ width: `${(metric.total_traces / maxDailyTotal) * 100}%` }" /></div>
-              <span class="whitespace-nowrap">{{ metric.total_traces }} 次 · {{ Math.round(metric.hit_rate * 100) }}% 命中 · {{ metric.failed_traces }} 失败</span>
+      <Card class="h-[22rem] flex flex-col">
+        <CardHeader class="shrink-0"><CardTitle class="flex items-center gap-2"><TrendingUp class="h-5 w-5" />{{ trendDays }} 日检索趋势</CardTitle><CardDescription>请求量 · 命中率 · 失败次数 · 平均耗时</CardDescription></CardHeader>
+        <CardContent class="flex-1 flex flex-col">
+          <div class="mb-3 flex items-center justify-between gap-2">
+            <div class="flex gap-1">
+              <Button v-for="days in [7, 14, 30]" :key="days" size="sm" :variant="trendDays === days ? 'default' : 'outline'" :disabled="!selectedKnowledgeBaseId" class="h-7 px-3 text-xs" @click="trendDays = days; refreshStats()">{{ days }}天</Button>
             </div>
+            <div class="flex gap-3 text-xs text-muted-foreground">
+              <span>总 {{ stats.total_traces }} 次</span>
+              <span>命中 {{ hitRatePercent }}</span>
+              <span>失败 {{ stats.failed_traces }}</span>
+            </div>
+          </div>
+          <!-- Fixed-height mini bar chart -->
+          <div v-if="stats.daily_metrics.length === 0" class="flex-1 flex items-center justify-center text-sm text-muted-foreground">暂无 RAG 观测数据，选择知识库后发送消息即可生成趋势</div>
+          <div v-else class="flex-1 flex items-end gap-0.5 overflow-hidden min-h-0">
+            <div v-for="metric in stats.daily_metrics" :key="metric.date" class="flex-1 flex flex-col items-center justify-end min-w-0" :title="`${metric.date}: ${metric.total_traces}次, ${Math.round(metric.hit_rate*100)}%命中`">
+              <div class="w-full max-w-[3rem] rounded-t-sm transition-all" :class="metric.failed_traces > metric.total_traces * 0.3 ? 'bg-red-400' : 'bg-blue-400'" :style="{ height: `${Math.max(4, (metric.total_traces / maxDailyTotal) * 100)}%` }" />
+            </div>
+          </div>
+          <div v-if="stats.daily_metrics.length > 0" class="mt-1 flex justify-between text-[10px] text-muted-foreground shrink-0">
+            <span>{{ stats.daily_metrics[0]?.date?.slice(5) }}</span>
+            <span>{{ stats.daily_metrics[stats.daily_metrics.length-1]?.date?.slice(5) }}</span>
           </div>
         </CardContent>
       </Card>
@@ -360,14 +362,20 @@ onMounted(async () => {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader><CardTitle>检索详情</CardTitle><CardDescription>路由策略、候选来源与片段预览。</CardDescription></CardHeader>
-        <CardContent>
-          <div v-if="!selectedTrace" class="py-8 text-center text-muted-foreground">请选择左侧的一条检索记录。</div>
-          <div v-else class="space-y-4">
-            <div class="rounded-lg bg-muted p-3 text-sm"><strong>路由：</strong>{{ selectedTrace.routes.map(route => `${route.query_type || 'general'} / ${route.strategy || 'adaptive'}`).join('，') }}<br><strong>重写次数：</strong>{{ selectedTrace.rewrite_count }} · <strong>Top K：</strong>{{ selectedTrace.top_k }}<br><strong>时间：</strong>{{ selectedTrace.created_at }}</div>
+      <Card class="flex flex-col max-h-[32rem]">
+        <CardHeader class="shrink-0"><CardTitle>检索详情</CardTitle><CardDescription>路由策略、候选来源与片段预览。</CardDescription></CardHeader>
+        <CardContent class="flex-1 overflow-y-auto min-h-0">
+          <div v-if="!selectedTrace" class="py-12 text-center text-muted-foreground">请选择左侧的一条检索记录。</div>
+          <div v-else class="space-y-3">
+            <div class="rounded-lg bg-muted p-3 text-sm space-y-1">
+              <div><strong>路由：</strong>{{ selectedTrace.routes.map(route => `${route.query_type || 'general'} / ${route.strategy || 'adaptive'}`).join('，') }}</div>
+              <div><strong>重写：</strong>{{ selectedTrace.rewrite_count }}次 · <strong>TopK：</strong>{{ selectedTrace.top_k }} · <strong>耗时：</strong>{{ selectedTrace.latency_ms }}ms</div>
+            </div>
             <div v-if="selectedTrace.error" class="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"><strong>错误：</strong>{{ selectedTrace.error }}</div>
-            <div v-for="(result, index) in selectedTrace.results" :key="`${result.document_id}-${index}`" class="rounded-lg border p-3"><div class="flex justify-between gap-3 text-sm"><span class="font-medium">文档 {{ result.document_id ?? '图谱实体' }}</span><span class="text-muted-foreground">{{ result.source }} · {{ result.score.toFixed(4) }}</span></div><p class="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{{ result.content_preview }}</p></div>
+            <div v-for="(result, index) in selectedTrace.results" :key="`${result.document_id}-${index}`" class="rounded-lg border p-3">
+              <div class="flex justify-between gap-3 text-sm"><span class="font-medium truncate">{{ (result as any).document_name || `文档 ${result.document_id ?? '图谱实体'}` }}</span><span class="shrink-0 text-muted-foreground">{{ result.source }} · {{ result.score.toFixed(3) }}</span></div>
+              <p class="mt-1 text-sm text-muted-foreground line-clamp-3">{{ result.content_preview }}</p>
+            </div>
           </div>
         </CardContent>
       </Card>
