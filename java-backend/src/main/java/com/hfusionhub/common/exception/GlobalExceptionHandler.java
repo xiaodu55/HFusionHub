@@ -37,13 +37,26 @@ public class GlobalExceptionHandler {
     }
 
     private HttpStatus resolveBusinessHttpStatus(int code) {
+        // 标准 HTTP 状态码直接映射
         if (code >= 400 && code < 600) {
             HttpStatus status = HttpStatus.resolve(code);
             if (status != null) {
                 return status;
             }
         }
+        // 业务层 NOT_FOUND 系列（分块、文档、知识库等）映射为 HTTP 404
+        if (isNotFoundCode(code)) {
+            return HttpStatus.NOT_FOUND;
+        }
         return HttpStatus.BAD_REQUEST;
+    }
+
+    /**
+     * 判断业务错误码是否对应 HTTP 404 语义。
+     * 范围规则：4xxx 系列中个位为 1 的错误码（4001, 4101, 4201...）表示"资源不存在"。
+     */
+    private boolean isNotFoundCode(int code) {
+        return code >= 4000 && code < 5000 && code % 10 == 1;
     }
 
     /**

@@ -1,5 +1,7 @@
 package com.hfusionhub.service;
 
+import com.hfusionhub.dto.ChunkDTO;
+import com.hfusionhub.dto.ChunkPageDTO;
 import com.hfusionhub.dto.DocumentIndexCallbackDTO;
 
 /**
@@ -24,17 +26,20 @@ public interface VectorizationService {
      * @param page       页码
      * @param size       每页大小
      * @param blockType  块类型筛选（可选）
-     * @return 分块列表JSON
+     * @return 分页分块列表
      */
-    String getDocumentChunks(Long documentId, Integer page, Integer size, String blockType);
+    ChunkPageDTO getDocumentChunks(Long documentId, Integer page, Integer size, String blockType);
 
     /**
-     * 获取单个分块详情
+     * 获取单个分块详情。
+     *
+     * <p>分块不存在时抛出 {@code BusinessException(StatusCode.CHUNK_NOT_FOUND)}，
+     * 由 {@link com.hfusionhub.common.exception.GlobalExceptionHandler} 转换为 HTTP 404。</p>
      *
      * @param chunkId 分块ID
-     * @return 分块详情JSON
+     * @return 分块详情
      */
-    String getChunkDetail(String chunkId);
+    ChunkDTO getChunkDetail(String chunkId);
 
     /**
      * 回调：更新文档处理状态

@@ -103,3 +103,153 @@ def test_rrf_rank_does_not_bypass_the_evidence_threshold():
     ])
 
     assert [result.document_id for result in results] == ["1"]
+
+
+# ---- 后处理回归：输出约束剥离 + 跨通道互认 + 短查询降门槛 ----
+
+
+def test_output_constraint_stripped_from_query_terms():
+    """格式指令不应参与查询覆盖率计算。"""
+    processor = Postprocessor(min_score=0.0)
+
+    # 模拟：输出格式指令 + 实际查询内容
+    results, decisions = processor.process_with_debug(
+        [
+            {
+                "content": "The test token is 1785288404409",
+                "score": 0.72,
+                "document_id": "1",
+                "source": "vector",
+                "metadata": {"chunk_id": "4_chunk_0000", "evidence_score": 0.72},
+            }
+        ],
+        query="exact number answer only the test token",
+    )
+
+    accepted_ids = [d["chunk_id"] for d in decisions if d["decision"] != "filtered_query_mismatch"]
+    assert "4_chunk_0000" in accepted_ids, (
+        f"应通过（输出约束已剥离），实际决策: {decisions}"
+    )
+
+
+def test_cross_channel_corroboration_bypasses_query_coverage():
+    """向量+关键词双通道命中 → 跨通道互认绕过覆盖率（覆盖率本应失败时）。"""
+    processor = Postprocessor(min_score=0.0, strong_evidence_score=0.85)
+
+    content = "The test token is 1785288404409"
+    chunk_metadata = {"chunk_id": "4_chunk_0000", "evidence_score": 0.5}
+
+    # 查询中包含不会匹配 chunk 的非输出词，确保覆盖率本应失败
+    results, decisions = processor.process_with_debug(
+        [
+            {
+                "content": content,
+                "score": 0.5,
+                "document_id": "1",
+                "source": "vector",
+                "metadata": chunk_metadata,
+            },
+            {
+                "content": content,
+                "score": 0.4,
+                "document_id": "1",
+                "source": "keyword",
+                "metadata": chunk_metadata,
+            },
+        ],
+        query="python framework architecture design pattern deployment",
+    )
+
+    accepted = [d for d in decisions if d["decision"] not in ("filtered_low_evidence", "filtered_query_mismatch")]
+    assert len(accepted) >= 1, (
+        f"双通道命中应有跨通道互认通过，实际决策: {decisions}"
+    )
+    bypass_reasons = {d.get("bypass_reason", "") for d in accepted if "bypass_reason" in d}
+    assert "cross_channel_corroboration" in bypass_reasons, (
+        f"应包含跨通道互认标记，实际理由: {bypass_reasons}"
+    )
+
+
+def test_short_query_lenient_coverage():
+    """短查询（≤3 词）应使用更宽松的覆盖率阈值。"""
+    processor = Postprocessor(min_score=0.0)
+
+    # Query 只有 3 个有效词，但 content 只匹配 1 个 → 覆盖 0.33 ≥ 新阈值 0.33
+    results, decisions = processor.process_with_debug(
+        [
+            {
+                "content": "token is 1785288404409",
+                "score": 0.6,
+                "document_id": "1",
+                "source": "vector",
+                "metadata": {"chunk_id": "chunk_1", "evidence_score": 0.6},
+            }
+        ],
+        query="document test token",
+    )
+
+    accepted = [d for d in decisions if d["decision"] not in ("filtered_low_evidence", "filtered_query_mismatch")]
+    assert len(accepted) == 1, (
+        f"短查询应通过，实际决策: {decisions}"
+    )
+
+
+def test_exact_token_number_preserved_after_output_stripping():
+    """核心回归：指定 token 数字的查询 → 分块通过，不被 postprocessor 过滤。"""
+    processor = Postprocessor(min_score=0.35)
+
+    content = "The test token is 1785288404409"
+    chunk_metadata = {"chunk_id": "4_chunk_0000", "evidence_score": 0.72}
+
+    results, decisions = processor.process_with_debug(
+        [
+            {
+                "content": content,
+                "score": 0.72,
+                "document_id": "1",
+                "source": "vector",
+                "metadata": chunk_metadata,
+            },
+            {
+                "content": content,
+                "score": 0.45,
+                "document_id": "1",
+                "source": "keyword",
+                "metadata": chunk_metadata,
+            },
+        ],
+        query="Answer only the number. What is the test token in the document?",
+    )
+
+    accepted = [d for d in decisions if d["decision"] not in ("filtered_low_evidence", "filtered_query_mismatch")]
+    assert len(accepted) >= 1, (
+        f"token 精确查询应通过后处理，实际决策: {decisions}"
+    )
+    # 验证分块内容完整保留
+    assert results and results[0].content == content
+
+
+def test_strong_evidence_bypasses_coverage():
+    """强通道分数（≥0.65）应绕过查询覆盖率。"""
+    processor = Postprocessor(min_score=0.0, strong_evidence_score=0.65)
+
+    results, decisions = processor.process_with_debug(
+        [
+            {
+                "content": "1785288404409",
+                "score": 0.90,
+                "document_id": "1",
+                "source": "vector",
+                "metadata": {"chunk_id": "chunk_s", "evidence_score": 0.90},
+            }
+        ],
+        query="some unrelated words that do not match anything here at all",
+    )
+
+    accepted = [d for d in decisions if d["decision"] not in ("filtered_low_evidence", "filtered_query_mismatch")]
+    assert len(accepted) == 1, (
+        f"强证据分应绕过覆盖率，实际决策: {decisions}"
+    )
+    assert any(
+        d.get("bypass_reason") == "strong_channel_score" for d in accepted
+    ), f"缺少 strong_channel_score 标记: {decisions}"

@@ -30,4 +30,15 @@ public interface DocumentChunkMapper extends BaseMapper<DocumentChunk> {
             "<if test='blockType != null and blockType != \"\"'> AND block_type = #{blockType}</if>",
             "</script>"})
     long countByDocumentId(@Param("documentId") Long documentId, @Param("blockType") String blockType);
+
+    /**
+     * 按分块主键精确查询。
+     *
+     * <p>显式 SQL 避免依赖 MyBatis Plus {@code selectById} 的隐式映射，
+     * 同时为后续 DBA 优化（索引提示、分区裁剪）留下锚点。</p>
+     */
+    @Select("SELECT chunk_id, document_id, knowledge_base_id, index_version, "
+            + "chunk_index, block_type, outline_path, content_excerpt, char_count, metadata "
+            + "FROM document_chunk WHERE chunk_id = #{chunkId}")
+    DocumentChunk selectByChunkId(@Param("chunkId") String chunkId);
 }

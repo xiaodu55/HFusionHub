@@ -6,6 +6,8 @@ import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
+import com.hfusionhub.dto.ChunkDTO;
+import com.hfusionhub.dto.ChunkPageDTO;
 import com.hfusionhub.dto.DocumentChunkCallbackDTO;
 import com.hfusionhub.dto.DocumentIndexCallbackDTO;
 import com.hfusionhub.entity.Document;
@@ -141,56 +143,55 @@ public class VectorizationServiceImpl implements VectorizationService {
     }
 
     @Override
-    public String getDocumentChunks(Long documentId, Integer page, Integer size, String blockType) {
+    public ChunkPageDTO getDocumentChunks(Long documentId, Integer page, Integer size, String blockType) {
+        assertDocumentOwnerWhenUserRequest(requireDocument(documentId));
+        int safePage = page == null || page < 1 ? 1 : page;
+        int safeSize = size == null || size < 1 ? 20 : Math.min(size, 100);
+
+        // Prefer durable metadata over legacy Python fallback
+        long persistedCount = documentChunkMapper.countByDocumentId(documentId, blockType);
+        if (persistedCount > 0) {
+            List<DocumentChunk> chunks = documentChunkMapper.selectPageByDocumentId(
+                    documentId, (safePage - 1) * safeSize, safeSize, blockType);
+            return ChunkPageDTO.builder()
+                    .documentId(documentId)
+                    .totalChunks(persistedCount)
+                    .chunks(chunks.stream().map(this::toChunkDTO).toList())
+                    .build();
+        }
+
+        // Legacy documents created before V2 have no durable metadata yet.
+        // Keep the old Python route as a temporary read fallback until they
+        // are re-indexed.
+        String url = pythonEngineUrl + "/api/chunks/" + documentId
+                + "?page=" + safePage
+                + "&size=" + safeSize;
+
+        if (blockType != null && !blockType.isEmpty()) {
+            url += "&block_type=" + blockType;
+        }
+
         try {
-            assertDocumentOwnerWhenUserRequest(requireDocument(documentId));
-            int safePage = page == null || page < 1 ? 1 : page;
-            int safeSize = size == null || size < 1 ? 20 : Math.min(size, 100);
-            long persistedCount = documentChunkMapper.countByDocumentId(documentId, blockType);
-            if (persistedCount > 0) {
-                List<DocumentChunk> chunks = documentChunkMapper.selectPageByDocumentId(
-                        documentId, (safePage - 1) * safeSize, safeSize, blockType);
-                Map<String, Object> response = new HashMap<>();
-                response.put("success", true);
-                response.put("document_id", String.valueOf(documentId));
-                response.put("total_chunks", persistedCount);
-                response.put("chunks", chunks.stream().map(this::toChunkResponse).toList());
-                return objectMapper.writeValueAsString(response);
-            }
-
-            // Legacy documents created before V2 have no durable metadata yet.
-            // Keep the old Python route as a temporary read fallback until they
-            // are re-indexed.
-            String url = pythonEngineUrl + "/api/chunks/" + documentId
-                    + "?page=" + safePage
-                    + "&size=" + safeSize;
-
-            if (blockType != null && !blockType.isEmpty()) {
-                url += "&block_type=" + blockType;
-            }
-
             ResponseEntity<String> response = restTemplate.exchange(
                     url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), String.class);
-            return response.getBody();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> legacy = objectMapper.readValue(response.getBody(), Map.class);
+            return legacyChunkPageFromPython(legacy, documentId);
         } catch (Exception e) {
-            log.error("获取分块列表失败", e);
-            return "{\"code\":500,\"error\":\"获取分块列表失败\"}";
+            log.error("获取分块列表失败: documentId={}", documentId, e);
+            throw new BusinessException("获取分块列表失败");
         }
     }
 
     @Override
-    public String getChunkDetail(String chunkId) {
-        try {
-            DocumentChunk persistedChunk = documentChunkMapper.selectById(chunkId);
-            if (persistedChunk != null) {
-                assertDocumentOwnerWhenUserRequest(requireDocument(persistedChunk.getDocumentId()));
-                return objectMapper.writeValueAsString(toChunkResponse(persistedChunk));
-            }
-            throw new BusinessException("分块不存在；请重新索引旧文档后重试");
-        } catch (Exception e) {
-            log.error("获取分块详情失败", e);
-            return "{\"code\":500,\"error\":\"获取分块详情失败\"}";
+    public ChunkDTO getChunkDetail(String chunkId) {
+        // 显式 SQL，不依赖 MyBatis Plus 隐式映射
+        DocumentChunk persistedChunk = documentChunkMapper.selectByChunkId(chunkId);
+        if (persistedChunk == null) {
+            throw new BusinessException(StatusCode.CHUNK_NOT_FOUND, "分块不存在");
         }
+        assertDocumentOwnerWhenUserRequest(requireDocument(persistedChunk.getDocumentId()));
+        return toChunkDTO(persistedChunk);
     }
 
     @Override
@@ -784,17 +785,103 @@ public class VectorizationServiceImpl implements VectorizationService {
         }
     }
 
+    private ChunkDTO toChunkDTO(DocumentChunk chunk) {
+        return ChunkDTO.builder()
+                .chunkId(chunk.getChunkId())
+                .documentId(chunk.getDocumentId())
+                .index(chunk.getChunkIndex())
+                .content(chunk.getContentExcerpt())
+                .blockType(chunk.getBlockType())
+                .outlinePath(fromJsonList(chunk.getOutlinePath()))
+                .metadata(fromJsonMap(chunk.getMetadata()))
+                .build();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> fromJsonList(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(value, List.class);
+        } catch (JsonProcessingException e) {
+            return List.of();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> fromJsonMap(String value) {
+        if (value == null || value.isBlank()) {
+            return Collections.emptyMap();
+        }
+        try {
+            return objectMapper.readValue(value, Map.class);
+        } catch (JsonProcessingException e) {
+            return Collections.emptyMap();
+        }
+    }
+
+    /**
+     * 将 Python 引擎返回的旧版分块 JSON 转为 {@link ChunkPageDTO}。
+     * 仅用于未迁移到 V2 durable metadata 的遗留文档。
+     */
+    @SuppressWarnings("unchecked")
+    private ChunkPageDTO legacyChunkPageFromPython(Map<String, Object> legacy, Long documentId) {
+        Object chunksNode = legacy.get("chunks");
+        List<ChunkDTO> chunks = List.of();
+        if (chunksNode instanceof List<?> raw) {
+            chunks = raw.stream()
+                    .filter(Map.class::isInstance)
+                    .map(item -> (Map<String, Object>) item)
+                    .map(this::legacyChunkFromPythonItem)
+                    .toList();
+        }
+        long total = chunks.size();
+        if (legacy.get("total_chunks") instanceof Number n) {
+            total = n.longValue();
+        }
+        return ChunkPageDTO.builder()
+                .documentId(documentId)
+                .totalChunks(total)
+                .chunks(chunks)
+                .build();
+    }
+
+    private ChunkDTO legacyChunkFromPythonItem(Map<String, Object> item) {
+        return ChunkDTO.builder()
+                .chunkId(safeString(item.get("chunk_id")))
+                .index(safeInt(item.get("index")))
+                .content(safeString(item.get("content")))
+                .blockType(safeString(item.get("block_type")))
+                .build();
+    }
+
+    private String safeString(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private Integer safeInt(Object value) {
+        if (value instanceof Number n) {
+            return n.intValue();
+        }
+        return null;
+    }
+
+    /** @deprecated replaced by {@link #toChunkDTO(DocumentChunk)} with typed DTO output */
+    @Deprecated
     private Map<String, Object> toChunkResponse(DocumentChunk chunk) {
         Map<String, Object> response = new HashMap<>();
         response.put("chunk_id", chunk.getChunkId());
         response.put("index", chunk.getChunkIndex());
         response.put("content", chunk.getContentExcerpt());
         response.put("block_type", chunk.getBlockType());
-        response.put("outline_path", fromJson(chunk.getOutlinePath()));
-        response.put("metadata", fromJson(chunk.getMetadata()));
+        response.put("outline_path", fromJsonList(chunk.getOutlinePath()));
+        response.put("metadata", fromJsonMap(chunk.getMetadata()));
         return response;
     }
 
+    /** @deprecated replaced by {@link #fromJsonList(String)} and {@link #fromJsonMap(String)} */
+    @Deprecated
     private Object fromJson(String value) {
         if (value == null || value.isBlank()) {
             return Collections.emptyMap();

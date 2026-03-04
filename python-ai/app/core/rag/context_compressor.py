@@ -37,6 +37,12 @@ from .utils import (
 from .cache import CacheManager, compression_cache
 from .base import BaseCompressionStrategy
 
+# ---- Compression guard thresholds ----
+# Tokens below this threshold == skip compression entirely
+_MIN_COMPRESSION_TOKENS = 300
+# Characters below this threshold == skip compression entirely (rough CJK equivalent)
+_MIN_COMPRESSION_CHARS = 600
+
 
 # ==================== 枚举定义 ====================
 
@@ -189,6 +195,20 @@ class ExtractiveCompressionStrategy(BaseCompressionStrategy):
         # 估算 token 数
         original_tokens = self.estimate_tokens(text)
 
+        # ---- 短文本保护：低于阈值不压缩，避免丢失关键事实 ----
+        if original_tokens < _MIN_COMPRESSION_TOKENS or len(text) < _MIN_COMPRESSION_CHARS:
+            key_phrases = self._extract_key_phrases(text)
+            return CompressionResult(
+                original_text=text,
+                compressed_text=text,
+                original_tokens=original_tokens,
+                compressed_tokens=original_tokens,
+                compression_ratio=1.0,
+                strategy_used=self.name,
+                key_phrases=key_phrases,
+                status=CompressionStatus.COMPLETED,
+            )
+
         # 分句
         sentences = self._split_sentences(text)
         if not sentences:
@@ -250,33 +270,71 @@ class ExtractiveCompressionStrategy(BaseCompressionStrategy):
         """分句"""
         return split_sentences(text, min_length=2)
 
+    # Patterns that indicate factual density — sentences matching these carry
+    # evidence the model needs and must not be dropped by compression.
+    _FACT_PATTERNS: list[re.Pattern] = [
+        re.compile(p, re.UNICODE)
+        for p in [
+            # Numbers with units (42%, ¥100, 3.14, 1,000 万)
+            r'\d+(?:[,.]\d+)?\s*(?:%|万|亿|元|美元|欧元|日元|英镑|港币|k|K|M|B|tokens?|ms|s|MB|GB|KB|TB)',
+            # Numeric ranges or values (>=5, 30-50, +15%)
+            r'[>=<]\s*\d+|[+\-]\d+[%％]|\d+\s*[-—]\s*\d+',
+            # Dates and times (2024年, 2024-01-15, Q1, 12月)
+            r'\d{4}\s*[年/\-]\s*\d{1,2}\s*[月/\-]|\bQ[1-4]\b|\d{1,2}\s*月',
+            # Code / technical tokens
+            r'\b(function|class|def|import|from|return|SELECT|WHERE|INSERT|UPDATE)\b',
+            r'`[^`]+`|```|@\w+|#\w+',
+            # Proper nouns: Chinese person/organization names
+            r'[一-鿿]{2,4}(?:公司|集团|大学|医院|银行|基金|部门|委员会|平台|系统|模型|算法)',
+            # English proper nouns
+            r'\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b|\b[A-Z]{2,}\b',
+            # Key evidence markers
+            r'(?:关键|重要|核心|结论|发现|根据|数据|显示|表明|证明|证实|结果|统计|报告)',
+            r'(?:得分|排名|增长|下降|提升|降低|占比|达到|突破|超过|低于|高于)',
+        ]
+    ]
+
+    @classmethod
+    def _factual_density_score(cls, sentence: str) -> float:
+        """Score a sentence by how many distinct fact-pattern categories it matches.
+
+        Returns a value in [0, 1]; higher means the sentence is denser in
+        numbers, dates, code, proper nouns and evidence markers.
+        """
+        if not sentence:
+            return 0.0
+        matched = 0
+        for pattern in cls._FACT_PATTERNS:
+            if pattern.search(sentence):
+                matched += 1
+        return min(1.0, matched / max(len(cls._FACT_PATTERNS) * 0.5, 1))
+
     def _calculate_sentence_scores(
         self,
         sentences: List[str],
         full_text: str
     ) -> List[float]:
         """
-        计算句子重要性得分
+        计算句子重要性得分。
 
-        使用简化版 TextRank：
-        1. 句子长度得分
-        2. 关键词匹配得分
-        3. 位置得分（开头和结尾更重要）
+        Weight breakdown (evidence-first):
+        - factual density  — 0.50  (numbers, dates, code, proper nouns, evidence markers)
+        - length            — 0.20  (longer sentences typically carry more info)
+        - position          — 0.15  (opening / closing sentences set context)
+        - keyword overlap   — 0.15  (overlap with key phrases in full text)
         """
         scores = []
-        total_length = len(full_text)
+        max_len = max((len(s) for s in sentences), default=1)
+        key_phrases = self._extract_key_phrases(full_text)
 
         for i, sentence in enumerate(sentences):
-            # 1. 句子长度得分（越长越重要）
-            length_score = len(sentence) / max(len(s) for s in sentences) if sentences else 0
+            # 1. Factual density (dominant weight — evidence must survive)
+            fact_score = self._factual_density_score(sentence)
 
-            # 2. 关键词匹配得分（匹配问号、数字、专业术语等）
-            keyword_patterns = [r'\d+', r'[A-Z][a-z]+', r'？', r'是', r'为']
-            keyword_score = sum(
-                1 for p in keyword_patterns if re.search(p, sentence)
-            ) / len(keyword_patterns)
+            # 2. Length score
+            length_score = len(sentence) / max_len
 
-            # 3. 位置得分（开头和结尾更重要）
+            # 3. Position score
             if i == 0:
                 position_score = 1.0
             elif i == len(sentences) - 1:
@@ -284,11 +342,17 @@ class ExtractiveCompressionStrategy(BaseCompressionStrategy):
             else:
                 position_score = 0.5
 
-            # 综合得分
+            # 4. Keyword overlap with the full text key phrases
+            kw_overlap = 0.0
+            if key_phrases:
+                hits = sum(1 for kw in key_phrases if kw in sentence)
+                kw_overlap = min(1.0, hits / max(len(key_phrases), 1))
+
             total_score = (
-                length_score * 0.4 +
-                keyword_score * 0.3 +
-                position_score * 0.3
+                fact_score * 0.50 +
+                length_score * 0.20 +
+                position_score * 0.15 +
+                kw_overlap * 0.15
             )
             scores.append(total_score)
 

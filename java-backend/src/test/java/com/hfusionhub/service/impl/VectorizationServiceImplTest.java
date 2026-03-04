@@ -2,11 +2,14 @@ package com.hfusionhub.service.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
+import com.hfusionhub.dto.ChunkDTO;
 import com.hfusionhub.dto.DocumentChunkCallbackDTO;
 import com.hfusionhub.dto.DocumentIndexCallbackDTO;
 import com.hfusionhub.entity.Document;
+import com.hfusionhub.entity.DocumentChunk;
 import com.hfusionhub.entity.DocumentIndexJob;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.enums.DocumentStatus;
@@ -33,6 +36,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -287,6 +291,101 @@ class VectorizationServiceImplTest {
         assertEquals("{\"page\":3}", captor.getValue().getMetadata());
     }
 
+    // -------------------- 分块详情 --------------------
+
+    @Test
+    void getChunkDetailReturnsTypedDTOWhenChunkExists() {
+        Document document = ownedDocument(DocumentStatus.COMPLETED);
+        DocumentChunk persistedChunk = persistedChunk("chunk-a1", 10L, 0, "text", "Key finding: the revenue grew by 42%");
+        persistedChunk.setOutlinePath("[\"Summary\"]");
+        persistedChunk.setMetadata("{\"tokens\": 128}");
+        when(documentChunkMapper.selectByChunkId("chunk-a1")).thenReturn(persistedChunk);
+        when(documentMapper.selectById(10L)).thenReturn(document);
+        when(knowledgeBaseMapper.selectById(20L)).thenReturn(ownedKnowledgeBase());
+
+        ChunkDTO result = vectorizationService.getChunkDetail("chunk-a1");
+
+        assertEquals("chunk-a1", result.getChunkId());
+        assertEquals(10L, result.getDocumentId());
+        assertEquals(0, result.getIndex());
+        assertEquals("text", result.getBlockType());
+        assertEquals("Key finding: the revenue grew by 42%", result.getContent());
+        assertEquals(List.of("Summary"), result.getOutlinePath());
+        assertEquals(Map.of("tokens", 128), result.getMetadata());
+    }
+
+    @Test
+    void getChunkDetailThrowsNotFoundWhenChunkMissing() {
+        when(documentChunkMapper.selectByChunkId("nonexistent")).thenReturn(null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> vectorizationService.getChunkDetail("nonexistent"));
+
+        assertEquals(StatusCode.CHUNK_NOT_FOUND, ex.getCode());
+        assertEquals("分块不存在", ex.getMessage());
+    }
+
+    @Test
+    void getChunkDetailValidatesDocumentOwnership() {
+        DocumentChunk persistedChunk = persistedChunk("chunk-a1", 10L, 0, "text", "content");
+        when(documentChunkMapper.selectByChunkId("chunk-a1")).thenReturn(persistedChunk);
+        // Document owned by user 1
+        Document document = ownedDocument(DocumentStatus.COMPLETED);
+        when(documentMapper.selectById(10L)).thenReturn(document);
+        // But the logged-in user is 999 — not the owner
+        KnowledgeBase kb = new KnowledgeBase();
+        kb.setId(20L);
+        kb.setUserId(999L);
+        when(knowledgeBaseMapper.selectById(20L)).thenReturn(kb);
+
+        assertThrows(BusinessException.class,
+                () -> vectorizationService.getChunkDetail("chunk-a1"));
+    }
+
+    @Test
+    void getChunkDetailThrowsWhenDocumentOfChunkIsMissing() {
+        DocumentChunk persistedChunk = persistedChunk("chunk-a1", 99L, 0, "text", "orphan");
+        when(documentChunkMapper.selectByChunkId("chunk-a1")).thenReturn(persistedChunk);
+        when(documentMapper.selectById(99L)).thenReturn(null);
+
+        assertThrows(BusinessException.class,
+                () -> vectorizationService.getChunkDetail("chunk-a1"));
+    }
+
+    @Test
+    void getChunkDetailUsesExplicitSelectByChunkId() {
+        // 验证不依赖 MyBatis Plus selectById
+        Document document = ownedDocument(DocumentStatus.COMPLETED);
+        DocumentChunk persistedChunk = persistedChunk("chunk-b2", 10L, 1, "code", "print('hello')");
+        when(documentChunkMapper.selectByChunkId("chunk-b2")).thenReturn(persistedChunk);
+        when(documentMapper.selectById(10L)).thenReturn(document);
+        when(knowledgeBaseMapper.selectById(20L)).thenReturn(ownedKnowledgeBase());
+
+        ChunkDTO result = vectorizationService.getChunkDetail("chunk-b2");
+
+        assertEquals("chunk-b2", result.getChunkId());
+        assertEquals("code", result.getBlockType());
+        // confirm the explicit mapper method was called, not selectById
+        verify(documentChunkMapper).selectByChunkId("chunk-b2");
+    }
+
+    @Test
+    void getChunkDetailMapsNullMetadataGracefully() {
+        Document document = ownedDocument(DocumentStatus.COMPLETED);
+        DocumentChunk persistedChunk = persistedChunk("chunk-c3", 10L, 2, "text", "minimal chunk");
+        persistedChunk.setOutlinePath(null);
+        persistedChunk.setMetadata(null);
+        when(documentChunkMapper.selectByChunkId("chunk-c3")).thenReturn(persistedChunk);
+        when(documentMapper.selectById(10L)).thenReturn(document);
+        when(knowledgeBaseMapper.selectById(20L)).thenReturn(ownedKnowledgeBase());
+
+        ChunkDTO result = vectorizationService.getChunkDetail("chunk-c3");
+
+        assertEquals("chunk-c3", result.getChunkId());
+        assertEquals(List.of(), result.getOutlinePath());
+        assertEquals(Map.of(), result.getMetadata());
+    }
+
     private Document ownedDocument(DocumentStatus status) {
         Document document = new Document();
         document.setId(10L);
@@ -335,5 +434,21 @@ class VectorizationServiceImplTest {
         chunk.setContentExcerpt("Chunk content");
         chunk.setCharCount(13);
         return chunk;
+    }
+
+    private DocumentChunk persistedChunk(String chunkId, Long documentId, int index,
+                                         String blockType, String contentExcerpt) {
+        DocumentChunk entity = new DocumentChunk();
+        entity.setChunkId(chunkId);
+        entity.setDocumentId(documentId);
+        entity.setKnowledgeBaseId(20L);
+        entity.setIndexVersion("v1");
+        entity.setChunkIndex(index);
+        entity.setBlockType(blockType);
+        entity.setContentExcerpt(contentExcerpt);
+        entity.setCharCount(contentExcerpt.length());
+        entity.setOutlinePath("[]");
+        entity.setMetadata("{}");
+        return entity;
     }
 }

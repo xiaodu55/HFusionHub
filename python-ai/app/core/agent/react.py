@@ -35,6 +35,19 @@ logger = logging.getLogger(__name__)
 
 NO_SUFFICIENT_EVIDENCE_REPLY = "我在当前知识库中未检索到足够依据，无法基于资料回答这个问题。"
 
+# ---- Evidence integrity constants ----
+# If the compressed context drops below this fraction of the original token
+# count while the original had meaningful content, suspect over-compression.
+_MIN_COMPRESSION_SAFETY_RATIO = 0.25
+# Phrases that signal the model did NOT find usable evidence -- used by the
+# post-answer groundedness check.
+_GROUNDLESS_MARKERS = [
+    "未检索到足够依据", "未检索到依据", "证据不足", "无法基于资料",
+    "未找到相关", "没有相关信息", "资料中未提及", "资料中未包含",
+    "no sufficient evidence", "insufficient evidence", "not found in",
+    "cannot answer based on", "does not contain", "does not mention",
+]
+
 
 # System prompt for ReAct agent
 REACT_SYSTEM_PROMPT = """你是一个智能助手，能够使用工具来回答问题。
@@ -285,6 +298,71 @@ class ReactAgent(Agent):
             logger.error(f"RAG retrieval failed: {e}")
             return "", [], self.knowledge_base_id
 
+    async def _safe_compress(
+        self,
+        rag_context: str,
+        target_ratio: float = 0.6,
+    ) -> tuple[str, bool]:
+        """Compress retrieval context with evidence-integrity guard.
+
+        Returns ``(compressed_text, was_compressed)``.  When the context is
+        already short or compression would destroy critical evidence,
+        the original text is returned unchanged.
+        """
+        if not rag_context:
+            return rag_context, False
+
+        compressor = get_compressor(CompressionStrategyType.EXTRACTIVE)
+        result = await compressor.compress(
+            rag_context,
+            CompressionConfig(target_ratio=target_ratio),
+        )
+
+        # If the compressor already chose not to compress (short-text guard),
+        # trust its judgement.
+        if result.compressed_text == rag_context:
+            logger.info(
+                "[RAG] Compression skipped: context below minimum threshold "
+                f"({result.original_tokens} tokens)"
+            )
+            return rag_context, False
+
+        # Safety valve: if compression dropped below the safety ratio and the
+        # original had substantial content, keep the original.
+        if (result.compression_ratio < _MIN_COMPRESSION_SAFETY_RATIO
+                and result.original_tokens > 500):
+            logger.warning(
+                f"[RAG] Compression over-aggressive "
+                f"({result.original_tokens} -> {result.compressed_tokens} tokens, "
+                f"ratio {result.compression_ratio:.2f}); falling back to original"
+            )
+            return rag_context, False
+
+        logger.info(
+            f"[RAG] Compressed context: "
+            f"{result.original_tokens} -> {result.compressed_tokens} tokens"
+        )
+        return result.compressed_text, True
+
+    @staticmethod
+    def _is_groundless_answer(answer: str) -> bool:
+        """Return True when the answer text signals the model found no usable evidence."""
+        answer_lower = answer.lower()
+        return any(marker.lower() in answer_lower for marker in _GROUNDLESS_MARKERS)
+
+    @staticmethod
+    def _build_rag_prompt(context: str, query: str) -> str:
+        """Build the evidence-first prompt used by both streaming and non-streaming paths."""
+        return (
+            "请仅根据以下参考资料回答用户问题。"
+            "不要补充资料中没有的信息；若资料不足以支持答案，请明确说明\u201c未检索到足够依据\u201d。\n\n"
+            "【参考资料】\n"
+            f"{context}\n\n"
+            "【用户问题】\n"
+            f"{query}\n\n"
+            "请基于参考资料提供准确回答，并在适用处说明依据。"
+        )
+
     def _parse_action(self, text: str) -> Optional[tuple]:
         """Parse action and action input from text"""
         # Find Action
@@ -436,14 +514,9 @@ class ReactAgent(Agent):
                 sub_question.content, history
             )
 
-            # 压缩检索结果
+            # 安全压缩检索结果
             if rag_context:
-                compressor = get_compressor(CompressionStrategyType.EXTRACTIVE)
-                compression_result = await compressor.compress(
-                    rag_context,
-                    CompressionConfig(target_ratio=0.6)
-                )
-                rag_context = compression_result.compressed_text
+                rag_context, _ = await self._safe_compress(rag_context)
                 logger.info(
                     f"Compressed sub-question context: "
                     f"{compression_result.original_tokens} -> {compression_result.compressed_tokens} tokens"
@@ -561,22 +634,13 @@ class ReactAgent(Agent):
                 messages.append(ChatMessage(role=msg["role"], content=msg["content"]))
 
         # RAG: 检索相关知识
+        # RAG: 检索相关知识
         logger.info(f"[RAG] Starting retrieval for query: {query[:50]}..., knowledge_base_id: {self.knowledge_base_id}")
-        rag_context, rag_sources, auto_detected_kb_id = await self._retrieve_context(query, history, intent_result)
-        logger.info(f"[RAG] Retrieved context length: {len(rag_context)}, sources count: {len(rag_sources)}, auto_detected_kb_id: {auto_detected_kb_id}")
+        raw_context, rag_sources, auto_detected_kb_id = await self._retrieve_context(query, history, intent_result)
+        logger.info(f"[RAG] Retrieved context length: {len(raw_context)}, sources count: {len(rag_sources)}, auto_detected_kb_id: {auto_detected_kb_id}")
 
-        # 压缩检索结果
-        if rag_context:
-            compressor = get_compressor(CompressionStrategyType.EXTRACTIVE)
-            compression_result = await compressor.compress(
-                rag_context,
-                CompressionConfig(target_ratio=0.6)
-            )
-            rag_context = compression_result.compressed_text
-            logger.info(
-                f"Compressed RAG context: "
-                f"{compression_result.original_tokens} -> {compression_result.compressed_tokens} tokens"
-            )
+        # 安全压缩（短文本/过度压缩自动回退到原文）
+        rag_context, was_compressed = await self._safe_compress(raw_context)
 
         if has_selected_kb and not rag_context:
             return AgentResponse(
@@ -590,16 +654,7 @@ class ReactAgent(Agent):
             )
 
         if rag_context:
-            # 将检索到的上下文添加到用户查询中
-            enhanced_query = f"""请仅根据以下参考资料回答用户问题。不要补充资料中没有的信息；若资料不足以支持答案，请明确说明“未检索到足够依据”。
-
-【参考资料】
-{rag_context}
-
-【用户问题】
-{query}
-
-请基于参考资料提供准确回答，并在适用处说明依据。"""
+            enhanced_query = self._build_rag_prompt(rag_context, query)
         else:
             enhanced_query = query
 
@@ -671,6 +726,40 @@ class ReactAgent(Agent):
             source_key = source.get("chunk_id") or f"{source.get('document_id')}:{source.get('content', '')}"
             if source_key not in unique_sources:
                 unique_sources[source_key] = source
+
+        # ---- Groundedness check ----
+        # If retrieval found evidence but the model says "insufficient evidence",
+        # retry once with uncompressed context before giving up.
+        groundedness_failed = False
+        if (has_selected_kb and rag_sources
+                and self._is_groundless_answer(final_answer)
+                and was_compressed):
+            logger.warning(
+                "[RAG] Model returned groundless answer despite non-empty retrieval. "
+                "Retrying with uncompressed context."
+            )
+            try:
+                retry_prompt = self._build_rag_prompt(raw_context, query)
+                retry_messages = [ChatMessage(role="system", content=system_prompt)]
+                if history:
+                    for msg in history[-10:]:
+                        retry_messages.append(ChatMessage(role=msg["role"], content=msg["content"]))
+                retry_messages.append(ChatMessage(role="user", content=retry_prompt))
+                retry_response = await llm.chat(messages=retry_messages, temperature=0.7)
+                retry_text = retry_response.content
+                if not self._is_groundless_answer(retry_text):
+                    final_answer = retry_text
+                    logger.info("[RAG] Groundedness retry succeeded with uncompressed context.")
+                else:
+                    groundedness_failed = True
+                    logger.error(
+                        "[RAG] Groundedness retry also returned groundless answer. "
+                        f"Raw context length: {len(raw_context)}, "
+                        f"sources: {len(rag_sources)}"
+                    )
+            except Exception as retry_err:
+                groundedness_failed = True
+                logger.error(f"[RAG] Groundedness retry failed: {retry_err}")
 
         # 使用 SelfReflector 评估答案质量
         if final_answer and rag_context:
@@ -754,14 +843,13 @@ class ReactAgent(Agent):
                     yield chunk
                 return
 
-            # 检索增强生成
+            # 检索增强生成 — 统一流水线
             context = ""
+            raw_context = ""
             sources = []
-
-            # 获取检索器
+            was_compressed = False
             retriever = get_retriever()
 
-            # A selected knowledge base always uses the evidence-first RAG path.
             if has_selected_kb:
                 try:
                     retrieval_plan = await get_adaptive_retrieval_planner().plan(
@@ -769,7 +857,6 @@ class ReactAgent(Agent):
                         history=history,
                         intent_result=intent_result,
                     )
-                    # Query Decomposition
                     query_decomposer = get_query_decomposer()
                     decomposition_result = await query_decomposer.decompose(query, intent_result, history)
 
@@ -799,27 +886,18 @@ class ReactAgent(Agent):
                                         "metadata": item.metadata or {},
                                     })
 
-                        # 去重
                         seen_contents = set()
                         unique_results = []
                         for r in all_results:
-                            content = r.get("content", "")
-                            if content not in seen_contents:
-                                seen_contents.add(content)
+                            content_val = r.get("content", "")
+                            if content_val not in seen_contents:
+                                seen_contents.add(content_val)
                                 unique_results.append(r)
 
-                        # Context Compression
-                        compressor = get_compressor(CompressionStrategyType.EXTRACTIVE)
-                        rag_context = "\n\n".join([r.get("content", "") for r in unique_results])
-                        if rag_context:
-                            compression_result = await compressor.compress(
-                                rag_context,
-                                CompressionConfig(target_ratio=0.6)
-                            )
-                            context = compression_result.compressed_text
-                            sources = unique_results
+                        raw_context = "\n\n".join([r.get("content", "") for r in unique_results])
+                        context, was_compressed = await self._safe_compress(raw_context)
+                        sources = unique_results
                     else:
-                        # 直接检索
                         result = await retriever.retrieve(
                             query=retrieval_plan.query,
                             knowledge_base_id=self.knowledge_base_id,
@@ -837,36 +915,17 @@ class ReactAgent(Agent):
                                     "outline_path": item.outline_path or [],
                                     "metadata": item.metadata or {},
                                 })
-                            # Context Compression
-                            compressor = get_compressor(CompressionStrategyType.EXTRACTIVE)
-                            rag_context = "\n\n".join([r.get("content", "") for r in results])
-                            if rag_context:
-                                compression_result = await compressor.compress(
-                                    rag_context,
-                                    CompressionConfig(target_ratio=0.6)
-                                )
-                                context = compression_result.compressed_text
-                                sources = results
+                            raw_context = "\n\n".join([r.get("content", "") for r in results])
+                            context, was_compressed = await self._safe_compress(raw_context)
+                            sources = results
                 except Exception as e:
                     logger.error(f"[RAG] Retrieval failed, falling back to direct LLM: {e}", exc_info=True)
-                    # 检索失败，继续使用直接 LLM 模式
 
             if has_selected_kb and not context:
                 yield NO_SUFFICIENT_EVIDENCE_REPLY
                 return
 
-            # 构建提示词
-            if context:
-                prompt = f"""请仅根据以下参考资料回答问题。不要补充资料中没有的信息；若资料不足以支持答案，请明确说明“未检索到足够依据”。
-
-参考资料：
-{context}
-
-用户问题：{query}
-
-请用中文回答，并只陈述可由资料支持的结论。"""
-            else:
-                prompt = query
+            prompt = self._build_rag_prompt(context, query) if context else query
 
             # 使用 LLM 流式生成回答
             llm = get_llm()
@@ -882,31 +941,56 @@ class ReactAgent(Agent):
                 yield chunk
             final_answer = "".join(final_answer_parts)
 
-            # 流式结束后，yield sources 信息（嵌入到 content 中）
+            # ---- Groundedness check (streaming path) ----
+            if (has_selected_kb and sources
+                    and self._is_groundless_answer(final_answer)
+                    and was_compressed
+                    and raw_context):
+                logger.warning(
+                    "[RAG:stream] Model returned groundless answer despite non-empty retrieval. "
+                    "Retrying with uncompressed context."
+                )
+                try:
+                    retry_prompt = self._build_rag_prompt(raw_context, query)
+                    retry_messages = [
+                        ChatMessage(role="system", content="你是一个智能助手，请回答用户的问题。"),
+                        ChatMessage(role="user", content=retry_prompt)
+                    ]
+                    retry_parts: list[str] = []
+                    async for chunk in llm.chat_stream(messages=retry_messages, temperature=0.7, max_tokens=2048):
+                        retry_parts.append(chunk)
+                        yield chunk
+                    retry_text = "".join(retry_parts)
+                    if not self._is_groundless_answer(retry_text):
+                        final_answer = retry_text
+                        logger.info("[RAG:stream] Groundedness retry succeeded.")
+                    else:
+                        logger.error(
+                            "[RAG:stream] Groundedness retry also returned groundless answer. "
+                            f"Raw context length: {len(raw_context)}, "
+                            f"sources: {len(sources)}"
+                        )
+                except Exception as retry_err:
+                    logger.error(f"[RAG:stream] Groundedness retry failed: {retry_err}")
+
+            # 流式结束后，yield sources 信息
             if sources:
-                # 格式化 sources 以便前端显示
-                formatted_sources = []
-                for s in sources:
-                    metadata = s.get("metadata", {}) or {}
-                    document_id = s.get("document_id")
-                    document_name = metadata.get("document_title") or f"文档 #{document_id}"
-                    formatted_sources.append({
-                        "document_id": document_id,
-                        "chunk_id": s.get("chunk_id") or metadata.get("chunk_id"),
-                        "knowledge_base_id": s.get("knowledge_base_id") or metadata.get("knowledge_base_id"),
-                        "title": document_name,
-                        "document_name": document_name,
-                        "outline_path": s.get("outline_path", []) or metadata.get("outline_path", []),
-                        "content": s.get("content", "")[:200],
-                        "excerpt": s.get("content", "")[:200],
+                formatted_sources = [
+                    self._citation_from_result(s) if hasattr(s, 'content') else {
+                        "document_id": s.get("document_id"),
+                        "chunk_id": s.get("chunk_id") or s.get("metadata", {}).get("chunk_id"),
+                        "knowledge_base_id": s.get("knowledge_base_id"),
+                        "title": s.get("metadata", {}).get("document_title", f"文档 #{s.get('document_id')}"),
+                        "document_name": s.get("metadata", {}).get("document_title", f"文档 #{s.get('document_id')}"),
+                        "outline_path": s.get("outline_path", []),
+                        "content": (s.get("content", "") or "")[:200],
+                        "excerpt": (s.get("content", "") or "")[:200],
                         "score": s.get("score", 0),
                         "source": s.get("source", "vector"),
-                    })
-                # 使用特殊标记嵌入 sources，前端解析时识别
-                sources_event = {
-                    "content": "",  # 空内容
-                    "sources": formatted_sources
-                }
+                    }
+                    for s in sources
+                ]
+                sources_event = {"content": "", "sources": formatted_sources}
                 yield json.dumps(sources_event, ensure_ascii=False)
 
             # 评估答案质量

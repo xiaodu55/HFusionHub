@@ -2,6 +2,8 @@ package com.hfusionhub.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hfusionhub.common.result.R;
+import com.hfusionhub.dto.ChunkDTO;
+import com.hfusionhub.dto.ChunkPageDTO;
 import com.hfusionhub.dto.DocumentIndexCallbackDTO;
 import com.hfusionhub.service.VectorizationService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -72,20 +74,20 @@ public class VectorizationController {
 
     @Operation(summary = "获取文档分块列表")
     @GetMapping("/{documentId}/chunks")
-    public R<String> getDocumentChunks(
+    public R<ChunkPageDTO> getDocumentChunks(
             @Parameter(description = "文档ID") @PathVariable Long documentId,
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer page,
             @Parameter(description = "每页大小") @RequestParam(defaultValue = "20") Integer size,
             @Parameter(description = "块类型筛选") @RequestParam(required = false) String blockType) {
-        String result = vectorizationService.getDocumentChunks(documentId, page, size, blockType);
+        ChunkPageDTO result = vectorizationService.getDocumentChunks(documentId, page, size, blockType);
         return R.ok(result);
     }
 
     @Operation(summary = "获取单个分块详情")
     @GetMapping("/chunks/{chunkId}")
-    public R<String> getChunkDetail(
+    public R<ChunkDTO> getChunkDetail(
             @Parameter(description = "分块ID") @PathVariable String chunkId) {
-        String result = vectorizationService.getChunkDetail(chunkId);
+        ChunkDTO result = vectorizationService.getChunkDetail(chunkId);
         return R.ok(result);
     }
 

@@ -117,4 +117,11 @@ public interface StatusCode {
      * AI 服务不可用
      */
     int AI_SERVICE_UNAVAILABLE = 3003;
+
+    // ==================== 分块错误码 (4000-4999) ====================
+
+    /**
+     * 分块不存在
+     */
+    int CHUNK_NOT_FOUND = 4001;
 }

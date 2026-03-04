@@ -163,10 +163,10 @@ def test_postprocessor_filters_low_query_coverage_false_positive():
     processed, decisions = postprocessor.process_with_debug([
         {
             "content": "虚拟机管理软件安装成功之后，就可以新建虚拟机了。",
-            "score": 0.99,
+            "score": 0.72,
             "document_id": "linux",
             "source": "vector",
-            "metadata": {"chunk_id": "linux-1", "evidence_score": 0.99},
+            "metadata": {"chunk_id": "linux-1", "evidence_score": 0.72},
         },
         {
             "content": "Java 虚拟线程是 JDK 提供的轻量级线程，用于降低并发任务创建成本。",

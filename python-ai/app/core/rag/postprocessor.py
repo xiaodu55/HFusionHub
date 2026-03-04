@@ -9,10 +9,53 @@ Postprocessor - 后处理模块
 """
 
 import re
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set
 from dataclasses import dataclass, field
 
 from app.utils.config import config
+
+
+# ---- Output-format constraint patterns ----
+# These are instructions about HOW to answer, not WHAT to search for.
+# Stripping them from query-term extraction prevents false
+# query_mismatch filtering.
+_OUTPUT_CONSTRAINT_PATTERNS = [
+    # English format directives
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r'\banswer\s+only\s+(?:the\s+)?(?:number|value|result)s?\b',
+        r'\b(?:just|only)\s+(?:give|tell|say|output|return)\b',
+        r'\b(?:in\s+)?(?:exact|precise|specific)\s+(?:number|value|answer|result)\b',
+        r'\b(?:numeric|numerical)\s+(?:value|answer|result|output)\b',
+        r'\bplease\s+(?:just\s+)?(?:answer|respond|reply|output)\b',
+        r'\b(?:briefly|concisely|shortly)\s+(?:answer|respond)\b',
+        r'\bno\s+explanation\b',
+        r'\bdon\'?t\s+explain\b',
+    ]
+    # Chinese format directives
+] + [
+    re.compile(p)
+    for p in [
+        r'(?:请|只需|只要)(?:简要|简单|简短|直接)?(?:回答|输出|返回|给出)',
+        r'(?:只|仅|就)(?:输出|返回|给出|要)(?:结果|答案|数字|数值)',
+        r'(?:不需要|无需|不要|别)(?:解释|说明|描述|啰嗦)',
+        r'(?:准确|精确|确切)(?:的)?(?:数字|数值|答案|结果)',
+        r'用(?:数字|数值|英文|中文)(?:回答|输出|返回)',
+        r'直接(?:说|告诉|回答)',
+    ]
+]
+
+# Tokens that signal output-format constraints rather than content intent.
+# These are stripped AFTER regex pattern matching above.
+_OUTPUT_CONSTRAINT_TOKENS: Set[str] = {
+    "answer", "exact", "exactly", "precise", "precisely", "specific",
+    "specifically", "numeric", "numerical", "brief", "briefly", "concise",
+    "concisely", "short", "shortly", "only", "just", "output", "return",
+    "explain", "explanation", "describe", "description", "tell", "say",
+    "回答", "输出", "返回", "给出", "结果", "答案", "数字", "数值",
+    "简要", "简单", "简短", "直接", "准确", "精确", "确切", "解释",
+    "说明", "描述", "啰嗦", "只需", "只要", "别", "不要", "不需要",
+}
 
 
 @dataclass
@@ -34,6 +77,7 @@ class Postprocessor:
         self,
         dedup_threshold: float = 0.95,
         min_score: Optional[float] = None,
+        strong_evidence_score: Optional[float] = None,
     ):
         """
         初始化后处理器
@@ -41,11 +85,13 @@ class Postprocessor:
         Args:
             dedup_threshold: 去重阈值（相似度高于此值视为重复）
             min_score: 最小证据分数阈值；低于该值的片段不得注入回答上下文
+            strong_evidence_score: 强证据分数阈值；达到此值可绕过查询覆盖率检查
         """
         self.dedup_threshold = dedup_threshold
         self.min_score = (
             config.RAG_MIN_EVIDENCE_SCORE if min_score is None else min_score
         )
+        self.strong_evidence_score = strong_evidence_score or 0.85
 
     def process(
         self,
@@ -74,6 +120,10 @@ class Postprocessor:
         """Process results and retain an auditable decision for every input."""
         processed = [self._to_processed(r) for r in results]
         query_terms = self._query_terms(query)
+
+        # ---- 跨通道互认：向量+关键词同时命中的分块视为强证据 ----
+        cross_channel_chunks: Set[str] = self._find_cross_channel_hits(processed)
+
         decisions = [
             {
                 "input_rank": rank,
@@ -95,12 +145,43 @@ class Postprocessor:
         # intact while allowing rank fusion to decide result order.
         evidence_accepted: List[tuple[ProcessedResult, int]] = []
         for index, result in enumerate(processed):
-            if result.metadata.get("evidence_score", result.score) < self.min_score:
+            evidence_score = result.metadata.get("evidence_score", result.score)
+            chunk_id = result.metadata.get("chunk_id")
+
+            # ---- 三级证据门控 ----
+            # Gate 1: 低证据分 → 直接拒绝
+            if evidence_score < self.min_score:
                 decisions[index]["decision"] = "filtered_low_evidence"
-            elif not self._passes_query_coverage(query_terms, result.content):
-                decisions[index]["decision"] = "filtered_query_mismatch"
-            else:
+                continue
+
+            # Gate 2: 查询覆盖率 → 任一强证据条件通过即接受
+            if self._passes_query_coverage(query_terms, result.content):
+                decisions[index]["decision"] = "query_coverage_pass"
                 evidence_accepted.append((result, index))
+                continue
+
+            # 强证据绕过条件 A: 原始通道相似度达标
+            if evidence_score >= self.strong_evidence_score:
+                decisions[index]["decision"] = "accepted_strong_evidence"
+                decisions[index]["bypass_reason"] = "strong_channel_score"
+                evidence_accepted.append((result, index))
+                continue
+
+            # 强证据绕过条件 B: 向量+关键词双通道互认
+            if chunk_id and chunk_id in cross_channel_chunks:
+                decisions[index]["decision"] = "accepted_cross_channel"
+                decisions[index]["bypass_reason"] = "cross_channel_corroboration"
+                evidence_accepted.append((result, index))
+                continue
+
+            # 强证据绕过条件 C: 短查询降低覆盖率门槛
+            if len(query_terms) <= 3 and self._query_coverage(query_terms, result.content) >= 0.25:
+                decisions[index]["decision"] = "accepted_short_query"
+                decisions[index]["bypass_reason"] = "short_query_lenient_coverage"
+                evidence_accepted.append((result, index))
+                continue
+
+            decisions[index]["decision"] = "filtered_query_mismatch"
 
         # 3. 去重
         deduplicated: List[tuple[ProcessedResult, int]] = []
@@ -185,9 +266,22 @@ class Postprocessor:
         return intersection / union if union > 0 else 0.0
 
     @staticmethod
-    def _query_terms(query: Optional[str]) -> List[str]:
+    def _strip_output_constraints(query: str) -> str:
+        """Remove answer-format directives so they don't pollute relevance scoring.
+
+        "Answer only the number what is the test token" -> "what is the test token"
+        """
+        stripped = query
+        for pattern in _OUTPUT_CONSTRAINT_PATTERNS:
+            stripped = pattern.sub(" ", stripped)
+        stripped = re.sub(r"\s+", " ", stripped).strip()
+        return stripped or query
+
+    @classmethod
+    def _query_terms(cls, query: Optional[str]) -> List[str]:
         if not query:
             return []
+        stripped = cls._strip_output_constraints(query)
         stopwords = {
             "什么", "怎么", "如何", "为什么", "是否", "多少", "哪里", "哪个",
             "请", "帮", "我", "一下", "这个", "那个", "文档", "内容", "知识库",
@@ -197,16 +291,31 @@ class Postprocessor:
             "the", "a", "an", "of", "in", "on", "for", "to", "do", "does", "did", "please",
             "tell", "me", "about",
         }
-        raw_terms = re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]", query.lower())
+        raw_terms = re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]", stripped.lower())
         terms: List[str] = []
         for term in raw_terms:
-            if term in stopwords:
+            if term in stopwords or term in _OUTPUT_CONSTRAINT_TOKENS:
                 continue
             if len(term) == 1 and not ("\u4e00" <= term <= "\u9fff"):
                 continue
             if term not in terms:
                 terms.append(term)
         return terms
+
+    @classmethod
+    def _find_cross_channel_hits(cls, processed: List[ProcessedResult]) -> Set[str]:
+        """Return chunk_ids that appear in BOTH vector and keyword channels."""
+        vector_ids: Set[str] = set()
+        keyword_ids: Set[str] = set()
+        for result in processed:
+            chunk_id = result.metadata.get("chunk_id")
+            if not chunk_id:
+                continue
+            if result.source == "vector":
+                vector_ids.add(chunk_id)
+            elif result.source == "keyword":
+                keyword_ids.add(chunk_id)
+        return vector_ids & keyword_ids
 
     @classmethod
     def _query_coverage(cls, query_terms: List[str], content: str) -> float:
@@ -224,6 +333,8 @@ class Postprocessor:
         coverage = cls._query_coverage(query_terms, content)
         if len(query_terms) <= 2:
             return coverage >= 0.5
+        if len(query_terms) <= 3:
+            return coverage >= 0.33
         return coverage >= 0.45
 
     def _sort(self, results: List[ProcessedResult]) -> List[ProcessedResult]:
