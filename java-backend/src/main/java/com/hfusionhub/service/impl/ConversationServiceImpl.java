@@ -180,12 +180,14 @@ public class ConversationServiceImpl implements ConversationService {
         } catch (Exception e) {
             log.error("Failed to get AI response: {}", e.getMessage(), e);
             return saveAssistantMessage(dto.getConversationId(),
-                    aiUnavailableMessage(e), "fallback", 0, conversation, dto.getContent(), assistantRequestId);
+                    aiUnavailableMessage(e), "fallback", 0, List.of(),
+                    conversation, dto.getContent(), assistantRequestId);
         }
 
         // 阶段 3: 保存助手消息 + 更新标题（短事务）
         return saveAssistantMessage(dto.getConversationId(),
                 aiResponse.getContent(), aiResponse.getModel(), aiResponse.getTokenCount(),
+                aiResponse.getSources(),
                 conversation, dto.getContent(), assistantRequestId);
     }
 
@@ -237,13 +239,15 @@ public class ConversationServiceImpl implements ConversationService {
     @Transactional
     public MessageInfoDTO saveAssistantMessage(Long conversationId,
             String content, String model, int tokenCount,
+            List<Map<String, Object>> sources,
             Conversation conversation, String userContent) {
-        return saveAssistantMessage(conversationId, content, model, tokenCount, conversation, userContent, null);
+        return saveAssistantMessage(conversationId, content, model, tokenCount, sources, conversation, userContent, null);
     }
 
     @Transactional
     public MessageInfoDTO saveAssistantMessage(Long conversationId,
             String content, String model, int tokenCount,
+            List<Map<String, Object>> sources,
             Conversation conversation, String userContent, String requestId) {
         Message existingAssistant = findAssistantByRequestId(requestId);
         if (existingAssistant != null) {
@@ -255,6 +259,7 @@ public class ConversationServiceImpl implements ConversationService {
         msg.setContent(content);
         msg.setModel(model);
         msg.setTokenCount(tokenCount);
+        msg.setSources(sources);
         msg.setRequestId(requestId);
         try {
             messageMapper.insert(msg);
