@@ -43,4 +43,13 @@ public class MessageInfoDTO {
 
     @Schema(description = "知识来源")
     private List<Map<String, Object>> sources;
+
+    @Schema(description = "Agent V1 状态：completed | insufficient_evidence | tool_error | timeout")
+    private String status;
+
+    @Schema(description = "Agent V1 运行标识")
+    private String agentRunId;
+
+    @Schema(description = "Agent V1 工具调用次数")
+    private Integer toolCallsCount;
 }

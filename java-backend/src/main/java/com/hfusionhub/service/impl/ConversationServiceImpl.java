@@ -172,11 +172,19 @@ public class ConversationServiceImpl implements ConversationService {
         List<Map<String, String>> history = getChatHistory(conversation.getId());
 
         // 阶段 2: 事务外调用 AI（释放数据库连接）
+        // Agent V1: 有知识库 → /api/agent/v1/chat; 无知识库 → /api/chat
         AiClient.ChatResponse aiResponse;
         try {
-            aiResponse = aiClient.chat(
-                    dto.getContent(), dto.getConversationId(),
-                    conversation.getKnowledgeBaseId(), history);
+            if (conversation.getKnowledgeBaseId() != null && conversation.getKnowledgeBaseId() > 0) {
+                aiResponse = aiClient.agentV1Chat(
+                        dto.getContent(), dto.getConversationId(),
+                        conversation.getKnowledgeBaseId(), history,
+                        "detailed", 5, requestId);
+            } else {
+                aiResponse = aiClient.chat(
+                        dto.getContent(), dto.getConversationId(),
+                        conversation.getKnowledgeBaseId(), history);
+            }
         } catch (Exception e) {
             log.error("Failed to get AI response: {}", e.getMessage(), e);
             return saveAssistantMessage(dto.getConversationId(),
@@ -185,9 +193,7 @@ public class ConversationServiceImpl implements ConversationService {
         }
 
         // 阶段 3: 保存助手消息 + 更新标题（短事务）
-        return saveAssistantMessage(dto.getConversationId(),
-                aiResponse.getContent(), aiResponse.getModel(), aiResponse.getTokenCount(),
-                aiResponse.getSources(),
+        return saveAssistantMessageV1(dto.getConversationId(), aiResponse,
                 conversation, dto.getContent(), assistantRequestId);
     }
 
@@ -261,6 +267,76 @@ public class ConversationServiceImpl implements ConversationService {
         msg.setTokenCount(tokenCount);
         msg.setSources(sources);
         msg.setRequestId(requestId);
+        try {
+            messageMapper.insert(msg);
+        } catch (DuplicateKeyException e) {
+            existingAssistant = findAssistantByRequestId(requestId);
+            if (existingAssistant != null) {
+                return convertToMessageInfoDTO(existingAssistant);
+            }
+            throw e;
+        }
+        if ("新对话".equals(conversation.getTitle()) && StringUtils.hasText(userContent)) {
+            conversation.setTitle(userContent.length() > 50 ? userContent.substring(0, 50) + "..." : userContent);
+            conversationMapper.updateById(conversation);
+        }
+        return convertToMessageInfoDTO(msg);
+    }
+
+    /**
+     * Save assistant message from a full AiClient.ChatResponse, preserving
+     * Agent V1 metadata (status, agent_run_id, tool_calls_count,
+     * token_usage) alongside the core answer + sources.
+     */
+    @Transactional
+    public MessageInfoDTO saveAssistantMessageV1(Long conversationId,
+            AiClient.ChatResponse aiResponse,
+            Conversation conversation, String userContent, String requestId) {
+        Message existingAssistant = findAssistantByRequestId(requestId);
+        if (existingAssistant != null) {
+            return convertToMessageInfoDTO(existingAssistant);
+        }
+        // Primary content: prefer answer if content is null (V1 path sends both).
+        String primaryContent = aiResponse.getContent() != null
+                ? aiResponse.getContent()
+                : aiResponse.getAnswer();
+
+        Message msg = new Message();
+        msg.setConversationId(conversationId);
+        msg.setRole("assistant");
+        msg.setContent(primaryContent != null ? primaryContent : "");
+        msg.setModel(aiResponse.getModel());
+        msg.setTokenCount(aiResponse.getTokenCount());
+        msg.setSources(aiResponse.getSources());
+        msg.setRequestId(requestId);
+
+        // Agent V1 metadata — stored as sources extension.
+        // Existing sources already contain citations; append V1 run metadata
+        // as a reserved entry so the frontend can render status badges.
+        if (aiResponse.getStatus() != null || aiResponse.getAgentRunId() != null) {
+            List<Map<String, Object>> enrichedSources =
+                    new java.util.ArrayList<>(msg.getSources() != null ? msg.getSources() : List.of());
+            Map<String, Object> v1Meta = new HashMap<>();
+            v1Meta.put("_v1", true);
+            if (aiResponse.getStatus() != null) {
+                v1Meta.put("status", aiResponse.getStatus());
+            }
+            if (aiResponse.getAgentRunId() != null) {
+                v1Meta.put("agent_run_id", aiResponse.getAgentRunId());
+            }
+            if (aiResponse.getToolCallsCount() > 0) {
+                v1Meta.put("tool_calls_count", aiResponse.getToolCallsCount());
+            }
+            if (aiResponse.getTokenUsage() != null) {
+                v1Meta.put("token_usage", aiResponse.getTokenUsage());
+            }
+            if (aiResponse.getErrorDetail() != null) {
+                v1Meta.put("error_detail", aiResponse.getErrorDetail());
+            }
+            enrichedSources.add(v1Meta);
+            msg.setSources(enrichedSources);
+        }
+
         try {
             messageMapper.insert(msg);
         } catch (DuplicateKeyException e) {
@@ -802,9 +878,31 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     /**
-     * Message 转换为 MessageInfoDTO
+     * Message → MessageInfoDTO, extracting Agent V1 metadata from sources
+     * when present.
      */
     private MessageInfoDTO convertToMessageInfoDTO(Message message) {
+        List<Map<String, Object>> rawSources = message.getSources();
+        List<Map<String, Object>> visibleSources = new java.util.ArrayList<>();
+        String v1Status = null;
+        String v1AgentRunId = null;
+        Integer v1ToolCallsCount = null;
+
+        if (rawSources != null) {
+            for (Map<String, Object> entry : rawSources) {
+                if (Boolean.TRUE.equals(entry.get("_v1"))) {
+                    v1Status = (String) entry.get("status");
+                    v1AgentRunId = (String) entry.get("agent_run_id");
+                    Object tcc = entry.get("tool_calls_count");
+                    if (tcc instanceof Number n) {
+                        v1ToolCallsCount = n.intValue();
+                    }
+                } else {
+                    visibleSources.add(entry);
+                }
+            }
+        }
+
         return MessageInfoDTO.builder()
                 .id(message.getId())
                 .conversationId(message.getConversationId())
@@ -812,8 +910,11 @@ public class ConversationServiceImpl implements ConversationService {
                 .content(message.getContent())
                 .tokenCount(message.getTokenCount())
                 .model(message.getModel())
-                .sources(message.getSources())
+                .sources(visibleSources.isEmpty() ? null : visibleSources)
                 .createdAt(message.getCreatedAt())
+                .status(v1Status)
+                .agentRunId(v1AgentRunId)
+                .toolCallsCount(v1ToolCallsCount)
                 .build();
     }
 }

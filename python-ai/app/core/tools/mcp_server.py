@@ -38,7 +38,7 @@ _MCP_TOOL_SCHEMAS: List[Dict[str, Any]] = []
 
 def _build_tool_schemas() -> List[Dict[str, Any]]:
     """Build MCP-compliant tool schemas from registered tools."""
-    raw_tools = get_tools()
+    raw_tools = get_tools(v1_only=False)
     schemas = []
     for tool in raw_tools:
         params = tool.get("parameters", {})
@@ -145,16 +145,19 @@ async def handle_mcp_request(
         tool_name = params["name"]
         arguments = params.get("arguments", {})
 
-        # Build safe execution policy
+        # Build safe execution policy — Agent V1 tools + legacy tools.
         policy = ToolExecutionPolicy(
-            allowed_names={"search_knowledge_base", "calculate", "get_current_time", "web_search"},
+            allowed_names={
+                "search_knowledge_base", "read_chunk", "list_document_chunks",
+                "calculate", "get_current_time", "web_search",
+            },
             knowledge_base_id=knowledge_base_id,
             timeout_seconds=30.0,
             max_search_results=10,
             max_input_characters=1024,
         )
 
-        raw_tools = get_tools(knowledge_base_id=knowledge_base_id)
+        raw_tools = get_tools(knowledge_base_id=knowledge_base_id, v1_only=False)
 
         try:
             result_text = await execute_tool(tool_name, arguments, raw_tools, policy=policy)

@@ -126,10 +126,14 @@ class Config:
     RAG_AGENT_MAX_STEPS = int(os.getenv("RAG_AGENT_MAX_STEPS", "5"))
     RAG_AGENT_TOOL_TIMEOUT_SECONDS = float(os.getenv("RAG_AGENT_TOOL_TIMEOUT_SECONDS", "10"))
     RAG_AGENT_MAX_SEARCH_RESULTS = int(os.getenv("RAG_AGENT_MAX_SEARCH_RESULTS", "5"))
+    # Agent V1 whitelist — only knowledge-base research tools.
+    # Additional tools (calculate, get_current_time, web_search) may be
+    # added via this env var for non-V1 workflows, but the V1
+    # WorkflowRuntime hard-enforces the V1 whitelist regardless.
     RAG_AGENT_ALLOWED_TOOLS = tuple(
         item.strip() for item in os.getenv(
             "RAG_AGENT_ALLOWED_TOOLS",
-            "search_knowledge_base,get_current_time,calculate",
+            "search_knowledge_base,read_chunk,list_document_chunks",
         ).split(",") if item.strip()
     )
 

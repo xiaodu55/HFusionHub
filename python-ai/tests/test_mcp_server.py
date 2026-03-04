@@ -12,11 +12,15 @@ from app.core.tools.mcp_server import (
 
 
 class TestMCPToolSchemas:
-    def test_returns_four_tools(self):
+    def test_schemas_include_all_registered_tools(self):
         schemas = get_mcp_tool_schemas()
-        assert len(schemas) == 4
+        # Agent V1 adds read_chunk + list_document_chunks → 6 tools total.
+        assert len(schemas) == 6
         names = {s["name"] for s in schemas}
-        assert names == {"search_knowledge_base", "calculate", "get_current_time", "web_search"}
+        assert names == {
+            "search_knowledge_base", "read_chunk", "list_document_chunks",
+            "calculate", "get_current_time", "web_search",
+        }
 
     def test_each_tool_has_input_schema(self):
         for schema in get_mcp_tool_schemas():
@@ -44,7 +48,9 @@ class TestToolsList:
     async def test_lists_all_tools(self):
         resp = await handle_mcp_request("tools/list", None, 1)
         tools = resp["result"]["tools"]
-        assert len(tools) == 4
+        # Agent V1: 6 tools (search_knowledge_base, read_chunk, list_document_chunks,
+        # calculate, get_current_time, web_search)
+        assert len(tools) == 6
 
 
 class TestToolsCall:
@@ -84,7 +90,16 @@ class TestToolsCall:
             "name": "delete_everything",
             "arguments": {}
         }, 4)
-        assert resp["result"]["content"][0]["text"].startswith("错误")
+        text = resp["result"]["content"][0]["text"]
+        # Agent V1: execute_tool returns JSON on policy rejection.
+        import json as _json
+        try:
+            parsed = _json.loads(text)
+            assert "error" in parsed
+            assert "tool_not_allowed" in parsed["error"] or "拒绝" in parsed["error"]
+        except _json.JSONDecodeError:
+            # Fallback: old-style plain text.
+            assert "拒绝" in text or "错误" in text
 
     @pytest.mark.asyncio
     async def test_missing_tool_name_returns_error(self):

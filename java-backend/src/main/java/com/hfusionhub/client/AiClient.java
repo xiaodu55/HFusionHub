@@ -42,7 +42,7 @@ public class AiClient {
     }
 
     /**
-     * Chat with AI agent
+     * Chat with AI agent — general path (knowledge_base_id optional).
      *
      * @param message User message
      * @param conversationId Conversation ID
@@ -56,24 +56,87 @@ public class AiClient {
             Long knowledgeBaseId,
             List<Map<String, String>> history
     ) {
+        return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
+                "detailed", 5, null);
+    }
+
+    /**
+     * Chat with AI agent — general path with style control.
+     */
+    public ChatResponse chat(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String style,
+            int maxToolSteps
+    ) {
+        return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
+                style, maxToolSteps, null);
+    }
+
+    /**
+     * Agent V1 chat — REQUIRES knowledge_base_id.
+     *
+     * Calls {@code POST /api/agent/v1/chat}.  Returns 422 if
+     * knowledgeBaseId is null (enforced at Python side).
+     *
+     * @param message         User message
+     * @param conversationId  Conversation ID
+     * @param knowledgeBaseId Knowledge base ID (REQUIRED, non-null)
+     * @param history         Chat history
+     * @param style           Answer style (concise | detailed | report)
+     * @param maxToolSteps    Max ReAct tool-calling steps (1–10)
+     * @param requestId       Idempotency key for SSE dedup
+     * @return AI response with full V1 fields
+     */
+    public ChatResponse agentV1Chat(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String style,
+            int maxToolSteps,
+            String requestId
+    ) {
+        if (knowledgeBaseId == null || knowledgeBaseId <= 0) {
+            throw new BusinessException(StatusCode.BAD_REQUEST,
+                    "Agent V1 requires a non-null knowledge_base_id");
+        }
+        return doChat("/api/agent/v1/chat", message, conversationId, knowledgeBaseId,
+                history, style, maxToolSteps, requestId);
+    }
+
+    private ChatResponse doChat(
+            String path,
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String style,
+            int maxToolSteps,
+            String requestId
+    ) {
         try {
-            // Build request
             Map<String, Object> request = new HashMap<>();
             request.put("message", message);
             request.put("conversation_id", conversationId);
             request.put("knowledge_base_id", knowledgeBaseId);
             request.put("history", history != null ? history : List.of());
             request.put("stream", false);
+            request.put("style", style != null ? style : "detailed");
+            request.put("max_tool_steps", Math.max(1, Math.min(maxToolSteps, 10)));
+            if (requestId != null) {
+                request.put("request_id", requestId);
+            }
 
-            // Set headers
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             addInternalToken(headers);
 
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
 
-            // Call Python AI service
-            String url = baseUrl + "/api/chat";
+            String url = baseUrl + path;
             log.info("Calling AI service: {}", url);
 
             ResponseEntity<ChatResponse> response = restTemplate.exchange(
@@ -239,9 +302,17 @@ public class AiClient {
     }
 
     /**
-     * Chat response data model
+     * Chat response data model — Agent V1.
+     *
+     * Java-compat keys (consumed by Jackson from Python JSON):
+     *   content, model, token_count, steps, sources, auto_detected_kb_id
+     *
+     * Agent V1 keys (available when calling /api/agent/v1/chat):
+     *   answer, status, agent_run_id, token_usage, tool_calls_count,
+     *   style_used, max_tool_steps, error_detail, failed_tool
      */
     public static class ChatResponse {
+        // ── Java-compat ──
         private String content;
         private String model;
         @JsonProperty("token_count")
@@ -251,8 +322,27 @@ public class AiClient {
         @JsonProperty("auto_detected_kb_id")
         private Long autoDetectedKbId;
 
+        // ── Agent V1 ──
+        private String answer;
+        private String status;
+        @JsonProperty("agent_run_id")
+        private String agentRunId;
+        @JsonProperty("token_usage")
+        private Map<String, Object> tokenUsage;
+        @JsonProperty("tool_calls_count")
+        private int toolCallsCount;
+        @JsonProperty("style_used")
+        private String styleUsed;
+        @JsonProperty("max_tool_steps")
+        private int maxToolSteps;
+        @JsonProperty("error_detail")
+        private String errorDetail;
+        @JsonProperty("failed_tool")
+        private String failedTool;
+
         public ChatResponse() {}
 
+        // ── Java-compat getters/setters ──
         public String getContent() { return content; }
         public void setContent(String content) { this.content = content; }
 
@@ -270,6 +360,34 @@ public class AiClient {
 
         public Long getAutoDetectedKbId() { return autoDetectedKbId; }
         public void setAutoDetectedKbId(Long autoDetectedKbId) { this.autoDetectedKbId = autoDetectedKbId; }
+
+        // ── Agent V1 getters/setters ──
+        public String getAnswer() { return answer; }
+        public void setAnswer(String answer) { this.answer = answer; }
+
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
+
+        public String getAgentRunId() { return agentRunId; }
+        public void setAgentRunId(String agentRunId) { this.agentRunId = agentRunId; }
+
+        public Map<String, Object> getTokenUsage() { return tokenUsage; }
+        public void setTokenUsage(Map<String, Object> tokenUsage) { this.tokenUsage = tokenUsage; }
+
+        public int getToolCallsCount() { return toolCallsCount; }
+        public void setToolCallsCount(int toolCallsCount) { this.toolCallsCount = toolCallsCount; }
+
+        public String getStyleUsed() { return styleUsed; }
+        public void setStyleUsed(String styleUsed) { this.styleUsed = styleUsed; }
+
+        public int getMaxToolSteps() { return maxToolSteps; }
+        public void setMaxToolSteps(int maxToolSteps) { this.maxToolSteps = maxToolSteps; }
+
+        public String getErrorDetail() { return errorDetail; }
+        public void setErrorDetail(String errorDetail) { this.errorDetail = errorDetail; }
+
+        public String getFailedTool() { return failedTool; }
+        public void setFailedTool(String failedTool) { this.failedTool = failedTool; }
     }
 
     /**

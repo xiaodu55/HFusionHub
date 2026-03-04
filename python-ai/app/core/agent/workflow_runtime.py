@@ -3,6 +3,9 @@
 The runtime deliberately records operational metadata rather than prompts,
 thoughts, tool arguments, observations, or retrieved document text.  Those
 items can contain user data and already have their own scoped RAG trace.
+
+Agent V1: enforces a tool whitelist (search_knowledge_base, read_chunk,
+list_document_chunks) and returns standardised status codes.
 """
 
 from __future__ import annotations
@@ -18,6 +21,13 @@ from uuid import uuid4
 
 from .agent import Agent, AgentResponse
 
+# ── Agent V1 status constants ──
+STATUS_COMPLETED = "completed"
+STATUS_INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+STATUS_TOOL_ERROR = "tool_error"
+STATUS_TIMEOUT = "timeout"
+STATUS_FAILED = "failed"
+
 NO_SUFFICIENT_EVIDENCE_REPLY = "我在当前知识库中未检索到足够依据，无法基于资料回答这个问题。"
 SERVICE_UNAVAILABLE_REPLY = "抱歉，AI 服务暂时不可用，请稍后重试。"
 
@@ -29,6 +39,7 @@ class AgentRunEvent:
     attempt: int = 0
     duration_ms: float = 0.0
     error_code: Optional[str] = None
+    failed_tool: Optional[str] = None
 
 
 @dataclass
@@ -88,12 +99,24 @@ def get_agent_run_store() -> AgentRunStore:
 
 
 class SingleAgentWorkflow(Agent):
-    """Apply a timeout, a safe retry policy and a trace to one existing agent.
+    """Apply a timeout, a safe retry policy, tool whitelist and a trace to one
+    existing agent.
+
+    Agent V1: only ``search_knowledge_base``, ``read_chunk``, and
+    ``list_document_chunks`` may be invoked.  Any other tool is rejected before
+    the delegate agent ever sees it.
 
     This is intentionally a small boundary around the current React agent.  It
     does not add autonomous write tools, and it never changes a selected KB
     failure into a model-only answer.
     """
+
+    # Agent V1 tool whitelist — hard-coded; not configurable at runtime.
+    V1_ALLOWED_TOOLS: frozenset = frozenset({
+        "search_knowledge_base",
+        "read_chunk",
+        "list_document_chunks",
+    })
 
     def __init__(
         self,
@@ -103,6 +126,7 @@ class SingleAgentWorkflow(Agent):
         max_retries: int = 1,
         retry_delay_seconds: float = 0.2,
         run_store: Optional[AgentRunStore] = None,
+        allowed_tools: Optional[frozenset] = None,
     ):
         self.delegate = delegate
         self.knowledge_base_id = knowledge_base_id
@@ -110,10 +134,19 @@ class SingleAgentWorkflow(Agent):
         self.max_retries = max(0, max_retries)
         self.retry_delay_seconds = max(0.0, retry_delay_seconds)
         self.run_store = run_store or get_agent_run_store()
+        self.allowed_tools = allowed_tools or self.V1_ALLOWED_TOOLS
 
     @property
     def _has_selected_knowledge_base(self) -> bool:
         return bool(self.knowledge_base_id and self.knowledge_base_id > 0)
+
+    # ── Agent V1: tool whitelist enforcement ────────────────────────────
+
+    def _filter_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Return only tools whose names are in the V1 whitelist."""
+        return [t for t in tools if t.get("name") in self.allowed_tools]
+
+    # ── Error helpers ──────────────────────────────────────────────────
 
     @staticmethod
     def _error_code(error: BaseException) -> str:
@@ -135,6 +168,40 @@ class SingleAgentWorkflow(Agent):
         run.finish_reason = finish_reason
         run.duration_ms = round((time.monotonic() - started) * 1000, 2)
 
+    # ── Build a standardised V1 response ───────────────────────────────
+
+    def _v1_response(
+        self,
+        content: str,
+        status: str,
+        sources: Optional[List[Dict[str, Any]]] = None,
+        agent_run_id: Optional[str] = None,
+        token_usage: Optional[Dict[str, int]] = None,
+        tool_calls_count: int = 0,
+        max_tool_steps: int = 5,
+        error_detail: Optional[str] = None,
+        failed_tool: Optional[str] = None,
+        **kwargs,
+    ) -> AgentResponse:
+        return AgentResponse(
+            content=content,
+            answer=content,
+            status=status,
+            agent_status=status,  # backward compat — prefer `status` in V1
+            finish_reason=status,
+            sources=sources or [],
+            agent_run_id=agent_run_id,
+            token_usage=token_usage,
+            tool_calls_count=tool_calls_count,
+            max_tool_steps=max_tool_steps,
+            error_detail=error_detail,
+            failed_tool=failed_tool,
+            steps=[],
+            **kwargs,
+        )
+
+    # ── run ─────────────────────────────────────────────────────────────
+
     async def run(
         self,
         query: str,
@@ -143,6 +210,13 @@ class SingleAgentWorkflow(Agent):
     ) -> AgentResponse:
         run = self.run_store.start(self.knowledge_base_id)
         started = time.monotonic()
+
+        # Enforce V1 tool whitelist on the delegate *before* execution.
+        original_tools = self.delegate.get_tools()
+        filtered_tools = self._filter_tools(original_tools)
+        if hasattr(self.delegate, 'tools'):
+            self.delegate.tools = filtered_tools  # type: ignore[attr-defined]
+
         for attempt in range(self.max_retries + 1):
             attempt_started = time.monotonic()
             try:
@@ -154,12 +228,26 @@ class SingleAgentWorkflow(Agent):
                     name="agent", status="completed", attempt=attempt,
                     duration_ms=round((time.monotonic() - attempt_started) * 1000, 2),
                 ))
-                status = "insufficient_evidence" if response.finish_reason == "insufficient_evidence" else "completed"
-                self._finish(run, status, response.finish_reason or status, started)
+
+                # Map finish_reason → Agent V1 status.
+                fr = response.finish_reason or ""
+                if fr == "insufficient_evidence":
+                    v1_status = STATUS_INSUFFICIENT_EVIDENCE
+                elif fr in ("tool_error", "agent_failure"):
+                    v1_status = STATUS_TOOL_ERROR
+                elif fr in ("agent_timeout", "timeout"):
+                    v1_status = STATUS_TIMEOUT
+                else:
+                    v1_status = STATUS_COMPLETED
+
+                self._finish(run, v1_status, response.finish_reason or v1_status, started)
                 response.agent_run_id = run.run_id
-                response.agent_status = status
+                response.agent_status = v1_status
+                response.status = v1_status
+                response.answer = response.answer or response.content
                 return response
-            except Exception as error:  # handled below; never expose error details to chat
+
+            except Exception as error:
                 code = self._error_code(error)
                 run.events.append(AgentRunEvent(
                     name="agent", status="failed", attempt=attempt,
@@ -171,14 +259,27 @@ class SingleAgentWorkflow(Agent):
                     await asyncio.sleep(self.retry_delay_seconds)
                     continue
 
+                # Build the appropriate V1 status.
+                if code == "timeout":
+                    v1_status = STATUS_TIMEOUT
+                else:
+                    v1_status = STATUS_TOOL_ERROR
+
                 finish_reason = "agent_timeout" if code == "timeout" else "agent_failure"
-                self._finish(run, "failed", finish_reason, started)
-                return AgentResponse(
+                self._finish(run, v1_status, finish_reason, started)
+
+                # If the delegate already produced partial sources, preserve them.
+                partial_sources = getattr(self.delegate, '_last_sources', [])
+
+                return self._v1_response(
                     content=NO_SUFFICIENT_EVIDENCE_REPLY if self._has_selected_knowledge_base else SERVICE_UNAVAILABLE_REPLY,
-                    finish_reason=finish_reason,
-                    sources=[],
+                    status=v1_status,
+                    sources=partial_sources if v1_status == STATUS_TIMEOUT else [],
                     agent_run_id=run.run_id,
-                    agent_status="failed",
+                    tool_calls_count=getattr(self.delegate, '_tool_calls_count', 0),
+                    max_tool_steps=kwargs.get("max_tool_steps", getattr(self.delegate, 'max_steps', 5)),
+                    error_detail=str(error) if v1_status == STATUS_TOOL_ERROR else None,
+                    failed_tool=None,
                 )
 
         raise AssertionError("workflow retry loop must return")
@@ -191,17 +292,27 @@ class SingleAgentWorkflow(Agent):
     ) -> AsyncGenerator[str, None]:
         run = self.run_store.start(self.knowledge_base_id)
         started = time.monotonic()
+
+        # Enforce V1 tool whitelist on the delegate.
+        if hasattr(self.delegate, 'tools'):
+            original = self.delegate.get_tools()
+            self.delegate.tools = self._filter_tools(original)  # type: ignore[attr-defined]
+
         try:
             async with asyncio.timeout(self.timeout_seconds):
                 async for chunk in self.delegate.run_stream(query=query, history=history, **kwargs):
                     yield chunk
             run.events.append(AgentRunEvent(name="agent_stream", status="completed", attempt=0))
-            self._finish(run, "completed", "stop", started)
+            self._finish(run, STATUS_COMPLETED, "stop", started)
+        except asyncio.TimeoutError:
+            run.events.append(AgentRunEvent(name="agent_stream", status="failed", error_code="timeout"))
+            self._finish(run, STATUS_TIMEOUT, "agent_timeout", started)
+            yield NO_SUFFICIENT_EVIDENCE_REPLY if self._has_selected_knowledge_base else SERVICE_UNAVAILABLE_REPLY
         except Exception as error:
             code = self._error_code(error)
             run.events.append(AgentRunEvent(name="agent_stream", status="failed", error_code=code))
-            self._finish(run, "failed", "agent_timeout" if code == "timeout" else "agent_failure", started)
+            self._finish(run, STATUS_TOOL_ERROR, "agent_failure", started)
             yield NO_SUFFICIENT_EVIDENCE_REPLY if self._has_selected_knowledge_base else SERVICE_UNAVAILABLE_REPLY
 
     def get_tools(self) -> List[Dict[str, Any]]:
-        return self.delegate.get_tools()
+        return self._filter_tools(self.delegate.get_tools())
