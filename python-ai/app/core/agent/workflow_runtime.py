@@ -20,6 +20,7 @@ from typing import Any, AsyncGenerator, Deque, Dict, List, Optional
 from uuid import uuid4
 
 from .agent import Agent, AgentResponse
+from ..tools.registry import ToolRegistry, create_v1_registry
 
 # ── Agent V1 status constants ──
 STATUS_COMPLETED = "completed"

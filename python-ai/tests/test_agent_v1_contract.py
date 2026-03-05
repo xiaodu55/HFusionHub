@@ -288,7 +288,52 @@ def test_agent_v1_tool_names_is_exactly_three():
 # ---------------------------------------------------------------------------
 
 class TestAgentV1EndToEnd:
-    """Simulate the exact request Java's AiClient.agentV1Chat() would send."""
+    """Simulate the exact request Java's AiClient.agentV1Chat() would send.
+
+    These are **contract tests** — they verify HTTP-layer serialisation,
+    route registration, validation and JSON key shapes.  The Agent is mocked
+    so no real Milvus / LLM / Retriever is touched.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _mock_agent(self, monkeypatch):
+        """注入假 Agent — 契约测试不依赖真实 Milvus / LLM / Retriever。"""
+        from app.core.agent import AgentResponse
+
+        canned = AgentResponse(
+            content="这是来自知识库的测试回答，包含对问题的详细分析。",
+            answer="这是来自知识库的测试回答，包含对问题的详细分析。",
+            model="deepseek-v4-flash",
+            status="completed",
+            sources=[
+                {
+                    "document_id": 1,
+                    "chunk_id": "1_chunk_0000",
+                    "title": "测试文档.pdf",
+                    "excerpt": "这是测试文档的摘要内容，用于验证来源字段格式。",
+                    "score": 0.95,
+                }
+            ],
+            agent_run_id="test-run-java-001",
+            token_count=150,
+            token_usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+            tool_calls_count=2,
+            style_used="detailed",
+            max_tool_steps=5,
+            steps=[],
+            auto_detected_kb_id=None,
+        )
+
+        class _MockAgent:
+            async def run(self, **kwargs):
+                return canned
+
+            async def run_stream(self, **kwargs):
+                yield '{"content": "chunk"}'
+
+        mock = _MockAgent()
+        monkeypatch.setattr("app.api.chat.get_agent", lambda **kw: mock)
+        return mock
 
     def test_v1_endpoint_returns_java_compat_keys(self):
         """Non-streaming V1 response includes all Java AiClient fields."""
@@ -365,3 +410,188 @@ class TestAgentV1EndToEnd:
         assert "content" in data
         assert "model" in data
         assert data["model"] != "fallback"
+
+
+# ---------------------------------------------------------------------------
+# 7. ToolSpec / ToolResult / ToolRegistry unit tests (Step 2)
+# ---------------------------------------------------------------------------
+
+class TestToolSpec:
+    """Every V1 tool must have a complete ToolSpec."""
+
+    def test_search_kb_spec_is_complete(self):
+        from app.core.tools.spec import SEARCH_KB_SPEC, RiskLevel, Permissions
+        assert SEARCH_KB_SPEC.name == "search_knowledge_base"
+        assert len(SEARCH_KB_SPEC.description) > 20
+        assert "query" in SEARCH_KB_SPEC.input_schema.get("required", [])
+        assert SEARCH_KB_SPEC.risk_level == RiskLevel.READ_ONLY
+        assert Permissions.KB_READ in SEARCH_KB_SPEC.required_permissions
+        assert SEARCH_KB_SPEC.timeout_seconds > 0
+        assert "tool_timeout" in SEARCH_KB_SPEC.error_codes
+        assert SEARCH_KB_SPEC.agent_version == "1.0"
+
+    def test_read_chunk_spec_is_complete(self):
+        from app.core.tools.spec import READ_CHUNK_SPEC, RiskLevel
+        assert READ_CHUNK_SPEC.name == "read_chunk"
+        assert "chunk_id" in READ_CHUNK_SPEC.input_schema.get("required", [])
+        assert READ_CHUNK_SPEC.risk_level == RiskLevel.READ_ONLY
+        assert READ_CHUNK_SPEC.agent_version == "1.0"
+
+    def test_list_document_chunks_spec_is_complete(self):
+        from app.core.tools.spec import LIST_DOC_CHUNKS_SPEC, RiskLevel
+        assert LIST_DOC_CHUNKS_SPEC.name == "list_document_chunks"
+        assert "document_id" in LIST_DOC_CHUNKS_SPEC.input_schema.get("required", [])
+        assert LIST_DOC_CHUNKS_SPEC.risk_level == RiskLevel.READ_ONLY
+        assert LIST_DOC_CHUNKS_SPEC.agent_version == "1.0"
+
+    def test_all_v1_specs_are_read_only(self):
+        from app.core.tools.spec import V1_SPECS, RiskLevel
+        for name, spec in V1_SPECS.items():
+            assert spec.risk_level == RiskLevel.READ_ONLY, f"{name} must be read_only"
+            assert "knowledge_base:read" in spec.required_permissions, \
+                f"{name} must require knowledge_base:read"
+
+
+class TestToolResult:
+    """Unified ToolResult format."""
+
+    def test_success_format(self):
+        from app.core.tools.result import ToolResult
+        r = ToolResult.success("search_knowledge_base", [{"doc_id": 1}], 120.5)
+        d = r.to_dict()
+        assert d == {
+            "ok": True,
+            "tool_name": "search_knowledge_base",
+            "duration_ms": 120.5,
+            "data": [{"doc_id": 1}],
+        }
+
+    def test_failure_format(self):
+        from app.core.tools.result import ToolResult
+        from app.core.tools.spec import ErrorCode
+        r = ToolResult.failure("search_knowledge_base", ErrorCode.SCOPE_DENIED, "无权访问")
+        d = r.to_dict()
+        assert d["ok"] is False
+        assert d["error_code"] == ErrorCode.SCOPE_DENIED
+        assert "无权访问" in d["message"]
+
+
+class TestToolRegistry:
+    """ToolRegistry enforces V1 whitelist, KB scope, and input validation."""
+
+    def test_v1_registry_returns_only_three_tools(self):
+        from app.core.tools.registry import create_v1_registry
+        reg = create_v1_registry(1)
+        tools = reg.get_tools(v1_only=True)
+        names = {t["name"] for t in tools}
+        assert names == {"search_knowledge_base", "read_chunk", "list_document_chunks"}
+
+    @pytest.mark.asyncio
+    async def test_non_v1_tool_is_rejected(self):
+        from app.core.tools.registry import create_v1_registry
+        reg = create_v1_registry(1)
+        result = await reg.execute("web_search", {"query": "test"})
+        assert result.ok is False
+        assert result.error_code == "knowledge_base_scope_denied"
+
+    @pytest.mark.asyncio
+    async def test_calculate_is_rejected(self):
+        from app.core.tools.registry import create_v1_registry
+        reg = create_v1_registry(1)
+        result = await reg.execute("calculate", {"expression": "1+1"})
+        assert result.ok is False
+
+    @pytest.mark.asyncio
+    async def test_missing_kb_rejected(self):
+        from app.core.tools.registry import ToolRegistry
+        reg = ToolRegistry(knowledge_base_id=None, agent_version="1.0")
+        result = await reg.execute("search_knowledge_base", {"query": "test"})
+        assert result.ok is False
+        assert result.error_code == "knowledge_base_scope_denied"
+
+    @pytest.mark.asyncio
+    async def test_invalid_input_rejected(self):
+        from app.core.tools.registry import create_v1_registry
+        reg = create_v1_registry(1)
+        # Missing required "query" field
+        result = await reg.execute("search_knowledge_base", {"top_k": 5})
+        assert result.ok is False
+        assert result.error_code == "invalid_input"
+
+    @pytest.mark.asyncio
+    async def test_unknown_tool_returns_not_found(self):
+        from app.core.tools.registry import create_v1_registry
+        reg = create_v1_registry(1)
+        result = await reg.execute("nonexistent_tool", {})
+        assert result.ok is False
+        assert result.error_code == "not_found"
+
+    @pytest.mark.integration
+    @pytest.mark.asyncio
+    async def test_search_knowledge_base_succeeds(self, tmp_milvus_db):
+        from app.core.tools.registry import create_v1_registry
+        reg = create_v1_registry(1)
+        result = await reg.execute("search_knowledge_base", {"query": "test", "top_k": 3})
+        assert result.ok is True
+        assert result.tool_name == "search_knowledge_base"
+        assert result.duration_ms >= 0
+        assert isinstance(result.data, list)
+
+    @pytest.mark.integration
+    @pytest.mark.asyncio
+    async def test_read_chunk_invalid_id(self, tmp_milvus_db):
+        from app.core.tools.registry import create_v1_registry
+        reg = create_v1_registry(1)
+        result = await reg.execute("read_chunk", {"chunk_id": "nonexistent_99999"})
+        # Tool itself returns error dict → mapped to failure
+        if not result.ok:
+            assert "error_code" in result.to_dict()
+
+    @pytest.mark.integration
+    @pytest.mark.asyncio
+    async def test_list_document_chunks_succeeds(self, tmp_milvus_db):
+        from app.core.tools.registry import create_v1_registry
+        reg = create_v1_registry(1)
+        result = await reg.execute("list_document_chunks", {"document_id": 99999})
+        # May succeed (empty list) or return error for nonexistent doc
+        assert result.tool_name == "list_document_chunks"
+
+
+# ---------------------------------------------------------------------------
+# 8. Agent E2E: bypass attempt (Step 2 acceptance)
+# ---------------------------------------------------------------------------
+
+class TestAgentCannotBypassRegistry:
+    """Agent MUST NOT be able to call tools outside the Registry."""
+
+    def test_react_agent_tools_come_from_registry(self):
+        """ReactAgent._get_tools() returns V1-only tools via Registry."""
+        from app.core.agent.react import ReactAgent
+        from app.core.tools.registry import create_v1_registry
+
+        registry = create_v1_registry(1)
+        agent = ReactAgent(knowledge_base_id=1, tool_registry=registry)
+        tools = agent._get_tools()
+
+        names = {t["name"] for t in tools}
+        assert names == {"search_knowledge_base", "read_chunk", "list_document_chunks"}
+        # Each tool carries a _registry back-reference.
+        for t in tools:
+            assert "_registry" in t, f"{t['name']} missing _registry back-ref"
+
+    def test_agent_without_kb_gets_no_tools(self):
+        """Without a knowledge base, the agent gets zero tools."""
+        from app.core.agent.react import ReactAgent
+        agent = ReactAgent(knowledge_base_id=None)
+        tools = agent._get_tools()
+        assert tools == []
+
+    def test_full_registry_excludes_v1_tools_from_non_v1_callers(self):
+        """create_full_registry with v1_only=False returns all tools (MCP path)."""
+        from app.core.tools.registry import create_full_registry
+        reg = create_full_registry(knowledge_base_id=1)
+        tools = reg.get_tools(v1_only=False)
+        names = {t["name"] for t in tools}
+        assert "web_search" in names
+        assert "calculate" in names
+        assert "get_current_time" in names

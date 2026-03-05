@@ -8,5 +8,14 @@ requires-python = ">=3.11"
 requires = ["pip-tools>=7.4"]
 build-backend = "setuptools.build_meta"
 
+[tool.pytest.ini_options]
+markers = [
+    "unit: Unit tests — no external dependencies, fast, can run in parallel",
+    "contract: Contract tests — verify API JSON shapes, field names, status codes (mock backend)",
+    "integration: Integration tests — use temporary isolated resources (temp Milvus Lite db)",
+    "e2e: End-to-end tests — require running services, not for CI",
+]
+testpaths = ["tests"]
+
 [tool.pip-tools]
 generate-hashes = true

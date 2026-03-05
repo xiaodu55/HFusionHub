@@ -19,7 +19,7 @@ from typing import List, Dict, Any, Optional, AsyncGenerator
 
 from .agent import Agent, AgentResponse, AgentStep
 from ..llm import get_llm, ChatMessage, BaseLLM
-from ..tools import get_tools, execute_tool, ToolExecutionPolicy
+from ..tools import execute_tool, ToolExecutionPolicy, ToolRegistry, create_v1_registry
 from ..rag import (
     get_retriever,
     get_intent_classifier,
@@ -99,6 +99,7 @@ class ReactAgent(Agent):
         max_steps: int = 5,
         tool_policy: Optional[ToolExecutionPolicy] = None,
         style: str = "detailed",
+        tool_registry: Optional[ToolRegistry] = None,
         **kwargs
     ):
         self.knowledge_base_id = knowledge_base_id
@@ -108,6 +109,10 @@ class ReactAgent(Agent):
         self.style = style if style in _STYLE_PROMPTS else "detailed"
         self.llm: BaseLLM = None
         self.tools: List[Dict[str, Any]] = []
+
+        # Agent V1: Tool Registry is the SINGLE source of truth for tools.
+        # Agents MUST NOT bypass the registry.
+        self._registry: Optional[ToolRegistry] = tool_registry
 
         # Agent V1: track tool calls and sources for partial-result reporting.
         self._tool_calls_count: int = 0
@@ -120,9 +125,25 @@ class ReactAgent(Agent):
         return self.llm
 
     def _get_tools(self) -> List[Dict[str, Any]]:
-        """Get available tools"""
+        """Get available tools from the Tool Registry.
+
+        The Registry is the single choke point — agents cannot get tools
+        any other way.  Each tool dict carries a ``_registry`` back-reference
+        so ``execute_tool`` can route through the Registry.
+        """
         if not self.tools:
-            self.tools = get_tools(knowledge_base_id=self.knowledge_base_id)
+            if self._registry is not None:
+                raw = self._registry.get_tools(v1_only=True)
+            elif self._has_selected_knowledge_base():
+                self._registry = create_v1_registry(self.knowledge_base_id)
+                raw = self._registry.get_tools(v1_only=True)
+            else:
+                # No KB → no KB-scoped tools.  Return empty list.
+                return []
+            # Attach registry back-reference so execute_tool uses it.
+            for t in raw:
+                t["_registry"] = self._registry
+            self.tools = raw
         return self.tools
 
     def _has_selected_knowledge_base(self) -> bool:

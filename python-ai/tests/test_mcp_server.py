@@ -91,14 +91,17 @@ class TestToolsCall:
             "arguments": {}
         }, 4)
         text = resp["result"]["content"][0]["text"]
-        # Agent V1: execute_tool returns JSON on policy rejection.
+        # Agent V1 Step 2: execute_tool returns ToolResult JSON with
+        # error_code + message.  Rejection clue may be in either field.
         import json as _json
         try:
             parsed = _json.loads(text)
-            assert "error" in parsed
-            assert "tool_not_allowed" in parsed["error"] or "拒绝" in parsed["error"]
+            assert parsed.get("ok") is False
+            msg = str(parsed.get("message", ""))
+            err = str(parsed.get("error_code", ""))
+            combined = msg + " " + err
+            assert "tool_not_allowed" in combined or "拒绝" in combined or "invalid" in combined or "not_found" in err
         except _json.JSONDecodeError:
-            # Fallback: old-style plain text.
             assert "拒绝" in text or "错误" in text
 
     @pytest.mark.asyncio

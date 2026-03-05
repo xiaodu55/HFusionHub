@@ -6,7 +6,7 @@ from .agent import Agent, AgentResponse
 from .react import ReactAgent
 from .workflow_runtime import SingleAgentWorkflow, get_agent_run_store
 from .multi_agent_runtime import BoundedMultiAgentWorkflow
-from ..tools import ToolExecutionPolicy
+from ..tools import ToolExecutionPolicy, create_v1_registry
 from app.utils.config import config
 from .collaboration import (
     ExpertRole,
@@ -41,6 +41,13 @@ def get_agent(
     Returns:
         Agent instance
     """
+    # Agent V1: create a ToolRegistry for KB-scoped agents.
+    # The Registry is the SINGLE choke point for tool access — agents
+    # MUST NOT bypass it.  Non-KB agents get no tools at all.
+    tool_registry = None
+    if knowledge_base_id and knowledge_base_id > 0:
+        tool_registry = create_v1_registry(knowledge_base_id)
+
     tool_policy = None
     if config.RAG_AGENT_WORKFLOW_ENABLED:
         tool_policy = ToolExecutionPolicy(
@@ -54,6 +61,7 @@ def get_agent(
         model=model,
         max_steps=config.RAG_AGENT_MAX_STEPS if config.RAG_AGENT_WORKFLOW_ENABLED else 5,
         tool_policy=tool_policy,
+        tool_registry=tool_registry,
         **kwargs
     )
     if not config.RAG_AGENT_WORKFLOW_ENABLED:

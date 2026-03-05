@@ -1,9 +1,12 @@
 """
-Tools Module - Tool definitions and execution
+Tools Module — Tool definitions, execution, and registry.
 
-Agent V1 whitelist: search_knowledge_base, read_chunk, list_document_chunks
-Non-V1 tools (calculate, get_current_time, web_search) are available only when
-the tool policy explicitly allows them.
+Agent V1: all tool access goes through the ToolRegistry.  Agents MUST NOT
+import tool modules directly.  The Registry enforces the V1 whitelist,
+input validation, KB scope, and timeout at a single choke point.
+
+Legacy ``get_tools()`` / ``execute_tool()`` are kept for backward compat
+with MCP and non-agent callers but delegate to the Registry internally.
 """
 
 from dataclasses import dataclass
@@ -11,22 +14,36 @@ from typing import List, Dict, Any, Optional, Set
 import json
 import asyncio
 
+from .base import BaseTool
 from .search_tool import SearchTool
 from .time_tool import TimeTool
 from .calculator_tool import CalculatorTool
 from .web_search_tool import WebSearchTool
 from .read_chunk_tool import ReadChunkTool
 from .list_document_chunks_tool import ListDocumentChunksTool
+from .spec import ToolSpec, ErrorCode, RiskLevel, Permissions, V1_SPECS
+from .result import ToolResult
+from .registry import ToolRegistry, RegistryError, create_v1_registry, create_full_registry
 
 
-__all__ = ['get_tools', 'execute_tool', 'ToolExecutionPolicy',
-           'SearchTool', 'TimeTool', 'CalculatorTool', 'WebSearchTool',
-           'ReadChunkTool', 'ListDocumentChunksTool',
-           'AGENT_V1_TOOL_NAMES']
+__all__ = [
+    # Models
+    'ToolSpec', 'ToolResult', 'ToolExecutionPolicy',
+    'ErrorCode', 'RiskLevel', 'Permissions',
+    # Registry
+    'ToolRegistry', 'RegistryError',
+    'create_v1_registry', 'create_full_registry',
+    # Tools
+    'BaseTool', 'SearchTool', 'TimeTool', 'CalculatorTool',
+    'WebSearchTool', 'ReadChunkTool', 'ListDocumentChunksTool',
+    # Legacy compat
+    'get_tools', 'execute_tool',
+    # Constants
+    'AGENT_V1_TOOL_NAMES',
+]
 
 
-# Agent V1 whitelist — only these tools may be invoked by the knowledge-base
-# research agent.  Any tool not in this set is out of V1 scope.
+# Agent V1 whitelist
 AGENT_V1_TOOL_NAMES: Set[str] = {
     "search_knowledge_base",
     "read_chunk",
@@ -35,12 +52,12 @@ AGENT_V1_TOOL_NAMES: Set[str] = {
 
 
 class ToolPolicyError(ValueError):
-    """A tool call did not satisfy the single-agent safety policy."""
+    """A tool call did not satisfy the safety policy."""
 
 
 @dataclass(frozen=True)
 class ToolExecutionPolicy:
-    """Allow only bounded, read-only tools and normalise their inputs."""
+    """Legacy policy — still used for non-Registry paths (MCP)."""
 
     allowed_names: Set[str]
     knowledge_base_id: Optional[int] = None
@@ -63,11 +80,11 @@ class ToolExecutionPolicy:
             if not query or len(query) > self.max_input_characters:
                 raise ToolPolicyError("invalid_search_query")
             try:
-                requested_top_k = int(normalized.get("top_k", self.max_search_results))
+                rtk = int(normalized.get("top_k", self.max_search_results))
             except (TypeError, ValueError) as error:
                 raise ToolPolicyError("invalid_top_k") from error
             normalized["query"] = query
-            normalized["top_k"] = max(1, min(requested_top_k, self.max_search_results))
+            normalized["top_k"] = max(1, min(rtk, self.max_search_results))
 
         elif tool_name == "read_chunk":
             if not self.knowledge_base_id:
@@ -95,7 +112,6 @@ class ToolExecutionPolicy:
             normalized["expression"] = expression
 
         elif tool_name == "get_current_time":
-            # No parameters to validate — the tool ignores all input.
             pass
 
         elif tool_name == "web_search":
@@ -114,105 +130,34 @@ class ToolExecutionPolicy:
         return normalized
 
 
+# ── Legacy compat — delegates to Registry internally ──────────────────
+
 def get_tools(
     knowledge_base_id: int = None,
     v1_only: bool = True,
     **kwargs
 ) -> List[Dict[str, Any]]:
+    """Get tool definitions with instance references.
+
+    Returns tools from the Registry, each carrying an ``_registry``
+    back-reference so ``execute_tool`` routes through the Registry.
+    For backward compat, also attaches the ``instance`` key used by MCP.
     """
-    Get list of available tools.
+    if v1_only and knowledge_base_id:
+        registry = create_v1_registry(knowledge_base_id)
+    else:
+        registry = create_full_registry(knowledge_base_id)
 
-    When ``v1_only=True`` (default), only the three Agent V1 knowledge-base
-    research tools are returned.  Callers that need the full suite (MCP server,
-    non-agent use-cases) must explicitly pass ``v1_only=False``.
+    specs = registry.get_tools(v1_only=v1_only)
 
-    Agent V1 whitelist: search_knowledge_base, read_chunk, list_document_chunks.
+    # Attach tool instances for legacy MCP execute_tool path
+    for spec_dict in specs:
+        tool_name = spec_dict["name"]
+        inst = registry._instances.get(tool_name)
+        if inst is not None:
+            spec_dict["instance"] = inst
 
-    Args:
-        knowledge_base_id: Knowledge base ID for scoped tools.
-        v1_only: If True (default), return only V1-whitelisted tools.
-
-    Returns:
-        List of tool definitions.
-    """
-    all_tools = [
-        {
-            "name": "search_knowledge_base",
-            "description": "在知识库中搜索相关文档分块。返回最相关的结果及其相似度分数、文档来源和内容摘要。当用户询问特定知识或需要查找文档信息时使用。",
-            "parameters": {
-                "query": {
-                    "type": "string",
-                    "description": "搜索查询文本"
-                },
-                "top_k": {
-                    "type": "integer",
-                    "description": "返回的结果数量，默认5，最大20",
-                    "default": 5
-                }
-            },
-            "instance": SearchTool(knowledge_base_id=knowledge_base_id)
-        },
-        {
-            "name": "read_chunk",
-            "description": "读取指定分块的完整文本内容。当搜索结果中的摘要不足以回答问题时，使用此工具获取分块全文。每次仅读取一个分块。",
-            "parameters": {
-                "chunk_id": {
-                    "type": "string",
-                    "description": "分块标识符，如 '4_chunk_0000'"
-                }
-            },
-            "instance": ReadChunkTool(knowledge_base_id=knowledge_base_id)
-        },
-        {
-            "name": "list_document_chunks",
-            "description": "列出指定文档在知识库中的所有分块概览（含前200字摘要）。当需要了解某文档的整体结构或确定哪些分块值得深入阅读时使用。最多返回100条。",
-            "parameters": {
-                "document_id": {
-                    "type": "integer",
-                    "description": "文档 ID（数字）"
-                }
-            },
-            "instance": ListDocumentChunksTool(knowledge_base_id=knowledge_base_id)
-        },
-        {
-            "name": "get_current_time",
-            "description": "获取当前日期和时间。当用户询问现在时间、日期时使用。",
-            "parameters": {},
-            "instance": TimeTool()
-        },
-        {
-            "name": "calculate",
-            "description": "执行数学计算。当用户需要计算数学表达式时使用。",
-            "parameters": {
-                "expression": {
-                    "type": "string",
-                    "description": "数学表达式，如 '2 + 3 * 4'"
-                }
-            },
-            "instance": CalculatorTool()
-        },
-        {
-            "name": "web_search",
-            "description": "搜索互联网获取最新信息。当用户询问知识库之外的信息或需要实时数据时使用。",
-            "parameters": {
-                "query": {
-                    "type": "string",
-                    "description": "搜索查询文本"
-                },
-                "max_results": {
-                    "type": "integer",
-                    "description": "返回的最大结果数(1-10)",
-                    "default": 5
-                }
-            },
-            "instance": WebSearchTool()
-        }
-    ]
-
-    if v1_only:
-        return [t for t in all_tools if t["name"] in AGENT_V1_TOOL_NAMES]
-    return all_tools
-
+    return specs
 
 
 async def execute_tool(
@@ -221,24 +166,36 @@ async def execute_tool(
     tools: List[Dict[str, Any]],
     policy: Optional[ToolExecutionPolicy] = None,
 ) -> str:
-    """
-    Execute a tool.
+    """Execute a tool through the Registry, returning a JSON string.
 
-    Args:
-        tool_name: Name of the tool to execute.
-        tool_input: Input parameters for the tool.
-        tools: List of available tools.
-        policy: Optional safety policy for input validation and timeout.
-
-    Returns:
-        Tool execution result as a JSON string.
+    Prefer ``ToolRegistry.execute()`` for new code — it returns a
+    ``ToolResult`` object with structured success/error fields.
+    This function exists for backward compat with the ReAct agent's
+    text-based observation loop.
     """
+    # Try to find the registry from the tools list (attached at registration)
+    # or fall back to policy-based execution.
+    registry: Optional[ToolRegistry] = None
+    for tool in tools:
+        reg = tool.get("_registry")
+        if reg is not None:
+            registry = reg
+            break
+
+    if registry is not None:
+        # Use the Registry for execution
+        result = await registry.execute(tool_name, tool_input)
+        return json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
+
+    # Fallback: policy-based execution (MCP path)
     try:
         safe_input = policy.normalize(tool_name, tool_input) if policy else tool_input
     except ToolPolicyError as error:
-        return json.dumps({"error": f"工具调用被安全策略拒绝（{error}）"}, ensure_ascii=False)
+        return json.dumps(
+            ToolResult.failure(tool_name, ErrorCode.INVALID_INPUT, str(error)).to_dict(),
+            ensure_ascii=False,
+        )
 
-    # Find the tool instance.
     tool_instance = None
     for tool in tools:
         if tool["name"] == tool_name:
@@ -246,10 +203,12 @@ async def execute_tool(
             break
 
     if tool_instance is None:
-        return json.dumps({"error": f"工具 '{tool_name}' 不存在"}, ensure_ascii=False)
+        return json.dumps(
+            ToolResult.failure(tool_name, ErrorCode.NOT_FOUND, f"工具 '{tool_name}' 不存在").to_dict(),
+            ensure_ascii=False,
+        )
 
     try:
-        # Execute the tool with optional timeout.
         if policy:
             result = await asyncio.wait_for(
                 tool_instance.execute(**safe_input),
@@ -258,13 +217,24 @@ async def execute_tool(
         else:
             result = await tool_instance.execute(**safe_input)
 
-        # Always return JSON so the agent can parse the output reliably.
-        if isinstance(result, (dict, list)):
-            return json.dumps(result, ensure_ascii=False, indent=2)
-        else:
-            return json.dumps({"result": str(result)}, ensure_ascii=False)
+        if isinstance(result, dict) and "error" in result:
+            return json.dumps(
+                ToolResult.failure(tool_name, ErrorCode.INTERNAL, result["error"]).to_dict(),
+                ensure_ascii=False,
+            )
+
+        return json.dumps(
+            ToolResult.success(tool_name, result).to_dict(),
+            ensure_ascii=False, indent=2,
+        )
 
     except asyncio.TimeoutError:
-        return json.dumps({"error": "工具调用超时"}, ensure_ascii=False)
+        return json.dumps(
+            ToolResult.failure(tool_name, ErrorCode.TIMEOUT, "工具调用超时").to_dict(),
+            ensure_ascii=False,
+        )
     except Exception as e:
-        return json.dumps({"error": f"工具执行错误：{str(e)}"}, ensure_ascii=False)
+        return json.dumps(
+            ToolResult.failure(tool_name, ErrorCode.INTERNAL, f"工具执行错误：{e}").to_dict(),
+            ensure_ascii=False,
+        )
