@@ -33,6 +33,7 @@ class Permissions:
 class ErrorCode:
     TIMEOUT = "tool_timeout"
     SCOPE_DENIED = "knowledge_base_scope_denied"
+    PERMISSION_DENIED = "permission_denied"
     INVALID_INPUT = "invalid_input"
     NOT_FOUND = "not_found"
     INTERNAL = "internal_error"
@@ -62,6 +63,7 @@ class ToolSpec:
     error_codes: Dict[str, str] = field(default_factory=lambda: {
         ErrorCode.TIMEOUT: "工具调用超时",
         ErrorCode.SCOPE_DENIED: "无权访问该知识库",
+        ErrorCode.PERMISSION_DENIED: "权限不足，操作被拒绝",
         ErrorCode.INVALID_INPUT: "输入参数无效",
         ErrorCode.NOT_FOUND: "未找到请求的资源",
         ErrorCode.INTERNAL: "工具内部错误",

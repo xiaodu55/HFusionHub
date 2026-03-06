@@ -173,18 +173,34 @@ public class ConversationServiceImpl implements ConversationService {
 
         // 阶段 2: 事务外调用 AI（释放数据库连接）
         // Agent V1: 有知识库 → /api/agent/v1/chat; 无知识库 → /api/chat
+        // Agent V1 Step 3: userId MUST come from the authenticated Java session;
+        // it is NEVER taken from the frontend DTO.  The model cannot forge it.
+        Long currentUserId = JwtUtils.getCurrentUserId();
         AiClient.ChatResponse aiResponse;
         try {
             if (conversation.getKnowledgeBaseId() != null && conversation.getKnowledgeBaseId() > 0) {
+                // V1 context guard: if Java cannot resolve the authenticated user,
+                // fail loudly — do NOT silently route to a non-V1 path or save a
+                // fallback answer that would mask the security gap.
+                if (currentUserId == null || currentUserId <= 0) {
+                    throw new BusinessException(
+                            "Agent V1 配置错误：知识库会话需要已认证的用户上下文，但当前会话无法解析用户 ID。"
+                            + "请确认 JWT 令牌有效且包含 subject 声明。");
+                }
                 aiResponse = aiClient.agentV1Chat(
                         dto.getContent(), dto.getConversationId(),
                         conversation.getKnowledgeBaseId(), history,
-                        "detailed", 5, requestId);
+                        "detailed", 5, requestId, currentUserId);
             } else {
                 aiResponse = aiClient.chat(
                         dto.getContent(), dto.getConversationId(),
                         conversation.getKnowledgeBaseId(), history);
             }
+        } catch (BusinessException e) {
+            // Re-throw BusinessExceptions directly — they represent explicit
+            // configuration or permission errors that MUST NOT be silently
+            // converted to a fallback answer.
+            throw e;
         } catch (Exception e) {
             log.error("Failed to get AI response: {}", e.getMessage(), e);
             return saveAssistantMessage(dto.getConversationId(),
@@ -629,10 +645,30 @@ public class ConversationServiceImpl implements ConversationService {
         boolean[] assistantSaved = {false};
         final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
-        reactor.core.publisher.Flux<String> sseFlux = aiClient.streamChat(
-                dto.getContent(), dto.getConversationId(),
-                conversation.getKnowledgeBaseId(), history, requestId)
-                .doFinally(signalType -> {
+        // Agent V1 Step 3: KB-bound streaming MUST go through the V1 endpoint
+        // so that the execution context (user_id, permissions, mode) is created
+        // and the permission boundary is enforced on every tool call.
+        final boolean isKbBound = conversation.getKnowledgeBaseId() != null
+                && conversation.getKnowledgeBaseId() > 0;
+        if (isKbBound && (currentUserId == null || currentUserId <= 0)) {
+            emitter.completeWithError(new BusinessException(
+                    "Agent V1 配置错误：知识库会话需要已认证的用户上下文，但当前会话无法解析用户 ID。"
+                    + "请确认 JWT 令牌有效且包含 subject 声明。"));
+            return;
+        }
+
+        reactor.core.publisher.Flux<String> sseFlux;
+        if (isKbBound) {
+            sseFlux = aiClient.agentV1ChatStream(
+                    dto.getContent(), dto.getConversationId(),
+                    conversation.getKnowledgeBaseId(), history, requestId, currentUserId);
+        } else {
+            sseFlux = aiClient.streamChat(
+                    dto.getContent(), dto.getConversationId(),
+                    conversation.getKnowledgeBaseId(), history, requestId);
+        }
+
+        sseFlux = sseFlux.doFinally(signalType -> {
                     // Cleanup: remove from active requests and signal completion
                     activeStreamRequests.remove(requestId, streamCancellation);
                     streamCancellation.completed.complete(null);

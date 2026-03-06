@@ -165,6 +165,7 @@ async def execute_tool(
     tool_input: Dict[str, Any],
     tools: List[Dict[str, Any]],
     policy: Optional[ToolExecutionPolicy] = None,
+    context: Optional[Any] = None,  # AgentExecutionContext (lazy import)
 ) -> str:
     """Execute a tool through the Registry, returning a JSON string.
 
@@ -172,6 +173,9 @@ async def execute_tool(
     ``ToolResult`` object with structured success/error fields.
     This function exists for backward compat with the ReAct agent's
     text-based observation loop.
+
+    When *context* is provided, the Registry enforces mode gates,
+    permission checks, and KB-scope isolation before execution.
     """
     # Try to find the registry from the tools list (attached at registration)
     # or fall back to policy-based execution.
@@ -183,8 +187,8 @@ async def execute_tool(
             break
 
     if registry is not None:
-        # Use the Registry for execution
-        result = await registry.execute(tool_name, tool_input)
+        # Use the Registry for execution (with optional context).
+        result = await registry.execute(tool_name, tool_input, context=context)
         return json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
 
     # Fallback: policy-based execution (MCP path)

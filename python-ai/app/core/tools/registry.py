@@ -167,14 +167,18 @@ class ToolRegistry:
         tool_name: str,
         tool_input: Dict[str, Any],
         timeout_seconds: Optional[float] = None,
+        context: Optional[Any] = None,  # AgentExecutionContext (lazy import)
     ) -> ToolResult:
         """Execute a tool through the registry.
 
         Validates:
           1. Tool is registered
           2. Tool is available for the current agent version
-          3. Input matches the input_schema
-          4. Knowledge base is set (for KB-scoped tools)
+          3. **Permission check** — context must grant every required permission
+          4. **Mode gate** — read_only mode rejects write / external tools
+          5. **KB scope** — tool's knowledge_base_id must match context
+          6. Input matches the input_schema
+          7. Knowledge base is set (for KB-scoped tools)
         """
         spec = self._specs.get(tool_name)
         if spec is None:
@@ -184,13 +188,38 @@ class ToolRegistry:
                 message=f"工具 '{tool_name}' 未注册",
             )
 
-        # Agent-version gate
+        # Agent-version gate (registry-level; context-based check follows)
         if spec.agent_version != self._agent_version:
             return ToolResult.failure(
                 tool_name=tool_name,
                 error_code=ErrorCode.SCOPE_DENIED,
                 message=f"工具 '{tool_name}' 不在 Agent V{self._agent_version} 白名单中",
             )
+
+        # ── Permission & mode checks (when context is present) ────────
+        if context is not None:
+            # Mode gate: read_only mode rejects write / external tools.
+            if not context.allows_risk_level(spec.risk_level):
+                return ToolResult.failure(
+                    tool_name=tool_name,
+                    error_code=ErrorCode.PERMISSION_DENIED,
+                    message=(
+                        f"工具 '{tool_name}' 风险等级为 {spec.risk_level}，"
+                        f"当前模式 {context.mode} 不允许执行"
+                    ),
+                )
+
+            # Required-permission check.
+            for perm in spec.required_permissions:
+                if not context.has_permission(perm):
+                    return ToolResult.failure(
+                        tool_name=tool_name,
+                        error_code=ErrorCode.PERMISSION_DENIED,
+                        message=(
+                            f"工具 '{tool_name}' 需要权限 '{perm}'，"
+                            f"当前上下文未授予该权限"
+                        ),
+                    )
 
         # KB-scope enforcement
         if Permissions.KB_READ in spec.required_permissions:
@@ -199,6 +228,16 @@ class ToolRegistry:
                     tool_name=tool_name,
                     error_code=ErrorCode.SCOPE_DENIED,
                     message="未指定知识库ID，无法执行知识库操作",
+                )
+            # Cross-KB check: context KB must match registry KB.
+            if context is not None and not context.owns_knowledge_base(self._knowledge_base_id):
+                return ToolResult.failure(
+                    tool_name=tool_name,
+                    error_code=ErrorCode.SCOPE_DENIED,
+                    message=(
+                        f"无权访问知识库 {self._knowledge_base_id}，"
+                        f"当前上下文限定知识库 {context.knowledge_base_id}"
+                    ),
                 )
 
         # Input validation against JSON Schema
@@ -210,10 +249,12 @@ class ToolRegistry:
                 message=validation_error,
             )
 
-        # Inject knowledge_base_id for KB-scoped tools.
-        # Always strip any user-supplied value first to prevent KB spoofing.
+        # ── Anti-spoofing: strip model-supplied identity fields ───────
+        # The model MUST NOT be able to forge user_id or knowledge_base_id.
+        # The Registry injects the real values from the context / registry.
         safe_input = dict(tool_input)
         safe_input.pop("knowledge_base_id", None)
+        safe_input.pop("user_id", None)
         if Permissions.KB_READ in spec.required_permissions:
             safe_input["knowledge_base_id"] = self._knowledge_base_id
 

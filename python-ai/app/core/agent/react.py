@@ -18,6 +18,7 @@ import time
 from typing import List, Dict, Any, Optional, AsyncGenerator
 
 from .agent import Agent, AgentResponse, AgentStep
+from .citation import normalize_source
 from ..llm import get_llm, ChatMessage, BaseLLM
 from ..tools import execute_tool, ToolExecutionPolicy, ToolRegistry, create_v1_registry
 from ..rag import (
@@ -100,6 +101,7 @@ class ReactAgent(Agent):
         tool_policy: Optional[ToolExecutionPolicy] = None,
         style: str = "detailed",
         tool_registry: Optional[ToolRegistry] = None,
+        execution_context: Optional[Any] = None,  # AgentExecutionContext
         **kwargs
     ):
         self.knowledge_base_id = knowledge_base_id
@@ -113,6 +115,11 @@ class ReactAgent(Agent):
         # Agent V1: Tool Registry is the SINGLE source of truth for tools.
         # Agents MUST NOT bypass the registry.
         self._registry: Optional[ToolRegistry] = tool_registry
+
+        # Agent V1 Step 3: immutable execution context from Java (user_id,
+        # permissions, mode, …).  Passed to the Registry at tool-execution
+        # time for permission / mode / KB-scope enforcement.
+        self._context: Optional[Any] = execution_context
 
         # Agent V1: track tool calls and sources for partial-result reporting.
         self._tool_calls_count: int = 0
@@ -151,57 +158,10 @@ class ReactAgent(Agent):
         return self.knowledge_base_id is not None and self.knowledge_base_id > 0
 
     # ── Agent V1 canonical source format ───────────────────────────────
-
-    @staticmethod
-    def _citation_from_result(result: Any) -> Dict[str, Any]:
-        """Build the canonical Agent V1 citation from a retrieved chunk."""
-        metadata = getattr(result, "metadata", {}) or {}
-        if isinstance(metadata, str):
-            try:
-                metadata = json.loads(metadata)
-            except (json.JSONDecodeError, TypeError):
-                metadata = {}
-
-        document_id = getattr(result, "document_id", None) or metadata.get("document_id")
-        chunk_id = (
-            getattr(result, "chunk_id", None)
-            or metadata.get("chunk_id")
-        )
-        content = getattr(result, "content", "") or ""
-        title = metadata.get("document_title") or f"文档 #{document_id}"
-        score = getattr(result, "score", 0) or 0
-
-        return {
-            "document_id": int(document_id) if document_id is not None else None,
-            "chunk_id": chunk_id,
-            "title": title,
-            "excerpt": content[:300] if content else "",
-            "score": float(score),
-        }
-
-    @staticmethod
-    def _citation_from_dict(source: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalise a dict-based source to the canonical Agent V1 format."""
-        metadata = source.get("metadata", {})
-        if isinstance(metadata, str):
-            try:
-                metadata = json.loads(metadata)
-            except (json.JSONDecodeError, TypeError):
-                metadata = {}
-
-        doc_id = source.get("document_id") or metadata.get("document_id")
-        chunk_id = source.get("chunk_id") or metadata.get("chunk_id")
-        content = source.get("content", "") or ""
-        title = metadata.get("document_title") or source.get("document_name") or f"文档 #{doc_id}"
-        score = source.get("score", 0) or 0
-
-        return {
-            "document_id": int(doc_id) if doc_id is not None else None,
-            "chunk_id": chunk_id,
-            "title": title,
-            "excerpt": content[:300] if content else "",
-            "score": float(score),
-        }
+    # Both sync and streaming paths MUST route through normalize_source() —
+    # the single choke point defined in app.core.agent.citation.
+    # It is idempotent (safe to call on already-normalised sources) and
+    # handles ProcessedResult objects, SearchResult objects, and raw dicts.
 
     def _format_tools_description(self) -> str:
         """Format tools description for system prompt"""
@@ -279,7 +239,7 @@ class ReactAgent(Agent):
 
             if action_result:
                 action, action_input = action_result
-                observation = await execute_tool(action, action_input, tools, policy=self.tool_policy)
+                observation = await execute_tool(action, action_input, tools, policy=self.tool_policy, context=self._context)
                 self._tool_calls_count += 1
 
                 thought_match = re.search(r'Thought:\s*(.+?)(?:\n|$)', assistant_text)
@@ -372,7 +332,7 @@ class ReactAgent(Agent):
                     f"[{i}] ({source_label}, 相似度: {r.score:.2f})\n{r.content}"
                 )
 
-                sources.append(self._citation_from_result(r))
+                sources.append(normalize_source(r))
 
             return "\n\n".join(context_parts), sources, self.knowledge_base_id
 
@@ -705,7 +665,7 @@ class ReactAgent(Agent):
                 action, action_input = action_result
                 self._tool_calls_count += 1
 
-                observation = await execute_tool(action, action_input, tools, policy=self.tool_policy)
+                observation = await execute_tool(action, action_input, tools, policy=self.tool_policy, context=self._context)
 
                 # Collect sources from tool results (Agent V1 canonical format).
                 if action == "search_knowledge_base":
@@ -714,7 +674,7 @@ class ReactAgent(Agent):
                         if isinstance(obs_data, list):
                             for result in obs_data:
                                 if isinstance(result, dict) and "error" not in result:
-                                    sources.append(self._citation_from_dict(result))
+                                    sources.append(normalize_source(result))
                                     self._last_sources = list(sources)
                     except (json.JSONDecodeError, TypeError):
                         pass
@@ -898,7 +858,11 @@ class ReactAgent(Agent):
                     decomposition_result = await query_decomposer.decompose(query, intent_result, history)
 
                     if decomposition_result and decomposition_result.sub_questions:
-                        all_results = []
+                        # ── Decomposition path ──
+                        # Keep ProcessedResult objects intact — same as the sync
+                        # path does.  NEVER hand-roll a dict; the single choke
+                        # point is normalize_source().
+                        all_results: list = []  # List[ProcessedResult]
                         for sub_q in decomposition_result.sub_questions:
                             sub_query = sub_q.content if hasattr(sub_q, 'content') else str(sub_q)
                             sub_plan = await get_adaptive_retrieval_planner().plan(
@@ -906,55 +870,46 @@ class ReactAgent(Agent):
                                 history=history,
                                 intent_result=intent_result,
                             )
-                            result = await retriever.retrieve(
+                            sub_result = await retriever.retrieve(
                                 query=sub_plan.query,
                                 knowledge_base_id=self.knowledge_base_id,
                                 top_k=sub_plan.top_k,
                             )
-                            if result and result.results:
-                                for item in result.results:
-                                    all_results.append({
-                                        "content": item.content,
-                                        "score": item.score,
-                                        "document_id": item.document_id,
-                                        "knowledge_base_id": item.knowledge_base_id,
-                                        "source": item.source,
-                                        "outline_path": item.outline_path or [],
-                                        "metadata": item.metadata or {},
-                                    })
+                            if sub_result and sub_result.results:
+                                all_results.extend(sub_result.results)
 
-                        seen_contents = set()
-                        unique_results = []
+                        # Deduplicate by content across sub-queries.
+                        seen_contents: set = set()
+                        unique_results: list = []
                         for r in all_results:
-                            content_val = r.get("content", "")
+                            content_val = getattr(r, "content", "") or ""
                             if content_val not in seen_contents:
                                 seen_contents.add(content_val)
                                 unique_results.append(r)
 
-                        raw_context = "\n\n".join([r.get("content", "") for r in unique_results])
+                        raw_context = "\n\n".join([
+                            (getattr(r, "content", "") or "") for r in unique_results
+                        ])
                         context, was_compressed = await self._safe_compress(raw_context)
-                        sources = [self._citation_from_dict(r) for r in unique_results]
+                        # normalize_source accepts ProcessedResult objects
+                        # directly — same code path as the sync run().
+                        sources = [normalize_source(r) for r in unique_results]
                     else:
+                        # ── Non-decomposition path ──
                         result = await retriever.retrieve(
                             query=retrieval_plan.query,
                             knowledge_base_id=self.knowledge_base_id,
                             top_k=retrieval_plan.top_k,
                         )
                         if result and result.results:
-                            results = []
-                            for item in result.results:
-                                results.append({
-                                    "content": item.content,
-                                    "score": item.score,
-                                    "document_id": item.document_id,
-                                    "knowledge_base_id": item.knowledge_base_id,
-                                    "source": item.source,
-                                    "outline_path": item.outline_path or [],
-                                    "metadata": item.metadata or {},
-                                })
-                            raw_context = "\n\n".join([r.get("content", "") for r in results])
+                            # result.results is already List[ProcessedResult].
+                            # Pass objects directly to normalize_source —
+                            # no manual dict conversion.
+                            raw_context = "\n\n".join([
+                                (getattr(r, "content", "") or "") for r in result.results
+                            ])
                             context, was_compressed = await self._safe_compress(raw_context)
-                            sources = [self._citation_from_dict(r) for r in results]
+                            sources = [normalize_source(r) for r in result.results]
                 except Exception as e:
                     logger.error(f"[RAG] Retrieval failed, falling back to direct LLM: {e}", exc_info=True)
 
@@ -1011,9 +966,11 @@ class ReactAgent(Agent):
                     logger.error(f"[RAG:stream] Groundedness retry failed: {retry_err}")
 
             # Yield sources as a JSON event (Agent V1 canonical format).
+            # Sources are already normalised by normalize_source() above —
+            # do NOT re-normalise (normalize_source is idempotent but
+            # calling it again would be wasted work and masks bugs).
             if sources:
-                formatted_sources = [self._citation_from_dict(s) for s in sources]
-                sources_event = {"content": "", "sources": formatted_sources}
+                sources_event = {"content": "", "sources": sources}
                 yield json.dumps(sources_event, ensure_ascii=False)
 
             # Evaluate answer quality.

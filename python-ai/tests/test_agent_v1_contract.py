@@ -122,18 +122,38 @@ class TestKnowledgeBaseIdRequired:
     """Agent V1 endpoint MUST reject requests without knowledge_base_id."""
 
     def test_agent_v1_request_validates_kb_id(self):
-        """AgentV1Request Pydantic model requires knowledge_base_id."""
+        """AgentV1Request Pydantic model requires knowledge_base_id and user_id."""
         with pytest.raises(Exception):
-            AgentV1Request(message="hello")  # missing knowledge_base_id
+            AgentV1Request(message="hello")  # missing knowledge_base_id and user_id
 
     def test_agent_v1_request_accepts_valid(self):
-        """AgentV1Request with KB ID is valid."""
-        req = AgentV1Request(message="hello", knowledge_base_id=1)
+        """AgentV1Request with KB ID and user_id is valid."""
+        req = AgentV1Request(message="hello", knowledge_base_id=1, user_id=4)
         assert req.knowledge_base_id == 1
+        assert req.user_id == 4
 
     def test_agent_v1_endpoint_rejects_missing_kb(self):
         """POST /api/agent/v1/chat without knowledge_base_id → 422."""
         resp = client.post("/api/agent/v1/chat", json={"message": "hello"})
+        assert resp.status_code == 422
+
+    def test_agent_v1_endpoint_rejects_missing_user_id(self):
+        """POST /api/agent/v1/chat without user_id → 422 (Step 3)."""
+        resp = client.post("/api/agent/v1/chat", json={
+            "message": "hello",
+            "knowledge_base_id": 1,
+            # user_id deliberately omitted
+        })
+        assert resp.status_code == 422
+
+    def test_agent_v1_stream_endpoint_rejects_missing_user_id(self):
+        """POST /api/agent/v1/chat/stream without user_id → 422 (Step 3)."""
+        resp = client.post("/api/agent/v1/chat/stream", json={
+            "message": "hello",
+            "knowledge_base_id": 1,
+            "stream": True,
+            # user_id deliberately omitted
+        })
         assert resp.status_code == 422
 
 
@@ -329,7 +349,22 @@ class TestAgentV1EndToEnd:
                 return canned
 
             async def run_stream(self, **kwargs):
-                yield '{"content": "chunk"}'
+                # Yield content chunks first, then sources as a JSON event
+                # (mirroring the real ReactAgent.run_stream behaviour).
+                yield '{"content": "这是来自知识库的测试回答"}'
+                import json as _json
+                yield _json.dumps({
+                    "content": "",
+                    "sources": [
+                        {
+                            "document_id": 1,
+                            "chunk_id": "1_chunk_0000",
+                            "title": "测试文档.pdf",
+                            "excerpt": "这是测试文档的摘要内容，用于验证来源字段格式。",
+                            "score": 0.95,
+                        }
+                    ],
+                }, ensure_ascii=False)
 
         mock = _MockAgent()
         monkeypatch.setattr("app.api.chat.get_agent", lambda **kw: mock)
@@ -340,6 +375,7 @@ class TestAgentV1EndToEnd:
         resp = client.post("/api/agent/v1/chat", json={
             "message": "测试问题",
             "knowledge_base_id": 1,
+            "user_id": 4,
             "conversation_id": 1,
             "history": [],
             "stream": False,
@@ -383,6 +419,7 @@ class TestAgentV1EndToEnd:
         resp = client.post("/api/agent/v1/chat", json={
             "message": "1785288404409",
             "knowledge_base_id": 1,
+            "user_id": 4,
             "history": [],
             "stream": False,
         })
@@ -410,6 +447,21 @@ class TestAgentV1EndToEnd:
         assert "content" in data
         assert "model" in data
         assert data["model"] != "fallback"
+
+    def test_v1_stream_endpoint_returns_sse(self):
+        """POST /api/agent/v1/chat/stream with valid context → 200 + SSE events."""
+        resp = client.post("/api/agent/v1/chat/stream", json={
+            "message": "流式测试问题",
+            "knowledge_base_id": 1,
+            "user_id": 4,
+            "history": [],
+            "stream": True,
+        })
+        assert resp.status_code == 200
+        # SSE content type.
+        assert "text/event-stream" in resp.headers.get("content-type", "")
+        # Should contain [DONE] sentinel.
+        assert "[DONE]" in resp.text
 
 
 # ---------------------------------------------------------------------------
@@ -595,3 +647,924 @@ class TestAgentCannotBypassRegistry:
         assert "web_search" in names
         assert "calculate" in names
         assert "get_current_time" in names
+
+
+# ---------------------------------------------------------------------------
+# 9. AgentExecutionContext unit tests (Step 3)
+# ---------------------------------------------------------------------------
+
+class TestAgentExecutionContext:
+    """AgentExecutionContext is immutable and enforces mode / permission rules."""
+
+    def test_valid_context_construction(self):
+        from app.core.agent.execution_context import AgentExecutionContext
+
+        ctx = AgentExecutionContext(
+            user_id=4,
+            knowledge_base_id=3,
+            permissions=frozenset({"knowledge_base:read"}),
+            agent_run_id="test-run-1",
+            mode="read_only",
+        )
+        assert ctx.user_id == 4
+        assert ctx.knowledge_base_id == 3
+        assert ctx.mode == "read_only"
+        assert ctx.has_permission("knowledge_base:read")
+        assert not ctx.has_permission("knowledge_base:write")
+
+    def test_context_rejects_invalid_user_id(self):
+        from app.core.agent.execution_context import AgentExecutionContext
+
+        with pytest.raises(ValueError, match="user_id must be positive"):
+            AgentExecutionContext(user_id=0, knowledge_base_id=1)
+
+    def test_context_rejects_invalid_kb_id(self):
+        from app.core.agent.execution_context import AgentExecutionContext
+
+        with pytest.raises(ValueError, match="knowledge_base_id must be positive"):
+            AgentExecutionContext(user_id=4, knowledge_base_id=0)
+
+    def test_context_rejects_invalid_mode(self):
+        from app.core.agent.execution_context import AgentExecutionContext
+
+        with pytest.raises(ValueError, match="Invalid mode"):
+            AgentExecutionContext(user_id=4, knowledge_base_id=1, mode="admin_mode")
+
+    def test_read_only_allows_read_only_tools(self):
+        from app.core.agent.execution_context import AgentExecutionContext
+        from app.core.tools.spec import RiskLevel
+
+        ctx = AgentExecutionContext(user_id=4, knowledge_base_id=1, mode="read_only")
+        assert ctx.allows_risk_level(RiskLevel.READ_ONLY) is True
+        assert ctx.allows_risk_level(RiskLevel.READ_WRITE) is False
+        assert ctx.allows_risk_level(RiskLevel.EXTERNAL) is False
+
+    def test_read_write_allows_all_tools(self):
+        from app.core.agent.execution_context import AgentExecutionContext
+        from app.core.tools.spec import RiskLevel
+
+        ctx = AgentExecutionContext(user_id=4, knowledge_base_id=1, mode="read_write")
+        assert ctx.allows_risk_level(RiskLevel.READ_ONLY) is True
+        assert ctx.allows_risk_level(RiskLevel.READ_WRITE) is True
+        assert ctx.allows_risk_level(RiskLevel.EXTERNAL) is True
+
+    def test_owns_knowledge_base(self):
+        from app.core.agent.execution_context import AgentExecutionContext
+
+        ctx = AgentExecutionContext(user_id=4, knowledge_base_id=3)
+        assert ctx.owns_knowledge_base(3) is True
+        assert ctx.owns_knowledge_base(99) is False
+
+    def test_to_dict_serialisation(self):
+        from app.core.agent.execution_context import AgentExecutionContext
+
+        ctx = AgentExecutionContext(
+            user_id=4,
+            knowledge_base_id=3,
+            permissions=frozenset({"knowledge_base:read"}),
+            agent_run_id="run-1",
+            mode="read_only",
+        )
+        d = ctx.to_dict()
+        assert d["user_id"] == 4
+        assert d["knowledge_base_id"] == 3
+        assert d["permissions"] == ["knowledge_base:read"]
+        assert d["agent_run_id"] == "run-1"
+        assert d["mode"] == "read_only"
+
+
+# ---------------------------------------------------------------------------
+# 10. Approval boundary tests (Step 3)
+# ---------------------------------------------------------------------------
+
+class TestApprovalBoundary:
+    """ApprovalRequest lifecycle: pending → approved / denied / expired."""
+
+    def test_new_approval_is_pending(self):
+        from app.core.agent.execution_context import ApprovalRequest
+
+        req = ApprovalRequest(
+            approval_id="ap-001",
+            agent_run_id="run-1",
+            tool_name="future_write_tool",
+            arguments_summary="创建草稿: 标题=测试",
+        )
+        assert req.status == "pending"
+        assert req.is_terminal is False
+        assert req.is_approved is False
+        assert req.is_expired is False
+
+    def test_approve_transitions_to_approved(self):
+        from app.core.agent.execution_context import ApprovalRequest
+
+        req = ApprovalRequest(
+            approval_id="ap-001",
+            agent_run_id="run-1",
+            tool_name="future_write_tool",
+            arguments_summary="创建草稿",
+        )
+        req.approve()
+        assert req.status == "approved"
+        assert req.is_terminal is True
+        assert req.is_approved is True
+
+    def test_deny_transitions_to_denied(self):
+        from app.core.agent.execution_context import ApprovalRequest
+
+        req = ApprovalRequest(
+            approval_id="ap-001",
+            agent_run_id="run-1",
+            tool_name="future_write_tool",
+            arguments_summary="创建草稿",
+        )
+        req.deny()
+        assert req.status == "denied"
+        assert req.is_terminal is True
+        assert req.is_approved is False
+
+    def test_cannot_approve_terminal(self):
+        from app.core.agent.execution_context import ApprovalRequest
+
+        req = ApprovalRequest(
+            approval_id="ap-001",
+            agent_run_id="run-1",
+            tool_name="future_write_tool",
+            arguments_summary="创建草稿",
+        )
+        req.approve()
+        with pytest.raises(ValueError, match="already approved"):
+            req.approve()
+
+    def test_cannot_deny_terminal(self):
+        from app.core.agent.execution_context import ApprovalRequest
+
+        req = ApprovalRequest(
+            approval_id="ap-001",
+            agent_run_id="run-1",
+            tool_name="future_write_tool",
+            arguments_summary="创建草稿",
+        )
+        req.deny()
+        with pytest.raises(ValueError, match="already denied"):
+            req.deny()
+
+    def test_expired_approval_is_detected(self):
+        from app.core.agent.execution_context import ApprovalRequest
+        from datetime import datetime, timedelta, timezone
+
+        # Create an approval that expired 1 hour ago.
+        past = datetime.now(timezone.utc) - timedelta(hours=1)
+        req = ApprovalRequest(
+            approval_id="ap-001",
+            agent_run_id="run-1",
+            tool_name="future_write_tool",
+            arguments_summary="创建草稿",
+            expires_at=past,
+        )
+        assert req.is_expired is True
+        # After detection, status auto-transitions to expired.
+        assert req.status == "expired"
+
+    def test_to_dict_includes_all_fields(self):
+        from app.core.agent.execution_context import ApprovalRequest
+
+        req = ApprovalRequest(
+            approval_id="ap-001",
+            agent_run_id="run-1",
+            tool_name="future_write_tool",
+            arguments_summary="创建草稿: 标题=测试报告",
+        )
+        d = req.to_dict()
+        assert d["approval_id"] == "ap-001"
+        assert d["agent_run_id"] == "run-1"
+        assert d["tool_name"] == "future_write_tool"
+        assert "测试报告" in d["arguments_summary"]
+        assert d["status"] == "pending"
+        assert "expires_at" in d
+        assert "created_at" in d
+
+
+# ---------------------------------------------------------------------------
+# 11. Permission enforcement integration tests (Step 3 acceptance)
+# ---------------------------------------------------------------------------
+
+class TestPermissionEnforcement:
+    """Registry rejects execution when context does not grant sufficient rights."""
+
+    @pytest.mark.asyncio
+    async def test_cross_kb_access_denied(self):
+        """Context KB=1, registry KB=2 → SCOPE_DENIED."""
+        from app.core.tools.registry import create_v1_registry
+        from app.core.agent.execution_context import AgentExecutionContext
+
+        ctx = AgentExecutionContext(
+            user_id=4,
+            knowledge_base_id=1,  # Authorized for KB 1 only.
+            permissions=frozenset({"knowledge_base:read"}),
+            agent_run_id="test-cross-kb",
+            mode="read_only",
+        )
+        # Registry is scoped to KB 2 — mismatch should be denied.
+        reg = create_v1_registry(2)  # knowledge_base_id=2
+        result = await reg.execute(
+            "search_knowledge_base",
+            {"query": "test"},
+            context=ctx,
+        )
+        assert result.ok is False
+        assert result.error_code == "knowledge_base_scope_denied"
+
+    @pytest.mark.asyncio
+    async def test_user_id_stripped_from_tool_input(self):
+        """Model-supplied user_id is stripped before tool execution."""
+        from app.core.tools.registry import create_v1_registry
+        from app.core.agent.execution_context import AgentExecutionContext
+
+        ctx = AgentExecutionContext(
+            user_id=4,
+            knowledge_base_id=1,
+            permissions=frozenset({"knowledge_base:read"}),
+            agent_run_id="test-anti-spoof",
+            mode="read_only",
+        )
+        reg = create_v1_registry(1)
+        # Model tries to forge user_id=999 in tool input.
+        result = await reg.execute(
+            "search_knowledge_base",
+            {"query": "test", "user_id": 999, "knowledge_base_id": 999},
+            context=ctx,
+        )
+        # Should succeed with real user_id/kb, forged values stripped.
+        assert result.ok is True
+        assert result.tool_name == "search_knowledge_base"
+
+    @pytest.mark.asyncio
+    async def test_write_tool_blocked_in_read_only_mode(self):
+        """In read_only mode, write/external tools return PERMISSION_DENIED."""
+        from app.core.tools.registry import ToolRegistry
+        from app.core.tools.spec import ToolSpec, RiskLevel, Permissions, ErrorCode
+        from app.core.agent.execution_context import AgentExecutionContext
+
+        # Register a write tool in a fresh registry.
+        write_spec = ToolSpec(
+            name="create_draft",
+            description="创建文档草稿",
+            input_schema={
+                "type": "object",
+                "properties": {"title": {"type": "string"}},
+                "required": ["title"],
+            },
+            output_schema={"type": "object"},
+            risk_level=RiskLevel.READ_WRITE,
+            timeout_seconds=10.0,
+            required_permissions=[Permissions.KB_WRITE],
+            error_codes={ErrorCode.PERMISSION_DENIED: "权限不足"},
+            agent_version="1.0",
+        )
+
+        reg = ToolRegistry(knowledge_base_id=1, agent_version="1.0")
+        reg._register(write_spec, None)  # No instance needed — will fail at gate.
+
+        ctx = AgentExecutionContext(
+            user_id=4,
+            knowledge_base_id=1,
+            permissions=frozenset({"knowledge_base:read"}),
+            agent_run_id="test-write-blocked",
+            mode="read_only",  # V1 mode
+        )
+        result = await reg.execute(
+            "create_draft",
+            {"title": "Test"},
+            context=ctx,
+        )
+        assert result.ok is False
+        assert result.error_code == ErrorCode.PERMISSION_DENIED
+        assert "read_only" in result.message
+
+    @pytest.mark.asyncio
+    async def test_missing_permission_denied(self):
+        """Tool requires knowledge_base:write but context only grants read."""
+        from app.core.tools.registry import ToolRegistry
+        from app.core.tools.spec import ToolSpec, RiskLevel, Permissions, ErrorCode
+        from app.core.agent.execution_context import AgentExecutionContext
+
+        write_spec = ToolSpec(
+            name="update_kb",
+            description="更新知识库条目",
+            input_schema={
+                "type": "object",
+                "properties": {"entry": {"type": "string"}},
+                "required": ["entry"],
+            },
+            output_schema={"type": "object"},
+            risk_level=RiskLevel.READ_WRITE,
+            timeout_seconds=10.0,
+            required_permissions=[Permissions.KB_WRITE],
+            error_codes={ErrorCode.PERMISSION_DENIED: "权限不足"},
+            agent_version="1.0",
+        )
+
+        reg = ToolRegistry(knowledge_base_id=1, agent_version="1.0")
+        reg._register(write_spec, None)
+
+        ctx = AgentExecutionContext(
+            user_id=4,
+            knowledge_base_id=1,
+            permissions=frozenset({"knowledge_base:read"}),  # Only read.
+            agent_run_id="test-missing-perm",
+            mode="read_write",  # Mode allows writes, but permissions don't.
+        )
+        result = await reg.execute(
+            "update_kb",
+            {"entry": "test"},
+            context=ctx,
+        )
+        assert result.ok is False
+        assert result.error_code == ErrorCode.PERMISSION_DENIED
+        assert "knowledge_base:write" in result.message
+
+    @pytest.mark.asyncio
+    async def test_approved_context_allows_read_only_tool(self):
+        """With valid context, read_only tools execute normally."""
+        from app.core.tools.registry import create_v1_registry
+        from app.core.agent.execution_context import AgentExecutionContext
+
+        ctx = AgentExecutionContext(
+            user_id=4,
+            knowledge_base_id=1,
+            permissions=frozenset({"knowledge_base:read"}),
+            agent_run_id="test-approved",
+            mode="read_only",
+        )
+        reg = create_v1_registry(1)
+        result = await reg.execute(
+            "search_knowledge_base",
+            {"query": "test", "top_k": 3},
+            context=ctx,
+        )
+        # With valid context, V1 tool executes normally.
+        assert result.ok is True
+        assert result.tool_name == "search_knowledge_base"
+        assert result.duration_ms >= 0
+
+
+# ---------------------------------------------------------------------------
+# 12. normalize_source() — unified, idempotent citation normalisation
+# ---------------------------------------------------------------------------
+
+class TestNormalizeSource:
+    """normalize_source() is the single choke point for source citations.
+
+    It MUST be idempotent, handle objects and dicts, and preserve
+    document_title / content through every conversion.
+    """
+
+    def test_idempotent_on_canonical(self):
+        """Calling normalize_source on an already-canonical source is a no-op."""
+        from app.core.agent.citation import normalize_source
+
+        canonical = {
+            "document_id": 4,
+            "chunk_id": "4_chunk_0000",
+            "title": "财务报告.pdf",
+            "excerpt": "营收达到12.8亿元，同比增长23%...",
+            "score": 0.923,
+        }
+        result = normalize_source(canonical)
+        assert result == canonical
+
+    def test_idempotent_double_call(self):
+        """Two normalize_source calls produce the same result."""
+        from app.core.agent.citation import normalize_source
+
+        raw = {
+            "document_id": 4,
+            "chunk_id": "4_chunk_0000",
+            "content": "营收达到12.8亿元，同比增长23%...",
+            "score": 0.923,
+            "metadata": {
+                "document_title": "财务报告.pdf",
+                "chunk_id": "4_chunk_0000",
+            },
+        }
+        first = normalize_source(raw)
+        second = normalize_source(first)
+        assert first == second
+        assert first["title"] == "财务报告.pdf"
+        assert first["excerpt"] == "营收达到12.8亿元，同比增长23%..."
+
+    def test_raw_dict_with_metadata(self):
+        """Raw retrieval dict → canonical with title from metadata.document_title."""
+        from app.core.agent.citation import normalize_source
+
+        raw = {
+            "document_id": 4,
+            "chunk_id": "4_chunk_0000",
+            "content": "营收达到12.8亿元...",
+            "score": 0.88,
+            "metadata": {
+                "document_title": "Q3财报.pdf",
+                "chunk_id": "4_chunk_0000",
+                "knowledge_base_id": 1,
+            },
+        }
+        result = normalize_source(raw)
+        assert result["document_id"] == 4
+        assert result["chunk_id"] == "4_chunk_0000"
+        assert result["title"] == "Q3财报.pdf"
+        assert result["excerpt"] == "营收达到12.8亿元..."
+        assert result["score"] == 0.88
+
+    def test_raw_dict_document_name_fallback(self):
+        """When metadata has no document_title, fall back to document_name."""
+        from app.core.agent.citation import normalize_source
+
+        raw = {
+            "document_id": 7,
+            "content": "Some content here.",
+            "score": 0.75,
+            "document_name": "readme.md",
+            "metadata": {"chunk_id": "7_chunk_0002"},
+        }
+        result = normalize_source(raw)
+        assert result["title"] == "readme.md"
+
+    def test_document_id_fallback_title(self):
+        """When no title at all, log warning and use placeholder."""
+        from app.core.agent.citation import normalize_source
+
+        raw = {
+            "document_id": 99,
+            "content": "Some data.",
+            "score": 0.5,
+            "metadata": {},
+        }
+        result = normalize_source(raw)
+        assert result["document_id"] == 99
+        assert result["title"] == "文档 #99"  # Last-resort fallback.
+
+    def test_excerpt_truncates_at_300_chars(self):
+        """Excerpt is never longer than 300 characters."""
+        from app.core.agent.citation import normalize_source
+
+        long_content = "A" * 500
+        raw = {
+            "document_id": 1,
+            "content": long_content,
+            "score": 0.9,
+            "metadata": {"document_title": "Long Doc"},
+        }
+        result = normalize_source(raw)
+        assert len(result["excerpt"]) == 300
+
+    def test_empty_content_yields_empty_excerpt(self):
+        """Missing content produces empty excerpt with warning."""
+        from app.core.agent.citation import normalize_source
+
+        raw = {
+            "document_id": 2,
+            "score": 0.5,
+            "metadata": {"document_title": "Empty Doc"},
+        }
+        result = normalize_source(raw)
+        assert result["excerpt"] == ""
+
+    def test_process_from_object(self):
+        """normalize_source handles ProcessedResult-like objects via getattr."""
+        from app.core.agent.citation import normalize_source
+
+        class FakeResult:
+            document_id = 3
+            content = "对象内容测试。"
+            score = 0.91
+            metadata = {
+                "document_title": "对象文档.pdf",
+                "chunk_id": "3_chunk_0001",
+            }
+
+        result = normalize_source(FakeResult())
+        assert result["document_id"] == 3
+        assert result["chunk_id"] == "3_chunk_0001"
+        assert result["title"] == "对象文档.pdf"
+        assert result["excerpt"] == "对象内容测试。"
+
+    def test_all_keys_present(self):
+        """Every canonical key is always present in the output."""
+        from app.core.agent.citation import normalize_source, CANONICAL_SOURCE_KEYS
+
+        for source in (
+            {"document_id": 1, "chunk_id": "c1", "title": "T", "excerpt": "E", "score": 1.0},
+            {"document_id": None, "content": "", "metadata": {}},
+        ):
+            result = normalize_source(source)
+            for key in CANONICAL_SOURCE_KEYS:
+                assert key in result, f"Missing key '{key}' in {result}"
+
+
+# ---------------------------------------------------------------------------
+# 13. SSE source regression — same metadata as sync path
+# ---------------------------------------------------------------------------
+
+class TestSseSourceRegression:
+    """SSE streaming sources MUST match sync-path sources for the same query.
+
+    Regression: the streaming path was double-normalising sources (calling
+    _citation_from_dict on already-normalised dicts), which stripped
+    document_title → "文档 #ID" and excerpt → "".
+    """
+
+    @pytest.fixture(autouse=True)
+    def _mock_agent(self, monkeypatch):
+        """注入假 Agent — 让 SSE 回归测试不依赖真实 Milvus / LLM。
+
+        同步和流式路径的 mock 返回完全相同的来源数据，因此可以验证
+        两个路径产生一致的 citation 输出。
+        """
+        from app.core.agent import AgentResponse
+
+        canned = AgentResponse(
+            content="这是测试回答。",
+            answer="这是测试回答。",
+            model="test-model",
+            status="completed",
+            sources=[
+                {
+                    "document_id": 1,
+                    "chunk_id": "1_chunk_0000",
+                    "title": "测试文档.pdf",
+                    "excerpt": "这是测试文档的摘要内容，用于验证来源字段格式。",
+                    "score": 0.95,
+                }
+            ],
+            agent_run_id="test-sse-regression",
+            token_count=50,
+            tool_calls_count=1,
+            style_used="detailed",
+            max_tool_steps=5,
+        )
+
+        class _MockAgent:
+            async def run(self, **kwargs):
+                return canned
+
+            async def run_stream(self, **kwargs):
+                yield '{"content": "这是测试回答。"}'
+                import json as _json
+                yield _json.dumps({
+                    "content": "",
+                    "sources": [
+                        {
+                            "document_id": 1,
+                            "chunk_id": "1_chunk_0000",
+                            "title": "测试文档.pdf",
+                            "excerpt": "这是测试文档的摘要内容，用于验证来源字段格式。",
+                            "score": 0.95,
+                        }
+                    ],
+                }, ensure_ascii=False)
+
+        mock = _MockAgent()
+        monkeypatch.setattr("app.api.chat.get_agent", lambda **kw: mock)
+        return mock
+
+    def test_stream_and_sync_sources_have_same_schema(self):
+        """Both sync and SSE events use the same canonical source keys."""
+        from app.core.agent.citation import CANONICAL_SOURCE_KEYS
+
+        sync_body = {
+            "message": "1785288404409",
+            "knowledge_base_id": 1,
+            "user_id": 4,
+            "history": [],
+            "stream": False,
+        }
+        stream_body = {
+            "message": "1785288404409",
+            "knowledge_base_id": 1,
+            "user_id": 4,
+            "history": [],
+            "stream": True,
+        }
+
+        sync_resp = client.post("/api/agent/v1/chat", json=sync_body)
+        assert sync_resp.status_code == 200
+        sync_sources = sync_resp.json().get("sources", [])
+
+        stream_resp = client.post("/api/agent/v1/chat/stream", json=stream_body)
+        assert stream_resp.status_code == 200
+        assert "text/event-stream" in stream_resp.headers.get("content-type", "")
+
+        # Parse SSE sources from the stream.
+        stream_sources = _parse_sse_sources(stream_resp.text)
+
+        # Both should use the same keys.
+        for sources_list in (sync_sources, stream_sources):
+            for source in sources_list:
+                for key in CANONICAL_SOURCE_KEYS:
+                    assert key in source, f"Missing key '{key}' in source: {source}"
+
+    def test_same_chunk_same_citation(self):
+        """A chunk appearing in both sync and stream MUST have identical citation."""
+        sync_body = {
+            "message": "1785288404409",
+            "knowledge_base_id": 1,
+            "user_id": 4,
+            "history": [],
+            "stream": False,
+        }
+        stream_body = {
+            "message": "1785288404409",
+            "knowledge_base_id": 1,
+            "user_id": 4,
+            "history": [],
+            "stream": True,
+        }
+
+        sync_resp = client.post("/api/agent/v1/chat", json=sync_body)
+        sync_sources = sync_resp.json().get("sources", []) if sync_resp.status_code == 200 else []
+
+        stream_resp = client.post("/api/agent/v1/chat/stream", json=stream_body)
+        stream_sources = _parse_sse_sources(stream_resp.text) if stream_resp.status_code == 200 else []
+
+        # Build chunk_id → citation map for both paths.
+        sync_by_chunk = {}
+        for s in sync_sources:
+            cid = s.get("chunk_id")
+            if cid:
+                sync_by_chunk[cid] = s
+
+        stream_by_chunk = {}
+        for s in stream_sources:
+            cid = s.get("chunk_id")
+            if cid:
+                stream_by_chunk[cid] = s
+
+        # Every chunk that appears in both paths must have identical metadata.
+        common = set(sync_by_chunk) & set(stream_by_chunk)
+        assert len(common) > 0, (
+            "No common chunks between sync and stream — "
+            "cannot verify citation consistency"
+        )
+        for chunk_id in common:
+            sync_cite = sync_by_chunk[chunk_id]
+            stream_cite = stream_by_chunk[chunk_id]
+            assert sync_cite["document_id"] == stream_cite["document_id"], (
+                f"document_id mismatch for {chunk_id}"
+            )
+            assert sync_cite["title"] == stream_cite["title"], (
+                f"title mismatch for {chunk_id}: sync={sync_cite['title']!r}, stream={stream_cite['title']!r}"
+            )
+            assert sync_cite["excerpt"] == stream_cite["excerpt"], (
+                f"excerpt mismatch for {chunk_id}"
+            )
+
+    def test_sse_sources_have_nonempty_title(self):
+        """No SSE source may have a placeholder "文档 #N" title."""
+        stream_body = {
+            "message": "1785288404409",
+            "knowledge_base_id": 1,
+            "user_id": 4,
+            "history": [],
+            "stream": True,
+        }
+        resp = client.post("/api/agent/v1/chat/stream", json=stream_body)
+        assert resp.status_code == 200
+
+        sources = _parse_sse_sources(resp.text)
+        for source in sources:
+            title = source.get("title", "")
+            # Must not be the fallback placeholder.
+            assert not title.startswith("文档 #"), (
+                f"SSE source has fallback placeholder title: {title!r}. "
+                f"Full source: {source}"
+            )
+            # Must be non-empty.
+            assert title, f"SSE source has empty title: {source}"
+
+    def test_sse_sources_have_nonempty_excerpt(self):
+        """No SSE source may have an empty excerpt when content was retrieved."""
+        stream_body = {
+            "message": "1785288404409",
+            "knowledge_base_id": 1,
+            "user_id": 4,
+            "history": [],
+            "stream": True,
+        }
+        resp = client.post("/api/agent/v1/chat/stream", json=stream_body)
+        assert resp.status_code == 200
+
+        sources = _parse_sse_sources(resp.text)
+        for source in sources:
+            excerpt = source.get("excerpt", "")
+            assert excerpt, (
+                f"SSE source has empty excerpt. Full source: {source}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# 14. normalize_source with real ProcessedResult (strong assertions)
+# ---------------------------------------------------------------------------
+
+class TestNormalizeSourceFromProcessedResult:
+    """normalize_source() MUST extract real title and non-empty excerpt
+    from a ProcessedResult that carries full metadata — same objects the
+    streaming path now passes directly (no manual dict conversion).
+    """
+
+    def test_process_result_yields_real_title_not_placeholder(self):
+        """When metadata has document_title, title ≠ '文档 #N'."""
+        from app.core.agent.citation import normalize_source
+        from app.core.rag.postprocessor import ProcessedResult
+
+        pr = ProcessedResult(
+            content="这是完整的文档内容，包含了关键信息和数据。",
+            score=0.92,
+            document_id="4",
+            knowledge_base_id=1,
+            outline_path=["章节1", "章节2"],
+            source="vector",
+            metadata={
+                "document_title": "API Test Document 1785288404409",
+                "chunk_id": "4_chunk_0000",
+                "knowledge_base_id": 1,
+            },
+        )
+        result = normalize_source(pr)
+        assert result["title"] == "API Test Document 1785288404409", (
+            f"Expected real title, got: {result['title']!r}"
+        )
+        assert not result["title"].startswith("文档 #"), (
+            f"Title must not be placeholder: {result['title']!r}"
+        )
+        assert result["excerpt"] != "", "Excerpt must not be empty"
+        assert result["excerpt"] == "这是完整的文档内容，包含了关键信息和数据。"
+        assert result["document_id"] == 4
+        assert result["chunk_id"] == "4_chunk_0000"
+        assert result["score"] == 0.92
+
+    def test_process_result_finds_chunk_id_from_metadata(self):
+        """chunk_id comes from metadata when the object has no direct attribute."""
+        from app.core.agent.citation import normalize_source
+        from app.core.rag.postprocessor import ProcessedResult
+
+        pr = ProcessedResult(
+            content="Some content.",
+            score=0.85,
+            document_id="7",
+            metadata={
+                "document_title": "readme.md",
+                "chunk_id": "7_chunk_0003",
+            },
+        )
+        result = normalize_source(pr)
+        assert result["chunk_id"] == "7_chunk_0003"
+
+    def test_process_result_with_empty_metadata_still_extracts_content(self):
+        """Even with empty metadata, content from ProcessedResult is used as excerpt."""
+        from app.core.agent.citation import normalize_source
+        from app.core.rag.postprocessor import ProcessedResult
+
+        pr = ProcessedResult(
+            content="Content is here, metadata is minimal.",
+            score=0.75,
+            document_id="2",
+            metadata={},
+        )
+        result = normalize_source(pr)
+        assert result["excerpt"] == "Content is here, metadata is minimal."
+        # Title falls back to placeholder since no metadata.document_title.
+        assert result["title"] == "文档 #2"
+
+
+# ---------------------------------------------------------------------------
+# 15. Persistent chunk-store fallback
+# ---------------------------------------------------------------------------
+
+class TestChunkStoreFallback:
+    """When in-memory metadata is incomplete, normalize_source looks up
+    the persistent chunks_store.json for the missing fields."""
+
+    def test_lookup_chunk_finds_existing(self, tmp_path):
+        """_lookup_chunk_in_store finds a chunk by its chunk_id."""
+        import json
+        from app.core.agent.citation import _lookup_chunk_in_store
+        from app.core.vectorstore import milvus_store
+
+        store = {
+            "4": [{
+                "chunk_id": "4_chunk_0000",
+                "document_id": "4",
+                "content": "Full chunk content from persistent store.",
+                "metadata": json.dumps({"document_title": "Persisted Title.pdf"}),
+            }],
+        }
+        # Write a temporary chunks store.
+        store_path = tmp_path / "chunks_store.json"
+        store_path.write_text(json.dumps(store, ensure_ascii=False), encoding="utf-8")
+
+        # Patch the store path.
+        orig_path = milvus_store.CHUNKS_STORE_PATH
+        try:
+            milvus_store.CHUNKS_STORE_PATH = str(store_path)
+            chunk = _lookup_chunk_in_store("4_chunk_0000")
+            assert chunk is not None
+            assert chunk["content"] == "Full chunk content from persistent store."
+            assert chunk["chunk_id"] == "4_chunk_0000"
+        finally:
+            milvus_store.CHUNKS_STORE_PATH = orig_path
+
+    def test_lookup_missing_chunk_returns_none(self):
+        """_lookup_chunk_in_store returns None for unknown chunk_id."""
+        from app.core.agent.citation import _lookup_chunk_in_store
+        assert _lookup_chunk_in_store("nonexistent_chunk") is None
+
+    def test_lookup_none_chunk_id_returns_none(self):
+        """_lookup_chunk_in_store returns None for None input."""
+        from app.core.agent.citation import _lookup_chunk_in_store
+        assert _lookup_chunk_in_store(None) is None
+
+    def test_normalize_source_recovers_title_from_store(self, tmp_path):
+        """When metadata lacks document_title, title is recovered from chunk store."""
+        import json
+        from app.core.agent.citation import normalize_source
+        from app.core.vectorstore import milvus_store
+
+        store = {
+            "5": [{
+                "chunk_id": "5_chunk_0001",
+                "document_id": "5",
+                "content": "Recovered content.",
+                "metadata": json.dumps({"document_title": "Recovered Document.pdf"}),
+            }],
+        }
+        store_path = tmp_path / "chunks_store.json"
+        store_path.write_text(json.dumps(store, ensure_ascii=False), encoding="utf-8")
+
+        orig_path = milvus_store.CHUNKS_STORE_PATH
+        try:
+            milvus_store.CHUNKS_STORE_PATH = str(store_path)
+            # Source has metadata but missing document_title — fallback to store.
+            raw = {
+                "document_id": 5,
+                "chunk_id": "5_chunk_0001",
+                "score": 0.88,
+                "metadata": {"chunk_id": "5_chunk_0001"},  # No document_title!
+            }
+            result = normalize_source(raw)
+            assert result["title"] == "Recovered Document.pdf"
+            assert result["excerpt"] == "Recovered content."[0:300]
+        finally:
+            milvus_store.CHUNKS_STORE_PATH = orig_path
+
+    def test_normalize_source_no_title_even_from_store(self, tmp_path):
+        """When chunk store also lacks title, falls back to placeholder."""
+        import json
+        from app.core.agent.citation import normalize_source
+        from app.core.vectorstore import milvus_store
+
+        store = {
+            "6": [{
+                "chunk_id": "6_chunk_0000",
+                "document_id": "6",
+                "content": "Just content, no title metadata at all.",
+                "metadata": "{}",
+            }],
+        }
+        store_path = tmp_path / "chunks_store.json"
+        store_path.write_text(json.dumps(store, ensure_ascii=False), encoding="utf-8")
+
+        orig_path = milvus_store.CHUNKS_STORE_PATH
+        try:
+            milvus_store.CHUNKS_STORE_PATH = str(store_path)
+            raw = {
+                "document_id": 6,
+                "chunk_id": "6_chunk_0000",
+                "score": 0.5,
+                "metadata": {},
+            }
+            result = normalize_source(raw)
+            # Store has content but no document_title — falls to placeholder.
+            assert result["title"] == "文档 #6"
+            # Content is recovered from store.
+            assert result["excerpt"] == "Just content, no title metadata at all."
+        finally:
+            milvus_store.CHUNKS_STORE_PATH = orig_path
+
+
+# ── SSE helper ──────────────────────────────────────────────────────────
+
+def _parse_sse_sources(sse_text: str):
+    """Extract source citations from an SSE event stream."""
+    sources = []
+    for line in sse_text.splitlines():
+        if line.startswith("data: "):
+            payload = line[len("data: "):]
+            if payload == "[DONE]":
+                continue
+            try:
+                parsed = json.loads(payload)
+                if isinstance(parsed, dict) and "sources" in parsed:
+                    sources.extend(parsed["sources"])
+            except Exception:
+                pass
+    return sources

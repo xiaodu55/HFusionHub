@@ -51,6 +51,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.agent import get_agent, get_agent_run_store
+from app.core.agent.execution_context import AgentExecutionContext
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -100,6 +101,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=CHAT_MESSAGE_MAX_LENGTH)
     conversation_id: Optional[int] = Field(None, ge=1)
     knowledge_base_id: Optional[int] = Field(None, ge=1)
+    user_id: Optional[int] = Field(None, ge=1, description="Authenticated user ID — from Java session")
     history: List[ChatMessage] = Field(default_factory=list, max_length=CHAT_HISTORY_MAX_ITEMS)
     model: Optional[str] = Field(None, max_length=CHAT_MODEL_MAX_LENGTH)
     stream: bool = Field(False)
@@ -110,9 +112,15 @@ class ChatRequest(BaseModel):
 
 
 class AgentV1Request(BaseModel):
-    """Agent V1 request — knowledge_base_id is REQUIRED."""
+    """Agent V1 request — knowledge_base_id and user_id are REQUIRED.
+
+    ``user_id`` comes from the Java backend after session authentication.
+    The model CANNOT forge or override it — Python strips any model-supplied
+    ``user_id`` from tool input before execution (see ToolRegistry).
+    """
     message: str = Field(..., min_length=1, max_length=CHAT_MESSAGE_MAX_LENGTH)
     knowledge_base_id: int = Field(..., ge=1, description="REQUIRED — target knowledge base ID")
+    user_id: int = Field(..., ge=1, description="REQUIRED — authenticated user ID from Java")
     conversation_id: Optional[int] = Field(None, ge=1)
     history: List[ChatMessage] = Field(default_factory=list, max_length=CHAT_HISTORY_MAX_ITEMS)
     model: Optional[str] = Field(None, max_length=CHAT_MODEL_MAX_LENGTH)
@@ -203,9 +211,21 @@ async def chat(request: ChatRequest):
             for msg in request.history
         ]
 
+        # Build execution context when user_id and KB are both present.
+        execution_context = None
+        if request.user_id and request.knowledge_base_id:
+            execution_context = AgentExecutionContext(
+                user_id=request.user_id,
+                knowledge_base_id=request.knowledge_base_id,
+                permissions=frozenset({"knowledge_base:read"}),
+                agent_run_id=request.request_id or str(uuid4()),
+                mode="read_only",
+            )
+
         agent = get_agent(
             knowledge_base_id=request.knowledge_base_id,
             model=request.model,
+            execution_context=execution_context,
         )
 
         if request.stream:
@@ -246,9 +266,13 @@ async def agent_v1_chat(request: AgentV1Request):
     """
     Agent V1 — knowledge-base research agent.
 
-    ``knowledge_base_id`` is REQUIRED.  Returns 422 without it.
+    ``knowledge_base_id`` and ``user_id`` are REQUIRED.  Returns 422 without them.
     Only V1-whitelisted tools (search_knowledge_base, read_chunk,
     list_document_chunks) are available.
+
+    Agent V1 Step 3: An immutable ``AgentExecutionContext`` is created from
+    the Java-supplied fields.  The model cannot forge ``user_id`` or
+    ``knowledge_base_id`` — the Registry strips them from tool input.
     """
     try:
         style = request.style if request.style in _VALID_STYLES else "detailed"
@@ -258,10 +282,22 @@ async def agent_v1_chat(request: AgentV1Request):
             for msg in request.history
         ]
 
+        # Agent V1 Step 3: build immutable execution context.
+        # V1 is always read_only — write / external tools are rejected by
+        # the Registry even if they were registered.
+        execution_context = AgentExecutionContext(
+            user_id=request.user_id,
+            knowledge_base_id=request.knowledge_base_id,
+            permissions=frozenset({"knowledge_base:read"}),
+            agent_run_id=request.request_id or str(uuid4()),
+            mode="read_only",
+        )
+
         # Agent V1: knowledge_base_id is always present (enforced by Pydantic).
         agent = get_agent(
             knowledge_base_id=request.knowledge_base_id,
             model=request.model,
+            execution_context=execution_context,
         )
 
         if request.stream:
@@ -295,6 +331,86 @@ async def agent_v1_chat(request: AgentV1Request):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent V1 error: {str(e)}") from e
+
+
+@router.post("/api/agent/v1/chat/stream")
+async def agent_v1_chat_stream(request: AgentV1Request):
+    """
+    Agent V1 streaming — knowledge-base research agent (SSE).
+
+    ``knowledge_base_id`` and ``user_id`` are REQUIRED.  Returns 422 without them.
+    Only V1-whitelisted tools (search_knowledge_base, read_chunk,
+    list_document_chunks) are available.
+
+    Agent V1 Step 3: An immutable ``AgentExecutionContext`` is created from
+    the Java-supplied fields and passed through the full agent chain.
+    KB-bound conversations MUST use this endpoint, NOT ``/api/chat/stream``.
+    """
+    try:
+        style = request.style if request.style in _VALID_STYLES else "detailed"
+
+        history = [
+            {"role": msg.role, "content": msg.content}
+            for msg in request.history
+        ]
+
+        # Agent V1 Step 3: build immutable execution context.
+        execution_context = AgentExecutionContext(
+            user_id=request.user_id,
+            knowledge_base_id=request.knowledge_base_id,
+            permissions=frozenset({"knowledge_base:read"}),
+            agent_run_id=request.request_id or str(uuid4()),
+            mode="read_only",
+        )
+
+        agent = get_agent(
+            knowledge_base_id=request.knowledge_base_id,
+            model=request.model,
+            execution_context=execution_context,
+        )
+
+        request_id = request.request_id or str(uuid4())
+
+        async def event_generator():
+            serving_task = _track_active_request(request_id)
+            try:
+                async for chunk in agent.run_stream(
+                    query=request.message,
+                    history=history,
+                    style=style,
+                    max_tool_steps=request.max_tool_steps,
+                ):
+                    event = _agent_chunk_to_sse(chunk)
+                    if event is not None:
+                        yield event
+
+            except asyncio.CancelledError:
+                logger.info("Agent V1 stream %s was cancelled", request_id)
+                yield f"data: {json.dumps({'content': '', 'cancelled': True}, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                logger.error("Agent V1 streaming error for request %s: %s", request_id, e, exc_info=True)
+                yield f"data: {json.dumps({'content': '', 'error': str(e)}, ensure_ascii=False)}\n\n"
+            finally:
+                try:
+                    yield "data: [DONE]\n\n"
+                except Exception:
+                    pass
+                if active_requests.get(request_id) is serving_task:
+                    active_requests.pop(request_id, None)
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+                "X-Request-ID": request_id,
+            },
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Agent V1 stream error: {str(e)}") from e
 
 
 @router.post("/api/chat/stream")
@@ -388,6 +504,7 @@ async def chat_health():
         "llm_model": llm.model if hasattr(llm, "model") else "unknown",
         "agent_v1": {
             "route": "/api/agent/v1/chat",
+            "stream_route": "/api/agent/v1/chat/stream",
             "registered": True,
             "contract_version": "1.0",
             "tools": sorted(AGENT_V1_TOOL_NAMES),

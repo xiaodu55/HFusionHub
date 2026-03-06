@@ -57,7 +57,7 @@ public class AiClient {
             List<Map<String, String>> history
     ) {
         return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                "detailed", 5, null);
+                "detailed", 5, null, null);
     }
 
     /**
@@ -72,14 +72,14 @@ public class AiClient {
             int maxToolSteps
     ) {
         return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                style, maxToolSteps, null);
+                style, maxToolSteps, null, null);
     }
 
     /**
-     * Agent V1 chat — REQUIRES knowledge_base_id.
+     * Agent V1 chat — REQUIRES knowledge_base_id and user_id.
      *
      * Calls {@code POST /api/agent/v1/chat}.  Returns 422 if
-     * knowledgeBaseId is null (enforced at Python side).
+     * knowledgeBaseId or userId is null (enforced at Python side).
      *
      * @param message         User message
      * @param conversationId  Conversation ID
@@ -88,6 +88,7 @@ public class AiClient {
      * @param style           Answer style (concise | detailed | report)
      * @param maxToolSteps    Max ReAct tool-calling steps (1–10)
      * @param requestId       Idempotency key for SSE dedup
+     * @param userId          Authenticated user ID from Java session (REQUIRED, non-null)
      * @return AI response with full V1 fields
      */
     public ChatResponse agentV1Chat(
@@ -97,14 +98,19 @@ public class AiClient {
             List<Map<String, String>> history,
             String style,
             int maxToolSteps,
-            String requestId
+            String requestId,
+            Long userId
     ) {
         if (knowledgeBaseId == null || knowledgeBaseId <= 0) {
             throw new BusinessException(StatusCode.BAD_REQUEST,
                     "Agent V1 requires a non-null knowledge_base_id");
         }
+        if (userId == null || userId <= 0) {
+            throw new BusinessException(StatusCode.BAD_REQUEST,
+                    "Agent V1 requires a non-null user_id — Java session must provide authenticated user ID");
+        }
         return doChat("/api/agent/v1/chat", message, conversationId, knowledgeBaseId,
-                history, style, maxToolSteps, requestId);
+                history, style, maxToolSteps, requestId, userId);
     }
 
     private ChatResponse doChat(
@@ -115,7 +121,8 @@ public class AiClient {
             List<Map<String, String>> history,
             String style,
             int maxToolSteps,
-            String requestId
+            String requestId,
+            Long userId
     ) {
         try {
             Map<String, Object> request = new HashMap<>();
@@ -128,6 +135,12 @@ public class AiClient {
             request.put("max_tool_steps", Math.max(1, Math.min(maxToolSteps, 10)));
             if (requestId != null) {
                 request.put("request_id", requestId);
+            }
+            // Agent V1 Step 3: user_id from authenticated Java session.
+            // The model CANNOT forge this — the Registry strips any
+            // model-supplied user_id from tool input.
+            if (userId != null && userId > 0) {
+                request.put("user_id", userId);
             }
 
             HttpHeaders headers = new HttpHeaders();
@@ -219,6 +232,80 @@ public class AiClient {
                 .doOnError(e -> {
                     if (!(e instanceof ResourceAccessException)) {
                         log.error("Stream chat with AI failed: {}", e.getMessage(), e);
+                    }
+                });
+    }
+
+    /**
+     * Agent V1 streaming chat — REQUIRES knowledge_base_id and user_id.
+     *
+     * Calls {@code POST /api/agent/v1/chat/stream}.  Returns a Flux of raw
+     * SSE data lines.  KB-bound conversations MUST use this endpoint,
+     * NOT {@code /api/chat/stream}, so that the execution context is created
+     * and the permission boundary is enforced.
+     *
+     * @param message         User message
+     * @param conversationId  Conversation ID
+     * @param knowledgeBaseId Knowledge base ID (REQUIRED, non-null)
+     * @param history         Chat history
+     * @param requestId       Unique request ID (for idempotency + cancellation)
+     * @param userId          Authenticated user ID from Java session (REQUIRED, non-null)
+     * @return Flux of raw SSE lines
+     */
+    public reactor.core.publisher.Flux<String> agentV1ChatStream(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String requestId,
+            Long userId
+    ) {
+        if (knowledgeBaseId == null || knowledgeBaseId <= 0) {
+            throw new BusinessException(StatusCode.BAD_REQUEST,
+                    "Agent V1 streaming requires a non-null knowledge_base_id");
+        }
+        if (userId == null || userId <= 0) {
+            throw new BusinessException(StatusCode.BAD_REQUEST,
+                    "Agent V1 streaming requires a non-null user_id — Java session must provide authenticated user ID");
+        }
+
+        // Build request body with execution context fields.
+        Map<String, Object> request = new HashMap<>();
+        request.put("message", message);
+        request.put("conversation_id", conversationId);
+        request.put("knowledge_base_id", knowledgeBaseId);
+        request.put("user_id", userId);
+        request.put("history", history != null ? history : List.of());
+        request.put("stream", true);
+        request.put("request_id", requestId);
+
+        String url = baseUrl + "/api/agent/v1/chat/stream";
+        log.info("Starting Agent V1 streaming request to Python AI: {}, requestId: {}, userId: {}",
+                url, requestId, userId);
+
+        return webClient.post()
+                .uri(url)
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .headers(this::addInternalToken)
+                .bodyValue(request)
+                .retrieve()
+                .onStatus(
+                        status -> status.isError(),
+                        clientResponse -> clientResponse.bodyToMono(String.class)
+                                .flatMap(body -> reactor.core.publisher.Mono.error(
+                                        new BusinessException(StatusCode.SERVICE_UNAVAILABLE,
+                                                "Python AI returned status " + clientResponse.statusCode().value() + ": " + body)))
+                )
+                .bodyToFlux(String.class)
+                .doOnNext(chunk -> log.info("Agent V1 SSE raw chunk ({}B): {}", chunk.length(),
+                    chunk.length() > 200 ? chunk.substring(0, 200) + "..." : chunk))
+                .doOnError(ResourceAccessException.class, e -> {
+                    log.error("AI service connection failed during V1 streaming: {}", e.getMessage());
+                })
+                .doOnError(e -> {
+                    if (!(e instanceof ResourceAccessException)) {
+                        log.error("Agent V1 stream chat failed: {}", e.getMessage(), e);
                     }
                 });
     }
