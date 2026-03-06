@@ -426,6 +426,8 @@ public class AiClient {
         private String errorDetail;
         @JsonProperty("failed_tool")
         private String failedTool;
+        @JsonProperty("step_events")
+        private List<Map<String, Object>> stepEvents;
 
         public ChatResponse() {}
 
@@ -475,6 +477,9 @@ public class AiClient {
 
         public String getFailedTool() { return failedTool; }
         public void setFailedTool(String failedTool) { this.failedTool = failedTool; }
+
+        public List<Map<String, Object>> getStepEvents() { return stepEvents; }
+        public void setStepEvents(List<Map<String, Object>> stepEvents) { this.stepEvents = stepEvents; }
     }
 
     /**

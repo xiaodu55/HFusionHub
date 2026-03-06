@@ -1,0 +1,83 @@
+package com.hfusionhub.controller;
+
+import com.hfusionhub.common.dto.PageResult;
+import com.hfusionhub.common.result.R;
+import com.hfusionhub.common.utils.JwtUtils;
+import com.hfusionhub.dto.AgentTaskDetailDTO;
+import com.hfusionhub.dto.AgentTaskSummaryDTO;
+import com.hfusionhub.service.AgentTaskService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.bind.annotation.*;
+
+/**
+ * Agent 任务管理控制器
+ *
+ * @author HFusionHub Team
+ */
+@Slf4j
+@Tag(name = "Agent任务管理", description = "Agent任务查询、重试、取消接口")
+@RestController
+@RequestMapping("/agent-task")
+@RequiredArgsConstructor
+public class AgentTaskController {
+
+    private final AgentTaskService agentTaskService;
+
+    @Operation(summary = "获取任务详情（含所有 Run 和 Step 时间线）")
+    @GetMapping("/{taskId}")
+    public R<AgentTaskDetailDTO> getTaskDetail(@PathVariable Long taskId) {
+        AgentTaskDetailDTO detail = agentTaskService.getTaskDetail(taskId);
+        if (detail == null) {
+            return R.fail("任务不存在");
+        }
+        // 校验所有权
+        if (!detail.getUserId().equals(JwtUtils.getCurrentUserId())) {
+            return R.fail("无权查看此任务");
+        }
+        return R.ok(detail);
+    }
+
+    @Operation(summary = "按 request_id 查询任务详情")
+    @GetMapping("/by-request/{requestId}")
+    public R<AgentTaskDetailDTO> getTaskByRequestId(@PathVariable String requestId) {
+        AgentTaskDetailDTO detail = agentTaskService.getTaskByRequestId(requestId);
+        if (detail == null) {
+            return R.fail("任务不存在");
+        }
+        if (!detail.getUserId().equals(JwtUtils.getCurrentUserId())) {
+            return R.fail("无权查看此任务");
+        }
+        return R.ok(detail);
+    }
+
+    @Operation(summary = "查询当前用户的任务列表")
+    @GetMapping("/list")
+    public R<PageResult<AgentTaskSummaryDTO>> listTasks(
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int pageSize) {
+        Long userId = JwtUtils.getCurrentUserId();
+        PageResult<AgentTaskSummaryDTO> result = agentTaskService.listUserTasks(
+                userId, status, page, pageSize);
+        return R.ok(result);
+    }
+
+    @Operation(summary = "重试失败或超时的任务")
+    @PostMapping("/{taskId}/retry")
+    public R<String> retryTask(@PathVariable Long taskId) {
+        Long userId = JwtUtils.getCurrentUserId();
+        agentTaskService.retryTask(taskId, userId);
+        return R.ok("任务已重置为待执行状态，请重新发起对话请求");
+    }
+
+    @Operation(summary = "取消运行中的任务")
+    @PostMapping("/{taskId}/cancel")
+    public R<Boolean> cancelTask(@PathVariable Long taskId) {
+        Long userId = JwtUtils.getCurrentUserId();
+        boolean cancelled = agentTaskService.cancelTask(taskId, userId);
+        return R.ok(cancelled);
+    }
+}

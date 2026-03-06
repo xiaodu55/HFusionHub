@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hfusionhub.mapper.AgentRunMapper">
+
+    <resultMap id="BaseResultMap" type="com.hfusionhub.entity.AgentRun">
+        <id column="id" property="id"/>
+        <result column="task_id" property="taskId"/>
+        <result column="run_uuid" property="runUuid"/>
+        <result column="attempt_number" property="attemptNumber"/>
+        <result column="status" property="status"/>
+        <result column="model" property="model"/>
+        <result column="style" property="style"/>
+        <result column="max_tool_steps" property="maxToolSteps"/>
+        <result column="token_usage" property="tokenUsage"
+                typeHandler="com.hfusionhub.handler.JsonTypeHandler"/>
+        <result column="tool_calls_count" property="toolCallsCount"/>
+        <result column="error_code" property="errorCode"/>
+        <result column="error_detail" property="errorDetail"/>
+        <result column="failed_tool" property="failedTool"/>
+        <result column="started_at" property="startedAt"/>
+        <result column="completed_at" property="completedAt"/>
+        <result column="duration_ms" property="durationMs"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, task_id, run_uuid, attempt_number, status, model, style, max_tool_steps,
+        token_usage, tool_calls_count, error_code, error_detail, failed_tool,
+        started_at, completed_at, duration_ms, created_at, updated_at
+    </sql>
+
+    <select id="selectByRunUuid" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_run
+        WHERE run_uuid = #{runUuid}
+    </select>
+
+    <select id="selectByTaskId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_run
+        WHERE task_id = #{taskId}
+        ORDER BY attempt_number ASC
+    </select>
+
+    <update id="updateFinalStatus">
+        UPDATE agent_run
+        SET status = #{status},
+            model = #{model},
+            token_usage = #{tokenUsage, typeHandler=com.hfusionhub.handler.JsonTypeHandler},
+            tool_calls_count = #{toolCallsCount},
+            duration_ms = #{durationMs},
+            error_code = #{errorCode},
+            error_detail = #{errorDetail},
+            failed_tool = #{failedTool},
+            completed_at = #{completedAt},
+            updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+</mapper>

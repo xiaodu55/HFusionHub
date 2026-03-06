@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hfusionhub.mapper.AgentTaskMapper">
+
+    <resultMap id="BaseResultMap" type="com.hfusionhub.entity.AgentTask">
+        <id column="id" property="id"/>
+        <result column="request_id" property="requestId"/>
+        <result column="user_id" property="userId"/>
+        <result column="conversation_id" property="conversationId"/>
+        <result column="knowledge_base_id" property="knowledgeBaseId"/>
+        <result column="query" property="query"/>
+        <result column="status" property="status"/>
+        <result column="current_run_id" property="currentRunId"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, request_id, user_id, conversation_id, knowledge_base_id,
+        query, status, current_run_id, created_at, updated_at
+    </sql>
+
+    <select id="selectByRequestId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_task
+        WHERE request_id = #{requestId}
+    </select>
+
+    <select id="selectByUserIdAndStatus" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_task
+        WHERE user_id = #{userId}
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+        ORDER BY created_at DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countByUserIdAndStatus" resultType="int">
+        SELECT COUNT(*)
+        FROM agent_task
+        WHERE user_id = #{userId}
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+    </select>
+
+    <update id="updateStatus">
+        UPDATE agent_task
+        SET status = #{status},
+            current_run_id = #{currentRunId},
+            updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+</mapper>

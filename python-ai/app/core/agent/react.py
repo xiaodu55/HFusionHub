@@ -803,7 +803,17 @@ class ReactAgent(Agent):
         history: List[Dict[str, str]] = None,
         **kwargs
     ) -> AsyncGenerator[str, None]:
-        """Run ReAct agent with streaming support — Agent V1."""
+        """Run ReAct agent with streaming support — Agent V1.
+
+        Emits structured SSE events at key lifecycle points for the Java
+        backend to persist as agent_step records:
+        - retrieval: step_completed (step_type=retrieval)
+        - model_generation: step_completed (step_type=model_generation)
+        - reflection: step_completed (step_type=reflection) when applicable
+        """
+        import json as _json
+        import time as _time
+
         # Reset per-run counters.
         self._tool_calls_count = 0
         self._last_sources = []
@@ -812,6 +822,9 @@ class ReactAgent(Agent):
             self.style = kwargs["style"] if kwargs["style"] in _STYLE_PROMPTS else self.style
 
         from ..rag import get_intent_classifier, get_query_decomposer, get_compressor, get_reflector
+
+        # Track step sequence counter for structured events.
+        _step_seq = 0
 
         try:
             has_selected_kb = self._has_selected_knowledge_base()
@@ -845,9 +858,11 @@ class ReactAgent(Agent):
             raw_context = ""
             sources: List[Dict[str, Any]] = []
             was_compressed = False
+            retrieval_duration_ms = 0.0
             retriever = get_retriever()
 
             if has_selected_kb:
+                retrieval_start = _time.monotonic()
                 try:
                     retrieval_plan = await get_adaptive_retrieval_planner().plan(
                         query=query,
@@ -859,10 +874,7 @@ class ReactAgent(Agent):
 
                     if decomposition_result and decomposition_result.sub_questions:
                         # ── Decomposition path ──
-                        # Keep ProcessedResult objects intact — same as the sync
-                        # path does.  NEVER hand-roll a dict; the single choke
-                        # point is normalize_source().
-                        all_results: list = []  # List[ProcessedResult]
+                        all_results: list = []
                         for sub_q in decomposition_result.sub_questions:
                             sub_query = sub_q.content if hasattr(sub_q, 'content') else str(sub_q)
                             sub_plan = await get_adaptive_retrieval_planner().plan(
@@ -878,7 +890,6 @@ class ReactAgent(Agent):
                             if sub_result and sub_result.results:
                                 all_results.extend(sub_result.results)
 
-                        # Deduplicate by content across sub-queries.
                         seen_contents: set = set()
                         unique_results: list = []
                         for r in all_results:
@@ -891,8 +902,6 @@ class ReactAgent(Agent):
                             (getattr(r, "content", "") or "") for r in unique_results
                         ])
                         context, was_compressed = await self._safe_compress(raw_context)
-                        # normalize_source accepts ProcessedResult objects
-                        # directly — same code path as the sync run().
                         sources = [normalize_source(r) for r in unique_results]
                     else:
                         # ── Non-decomposition path ──
@@ -902,16 +911,46 @@ class ReactAgent(Agent):
                             top_k=retrieval_plan.top_k,
                         )
                         if result and result.results:
-                            # result.results is already List[ProcessedResult].
-                            # Pass objects directly to normalize_source —
-                            # no manual dict conversion.
                             raw_context = "\n\n".join([
                                 (getattr(r, "content", "") or "") for r in result.results
                             ])
                             context, was_compressed = await self._safe_compress(raw_context)
                             sources = [normalize_source(r) for r in result.results]
+
+                    retrieval_duration_ms = (_time.monotonic() - retrieval_start) * 1000
                 except Exception as e:
+                    retrieval_duration_ms = (_time.monotonic() - retrieval_start) * 1000
                     logger.error(f"[RAG] Retrieval failed, falling back to direct LLM: {e}", exc_info=True)
+                    # Emit retrieval error step event
+                    _step_seq += 1
+                    yield _json.dumps({
+                        "event": "step_completed",
+                        "sequence": _step_seq,
+                        "step_type": "retrieval",
+                        "action": "search_knowledge_base",
+                        "input_summary": query[:200],
+                        "output_summary": None,
+                        "sources": [],
+                        "duration_ms": round(retrieval_duration_ms, 2),
+                        "error_code": "tool_error",
+                        "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
+                    }, ensure_ascii=False)
+                else:
+                    # Emit retrieval step completed event
+                    _step_seq += 1
+                    yield _json.dumps({
+                        "event": "step_completed",
+                        "sequence": _step_seq,
+                        "step_type": "retrieval",
+                        "action": "search_knowledge_base",
+                        "input_summary": query[:200],
+                        "output_summary": f"Retrieved {len(sources)} sources, context {len(context)} chars"
+                                         + (" (compressed)" if was_compressed else ""),
+                        "sources": sources,
+                        "duration_ms": round(retrieval_duration_ms, 2),
+                        "error_code": None,
+                        "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
+                    }, ensure_ascii=False)
 
             self._last_sources = sources
 
@@ -927,11 +966,28 @@ class ReactAgent(Agent):
                 ChatMessage(role="user", content=prompt)
             ]
 
+            gen_start = _time.monotonic()
             final_answer_parts: list[str] = []
             async for chunk in llm.chat_stream(messages=messages, temperature=0.7, max_tokens=2048):
                 final_answer_parts.append(chunk)
                 yield chunk
             final_answer = "".join(final_answer_parts)
+            gen_duration_ms = (_time.monotonic() - gen_start) * 1000
+
+            # Emit model generation step completed event
+            _step_seq += 1
+            yield _json.dumps({
+                "event": "step_completed",
+                "sequence": _step_seq,
+                "step_type": "model_generation",
+                "action": None,
+                "input_summary": prompt[:200] if context else query[:200],
+                "output_summary": final_answer[:300],
+                "sources": None,
+                "duration_ms": round(gen_duration_ms, 2),
+                "error_code": None,
+                "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
+            }, ensure_ascii=False)
 
             # ── Groundedness check (streaming) ──
             if (has_selected_kb and sources

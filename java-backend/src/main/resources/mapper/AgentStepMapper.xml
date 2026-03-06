@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hfusionhub.mapper.AgentStepMapper">
+
+    <resultMap id="BaseResultMap" type="com.hfusionhub.entity.AgentStep">
+        <id column="id" property="id"/>
+        <result column="run_id" property="runId"/>
+        <result column="sequence" property="sequence"/>
+        <result column="step_type" property="stepType"/>
+        <result column="action" property="action"/>
+        <result column="input_summary" property="inputSummary"/>
+        <result column="output_summary" property="outputSummary"/>
+        <result column="sources" property="sources"
+                typeHandler="com.hfusionhub.handler.JsonTypeHandler"/>
+        <result column="duration_ms" property="durationMs"/>
+        <result column="error_code" property="errorCode"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, run_id, sequence, step_type, action, input_summary, output_summary,
+        sources, duration_ms, error_code, created_at
+    </sql>
+
+    <select id="selectByRunId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_step
+        WHERE run_id = #{runId}
+        ORDER BY sequence ASC
+    </select>
+
+    <select id="countByRunId" resultType="int">
+        SELECT COUNT(*) FROM agent_step WHERE run_id = #{runId}
+    </select>
+
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO agent_step
+        (run_id, sequence, step_type, action, input_summary, output_summary,
+         sources, duration_ms, error_code, created_at)
+        VALUES
+        <foreach collection="steps" item="step" separator=",">
+            (#{step.runId}, #{step.sequence}, #{step.stepType}, #{step.action},
+             #{step.inputSummary}, #{step.outputSummary},
+             #{step.sources, typeHandler=com.hfusionhub.handler.JsonTypeHandler},
+             #{step.durationMs}, #{step.errorCode}, NOW())
+        </foreach>
+    </insert>
+
+</mapper>

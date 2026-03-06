@@ -1,0 +1,128 @@
+package com.hfusionhub.service;
+
+import com.hfusionhub.common.dto.PageResult;
+import com.hfusionhub.dto.AgentTaskDetailDTO;
+import com.hfusionhub.dto.AgentTaskSummaryDTO;
+import com.hfusionhub.entity.AgentRun;
+import com.hfusionhub.entity.AgentTask;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Agent 任务状态机服务接口
+ *
+ * @author HFusionHub Team
+ */
+public interface AgentTaskService {
+
+    // ================================================================
+    // 生命周期方法
+    // ================================================================
+
+    /**
+     * 创建任务（幂等：相同 requestId 返回已有任务）
+     *
+     * @param requestId      客户端幂等键
+     * @param userId         用户ID
+     * @param conversationId 对话ID
+     * @param kbId           知识库ID（可选）
+     * @param query          原始问题
+     * @return 任务实体
+     */
+    AgentTask createTask(String requestId, Long userId, Long conversationId,
+                         Long kbId, String query);
+
+    /**
+     * 开始一次运行（task: pending → running，创建 agent_run）
+     *
+     * @param taskId 任务ID
+     * @param runUuid Python agent_run_id
+     * @param model  模型名称
+     * @param style  回答风格
+     * @param maxToolSteps 最大工具步数
+     * @return 运行实体
+     */
+    AgentRun startRun(Long taskId, String runUuid, String model, String style, int maxToolSteps);
+
+    /**
+     * 记录一个步骤
+     *
+     * @param runId        运行ID
+     * @param sequence     步骤序号
+     * @param stepType     步骤类型
+     * @param action       动作名
+     * @param inputSummary 输入摘要
+     * @param outputSummary 输出摘要
+     * @param sources      引用来源
+     * @param durationMs   耗时(ms)
+     * @param errorCode    错误码
+     */
+    void recordStep(Long runId, int sequence, String stepType, String action,
+                    String inputSummary, String outputSummary,
+                    List<Map<String, Object>> sources, long durationMs, String errorCode);
+
+    /**
+     * 完成一次运行（run → 终态，task → 终态）
+     */
+    void completeRun(Long runId, String status, String model,
+                     Map<String, Object> tokenUsage, int toolCallsCount,
+                     long durationMs, String errorCode, String errorDetail,
+                     String failedTool);
+
+    /**
+     * 标记运行失败并关闭任务
+     */
+    void failRun(Long runId, String errorCode, String errorDetail, String failedTool);
+
+    /**
+     * 标记运行被取消并关闭任务
+     */
+    void cancelRun(Long runId);
+
+    // ================================================================
+    // 查询方法
+    // ================================================================
+
+    /**
+     * 按任务ID查询详情（含所有 run 和 step 时间线）
+     */
+    AgentTaskDetailDTO getTaskDetail(Long taskId);
+
+    /**
+     * 按幂等键查询详情
+     */
+    AgentTaskDetailDTO getTaskByRequestId(String requestId);
+
+    /**
+     * 按用户ID分页查询任务列表
+     */
+    PageResult<AgentTaskSummaryDTO> listUserTasks(Long userId, String status, int page, int pageSize);
+
+    /**
+     * 按任务ID查所有 run（用于取消时查找活跃 run）
+     */
+    List<AgentRun> getRunsByTaskId(Long taskId);
+
+    // ================================================================
+    // 操作方法
+    // ================================================================
+
+    /**
+     * 重试失败/超时任务
+     *
+     * @param taskId 任务ID
+     * @param userId 操作用户ID（校验所有权）
+     * @return 新创建的 AgentRun
+     */
+    AgentRun retryTask(Long taskId, Long userId);
+
+    /**
+     * 取消运行中的任务
+     *
+     * @param taskId 任务ID
+     * @param userId 操作用户ID（校验所有权）
+     * @return 是否成功取消
+     */
+    boolean cancelTask(Long taskId, Long userId);
+}

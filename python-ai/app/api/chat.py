@@ -38,11 +38,19 @@ SSE events (streaming):
   data: {"content": "chunk text..."}
   data: {"sources": [{"document_id": ..., "chunk_id": ..., ...}]}
   data: [DONE]
+
+Agent structured events (intercepted by Java for persistence):
+  data: {"event":"run_started","agent_run_id":"uuid","timestamp":"ISO"}
+  data: {"event":"step_completed","sequence":1,"step_type":"retrieval",...}
+  data: {"event":"run_completed","status":"completed","token_usage":{...},...}
+  data: {"event":"run_error","status":"tool_error","error_code":"...",...}
 """
 
 import asyncio
 import json
 import logging
+import time as time_module
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
@@ -63,14 +71,111 @@ CHAT_HISTORY_MAX_ITEMS = 50
 CHAT_REQUEST_ID_MAX_LENGTH = 80
 CHAT_MODEL_MAX_LENGTH = 100
 
+_INPUT_SUMMARY_MAX_LENGTH = 2000
+_OUTPUT_SUMMARY_MAX_LENGTH = 2000
+
 _VALID_STYLES = {"concise", "detailed", "report"}
 
 
+def _truncate(text: Optional[str], max_len: int) -> Optional[str]:
+    """Truncate text to max_len characters, adding ellipsis if truncated."""
+    if text is None:
+        return None
+    if len(text) <= max_len:
+        return text
+    return text[:max_len - 3] + "..."
+
+
+def _now_iso() -> str:
+    """Return current UTC timestamp as ISO 8601 string."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _build_step_event(
+    sequence: int,
+    step_type: str,
+    action: Optional[str] = None,
+    input_summary: Optional[str] = None,
+    output_summary: Optional[str] = None,
+    sources: Optional[List[Dict[str, Any]]] = None,
+    duration_ms: float = 0.0,
+    error_code: Optional[str] = None,
+) -> str:
+    """Build a structured step_completed SSE event JSON string."""
+    return json.dumps({
+        "event": "step_completed",
+        "sequence": sequence,
+        "step_type": step_type,
+        "action": action,
+        "input_summary": _truncate(input_summary, _INPUT_SUMMARY_MAX_LENGTH),
+        "output_summary": _truncate(output_summary, _OUTPUT_SUMMARY_MAX_LENGTH),
+        "sources": sources,
+        "duration_ms": round(duration_ms, 2),
+        "error_code": error_code,
+        "timestamp": _now_iso(),
+    }, ensure_ascii=False)
+
+
+def _build_run_event(
+    status: str,
+    agent_run_id: Optional[str] = None,
+    token_usage: Optional[Dict[str, int]] = None,
+    tool_calls_count: int = 0,
+) -> str:
+    """Build a structured run_completed SSE event JSON string."""
+    return json.dumps({
+        "event": "run_completed",
+        "status": status,
+        "agent_run_id": agent_run_id,
+        "token_usage": token_usage,
+        "tool_calls_count": tool_calls_count,
+        "timestamp": _now_iso(),
+    }, ensure_ascii=False)
+
+
+def _build_run_error_event(
+    status: str,
+    error_code: str,
+    error_detail: Optional[str] = None,
+    failed_tool: Optional[str] = None,
+    agent_run_id: Optional[str] = None,
+) -> str:
+    """Build a structured run_error SSE event JSON string."""
+    return json.dumps({
+        "event": "run_error",
+        "status": status,
+        "error_code": error_code,
+        "error_detail": error_detail,
+        "failed_tool": failed_tool,
+        "agent_run_id": agent_run_id,
+        "timestamp": _now_iso(),
+    }, ensure_ascii=False)
+
+
+def _build_run_started_event(agent_run_id: str) -> str:
+    """Build a structured run_started SSE event JSON string."""
+    return json.dumps({
+        "event": "run_started",
+        "agent_run_id": agent_run_id,
+        "timestamp": _now_iso(),
+    }, ensure_ascii=False)
+
+
 def _agent_chunk_to_sse(chunk: str) -> Optional[str]:
-    """Convert one agent chunk into a browser-facing SSE event."""
+    """Convert one agent chunk into a browser-facing SSE event.
+
+    Handles:
+    - Structured event dicts (event field) → pass through for Java interception
+    - Sources dicts → sources SSE event
+    - Evaluation dicts → suppressed (internal only)
+    - Plain text → content SSE event
+    """
     try:
         parsed = json.loads(chunk)
         if isinstance(parsed, dict):
+            # Structured agent events — pass through for Java to intercept
+            if "event" in parsed:
+                return f"data: {json.dumps(parsed, ensure_ascii=False)}\n\n"
             sources = parsed.get("sources")
             if sources:
                 return f"data: {json.dumps({'sources': sources}, ensure_ascii=False)}\n\n"
@@ -158,12 +263,30 @@ class ChatResponse(BaseModel):
     max_tool_steps: int = Field(5, description="Configured max ReAct steps")
     error_detail: Optional[str] = Field(None, description="Error detail on tool_error / timeout")
     failed_tool: Optional[str] = Field(None, description="Tool name that failed")
+    step_events: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Structured step events for Java persistence")
 
 
 # ── Helper ──────────────────────────────────────────────────────────────
 
 def _build_chat_response(response, style: str) -> ChatResponse:
     """Build a ChatResponse from AgentResponse, syncing Java and V1 fields."""
+    # Build step_events from AgentResponse.steps for Java persistence.
+    step_events = []
+    for i, s in enumerate(response.steps or [], start=1):
+        step_events.append({
+            "sequence": i,
+            "step_type": "tool_call" if s.action else "model_generation",
+            "action": s.action,
+            "input_summary": _truncate(
+                json.dumps(s.action_input, ensure_ascii=False) if s.action_input else s.thought,
+                _INPUT_SUMMARY_MAX_LENGTH,
+            ),
+            "output_summary": _truncate(s.observation, _OUTPUT_SUMMARY_MAX_LENGTH),
+            "sources": None,
+            "duration_ms": 0,
+            "error_code": None,
+        })
+
     return ChatResponse(
         # Java-compat
         content=response.content or response.answer or "",
@@ -191,6 +314,7 @@ def _build_chat_response(response, style: str) -> ChatResponse:
         max_tool_steps=response.max_tool_steps,
         error_detail=response.error_detail,
         failed_tool=response.failed_tool,
+        step_events=step_events,
     )
 
 
@@ -342,9 +466,8 @@ async def agent_v1_chat_stream(request: AgentV1Request):
     Only V1-whitelisted tools (search_knowledge_base, read_chunk,
     list_document_chunks) are available.
 
-    Agent V1 Step 3: An immutable ``AgentExecutionContext`` is created from
-    the Java-supplied fields and passed through the full agent chain.
-    KB-bound conversations MUST use this endpoint, NOT ``/api/chat/stream``.
+    Emits structured agent events (run_started, step_completed, run_completed,
+    run_error) alongside content chunks for Java backend persistence.
     """
     try:
         style = request.style if request.style in _VALID_STYLES else "detailed"
@@ -354,7 +477,6 @@ async def agent_v1_chat_stream(request: AgentV1Request):
             for msg in request.history
         ]
 
-        # Agent V1 Step 3: build immutable execution context.
         execution_context = AgentExecutionContext(
             user_id=request.user_id,
             knowledge_base_id=request.knowledge_base_id,
@@ -370,9 +492,17 @@ async def agent_v1_chat_stream(request: AgentV1Request):
         )
 
         request_id = request.request_id or str(uuid4())
+        agent_run_id = execution_context.agent_run_id
 
         async def event_generator():
             serving_task = _track_active_request(request_id)
+            # Track run-level metrics for run_completed event.
+            run_start_time = time_module.monotonic()
+            total_tool_calls = 0
+
+            # Emit run_started event before agent execution.
+            yield _agent_chunk_to_sse(_build_run_started_event(agent_run_id))
+
             try:
                 async for chunk in agent.run_stream(
                     query=request.message,
@@ -380,15 +510,49 @@ async def agent_v1_chat_stream(request: AgentV1Request):
                     style=style,
                     max_tool_steps=request.max_tool_steps,
                 ):
+                    # Count tool calls from step_completed events.
+                    try:
+                        parsed = json.loads(chunk)
+                        if isinstance(parsed, dict) and parsed.get("event") == "step_completed":
+                            if parsed.get("step_type") == "tool_call":
+                                total_tool_calls += 1
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        pass
+
                     event = _agent_chunk_to_sse(chunk)
                     if event is not None:
                         yield event
 
+                # Emit run_completed on success.
+                run_duration = (time_module.monotonic() - run_start_time) * 1000
+                yield _agent_chunk_to_sse(_build_run_event(
+                    status="completed",
+                    agent_run_id=agent_run_id,
+                    token_usage=None,  # Will be populated by Java from final response
+                    tool_calls_count=total_tool_calls,
+                ))
+
             except asyncio.CancelledError:
                 logger.info("Agent V1 stream %s was cancelled", request_id)
+                yield _agent_chunk_to_sse(
+                    _build_run_error_event(
+                        status="cancelled",
+                        error_code="cancelled",
+                        error_detail="用户取消",
+                        agent_run_id=agent_run_id,
+                    )
+                )
                 yield f"data: {json.dumps({'content': '', 'cancelled': True}, ensure_ascii=False)}\n\n"
             except Exception as e:
                 logger.error("Agent V1 streaming error for request %s: %s", request_id, e, exc_info=True)
+                yield _agent_chunk_to_sse(
+                    _build_run_error_event(
+                        status="failed",
+                        error_code="internal_error",
+                        error_detail=str(e)[:500],
+                        agent_run_id=agent_run_id,
+                    )
+                )
                 yield f"data: {json.dumps({'content': '', 'error': str(e)}, ensure_ascii=False)}\n\n"
             finally:
                 try:

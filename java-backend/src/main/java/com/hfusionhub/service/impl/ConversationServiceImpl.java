@@ -15,11 +15,15 @@ import com.hfusionhub.entity.Conversation;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.entity.Message;
 import com.hfusionhub.entity.User;
+import com.hfusionhub.entity.AgentTask;
+import com.hfusionhub.entity.AgentRun;
 import com.hfusionhub.mapper.ConversationMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.MessageMapper;
 import com.hfusionhub.mapper.UserMapper;
+import com.hfusionhub.common.constant.AgentConstants;
 import com.hfusionhub.service.ConversationService;
+import com.hfusionhub.service.AgentTaskService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -56,6 +60,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final UserMapper userMapper;
     private final AiClient aiClient;
+    private final AgentTaskService agentTaskService;
 
     private static final int REQUEST_ID_MAX_LENGTH = 64;
     private static final String ASSISTANT_REQUEST_SUFFIX = ":assistant";
@@ -448,6 +453,17 @@ public class ConversationServiceImpl implements ConversationService {
         // event.  The worker's finally block persists the partial response.
         aiClient.cancelRequest(requestId);
         stream.closeConnection();
+
+        // Agent V1 Step 4: mark agent run as cancelled
+        if (stream.getAgentRunId() != null) {
+            try {
+                agentTaskService.cancelRun(stream.getAgentRunId());
+            } catch (Exception e) {
+                log.warn("Failed to mark agent run {} as cancelled: {}",
+                        stream.getAgentRunId(), e.getMessage());
+            }
+        }
+
         try {
             stream.completed.get(3, TimeUnit.SECONDS);
         } catch (Exception e) {
@@ -639,6 +655,17 @@ public class ConversationServiceImpl implements ConversationService {
         // 5. 获取对话历史
         List<Map<String, String>> history = getChatHistory(conversation.getId());
 
+        // 5.5. Agent V1 Step 4: 创建持久化 agent_task 和 agent_run
+        final AgentTask agentTask = agentTaskService.createTask(
+                requestId, currentUserId, conversation.getId(),
+                conversation.getKnowledgeBaseId(), dto.getContent());
+        final String runUuid = java.util.UUID.randomUUID().toString();
+        final AgentRun agentRun = agentTaskService.startRun(
+                agentTask.getId(), runUuid, null, "detailed", 5);
+        streamCancellation.setAgentRunId(agentRun.getId());
+        log.info("Agent task tracking: taskId={} runId={} runUuid={}",
+                agentTask.getId(), agentRun.getId(), runUuid);
+
         // 6. 使用 WebClient Flux 实现真正的流式响应
         StringBuilder responseBuilder = new StringBuilder();
         java.util.List<Map<String, Object>> accumulatedSources = new java.util.ArrayList<>();
@@ -697,12 +724,25 @@ public class ConversationServiceImpl implements ConversationService {
 
                     try {
                         com.fasterxml.jackson.databind.JsonNode jsonNode = objectMapper.readTree(data);
+
+                        // ── Agent V1 Step 4: intercept structured events for persistence ──
+                        if (jsonNode.has("event")) {
+                            handleAgentEvent(jsonNode, agentRun.getId());
+                            // Forward structured events to frontend (for progress UI)
+                            try {
+                                Map<String, Object> eventMap = objectMapper.treeToValue(jsonNode, Map.class);
+                                emitter.send(SseEmitter.event().data(eventMap, MediaType.APPLICATION_JSON));
+                            } catch (Exception ignored) {}
+                            return;
+                        }
+
                         String content = jsonNode.has("content") ? jsonNode.get("content").asText() : "";
                         boolean isCancelled = jsonNode.has("cancelled") && jsonNode.get("cancelled").asBoolean();
                         com.fasterxml.jackson.databind.JsonNode sourcesNode = jsonNode.get("sources");
 
                         if (isCancelled) {
                             log.info("Python AI request cancelled: {}", requestId);
+                            agentTaskService.cancelRun(agentRun.getId());
                             try { emitter.send(SseEmitter.event().data("[DONE]")); emitter.complete(); } catch (Exception ignored) {}
                             return;
                         }
@@ -729,6 +769,7 @@ public class ConversationServiceImpl implements ConversationService {
                     // onError
                     if (cancelled.get()) {
                         log.info("Stream cancelled by client, requestId: {}", requestId);
+                        agentTaskService.cancelRun(agentRun.getId());
                         try {
                             if (!assistantSaved[0] && responseBuilder.length() > 0) {
                                 assistantSaved[0] = saveStreamAssistantMessage(
@@ -746,6 +787,10 @@ public class ConversationServiceImpl implements ConversationService {
                         return;
                     }
                     log.error("Streaming error: {}", error.getMessage(), error);
+                    agentTaskService.failRun(agentRun.getId(),
+                            "internal_error",
+                            error.getMessage() != null ? error.getMessage() : "Unknown streaming error",
+                            null);
                     try {
                         String errorMessage = aiUnavailableMessage(error instanceof Exception ? (Exception) error : new RuntimeException(error));
                         emitter.send(SseEmitter.event().data(Map.of("content", errorMessage)));
@@ -788,11 +833,76 @@ public class ConversationServiceImpl implements ConversationService {
         streamCancellation.setSubscription(subscription);
     }
 
+    /**
+     * Agent V1 Step 4: handle structured SSE events from Python for persistence.
+     */
+    private void handleAgentEvent(com.fasterxml.jackson.databind.JsonNode eventNode, Long runId) {
+        try {
+            String eventType = eventNode.get("event").asText();
+            switch (eventType) {
+                case "step_completed": {
+                    int sequence = eventNode.has("sequence") ? eventNode.get("sequence").asInt() : 0;
+                    String stepType = eventNode.has("step_type") ? eventNode.get("step_type").asText() : "";
+                    String action = eventNode.has("action") && !eventNode.get("action").isNull()
+                            ? eventNode.get("action").asText() : null;
+                    String inputSummary = eventNode.has("input_summary") && !eventNode.get("input_summary").isNull()
+                            ? eventNode.get("input_summary").asText() : null;
+                    String outputSummary = eventNode.has("output_summary") && !eventNode.get("output_summary").isNull()
+                            ? eventNode.get("output_summary").asText() : null;
+                    List<Map<String, Object>> sources = null;
+                    if (eventNode.has("sources") && !eventNode.get("sources").isNull() && eventNode.get("sources").isArray()) {
+                        sources = new com.fasterxml.jackson.databind.ObjectMapper()
+                                .treeToValue(eventNode.get("sources"), List.class);
+                    }
+                    long durationMs = eventNode.has("duration_ms") ? eventNode.get("duration_ms").asLong() : 0L;
+                    String errorCode = eventNode.has("error_code") && !eventNode.get("error_code").isNull()
+                            ? eventNode.get("error_code").asText() : null;
+
+                    agentTaskService.recordStep(runId, sequence, stepType, action,
+                            inputSummary, outputSummary, sources, durationMs, errorCode);
+                    break;
+                }
+                case "run_completed": {
+                    String rawStatus = eventNode.has("status") ? eventNode.get("status").asText() : "completed";
+                    String status = AgentConstants.mapPythonStatus(rawStatus);
+                    int toolCalls = eventNode.has("tool_calls_count") ? eventNode.get("tool_calls_count").asInt() : 0;
+                    agentTaskService.completeRun(runId, status, null, null, toolCalls, 0,
+                            null, null, null);
+                    log.info("Agent run {} completed via SSE event: rawStatus={} mappedStatus={}", runId, rawStatus, status);
+                    break;
+                }
+                case "run_error": {
+                    String rawStatus = eventNode.has("status") ? eventNode.get("status").asText() : "failed";
+                    String status = AgentConstants.mapPythonStatus(rawStatus);
+                    String errorCode = eventNode.has("error_code") && !eventNode.get("error_code").isNull()
+                            ? eventNode.get("error_code").asText() : "internal_error";
+                    String errorDetail = eventNode.has("error_detail") && !eventNode.get("error_detail").isNull()
+                            ? eventNode.get("error_detail").asText() : null;
+                    String failedTool = eventNode.has("failed_tool") && !eventNode.get("failed_tool").isNull()
+                            ? eventNode.get("failed_tool").asText() : null;
+                    agentTaskService.completeRun(runId, status, null, null, 0, 0,
+                            errorCode, errorDetail, failedTool);
+                    log.warn("Agent run {} failed via SSE event: rawStatus={} mappedStatus={} errorCode={}",
+                            runId, rawStatus, status, errorCode);
+                    break;
+                }
+                case "run_started":
+                    // No persistence action needed — run was created by startRun().
+                    break;
+                default:
+                    log.debug("Unknown agent event type: {}", eventType);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to handle agent event: {}", e.getMessage());
+        }
+    }
+
     private static final class StreamCancellation {
         private final AtomicBoolean cancelled;
         private final Long userId;
         private final CompletableFuture<Void> completed = new CompletableFuture<>();
         private volatile reactor.core.Disposable subscription;
+        private volatile Long agentRunId;  // Agent V1: current agent_run ID for status updates
 
         private StreamCancellation(AtomicBoolean cancelled, Long userId) {
             this.cancelled = cancelled;
@@ -801,6 +911,14 @@ public class ConversationServiceImpl implements ConversationService {
 
         private void setSubscription(reactor.core.Disposable subscription) {
             this.subscription = subscription;
+        }
+
+        private void setAgentRunId(Long agentRunId) {
+            this.agentRunId = agentRunId;
+        }
+
+        private Long getAgentRunId() {
+            return agentRunId;
         }
 
         private void closeConnection() {
