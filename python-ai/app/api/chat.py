@@ -47,6 +47,7 @@ Agent structured events (intercepted by Java for persistence):
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import time as time_module
@@ -59,6 +60,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.agent import get_agent, get_agent_run_store
+from app.core.agent.agent import AgentResponse
 from app.core.agent.execution_context import AgentExecutionContext
 
 router = APIRouter()
@@ -222,6 +224,13 @@ class AgentV1Request(BaseModel):
     ``user_id`` comes from the Java backend after session authentication.
     The model CANNOT forge or override it — Python strips any model-supplied
     ``user_id`` from tool input before execution (see ToolRegistry).
+
+    ``capability_profile`` (Agent V1 Step 5):
+      - ``null`` / absent → V1.0 (3 read-only KB tools, no approval flow).
+      - ``"approval_write"`` → V1.1 write capability.  The agent CAN see
+        write_note but the registry gates every write call behind
+        approval_required.  Java MUST set this explicitly; the model
+        cannot upgrade its own capability.
     """
     message: str = Field(..., min_length=1, max_length=CHAT_MESSAGE_MAX_LENGTH)
     knowledge_base_id: int = Field(..., ge=1, description="REQUIRED — target knowledge base ID")
@@ -234,6 +243,7 @@ class AgentV1Request(BaseModel):
     style: Optional[str] = Field("detailed")
     max_tool_steps: Optional[int] = Field(5, ge=1, le=10)
     temperature: Optional[float] = Field(0.3, ge=0.0, le=2.0)
+    capability_profile: Optional[str] = Field(None, pattern="^(approval_write)$")
 
 
 class ChatResponse(BaseModel):
@@ -268,24 +278,31 @@ class ChatResponse(BaseModel):
 
 # ── Helper ──────────────────────────────────────────────────────────────
 
-def _build_chat_response(response, style: str) -> ChatResponse:
-    """Build a ChatResponse from AgentResponse, syncing Java and V1 fields."""
+def _build_chat_response(response, style: str, extra_step_events: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
+    """Build a ChatResponse from AgentResponse, syncing Java and V1 fields.
+
+    When *extra_step_events* is provided (e.g. from the decide/resume flow),
+    those events are used directly instead of deriving them from response.steps.
+    """
     # Build step_events from AgentResponse.steps for Java persistence.
-    step_events = []
-    for i, s in enumerate(response.steps or [], start=1):
-        step_events.append({
-            "sequence": i,
-            "step_type": "tool_call" if s.action else "model_generation",
-            "action": s.action,
-            "input_summary": _truncate(
-                json.dumps(s.action_input, ensure_ascii=False) if s.action_input else s.thought,
-                _INPUT_SUMMARY_MAX_LENGTH,
-            ),
-            "output_summary": _truncate(s.observation, _OUTPUT_SUMMARY_MAX_LENGTH),
-            "sources": None,
-            "duration_ms": 0,
-            "error_code": None,
-        })
+    if extra_step_events is not None:
+        step_events = list(extra_step_events)
+    else:
+        step_events = []
+        for i, s in enumerate(response.steps or [], start=1):
+            step_events.append({
+                "sequence": i,
+                "step_type": "tool_call" if s.action else "model_generation",
+                "action": s.action,
+                "input_summary": _truncate(
+                    json.dumps(s.action_input, ensure_ascii=False) if s.action_input else s.thought,
+                    _INPUT_SUMMARY_MAX_LENGTH,
+                ),
+                "output_summary": _truncate(s.observation, _OUTPUT_SUMMARY_MAX_LENGTH),
+                "sources": None,
+                "duration_ms": 0,
+                "error_code": None,
+            })
 
     return ChatResponse(
         # Java-compat
@@ -415,6 +432,7 @@ async def agent_v1_chat(request: AgentV1Request):
             permissions=frozenset({"knowledge_base:read"}),
             agent_run_id=request.request_id or str(uuid4()),
             mode="read_only",
+            capability_profile=request.capability_profile,
         )
 
         # Agent V1: knowledge_base_id is always present (enforced by Pydantic).
@@ -483,6 +501,7 @@ async def agent_v1_chat_stream(request: AgentV1Request):
             permissions=frozenset({"knowledge_base:read"}),
             agent_run_id=request.request_id or str(uuid4()),
             mode="read_only",
+            capability_profile=request.capability_profile,
         )
 
         agent = get_agent(
@@ -499,6 +518,9 @@ async def agent_v1_chat_stream(request: AgentV1Request):
             # Track run-level metrics for run_completed event.
             run_start_time = time_module.monotonic()
             total_tool_calls = 0
+            # Track whether a terminal event was already emitted by the agent
+            # (run_error from exception handlers, or approval_required).
+            _terminal_event_emitted = False
 
             # Emit run_started event before agent execution.
             yield _agent_chunk_to_sse(_build_run_started_event(agent_run_id))
@@ -510,11 +532,14 @@ async def agent_v1_chat_stream(request: AgentV1Request):
                     style=style,
                     max_tool_steps=request.max_tool_steps,
                 ):
-                    # Count tool calls from step_completed events.
+                    # Detect terminal events emitted by the agent itself.
                     try:
                         parsed = json.loads(chunk)
-                        if isinstance(parsed, dict) and parsed.get("event") == "step_completed":
-                            if parsed.get("step_type") == "tool_call":
+                        if isinstance(parsed, dict):
+                            evt = parsed.get("event")
+                            if evt in ("run_error", "approval_required"):
+                                _terminal_event_emitted = True
+                            if evt == "step_completed" and parsed.get("step_type") == "tool_call":
                                 total_tool_calls += 1
                     except (json.JSONDecodeError, TypeError, ValueError):
                         pass
@@ -523,14 +548,15 @@ async def agent_v1_chat_stream(request: AgentV1Request):
                     if event is not None:
                         yield event
 
-                # Emit run_completed on success.
-                run_duration = (time_module.monotonic() - run_start_time) * 1000
-                yield _agent_chunk_to_sse(_build_run_event(
-                    status="completed",
-                    agent_run_id=agent_run_id,
-                    token_usage=None,  # Will be populated by Java from final response
-                    tool_calls_count=total_tool_calls,
-                ))
+                # Emit run_completed ONLY if no terminal event was emitted.
+                if not _terminal_event_emitted:
+                    run_duration = (time_module.monotonic() - run_start_time) * 1000
+                    yield _agent_chunk_to_sse(_build_run_event(
+                        status="completed",
+                        agent_run_id=agent_run_id,
+                        token_usage=None,  # Will be populated by Java from final response
+                        tool_calls_count=total_tool_calls,
+                    ))
 
             except asyncio.CancelledError:
                 logger.info("Agent V1 stream %s was cancelled", request_id)
@@ -636,6 +662,213 @@ async def chat_stream(request: ChatRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat stream error: {str(e)}") from e
 
+
+# ── Agent V1 Step 5: Approval endpoints ──────────────────────────────────
+
+class AgentResumeRequest(BaseModel):
+    """Resume a paused agent run after approval decision.
+
+    Java passes the full execution context so Python can re-run the agent
+    with a scoped grant for the approved tool.  All fields are REQUIRED
+    (validated by Java before calling this endpoint).
+    """
+    approval_id: str = Field(..., min_length=1, max_length=36)
+    decision: str = Field(..., pattern="^(approved|denied)$")
+    reason: Optional[str] = Field(None, max_length=500)
+    user_id: int = Field(..., ge=1, description="Authenticated user ID making the decision")
+    knowledge_base_id: int = Field(..., ge=1)
+    tool_name: str = Field(..., min_length=1, max_length=50)
+    tool_input: Dict[str, Any] = Field(..., description="Original tool parameters (for hash verification)")
+    query: str = Field(..., min_length=1, max_length=CHAT_MESSAGE_MAX_LENGTH,
+                       description="Original user query (to re-run agent)")
+    history: List[ChatMessage] = Field(default_factory=list, max_length=CHAT_HISTORY_MAX_ITEMS)
+    conversation_id: Optional[int] = Field(None, ge=1)
+    model: Optional[str] = Field(None, max_length=CHAT_MODEL_MAX_LENGTH)
+
+
+@router.post("/api/agent/v1/chat/decide")
+async def agent_v1_decide(request: AgentResumeRequest):
+    """Approve or deny a pending tool approval — Agent V1 Step 5.
+
+    Called by the Java backend AFTER updating MySQL agent_approval.
+    MySQL is the single source of truth; this endpoint handles the
+    actual tool execution.
+
+    **Approved flow:**
+      1. Validate the approval (parameter hash must match).
+      2. Register a one-time scoped grant for (tool_name, tool_input_hash).
+      3. Execute the approved tool DIRECTLY via ToolRegistry — NO LLM re-run.
+         This guarantees exactly one execution with the exact approved parameters.
+      4. Return a structured ChatResponse with step_events.
+
+    **Denied flow:**
+      Return ``{status: "denied"}`` — Java has already updated MySQL.
+    """
+    from app.core.tools.registry import register_scoped_grant, create_v1_registry, consume_scoped_grant
+    from app.core.tools.result import ToolResult
+
+    if request.decision == "denied":
+        logger.info("Approval %s DENIED by user %d: %s",
+                     request.approval_id, request.user_id, request.reason or "")
+        return {
+            "status": "denied",
+            "approval_id": request.approval_id,
+            "reason": request.reason,
+        }
+
+    # ── Approved: validate, then execute the tool directly ────────────────
+
+    # Step 1: Validate parameter hash.
+    input_canonical = json.dumps(request.tool_input, sort_keys=True, ensure_ascii=False)
+    input_hash = hashlib.sha256(input_canonical.encode("utf-8")).hexdigest()
+    logger.info(
+        "Approval %s APPROVED by user %d: tool=%s hash=%s... user=%d kb=%d",
+        request.approval_id, request.user_id, request.tool_name,
+        input_hash[:16], request.user_id, request.knowledge_base_id,
+    )
+
+    # Step 2: Create V1.1 registry for the approved KB, then register a
+    # one-shot scoped grant so the write tool passes the approval gate.
+    registry = create_v1_registry(
+        knowledge_base_id=request.knowledge_base_id,
+        agent_version="1.1",
+    )
+    grant_token = register_scoped_grant(
+        tool_name=request.tool_name,
+        tool_input=request.tool_input,
+        user_id=request.user_id,
+        knowledge_base_id=request.knowledge_base_id,
+    )
+
+    # Step 3: Build a read_write execution context.
+    execution_context = AgentExecutionContext(
+        user_id=request.user_id,
+        knowledge_base_id=request.knowledge_base_id,
+        permissions=frozenset({"knowledge_base:read", "knowledge_base:write"}),
+        agent_run_id=str(uuid4()),
+        mode="read_write",
+        capability_profile="approval_write",
+    )
+
+    # Step 4: Execute the approved tool DIRECTLY.
+    # This is intentionally NOT an agent re-run — we execute exactly the
+    # tool+parameters that the human approved, exactly once.  No LLM
+    # involvement means no token cost and no non-determinism.
+    started = time_module.monotonic()
+    try:
+        result: ToolResult = await asyncio.wait_for(
+            registry.execute(
+                tool_name=request.tool_name,
+                tool_input=request.tool_input,
+                context=execution_context,
+            ),
+            timeout=30.0,
+        )
+    except asyncio.TimeoutError:
+        elapsed_ms = round((time_module.monotonic() - started) * 1000, 2)
+        logger.error(
+            "Approval tool execution TIMEOUT: approval=%s tool=%s timeout_ms=%s",
+            request.approval_id, request.tool_name, elapsed_ms,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Tool execution timed out after {elapsed_ms}ms: {request.tool_name}",
+        )
+    except Exception as e:
+        elapsed_ms = round((time_module.monotonic() - started) * 1000, 2)
+        logger.error(
+            "Approval tool execution FAILED: approval=%s tool=%s elapsed_ms=%s error=%s",
+            request.approval_id, request.tool_name, elapsed_ms, e, exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Tool execution error: {request.tool_name}: {e}",
+        )
+
+    elapsed_ms = round((time_module.monotonic() - started) * 1000, 2)
+
+    # Step 5: Build the response from the tool result.
+    style = "detailed"
+
+    if result.ok:
+        logger.info(
+            "Approval tool executed OK: approval=%s tool=%s elapsed_ms=%s",
+            request.approval_id, request.tool_name, elapsed_ms,
+        )
+        # Build an AgentResponse with the tool result
+        step_event = {
+            "sequence": 1,
+            "step_type": "tool_call",
+            "action": request.tool_name,
+            "knowledge_base_id": request.knowledge_base_id,
+            "input_summary": _truncate(
+                json.dumps(request.tool_input, ensure_ascii=False),
+                _INPUT_SUMMARY_MAX_LENGTH,
+            ),
+            "output_summary": _truncate(
+                json.dumps(result.data, ensure_ascii=False) if result.data else "",
+                _OUTPUT_SUMMARY_MAX_LENGTH,
+            ),
+            "sources": None,
+            "duration_ms": elapsed_ms,
+            "error_code": None,
+        }
+        response = AgentResponse(
+            content=f"工具 '{request.tool_name}' 执行成功。",
+            answer=f"工具 '{request.tool_name}' 执行成功。",
+            status="completed",
+            sources=[],
+            steps=[],
+            model=request.model or "",
+            token_count=0,
+            token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            tool_calls_count=1,
+            style_used=style,
+            max_tool_steps=5,
+            agent_run_id=execution_context.agent_run_id,
+            error_detail=None,
+            failed_tool=None,
+        )
+        return _build_chat_response(response, style, extra_step_events=[step_event])
+    else:
+        logger.error(
+            "Approval tool returned FAILURE: approval=%s tool=%s error_code=%s message=%s",
+            request.approval_id, request.tool_name, result.error_code, result.message,
+        )
+        step_event = {
+            "sequence": 1,
+            "step_type": "tool_call",
+            "action": request.tool_name,
+            "knowledge_base_id": request.knowledge_base_id,
+            "input_summary": _truncate(
+                json.dumps(request.tool_input, ensure_ascii=False),
+                _INPUT_SUMMARY_MAX_LENGTH,
+            ),
+            "output_summary": _truncate(result.message, _OUTPUT_SUMMARY_MAX_LENGTH),
+            "sources": None,
+            "duration_ms": elapsed_ms,
+            "error_code": result.error_code,
+        }
+        response = AgentResponse(
+            content=f"工具 '{request.tool_name}' 执行失败: {result.message}",
+            answer=f"工具 '{request.tool_name}' 执行失败: {result.message}",
+            status="tool_error",
+            sources=[],
+            steps=[],
+            model=request.model or "",
+            token_count=0,
+            token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            tool_calls_count=1,
+            style_used=style,
+            max_tool_steps=5,
+            agent_run_id=execution_context.agent_run_id,
+            error_detail=result.message,
+            failed_tool=request.tool_name,
+        )
+        return _build_chat_response(response, style, extra_step_events=[step_event])
+
+
+# ── Legacy agent-runs (kept for backward compat) ──────────────────────────
 
 @router.get("/api/chat/agent-runs")
 async def list_agent_runs(limit: int = 50, knowledge_base_id: Optional[int] = None):

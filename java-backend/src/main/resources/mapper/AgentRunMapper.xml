@@ -12,7 +12,7 @@
         <result column="style" property="style"/>
         <result column="max_tool_steps" property="maxToolSteps"/>
         <result column="token_usage" property="tokenUsage"
-                typeHandler="com.hfusionhub.handler.JsonTypeHandler"/>
+                typeHandler="com.hfusionhub.handler.JsonMapTypeHandler"/>
         <result column="tool_calls_count" property="toolCallsCount"/>
         <result column="error_code" property="errorCode"/>
         <result column="error_detail" property="errorDetail"/>
@@ -47,7 +47,7 @@
         UPDATE agent_run
         SET status = #{status},
             model = #{model},
-            token_usage = #{tokenUsage, typeHandler=com.hfusionhub.handler.JsonTypeHandler},
+            token_usage = #{tokenUsage, typeHandler=com.hfusionhub.handler.JsonMapTypeHandler},
             tool_calls_count = #{toolCallsCount},
             duration_ms = #{durationMs},
             error_code = #{errorCode},

@@ -54,7 +54,11 @@ class AgentExecutionContext:
         knowledge_base_id: Target knowledge base ID (from conversation scope).
         permissions: Set of permission strings, e.g. ``{"knowledge_base:read"}``.
         agent_run_id: UUID of the current agent run.
-        mode: ``"read_only"`` (V1 default) or ``"read_write"`` (future).
+        mode: ``"read_only"`` (V1 default) or ``"read_write"`` (resume after approval).
+        capability_profile: ``"approval_write"`` enables V1.1 write tools (write_note)
+            while keeping read_only mode — the agent can SEE write_note but the
+            registry returns approval_required on invocation.  Must be explicitly
+            chosen by Java; the model cannot upgrade its own capability.
     """
 
     user_id: int
@@ -62,6 +66,9 @@ class AgentExecutionContext:
     permissions: FrozenSet[str] = field(default_factory=lambda: frozenset({"knowledge_base:read"}))
     agent_run_id: str = ""
     mode: str = MODE_READ_ONLY
+    capability_profile: Optional[str] = None
+
+    _VALID_PROFILES = {None, "approval_write"}
 
     def __post_init__(self):
         if self.mode not in _VALID_MODES:
@@ -70,6 +77,11 @@ class AgentExecutionContext:
             raise ValueError(f"user_id must be positive, got {self.user_id}")
         if self.knowledge_base_id <= 0:
             raise ValueError(f"knowledge_base_id must be positive, got {self.knowledge_base_id}")
+        if self.capability_profile not in self._VALID_PROFILES:
+            raise ValueError(
+                f"Invalid capability_profile: {self.capability_profile!r}. "
+                f"Must be one of {self._VALID_PROFILES}"
+            )
 
     # ── Permission helpers ────────────────────────────────────────────────
 
@@ -102,6 +114,7 @@ class AgentExecutionContext:
             "permissions": sorted(self.permissions),
             "agent_run_id": self.agent_run_id,
             "mode": self.mode,
+            "capability_profile": self.capability_profile,
         }
 
 

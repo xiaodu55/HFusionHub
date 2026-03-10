@@ -2,6 +2,7 @@ package com.hfusionhub.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
 import com.hfusionhub.handler.JsonTypeHandler;
+import com.hfusionhub.handler.JsonMapTypeHandler;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -70,7 +71,7 @@ public class AgentRun {
     /**
      * Token 使用统计
      */
-    @TableField(typeHandler = JsonTypeHandler.class)
+    @TableField(typeHandler = JsonMapTypeHandler.class)
     @Schema(description = "token统计")
     private Map<String, Object> tokenUsage;
 

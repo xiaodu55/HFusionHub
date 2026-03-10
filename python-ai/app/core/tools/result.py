@@ -32,6 +32,9 @@ class ToolResult:
     # Failure fields
     error_code: Optional[str] = None
     message: str = ""
+    # Approval fields (Agent V1 Step 5)
+    approval_required: bool = False
+    approval_tool_input: Optional[Dict[str, Any]] = None
 
     # ── Factory methods ────────────────────────────────────────────────
 
@@ -60,6 +63,23 @@ class ToolResult:
             duration_ms=duration_ms,
         )
 
+    @classmethod
+    def approval_required(
+        cls,
+        tool_name: str,
+        tool_input: Dict[str, Any],
+        message: str = "",
+    ) -> "ToolResult":
+        """High-risk tool requires human approval before execution."""
+        return cls(
+            ok=False,
+            tool_name=tool_name,
+            error_code="approval_required",
+            message=message,
+            approval_required=True,
+            approval_tool_input=tool_input,
+        )
+
     # ── Serialisation ──────────────────────────────────────────────────
 
     def to_dict(self) -> Dict[str, Any]:
@@ -73,4 +93,7 @@ class ToolResult:
         else:
             base["error_code"] = self.error_code
             base["message"] = self.message
+            if self.approval_required:
+                base["approval_required"] = True
+                base["approval_tool_input"] = self.approval_tool_input
         return base

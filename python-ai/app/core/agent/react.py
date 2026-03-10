@@ -626,21 +626,31 @@ class ReactAgent(Agent):
         rag_context, was_compressed = await self._safe_compress(raw_context)
 
         if has_selected_kb and not rag_context:
-            self._last_sources = []
-            return AgentResponse(
-                content=NO_SUFFICIENT_EVIDENCE_REPLY,
-                answer=NO_SUFFICIENT_EVIDENCE_REPLY,
-                steps=[],
-                model=llm.model if hasattr(llm, 'model') else "unknown",
-                token_count=0,
-                finish_reason="insufficient_evidence",
-                status="insufficient_evidence",
-                sources=[],
-                intent=intent_result.to_dict() if intent_result else None,
-                tool_calls_count=self._tool_calls_count,
-                max_tool_steps=self.max_steps,
-                style_used=self.style,
-            )
+            # Agent V1 Step 5: If non-retrieval tools (e.g. write_note) are
+            # available, enter the ReAct loop anyway — the LLM may still call
+            # a tool that doesn't depend on KB context.
+            non_retrieval_tools = [
+                t for t in tools
+                if t.get("_spec") is not None
+                and getattr(t["_spec"], "risk_level", "read_only") != "read_only"
+            ]
+            if not non_retrieval_tools:
+                self._last_sources = []
+                return AgentResponse(
+                    content=NO_SUFFICIENT_EVIDENCE_REPLY,
+                    answer=NO_SUFFICIENT_EVIDENCE_REPLY,
+                    steps=[],
+                    model=llm.model if hasattr(llm, 'model') else "unknown",
+                    token_count=0,
+                    finish_reason="insufficient_evidence",
+                    status="insufficient_evidence",
+                    sources=[],
+                    intent=intent_result.to_dict() if intent_result else None,
+                    tool_calls_count=self._tool_calls_count,
+                    max_tool_steps=self.max_steps,
+                    style_used=self.style,
+                )
+            # Else: fall through to ReAct loop with empty context
 
         if rag_context:
             enhanced_query = self._build_rag_prompt(rag_context, query, self.style)
@@ -666,6 +676,45 @@ class ReactAgent(Agent):
                 self._tool_calls_count += 1
 
                 observation = await execute_tool(action, action_input, tools, policy=self.tool_policy, context=self._context)
+
+                # Agent V1 Step 5: detect approval_required from high-risk tools
+                try:
+                    obs_data = json.loads(observation) if isinstance(observation, str) else observation
+                    if isinstance(obs_data, dict) and obs_data.get("error_code") == "approval_required":
+                        logger.info("[Agent V1] Approval required for tool '%s'", action)
+                        # Record a pending step for audit trail
+                        pending_step = AgentStep(
+                            thought="检测到高风险工具调用，需要人工审批",
+                            action=action,
+                            action_input=action_input,
+                            observation="approval_required: " + obs_data.get("message", ""),
+                        )
+                        steps.append(pending_step)
+                        # Return immediately with waiting_approval status
+                        return AgentResponse(
+                            content="",
+                            answer="",
+                            status="waiting_approval",
+                            steps=steps,
+                            model=llm.model if hasattr(llm, 'model') else "unknown",
+                            token_count=0,
+                            finish_reason="waiting_approval",
+                            sources=sources,
+                            intent=intent_result.to_dict() if intent_result else None,
+                            tool_calls_count=self._tool_calls_count,
+                            max_tool_steps=self.max_steps,
+                            style_used=self.style,
+                            failed_tool=action,
+                            error_detail=json.dumps({
+                                "event": "approval_required",
+                                "tool_name": action,
+                                "tool_input": action_input,
+                                "arguments_summary": json.dumps(action_input, ensure_ascii=False)[:500],
+                                "reason": obs_data.get("message", ""),
+                            }, ensure_ascii=False),
+                        )
+                except (json.JSONDecodeError, TypeError):
+                    pass
 
                 # Collect sources from tool results (Agent V1 canonical format).
                 if action == "search_knowledge_base":
@@ -810,6 +859,10 @@ class ReactAgent(Agent):
         - retrieval: step_completed (step_type=retrieval)
         - model_generation: step_completed (step_type=model_generation)
         - reflection: step_completed (step_type=reflection) when applicable
+
+        Agent V1 Step 5: When non-retrieval tools (write_note, etc.) are
+        available, the streaming path delegates to the unified ReAct loop
+        so that tool calls — and their approval gates — work correctly.
         """
         import json as _json
         import time as _time
@@ -853,6 +906,34 @@ class ReactAgent(Agent):
                 async for chunk in llm.chat_stream(messages=messages, temperature=0.7, max_tokens=2048):
                     yield chunk
                 return
+
+            # ── Agent V1 Step 5: ReAct path for write-capable agents ──
+            # When capability_profile="approval_write" is set, the agent has
+            # a V1.1 registry that includes write_note (risk_level=read_write).
+            # Detect non-retrieval tools and delegate to the unified streaming
+            # ReAct loop so that tool calls — and their approval gates — work.
+            if has_selected_kb:
+                tools = self._get_tools()
+                non_retrieval_tools = [
+                    t for t in tools
+                    if t.get("_spec") is not None
+                    and getattr(t["_spec"], "risk_level", "read_only") != "read_only"
+                ]
+                if non_retrieval_tools:
+                    logger.info(
+                        "[Agent V1:stream] Non-retrieval tools detected (%s); "
+                        "delegating to unified ReAct path",
+                        [t["name"] for t in non_retrieval_tools],
+                    )
+                    async for chunk in self._run_stream_react(
+                        query=query,
+                        history=history,
+                        tools=tools,
+                        intent_result=intent_result,
+                        **kwargs,
+                    ):
+                        yield chunk
+                    return
 
             context = ""
             raw_context = ""
@@ -1065,6 +1146,17 @@ class ReactAgent(Agent):
 
         except Exception as e:
             logger.error(f"[RAG] run_stream failed: {e}", exc_info=True)
+            # ── Agent V1 Step 5: emit run_error so Java transitions Task/Run → failed ──
+            import time as _err_time
+            yield _json.dumps({
+                "event": "run_error",
+                "status": "failed",
+                "agent_run_id": self._context.agent_run_id if self._context else "unknown",
+                "error_code": "internal_error",
+                "error_detail": str(e)[:500],
+                "failed_tool": None,
+                "timestamp": _err_time.strftime("%Y-%m-%dT%H:%M:%S", _err_time.gmtime()),
+            }, ensure_ascii=False)
             if self._has_selected_knowledge_base():
                 yield NO_SUFFICIENT_EVIDENCE_REPLY
                 return
@@ -1079,6 +1171,222 @@ class ReactAgent(Agent):
             except Exception as fallback_error:
                 logger.error(f"[RAG] Fallback LLM also failed: {fallback_error}", exc_info=True)
                 yield f"抱歉，AI服务出现异常，请稍后重试。错误信息：{str(e)}"
+
+    async def _run_stream_react(
+        self,
+        query: str,
+        history: Optional[List[Dict[str, str]]],
+        tools: List[Dict[str, Any]],
+        intent_result: Optional[Any] = None,
+        **kwargs
+    ) -> AsyncGenerator[str, None]:
+        """Streaming ReAct loop — Agent V1 Step 5.
+
+        Unified tool-execution path for streaming.  Performs RAG retrieval,
+        then enters a ReAct loop that can call ANY registered tool (including
+        write_note).  Each tool call goes through the ToolRegistry, which
+        enforces mode gates and triggers approval_required for high-risk tools.
+
+        Yields:
+          - Structured step_completed / approval_required SSE events
+          - Plain-text content chunks (final answer)
+          - Source citations as JSON
+        """
+        import json as _json
+        import time as _time
+
+        _run_id = self._context.agent_run_id if self._context else "unknown"
+
+        try:
+            llm = self._get_llm()
+            _step_seq = 0
+            sources: List[Dict[str, Any]] = []
+
+            # ── Phase 1: RAG retrieval ──────────────────────────────────
+            retrieval_start = _time.monotonic()
+            raw_context = ""
+            rag_context = ""
+            was_compressed = False
+            try:
+                raw_context, rag_sources, _ = await self._retrieve_context(query, history, intent_result)
+                sources.extend(rag_sources)
+                rag_context, was_compressed = await self._safe_compress(raw_context)
+            except Exception as e:
+                logger.error("[Agent V1:stream-react] Retrieval failed: %s", e, exc_info=True)
+
+            retrieval_duration_ms = (_time.monotonic() - retrieval_start) * 1000
+            _step_seq += 1
+            yield _json.dumps({
+                "event": "step_completed",
+                "sequence": _step_seq,
+                "step_type": "retrieval",
+                "action": "search_knowledge_base",
+                "input_summary": query[:200],
+                "output_summary": (
+                    f"Retrieved {len(sources)} sources, context {len(rag_context)} chars"
+                    + (" (compressed)" if was_compressed else "")
+                ) if rag_context else "No context found; entering ReAct loop with tools",
+                "sources": sources if sources else None,
+                "duration_ms": round(retrieval_duration_ms, 2),
+                "error_code": None,
+                "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
+            }, ensure_ascii=False)
+
+            # ── Phase 2: Build messages ─────────────────────────────────
+            system_prompt = REACT_SYSTEM_PROMPT.format(
+                tools_description=self._format_tools_description()
+            )
+            messages = [ChatMessage(role="system", content=system_prompt)]
+            if history:
+                for msg in history[-10:]:
+                    messages.append(ChatMessage(role=msg["role"], content=msg["content"]))
+
+            if rag_context:
+                enhanced_query = self._build_rag_prompt(rag_context, query, self.style)
+            else:
+                enhanced_query = query
+            messages.append(ChatMessage(role="user", content=enhanced_query))
+
+            # ── Phase 3: ReAct loop ─────────────────────────────────────
+            final_answer = None
+            for step_num in range(self.max_steps):
+                response = await llm.chat(messages=messages, temperature=0.7)
+                assistant_text = response.content
+
+                action_result = self._parse_action(assistant_text)
+
+                if action_result:
+                    action, action_input = action_result
+                    self._tool_calls_count += 1
+
+                    observation = await execute_tool(
+                        action, action_input, tools,
+                        policy=self.tool_policy, context=self._context,
+                    )
+
+                    # ── Agent V1 Step 5: detect approval_required ──────
+                    try:
+                        obs_data = _json.loads(observation) if isinstance(observation, str) else observation
+                        if isinstance(obs_data, dict) and obs_data.get("error_code") == "approval_required":
+                            logger.info(
+                                "[Agent V1:stream-react] Approval required for tool '%s' at step %d",
+                                action, step_num + 1,
+                            )
+                            # Emit step record for audit trail
+                            _step_seq += 1
+                            yield _json.dumps({
+                                "event": "step_completed",
+                                "sequence": _step_seq,
+                                "step_type": "tool_call",
+                                "action": action,
+                                "input_summary": _json.dumps(action_input, ensure_ascii=False)[:500],
+                                "output_summary": "approval_required: " + obs_data.get("message", ""),
+                                "sources": None,
+                                "duration_ms": 0,
+                                "error_code": "approval_required",
+                                "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
+                            }, ensure_ascii=False)
+                            # Emit the approval_required event for Java interception
+                            yield _json.dumps({
+                                "event": "approval_required",
+                                "tool_name": action,
+                                "tool_input": action_input,
+                                "arguments_summary": _json.dumps(action_input, ensure_ascii=False)[:500],
+                                "reason": obs_data.get("message", ""),
+                                "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
+                            }, ensure_ascii=False)
+                            return  # Stop streaming — wait for human decision
+                    except (_json.JSONDecodeError, TypeError):
+                        pass
+
+                    # Collect sources from tool results
+                    tool_sources: list = []
+                    if action == "search_knowledge_base":
+                        try:
+                            obs_data2 = _json.loads(observation) if isinstance(observation, str) else observation
+                            if isinstance(obs_data2, list):
+                                for result in obs_data2:
+                                    if isinstance(result, dict) and "error" not in result:
+                                        normed = normalize_source(result)
+                                        sources.append(normed)
+                                        tool_sources.append(normed)
+                                        self._last_sources = list(sources)
+                        except (_json.JSONDecodeError, TypeError):
+                            pass
+
+                    # Emit step_completed for the tool call
+                    _step_seq += 1
+                    yield _json.dumps({
+                        "event": "step_completed",
+                        "sequence": _step_seq,
+                        "step_type": "tool_call",
+                        "action": action,
+                        "input_summary": _json.dumps(action_input, ensure_ascii=False)[:500],
+                        "output_summary": str(observation)[:500] if observation else None,
+                        "sources": tool_sources if tool_sources else None,
+                        "duration_ms": 0,
+                        "error_code": None,
+                        "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
+                    }, ensure_ascii=False)
+
+                    messages.append(ChatMessage(role="assistant", content=assistant_text))
+                    messages.append(ChatMessage(role="user", content=f"Observation: {observation}"))
+                else:
+                    final_answer = self._parse_final_answer(assistant_text)
+                    if not final_answer:
+                        final_answer = assistant_text
+                    break
+
+            if final_answer is None:
+                final_answer = (
+                    assistant_text if 'assistant_text' in locals()
+                    else "无法基于当前工具和资料回答该问题。"
+                )
+
+            # ── Phase 4: Emit generation step + content + sources ───────
+            _step_seq += 1
+            yield _json.dumps({
+                "event": "step_completed",
+                "sequence": _step_seq,
+                "step_type": "model_generation",
+                "action": None,
+                "input_summary": enhanced_query[:200] if rag_context else query[:200],
+                "output_summary": final_answer[:300],
+                "sources": None,
+                "duration_ms": 0,
+                "error_code": None,
+                "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
+            }, ensure_ascii=False)
+
+            # Yield the final answer as a content chunk
+            yield final_answer
+
+            # Deduplicate sources
+            unique_sources: Dict[str, Dict[str, Any]] = {}
+            for source in sources:
+                source_key = source.get("chunk_id") or f"{source.get('document_id')}:{source.get('excerpt', '')[:80]}"
+                if source_key not in unique_sources:
+                    unique_sources[source_key] = source
+            deduped_sources = list(unique_sources.values())
+            self._last_sources = deduped_sources
+
+            if deduped_sources:
+                yield _json.dumps({"content": "", "sources": deduped_sources}, ensure_ascii=False)
+
+        except Exception as _react_err:
+            logger.error(
+                "[Agent V1:stream-react] Fatal error in streaming ReAct loop: %s",
+                _react_err, exc_info=True,
+            )
+            yield _json.dumps({
+                "event": "run_error",
+                "status": "failed",
+                "agent_run_id": _run_id,
+                "error_code": "internal_error",
+                "error_detail": str(_react_err)[:500],
+                "failed_tool": None,
+                "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
+            }, ensure_ascii=False)
 
     def get_tools(self) -> List[Dict[str, Any]]:
         """Get list of available tools"""

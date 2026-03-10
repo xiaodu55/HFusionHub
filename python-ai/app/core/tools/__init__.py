@@ -24,6 +24,7 @@ from .list_document_chunks_tool import ListDocumentChunksTool
 from .spec import ToolSpec, ErrorCode, RiskLevel, Permissions, V1_SPECS
 from .result import ToolResult
 from .registry import ToolRegistry, RegistryError, create_v1_registry, create_full_registry
+from .registry import register_scoped_grant, consume_scoped_grant, clear_expired_grants
 
 
 __all__ = [
@@ -33,6 +34,8 @@ __all__ = [
     # Registry
     'ToolRegistry', 'RegistryError',
     'create_v1_registry', 'create_full_registry',
+    # Scoped grants (Agent V1 Step 5)
+    'register_scoped_grant', 'consume_scoped_grant', 'clear_expired_grants',
     # Tools
     'BaseTool', 'SearchTool', 'TimeTool', 'CalculatorTool',
     'WebSearchTool', 'ReadChunkTool', 'ListDocumentChunksTool',

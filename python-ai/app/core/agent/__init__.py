@@ -51,9 +51,25 @@ def get_agent(
     # Agent V1: create a ToolRegistry for KB-scoped agents.
     # The Registry is the SINGLE choke point for tool access — agents
     # MUST NOT bypass it.  Non-KB agents get no tools at all.
+    #
+    # Version gating:
+    #   "1.0" — read-only KB tools (search, read_chunk, list_chunks)
+    #   "1.1" — adds write_note (visible to see → approval_required gate)
+    #
+    # "1.1" is triggered by EITHER:
+    #   - capability_profile="approval_write" (initial write-request, read_only
+    #     mode — agent sees write_note → registry returns approval_required)
+    #   - mode="read_write" (decide/resume after human approval)
     tool_registry = None
     if knowledge_base_id and knowledge_base_id > 0:
-        tool_registry = create_v1_registry(knowledge_base_id)
+        _want_1_1 = False
+        if execution_context is not None:
+            if getattr(execution_context, 'mode', 'read_only') == 'read_write':
+                _want_1_1 = True
+            if getattr(execution_context, 'capability_profile', None) == 'approval_write':
+                _want_1_1 = True
+        registry_version = "1.1" if _want_1_1 else "1.0"
+        tool_registry = create_v1_registry(knowledge_base_id, agent_version=registry_version)
 
     tool_policy = None
     if config.RAG_AGENT_WORKFLOW_ENABLED:

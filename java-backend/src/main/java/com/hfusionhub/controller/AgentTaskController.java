@@ -5,7 +5,11 @@ import com.hfusionhub.common.result.R;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.dto.AgentTaskDetailDTO;
 import com.hfusionhub.dto.AgentTaskSummaryDTO;
+import com.hfusionhub.entity.AgentApproval;
 import com.hfusionhub.service.AgentTaskService;
+
+import java.util.List;
+import java.util.Map;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -79,5 +83,48 @@ public class AgentTaskController {
         Long userId = JwtUtils.getCurrentUserId();
         boolean cancelled = agentTaskService.cancelTask(taskId, userId);
         return R.ok(cancelled);
+    }
+
+    // ================================================================
+    // Agent V1 Step 5: 审批端点
+    // ================================================================
+
+    @Operation(summary = "查询任务的审批记录")
+    @GetMapping("/{taskId}/approvals")
+    public R<List<AgentApproval>> getApprovals(@PathVariable Long taskId) {
+        // 校验所有权
+        AgentTaskDetailDTO detail = agentTaskService.getTaskDetail(taskId);
+        if (detail == null) return R.fail("任务不存在");
+        if (!detail.getUserId().equals(JwtUtils.getCurrentUserId())) return R.fail("无权查看此任务");
+        return R.ok(agentTaskService.getApprovalsByTaskId(taskId));
+    }
+
+    @Operation(summary = "审批决定（批准/拒绝工具调用）")
+    @PostMapping("/{taskId}/approve")
+    public R<AgentApproval> decideApproval(@PathVariable Long taskId,
+                                           @RequestBody Map<String, String> body) {
+        Long userId = JwtUtils.getCurrentUserId();
+        String approvalId = body.get("approvalId");
+        String decision = body.get("decision");
+        String reason = body.get("reason");
+
+        if (approvalId == null || approvalId.isBlank()) return R.fail("approvalId 不能为空");
+        if (decision == null || (!"approved".equals(decision) && !"denied".equals(decision)))
+            return R.fail("decision 必须为 approved 或 denied");
+
+        // 安全校验：审批记录必须属于该任务
+        AgentApproval approval = agentTaskService.getApproval(approvalId);
+        if (approval == null) return R.fail("审批记录不存在");
+        if (!approval.getTaskId().equals(taskId)) return R.fail("审批记录不属于此任务");
+        if (!approval.getUserId().equals(userId)) return R.fail("无权审批：审批目标用户不匹配");
+
+        return R.ok(agentTaskService.decideApproval(approvalId, decision, userId, reason));
+    }
+
+    @Operation(summary = "当前用户的待审批列表")
+    @GetMapping("/approvals/pending")
+    public R<List<AgentApproval>> listPendingApprovals() {
+        Long userId = JwtUtils.getCurrentUserId();
+        return R.ok(agentTaskService.listPendingApprovals(userId));
     }
 }

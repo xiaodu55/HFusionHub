@@ -57,7 +57,7 @@ public class AiClient {
             List<Map<String, String>> history
     ) {
         return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                "detailed", 5, null, null);
+                "detailed", 5, null, null, null);
     }
 
     /**
@@ -72,7 +72,7 @@ public class AiClient {
             int maxToolSteps
     ) {
         return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                style, maxToolSteps, null, null);
+                style, maxToolSteps, null, null, null);
     }
 
     /**
@@ -101,6 +101,29 @@ public class AiClient {
             String requestId,
             Long userId
     ) {
+        return agentV1Chat(message, conversationId, knowledgeBaseId, history,
+                style, maxToolSteps, requestId, userId, null);
+    }
+
+    /**
+     * Agent V1 chat with optional {@code capabilityProfile}.
+     *
+     * {@code capabilityProfile = "approval_write"} enables the V1.1 write-
+     * capability tool set (write_note); the agent can SEE the tool but the
+     * registry returns approval_required on invocation.  Must be explicitly
+     * set by Java — the model cannot upgrade its own capability.
+     */
+    public ChatResponse agentV1Chat(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String style,
+            int maxToolSteps,
+            String requestId,
+            Long userId,
+            String capabilityProfile
+    ) {
         if (knowledgeBaseId == null || knowledgeBaseId <= 0) {
             throw new BusinessException(StatusCode.BAD_REQUEST,
                     "Agent V1 requires a non-null knowledge_base_id");
@@ -110,7 +133,7 @@ public class AiClient {
                     "Agent V1 requires a non-null user_id — Java session must provide authenticated user ID");
         }
         return doChat("/api/agent/v1/chat", message, conversationId, knowledgeBaseId,
-                history, style, maxToolSteps, requestId, userId);
+                history, style, maxToolSteps, requestId, userId, capabilityProfile);
     }
 
     private ChatResponse doChat(
@@ -122,7 +145,8 @@ public class AiClient {
             String style,
             int maxToolSteps,
             String requestId,
-            Long userId
+            Long userId,
+            String capabilityProfile
     ) {
         try {
             Map<String, Object> request = new HashMap<>();
@@ -141,6 +165,12 @@ public class AiClient {
             // model-supplied user_id from tool input.
             if (userId != null && userId > 0) {
                 request.put("user_id", userId);
+            }
+            // Agent V1 Step 5: capability_profile explicitly chosen by Java.
+            // "approval_write" enables V1.1 write tools (write_note) with
+            // approval_required gating.  The model cannot set this itself.
+            if (capabilityProfile != null && !capabilityProfile.isEmpty()) {
+                request.put("capability_profile", capabilityProfile);
             }
 
             HttpHeaders headers = new HttpHeaders();
@@ -260,6 +290,27 @@ public class AiClient {
             String requestId,
             Long userId
     ) {
+        return agentV1ChatStream(message, conversationId, knowledgeBaseId, history,
+                requestId, userId, null);
+    }
+
+    /**
+     * Agent V1 streaming chat with optional {@code capabilityProfile}.
+     *
+     * {@code capabilityProfile = "approval_write"} enables the V1.1 write-
+     * capability tool set (write_note); the agent can SEE the tool but the
+     * registry returns approval_required on invocation.  Must be explicitly
+     * set by Java — the model cannot upgrade its own capability.
+     */
+    public reactor.core.publisher.Flux<String> agentV1ChatStream(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String requestId,
+            Long userId,
+            String capabilityProfile
+    ) {
         if (knowledgeBaseId == null || knowledgeBaseId <= 0) {
             throw new BusinessException(StatusCode.BAD_REQUEST,
                     "Agent V1 streaming requires a non-null knowledge_base_id");
@@ -278,6 +329,10 @@ public class AiClient {
         request.put("history", history != null ? history : List.of());
         request.put("stream", true);
         request.put("request_id", requestId);
+        // Agent V1 Step 5: capability_profile explicitly chosen by Java.
+        if (capabilityProfile != null && !capabilityProfile.isEmpty()) {
+            request.put("capability_profile", capabilityProfile);
+        }
 
         String url = baseUrl + "/api/agent/v1/chat/stream";
         log.info("Starting Agent V1 streaming request to Python AI: {}, requestId: {}, userId: {}",
@@ -349,6 +404,92 @@ public class AiClient {
         } catch (Exception e) {
             log.warn("AI service health check failed: {}", e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Notify Python AI of an approval decision — Agent V1 Step 5.
+     *
+     * Called by AgentTaskServiceImpl after updating MySQL agent_approval.
+     * Python registers a scoped grant and re-runs the agent to execute the
+     * approved tool (or returns denied status).
+     *
+     * @param approvalId      UUID of the approval record
+     * @param decision        "approved" or "denied"
+     * @param reason          optional reason text
+     * @param userId          authenticated user who made the decision
+     * @param knowledgeBaseId target knowledge base
+     * @param toolName        name of the tool to execute (or reject)
+     * @param toolInput       original tool parameters (JSON string)
+     * @param query           original user query (to re-run agent)
+     * @param history         chat history
+     * @param conversationId  conversation ID
+     * @param model           optional model override
+     * @return ChatResponse with the result of the resumed agent run
+     */
+    public ChatResponse decideApproval(
+            String approvalId,
+            String decision,
+            String reason,
+            Long userId,
+            Long knowledgeBaseId,
+            String toolName,
+            String toolInput,
+            String query,
+            List<Map<String, String>> history,
+            Long conversationId,
+            String model
+    ) {
+        try {
+            Map<String, Object> request = new HashMap<>();
+            request.put("approval_id", approvalId);
+            request.put("decision", decision);
+            if (reason != null) request.put("reason", reason);
+            request.put("user_id", userId);
+            request.put("knowledge_base_id", knowledgeBaseId);
+            request.put("tool_name", toolName);
+            // Parse tool_input from JSON string to object
+            try {
+                com.fasterxml.jackson.databind.ObjectMapper mapper =
+                        new com.fasterxml.jackson.databind.ObjectMapper();
+                request.put("tool_input", mapper.readTree(toolInput));
+            } catch (Exception e) {
+                request.put("tool_input", Map.of("_raw", toolInput));
+            }
+            request.put("query", query);
+            request.put("history", history != null ? history : List.of());
+            if (conversationId != null) request.put("conversation_id", conversationId);
+            if (model != null) request.put("model", model);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            addInternalToken(headers);
+
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
+
+            String url = baseUrl + "/api/agent/v1/chat/decide";
+            log.info("Calling AI decide endpoint: {} approvalId={} decision={}",
+                    url, approvalId, decision);
+
+            ResponseEntity<ChatResponse> response = restTemplate.exchange(
+                    url, HttpMethod.POST, entity, ChatResponse.class);
+
+            if (response.getBody() != null) {
+                return response.getBody();
+            }
+            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE,
+                    "AI service returned empty response for decide");
+
+        } catch (BusinessException e) {
+            throw e;
+        } catch (ResourceAccessException e) {
+            log.error("AI decide connection failed: {}", e.getMessage());
+            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE,
+                    "AI service is unavailable. Please try again later.");
+        } catch (Exception e) {
+            log.error("Decide approval failed: {}", e.getMessage(), e);
+            throw new BusinessException(StatusCode.INTERNAL_ERROR,
+                    "Failed to process approval decision: " + e.getMessage());
         }
     }
 

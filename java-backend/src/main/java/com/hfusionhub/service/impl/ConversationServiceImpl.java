@@ -8,6 +8,7 @@ import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.dto.ConversationCreateDTO;
 import com.hfusionhub.dto.ConversationInfoDTO;
 import com.hfusionhub.dto.ConversationQueryDTO;
+import com.hfusionhub.dto.AgentTaskDetailDTO;
 import com.hfusionhub.dto.MessageInfoDTO;
 import com.hfusionhub.dto.MessageSendDTO;
 import com.hfusionhub.client.AiClient;
@@ -181,6 +182,11 @@ public class ConversationServiceImpl implements ConversationService {
         // Agent V1 Step 3: userId MUST come from the authenticated Java session;
         // it is NEVER taken from the frontend DTO.  The model cannot forge it.
         Long currentUserId = JwtUtils.getCurrentUserId();
+        // Agent V1 Step 5: server-side capability gate — the DTO may carry
+        // capabilityProfile="approval_write", but the server validates it against
+        // business rules before passing it to Python.  Regular chat is always null.
+        String effectiveCapability = resolveCapabilityProfile(
+                dto.getCapabilityProfile(), conversation, currentUserId);
         AiClient.ChatResponse aiResponse;
         try {
             if (conversation.getKnowledgeBaseId() != null && conversation.getKnowledgeBaseId() > 0) {
@@ -195,7 +201,8 @@ public class ConversationServiceImpl implements ConversationService {
                 aiResponse = aiClient.agentV1Chat(
                         dto.getContent(), dto.getConversationId(),
                         conversation.getKnowledgeBaseId(), history,
-                        "detailed", 5, requestId, currentUserId);
+                        "detailed", 5, requestId, currentUserId,
+                        effectiveCapability);
             } else {
                 aiResponse = aiClient.chat(
                         dto.getContent(), dto.getConversationId(),
@@ -546,6 +553,7 @@ public class ConversationServiceImpl implements ConversationService {
         java.util.Collections.reverse(messages); // return in chronological order
 
         return messages.stream()
+                .filter(m -> m.getContent() != null && !m.getContent().isBlank())
                 .map(m -> {
                     Map<String, String> map = new HashMap<>();
                     map.put("role", m.getRole());
@@ -634,6 +642,12 @@ public class ConversationServiceImpl implements ConversationService {
         StreamCancellation streamCancellation = new StreamCancellation(cancelled, currentUserId);
         activeStreamRequests.put(requestId, streamCancellation);
 
+        // 3.5. Agent V1 Step 5: resolve capability profile with server-side gate.
+        // The DTO may request "approval_write", but the server validates it against
+        // business rules.  Regular chat is always forced to null.
+        String streamingCapability = resolveCapabilityProfile(
+                dto.getCapabilityProfile(), conversation, currentUserId);
+
         // 4. 保存用户消息
         Message userMessage = findUserByRequestId(requestId);
         if (userMessage == null) {
@@ -663,6 +677,7 @@ public class ConversationServiceImpl implements ConversationService {
         final AgentRun agentRun = agentTaskService.startRun(
                 agentTask.getId(), runUuid, null, "detailed", 5);
         streamCancellation.setAgentRunId(agentRun.getId());
+        streamCancellation.setAgentTaskId(agentTask.getId());
         log.info("Agent task tracking: taskId={} runId={} runUuid={}",
                 agentTask.getId(), agentRun.getId(), runUuid);
 
@@ -688,7 +703,8 @@ public class ConversationServiceImpl implements ConversationService {
         if (isKbBound) {
             sseFlux = aiClient.agentV1ChatStream(
                     dto.getContent(), dto.getConversationId(),
-                    conversation.getKnowledgeBaseId(), history, requestId, currentUserId);
+                    conversation.getKnowledgeBaseId(), history, requestId, currentUserId,
+                    streamingCapability);
         } else {
             sseFlux = aiClient.streamChat(
                     dto.getContent(), dto.getConversationId(),
@@ -705,23 +721,34 @@ public class ConversationServiceImpl implements ConversationService {
                 chunk -> {
                     if (cancelled.get()) return;
 
-                    // Python streaming emits one JSON event per chunk.
-                    // Each chunk is either a JSON object or [DONE] sentinel.
-                    String data = chunk.strip();
-                    if (data.isEmpty()) return;
+                    // Python streaming emits SSE formatted lines:
+                    //   data: {json}\n\n
+                    //   data: [DONE]\n\n
+                    //
+                    // WebFlux StringDecoder splits by \n, so each Flux element
+                    // is one line (prefix + payload, or empty separator).
+                    // Strip the "data: " / "data:" prefix before JSON parsing.
 
-                        if ("[DONE]".equals(data)) {
+                    // ── Step 1: normalise the raw payload ──────────────────
+                    String data = stripSsePrefix(chunk);
+                    if (data == null) return;   // empty / separator line
+
+                    // ── Step 2: [DONE] sentinel ───────────────────────────
+                    if ("[DONE]".equals(data)) {
                         log.info("Stream completed, requestId: {}", requestId);
                         try {
                             emitter.send(SseEmitter.event().data("[DONE]"));
                             emitter.complete();
                         } catch (Exception ignored) {}
-                        assistantSaved[0] = saveStreamAssistantMessage(
-                                dto.getConversationId(), responseBuilder.toString(),
-                                "streaming", accumulatedSources, assistantRequestId);
+                        if (responseBuilder.length() > 0) {
+                                assistantSaved[0] = saveStreamAssistantMessage(
+                                        dto.getConversationId(), responseBuilder.toString(),
+                                        "streaming", accumulatedSources, assistantRequestId);
+                            }
                         return;
                     }
 
+                    // ── Step 3: parse JSON payload ────────────────────────
                     try {
                         com.fasterxml.jackson.databind.JsonNode jsonNode = objectMapper.readTree(data);
 
@@ -802,7 +829,25 @@ public class ConversationServiceImpl implements ConversationService {
                     }
                 },
                 () -> {
-                    // onComplete: ensure emitter is closed and assistant saved
+                    // onComplete: ensure emitter is closed and assistant saved.
+                    // Agent V1 Step 5 safety net: if the run is still in 'running'
+                    // state (no run_completed / run_error / approval_required was
+                    // received), converge it to failed so nothing stays running forever.
+                    try {
+                        AgentRun finalRunState = agentTaskService.getRunById(agentRun.getId());
+                        if (finalRunState != null
+                                && "running".equals(finalRunState.getStatus())) {
+                            log.warn("Agent run {} completed SSE stream but is still 'running' — "
+                                    + "forcing failed convergence", agentRun.getId());
+                            agentTaskService.failRun(agentRun.getId(),
+                                    "internal_error",
+                                    "Stream completed without terminal event; forced failed convergence",
+                                    null);
+                        }
+                    } catch (Exception convergenceError) {
+                        log.warn("Failed to check/converge agent run state on complete: {}",
+                                convergenceError.getMessage());
+                    }
                     if (responseBuilder.length() > 0) {
                         try {
                             emitter.send(SseEmitter.event().data("[DONE]"));
@@ -886,6 +931,26 @@ public class ConversationServiceImpl implements ConversationService {
                             runId, rawStatus, status, errorCode);
                     break;
                 }
+                case "approval_required": {
+                    String toolName = eventNode.has("tool_name") ? eventNode.get("tool_name").asText() : "";
+                    String toolInput = eventNode.has("tool_input") ? eventNode.get("tool_input").toString() : "{}";
+                    String argumentsSummary = eventNode.has("arguments_summary") && !eventNode.get("arguments_summary").isNull()
+                            ? eventNode.get("arguments_summary").asText() : "";
+
+                    // Look up task context via the run
+                    AgentRun currentRun = agentTaskService.getRunById(runId);
+                    if (currentRun != null) {
+                        AgentTaskDetailDTO taskDetail = agentTaskService.getTaskDetail(currentRun.getTaskId());
+                        Long taskUserId = taskDetail != null ? taskDetail.getUserId() : 2L;
+                        agentTaskService.pauseForApproval(currentRun.getTaskId(), runId, taskUserId,
+                                toolName, toolInput, argumentsSummary);
+                        log.info("Agent run {} requires approval: tool={} taskId={}",
+                                runId, toolName, currentRun.getTaskId());
+                    } else {
+                        log.warn("Cannot pause for approval: run {} not found", runId);
+                    }
+                    break;
+                }
                 case "run_started":
                     // No persistence action needed — run was created by startRun().
                     break;
@@ -897,12 +962,101 @@ public class ConversationServiceImpl implements ConversationService {
         }
     }
 
+    // ── Agent V1 Step 5: capability profile resolution ──────────────────────
+
+    /**
+     * Resolve the effective capability profile with server-side validation.
+     *
+     * Rules:
+     *   - {@code "approval_write"} is only allowed for KB-bound conversations
+     *     where the authenticated user owns the KB.  Otherwise it is rejected.
+     *   - {@code null} / empty / unrecognised values → forced to {@code null}
+     *     (regular read-only V1.0 chat).
+     *   - The frontend MUST NOT directly control this; it merely sends a
+     *     request hint.  The server always decides the effective value.
+     *
+     * @param requested   value from {@link MessageSendDTO#getCapabilityProfile()}
+     * @param conversation the current conversation
+     * @param currentUserId authenticated user ID from JWT
+     * @return {@code "approval_write"} if allowed, otherwise {@code null}
+     */
+    private String resolveCapabilityProfile(
+            String requested,
+            Conversation conversation,
+            Long currentUserId
+    ) {
+        if (!"approval_write".equals(requested)) {
+            return null;  // unrecognised or absent → V1.0 read-only
+        }
+        // approval_write requires a KB-bound conversation.
+        if (conversation.getKnowledgeBaseId() == null
+                || conversation.getKnowledgeBaseId() <= 0) {
+            log.warn("capabilityProfile=approval_write rejected: conversation {} has no KB",
+                    conversation.getId());
+            return null;
+        }
+        // User must be authenticated.
+        if (currentUserId == null || currentUserId <= 0) {
+            log.warn("capabilityProfile=approval_write rejected: no authenticated user");
+            return null;
+        }
+        // The authenticated user must own the KB.
+        KnowledgeBase kb = knowledgeBaseMapper.selectById(conversation.getKnowledgeBaseId());
+        if (kb == null || !currentUserId.equals(kb.getUserId())) {
+            log.warn("capabilityProfile=approval_write rejected: user {} does not own KB {}",
+                    currentUserId, conversation.getKnowledgeBaseId());
+            return null;
+        }
+        log.info("capabilityProfile=approval_write granted for conversation {} (KB {}, user {})",
+                conversation.getId(), conversation.getKnowledgeBaseId(), currentUserId);
+        return "approval_write";
+    }
+
+    /**
+     * Strip the SSE {@code data:} / {@code data: } prefix from a raw chunk line.
+     *
+     * Python emits SSE in standard format:
+     *   data: {json payload}\n\n
+     *   data: [DONE]\n\n
+     *
+     * WebFlux {@code StringDecoder} splits the response body by {@code \n},
+     * so each Flux element is one line.  Empty lines (SSE separators) and
+     * anything that isn't a {@code data:} line are returned as {@code null}.
+     *
+     * @param rawChunk one line from the SSE stream (may have trailing whitespace)
+     * @return the JSON / sentinel payload, or {@code null} if this line
+     *         carries no data
+     */
+    private static String stripSsePrefix(String rawChunk) {
+        if (rawChunk == null) return null;
+        String line = rawChunk.strip();
+        if (line.isEmpty()) return null;               // SSE separator (blank line)
+
+        // Standard SSE: "data: {json}" or "data: [DONE]"
+        if (line.startsWith("data: ")) {
+            String payload = line.substring(6).strip();
+            return payload.isEmpty() ? null : payload;
+        }
+        if (line.startsWith("data:")) {
+            String payload = line.substring(5).strip();
+            return payload.isEmpty() ? null : payload;
+        }
+
+        // Non-SSE or legacy format — treat the whole line as the payload.
+        // This handles the case where the Python / proxy strips the prefix,
+        // or a non-SSE response is received.
+        return line;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+
     private static final class StreamCancellation {
         private final AtomicBoolean cancelled;
         private final Long userId;
         private final CompletableFuture<Void> completed = new CompletableFuture<>();
         private volatile reactor.core.Disposable subscription;
         private volatile Long agentRunId;  // Agent V1: current agent_run ID for status updates
+        private volatile Long agentTaskId; // Agent V1: current agent_task ID
 
         private StreamCancellation(AtomicBoolean cancelled, Long userId) {
             this.cancelled = cancelled;
@@ -919,6 +1073,14 @@ public class ConversationServiceImpl implements ConversationService {
 
         private Long getAgentRunId() {
             return agentRunId;
+        }
+
+        private void setAgentTaskId(Long taskId) {
+            this.agentTaskId = taskId;
+        }
+
+        private Long getAgentTaskId() {
+            return agentTaskId;
         }
 
         private void closeConnection() {

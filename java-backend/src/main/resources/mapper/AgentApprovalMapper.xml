@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hfusionhub.mapper.AgentApprovalMapper">
+
+    <resultMap id="BaseResultMap" type="com.hfusionhub.entity.AgentApproval">
+        <id column="id" property="id"/>
+        <result column="approval_id" property="approvalId"/>
+        <result column="task_id" property="taskId"/>
+        <result column="run_id" property="runId"/>
+        <result column="user_id" property="userId"/>
+        <result column="tool_name" property="toolName"/>
+        <result column="tool_input_hash" property="toolInputHash"/>
+        <result column="arguments_summary" property="argumentsSummary"/>
+        <result column="status" property="status"/>
+        <result column="decided_by" property="decidedBy"/>
+        <result column="decided_at" property="decidedAt"/>
+        <result column="reason" property="reason"/>
+        <result column="expires_at" property="expiresAt"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, approval_id, task_id, run_id, user_id, tool_name, tool_input_hash,
+        arguments_summary, status, decided_by, decided_at, reason, expires_at, created_at
+    </sql>
+
+    <select id="selectByApprovalId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_approval
+        WHERE approval_id = #{approvalId}
+    </select>
+
+    <select id="selectByTaskId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_approval
+        WHERE task_id = #{taskId}
+        ORDER BY created_at DESC
+    </select>
+
+    <select id="selectPendingByUserId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_approval
+        WHERE user_id = #{userId} AND status = 'pending' AND expires_at > NOW()
+        ORDER BY created_at DESC
+    </select>
+
+    <select id="selectExpiredPending" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_approval
+        WHERE status = 'pending' AND expires_at &lt;= #{now}
+    </select>
+
+    <update id="updateDecision">
+        UPDATE agent_approval
+        SET status = #{status},
+            decided_by = #{decidedBy},
+            decided_at = #{decidedAt},
+            reason = #{reason}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

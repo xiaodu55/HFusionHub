@@ -34,6 +34,7 @@ class ErrorCode:
     TIMEOUT = "tool_timeout"
     SCOPE_DENIED = "knowledge_base_scope_denied"
     PERMISSION_DENIED = "permission_denied"
+    APPROVAL_REQUIRED = "approval_required"
     INVALID_INPUT = "invalid_input"
     NOT_FOUND = "not_found"
     INTERNAL = "internal_error"

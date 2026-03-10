@@ -3,6 +3,7 @@ package com.hfusionhub.service;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.dto.AgentTaskDetailDTO;
 import com.hfusionhub.dto.AgentTaskSummaryDTO;
+import com.hfusionhub.entity.AgentApproval;
 import com.hfusionhub.entity.AgentRun;
 import com.hfusionhub.entity.AgentTask;
 
@@ -104,6 +105,11 @@ public interface AgentTaskService {
      */
     List<AgentRun> getRunsByTaskId(Long taskId);
 
+    /**
+     * 按 run ID 查询单个 run
+     */
+    AgentRun getRunById(Long runId);
+
     // ================================================================
     // 操作方法
     // ================================================================
@@ -125,4 +131,54 @@ public interface AgentTaskService {
      * @return 是否成功取消
      */
     boolean cancelTask(Long taskId, Long userId);
+
+    // ================================================================
+    // Agent V1 Step 5: 审批方法
+    // ================================================================
+
+    /**
+     * 暂停任务等待审批（running → waiting_approval）
+     *
+     * @param taskId           任务ID
+     * @param runId            运行ID
+     * @param userId           用户ID
+     * @param toolName         工具名
+     * @param toolInput        工具参数 JSON
+     * @param argumentsSummary 参数摘要
+     * @return 审批记录
+     */
+    AgentApproval pauseForApproval(Long taskId, Long runId, Long userId,
+                                   String toolName, String toolInput, String argumentsSummary);
+
+    /**
+     * 审批决定（批准/拒绝）
+     *
+     * @param approvalId 审批UUID
+     * @param decision   "approved" | "denied"
+     * @param decidedBy  审批人用户ID
+     * @param reason     决定原因
+     * @return 更新后的审批记录
+     */
+    AgentApproval decideApproval(String approvalId, String decision, Long decidedBy, String reason);
+
+    /**
+     * 查询用户的待审批列表
+     * @param userId 用户ID
+     */
+    List<AgentApproval> listPendingApprovals(Long userId);
+
+    /**
+     * 按审批ID查询
+     */
+    AgentApproval getApproval(String approvalId);
+
+    /**
+     * 查询任务的审批记录
+     */
+    List<AgentApproval> getApprovalsByTaskId(Long taskId);
+
+    /**
+     * 超时自动拒绝（定时任务调用）
+     */
+    int expireApprovals();
 }

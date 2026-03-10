@@ -2,6 +2,7 @@ package com.hfusionhub.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.constant.AgentConstants;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.exception.BusinessException;
@@ -9,12 +10,16 @@ import com.hfusionhub.dto.AgentRunDTO;
 import com.hfusionhub.dto.AgentStepDTO;
 import com.hfusionhub.dto.AgentTaskDetailDTO;
 import com.hfusionhub.dto.AgentTaskSummaryDTO;
+import com.hfusionhub.entity.AgentApproval;
 import com.hfusionhub.entity.AgentRun;
 import com.hfusionhub.entity.AgentStep;
 import com.hfusionhub.entity.AgentTask;
+import com.hfusionhub.mapper.AgentApprovalMapper;
 import com.hfusionhub.mapper.AgentRunMapper;
 import com.hfusionhub.mapper.AgentStepMapper;
 import com.hfusionhub.mapper.AgentTaskMapper;
+import com.hfusionhub.mapper.MessageMapper;
+import com.hfusionhub.entity.Message;
 import com.hfusionhub.service.AgentTaskService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,9 +27,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -40,6 +47,9 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     private final AgentTaskMapper taskMapper;
     private final AgentRunMapper runMapper;
     private final AgentStepMapper stepMapper;
+    private final AgentApprovalMapper approvalMapper;
+    private final MessageMapper messageMapper;
+    private final AiClient aiClient;
 
     // ================================================================
     // 生命周期方法
@@ -240,6 +250,11 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         return runMapper.selectByTaskId(taskId);
     }
 
+    @Override
+    public AgentRun getRunById(Long runId) {
+        return runMapper.selectById(runId);
+    }
+
     // ================================================================
     // 操作方法
     // ================================================================
@@ -290,6 +305,375 @@ public class AgentTaskServiceImpl implements AgentTaskService {
 
         log.info("Task {} cancelled by user {}", taskId, userId);
         return true;
+    }
+
+    // ================================================================
+    // Agent V1 Step 5: 审批方法
+    // ================================================================
+
+    @Override
+    @Transactional
+    public AgentApproval pauseForApproval(Long taskId, Long runId, Long userId,
+                                          String toolName, String toolInput,
+                                          String argumentsSummary) {
+        AgentTask task = taskMapper.selectById(taskId);
+        if (task == null) throw new BusinessException("任务不存在: " + taskId);
+
+        // 状态转移: running → waiting_approval
+        if (!AgentConstants.canTransition(task.getStatus(), AgentConstants.STATUS_WAITING_APPROVAL)) {
+            throw new BusinessException("当前状态不允许转入等待审批: " + task.getStatus());
+        }
+
+        // 计算参数哈希（审批令牌绑定）
+        String toolInputHash = sha256(taskId + ":" + runId + ":" + userId + ":" + toolName + ":" + toolInput);
+
+        AgentApproval approval = new AgentApproval();
+        approval.setApprovalId(java.util.UUID.randomUUID().toString());
+        approval.setTaskId(taskId);
+        approval.setRunId(runId);
+        approval.setUserId(userId);
+        approval.setToolName(toolName);
+        approval.setToolInputHash(toolInputHash);
+        approval.setArgumentsSummary(argumentsSummary);
+        approval.setStatus("pending");
+        approval.setExpiresAt(java.time.LocalDateTime.now().plusMinutes(5));
+        approvalMapper.insert(approval);
+
+        // 更新 task 状态
+        task.setStatus(AgentConstants.STATUS_WAITING_APPROVAL);
+        taskMapper.updateById(task);
+
+        // 更新 run 状态
+        AgentRun run = runMapper.selectById(runId);
+        if (run != null) {
+            run.setStatus(AgentConstants.STATUS_WAITING_APPROVAL);
+            runMapper.updateById(run);
+        }
+
+        log.info("Task {} paused for approval: approvalId={} tool={}", taskId,
+                approval.getApprovalId(), toolName);
+        return approval;
+    }
+
+    @Override
+    public AgentApproval decideApproval(String approvalId, String decision,
+                                         Long decidedBy, String reason) {
+        AgentApproval approval = approvalMapper.selectByApprovalId(approvalId);
+        if (approval == null) throw new BusinessException("审批记录不存在: " + approvalId);
+        if (!"pending".equals(approval.getStatus()))
+            throw new BusinessException("审批状态不允许决定: " + approval.getStatus());
+        if (approval.getExpiresAt().isBefore(java.time.LocalDateTime.now()))
+            throw new BusinessException("审批已过期");
+
+        // ── Phase 1: MySQL updates (auto-committed per statement) ──
+        String newStatus = "approved".equals(decision) ? "approved" : "denied";
+        approvalMapper.updateDecision(approval.getId(), newStatus, decidedBy,
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")), reason);
+
+        AgentTask task = taskMapper.selectById(approval.getTaskId());
+        AgentRun run = runMapper.selectById(approval.getRunId());
+
+        if ("denied".equals(decision)) {
+            if (task != null) {
+                task.setStatus(AgentConstants.STATUS_FAILED);
+                taskMapper.updateById(task);
+            }
+            if (run != null) {
+                run.setStatus(AgentConstants.STATUS_FAILED);
+                run.setErrorCode("approval_denied");
+                run.setErrorDetail("审批被拒绝: " + (reason != null ? reason : "无理由"));
+                run.setCompletedAt(java.time.LocalDateTime.now());
+                runMapper.updateById(run);
+            }
+            log.info("Approval {} DENIED by user {}: tool={} reason={}",
+                    approvalId, decidedBy, approval.getToolName(), reason);
+        } else {
+            if (task != null && AgentConstants.canTransition(task.getStatus(), AgentConstants.STATUS_RUNNING)) {
+                task.setStatus(AgentConstants.STATUS_RUNNING);
+                taskMapper.updateById(task);
+            }
+            if (run != null) {
+                run.setStatus(AgentConstants.STATUS_RUNNING);
+                runMapper.updateById(run);
+            }
+            log.info("Approval {} APPROVED by user {}: tool={} (will call Python resume)",
+                    approvalId, decidedBy, approval.getToolName());
+        }
+
+        approval.setStatus(newStatus);
+        approval.setDecidedBy(decidedBy);
+        approval.setReason(reason);
+
+        // ── Phase 2: Call Python (outside any transaction — recordStep
+        //        and completeRun manage their own transactions). ──
+        if ("approved".equals(decision) && task != null && run != null) {
+            try {
+                resumeAgentAfterApproval(approval, task, run);
+            } catch (Exception e) {
+                String errorMsg = e.getClass().getSimpleName() + ": "
+                        + (e.getMessage() != null ? e.getMessage() : "(null message)");
+                log.error("Failed to resume agent after approval {}: {}",
+                        approvalId, errorMsg, e);
+                // Converge run and task to failed so nothing is stuck
+                // in 'running' after a failed Python resume call.
+                try {
+                    AgentRun checkRun = runMapper.selectById(run.getId());
+                    if (checkRun != null) {
+                        String currentStatus = checkRun.getStatus();
+                        if (!AgentConstants.TERMINAL_STATUSES.contains(currentStatus)) {
+                            checkRun.setStatus(AgentConstants.STATUS_FAILED);
+                            checkRun.setErrorCode("internal_error");
+                            checkRun.setErrorDetail("审批后恢复执行失败: " + errorMsg);
+                            checkRun.setCompletedAt(LocalDateTime.now());
+                            runMapper.updateById(checkRun);
+                            AgentTask checkTask = taskMapper.selectById(
+                                    checkRun.getTaskId());
+                            if (checkTask != null && !AgentConstants.TERMINAL_STATUSES.contains(
+                                    checkTask.getStatus())) {
+                                checkTask.setStatus(AgentConstants.STATUS_FAILED);
+                                taskMapper.updateById(checkTask);
+                            }
+                        }
+                    } else {
+                        // Even if the run can't be found now, update the
+                        // in-memory run reference to failed and persist it.
+                        log.warn("Could not re-read run {} after resume failure — updating original reference", run.getId());
+                        run.setStatus(AgentConstants.STATUS_FAILED);
+                        run.setErrorCode("internal_error");
+                        run.setErrorDetail("审批后恢复执行失败: " + errorMsg);
+                        run.setCompletedAt(LocalDateTime.now());
+                        runMapper.updateById(run);
+                        if (task != null && !AgentConstants.TERMINAL_STATUSES.contains(task.getStatus())) {
+                            task.setStatus(AgentConstants.STATUS_FAILED);
+                            taskMapper.updateById(task);
+                        }
+                    }
+                } catch (Exception convergenceError) {
+                    log.error("CRITICAL: Failed to converge run/task to failed after approval error. "
+                            + "Run {} may be stuck in non-terminal state. Error: {}",
+                            run.getId(), convergenceError.getMessage(), convergenceError);
+                }
+            }
+        }
+
+        return approval;
+    }
+
+    /**
+     * Call Python /api/agent/v1/chat/decide to execute the approved tool
+     * and complete the agent run.  Runs OUTSIDE the @Transactional boundary
+     * so that the MySQL approval update is committed before the (potentially
+     * slow) tool execution.
+     */
+    private void resumeAgentAfterApproval(AgentApproval approval, AgentTask task, AgentRun run) {
+        Long runId = run.getId();
+        // Build chat history from messages
+        List<Map<String, String>> history = List.of();
+        Long conversationId = task.getConversationId();
+        if (conversationId != null) {
+            history = getChatHistoryForTask(conversationId);
+        }
+
+        // Parse tool input from arguments summary
+        String toolInput = "{}";
+        if (approval.getArgumentsSummary() != null && !approval.getArgumentsSummary().isBlank()) {
+            toolInput = approval.getArgumentsSummary();
+        }
+
+        // Call Python to execute the approved tool and continue the agent loop
+        AiClient.ChatResponse aiResponse = aiClient.decideApproval(
+                approval.getApprovalId(),
+                "approved",
+                approval.getReason(),
+                approval.getUserId(),
+                task.getKnowledgeBaseId(),
+                approval.getToolName(),
+                toolInput,
+                task.getQuery(),
+                history,
+                conversationId,
+                run.getModel()
+        );
+
+        // Record step events from the resumed run
+        if (aiResponse.getStepEvents() != null) {
+            int seq = stepMapper.countByRunId(runId);
+            for (Map<String, Object> stepEvent : aiResponse.getStepEvents()) {
+                if (stepEvent == null) continue;
+                seq++;
+                String stepType = stepEvent.get("step_type") != null
+                        ? stepEvent.get("step_type").toString() : "tool_call";
+                String action = stepEvent.get("action") != null
+                        ? stepEvent.get("action").toString() : null;
+                String inputSummary = stepEvent.get("input_summary") != null
+                        ? stepEvent.get("input_summary").toString() : null;
+                String outputSummary = stepEvent.get("output_summary") != null
+                        ? stepEvent.get("output_summary").toString() : null;
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> sources = stepEvent.get("sources") instanceof List
+                        ? (List<Map<String, Object>>) stepEvent.get("sources") : null;
+                long durationMs = stepEvent.get("duration_ms") instanceof Number n
+                        ? n.longValue() : 0L;
+                String errorCode = stepEvent.get("error_code") != null
+                        ? stepEvent.get("error_code").toString() : null;
+
+                recordStep(runId, seq, stepType, action,
+                        inputSummary, outputSummary, sources, durationMs, errorCode);
+            }
+        }
+
+        // Complete the run based on Python response
+        String pythonStatus = aiResponse.getStatus();
+        if (pythonStatus == null) pythonStatus = "completed";
+        String mappedStatus = AgentConstants.mapPythonStatus(pythonStatus);
+
+        Map<String, Object> tokenUsage = null;
+        if (aiResponse.getTokenUsage() != null) {
+            Map<String, Object> usage = aiResponse.getTokenUsage();
+            tokenUsage = Map.of(
+                "prompt_tokens", usage.getOrDefault("prompt_tokens", 0),
+                "completion_tokens", usage.getOrDefault("completion_tokens", 0),
+                "total_tokens", usage.getOrDefault("total_tokens", 0));
+        }
+
+        // Update the run and task directly.
+        // The Python call may have taken several seconds, so HikariCP
+        // connections may have been recycled.  Use a fresh lookup with
+        // a single retry on MyBatisSystemException.
+        // If the fresh lookup fails, fall back to the original reference
+        // so the run NEVER stays non-terminal.
+        AgentRun freshRun = null;
+        for (int retry = 0; retry < 2 && freshRun == null; retry++) {
+            try {
+                freshRun = runMapper.selectById(runId);
+            } catch (Exception selectEx) {
+                if (retry == 0) {
+                    log.warn("runMapper.selectById({}) failed on attempt {}: {} — retrying",
+                            runId, retry + 1, selectEx.getMessage());
+                    try { Thread.sleep(200); } catch (InterruptedException ignored) {}
+                } else {
+                    log.error("runMapper.selectById({}) failed on final attempt — falling back to original reference", runId);
+                }
+            }
+        }
+        if (freshRun == null) {
+            log.warn("Could not re-read run {} after Python resume — updating original entity reference", runId);
+            freshRun = run;
+        }
+
+        long actualDuration = 0L;
+        if (freshRun.getStartedAt() != null) {
+            actualDuration = java.time.Duration.between(
+                    freshRun.getStartedAt(), LocalDateTime.now()).toMillis();
+        }
+        freshRun.setStatus(mappedStatus);
+        if (tokenUsage != null) freshRun.setTokenUsage(tokenUsage);
+        freshRun.setToolCallsCount(aiResponse.getToolCallsCount());
+        freshRun.setDurationMs(actualDuration);
+        freshRun.setCompletedAt(LocalDateTime.now());
+        runMapper.updateById(freshRun);
+
+        AgentTask freshTask = taskMapper.selectById(freshRun.getTaskId());
+        if (freshTask != null) {
+            freshTask.setStatus(mappedStatus);
+            taskMapper.updateById(freshTask);
+        } else {
+            // Fallback: update the original task reference
+            task.setStatus(mappedStatus);
+            taskMapper.updateById(task);
+        }
+
+        String contentPreview = "";
+        if (aiResponse.getContent() != null && aiResponse.getContent().length() > 0) {
+            contentPreview = aiResponse.getContent().substring(0,
+                    Math.min(100, aiResponse.getContent().length()));
+        }
+        log.info("Agent run {} resumed after approval {}: status={} answer={}",
+                runId, approval.getApprovalId(), mappedStatus, contentPreview);
+    }
+
+    /**
+     * Get recent chat history for a conversation.
+     */
+    private List<Map<String, String>> getChatHistoryForTask(Long conversationId) {
+        if (conversationId == null) return List.of();
+        try {
+            LambdaQueryWrapper<Message> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(Message::getConversationId, conversationId)
+                    .orderByDesc(Message::getCreatedAt)
+                    .last("LIMIT 20");
+            List<Message> messages = messageMapper.selectList(wrapper);
+            java.util.Collections.reverse(messages);
+            return messages.stream()
+                    .filter(m -> m.getContent() != null && !m.getContent().isBlank())
+                    .map(m -> {
+                        Map<String, String> map = new HashMap<>();
+                        map.put("role", m.getRole());
+                        map.put("content", m.getContent());
+                        return map;
+                    })
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.warn("Failed to get chat history for conversation {}: {}",
+                    conversationId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    @Override
+    public AgentApproval getApproval(String approvalId) {
+        return approvalMapper.selectByApprovalId(approvalId);
+    }
+
+    @Override
+    public List<AgentApproval> listPendingApprovals(Long userId) {
+        return approvalMapper.selectPendingByUserId(userId);
+    }
+
+    @Override
+    public List<AgentApproval> getApprovalsByTaskId(Long taskId) {
+        return approvalMapper.selectByTaskId(taskId);
+    }
+
+    @Override
+    @Transactional
+    public int expireApprovals() {
+        String nowStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        List<AgentApproval> expired = approvalMapper.selectExpiredPending(nowStr);
+        for (AgentApproval a : expired) {
+            approvalMapper.updateDecision(a.getId(), "expired", null,
+                    nowStr, "审批超时自动拒绝");
+            // 更新 task → failed
+            AgentTask task = taskMapper.selectById(a.getTaskId());
+            if (task != null && AgentConstants.STATUS_WAITING_APPROVAL.equals(task.getStatus())) {
+                task.setStatus(AgentConstants.STATUS_FAILED);
+                taskMapper.updateById(task);
+            }
+            AgentRun run = runMapper.selectById(a.getRunId());
+            if (run != null) {
+                run.setStatus(AgentConstants.STATUS_FAILED);
+                run.setErrorCode("approval_expired");
+                run.setErrorDetail("审批超时（5分钟未响应）");
+                run.setCompletedAt(java.time.LocalDateTime.now());
+                runMapper.updateById(run);
+            }
+        }
+        if (!expired.isEmpty()) {
+            log.info("Expired {} pending approvals", expired.size());
+        }
+        return expired.size();
+    }
+
+    private static String sha256(String input) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (byte b : hash) hex.append(String.format("%02x", b));
+            return hex.toString();
+        } catch (Exception e) {
+            return input; // fallback — should never happen
+        }
     }
 
     // ================================================================
