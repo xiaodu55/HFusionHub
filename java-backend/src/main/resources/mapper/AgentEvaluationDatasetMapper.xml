@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hfusionhub.mapper.AgentEvaluationDatasetMapper">
+
+    <resultMap id="BaseResultMap" type="com.hfusionhub.entity.AgentEvaluationDataset">
+        <id column="id" property="id"/>
+        <result column="name" property="name"/>
+        <result column="description" property="description"/>
+        <result column="knowledge_base_id" property="knowledgeBaseId"/>
+        <result column="user_id" property="userId"/>
+        <result column="dimensions" property="dimensions"
+                typeHandler="com.hfusionhub.handler.JsonListTypeHandler"/>
+        <result column="case_count" property="caseCount"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+</mapper>

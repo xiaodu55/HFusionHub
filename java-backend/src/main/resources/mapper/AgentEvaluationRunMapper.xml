@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hfusionhub.mapper.AgentEvaluationRunMapper">
+
+    <resultMap id="BaseResultMap" type="com.hfusionhub.entity.AgentEvaluationRun">
+        <id column="id" property="id"/>
+        <result column="dataset_id" property="datasetId"/>
+        <result column="run_uuid" property="runUuid"/>
+        <result column="status" property="status"/>
+        <result column="overall_score" property="overallScore"/>
+        <result column="dimension_scores" property="dimensionScores"
+                typeHandler="com.hfusionhub.handler.JsonMapTypeHandler"/>
+        <result column="case_results" property="caseResults"
+                typeHandler="com.hfusionhub.handler.JsonMapTypeHandler"/>
+        <result column="failed_case_ids" property="failedCaseIds"
+                typeHandler="com.hfusionhub.handler.JsonListTypeHandler"/>
+        <result column="error_detail" property="errorDetail"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+</mapper>

@@ -20,6 +20,7 @@ from typing import Any, AsyncGenerator, Deque, Dict, List, Optional
 from uuid import uuid4
 
 from .agent import Agent, AgentResponse
+from .agent_observability import AgentTrace, get_agent_trace_store
 from ..tools.registry import ToolRegistry, create_v1_registry
 
 # ── Agent V1 status constants ──
@@ -169,6 +170,34 @@ class SingleAgentWorkflow(Agent):
         run.finish_reason = finish_reason
         run.duration_ms = round((time.monotonic() - started) * 1000, 2)
 
+    def _record_trace(
+        self,
+        run: AgentRun,
+        response: Optional[AgentResponse] = None,
+    ) -> None:
+        """Persist operational metadata to the AgentTraceStore."""
+        try:
+            trace = AgentTrace(
+                run_uuid=run.run_id,
+                knowledge_base_id=self.knowledge_base_id,
+                status=run.status,
+                model=getattr(response, 'model', '') if response else '',
+                duration_ms=run.duration_ms,
+                token_usage=getattr(response, 'token_usage', None) if response else None,
+                tool_calls_count=getattr(response, 'tool_calls_count', 0) if response else 0,
+                sources_count=len(getattr(response, 'sources', [])) if response else 0,
+                step_count=len(run.events),
+                approval_count=0,
+                total_approval_duration_ms=0.0,
+                error_code=run.events[-1].error_code if run.events and run.events[-1].error_code else None,
+                error_detail=getattr(response, 'error_detail', None) if response else None,
+                failed_tool=getattr(response, 'failed_tool', None) if response else None,
+            )
+            get_agent_trace_store().record(trace)
+        except Exception:
+            # Trace recording is best-effort; never fail a run because of it.
+            pass
+
     # ── Build a standardised V1 response ───────────────────────────────
 
     def _v1_response(
@@ -242,6 +271,7 @@ class SingleAgentWorkflow(Agent):
                     v1_status = STATUS_COMPLETED
 
                 self._finish(run, v1_status, response.finish_reason or v1_status, started)
+                self._record_trace(run, response)
                 response.agent_run_id = run.run_id
                 response.agent_status = v1_status
                 response.status = v1_status
@@ -268,6 +298,7 @@ class SingleAgentWorkflow(Agent):
 
                 finish_reason = "agent_timeout" if code == "timeout" else "agent_failure"
                 self._finish(run, v1_status, finish_reason, started)
+                self._record_trace(run)
 
                 # If the delegate already produced partial sources, preserve them.
                 partial_sources = getattr(self.delegate, '_last_sources', [])
@@ -305,14 +336,17 @@ class SingleAgentWorkflow(Agent):
                     yield chunk
             run.events.append(AgentRunEvent(name="agent_stream", status="completed", attempt=0))
             self._finish(run, STATUS_COMPLETED, "stop", started)
+            self._record_trace(run)
         except asyncio.TimeoutError:
             run.events.append(AgentRunEvent(name="agent_stream", status="failed", error_code="timeout"))
             self._finish(run, STATUS_TIMEOUT, "agent_timeout", started)
+            self._record_trace(run)
             yield NO_SUFFICIENT_EVIDENCE_REPLY if self._has_selected_knowledge_base else SERVICE_UNAVAILABLE_REPLY
         except Exception as error:
             code = self._error_code(error)
             run.events.append(AgentRunEvent(name="agent_stream", status="failed", error_code=code))
             self._finish(run, STATUS_TOOL_ERROR, "agent_failure", started)
+            self._record_trace(run)
             yield NO_SUFFICIENT_EVIDENCE_REPLY if self._has_selected_knowledge_base else SERVICE_UNAVAILABLE_REPLY
 
     def get_tools(self) -> List[Dict[str, Any]]:

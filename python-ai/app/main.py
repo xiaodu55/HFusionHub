@@ -24,6 +24,7 @@ from app.utils.config import config
 from app.api.vectorization import router as vectorization_router
 from app.api.chat import router as chat_router
 from app.api.rag import router as rag_router
+from app.api.agent_observability_api import router as agent_obs_router
 from app.api.mcp import router as mcp_router
 from app.api.metrics import router as metrics_router
 from app.api.exception_handlers import (
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
     app.include_router(vectorization_router, dependencies=internal_dependencies)
     app.include_router(chat_router, dependencies=internal_dependencies)
     app.include_router(rag_router, dependencies=internal_dependencies)
+    app.include_router(agent_obs_router, dependencies=internal_dependencies)
     # MCP endpoint is public — external AI clients (Claude Desktop, MCP Inspector)
     # do not have the internal token. Tool-level authorization is handled by the
     # knowledge_base_id header and the ToolExecutionPolicy.

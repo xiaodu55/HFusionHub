@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hfusionhub.mapper.AgentAlertEventMapper">
+
+    <resultMap id="BaseResultMap" type="com.hfusionhub.entity.AgentAlertEvent">
+        <id column="id" property="id"/>
+        <result column="rule_id" property="ruleId"/>
+        <result column="rule_name" property="ruleName"/>
+        <result column="user_id" property="userId"/>
+        <result column="knowledge_base_id" property="knowledgeBaseId"/>
+        <result column="severity" property="severity"/>
+        <result column="metric_name" property="metricName"/>
+        <result column="current_value" property="currentValue"/>
+        <result column="threshold_value" property="thresholdValue"/>
+        <result column="message" property="message"/>
+        <result column="context" property="context"
+                typeHandler="com.hfusionhub.handler.JsonMapTypeHandler"/>
+        <result column="resolved" property="resolved"/>
+        <result column="resolved_at" property="resolvedAt"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+</mapper>
