@@ -8,6 +8,11 @@
         <result column="run_uuid" property="runUuid"/>
         <result column="attempt_number" property="attemptNumber"/>
         <result column="status" property="status"/>
+        <result column="scheduled_at" property="scheduledAt"/>
+        <result column="lease_holder" property="leaseHolder"/>
+        <result column="lease_expires_at" property="leaseExpiresAt"/>
+        <result column="heartbeat_at" property="heartbeatAt"/>
+        <result column="dispatch_count" property="dispatchCount"/>
         <result column="model" property="model"/>
         <result column="style" property="style"/>
         <result column="max_tool_steps" property="maxToolSteps"/>
@@ -25,7 +30,8 @@
     </resultMap>
 
     <sql id="Base_Column_List">
-        id, task_id, run_uuid, attempt_number, status, model, style, max_tool_steps,
+        id, task_id, run_uuid, attempt_number, status, scheduled_at, lease_holder,
+        lease_expires_at, heartbeat_at, dispatch_count, model, style, max_tool_steps,
         token_usage, tool_calls_count, error_code, error_detail, failed_tool,
         started_at, completed_at, duration_ms, created_at, updated_at
     </sql>
@@ -57,5 +63,101 @@
             updated_at = NOW()
         WHERE id = #{id}
     </update>
+
+    <!-- ================================================================ -->
+    <!-- V13: 异步任务调度 — 队列/租约/恢复 SQL                              -->
+    <!-- ================================================================ -->
+
+    <update id="claimRun">
+        UPDATE agent_run
+        SET status = 'running',
+            lease_holder = #{holder},
+            lease_expires_at = #{leaseExpiresAt},
+            heartbeat_at = #{heartbeatAt},
+            started_at = COALESCE(started_at, #{now}),
+            updated_at = NOW()
+        WHERE id = #{id}
+          AND status = 'pending'
+          AND (scheduled_at IS NULL OR scheduled_at &lt;= #{now})
+    </update>
+
+    <select id="selectQueuedRuns" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_run
+        WHERE status = 'pending'
+          AND (scheduled_at IS NULL OR scheduled_at &lt;= #{now})
+        ORDER BY scheduled_at ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectLeaseExpiredRuns" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_run
+        WHERE status = 'running'
+          AND lease_expires_at &lt; #{staleBefore}
+        LIMIT #{limit}
+    </select>
+
+    <update id="renewLease">
+        UPDATE agent_run
+        SET lease_expires_at = #{leaseExpiresAt},
+            heartbeat_at = #{heartbeatAt},
+            updated_at = NOW()
+        WHERE id = #{id}
+          AND lease_holder = #{holder}
+    </update>
+
+    <update id="releaseLease">
+        UPDATE agent_run
+        SET lease_holder = NULL,
+            lease_expires_at = NULL,
+            heartbeat_at = NULL,
+            updated_at = NOW()
+        WHERE id = #{id}
+          AND lease_holder = #{holder}
+    </update>
+
+    <update id="completeRunGuarded">
+        UPDATE agent_run
+        SET status = #{status},
+            error_code = #{errorCode},
+            error_detail = #{errorDetail},
+            failed_tool = #{failedTool},
+            completed_at = #{completedAt},
+            duration_ms = COALESCE(duration_ms, 0),
+            lease_holder = NULL,
+            lease_expires_at = NULL,
+            heartbeat_at = NULL,
+            updated_at = NOW()
+        WHERE id = #{id}
+          AND status IN ('running', 'waiting_approval')
+    </update>
+
+    <update id="requeueOrphan">
+        UPDATE agent_run
+        SET status = 'pending',
+            run_uuid = #{runUuid},
+            scheduled_at = #{scheduledAt},
+            dispatch_count = dispatch_count + 1,
+            started_at = NULL,
+            token_usage = NULL,
+            tool_calls_count = 0,
+            duration_ms = 0,
+            error_code = NULL,
+            error_detail = NULL,
+            failed_tool = NULL,
+            lease_holder = NULL,
+            lease_expires_at = NULL,
+            heartbeat_at = NULL,
+            updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <select id="selectByHolder" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_run
+        WHERE lease_holder = #{holder}
+          AND status = 'running'
+    </select>
 
 </mapper>

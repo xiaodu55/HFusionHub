@@ -100,6 +100,34 @@ app:
     username: admin
     password: ${ADMIN_PASSWORD:}
 
+# Agent scheduling (V13) — test defaults
+agent:
+  queue:
+    enabled: false
+  worker:
+    poll-delay-ms: 1000
+    batch-size: 5
+  run:
+    lease-seconds: 30
+    heartbeat-seconds: 5
+    timeout-seconds: 60
+  retry:
+    max-attempts: 3
+    base-delay-seconds: 1
+    backoff-multiplier: 2
+    max-delay-seconds: 10
+    retryable-error-codes: timeout,connection_error,tool_error,internal_error
+    on-approval-expiry: false
+    max-dispatch-count: 3
+  recovery:
+    sweep-delay-ms: 5000
+    startup-recovery: false
+  status-event:
+    sse-poll-delay-ms: 500
+    retention-days: 1
+  cancel-flag-ttl-seconds: 60
+  instance-id: test-worker
+
 logging:
   level:
     root: WARN

@@ -46,4 +46,8 @@
         </foreach>
     </insert>
 
+    <delete id="deleteByRunId">
+        DELETE FROM agent_step WHERE run_id = #{runId}
+    </delete>
+
 </mapper>

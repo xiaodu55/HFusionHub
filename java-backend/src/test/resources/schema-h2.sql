@@ -225,3 +225,150 @@ CREATE TABLE IF NOT EXISTS flyway_schema_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_flyway_history_success ON flyway_schema_history (success);
+
+-- =====================================================
+-- Agent 任务表 (agent_task) — V10 + V13
+-- =====================================================
+CREATE TABLE IF NOT EXISTS agent_task (
+    id                BIGINT NOT NULL AUTO_INCREMENT,
+    request_id        VARCHAR(64) NOT NULL,
+    user_id           BIGINT NOT NULL,
+    conversation_id   BIGINT NOT NULL,
+    knowledge_base_id BIGINT DEFAULT NULL,
+    query             CLOB NOT NULL,
+    status            VARCHAR(20) NOT NULL DEFAULT 'pending',
+    current_run_id    BIGINT DEFAULT NULL,
+    dead_letter_reason VARCHAR(500) DEFAULT NULL,
+    dead_letter_at    TIMESTAMP DEFAULT NULL,
+    created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE (request_id),
+    FOREIGN KEY (user_id) REFERENCES sys_user (id),
+    FOREIGN KEY (conversation_id) REFERENCES conversation (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_user_status ON agent_task (user_id, status);
+CREATE INDEX IF NOT EXISTS idx_task_conv ON agent_task (conversation_id);
+CREATE INDEX IF NOT EXISTS idx_task_created_at ON agent_task (created_at);
+CREATE INDEX IF NOT EXISTS idx_task_status_updated ON agent_task (status, updated_at);
+
+-- =====================================================
+-- Agent 运行记录表 (agent_run) — V10 + V13
+-- =====================================================
+CREATE TABLE IF NOT EXISTS agent_run (
+    id                BIGINT NOT NULL AUTO_INCREMENT,
+    task_id           BIGINT NOT NULL,
+    run_uuid          VARCHAR(36) NOT NULL,
+    attempt_number    INT NOT NULL DEFAULT 1,
+    status            VARCHAR(20) NOT NULL DEFAULT 'pending',
+    scheduled_at      TIMESTAMP DEFAULT NULL,
+    lease_holder      VARCHAR(64) DEFAULT NULL,
+    lease_expires_at  TIMESTAMP DEFAULT NULL,
+    heartbeat_at      TIMESTAMP DEFAULT NULL,
+    dispatch_count    INT NOT NULL DEFAULT 1,
+    model             VARCHAR(50) DEFAULT NULL,
+    style             VARCHAR(20) DEFAULT 'detailed',
+    max_tool_steps    INT DEFAULT 5,
+    token_usage       VARCHAR(4000) DEFAULT NULL,
+    tool_calls_count  INT DEFAULT 0,
+    error_code        VARCHAR(50) DEFAULT NULL,
+    error_detail      CLOB DEFAULT NULL,
+    failed_tool       VARCHAR(50) DEFAULT NULL,
+    started_at        TIMESTAMP DEFAULT NULL,
+    completed_at      TIMESTAMP DEFAULT NULL,
+    duration_ms       BIGINT DEFAULT 0,
+    created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE (run_uuid),
+    FOREIGN KEY (task_id) REFERENCES agent_task (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_run_task_id ON agent_run (task_id);
+CREATE INDEX IF NOT EXISTS idx_run_status ON agent_run (status);
+CREATE INDEX IF NOT EXISTS idx_run_queue ON agent_run (status, scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_run_lease ON agent_run (lease_expires_at);
+CREATE INDEX IF NOT EXISTS idx_run_holder ON agent_run (lease_holder);
+
+-- =====================================================
+-- Agent 步骤记录表 (agent_step) — V10
+-- =====================================================
+CREATE TABLE IF NOT EXISTS agent_step (
+    id              BIGINT NOT NULL AUTO_INCREMENT,
+    run_id          BIGINT NOT NULL,
+    sequence        INT NOT NULL DEFAULT 0,
+    step_type       VARCHAR(30) NOT NULL,
+    action          VARCHAR(50) DEFAULT NULL,
+    input_summary   CLOB DEFAULT NULL,
+    output_summary  CLOB DEFAULT NULL,
+    sources         VARCHAR(4000) DEFAULT NULL,
+    duration_ms     BIGINT DEFAULT 0,
+    error_code      VARCHAR(50) DEFAULT NULL,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    FOREIGN KEY (run_id) REFERENCES agent_run (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_step_run_seq ON agent_step (run_id, sequence);
+
+-- =====================================================
+-- Agent 审批表 (agent_approval) — V11
+-- =====================================================
+CREATE TABLE IF NOT EXISTS agent_approval (
+    id                BIGINT NOT NULL AUTO_INCREMENT,
+    approval_id       VARCHAR(36) NOT NULL,
+    task_id           BIGINT NOT NULL,
+    run_id            BIGINT NOT NULL,
+    user_id           BIGINT NOT NULL,
+    tool_name         VARCHAR(50) NOT NULL,
+    tool_input_hash   VARCHAR(64) NOT NULL,
+    arguments_summary VARCHAR(1000) DEFAULT NULL,
+    status            VARCHAR(20) NOT NULL DEFAULT 'pending',
+    decided_by        BIGINT DEFAULT NULL,
+    decided_at        VARCHAR(20) DEFAULT NULL,
+    reason            VARCHAR(500) DEFAULT NULL,
+    expires_at        TIMESTAMP NOT NULL,
+    created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE (approval_id),
+    FOREIGN KEY (task_id) REFERENCES agent_task (id),
+    FOREIGN KEY (run_id) REFERENCES agent_run (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_approval_task ON agent_approval (task_id);
+CREATE INDEX IF NOT EXISTS idx_approval_user_status ON agent_approval (user_id, status);
+
+-- =====================================================
+-- Agent 状态事件表 (agent_status_event) — V13
+-- =====================================================
+CREATE TABLE IF NOT EXISTS agent_status_event (
+    id          BIGINT NOT NULL AUTO_INCREMENT,
+    task_id     BIGINT NOT NULL,
+    run_id      BIGINT DEFAULT NULL,
+    event_type  VARCHAR(40) NOT NULL,
+    status      VARCHAR(20) DEFAULT NULL,
+    payload     VARCHAR(4000) DEFAULT NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    FOREIGN KEY (task_id) REFERENCES agent_task (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ase_task ON agent_status_event (task_id, id);
+
+-- =====================================================
+-- Agent 恢复审计表 (agent_recovery_event) — V13
+-- =====================================================
+CREATE TABLE IF NOT EXISTS agent_recovery_event (
+    id          BIGINT NOT NULL AUTO_INCREMENT,
+    run_id      BIGINT NOT NULL,
+    task_id     BIGINT NOT NULL,
+    event_type  VARCHAR(40) NOT NULL,
+    detail      VARCHAR(1000) DEFAULT NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_are_run ON agent_recovery_event (run_id);
+CREATE INDEX IF NOT EXISTS idx_are_created ON agent_recovery_event (created_at);

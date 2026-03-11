@@ -47,6 +47,20 @@ public interface AgentTaskService {
     AgentRun startRun(Long taskId, String runUuid, String model, String style, int maxToolSteps);
 
     /**
+     * 开始一次运行（带租约持有者）
+     *
+     * @param taskId      任务ID
+     * @param runUuid     Python agent_run_id
+     * @param model       模型名称
+     * @param style       回答风格
+     * @param maxToolSteps 最大工具步数
+     * @param leaseHolder 租约持有者（流式路径传 "stream:..."，Worker 传 worker ID）
+     * @return 运行实体
+     */
+    AgentRun startRun(Long taskId, String runUuid, String model, String style,
+                      int maxToolSteps, String leaseHolder);
+
+    /**
      * 记录一个步骤
      *
      * @param runId        运行ID
@@ -181,4 +195,30 @@ public interface AgentTaskService {
      * 超时自动拒绝（定时任务调用）
      */
     int expireApprovals();
+
+    // ================================================================
+    // V13: 队列调度
+    // ================================================================
+
+    /**
+     * 创建待执行的 Run（PENDING 状态，scheduled_at=now），记录 QUEUED 事件。
+     * 由 Worker 认领租约后改为 running 并调用 Python。
+     *
+     * @param taskId 任务ID（任务必须处于 pending 或 failed 状态）
+     * @return 新创建的 pending Run
+     */
+    AgentRun enqueueRun(Long taskId);
+
+    // ================================================================
+    // V13: 死信恢复
+    // ================================================================
+
+    /**
+     * 恢复死信任务：清除死信字段，task→pending，创建新 pending run
+     *
+     * @param taskId 任务ID
+     * @param userId 操作用户ID（校验所有权）
+     * @return 新创建的 Run
+     */
+    AgentRun requeueTask(Long taskId, Long userId);
 }

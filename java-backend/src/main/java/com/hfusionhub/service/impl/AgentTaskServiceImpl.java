@@ -23,6 +23,7 @@ import com.hfusionhub.entity.Message;
 import com.hfusionhub.service.AgentTaskService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,7 +42,6 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class AgentTaskServiceImpl implements AgentTaskService {
 
     private final AgentTaskMapper taskMapper;
@@ -50,6 +50,35 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     private final AgentApprovalMapper approvalMapper;
     private final MessageMapper messageMapper;
     private final AiClient aiClient;
+    private final com.hfusionhub.service.AgentTaskQueueService queueService;
+    private final com.hfusionhub.service.AgentStatusEventService statusEventService;
+    private final com.hfusionhub.common.utils.RedisUtils redisUtils;
+
+    @SuppressWarnings("java:S107")
+    public AgentTaskServiceImpl(
+            AgentTaskMapper taskMapper,
+            AgentRunMapper runMapper,
+            AgentStepMapper stepMapper,
+            AgentApprovalMapper approvalMapper,
+            MessageMapper messageMapper,
+            AiClient aiClient,
+            @Lazy com.hfusionhub.service.AgentTaskQueueService queueService,
+            com.hfusionhub.service.AgentStatusEventService statusEventService,
+            com.hfusionhub.common.utils.RedisUtils redisUtils) {
+        this.taskMapper = taskMapper;
+        this.runMapper = runMapper;
+        this.stepMapper = stepMapper;
+        this.approvalMapper = approvalMapper;
+        this.messageMapper = messageMapper;
+        this.aiClient = aiClient;
+        this.queueService = queueService;
+        this.statusEventService = statusEventService;
+        this.redisUtils = redisUtils;
+    }
+    @org.springframework.beans.factory.annotation.Value("${agent.run.lease-seconds:120}")
+    private int leaseSeconds;
+    @org.springframework.beans.factory.annotation.Value("${agent.cancel-flag-ttl-seconds:3600}")
+    private int cancelFlagTtlSeconds;
 
     // ================================================================
     // 生命周期方法
@@ -82,6 +111,13 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     @Transactional
     public AgentRun startRun(Long taskId, String runUuid, String model,
                              String style, int maxToolSteps) {
+        return startRun(taskId, runUuid, model, style, maxToolSteps, null);
+    }
+
+    @Override
+    @Transactional
+    public AgentRun startRun(Long taskId, String runUuid, String model,
+                             String style, int maxToolSteps, String leaseHolder) {
         AgentTask task = taskMapper.selectById(taskId);
         if (task == null) {
             throw new BusinessException("Agent任务不存在: " + taskId);
@@ -98,6 +134,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         List<AgentRun> existingRuns = runMapper.selectByTaskId(taskId);
         int attemptNumber = existingRuns.size() + 1;
 
+        LocalDateTime now = LocalDateTime.now();
         AgentRun run = new AgentRun();
         run.setTaskId(taskId);
         run.setRunUuid(runUuid);
@@ -106,7 +143,14 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         run.setModel(model);
         run.setStyle(style != null ? style : "detailed");
         run.setMaxToolSteps(maxToolSteps > 0 ? maxToolSteps : 5);
-        run.setStartedAt(LocalDateTime.now());
+        run.setStartedAt(now);
+        run.setDispatchCount(1);
+        // V13: lease support — stream path passes "stream:...", worker passes worker ID
+        if (leaseHolder != null) {
+            run.setLeaseHolder(leaseHolder);
+            run.setLeaseExpiresAt(now.plusSeconds(leaseSeconds));
+            run.setHeartbeatAt(now);
+        }
         runMapper.insert(run);
 
         // 更新 task 状态为 running，记录当前 run
@@ -114,8 +158,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         task.setCurrentRunId(run.getId());
         taskMapper.updateById(task);
 
-        log.info("Started agent run id={} uuid={} attempt={} for task={}",
-                run.getId(), runUuid, attemptNumber, taskId);
+        log.info("Started agent run id={} uuid={} attempt={} for task={} leaseHolder={}",
+                run.getId(), runUuid, attemptNumber, taskId, leaseHolder);
         return run;
     }
 
@@ -175,23 +219,34 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                     run.getStartedAt(), LocalDateTime.now()).toMillis();
         }
 
+        // V13: 守护终态写入 — 仅 running/waiting_approval → 终态
+        int affected = runMapper.completeRunGuarded(runId, status, errorCode,
+                errorDetail, failedTool, LocalDateTime.now());
+
+        if (affected == 0) {
+            // Run was already completed by another path (e.g. recovery scheduler)
+            log.warn("completeRunGuarded returned 0 for run {} — stale callback rejected (run already terminal)",
+                    runId);
+            return;
+        }
+
+        // 同步更新 task 状态 — 守护：仅当 task.currentRunId == run.id
+        AgentTask task = taskMapper.selectById(run.getTaskId());
+        if (task != null) {
+            if (task.getCurrentRunId() != null && task.getCurrentRunId().equals(runId)) {
+                task.setStatus(status);
+                taskMapper.updateById(task);
+            } else {
+                log.warn("Task {} currentRunId={} != run.id={} — skipping task status propagation",
+                        task.getId(), task.getCurrentRunId(), runId);
+            }
+        }
+
+        // Store the model/token usage/duration in the run entity for audit
         run.setStatus(status);
-        if (model != null) run.setModel(model);
         if (tokenUsage != null) run.setTokenUsage(tokenUsage);
         run.setToolCallsCount(toolCallsCount);
         run.setDurationMs(actualDuration);
-        run.setErrorCode(errorCode);
-        run.setErrorDetail(errorDetail);
-        run.setFailedTool(failedTool);
-        run.setCompletedAt(LocalDateTime.now());
-        runMapper.updateById(run);
-
-        // 同步更新 task 状态
-        AgentTask task = taskMapper.selectById(run.getTaskId());
-        if (task != null) {
-            task.setStatus(status);
-            taskMapper.updateById(task);
-        }
 
         log.info("Agent run {} completed: status={} duration={}ms toolCalls={}",
                 runId, status, actualDuration, toolCallsCount);
@@ -273,14 +328,80 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             throw new BusinessException("只能重试失败或超时的任务，当前状态: " + task.getStatus());
         }
 
-        // 重置 task 为 pending
+        // V13: 创建新 pending Run，Worker 自动执行
+        List<AgentRun> existingRuns = runMapper.selectByTaskId(taskId);
+        int attemptNumber = existingRuns.size() + 1;
+
+        AgentRun newRun = new AgentRun();
+        newRun.setTaskId(taskId);
+        newRun.setRunUuid(java.util.UUID.randomUUID().toString());
+        newRun.setAttemptNumber(attemptNumber);
+        newRun.setStatus(AgentConstants.STATUS_PENDING);
+        newRun.setScheduledAt(LocalDateTime.now()); // immediate
+        newRun.setDispatchCount(1);
+        newRun.setModel(existingRuns.isEmpty() ? null : existingRuns.get(existingRuns.size() - 1).getModel());
+        newRun.setStyle("detailed");
+        newRun.setMaxToolSteps(5);
+        runMapper.insert(newRun);
+
+        // 更新 task 状态
         task.setStatus(AgentConstants.STATUS_PENDING);
-        task.setCurrentRunId(null);
+        task.setCurrentRunId(newRun.getId());
         taskMapper.updateById(task);
 
-        log.info("Task {} reset to pending for retry by user {}", taskId, userId);
-        // 实际的重新执行由调用方（Controller 或前端）触发
-        return null;
+        log.info("Task {} retry scheduled: new run id={} attempt={}",
+                taskId, newRun.getId(), attemptNumber);
+        return newRun;
+    }
+
+    // ================================================================
+    // V13: 队列调度
+    // ================================================================
+
+    @Override
+    @Transactional
+    public AgentRun enqueueRun(Long taskId) {
+        AgentTask task = taskMapper.selectById(taskId);
+        if (task == null) {
+            throw new BusinessException("Agent任务不存在: " + taskId);
+        }
+
+        // Allow PENDING and RETRYABLE states to be queued
+        if (!AgentConstants.STATUS_PENDING.equals(task.getStatus())
+                && !AgentConstants.RETRYABLE_STATUSES.contains(task.getStatus())) {
+            throw new BusinessException(String.format(
+                    "无法入队：任务状态 %s 不允许创建新 Run", task.getStatus()));
+        }
+
+        // Compute attempt number
+        List<AgentRun> existingRuns = runMapper.selectByTaskId(taskId);
+        int attemptNumber = existingRuns.size() + 1;
+
+        LocalDateTime now = LocalDateTime.now();
+        AgentRun run = new AgentRun();
+        run.setTaskId(taskId);
+        run.setRunUuid(java.util.UUID.randomUUID().toString());
+        run.setAttemptNumber(attemptNumber);
+        run.setStatus(AgentConstants.STATUS_PENDING);
+        run.setScheduledAt(now); // immediate execution
+        run.setDispatchCount(1);
+        run.setModel(existingRuns.isEmpty() ? null : existingRuns.get(existingRuns.size() - 1).getModel());
+        run.setStyle("detailed");
+        run.setMaxToolSteps(5);
+        runMapper.insert(run);
+
+        // Update task: pending, point to new run
+        task.setStatus(AgentConstants.STATUS_PENDING);
+        task.setCurrentRunId(run.getId());
+        taskMapper.updateById(task);
+
+        // Record QUEUED event
+        statusEventService.record(taskId, run.getId(), "QUEUED",
+                AgentConstants.STATUS_PENDING,
+                Map.of("attemptNumber", attemptNumber, "runUuid", run.getRunUuid()));
+
+        log.info("Task {} enqueued: run id={} uuid={} attempt={}", taskId, run.getId(), run.getRunUuid(), attemptNumber);
+        return run;
     }
 
     @Override
@@ -292,16 +413,58 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         if (!task.getUserId().equals(userId)) {
             throw new BusinessException("无权操作此任务");
         }
-        if (!AgentConstants.STATUS_RUNNING.equals(task.getStatus())) {
-            return false;
+
+        // V13: 增强取消 — 支持 pending/running/waiting_approval 状态
+        String taskStatus = task.getStatus();
+        if (AgentConstants.TERMINAL_STATUSES.contains(taskStatus)) {
+            return false; // already terminal
         }
 
-        // 标记 task 和 current run 为 cancelled
-        if (task.getCurrentRunId() != null) {
-            cancelRun(task.getCurrentRunId());
+        // For running tasks with a worker, set Redis cancel flag
+        if (AgentConstants.STATUS_RUNNING.equals(taskStatus) && task.getCurrentRunId() != null) {
+            AgentRun currentRun = runMapper.selectById(task.getCurrentRunId());
+            if (currentRun != null) {
+                // Set Redis cancel flag (TTL 1h) — survives restart
+                try {
+                    redisUtils.set("agent:cancel:" + currentRun.getId(), "1",
+                            cancelFlagTtlSeconds, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    log.warn("Failed to set Redis cancel flag for run {}: {}",
+                            currentRun.getId(), e.getMessage());
+                }
+                // Best-effort cancel the Python task
+                try {
+                    aiClient.cancelRequest(currentRun.getRunUuid());
+                } catch (Exception ex) {
+                    log.debug("Best-effort Python cancel for run {}: {}", currentRun.getId(), ex.getMessage());
+                }
+                cancelRun(currentRun.getId());
+            }
+        } else if (AgentConstants.STATUS_WAITING_APPROVAL.equals(taskStatus)) {
+            // Cancel all pending approvals for this task
+            List<AgentApproval> pendingApprovals = approvalMapper.selectByTaskId(taskId);
+            for (AgentApproval approval : pendingApprovals) {
+                if ("pending".equals(approval.getStatus())) {
+                    String nowStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                    approvalMapper.updateDecision(approval.getId(), "expired", null, nowStr, "用户取消任务");
+                }
+            }
+            if (task.getCurrentRunId() != null) {
+                cancelRun(task.getCurrentRunId());
+            }
+        } else if (AgentConstants.STATUS_PENDING.equals(taskStatus)) {
+            // Pending task — mark task and current run as cancelled
+            if (task.getCurrentRunId() != null) {
+                cancelRun(task.getCurrentRunId());
+            }
         }
+
         task.setStatus(AgentConstants.STATUS_CANCELLED);
         taskMapper.updateById(task);
+
+        // Record status event
+        statusEventService.record(taskId, task.getCurrentRunId(), "CANCELLED",
+                AgentConstants.STATUS_CANCELLED, null);
 
         log.info("Task {} cancelled by user {}", taskId, userId);
         return true;
@@ -385,6 +548,10 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                 run.setCompletedAt(java.time.LocalDateTime.now());
                 runMapper.updateById(run);
             }
+            // V13: record event
+            statusEventService.record(approval.getTaskId(), approval.getRunId(),
+                    "APPROVAL_DECIDED", AgentConstants.STATUS_FAILED,
+                    Map.of("decision", "denied", "toolName", approval.getToolName()));
             log.info("Approval {} DENIED by user {}: tool={} reason={}",
                     approvalId, decidedBy, approval.getToolName(), reason);
         } else {
@@ -396,6 +563,10 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                 run.setStatus(AgentConstants.STATUS_RUNNING);
                 runMapper.updateById(run);
             }
+            // V13: record event
+            statusEventService.record(approval.getTaskId(), approval.getRunId(),
+                    "APPROVAL_DECIDED", AgentConstants.STATUS_RUNNING,
+                    Map.of("decision", "approved", "toolName", approval.getToolName()));
             log.info("Approval {} APPROVED by user {}: tool={} (will call Python resume)",
                     approvalId, decidedBy, approval.getToolName());
         }
@@ -652,16 +823,75 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             AgentRun run = runMapper.selectById(a.getRunId());
             if (run != null) {
                 run.setStatus(AgentConstants.STATUS_FAILED);
-                run.setErrorCode("approval_expired");
+                run.setErrorCode(AgentConstants.ERR_APPROVAL_EXPIRED);
                 run.setErrorDetail("审批超时（5分钟未响应）");
                 run.setCompletedAt(java.time.LocalDateTime.now());
                 runMapper.updateById(run);
             }
+            // V13: record event
+            statusEventService.record(a.getTaskId(), a.getRunId(), "RUN_FAILED",
+                    AgentConstants.STATUS_FAILED,
+                    Map.of("errorCode", AgentConstants.ERR_APPROVAL_EXPIRED,
+                            "errorDetail", "审批超时（5分钟未响应）"));
         }
         if (!expired.isEmpty()) {
             log.info("Expired {} pending approvals", expired.size());
         }
         return expired.size();
+    }
+
+    // ================================================================
+    // V13: 死信恢复
+    // ================================================================
+
+    @Override
+    @Transactional
+    public AgentRun requeueTask(Long taskId, Long userId) {
+        AgentTask task = taskMapper.selectById(taskId);
+        if (task == null) {
+            throw new BusinessException("任务不存在: " + taskId);
+        }
+        if (!task.getUserId().equals(userId)) {
+            throw new BusinessException("无权操作此任务");
+        }
+        if (!AgentConstants.STATUS_DEAD_LETTER.equals(task.getStatus())) {
+            throw new BusinessException("只能恢复死信任务，当前状态: " + task.getStatus());
+        }
+
+        // 清除死信字段
+        task.setDeadLetterReason(null);
+        task.setDeadLetterAt(null);
+
+        // 创建新 pending Run
+        List<AgentRun> existingRuns = runMapper.selectByTaskId(taskId);
+        int attemptNumber = existingRuns.size() + 1;
+
+        AgentRun newRun = new AgentRun();
+        newRun.setTaskId(taskId);
+        newRun.setRunUuid(java.util.UUID.randomUUID().toString());
+        newRun.setAttemptNumber(attemptNumber);
+        newRun.setStatus(AgentConstants.STATUS_PENDING);
+        newRun.setScheduledAt(LocalDateTime.now()); // immediate
+        newRun.setDispatchCount(1);
+        newRun.setModel(existingRuns.isEmpty() ? null : existingRuns.get(existingRuns.size() - 1).getModel());
+        newRun.setStyle("detailed");
+        newRun.setMaxToolSteps(5);
+        runMapper.insert(newRun);
+
+        // 重置 task
+        task.setStatus(AgentConstants.STATUS_PENDING);
+        task.setCurrentRunId(newRun.getId());
+        taskMapper.updateById(task);
+
+        // Record event
+        statusEventService.record(taskId, newRun.getId(), "RECOVERED",
+                AgentConstants.STATUS_PENDING,
+                Map.of("fromStatus", AgentConstants.STATUS_DEAD_LETTER,
+                        "attemptNumber", attemptNumber));
+
+        log.info("Dead-letter task {} requeued by user {}: new run id={} attempt={}",
+                taskId, userId, newRun.getId(), attemptNumber);
+        return newRun;
     }
 
     private static String sha256(String input) {
@@ -707,6 +937,11 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                     .runUuid(run.getRunUuid())
                     .attemptNumber(run.getAttemptNumber())
                     .status(run.getStatus())
+                    .scheduledAt(run.getScheduledAt())
+                    .leaseHolder(run.getLeaseHolder())
+                    .leaseExpiresAt(run.getLeaseExpiresAt())
+                    .heartbeatAt(run.getHeartbeatAt())
+                    .dispatchCount(run.getDispatchCount())
                     .model(run.getModel())
                     .style(run.getStyle())
                     .maxToolSteps(run.getMaxToolSteps())
@@ -732,6 +967,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                 .query(task.getQuery())
                 .status(task.getStatus())
                 .currentRunId(task.getCurrentRunId())
+                .deadLetterReason(task.getDeadLetterReason())
+                .deadLetterAt(task.getDeadLetterAt())
                 .createdAt(task.getCreatedAt())
                 .updatedAt(task.getUpdatedAt())
                 .runs(runDTOs)
@@ -759,12 +996,15 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             querySummary = querySummary.substring(0, AgentConstants.QUERY_SUMMARY_MAX_LENGTH) + "...";
         }
 
+        boolean isDeadLetter = AgentConstants.STATUS_DEAD_LETTER.equals(task.getStatus());
         return AgentTaskSummaryDTO.builder()
                 .id(task.getId())
                 .requestId(task.getRequestId())
                 .query(querySummary)
                 .knowledgeBaseId(task.getKnowledgeBaseId())
                 .status(task.getStatus())
+                .deadLetter(isDeadLetter)
+                .deadLetterReason(task.getDeadLetterReason())
                 .runCount(runs.size())
                 .lastErrorCode(lastErrorCode)
                 .lastErrorMessage(lastErrorMessage)

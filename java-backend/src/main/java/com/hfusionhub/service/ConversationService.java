@@ -9,6 +9,7 @@ import com.hfusionhub.dto.MessageSendDTO;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -104,4 +105,22 @@ public interface ConversationService {
      * 主动取消指定的流式请求，并等待服务端保存已接收的部分结果。
      */
     boolean cancelMessageStream(String requestId, Long currentUserId);
+
+    /**
+     * 获取对话历史（最近20条，role+content格式），供 Worker 复用。
+     *
+     * @param conversationId 对话ID
+     * @return 历史消息列表
+     */
+    List<Map<String, String>> getChatHistory(Long conversationId);
+
+    /**
+     * V13 队列模式入口 — 校验权限、保存用户消息、创建 AgentTask + PENDING Run、
+     * 记录 QUEUED 事件，返回 taskId 供前端订阅 SSE。
+     *
+     * @param dto           消息内容
+     * @param currentUserId 当前用户ID
+     * @return agentTaskId（前端用此 ID 订阅 GET /agent-task/{id}/events/stream）
+     */
+    Long enqueueMessage(MessageSendDTO dto, Long currentUserId);
 }

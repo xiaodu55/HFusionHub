@@ -29,4 +29,9 @@ public interface AgentStepMapper extends BaseMapper<AgentStep> {
      * 按运行ID统计步骤数
      */
     int countByRunId(@Param("runId") Long runId);
+
+    /**
+     * 按运行ID删除所有步骤（孤儿重派前清理）
+     */
+    int deleteByRunId(@Param("runId") Long runId);
 }

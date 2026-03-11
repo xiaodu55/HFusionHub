@@ -35,9 +35,12 @@ public interface AgentConstants {
     /** 执行超时 */
     String STATUS_TIMED_OUT = "timed_out";
 
+    /** 死信（重试耗尽，需人工介入） */
+    String STATUS_DEAD_LETTER = "dead_letter";
+
     /** 终态集合 */
     Set<String> TERMINAL_STATUSES = Set.of(
-            STATUS_SUCCEEDED, STATUS_FAILED, STATUS_CANCELLED, STATUS_TIMED_OUT
+            STATUS_SUCCEEDED, STATUS_FAILED, STATUS_CANCELLED, STATUS_TIMED_OUT, STATUS_DEAD_LETTER
     );
 
     /** 可重试状态 */
@@ -51,11 +54,12 @@ public interface AgentConstants {
         // 终态不可再转移
         if (TERMINAL_STATUSES.contains(from)) return false;
         return switch (from) {
-            case STATUS_PENDING -> Set.of(STATUS_RUNNING, STATUS_CANCELLED).contains(to);
+            case STATUS_PENDING -> Set.of(STATUS_RUNNING, STATUS_CANCELLED, STATUS_DEAD_LETTER).contains(to);
             case STATUS_RUNNING -> Set.of(STATUS_SUCCEEDED, STATUS_FAILED,
-                    STATUS_CANCELLED, STATUS_TIMED_OUT, STATUS_WAITING_APPROVAL).contains(to);
+                    STATUS_CANCELLED, STATUS_TIMED_OUT, STATUS_WAITING_APPROVAL,
+                    STATUS_DEAD_LETTER).contains(to);
             case STATUS_WAITING_APPROVAL -> Set.of(STATUS_RUNNING, STATUS_FAILED,
-                    STATUS_CANCELLED, STATUS_TIMED_OUT).contains(to);
+                    STATUS_CANCELLED, STATUS_TIMED_OUT, STATUS_DEAD_LETTER).contains(to);
             default -> false;
         };
     }
@@ -116,6 +120,8 @@ public interface AgentConstants {
     // ============================================================
 
     /** 执行超时 */
+    String ERR_EXECUTION_TIMEOUT = "execution_timeout";
+
     String ERR_TIMEOUT = "timeout";
 
     /** 连接错误 */
@@ -129,6 +135,31 @@ public interface AgentConstants {
 
     /** 用户取消 */
     String ERR_CANCELLED = "cancelled";
+
+    /** 被新 Run 取代 */
+    String ERR_SUPERSEDED = "superseded";
+
+    /** 看门狗超时（租约过期 + 执行超时） */
+    String ERR_WATCHDOG_TIMEOUT = "watchdog_timeout";
+
+    /** 审批过期 */
+    String ERR_APPROVAL_EXPIRED = "approval_expired";
+
+    /** 默认可重试错误码 */
+    Set<String> DEFAULT_RETRYABLE_ERROR_CODES = Set.of(
+            ERR_TIMEOUT, ERR_EXECUTION_TIMEOUT, ERR_CONNECTION_ERROR, ERR_TOOL_ERROR, ERR_INTERNAL_ERROR
+    );
+
+    /**
+     * 判断错误码是否可重试。配置的 retryable-error-codes 集合优先；
+     * 若未配置则使用默认集合。
+     */
+    static boolean isRetryableErrorCode(String errorCode, java.util.Set<String> configured) {
+        if (errorCode == null) return false;
+        java.util.Set<String> effective = (configured != null && !configured.isEmpty())
+                ? configured : DEFAULT_RETRYABLE_ERROR_CODES;
+        return effective.contains(errorCode);
+    }
 
     // ============================================================
     // 摘要长度限制

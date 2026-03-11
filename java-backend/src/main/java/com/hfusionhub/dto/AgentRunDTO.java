@@ -34,6 +34,24 @@ public class AgentRunDTO {
     @Schema(description = "运行状态")
     private String status;
 
+    @Schema(description = "计划执行时间")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime scheduledAt;
+
+    @Schema(description = "租约持有者")
+    private String leaseHolder;
+
+    @Schema(description = "租约过期时间")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime leaseExpiresAt;
+
+    @Schema(description = "最近心跳时间")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime heartbeatAt;
+
+    @Schema(description = "派发次数")
+    private Integer dispatchCount;
+
     @Schema(description = "模型名称")
     private String model;
 

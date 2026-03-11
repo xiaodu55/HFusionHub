@@ -51,6 +51,36 @@ public class AgentRun {
     private String status;
 
     /**
+     * 计划执行时间（重试退避；NULL=立即可执行）
+     */
+    @Schema(description = "计划执行时间")
+    private LocalDateTime scheduledAt;
+
+    /**
+     * 租约持有者（worker实例ID 或 stream:xxx）
+     */
+    @Schema(description = "租约持有者")
+    private String leaseHolder;
+
+    /**
+     * 租约过期时间
+     */
+    @Schema(description = "租约过期时间")
+    private LocalDateTime leaseExpiresAt;
+
+    /**
+     * 最近心跳时间
+     */
+    @Schema(description = "最近心跳时间")
+    private LocalDateTime heartbeatAt;
+
+    /**
+     * 物理派发次数（孤儿重派时递增）
+     */
+    @Schema(description = "派发次数")
+    private Integer dispatchCount;
+
+    /**
      * 使用的模型
      */
     @Schema(description = "模型名称")

@@ -66,6 +66,18 @@ public class AgentTask {
     private Long currentRunId;
 
     /**
+     * 死信原因（重试耗尽）
+     */
+    @Schema(description = "死信原因")
+    private String deadLetterReason;
+
+    /**
+     * 死信时间
+     */
+    @Schema(description = "死信时间")
+    private LocalDateTime deadLetterAt;
+
+    /**
      * 创建时间
      */
     @TableField(fill = FieldFill.INSERT)

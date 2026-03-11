@@ -4,6 +4,8 @@ server:
     context-path: /api
 
 spring:
+  main:
+    allow-circular-references: true
   application:
     name: hfusionhub-backend
 
@@ -118,6 +120,37 @@ app:
   admin:
     username: ${ADMIN_USERNAME:admin}
     password: ${ADMIN_PASSWORD:}
+
+# =====================================================
+# Agent 异步任务调度与可靠恢复（V13）
+# =====================================================
+agent:
+  # 队列模式开关 — true=新 Run 入队由 Worker 异步执行, false=请求线程直连 Python（兼容旧行为）
+  queue:
+    enabled: ${AGENT_QUEUE_ENABLED:false}
+  worker:
+    poll-delay-ms: ${AGENT_WORKER_POLL_DELAY_MS:5000}
+    batch-size: ${AGENT_WORKER_BATCH_SIZE:5}
+  run:
+    lease-seconds: ${AGENT_RUN_LEASE_SECONDS:120}
+    heartbeat-seconds: ${AGENT_RUN_HEARTBEAT_SECONDS:15}
+    timeout-seconds: ${AGENT_RUN_TIMEOUT_SECONDS:600}
+  retry:
+    max-attempts: ${AGENT_RETRY_MAX_ATTEMPTS:3}
+    base-delay-seconds: ${AGENT_RETRY_BASE_DELAY_SECONDS:30}
+    backoff-multiplier: ${AGENT_RETRY_BACKOFF_MULTIPLIER:2}
+    max-delay-seconds: ${AGENT_RETRY_MAX_DELAY_SECONDS:600}
+    retryable-error-codes: ${AGENT_RETRY_RETRYABLE_ERROR_CODES:timeout,execution_timeout,connection_error,tool_error,internal_error}
+    on-approval-expiry: ${AGENT_RETRY_ON_APPROVAL_EXPIRY:false}
+    max-dispatch-count: ${AGENT_RETRY_MAX_DISPATCH_COUNT:3}
+  recovery:
+    sweep-delay-ms: ${AGENT_RECOVERY_SWEEP_DELAY_MS:30000}
+    startup-recovery: ${AGENT_RECOVERY_STARTUP:true}
+  status-event:
+    sse-poll-delay-ms: ${AGENT_STATUS_EVENT_SSE_POLL_MS:1000}
+    retention-days: ${AGENT_STATUS_EVENT_RETENTION_DAYS:7}
+  cancel-flag-ttl-seconds: ${AGENT_CANCEL_FLAG_TTL_SECONDS:3600}
+  instance-id: ${AGENT_WORKER_INSTANCE_ID:}
 
 # 日志配置
 logging:

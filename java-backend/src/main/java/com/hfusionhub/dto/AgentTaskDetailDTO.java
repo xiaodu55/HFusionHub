@@ -42,6 +42,13 @@ public class AgentTaskDetailDTO {
     @Schema(description = "当前活跃run ID")
     private Long currentRunId;
 
+    @Schema(description = "死信原因")
+    private String deadLetterReason;
+
+    @Schema(description = "死信时间")
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime deadLetterAt;
+
     @Schema(description = "创建时间")
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createdAt;

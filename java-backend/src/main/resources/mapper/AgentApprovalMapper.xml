@@ -57,6 +57,7 @@
             decided_at = #{decidedAt},
             reason = #{reason}
         WHERE id = #{id}
+          AND status = 'pending'
     </update>
 
 </mapper>

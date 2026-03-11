@@ -1,15 +1,18 @@
 package com.hfusionhub.controller;
 
+import com.hfusionhub.common.constant.AgentConstants;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.common.utils.JwtUtils;
-import com.hfusionhub.dto.AgentTaskDetailDTO;
-import com.hfusionhub.dto.AgentTaskSummaryDTO;
+import com.hfusionhub.dto.*;
 import com.hfusionhub.entity.AgentApproval;
+import com.hfusionhub.entity.AgentRun;
+import com.hfusionhub.service.AgentStatusEventService;
 import com.hfusionhub.service.AgentTaskService;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +32,7 @@ import org.springframework.web.bind.annotation.*;
 public class AgentTaskController {
 
     private final AgentTaskService agentTaskService;
+    private final AgentStatusEventService statusEventService;
 
     @Operation(summary = "获取任务详情（含所有 Run 和 Step 时间线）")
     @GetMapping("/{taskId}")
@@ -126,5 +130,96 @@ public class AgentTaskController {
     public R<List<AgentApproval>> listPendingApprovals() {
         Long userId = JwtUtils.getCurrentUserId();
         return R.ok(agentTaskService.listPendingApprovals(userId));
+    }
+
+    // ================================================================
+    // V13: 调度状态、事件、重试历史、死信管理
+    // ================================================================
+
+    @Operation(summary = "获取任务完整状态（含调度信息）")
+    @GetMapping("/{taskId}/status")
+    public R<AgentTaskStatusDTO> getTaskStatus(@PathVariable Long taskId) {
+        AgentTaskDetailDTO detail = agentTaskService.getTaskDetail(taskId);
+        if (detail == null) return R.fail("任务不存在");
+        if (!detail.getUserId().equals(JwtUtils.getCurrentUserId())) return R.fail("无权查看此任务");
+
+        AgentStatusEventDTO latestEvent = statusEventService.getLatestEvent(taskId);
+
+        // Find current run scheduling info
+        String currentRunStatus = null;
+        java.time.LocalDateTime currentRunScheduledAt = null;
+        Integer currentRunAttemptNumber = null;
+        if (detail.getRuns() != null && detail.getCurrentRunId() != null) {
+            for (AgentRunDTO runDTO : detail.getRuns()) {
+                if (runDTO.getId().equals(detail.getCurrentRunId())) {
+                    currentRunStatus = runDTO.getStatus();
+                    currentRunScheduledAt = runDTO.getScheduledAt();
+                    currentRunAttemptNumber = runDTO.getAttemptNumber();
+                    break;
+                }
+            }
+        }
+
+        AgentTaskStatusDTO status = AgentTaskStatusDTO.builder()
+                .id(detail.getId())
+                .requestId(detail.getRequestId())
+                .userId(detail.getUserId())
+                .conversationId(detail.getConversationId())
+                .knowledgeBaseId(detail.getKnowledgeBaseId())
+                .query(detail.getQuery())
+                .status(detail.getStatus())
+                .deadLetter(AgentConstants.STATUS_DEAD_LETTER.equals(detail.getStatus()))
+                .deadLetterReason(detail.getDeadLetterReason())
+                .currentRunId(detail.getCurrentRunId())
+                .currentRunStatus(currentRunStatus)
+                .currentRunScheduledAt(currentRunScheduledAt)
+                .currentRunAttemptNumber(currentRunAttemptNumber)
+                .totalRunCount(detail.getRuns() != null ? detail.getRuns().size() : 0)
+                .latestEvent(latestEvent)
+                .createdAt(detail.getCreatedAt())
+                .updatedAt(detail.getUpdatedAt())
+                .build();
+        return R.ok(status);
+    }
+
+    @Operation(summary = "查询任务事件列表（支持断点续传 sinceId）")
+    @GetMapping("/{taskId}/events")
+    public R<List<AgentStatusEventDTO>> listEvents(
+            @PathVariable Long taskId,
+            @RequestParam(required = false) Long sinceId,
+            @RequestParam(defaultValue = "50") int limit) {
+        AgentTaskDetailDTO detail = agentTaskService.getTaskDetail(taskId);
+        if (detail == null) return R.fail("任务不存在");
+        if (!detail.getUserId().equals(JwtUtils.getCurrentUserId())) return R.fail("无权查看此任务");
+        return R.ok(statusEventService.listEvents(taskId, sinceId, Math.min(limit, 200)));
+    }
+
+    @Operation(summary = "查询任务的重试历史")
+    @GetMapping("/{taskId}/retries")
+    public R<List<AgentRunDTO>> listRetries(@PathVariable Long taskId) {
+        AgentTaskDetailDTO detail = agentTaskService.getTaskDetail(taskId);
+        if (detail == null) return R.fail("任务不存在");
+        if (!detail.getUserId().equals(JwtUtils.getCurrentUserId())) return R.fail("无权查看此任务");
+        // Return all runs (each run = one attempt with scheduling info)
+        return R.ok(detail.getRuns());
+    }
+
+    @Operation(summary = "查询当前用户的死信任务列表")
+    @GetMapping("/dead-letter")
+    public R<PageResult<AgentTaskSummaryDTO>> listDeadLetterTasks(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int pageSize) {
+        Long userId = JwtUtils.getCurrentUserId();
+        PageResult<AgentTaskSummaryDTO> result = agentTaskService.listUserTasks(
+                userId, AgentConstants.STATUS_DEAD_LETTER, page, pageSize);
+        return R.ok(result);
+    }
+
+    @Operation(summary = "恢复死信任务")
+    @PostMapping("/{taskId}/requeue")
+    public R<AgentRun> requeueTask(@PathVariable Long taskId) {
+        Long userId = JwtUtils.getCurrentUserId();
+        AgentRun newRun = agentTaskService.requeueTask(taskId, userId);
+        return R.ok(newRun);
     }
 }

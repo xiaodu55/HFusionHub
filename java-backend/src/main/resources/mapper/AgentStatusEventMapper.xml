@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hfusionhub.mapper.AgentStatusEventMapper">
+
+    <resultMap id="BaseResultMap" type="com.hfusionhub.entity.AgentStatusEvent">
+        <id column="id" property="id"/>
+        <result column="task_id" property="taskId"/>
+        <result column="run_id" property="runId"/>
+        <result column="event_type" property="eventType"/>
+        <result column="status" property="status"/>
+        <result column="payload" property="payload"
+                typeHandler="com.hfusionhub.handler.JsonMapTypeHandler"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, task_id, run_id, event_type, status, payload, created_at
+    </sql>
+
+    <select id="selectAfter" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_status_event
+        WHERE task_id = #{taskId}
+          <if test="sinceId != null and sinceId > 0">
+              AND id &gt; #{sinceId}
+          </if>
+        ORDER BY id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectLatestByTaskId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_status_event
+        WHERE task_id = #{taskId}
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
+    <delete id="deleteOlderThan">
+        DELETE FROM agent_status_event
+        WHERE created_at &lt; #{cutoff}
+    </delete>
+
+</mapper>

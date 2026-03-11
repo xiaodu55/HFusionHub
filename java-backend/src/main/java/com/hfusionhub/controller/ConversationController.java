@@ -9,6 +9,7 @@ import com.hfusionhub.dto.ConversationQueryDTO;
 import com.hfusionhub.dto.MessageInfoDTO;
 import com.hfusionhub.dto.MessageSendDTO;
 import com.hfusionhub.service.ConversationService;
+import com.hfusionhub.service.TaskEventSseManager;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -16,6 +17,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -39,6 +41,10 @@ public class ConversationController {
 
     private final ConversationService conversationService;
     private final Executor sseTaskExecutor;
+    private final TaskEventSseManager taskEventSseManager;
+
+    @Value("${agent.queue.enabled:false}")
+    private boolean agentQueueEnabled;
 
     @Operation(summary = "创建对话", description = "创建新的对话")
     @PostMapping
@@ -102,10 +108,26 @@ public class ConversationController {
         response.setHeader("Cache-Control", "no-cache");
         response.setHeader("Connection", "keep-alive");
 
-        SseEmitter emitter = new SseEmitter(300000L); // 5 minutes timeout
-
         // 在请求线程中提取用户ID
         Long currentUserId = JwtUtils.getCurrentUserId();
+
+        // ── V13: 队列模式 — 入队后通过 SSE 订阅状态变更 ──
+        if (agentQueueEnabled) {
+            try {
+                Long taskId = conversationService.enqueueMessage(dto, currentUserId);
+                log.info("Queue mode: task {} enqueued for conversation {}, returning SSE subscription",
+                        taskId, dto.getConversationId());
+                return taskEventSseManager.register(taskId, currentUserId);
+            } catch (Exception e) {
+                log.error("Queue mode enqueue failed for conversation {}: {}", dto.getConversationId(), e.getMessage());
+                SseEmitter errorEmitter = new SseEmitter(0L);
+                errorEmitter.completeWithError(e);
+                return errorEmitter;
+            }
+        }
+
+        // ── 兼容模式：请求线程直连 Python ──
+        SseEmitter emitter = new SseEmitter(300000L); // 5 minutes timeout
 
         // 创建取消标志，客户端断开时设为true
         AtomicBoolean cancelled = new AtomicBoolean(false);

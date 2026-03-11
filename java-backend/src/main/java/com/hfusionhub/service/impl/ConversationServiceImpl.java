@@ -62,9 +62,10 @@ public class ConversationServiceImpl implements ConversationService {
     private final UserMapper userMapper;
     private final AiClient aiClient;
     private final AgentTaskService agentTaskService;
+    private final com.hfusionhub.service.AgentStreamEventProcessor streamEventProcessor;
 
     private static final int REQUEST_ID_MAX_LENGTH = 64;
-    private static final String ASSISTANT_REQUEST_SUFFIX = ":assistant";
+    public static final String ASSISTANT_REQUEST_SUFFIX = ":assistant";
     private final ConcurrentMap<String, StreamCancellation> activeStreamRequests = new ConcurrentHashMap<>();
 
     @Override
@@ -543,7 +544,8 @@ public class ConversationServiceImpl implements ConversationService {
     /**
      * Get last 20 messages for chat context (newest first, returns oldest→newest order)
      */
-    private List<Map<String, String>> getChatHistory(Long conversationId) {
+    @Override
+    public List<Map<String, String>> getChatHistory(Long conversationId) {
         LambdaQueryWrapper<Message> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Message::getConversationId, conversationId)
                 .orderByDesc(Message::getCreatedAt)
@@ -590,6 +592,85 @@ public class ConversationServiceImpl implements ConversationService {
     public void sendMessageStream(MessageSendDTO dto, SseEmitter emitter) {
         Long currentUserId = JwtUtils.getCurrentUserId();
         sendMessageStream(dto, emitter, currentUserId, new AtomicBoolean(false));
+    }
+
+    // ================================================================
+    // V13: 队列模式入口
+    // ================================================================
+
+    @Override
+    @Transactional
+    public Long enqueueMessage(MessageSendDTO dto, Long currentUserId) {
+        // 1. 查询对话
+        Conversation conversation = conversationMapper.selectById(dto.getConversationId());
+        if (conversation == null) {
+            throw new BusinessException("对话不存在");
+        }
+
+        // 2. 验证权限
+        if (!conversation.getUserId().equals(currentUserId)) {
+            throw new BusinessException("无权发送消息");
+        }
+
+        // 3. 验证关联知识库
+        if (conversation.getKnowledgeBaseId() != null) {
+            KnowledgeBase kb = knowledgeBaseMapper.selectById(conversation.getKnowledgeBaseId());
+            if (kb == null || kb.getDeleted() == 1 || kb.getStatus() != 0) {
+                throw new BusinessException("关联的知识库已被删除或禁用");
+            }
+            if (!kb.getUserId().equals(currentUserId)) {
+                throw new BusinessException("无权访问关联的知识库");
+            }
+        }
+
+        // 4. Idempotency check
+        final String requestId;
+        String rawRequestId = normalizeRequestId(dto.getRequestId());
+        if (rawRequestId == null) {
+            requestId = java.util.UUID.randomUUID().toString();
+        } else {
+            requestId = rawRequestId;
+        }
+        final String assistantRequestId = assistantRequestId(requestId);
+        Message existingAssistant = findAssistantByRequestId(assistantRequestId);
+        if (existingAssistant != null) {
+            log.info("Idempotent: assistant message already exists for requestId={}, returning taskId from message",
+                    requestId);
+            // Return a synthetic taskId — the frontend should fetch existing message directly
+            throw new BusinessException("该消息已处理完成，请刷新对话查看回复");
+        }
+
+        // 5. 保存用户消息
+        Message userMessage = findUserByRequestId(requestId);
+        if (userMessage == null) {
+            userMessage = new Message();
+            userMessage.setConversationId(dto.getConversationId());
+            userMessage.setRole("user");
+            userMessage.setContent(dto.getContent());
+            userMessage.setRequestId(requestId);
+            try {
+                messageMapper.insert(userMessage);
+            } catch (DuplicateKeyException e) {
+                userMessage = findUserByRequestId(requestId);
+                if (userMessage == null) {
+                    throw e;
+                }
+            }
+        }
+
+        // 6. 创建 AgentTask（PENDING）
+        AgentTask agentTask = agentTaskService.createTask(
+                requestId, currentUserId, conversation.getId(),
+                conversation.getKnowledgeBaseId(), dto.getContent());
+
+        // 7. 入队 PENDING Run
+        agentTaskService.enqueueRun(agentTask.getId());
+
+        log.info("Message enqueued: taskId={} conversationId={} userId={} isKbBound={}",
+                agentTask.getId(), conversation.getId(), currentUserId,
+                conversation.getKnowledgeBaseId() != null && conversation.getKnowledgeBaseId() > 0);
+
+        return agentTask.getId();
     }
 
     @Override
@@ -730,7 +811,7 @@ public class ConversationServiceImpl implements ConversationService {
                     // Strip the "data: " / "data:" prefix before JSON parsing.
 
                     // ── Step 1: normalise the raw payload ──────────────────
-                    String data = stripSsePrefix(chunk);
+                    String data = com.hfusionhub.service.AgentStreamEventProcessor.stripSsePrefix(chunk);
                     if (data == null) return;   // empty / separator line
 
                     // ── Step 2: [DONE] sentinel ───────────────────────────
@@ -754,7 +835,7 @@ public class ConversationServiceImpl implements ConversationService {
 
                         // ── Agent V1 Step 4: intercept structured events for persistence ──
                         if (jsonNode.has("event")) {
-                            handleAgentEvent(jsonNode, agentRun.getId());
+                            streamEventProcessor.handleLine(chunk, agentRun.getId());
                             // Forward structured events to frontend (for progress UI)
                             try {
                                 Map<String, Object> eventMap = objectMapper.treeToValue(jsonNode, Map.class);
@@ -878,90 +959,6 @@ public class ConversationServiceImpl implements ConversationService {
         streamCancellation.setSubscription(subscription);
     }
 
-    /**
-     * Agent V1 Step 4: handle structured SSE events from Python for persistence.
-     */
-    private void handleAgentEvent(com.fasterxml.jackson.databind.JsonNode eventNode, Long runId) {
-        try {
-            String eventType = eventNode.get("event").asText();
-            switch (eventType) {
-                case "step_completed": {
-                    int sequence = eventNode.has("sequence") ? eventNode.get("sequence").asInt() : 0;
-                    String stepType = eventNode.has("step_type") ? eventNode.get("step_type").asText() : "";
-                    String action = eventNode.has("action") && !eventNode.get("action").isNull()
-                            ? eventNode.get("action").asText() : null;
-                    String inputSummary = eventNode.has("input_summary") && !eventNode.get("input_summary").isNull()
-                            ? eventNode.get("input_summary").asText() : null;
-                    String outputSummary = eventNode.has("output_summary") && !eventNode.get("output_summary").isNull()
-                            ? eventNode.get("output_summary").asText() : null;
-                    List<Map<String, Object>> sources = null;
-                    if (eventNode.has("sources") && !eventNode.get("sources").isNull() && eventNode.get("sources").isArray()) {
-                        sources = new com.fasterxml.jackson.databind.ObjectMapper()
-                                .treeToValue(eventNode.get("sources"), List.class);
-                    }
-                    long durationMs = eventNode.has("duration_ms") ? eventNode.get("duration_ms").asLong() : 0L;
-                    String errorCode = eventNode.has("error_code") && !eventNode.get("error_code").isNull()
-                            ? eventNode.get("error_code").asText() : null;
-
-                    agentTaskService.recordStep(runId, sequence, stepType, action,
-                            inputSummary, outputSummary, sources, durationMs, errorCode);
-                    break;
-                }
-                case "run_completed": {
-                    String rawStatus = eventNode.has("status") ? eventNode.get("status").asText() : "completed";
-                    String status = AgentConstants.mapPythonStatus(rawStatus);
-                    int toolCalls = eventNode.has("tool_calls_count") ? eventNode.get("tool_calls_count").asInt() : 0;
-                    agentTaskService.completeRun(runId, status, null, null, toolCalls, 0,
-                            null, null, null);
-                    log.info("Agent run {} completed via SSE event: rawStatus={} mappedStatus={}", runId, rawStatus, status);
-                    break;
-                }
-                case "run_error": {
-                    String rawStatus = eventNode.has("status") ? eventNode.get("status").asText() : "failed";
-                    String status = AgentConstants.mapPythonStatus(rawStatus);
-                    String errorCode = eventNode.has("error_code") && !eventNode.get("error_code").isNull()
-                            ? eventNode.get("error_code").asText() : "internal_error";
-                    String errorDetail = eventNode.has("error_detail") && !eventNode.get("error_detail").isNull()
-                            ? eventNode.get("error_detail").asText() : null;
-                    String failedTool = eventNode.has("failed_tool") && !eventNode.get("failed_tool").isNull()
-                            ? eventNode.get("failed_tool").asText() : null;
-                    agentTaskService.completeRun(runId, status, null, null, 0, 0,
-                            errorCode, errorDetail, failedTool);
-                    log.warn("Agent run {} failed via SSE event: rawStatus={} mappedStatus={} errorCode={}",
-                            runId, rawStatus, status, errorCode);
-                    break;
-                }
-                case "approval_required": {
-                    String toolName = eventNode.has("tool_name") ? eventNode.get("tool_name").asText() : "";
-                    String toolInput = eventNode.has("tool_input") ? eventNode.get("tool_input").toString() : "{}";
-                    String argumentsSummary = eventNode.has("arguments_summary") && !eventNode.get("arguments_summary").isNull()
-                            ? eventNode.get("arguments_summary").asText() : "";
-
-                    // Look up task context via the run
-                    AgentRun currentRun = agentTaskService.getRunById(runId);
-                    if (currentRun != null) {
-                        AgentTaskDetailDTO taskDetail = agentTaskService.getTaskDetail(currentRun.getTaskId());
-                        Long taskUserId = taskDetail != null ? taskDetail.getUserId() : 2L;
-                        agentTaskService.pauseForApproval(currentRun.getTaskId(), runId, taskUserId,
-                                toolName, toolInput, argumentsSummary);
-                        log.info("Agent run {} requires approval: tool={} taskId={}",
-                                runId, toolName, currentRun.getTaskId());
-                    } else {
-                        log.warn("Cannot pause for approval: run {} not found", runId);
-                    }
-                    break;
-                }
-                case "run_started":
-                    // No persistence action needed — run was created by startRun().
-                    break;
-                default:
-                    log.debug("Unknown agent event type: {}", eventType);
-            }
-        } catch (Exception e) {
-            log.warn("Failed to handle agent event: {}", e.getMessage());
-        }
-    }
-
     // ── Agent V1 Step 5: capability profile resolution ──────────────────────
 
     /**
@@ -1010,42 +1007,6 @@ public class ConversationServiceImpl implements ConversationService {
         log.info("capabilityProfile=approval_write granted for conversation {} (KB {}, user {})",
                 conversation.getId(), conversation.getKnowledgeBaseId(), currentUserId);
         return "approval_write";
-    }
-
-    /**
-     * Strip the SSE {@code data:} / {@code data: } prefix from a raw chunk line.
-     *
-     * Python emits SSE in standard format:
-     *   data: {json payload}\n\n
-     *   data: [DONE]\n\n
-     *
-     * WebFlux {@code StringDecoder} splits the response body by {@code \n},
-     * so each Flux element is one line.  Empty lines (SSE separators) and
-     * anything that isn't a {@code data:} line are returned as {@code null}.
-     *
-     * @param rawChunk one line from the SSE stream (may have trailing whitespace)
-     * @return the JSON / sentinel payload, or {@code null} if this line
-     *         carries no data
-     */
-    private static String stripSsePrefix(String rawChunk) {
-        if (rawChunk == null) return null;
-        String line = rawChunk.strip();
-        if (line.isEmpty()) return null;               // SSE separator (blank line)
-
-        // Standard SSE: "data: {json}" or "data: [DONE]"
-        if (line.startsWith("data: ")) {
-            String payload = line.substring(6).strip();
-            return payload.isEmpty() ? null : payload;
-        }
-        if (line.startsWith("data:")) {
-            String payload = line.substring(5).strip();
-            return payload.isEmpty() ? null : payload;
-        }
-
-        // Non-SSE or legacy format — treat the whole line as the payload.
-        // This handles the case where the Python / proxy strips the prefix,
-        // or a non-SSE response is received.
-        return line;
     }
 
     // ──────────────────────────────────────────────────────────────────────

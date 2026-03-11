@@ -32,6 +32,12 @@ public class AgentTaskSummaryDTO {
     @Schema(description = "任务状态")
     private String status;
 
+    @Schema(description = "是否死信")
+    private boolean deadLetter;
+
+    @Schema(description = "死信原因")
+    private String deadLetterReason;
+
     @Schema(description = "总运行次数（含重试）")
     private Integer runCount;
 
