@@ -549,6 +549,7 @@ class TestEvaluationErrorHandling:
             "knowledge_base_id": 1,
             "user_id": 1,
             "label": "timeout-test",
+            "agent_timeout_seconds": 0.1,
             "dimensions": ["answer_correctness", "citation_consistency"],
             "cases": [{
                 "case_id": "timeout-001",

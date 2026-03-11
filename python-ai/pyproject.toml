@@ -16,6 +16,12 @@ markers = [
     "e2e: End-to-end tests — require running services, not for CI",
 ]
 testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+# A hung mock, network call, or background task must not stall local feedback
+# or the CI pipeline indefinitely.  Individual long-running tests can opt out
+# explicitly with ``@pytest.mark.timeout(0)`` and a documented reason.
+timeout = 45
+timeout_method = "thread"
 
 [tool.pip-tools]
 generate-hashes = true

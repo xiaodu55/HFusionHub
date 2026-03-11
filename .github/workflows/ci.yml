@@ -33,9 +33,9 @@ jobs:
           cache: pip
           cache-dependency-path: python-ai/requirements.txt
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest pytest-asyncio
+        run: pip install -r requirements-dev.txt
       - name: Run tests
-        run: pytest -q tests
+        run: pytest -q tests --durations=20
 
   # ─── Java 后端 ───
   java:

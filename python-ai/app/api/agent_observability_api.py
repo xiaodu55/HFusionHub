@@ -156,6 +156,12 @@ class AgentEvalRunRequest(BaseModel):
     knowledge_base_id: Optional[int] = None
     user_id: Optional[int] = None
     label: Optional[str] = Field(default=None, max_length=120)
+    agent_timeout_seconds: float = Field(
+        default=20.0,
+        ge=0.1,
+        le=120.0,
+        description="Per-case Agent execution budget. Timed-out cases are scored as failures, not batch errors.",
+    )
     dimensions: List[str] = Field(
         default_factory=lambda: [
             "answer_correctness",
@@ -239,7 +245,7 @@ async def run_agent_evaluation(request: AgentEvalRunRequest):
                 )
                 response = await asyncio.wait_for(
                     agent.run(query=c.query, history=[], style="concise", max_tool_steps=5),
-                    timeout=60.0,
+                    timeout=request.agent_timeout_seconds,
                 )
                 real_answer = response.answer or response.content or ""
                 real_sources = response.sources or []
@@ -254,7 +260,10 @@ async def run_agent_evaluation(request: AgentEvalRunRequest):
                 agent_status = response.status or "completed"
             except asyncio.TimeoutError:
                 agent_status = "timeout"
-                agent_error = "Agent call timed out after 60s"
+                agent_error = (
+                    "Agent call timed out after "
+                    f"{request.agent_timeout_seconds:g}s"
+                )
                 logger.warning("Evaluation agent timeout for case %s: %s", c.case_id, c.query[:80])
             except Exception as exc:
                 agent_status = "error"
