@@ -1,6 +1,16 @@
 from app.core.vectorstore import milvus_store
 
 
+def test_vector_store_status_reports_connection_failure(monkeypatch):
+    monkeypatch.setattr(milvus_store, "get_milvus_client", lambda: None)
+    monkeypatch.setattr(milvus_store, "_last_connection_error", "directory is locked")
+
+    status = milvus_store.vector_store_status()
+
+    assert status["ready"] is False
+    assert status["error"] == "directory is locked"
+
+
 def test_create_collection_reuses_compatible_collection(monkeypatch):
     class FakeClient:
         create_calls = 0

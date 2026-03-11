@@ -51,7 +51,15 @@ async def test_selected_knowledge_base_requires_retrieved_evidence(monkeypatch):
     agent = ReactAgent(knowledge_base_id=7)
     chunks = [chunk async for chunk in agent.run_stream("文档里的发布日期是什么？")]
 
-    assert chunks == [NO_SUFFICIENT_EVIDENCE_REPLY]
+    # The streaming protocol now emits a retrieval lifecycle event before the
+    # final plain-text evidence warning.  The warning remains the only answer
+    # content and the LLM must still not be called.
+    assert chunks[-1] == NO_SUFFICIENT_EVIDENCE_REPLY
+    assert len(chunks) == 2
+    import json
+    event = json.loads(chunks[0])
+    assert event["event"] == "step_completed"
+    assert event["step_type"] == "retrieval"
     assert retriever.knowledge_base_ids == [7]
 
 

@@ -85,7 +85,15 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"status": "healthy"}
+        # Readiness must include the local vector database: an HTTP-only
+        # health check previously reported healthy even though every document
+        # indexing request would fail at the Milvus step.
+        from app.core.vectorstore.milvus_store import vector_store_status
+        vector_store = vector_store_status()
+        return {
+            "status": "healthy" if vector_store["ready"] else "degraded",
+            "vector_store": vector_store,
+        }
 
     return app
 

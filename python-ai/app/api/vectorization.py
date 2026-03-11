@@ -362,8 +362,12 @@ async def _process_document_background(
             total_chunks=len(chunks),
         )
 
-        # Step 3: Create/update Milvus collection
-        create_collection()
+        # Step 3: Create/update Milvus collection.  Do not continue to a
+        # destructive replacement when the vector store is unavailable; the
+        # old index must remain intact and the callback must contain a useful
+        # failure reason.
+        if create_collection() is None:
+            raise MilvusException("Vector store is unavailable; cannot initialise the document index")
 
         # Step 4: Generate embeddings and store
         chunks_with_embeddings = []

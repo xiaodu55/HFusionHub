@@ -35,10 +35,21 @@ PROTOCOL_VERSION = "2024-11-05"
 # Tool definitions in MCP schema format
 _MCP_TOOL_SCHEMAS: List[Dict[str, Any]] = []
 
+# MCP is an external/public discovery surface.  High-risk tools such as
+# write_note are deliberately available only through the authenticated Agent
+# approval flow and must never appear in an MCP tools/list response.
+MCP_PUBLIC_TOOL_NAMES = {
+    "search_knowledge_base", "read_chunk", "list_document_chunks",
+    "calculate", "get_current_time", "web_search",
+}
+
 
 def _build_tool_schemas() -> List[Dict[str, Any]]:
     """Build MCP-compliant tool schemas from registered tools."""
-    raw_tools = get_tools(v1_only=False)
+    raw_tools = [
+        tool for tool in get_tools(v1_only=False)
+        if tool["name"] in MCP_PUBLIC_TOOL_NAMES
+    ]
     schemas = []
     for tool in raw_tools:
         params = tool.get("parameters", {})

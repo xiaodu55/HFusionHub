@@ -11,7 +11,9 @@ To switch to a standalone Milvus server for multi-instance or production:
 """
 
 import json
+import logging
 import os
+import threading
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from pymilvus import (
@@ -35,6 +37,9 @@ if not MILVUS_LITE_PATH.is_absolute():
 
 # Global client
 _client: Optional[MilvusClient] = None
+_client_lock = threading.RLock()
+_last_connection_error: Optional[str] = None
+logger = logging.getLogger(__name__)
 
 # Lazy import embedding service
 _embedding_service = None
@@ -50,18 +55,49 @@ def _get_embedding_service():
 
 
 def get_milvus_client() -> Optional[MilvusClient]:
-    """Get or create Milvus client (using Milvus Lite)"""
-    global _client
-    try:
-        if _client is None:
-            # Use Milvus Lite for local development
+    """Get the process-local Milvus Lite client.
+
+    Milvus Lite permits only one process to own a data directory.  Initialising
+    the client under a lock prevents concurrent FastAPI background tasks from
+    racing to acquire that directory and leaving the indexing path with a
+    transient ``None`` client.
+    """
+    global _client, _last_connection_error
+    with _client_lock:
+        if _client is not None:
+            return _client
+        try:
             MILVUS_LITE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            _client = MilvusClient(uri=str(MILVUS_LITE_PATH))
-            print(f"[Milvus] Connected to Milvus Lite at {MILVUS_LITE_PATH}")
-        return _client
-    except Exception as e:
-        print(f"Failed to connect to Milvus: {e}")
-        return None
+            client = MilvusClient(uri=str(MILVUS_LITE_PATH))
+            _client = client
+            _last_connection_error = None
+            logger.info("Connected to Milvus Lite at %s", MILVUS_LITE_PATH)
+            return client
+        except Exception as error:
+            _client = None
+            _last_connection_error = str(error)
+            logger.exception("Failed to connect to Milvus Lite at %s", MILVUS_LITE_PATH)
+            return None
+
+
+def vector_store_status() -> Dict[str, Any]:
+    """Return a safe readiness summary for health checks and diagnostics."""
+    client = get_milvus_client()
+    if client is None:
+        return {
+            "ready": False,
+            "collection": COLLECTION_NAME,
+            "error": _last_connection_error or "Milvus Lite connection failed",
+        }
+    try:
+        return {
+            "ready": True,
+            "collection": COLLECTION_NAME,
+            "collection_exists": client.has_collection(COLLECTION_NAME),
+        }
+    except Exception as error:
+        logger.exception("Milvus Lite readiness check failed")
+        return {"ready": False, "collection": COLLECTION_NAME, "error": str(error)}
 
 
 def drop_collection():

@@ -13,6 +13,7 @@ Tests the scoped grant mechanism and write_note KB enforcement:
 import asyncio
 import hashlib
 import json
+import os
 import sys
 import time
 import unittest
@@ -205,7 +206,7 @@ class TestScopedGrantTamperedParams(unittest.TestCase):
 # Test 5: write_note KB enforcement
 # ═══════════════════════════════════════════════════════════════════════════
 
-class TestWriteNoteKBEnforcement(unittest.TestCase):
+class TestWriteNoteKBEnforcement(unittest.IsolatedAsyncioTestCase):
     async def test_missing_kb_id_returns_error(self):
         """write_note with knowledge_base_id=None → returns error dict."""
         tool = WriteNoteTool()
@@ -274,7 +275,7 @@ class TestScopedGrantExpiry(unittest.TestCase):
 # Test 7: Registry.execute() KB injection for write_note
 # ═══════════════════════════════════════════════════════════════════════════
 
-class TestRegistryKBInjection(unittest.TestCase):
+class TestRegistryKBInjection(unittest.IsolatedAsyncioTestCase):
     async def test_write_note_gets_kb_injected(self):
         """Registry.execute() injects knowledge_base_id for KB_WRITE tools."""
         registry = create_v1_registry(knowledge_base_id=77, agent_version="1.1")
@@ -414,6 +415,10 @@ class TestScopedGrantHashCanonicalisation(unittest.TestCase):
 # Test 10: E2E via decide endpoint (requires running Python service)
 # ═══════════════════════════════════════════════════════════════════════════
 
+@unittest.skipUnless(
+    os.getenv("HFUSIONHUB_RUN_LIVE_E2E") == "true",
+    "set HFUSIONHUB_RUN_LIVE_E2E=true to run tests against a live Python service",
+)
 class TestDecideEndpointE2E(unittest.TestCase):
     """Integration tests against the running /api/agent/v1/chat/decide endpoint.
 
@@ -421,7 +426,7 @@ class TestDecideEndpointE2E(unittest.TestCase):
     """
 
     BASE = "http://localhost:9000"
-    TOKEN = "dev-token"
+    TOKEN = os.getenv("PYTHON_AI_INTERNAL_TOKEN", "")
 
     def _decide(self, approval_id, decision, tool_name, tool_input,
                 user_id, knowledge_base_id, reason=None):
