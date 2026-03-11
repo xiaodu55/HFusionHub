@@ -61,6 +61,16 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/chat/Detail.vue'),
       },
       {
+        path: 'agent',
+        name: 'AgentTasks',
+        component: () => import('@/pages/agent/Index.vue'),
+      },
+      {
+        path: 'memory',
+        name: 'Memory',
+        component: () => import('@/pages/memory/Index.vue'),
+      },
+      {
         path: 'rag',
         name: 'RagObservability',
         component: () => import('@/pages/rag/Index.vue'),

@@ -27,6 +27,11 @@ public class MemoryController {
         return R.ok(memoryService.save(entry));
     }
 
+    @PutMapping("/{id}")
+    public R<MemoryEntry> update(@PathVariable Long id, @RequestBody MemoryEntry entry) {
+        return R.ok(memoryService.update(id, entry));
+    }
+
     @DeleteMapping("/{id}")
     public R<Void> delete(@PathVariable Long id) {
         memoryService.delete(id);

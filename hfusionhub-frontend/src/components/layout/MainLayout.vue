@@ -41,6 +41,8 @@ const menuItems: Array<{
   { path: '/knowledge-base', label: '知识库', description: '知识治理', icon: BookOpen },
   { path: '/document', label: '文档管理', description: '解析与索引', icon: FileText },
   { path: '/chat', label: '智能对话', description: '多轮问答', icon: MessageSquare },
+  { path: '/agent', label: 'Agent 任务', description: '执行与恢复', icon: Sparkles },
+  { path: '/memory', label: '长期记忆', description: 'Agent 用户记忆', icon: User },
   { path: '/rag', label: 'RAG 观测', description: '检索评估', icon: Activity },
   { path: '/admin/flags', label: '功能开关', description: '灰度控制', icon: ShieldCheck },
 ]

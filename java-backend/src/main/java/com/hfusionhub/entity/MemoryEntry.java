@@ -28,6 +28,9 @@ public class MemoryEntry {
     /** 0.0-1.0 importance score */
     private Double importance;
 
+    /** NULL means that the user keeps this memory indefinitely. */
+    private LocalDateTime expiresAt;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

@@ -25,6 +25,7 @@ import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.common.constant.AgentConstants;
 import com.hfusionhub.service.ConversationService;
 import com.hfusionhub.service.AgentTaskService;
+import com.hfusionhub.service.MemoryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -62,6 +63,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final UserMapper userMapper;
     private final AiClient aiClient;
     private final AgentTaskService agentTaskService;
+    private final MemoryService memoryService;
     private final com.hfusionhub.service.AgentStreamEventProcessor streamEventProcessor;
 
     private static final int REQUEST_ID_MAX_LENGTH = 64;
@@ -176,13 +178,14 @@ public class ConversationServiceImpl implements ConversationService {
         // 阶段 1: 验证 + 保存用户消息（短事务）
         Message userMessage = saveUserMessage(dto, requestId);
         Conversation conversation = conversationMapper.selectById(dto.getConversationId());
+        Long currentUserId = JwtUtils.getCurrentUserId();
         List<Map<String, String>> history = getChatHistory(conversation.getId());
+        history = withRelevantMemories(history, currentUserId, conversation.getKnowledgeBaseId(), dto.getContent());
 
         // 阶段 2: 事务外调用 AI（释放数据库连接）
         // Agent V1: 有知识库 → /api/agent/v1/chat; 无知识库 → /api/chat
         // Agent V1 Step 3: userId MUST come from the authenticated Java session;
         // it is NEVER taken from the frontend DTO.  The model cannot forge it.
-        Long currentUserId = JwtUtils.getCurrentUserId();
         // Agent V1 Step 5: server-side capability gate — the DTO may carry
         // capabilityProfile="approval_write", but the server validates it against
         // business rules before passing it to Python.  Regular chat is always null.
@@ -565,6 +568,31 @@ public class ConversationServiceImpl implements ConversationService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Add only active, user-owned memories to the model context.  The marker
+     * makes their provenance explicit and keeps memory separate from chat
+     * history; the Python service still treats the knowledge-base scope as
+     * authoritative for document retrieval.
+     */
+    private List<Map<String, String>> withRelevantMemories(
+            List<Map<String, String>> history,
+            Long userId,
+            Long knowledgeBaseId,
+            String query) {
+        if (userId == null) return history;
+        var memories = memoryService.getRelevantMemories(userId, knowledgeBaseId, query, 5);
+        if (memories.isEmpty()) return history;
+        StringBuilder context = new StringBuilder("User-provided long-term memory (use only when relevant):\n");
+        for (var memory : memories) {
+            context.append("- ").append(memory.getType()).append(": ")
+                    .append(memory.getContent()).append("\n");
+        }
+        List<Map<String, String>> enriched = new java.util.ArrayList<>();
+        enriched.add(Map.of("role", "system", "content", context.toString()));
+        enriched.addAll(history);
+        return enriched;
+    }
+
     @Override
     public List<MessageInfoDTO> getMessages(Long conversationId) {
         // 1. 查询对话
@@ -749,6 +777,7 @@ public class ConversationServiceImpl implements ConversationService {
 
         // 5. 获取对话历史
         List<Map<String, String>> history = getChatHistory(conversation.getId());
+        history = withRelevantMemories(history, currentUserId, conversation.getKnowledgeBaseId(), dto.getContent());
 
         // 5.5. Agent V1 Step 4: 创建持久化 agent_task 和 agent_run
         final AgentTask agentTask = agentTaskService.createTask(

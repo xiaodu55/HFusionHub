@@ -8,6 +8,8 @@ public interface MemoryService {
     /** Save a new memory entry (user-scoped). */
     MemoryEntry save(MemoryEntry entry);
 
+    MemoryEntry update(Long id, MemoryEntry entry);
+
     /** List memories for the current user, optionally filtered by type and conversation. */
     List<MemoryEntry> listByUser(String type, Long conversationId);
 
@@ -16,4 +18,6 @@ public interface MemoryService {
 
     /** Retrieve relevant memories for a conversation context (for AI consumption). */
     List<MemoryEntry> getRelevantMemories(Long userId, String query, int limit);
+
+    List<MemoryEntry> getRelevantMemories(Long userId, Long knowledgeBaseId, String query, int limit);
 }
