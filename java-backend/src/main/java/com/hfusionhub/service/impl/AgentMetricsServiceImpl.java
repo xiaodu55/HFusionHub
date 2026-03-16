@@ -45,9 +45,9 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
     // ================================================================
 
     @Override
-    public AgentMetricsDTO getTaskMetrics(Long taskId) {
+    public AgentMetricsDTO getTaskMetrics(Long userId, Long taskId) {
         AgentTask task = taskMapper.selectById(taskId);
-        if (task == null) return null;
+        if (task == null || userId == null || !userId.equals(task.getUserId())) return null;
 
         List<AgentRun> runs = runMapper.selectByTaskId(taskId);
 
@@ -112,9 +112,11 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
     }
 
     @Override
-    public AgentMetricsDTO getRunMetrics(Long runId) {
+    public AgentMetricsDTO getRunMetrics(Long userId, Long runId) {
         AgentRun run = runMapper.selectById(runId);
         if (run == null) return null;
+        AgentTask ownerTask = taskMapper.selectById(run.getTaskId());
+        if (ownerTask == null || userId == null || !userId.equals(ownerTask.getUserId())) return null;
 
         List<AgentStep> steps = stepMapper.selectByRunId(runId);
 
@@ -366,7 +368,8 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
         // Pending approvals
         LambdaQueryWrapper<com.hfusionhub.entity.AgentApproval> pendingQuery =
                 new LambdaQueryWrapper<>();
-        pendingQuery.eq(com.hfusionhub.entity.AgentApproval::getStatus, "pending");
+        pendingQuery.eq(com.hfusionhub.entity.AgentApproval::getStatus, "pending")
+                .eq(com.hfusionhub.entity.AgentApproval::getUserId, userId);
         int pendingApprovals = Math.toIntExact(approvalMapper.selectCount(pendingQuery));
 
         Map<String, Object> stats = new LinkedHashMap<>();

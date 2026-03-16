@@ -50,7 +50,7 @@ public class AgentObservabilityController {
     @Operation(summary = "获取单任务指标")
     @GetMapping("/metrics/tasks/{taskId}")
     public R<AgentMetricsDTO> getTaskMetrics(@PathVariable Long taskId) {
-        AgentMetricsDTO metrics = metricsService.getTaskMetrics(taskId);
+        AgentMetricsDTO metrics = metricsService.getTaskMetrics(JwtUtils.getCurrentUserId(), taskId);
         if (metrics == null) return R.fail("任务不存在");
         return R.ok(metrics);
     }
@@ -58,7 +58,7 @@ public class AgentObservabilityController {
     @Operation(summary = "获取单Run指标")
     @GetMapping("/metrics/runs/{runId}")
     public R<AgentMetricsDTO> getRunMetrics(@PathVariable Long runId) {
-        AgentMetricsDTO metrics = metricsService.getRunMetrics(runId);
+        AgentMetricsDTO metrics = metricsService.getRunMetrics(JwtUtils.getCurrentUserId(), runId);
         if (metrics == null) return R.fail("Run记录不存在");
         return R.ok(metrics);
     }
@@ -106,7 +106,7 @@ public class AgentObservabilityController {
     @Operation(summary = "创建告警规则")
     @PostMapping("/alerts/rules")
     public R<AgentAlertRule> createAlertRule(@RequestBody AgentAlertRule rule) {
-        return R.ok(alertService.createRule(rule));
+        return R.ok(alertService.createRule(JwtUtils.getCurrentUserId(), rule));
     }
 
     @Operation(summary = "更新告警规则")
@@ -114,13 +114,13 @@ public class AgentObservabilityController {
     public R<AgentAlertRule> updateAlertRule(@PathVariable Long ruleId,
                                               @RequestBody AgentAlertRule rule) {
         rule.setId(ruleId);
-        return R.ok(alertService.updateRule(rule));
+        return R.ok(alertService.updateRule(JwtUtils.getCurrentUserId(), rule));
     }
 
     @Operation(summary = "删除告警规则")
     @DeleteMapping("/alerts/rules/{ruleId}")
     public R<String> deleteAlertRule(@PathVariable Long ruleId) {
-        alertService.deleteRule(ruleId);
+        alertService.deleteRule(JwtUtils.getCurrentUserId(), ruleId);
         return R.ok("已删除");
     }
 
@@ -147,7 +147,7 @@ public class AgentObservabilityController {
     @Operation(summary = "解除告警")
     @PostMapping("/alerts/events/{alertId}/resolve")
     public R<String> resolveAlert(@PathVariable Long alertId) {
-        alertService.resolveAlert(alertId);
+        alertService.resolveAlert(JwtUtils.getCurrentUserId(), alertId);
         return R.ok("已解除");
     }
 
@@ -172,7 +172,7 @@ public class AgentObservabilityController {
     @Operation(summary = "获取评测集详情")
     @GetMapping("/evaluation/datasets/{datasetId}")
     public R<AgentEvaluationDataset> getDataset(@PathVariable Long datasetId) {
-        return R.ok(evaluationService.getDataset(datasetId));
+        return R.ok(evaluationService.getDataset(JwtUtils.getCurrentUserId(), datasetId));
     }
 
     @Operation(summary = "评测集列表")
@@ -188,7 +188,7 @@ public class AgentObservabilityController {
     @Operation(summary = "删除评测集")
     @DeleteMapping("/evaluation/datasets/{datasetId}")
     public R<String> deleteDataset(@PathVariable Long datasetId) {
-        evaluationService.deleteDataset(datasetId);
+        evaluationService.deleteDataset(JwtUtils.getCurrentUserId(), datasetId);
         return R.ok("已删除");
     }
 
@@ -199,19 +199,19 @@ public class AgentObservabilityController {
     public R<AgentEvaluationCase> addCase(@PathVariable Long datasetId,
                                            @RequestBody AgentEvaluationCase evalCase) {
         evalCase.setDatasetId(datasetId);
-        return R.ok(evaluationService.addCase(evalCase));
+        return R.ok(evaluationService.addCase(JwtUtils.getCurrentUserId(), evalCase));
     }
 
     @Operation(summary = "获取评测用例列表")
     @GetMapping("/evaluation/datasets/{datasetId}/cases")
     public R<List<AgentEvaluationCase>> getCases(@PathVariable Long datasetId) {
-        return R.ok(evaluationService.getCases(datasetId));
+        return R.ok(evaluationService.getCases(JwtUtils.getCurrentUserId(), datasetId));
     }
 
     @Operation(summary = "删除评测用例")
     @DeleteMapping("/evaluation/cases/{caseId}")
     public R<String> deleteCase(@PathVariable Long caseId) {
-        evaluationService.deleteCase(caseId);
+        evaluationService.deleteCase(JwtUtils.getCurrentUserId(), caseId);
         return R.ok("已删除");
     }
 
@@ -230,13 +230,13 @@ public class AgentObservabilityController {
             @PathVariable Long datasetId,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int pageSize) {
-        return R.ok(evaluationService.listEvaluationRuns(datasetId, page, pageSize));
+        return R.ok(evaluationService.listEvaluationRuns(JwtUtils.getCurrentUserId(), datasetId, page, pageSize));
     }
 
     @Operation(summary = "获取单次评测执行详情")
     @GetMapping("/evaluation/runs/{runId}")
     public R<AgentEvaluationRun> getEvaluationRun(@PathVariable Long runId) {
-        return R.ok(evaluationService.getEvaluationRun(runId));
+        return R.ok(evaluationService.getEvaluationRun(JwtUtils.getCurrentUserId(), runId));
     }
 
     // ── 回归门禁 ──
@@ -244,7 +244,7 @@ public class AgentObservabilityController {
     @Operation(summary = "检查回归门禁")
     @PostMapping("/evaluation/datasets/{datasetId}/gate-check")
     public R<Map<String, Object>> checkRegressionGate(@PathVariable Long datasetId) {
-        return R.ok(evaluationService.checkRegressionGate(datasetId));
+        return R.ok(evaluationService.checkRegressionGate(JwtUtils.getCurrentUserId(), datasetId));
     }
 
     @Operation(summary = "获取默认门禁阈值")

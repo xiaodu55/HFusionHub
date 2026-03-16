@@ -15,9 +15,9 @@ public interface AgentAlertService {
 
     // ── 告警规则 CRUD ──
 
-    AgentAlertRule createRule(AgentAlertRule rule);
-    AgentAlertRule updateRule(AgentAlertRule rule);
-    void deleteRule(Long ruleId);
+    AgentAlertRule createRule(Long userId, AgentAlertRule rule);
+    AgentAlertRule updateRule(Long userId, AgentAlertRule rule);
+    void deleteRule(Long userId, Long ruleId);
     AgentAlertRule getRule(Long ruleId);
     List<AgentAlertRule> listRules(Long userId);
 
@@ -25,7 +25,7 @@ public interface AgentAlertService {
 
     PageResult<AgentAlertEvent> listAlertEvents(Long userId, int page, int pageSize);
     List<AgentAlertEvent> listUnresolvedAlerts(Long userId);
-    void resolveAlert(Long alertId);
+    void resolveAlert(Long userId, Long alertId);
 
     // ── 告警检查 ──
 

@@ -55,7 +55,9 @@ public class AgentAlertServiceImpl implements AgentAlertService {
 
     @Override
     @Transactional
-    public AgentAlertRule createRule(AgentAlertRule rule) {
+    public AgentAlertRule createRule(Long userId, AgentAlertRule rule) {
+        if (userId == null) throw new BusinessException("invalid user");
+        rule.setUserId(userId);
         rule.setCreatedAt(LocalDateTime.now());
         rule.setUpdatedAt(LocalDateTime.now());
         rule.setEnabled(rule.getEnabled() != null ? rule.getEnabled() : true);
@@ -67,8 +69,10 @@ public class AgentAlertServiceImpl implements AgentAlertService {
 
     @Override
     @Transactional
-    public AgentAlertRule updateRule(AgentAlertRule rule) {
+    public AgentAlertRule updateRule(Long userId, AgentAlertRule rule) {
         AgentAlertRule existing = ruleMapper.selectById(rule.getId());
+        requireOwned(userId, existing);
+        rule.setUserId(userId);
         if (existing == null) throw new BusinessException("告警规则不存在: " + rule.getId());
         rule.setUpdatedAt(LocalDateTime.now());
         ruleMapper.updateById(rule);
@@ -77,8 +81,9 @@ public class AgentAlertServiceImpl implements AgentAlertService {
 
     @Override
     @Transactional
-    public void deleteRule(Long ruleId) {
+    public void deleteRule(Long userId, Long ruleId) {
         if (ruleMapper.selectById(ruleId) == null) throw new BusinessException("告警规则不存在: " + ruleId);
+        requireOwned(userId, ruleMapper.selectById(ruleId));
         ruleMapper.deleteById(ruleId);
     }
 
@@ -131,8 +136,11 @@ public class AgentAlertServiceImpl implements AgentAlertService {
 
     @Override
     @Transactional
-    public void resolveAlert(Long alertId) {
+    public void resolveAlert(Long userId, Long alertId) {
         AgentAlertEvent event = eventMapper.selectById(alertId);
+        if (event != null && (userId == null || !userId.equals(event.getUserId()))) {
+            throw new BusinessException("unauthorized alert");
+        }
         if (event == null) throw new BusinessException("告警事件不存在: " + alertId);
         event.setResolved(true);
         event.setResolvedAt(LocalDateTime.now());
@@ -340,6 +348,12 @@ public class AgentAlertServiceImpl implements AgentAlertService {
     }
 
     // ── 内部评估结果 ──
+
+    private void requireOwned(Long userId, AgentAlertRule rule) {
+        if (rule == null || userId == null || rule.getUserId() == null || !userId.equals(rule.getUserId())) {
+            throw new BusinessException("unauthorized alert rule");
+        }
+    }
 
     private record AlertEvalResult(boolean triggered, double currentValue, String context) {}
 }

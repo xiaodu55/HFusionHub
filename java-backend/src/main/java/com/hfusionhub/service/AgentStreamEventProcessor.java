@@ -195,7 +195,11 @@ public class AgentStreamEventProcessor {
             AgentRun currentRun = agentTaskService.getRunById(runId);
             if (currentRun != null) {
                 AgentTaskDetailDTO taskDetail = agentTaskService.getTaskDetail(currentRun.getTaskId());
-                Long taskUserId = taskDetail != null ? taskDetail.getUserId() : 2L;
+                if (taskDetail == null || taskDetail.getUserId() == null) {
+                    log.error("Refusing approval for run {}: task owner cannot be resolved", runId);
+                    return;
+                }
+                Long taskUserId = taskDetail.getUserId();
                 agentTaskService.pauseForApproval(currentRun.getTaskId(), runId, taskUserId,
                         toolName, toolInput, argumentsSummary);
 

@@ -38,7 +38,7 @@ from app.core.vectorstore.milvus_store import (
     insert_chunks,
     search_similar,
     get_document_chunks,
-    delete_document_chunks
+    delete_document_chunks, delete_chunk_ids
 )
 from app.utils.config import config
 from app.utils.validators import (
@@ -400,10 +400,16 @@ async def _process_document_background(
         embeddings = [c['embedding'] for c in chunks_with_embeddings]
         # Keep old data reachable while parsing and embedding.  Replacement is
         # performed immediately before insertion, rather than at task start.
-        if not delete_document_chunks(document_id):
-            raise MilvusException(f"Failed to remove the previous index for document {document_id}")
+        # Stage the new version first.  A failed embedding/insert must not
+        # erase the last known-good index.
+        old_result = get_document_chunks(document_id=str(document_id), page=1, size=100000)
+        old_records = old_result.get("data", {}).get("records", []) if old_result.get("code") == 200 else []
+        old_ids = {str(record.get("chunk_id")) for record in old_records if record.get("chunk_id")}
         if not insert_chunks(chunks, embeddings, document_id, knowledge_base_id):
             raise MilvusException(f"Failed to insert chunks for document {document_id}")
+        new_ids = {str(chunk.chunk_id) for chunk in chunks if chunk.chunk_id}
+        if not delete_chunk_ids(sorted(old_ids - new_ids)):
+            raise MilvusException(f"Failed to remove stale chunks for document {document_id}")
 
         # Build a bounded, source-backed graph only after the new chunks are
         # durable.  Graph search remains opt-in; an indexing failure therefore
@@ -421,7 +427,7 @@ async def _process_document_background(
         # Step 6: Notify Java backend
         _update_status("PROCESSING", "Notifying Java backend...", stage="callback", progress=95)
         if callback_url:
-            await _notify_callback_async(
+            callback_ok = await _notify_callback_async(
                 callback_url=callback_url,
                 callback_secret=callback_secret,
                 document_id=document_id,
@@ -431,6 +437,8 @@ async def _process_document_background(
                 index_version=index_version,
                 chunks=_callback_chunk_metadata(chunks),
             )
+            if not callback_ok:
+                raise RuntimeError("Java callback was not acknowledged; index remains pending")
 
         _update_status(
             "COMPLETED",
@@ -617,7 +625,7 @@ async def _notify_callback_async(
     index_version: str,
     chunks: Optional[List[Dict[str, Any]]] = None,
     callback_secret: str = None
-):
+) -> bool:
     """Notify Java backend about processing completion (async, non-blocking)"""
     import hmac
     import hashlib
@@ -656,15 +664,20 @@ async def _notify_callback_async(
 
         if response.status_code >= 400:
             logger.warning(f"[Callback] Warning: {callback_url} returned {response.status_code}")
+            return False
         else:
             logger.info(f"[Callback] Notified {callback_url}: {response.status_code}")
+            return True
 
     except httpx.TimeoutException:
         logger.warning(f"[Callback] Timeout: {callback_url}")
+        return False
     except httpx.ConnectError:
         logger.warning(f"[Callback] Connection failed: {callback_url}")
+        return False
     except Exception as e:
         logger.error(f"[Callback] Failed to notify: {str(e)}")
+        return False
 
 
 def _callback_chunk_metadata(chunks: List[VectorChunk]) -> List[Dict[str, Any]]:

@@ -1,0 +1,10 @@
+.git
+**/node_modules
+**/target
+**/.venv
+**/__pycache__
+**/.pytest_cache
+python-ai/data
+python-ai/milvus_data.db
+python-ai/chunks_store.json
+java-backend/uploads

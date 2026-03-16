@@ -488,7 +488,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         }
 
         // 计算参数哈希（审批令牌绑定）
-        String toolInputHash = sha256(taskId + ":" + runId + ":" + userId + ":" + toolName + ":" + toolInput);
+        String toolInputHash = canonicalToolInputHash(toolInput != null ? toolInput : "{}");
 
         AgentApproval approval = new AgentApproval();
         approval.setApprovalId(java.util.UUID.randomUUID().toString());
@@ -497,6 +497,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         approval.setUserId(userId);
         approval.setToolName(toolName);
         approval.setToolInputHash(toolInputHash);
+        approval.setToolInput(toolInput != null ? toolInput : "{}");
         approval.setArgumentsSummary(argumentsSummary);
         approval.setStatus("pending");
         approval.setExpiresAt(java.time.LocalDateTime.now().plusMinutes(5));
@@ -530,8 +531,11 @@ public class AgentTaskServiceImpl implements AgentTaskService {
 
         // ── Phase 1: MySQL updates (auto-committed per statement) ──
         String newStatus = "approved".equals(decision) ? "approved" : "denied";
-        approvalMapper.updateDecision(approval.getId(), newStatus, decidedBy,
+        int updated = approvalMapper.updateDecision(approval.getId(), newStatus, decidedBy,
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")), reason);
+        if (updated != 1) {
+            throw new BusinessException("审批已被其他请求处理");
+        }
 
         AgentTask task = taskMapper.selectById(approval.getTaskId());
         AgentRun run = runMapper.selectById(approval.getRunId());
@@ -645,10 +649,10 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             history = getChatHistoryForTask(conversationId);
         }
 
-        // Parse tool input from arguments summary
-        String toolInput = "{}";
-        if (approval.getArgumentsSummary() != null && !approval.getArgumentsSummary().isBlank()) {
-            toolInput = approval.getArgumentsSummary();
+        // Resume with the exact JSON captured at pause time, never the redacted summary.
+        String toolInput = approval.getToolInput() != null ? approval.getToolInput() : "{}";
+        if (!canonicalToolInputHash(toolInput).equalsIgnoreCase(approval.getToolInputHash())) {
+            throw new BusinessException("审批参数校验失败");
         }
 
         // Call Python to execute the approved tool and continue the agent loop
@@ -660,6 +664,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                 task.getKnowledgeBaseId(),
                 approval.getToolName(),
                 toolInput,
+                approval.getToolInputHash(),
                 task.getQuery(),
                 history,
                 conversationId,
@@ -904,6 +909,34 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         } catch (Exception e) {
             return input; // fallback — should never happen
         }
+    }
+
+    private static String canonicalToolInputHash(String input) {
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            String canonical = mapper.writeValueAsString(sortJson(mapper.readTree(input == null ? "{}" : input)));
+            return sha256(canonical);
+        } catch (Exception e) {
+            throw new BusinessException("invalid tool input");
+        }
+    }
+
+    private static Object sortJson(com.fasterxml.jackson.databind.JsonNode node) {
+        if (node.isObject()) {
+            Map<String, Object> sorted = new java.util.TreeMap<>();
+            node.fields().forEachRemaining(entry -> sorted.put(entry.getKey(), sortJson(entry.getValue())));
+            return sorted;
+        }
+        if (node.isArray()) {
+            List<Object> values = new java.util.ArrayList<>();
+            node.forEach(value -> values.add(sortJson(value)));
+            return values;
+        }
+        if (node.isTextual()) return node.textValue();
+        if (node.isBoolean()) return node.booleanValue();
+        if (node.isNumber()) return node.numberValue();
+        if (node.isNull()) return null;
+        throw new IllegalArgumentException("unsupported JSON node");
     }
 
     // ================================================================

@@ -44,15 +44,11 @@ class WriteNoteTool(BaseTool):
             logger.error("[write_note] REJECTED: invalid knowledge_base_id=%s", knowledge_base_id)
             return {"error": f"knowledge_base_id 必须为正整数，收到: {knowledge_base_id}"}
 
-        # In production, this would write to the database.
-        # For V1 approval testing, we simulate the write.
-        logger.info("[write_note] Writing note to KB %d: %s", knowledge_base_id, content[:100])
-        return {
-            "status": "written",
-            "knowledge_base_id": knowledge_base_id,
-            "content_preview": content[:200],
-            "char_count": len(content),
-        }
+        # This tool has no durable repository implementation yet. Never claim
+        # success for a write that was only logged; callers can surface this as
+        # an explicit capability-unavailable error and retry safely later.
+        logger.error("[write_note] rejected: durable note persistence is not configured")
+        return {"error": "write_note is unavailable until durable note persistence is configured"}
 
     def to_dict(self) -> Dict[str, Any]:
         return {

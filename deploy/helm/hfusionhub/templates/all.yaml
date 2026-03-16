@@ -165,6 +165,10 @@ spec:
                 secretKeyRef:
                   name: {{ .Release.Name }}-secrets
                   key: mysql-password
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:mysql://{{ .Release.Name }}-mysql:{{ .Values.mysql.port }}/{{ .Values.mysql.database }}?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
+            - name: SPRING_DATA_REDIS_HOST
+              value: "{{ .Release.Name }}-redis"
             - name: PYTHON_AI_INTERNAL_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -202,6 +206,13 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
+          volumeMounts:
+            - name: shared-uploads
+              mountPath: /app/uploads
+      volumes:
+        - name: shared-uploads
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-uploads-pvc
 {{- end }}
 
 ---
@@ -260,6 +271,12 @@ spec:
               value: "0.0.0.0"
             - name: SERVER_PORT
               value: {{ .Values.pythonAi.port | quote }}
+            - name: MILVUS_LITE_PATH
+              value: /data/milvus_data.db
+            - name: CHUNKS_STORE_PATH
+              value: /data/chunks_store.json
+            - name: DOCUMENT_STORAGE_ROOT
+              value: /app/uploads/documents
           resources:
             {{- toYaml .Values.pythonAi.resources | nindent 12 }}
           livenessProbe:
@@ -272,7 +289,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: {{ .Values.pythonAi.port }}
             initialDelaySeconds: 10
             periodSeconds: 10
@@ -281,10 +298,15 @@ spec:
           volumeMounts:
             - name: python-data
               mountPath: /data
+            - name: shared-uploads
+              mountPath: /app/uploads
       volumes:
         - name: python-data
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-python-pvc
+        - name: shared-uploads
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-uploads-pvc
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -297,6 +319,19 @@ spec:
     requests:
       storage: {{ .Values.pythonAi.persistence.size }}
 {{- end }}
+
+---
+# Shared Java/Python document storage. Requires an RWX-capable storage class.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-uploads-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: {{ .Values.sharedStorage.uploadsSize }}
 
 ---
 # --- Frontend ---

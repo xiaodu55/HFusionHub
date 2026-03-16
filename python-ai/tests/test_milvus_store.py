@@ -44,7 +44,7 @@ def test_create_collection_reuses_compatible_collection(monkeypatch):
     assert client.create_calls == 0
 
 
-def test_create_collection_recreates_incompatible_collection(monkeypatch):
+def test_create_collection_refuses_to_drop_incompatible_collection(monkeypatch):
     class FakeIndexParams:
         def add_index(self, **kwargs):
             return None
@@ -84,6 +84,6 @@ def test_create_collection_recreates_incompatible_collection(monkeypatch):
 
     result = milvus_store.create_collection()
 
-    assert result is client
-    assert client.drop_calls == 1
-    assert client.create_calls == 1
+    assert result is None
+    assert client.drop_calls == 0
+    assert client.create_calls == 0

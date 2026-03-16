@@ -18,6 +18,7 @@ logging.basicConfig(
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.utils.config import config
@@ -68,12 +69,11 @@ def create_app() -> FastAPI:
     app.include_router(chat_router, dependencies=internal_dependencies)
     app.include_router(rag_router, dependencies=internal_dependencies)
     app.include_router(agent_obs_router, dependencies=internal_dependencies)
-    # MCP endpoint is public — external AI clients (Claude Desktop, MCP Inspector)
-    # do not have the internal token. Tool-level authorization is handled by the
-    # knowledge_base_id header and the ToolExecutionPolicy.
+    # The MCP router keeps initialize/tools-list public for protocol discovery;
+    # its tools/call handler separately enforces the internal token.
     app.include_router(mcp_router)
-    # Prometheus metrics — public for scraper access
-    app.include_router(metrics_router)
+    # Metrics expose latency/error details; keep them on the internal network.
+    app.include_router(metrics_router, dependencies=internal_dependencies)
 
     @app.get("/")
     async def root():
@@ -85,15 +85,19 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        # Readiness must include the local vector database: an HTTP-only
-        # health check previously reported healthy even though every document
-        # indexing request would fail at the Milvus step.
+        # Liveness intentionally does not depend on Milvus; a transient vector
+        # store outage must not cause Kubernetes to restart a healthy process.
+        return {"status": "healthy"}
+
+    @app.get("/ready")
+    async def ready():
+        """Readiness endpoint used by the orchestrator and load balancers."""
         from app.core.vectorstore.milvus_store import vector_store_status
         vector_store = vector_store_status()
-        return {
-            "status": "healthy" if vector_store["ready"] else "degraded",
-            "vector_store": vector_store,
-        }
+        payload = {"status": "ready" if vector_store["ready"] else "degraded",
+                   "vector_store": vector_store}
+        return JSONResponse(status_code=200 if vector_store["ready"] else 503,
+                            content=payload)
 
     return app
 

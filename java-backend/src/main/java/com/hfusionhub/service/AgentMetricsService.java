@@ -18,12 +18,12 @@ public interface AgentMetricsService {
     /**
      * 获取单个任务的指标（含其所有 Run 的聚合）
      */
-    AgentMetricsDTO getTaskMetrics(Long taskId);
+    AgentMetricsDTO getTaskMetrics(Long userId, Long taskId);
 
     /**
      * 获取单个 Run 的指标
      */
-    AgentMetricsDTO getRunMetrics(Long runId);
+    AgentMetricsDTO getRunMetrics(Long userId, Long runId);
 
     /**
      * 获取 Run 指标列表（可分页、可筛选）

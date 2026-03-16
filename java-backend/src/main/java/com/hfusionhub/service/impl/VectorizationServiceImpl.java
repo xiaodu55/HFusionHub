@@ -79,12 +79,18 @@ public class VectorizationServiceImpl implements VectorizationService {
 
     @Override
     public void startVectorization(Long documentId, String model) {
+        startVectorizationInternal(documentId, model, true);
+    }
+
+    private void startVectorizationInternal(Long documentId, String model, boolean enforceRequestOwner) {
         // 1. 查询文档
         Document document = documentMapper.selectById(documentId);
         if (document == null) {
             throw new BusinessException("文档不存在");
         }
-        assertDocumentOwnerWhenUserRequest(document);
+        if (enforceRequestOwner) {
+            assertDocumentOwnerWhenUserRequest(document);
+        }
         KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
         if (knowledgeBase == null
                 || knowledgeBase.getStatus() == null
@@ -301,7 +307,7 @@ public class VectorizationServiceImpl implements VectorizationService {
             try {
                 log.warn("恢复超时索引任务: documentId={}, version={}, attempt={}", staleJob.getDocumentId(),
                         staleJob.getIndexVersion(), staleJob.getAttempt());
-                startVectorization(staleJob.getDocumentId(), staleJob.getEmbeddingModel());
+                  startVectorizationInternal(staleJob.getDocumentId(), staleJob.getEmbeddingModel(), false);
                 recovered++;
             } catch (Exception e) {
                 log.error("恢复索引任务失败: documentId={}", staleJob.getDocumentId(), e);

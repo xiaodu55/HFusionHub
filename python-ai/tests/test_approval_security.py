@@ -238,9 +238,8 @@ class TestWriteNoteKBEnforcement(unittest.IsolatedAsyncioTestCase):
         """write_note with valid positive KB ID → returns written status."""
         tool = WriteNoteTool()
         result = await tool.execute(content="Valid note", knowledge_base_id=42)
-        self.assertEqual(result["status"], "written")
-        self.assertEqual(result["knowledge_base_id"], 42)
-        self.assertEqual(result["char_count"], len("Valid note"))
+        self.assertIn("error", result)
+        self.assertIn("durable note persistence", result["error"])
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -298,9 +297,9 @@ class TestRegistryKBInjection(unittest.IsolatedAsyncioTestCase):
             context=context,
         )
 
-        self.assertTrue(result.ok, f"Expected ok=True, got {result.to_dict()}")
-        self.assertEqual(result.data["knowledge_base_id"], 77)
-        self.assertEqual(result.data["status"], "written")
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error_code, "internal_error")
+        self.assertIn("durable note persistence", result.message)
 
     async def test_write_note_without_grant_returns_approval_required(self):
         """Without a scoped grant, write_note returns approval_required."""

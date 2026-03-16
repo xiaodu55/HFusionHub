@@ -323,6 +323,7 @@ CREATE TABLE IF NOT EXISTS agent_approval (
     user_id           BIGINT NOT NULL,
     tool_name         VARCHAR(50) NOT NULL,
     tool_input_hash   VARCHAR(64) NOT NULL,
+    tool_input        CLOB DEFAULT NULL,
     arguments_summary VARCHAR(1000) DEFAULT NULL,
     status            VARCHAR(20) NOT NULL DEFAULT 'pending',
     decided_by        BIGINT DEFAULT NULL,

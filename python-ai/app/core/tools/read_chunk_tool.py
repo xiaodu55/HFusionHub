@@ -51,7 +51,9 @@ class ReadChunkTool(BaseTool):
 
             # Scope enforcement: the chunk must belong to the selected KB.
             chunk_kb_id = detail.get("knowledge_base_id")
-            if chunk_kb_id is not None and int(chunk_kb_id) != int(kb_id):
+            if chunk_kb_id is None:
+                return {"error": "chunk has no knowledge-base scope"}
+            if int(chunk_kb_id) != int(kb_id):
                 return {"error": f"分块 {chunk_id} 不属于当前知识库。"}
 
             metadata = detail.get("metadata")

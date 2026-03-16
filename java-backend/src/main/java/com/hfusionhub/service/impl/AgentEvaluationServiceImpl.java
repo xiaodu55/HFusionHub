@@ -8,6 +8,7 @@ import com.hfusionhub.entity.AgentEvaluationRun;
 import com.hfusionhub.mapper.AgentEvaluationCaseMapper;
 import com.hfusionhub.mapper.AgentEvaluationDatasetMapper;
 import com.hfusionhub.mapper.AgentEvaluationRunMapper;
+import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.service.AgentEvaluationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +35,7 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
     private final AgentEvaluationDatasetMapper datasetMapper;
     private final AgentEvaluationCaseMapper caseMapper;
     private final AgentEvaluationRunMapper runMapper;
+    private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final RestTemplate restTemplate;
 
     @Value("${ai-service.base-url:http://localhost:9000}")
@@ -56,6 +58,13 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
     @Override
     @Transactional
     public AgentEvaluationDataset createDataset(AgentEvaluationDataset dataset) {
+        if (dataset.getUserId() == null) throw new BusinessException("invalid user");
+        if (dataset.getKnowledgeBaseId() != null) {
+            var kb = knowledgeBaseMapper.selectById(dataset.getKnowledgeBaseId());
+            if (kb == null || !dataset.getUserId().equals(kb.getUserId())) {
+                throw new BusinessException("unauthorized knowledge base");
+            }
+        }
         dataset.setCaseCount(0);
         dataset.setCreatedAt(LocalDateTime.now());
         dataset.setUpdatedAt(LocalDateTime.now());
@@ -65,8 +74,9 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
     }
 
     @Override
-    public AgentEvaluationDataset getDataset(Long datasetId) {
+    public AgentEvaluationDataset getDataset(Long userId, Long datasetId) {
         AgentEvaluationDataset ds = datasetMapper.selectById(datasetId);
+        requireOwner(userId, ds);
         if (ds == null) throw new BusinessException("评测集不存在: " + datasetId);
         return ds;
     }
@@ -74,13 +84,13 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
     @Override
     public List<AgentEvaluationDataset> listDatasets(Long userId, Long kbId,
                                                       int page, int pageSize) {
+        page = Math.max(1, page);
+        pageSize = Math.max(1, Math.min(pageSize, 100));
         int offset = (page - 1) * pageSize;
         LambdaQueryWrapper<AgentEvaluationDataset> query = new LambdaQueryWrapper<>();
-        if (kbId != null) {
-            query.eq(AgentEvaluationDataset::getKnowledgeBaseId, kbId);
-        } else if (userId != null) {
-            query.eq(AgentEvaluationDataset::getUserId, userId);
-        }
+        if (userId == null) throw new BusinessException("invalid user");
+        query.eq(AgentEvaluationDataset::getUserId, userId);
+        if (kbId != null) query.eq(AgentEvaluationDataset::getKnowledgeBaseId, kbId);
         query.orderByDesc(AgentEvaluationDataset::getCreatedAt)
              .last("LIMIT " + offset + "," + pageSize);
         return datasetMapper.selectList(query);
@@ -88,8 +98,8 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
 
     @Override
     @Transactional
-    public void deleteDataset(Long datasetId) {
-        AgentEvaluationDataset ds = getDataset(datasetId);
+    public void deleteDataset(Long userId, Long datasetId) {
+        AgentEvaluationDataset ds = getDataset(userId, datasetId);
         LambdaQueryWrapper<AgentEvaluationCase> caseQuery = new LambdaQueryWrapper<>();
         caseQuery.eq(AgentEvaluationCase::getDatasetId, datasetId);
         caseMapper.delete(caseQuery);
@@ -103,8 +113,8 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
 
     @Override
     @Transactional
-    public AgentEvaluationCase addCase(AgentEvaluationCase evalCase) {
-        AgentEvaluationDataset ds = getDataset(evalCase.getDatasetId());
+    public AgentEvaluationCase addCase(Long userId, AgentEvaluationCase evalCase) {
+        AgentEvaluationDataset ds = getDataset(userId, evalCase.getDatasetId());
         evalCase.setCreatedAt(LocalDateTime.now());
         caseMapper.insert(evalCase);
 
@@ -120,7 +130,8 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
     }
 
     @Override
-    public List<AgentEvaluationCase> getCases(Long datasetId) {
+    public List<AgentEvaluationCase> getCases(Long userId, Long datasetId) {
+        getDataset(userId, datasetId);
         LambdaQueryWrapper<AgentEvaluationCase> query = new LambdaQueryWrapper<>();
         query.eq(AgentEvaluationCase::getDatasetId, datasetId)
              .orderByAsc(AgentEvaluationCase::getId);
@@ -129,8 +140,9 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
 
     @Override
     @Transactional
-    public void deleteCase(Long caseId) {
+    public void deleteCase(Long userId, Long caseId) {
         AgentEvaluationCase c = caseMapper.selectById(caseId);
+        if (c != null) getDataset(userId, c.getDatasetId());
         if (c == null) throw new BusinessException("用例不存在: " + caseId);
         caseMapper.deleteById(caseId);
 
@@ -152,8 +164,8 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
     @Override
     @Transactional
     public AgentEvaluationRun runEvaluation(Long datasetId, Long userId) {
-        AgentEvaluationDataset ds = getDataset(datasetId);
-        List<AgentEvaluationCase> cases = getCases(datasetId);
+        AgentEvaluationDataset ds = getDataset(userId, datasetId);
+        List<AgentEvaluationCase> cases = getCases(userId, datasetId);
 
         if (cases.isEmpty()) {
             throw new BusinessException("评测集没有用例，无法执行评测");
@@ -252,7 +264,10 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
     }
 
     @Override
-    public List<AgentEvaluationRun> listEvaluationRuns(Long datasetId, int page, int pageSize) {
+    public List<AgentEvaluationRun> listEvaluationRuns(Long userId, Long datasetId, int page, int pageSize) {
+        getDataset(userId, datasetId);
+        page = Math.max(1, page);
+        pageSize = Math.max(1, Math.min(pageSize, 100));
         int offset = (page - 1) * pageSize;
         LambdaQueryWrapper<AgentEvaluationRun> query = new LambdaQueryWrapper<>();
         query.eq(AgentEvaluationRun::getDatasetId, datasetId)
@@ -262,8 +277,11 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
     }
 
     @Override
-    public AgentEvaluationRun getEvaluationRun(Long runId) {
-        return runMapper.selectById(runId);
+    public AgentEvaluationRun getEvaluationRun(Long userId, Long runId) {
+        AgentEvaluationRun run = runMapper.selectById(runId);
+        if (run == null) return null;
+        getDataset(userId, run.getDatasetId());
+        return run;
     }
 
     // ================================================================
@@ -271,7 +289,8 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
     // ================================================================
 
     @Override
-    public Map<String, Object> checkRegressionGate(Long datasetId) {
+    public Map<String, Object> checkRegressionGate(Long userId, Long datasetId) {
+        getDataset(userId, datasetId);
         // Get latest evaluation run for this dataset
         LambdaQueryWrapper<AgentEvaluationRun> query = new LambdaQueryWrapper<>();
         query.eq(AgentEvaluationRun::getDatasetId, datasetId)
@@ -323,5 +342,12 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
     @Override
     public Map<String, Double> getDefaultGateThresholds() {
         return DEFAULT_THRESHOLDS;
+    }
+
+    private void requireOwner(Long userId, AgentEvaluationDataset dataset) {
+        if (dataset == null || userId == null || dataset.getUserId() == null
+                || !userId.equals(dataset.getUserId())) {
+            throw new BusinessException("unauthorized evaluation dataset");
+        }
     }
 }

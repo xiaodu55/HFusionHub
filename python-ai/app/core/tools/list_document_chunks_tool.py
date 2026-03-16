@@ -65,7 +65,9 @@ class ListDocumentChunksTool(BaseTool):
                 for r in records:
                     # Enforce knowledge-base scope.
                     r_kb = r.get("knowledge_base_id")
-                    if r_kb is not None and int(r_kb) != int(kb_id):
+                    if r_kb is None:
+                        return {"error": "chunk has no knowledge-base scope"}
+                    if int(r_kb) != int(kb_id):
                         continue
                     content = r.get("content", "")
                     all_chunks.append({

@@ -48,6 +48,7 @@ Agent structured events (intercepted by Java for persistence):
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import time as time_module
@@ -679,6 +680,8 @@ class AgentResumeRequest(BaseModel):
     knowledge_base_id: int = Field(..., ge=1)
     tool_name: str = Field(..., min_length=1, max_length=50)
     tool_input: Dict[str, Any] = Field(..., description="Original tool parameters (for hash verification)")
+    expected_tool_input_hash: Optional[str] = Field(None, min_length=64, max_length=64,
+                                                     pattern="^[0-9a-fA-F]{64}$")
     query: str = Field(..., min_length=1, max_length=CHAT_MESSAGE_MAX_LENGTH,
                        description="Original user query (to re-run agent)")
     history: List[ChatMessage] = Field(default_factory=list, max_length=CHAT_HISTORY_MAX_ITEMS)
@@ -719,8 +722,14 @@ async def agent_v1_decide(request: AgentResumeRequest):
     # ── Approved: validate, then execute the tool directly ────────────────
 
     # Step 1: Validate parameter hash.
-    input_canonical = json.dumps(request.tool_input, sort_keys=True, ensure_ascii=False)
+    input_canonical = json.dumps(request.tool_input, sort_keys=True, ensure_ascii=False,
+                                 separators=(",", ":"))
     input_hash = hashlib.sha256(input_canonical.encode("utf-8")).hexdigest()
+    if request.expected_tool_input_hash is None:
+        raise HTTPException(status_code=400, detail="expected tool input hash is required for approval")
+    if not hmac.compare_digest(input_hash, request.expected_tool_input_hash):
+        logger.warning("Approval %s parameter hash mismatch", request.approval_id)
+        raise HTTPException(status_code=409, detail="approved tool parameters do not match")
     logger.info(
         "Approval %s APPROVED by user %d: tool=%s hash=%s... user=%d kb=%d",
         request.approval_id, request.user_id, request.tool_name,

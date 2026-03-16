@@ -439,7 +439,7 @@ onMounted(() => {
                   </p>
                   <!-- 重试按钮（仅在错误消息和助手消息上显示） -->
                   <Button
-                    v-if="message.role === 'assistant' && !streamingMessageId"
+                      v-if="isErrorMessage(message) && !streamingMessageId"
                     variant="ghost"
                     size="sm"
                     class="h-6 px-2 text-xs"

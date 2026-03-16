@@ -18,15 +18,15 @@ public interface AgentEvaluationService {
     // ── 评测集 CRUD ──
 
     AgentEvaluationDataset createDataset(AgentEvaluationDataset dataset);
-    AgentEvaluationDataset getDataset(Long datasetId);
+    AgentEvaluationDataset getDataset(Long userId, Long datasetId);
     List<AgentEvaluationDataset> listDatasets(Long userId, Long kbId, int page, int pageSize);
-    void deleteDataset(Long datasetId);
+    void deleteDataset(Long userId, Long datasetId);
 
     // ── 用例管理 ──
 
-    AgentEvaluationCase addCase(AgentEvaluationCase evalCase);
-    List<AgentEvaluationCase> getCases(Long datasetId);
-    void deleteCase(Long caseId);
+    AgentEvaluationCase addCase(Long userId, AgentEvaluationCase evalCase);
+    List<AgentEvaluationCase> getCases(Long userId, Long datasetId);
+    void deleteCase(Long userId, Long caseId);
 
     // ── 评测执行 ──
 
@@ -39,12 +39,12 @@ public interface AgentEvaluationService {
     /**
      * 获取评测执行历史
      */
-    List<AgentEvaluationRun> listEvaluationRuns(Long datasetId, int page, int pageSize);
+    List<AgentEvaluationRun> listEvaluationRuns(Long userId, Long datasetId, int page, int pageSize);
 
     /**
      * 获取单次评测执行详情
      */
-    AgentEvaluationRun getEvaluationRun(Long runId);
+    AgentEvaluationRun getEvaluationRun(Long userId, Long runId);
 
     // ── 回归门禁 ──
 
@@ -52,7 +52,7 @@ public interface AgentEvaluationService {
      * 检查最新评测结果是否通过回归门禁。
      * 返回门禁检查结果（pass/fail + 各维度详情）。
      */
-    Map<String, Object> checkRegressionGate(Long datasetId);
+    Map<String, Object> checkRegressionGate(Long userId, Long datasetId);
 
     /**
      * 获取默认回归门禁阈值

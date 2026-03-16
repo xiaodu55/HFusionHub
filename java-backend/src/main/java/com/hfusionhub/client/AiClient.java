@@ -435,6 +435,7 @@ public class AiClient {
             Long knowledgeBaseId,
             String toolName,
             String toolInput,
+            String toolInputHash,
             String query,
             List<Map<String, String>> history,
             Long conversationId,
@@ -456,6 +457,7 @@ public class AiClient {
             } catch (Exception e) {
                 request.put("tool_input", Map.of("_raw", toolInput));
             }
+            request.put("expected_tool_input_hash", toolInputHash);
             request.put("query", query);
             request.put("history", history != null ? history : List.of());
             if (conversationId != null) request.put("conversation_id", conversationId);

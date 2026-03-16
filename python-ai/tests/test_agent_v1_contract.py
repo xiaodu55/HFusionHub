@@ -2036,7 +2036,8 @@ class TestApprovalWriteToolVisibility:
             context=ctx,
         )
         # Should succeed — scoped grant bypasses permission checks.
-        assert result.ok is True
+        assert result.ok is False
+        assert "durable note persistence" in result.message
 
     @pytest.mark.asyncio
     async def test_scoped_grant_once_only(self):
@@ -2075,7 +2076,8 @@ class TestApprovalWriteToolVisibility:
             {"content": "one-shot note", "knowledge_base_id": 1},
             context=ctx,
         )
-        assert result1.ok is True, f"First call should succeed via scoped grant, got: {result1.error_code}"
+        assert result1.ok is False
+        assert result1.error_code == "internal_error"
 
         # Second call with same params — grant already consumed,
         # mode gate fires → approval_required.
@@ -2143,6 +2145,21 @@ class TestDecideEndpoint:
         }
         response = client.post("/api/agent/v1/chat/decide", json=payload)
         assert response.status_code == 422
+
+    def test_approved_decision_requires_original_parameter_hash(self):
+        """Java must bind an approval to the exact original tool parameters."""
+        payload = {
+            "approval_id": str(__import__("uuid").uuid4()),
+            "decision": "approved",
+            "user_id": 1,
+            "knowledge_base_id": 1,
+            "tool_name": "write_note",
+            "tool_input": {"content": "test"},
+            "query": "test",
+            "history": [],
+        }
+        response = client.post("/api/agent/v1/chat/decide", json=payload)
+        assert response.status_code == 400
 
 
 # ---------------------------------------------------------------------------

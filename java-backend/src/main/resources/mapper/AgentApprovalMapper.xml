@@ -10,6 +10,7 @@
         <result column="user_id" property="userId"/>
         <result column="tool_name" property="toolName"/>
         <result column="tool_input_hash" property="toolInputHash"/>
+        <result column="tool_input" property="toolInput"/>
         <result column="arguments_summary" property="argumentsSummary"/>
         <result column="status" property="status"/>
         <result column="decided_by" property="decidedBy"/>
@@ -20,7 +21,7 @@
     </resultMap>
 
     <sql id="Base_Column_List">
-        id, approval_id, task_id, run_id, user_id, tool_name, tool_input_hash,
+        id, approval_id, task_id, run_id, user_id, tool_name, tool_input_hash, tool_input,
         arguments_summary, status, decided_by, decided_at, reason, expires_at, created_at
     </sql>
 

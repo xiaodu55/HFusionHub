@@ -5,6 +5,9 @@ global:
   imageRegistry: ""
   storageClass: ""
 
+sharedStorage:
+  uploadsSize: 10Gi
+
 # --- MySQL ---
 mysql:
   enabled: true

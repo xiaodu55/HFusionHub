@@ -102,6 +102,9 @@ def vector_store_status() -> Dict[str, Any]:
 
 def drop_collection():
     """Drop collection (for schema migration)"""
+    if os.getenv("MILVUS_ALLOW_COLLECTION_DROP", "false").lower() != "true":
+        logger.error("Refusing to drop shared Milvus collection without explicit MILVUS_ALLOW_COLLECTION_DROP=true")
+        return False
     try:
         client = get_milvus_client()
         if client is None:
@@ -153,7 +156,8 @@ def create_collection():
                 if incompatible_reason:
                     print(f"[Milvus] Schema incompatible - {incompatible_reason}")
                     print("[Milvus] Dropping and recreating collection...")
-                    client.drop_collection(COLLECTION_NAME)
+                    logger.error("Milvus schema incompatible (%s); refusing destructive drop", incompatible_reason)
+                    return None
                 else:
                     return client
             except Exception as e:
@@ -349,34 +353,47 @@ def search_similar(
 
 
 # Local chunk metadata store (JSON file) - Milvus Lite's query() API is unreliable
-CHUNKS_STORE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "chunks_store.json")
+_chunks_store_env = os.getenv("CHUNKS_STORE_PATH")
+CHUNKS_STORE_PATH = Path(_chunks_store_env).expanduser() if _chunks_store_env else (PYTHON_AI_ROOT / "data" / "chunks_store.json")
+_chunks_store_lock = threading.RLock()
 
 
 def _load_chunks_store() -> Dict[str, List[Dict]]:
     """Load chunks metadata from local JSON file"""
-    try:
-        if os.path.exists(CHUNKS_STORE_PATH):
-            with open(CHUNKS_STORE_PATH, 'r', encoding='utf-8') as f:
-                return json.load(f)
-    except Exception as e:
-        print(f"[ChunksStore] Load error: {e}")
-    return {}
+    with _chunks_store_lock:
+        try:
+            store_path = Path(CHUNKS_STORE_PATH)
+            if store_path.exists():
+                with store_path.open('r', encoding='utf-8') as f:
+                    value = json.load(f)
+                    return value if isinstance(value, dict) else {}
+        except Exception as e:
+            logger.error("[ChunksStore] Load error: %s", e)
+        return {}
 
 
 def _save_chunks_store(store: Dict[str, List[Dict]]):
     """Save chunks metadata to local JSON file"""
-    try:
-        with open(CHUNKS_STORE_PATH, 'w', encoding='utf-8') as f:
-            json.dump(store, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"[ChunksStore] Save error: {e}")
+    with _chunks_store_lock:
+        try:
+            store_path = Path(CHUNKS_STORE_PATH)
+            store_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = store_path.with_suffix(store_path.suffix + ".tmp")
+            with tmp_path.open('w', encoding='utf-8') as f:
+                json.dump(store, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, store_path)
+        except Exception as e:
+            logger.error("[ChunksStore] Save error: %s", e)
 
 
 def _save_chunks_to_store(document_id: str, chunks: List[Dict]):
     """Save document chunks to local store"""
-    store = _load_chunks_store()
-    store[document_id] = chunks
-    _save_chunks_store(store)
+    with _chunks_store_lock:
+        store = _load_chunks_store()
+        store[document_id] = chunks
+        _save_chunks_store(store)
 
 
 def get_document_chunks(document_id: str, page: int = 1, size: int = 20, block_type: Optional[str] = None) -> Dict:
@@ -421,7 +438,7 @@ def get_chunk_detail(chunk_id: str) -> Optional[Dict]:
         results = client.query(
             collection_name=COLLECTION_NAME,
             filter=f'chunk_id == "{chunk_id}"',
-            output_fields=["chunk_id", "document_id", "content", "block_type", "outline_path", "metadata"]
+            output_fields=["chunk_id", "document_id", "knowledge_base_id", "content", "block_type", "outline_path", "metadata"]
         )
 
         if results:
@@ -460,4 +477,20 @@ def delete_document_chunks(document_id: str) -> bool:
 
     except Exception as e:
         print(f"Failed to delete chunks: {e}")
+        return False
+
+
+def delete_chunk_ids(chunk_ids: List[str]) -> bool:
+    """Delete only stale chunk IDs after a replacement index is durable."""
+    if not chunk_ids:
+        return True
+    try:
+        client = get_milvus_client()
+        if client is not None and client.has_collection(COLLECTION_NAME):
+            escaped = [str(cid).replace('"', '\\"') for cid in chunk_ids]
+            values = ",".join(f'"{cid}"' for cid in escaped)
+            client.delete(collection_name=COLLECTION_NAME, filter=f"chunk_id in [{values}]")
+        return True
+    except Exception as e:
+        logger.error("Failed to delete stale chunk IDs: %s", e)
         return False

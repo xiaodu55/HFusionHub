@@ -38,6 +38,10 @@ public class AgentApproval {
     @Schema(description = "工具参数SHA-256摘要")
     private String toolInputHash;
 
+    /** Exact JSON parameters approved by the user. Kept separately from the redacted summary. */
+    @TableField(value = "tool_input")
+    private String toolInput;
+
     @Schema(description = "参数摘要(脱敏)")
     private String argumentsSummary;
 
