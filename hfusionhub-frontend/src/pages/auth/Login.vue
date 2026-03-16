@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 
 const form = ref({
@@ -16,6 +17,7 @@ const form = ref({
 })
 const loading = ref(false)
 const error = ref('')
+const registered = computed(() => route.query.registered === '1')
 
 const handleLogin = async () => {
   if (!form.value.username || !form.value.password) {
@@ -49,6 +51,9 @@ const goToRegister = () => {
         <CardDescription>AI Agent 智能平台</CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
+        <div v-if="registered" class="text-sm text-emerald-600 dark:text-emerald-400">
+          注册成功，请使用新账号登录
+        </div>
         <div class="space-y-2">
           <Label for="username">用户名</Label>
           <Input

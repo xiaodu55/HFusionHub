@@ -94,13 +94,15 @@ describe('user store', () => {
     vi.mocked(userApi.register).mockResolvedValue({
       code: 200,
       message: 'ok',
-      data: undefined,
+      data: userInfo,
     })
     const store = useUserStore()
     const registration = {
       username: 'alice',
-      password: 'secret',
+      password: 'secret123',
       nickname: 'Alice',
+      email: 'alice@example.com',
+      phone: '13800138000',
     }
 
     await store.register(registration)

@@ -7,7 +7,7 @@ export const login = (data: LoginForm): Promise<ApiResponse<string>> => {
 }
 
 // 用户注册
-export const register = (data: RegisterForm): Promise<ApiResponse<void>> => {
+export const register = (data: RegisterForm): Promise<ApiResponse<UserInfo>> => {
   return post('/user/register', data)
 }
 

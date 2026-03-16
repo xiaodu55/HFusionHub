@@ -18,11 +18,13 @@ import com.hfusionhub.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDateTime;
+import java.util.Locale;
 
 /**
  * 用户服务实现
@@ -98,18 +100,23 @@ public class UserServiceImpl implements UserService {
      */
     @Override
     public UserInfoDTO register(UserRegisterDTO registerDTO) {
+        String username = trimToNull(registerDTO.getUsername());
+        String email = normaliseEmail(registerDTO.getEmail());
+        String phone = trimToNull(registerDTO.getPhone());
+        String nickname = trimToNull(registerDTO.getNickname());
+
         // 检查用户名是否已存在
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(User::getUsername, registerDTO.getUsername());
+        wrapper.eq(User::getUsername, username);
         Long count = userMapper.selectCount(wrapper);
         if (count > 0) {
             throw new BusinessException(StatusCode.USER_EXISTS, "用户名已存在");
         }
 
         // 检查邮箱是否已存在（如果填写了邮箱）
-        if (registerDTO.getEmail() != null && !registerDTO.getEmail().isEmpty()) {
+        if (email != null) {
             LambdaQueryWrapper<User> emailWrapper = new LambdaQueryWrapper<>();
-            emailWrapper.eq(User::getEmail, registerDTO.getEmail());
+            emailWrapper.eq(User::getEmail, email);
             Long emailCount = userMapper.selectCount(emailWrapper);
             if (emailCount > 0) {
                 throw new BusinessException(StatusCode.USER_EXISTS, "邮箱已被注册");
@@ -118,19 +125,39 @@ public class UserServiceImpl implements UserService {
 
         // 创建用户
         User user = new User();
-        user.setUsername(registerDTO.getUsername());
+        user.setUsername(username);
         user.setPassword(BCrypt.hashpw(registerDTO.getPassword()));
-        user.setNickname(registerDTO.getNickname());
-        user.setEmail(registerDTO.getEmail());
-        user.setPhone(registerDTO.getPhone());
+        user.setNickname(nickname != null ? nickname : username);
+        user.setEmail(email);
+        user.setPhone(phone);
         user.setRole("user");
         user.setStatus(0);
 
-        userMapper.insert(user);
+        try {
+            userMapper.insert(user);
+        } catch (DuplicateKeyException e) {
+            // The pre-check improves feedback, while the database unique index
+            // remains the authoritative guard against concurrent registration.
+            log.info("AUTH_REGISTER_CONFLICT username={} email={}", username, email);
+            throw new BusinessException(StatusCode.USER_EXISTS, "用户名或邮箱已被注册");
+        }
 
         String ip = getClientIp();
         log.info("AUTH_REGISTER_SUCCESS userId={} username={} ip={}", user.getId(), user.getUsername(), ip);
         return convertToUserInfoDTO(user);
+    }
+
+    private String normaliseEmail(String email) {
+        String normalised = trimToNull(email);
+        return normalised == null ? null : normalised.toLowerCase(Locale.ROOT);
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     /**

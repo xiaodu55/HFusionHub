@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { UserInfo } from '@/api/types'
+import type { RegisterForm, UserInfo } from '@/api/types'
 import * as userApi from '@/api/user'
 
 export const useUserStore = defineStore('user', () => {
@@ -31,7 +31,7 @@ export const useUserStore = defineStore('user', () => {
     return res
   }
 
-  const register = async (data: { username: string; password: string; nickname?: string }) => {
+  const register = async (data: RegisterForm) => {
     return await userApi.register(data)
   }
 

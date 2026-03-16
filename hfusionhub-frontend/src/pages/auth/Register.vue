@@ -15,13 +15,25 @@ const form = ref({
   password: '',
   confirmPassword: '',
   nickname: '',
+  email: '',
+  phone: '',
 })
 const loading = ref(false)
 const error = ref('')
 
 const handleRegister = async () => {
-  if (!form.value.username || !form.value.password) {
+  const username = form.value.username.trim()
+  const nickname = form.value.nickname.trim()
+  const email = form.value.email.trim().toLowerCase()
+  const phone = form.value.phone.trim()
+
+  if (!username || !form.value.password) {
     error.value = '请输入用户名和密码'
+    return
+  }
+
+  if (!/^[\p{L}\p{N}_-]{3,50}$/u.test(username)) {
+    error.value = '用户名需为3-50位文字、数字、下划线或短横线'
     return
   }
 
@@ -30,8 +42,18 @@ const handleRegister = async () => {
     return
   }
 
-  if (form.value.password.length < 6) {
-    error.value = '密码长度不能少于6位'
+  if (form.value.password.length < 8 || !/[A-Za-z]/.test(form.value.password) || !/\d/.test(form.value.password)) {
+    error.value = '密码至少8位，且必须同时包含字母和数字'
+    return
+  }
+
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    error.value = '请输入正确的邮箱地址'
+    return
+  }
+
+  if (phone && !/^\+?[1-9]\d{6,14}$/.test(phone)) {
+    error.value = '请输入正确的手机号'
     return
   }
 
@@ -40,11 +62,13 @@ const handleRegister = async () => {
 
   try {
     await userStore.register({
-      username: form.value.username,
+      username,
       password: form.value.password,
-      nickname: form.value.nickname || undefined,
+      nickname: nickname || undefined,
+      email: email || undefined,
+      phone: phone || undefined,
     })
-    router.push('/login')
+    router.replace({ path: '/login', query: { registered: '1' } })
   } catch (e: any) {
     error.value = e.message || '注册失败'
   } finally {
@@ -70,7 +94,9 @@ const goToLogin = () => {
           <Input
             id="username"
             v-model="form.username"
-            placeholder="请输入用户名"
+            autocomplete="username"
+            maxlength="50"
+            placeholder="3-50位，支持文字、数字、_ 和 -"
             :disabled="loading"
           />
         </div>
@@ -79,6 +105,8 @@ const goToLogin = () => {
           <Input
             id="nickname"
             v-model="form.nickname"
+            autocomplete="nickname"
+            maxlength="50"
             placeholder="请输入昵称（可选）"
             :disabled="loading"
           />
@@ -89,7 +117,9 @@ const goToLogin = () => {
             id="password"
             v-model="form.password"
             type="password"
-            placeholder="请输入密码（至少6位）"
+            autocomplete="new-password"
+            maxlength="72"
+            placeholder="至少8位，包含字母和数字"
             :disabled="loading"
           />
         </div>
@@ -99,7 +129,34 @@ const goToLogin = () => {
             id="confirmPassword"
             v-model="form.confirmPassword"
             type="password"
+            autocomplete="new-password"
+            maxlength="72"
             placeholder="请再次输入密码"
+            :disabled="loading"
+            @keyup.enter="handleRegister"
+          />
+        </div>
+        <div class="space-y-2">
+          <Label for="email">邮箱</Label>
+          <Input
+            id="email"
+            v-model="form.email"
+            type="email"
+            autocomplete="email"
+            maxlength="100"
+            placeholder="请输入邮箱（可选）"
+            :disabled="loading"
+          />
+        </div>
+        <div class="space-y-2">
+          <Label for="phone">手机号</Label>
+          <Input
+            id="phone"
+            v-model="form.phone"
+            type="tel"
+            autocomplete="tel"
+            maxlength="15"
+            placeholder="请输入手机号（可选）"
             :disabled="loading"
             @keyup.enter="handleRegister"
           />

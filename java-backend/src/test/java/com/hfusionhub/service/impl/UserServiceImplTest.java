@@ -20,6 +20,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DuplicateKeyException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -156,6 +158,39 @@ class UserServiceImplTest {
         assertEquals("user", inserted.getRole());
         assertEquals(0, inserted.getStatus());
         assertEquals("alice", result.getUsername());
+    }
+
+    @Test
+    void registerNormalisesOptionalFieldsAndDefaultsBlankNickname() {
+        UserRegisterDTO register = register("alice", " ALICE@EXAMPLE.COM ");
+        register.setNickname("   ");
+        register.setPhone(" 13800138000 ");
+        when(userMapper.selectCount(any(LambdaQueryWrapper.class)))
+                .thenReturn(0L)
+                .thenReturn(0L);
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+
+        userService.register(register);
+
+        verify(userMapper).insert(captor.capture());
+        assertEquals("alice", captor.getValue().getNickname());
+        assertEquals("alice@example.com", captor.getValue().getEmail());
+        assertEquals("13800138000", captor.getValue().getPhone());
+    }
+
+    @Test
+    void registerConvertsConcurrentUniqueConstraintViolationToUserExists() {
+        UserRegisterDTO register = register("alice", "alice@example.com");
+        when(userMapper.selectCount(any(LambdaQueryWrapper.class)))
+                .thenReturn(0L)
+                .thenReturn(0L);
+        doThrow(new DuplicateKeyException("duplicate username"))
+                .when(userMapper).insert(any(User.class));
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> userService.register(register));
+
+        assertEquals(StatusCode.USER_EXISTS, error.getCode());
     }
 
     @Test
