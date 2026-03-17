@@ -11,9 +11,82 @@ export interface AgentTaskSummary {
   updatedAt: string
 }
 
-export interface AgentStatusEvent { id: number; eventType: string; status?: string; message?: string; createdAt: string }
-export interface AgentTaskDetail extends AgentTaskSummary { userId: number; conversationId?: number; knowledgeBaseId?: number; runs?: any[]; steps?: any[] }
-export interface AgentMetrics { taskId?: number; runId?: number; status?: string; durationMs?: number; tokenCount?: number; toolCallsCount?: number; error?: string }
+export interface AgentStatusEvent {
+  id: number
+  taskId?: number
+  runId?: number
+  eventType: string
+  status?: string
+  payload?: unknown
+  createdAt: string
+}
+
+export interface AgentStep {
+  id: number
+  runId?: number
+  sequence?: number
+  stepType?: string
+  action?: string
+  inputSummary?: string
+  outputSummary?: string
+  durationMs?: number
+  errorCode?: string
+  createdAt?: string
+}
+
+export interface AgentRun {
+  id: number
+  taskId?: number
+  runUuid?: string
+  attemptNumber?: number
+  status?: string
+  scheduledAt?: string
+  startedAt?: string
+  completedAt?: string
+  durationMs?: number
+  model?: string
+  style?: string
+  maxToolSteps?: number
+  toolCallsCount?: number
+  errorCode?: string
+  errorDetail?: string
+  failedTool?: string
+  steps?: AgentStep[]
+}
+
+export interface AgentTaskDetail extends AgentTaskSummary {
+  userId: number
+  conversationId?: number
+  knowledgeBaseId?: number
+  deadLetterReason?: string
+  deadLetterAt?: string
+  runs?: AgentRun[]
+}
+
+export interface AgentMetrics {
+  taskId?: number
+  runId?: number
+  runUuid?: string
+  status?: string
+  totalDurationMs?: number
+  avgStepLatencyMs?: number
+  maxStepLatencyMs?: number
+  totalTokens?: number
+  promptTokens?: number
+  completionTokens?: number
+  toolCallsCount?: number
+  sourcesCount?: number
+  stepCount?: number
+  approvalCount?: number
+  avgApprovalDurationMs?: number
+  errorCode?: string
+  errorDetail?: string
+  failedTool?: string
+  model?: string
+  style?: string
+  maxToolSteps?: number
+  tokenUsage?: Record<string, unknown>
+}
 
 export const listTasks = (params?: { status?: string; page?: number; pageSize?: number }): Promise<ApiResponse<PageResult<AgentTaskSummary>>> => get('/agent-task/list', params)
 export const getTask = (id: number): Promise<ApiResponse<AgentTaskDetail>> => get(`/agent-task/${id}`)
