@@ -81,6 +81,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/profile/Index.vue'),
       },
       {
+        path: 'settings',
+        name: 'Settings',
+        component: () => import('@/pages/settings/Index.vue'),
+      },
+      {
         path: 'admin/flags',
         name: 'FeatureFlags',
         component: () => import('@/pages/admin/Flags.vue'),

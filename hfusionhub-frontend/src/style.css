@@ -1,24 +1,24 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: hsl(150 8% 3%);
-  --color-foreground: hsl(150 12% 94%);
-  --color-card: hsl(150 8% 7%);
-  --color-card-foreground: hsl(150 12% 94%);
-  --color-popover: hsl(150 8% 7%);
-  --color-popover-foreground: hsl(150 12% 94%);
+  --color-background: hsl(150 20% 97%);
+  --color-foreground: hsl(150 18% 12%);
+  --color-card: hsl(0 0% 100%);
+  --color-card-foreground: hsl(150 18% 12%);
+  --color-popover: hsl(0 0% 100%);
+  --color-popover-foreground: hsl(150 18% 12%);
   --color-primary: hsl(151 84% 43%);
-  --color-primary-foreground: hsl(160 20% 4%);
-  --color-secondary: hsl(165 7% 13%);
-  --color-secondary-foreground: hsl(150 12% 94%);
-  --color-muted: hsl(165 7% 13%);
-  --color-muted-foreground: hsl(150 6% 62%);
-  --color-accent: hsl(160 24% 16%);
-  --color-accent-foreground: hsl(150 12% 94%);
+  --color-primary-foreground: hsl(0 0% 100%);
+  --color-secondary: hsl(150 13% 92%);
+  --color-secondary-foreground: hsl(150 18% 16%);
+  --color-muted: hsl(150 12% 94%);
+  --color-muted-foreground: hsl(150 7% 42%);
+  --color-accent: hsl(151 38% 92%);
+  --color-accent-foreground: hsl(150 18% 14%);
   --color-destructive: hsl(0 76% 58%);
   --color-destructive-foreground: hsl(0 0% 100%);
-  --color-border: hsl(150 7% 18%);
-  --color-input: hsl(150 7% 18%);
+  --color-border: hsl(150 12% 86%);
+  --color-input: hsl(150 12% 82%);
   --color-ring: hsl(151 84% 43%);
   --radius: 0.5rem;
 }
@@ -56,7 +56,7 @@ body,
 }
 
 html {
-  background: #020403;
+  background: #f4f8f6;
 }
 
 body {
@@ -381,6 +381,136 @@ select {
   height: 0.68rem;
   border-radius: 999px;
   box-shadow: 0 0 18px currentColor;
+}
+
+html:not(.dark) .app-shell {
+  background:
+    linear-gradient(145deg, rgba(250, 253, 251, 0.98) 0%, rgba(242, 248, 245, 0.98) 48%, rgba(238, 245, 242, 0.98) 100%),
+    linear-gradient(90deg, rgba(16, 185, 129, 0.08), rgba(34, 211, 238, 0.04));
+}
+
+html:not(.dark) .app-shell::before {
+  background-image:
+    linear-gradient(rgba(15, 54, 41, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 54, 41, 0.04) 1px, transparent 1px);
+  opacity: 0.38;
+}
+
+html:not(.dark) .glass-sidebar {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(242, 248, 245, 0.9));
+  border-right-color: rgba(15, 54, 41, 0.1);
+  box-shadow: inset -1px 0 0 rgba(15, 54, 41, 0.03), 18px 0 48px rgba(21, 48, 39, 0.06);
+}
+
+html:not(.dark) .glass-header {
+  background: linear-gradient(120deg, rgba(255, 255, 255, 0.88), rgba(246, 251, 249, 0.78));
+  border-color: rgba(15, 54, 41, 0.1);
+  box-shadow: 0 14px 42px rgba(21, 48, 39, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+html:not(.dark) .glass-panel,
+html:not(.dark) .glass-panel-soft {
+  border-color: rgba(15, 54, 41, 0.1);
+  box-shadow: 0 18px 48px rgba(21, 48, 39, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+html:not(.dark) .glass-panel {
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.86), rgba(246, 251, 249, 0.8));
+}
+
+html:not(.dark) .glass-panel-soft {
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.76), rgba(246, 251, 249, 0.7));
+}
+
+html:not(.dark) .command-bar {
+  border-color: rgba(15, 54, 41, 0.12);
+  background: rgba(255, 255, 255, 0.65);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+html:not(.dark) .user-chip {
+  border-color: rgba(15, 54, 41, 0.1);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+html:not(.dark) .glass-sidebar .text-white,
+html:not(.dark) .glass-header .text-zinc-50 {
+  color: #16231e;
+}
+
+html:not(.dark) .glass-sidebar .text-zinc-100,
+html:not(.dark) .glass-header .text-zinc-100 {
+  color: #25342e;
+}
+
+html:not(.dark) .glass-sidebar .text-zinc-400,
+html:not(.dark) .glass-header .text-zinc-400,
+html:not(.dark) .glass-sidebar .text-zinc-500,
+html:not(.dark) .glass-header .text-zinc-500,
+html:not(.dark) .glass-sidebar .text-zinc-600,
+html:not(.dark) .glass-header .text-zinc-600 {
+  color: #66756f;
+}
+
+html:not(.dark) .glass-sidebar .hover\:text-white:hover,
+html:not(.dark) .glass-header .hover\:text-white:hover {
+  color: #16231e;
+}
+
+html:not(.dark) .glass-sidebar .hover\:bg-white\/10:hover,
+html:not(.dark) .glass-header .hover\:bg-white\/10:hover {
+  background-color: rgba(15, 54, 41, 0.07);
+}
+
+/* The dashboard uses a few deliberate dark-surface treatments.  Re-map
+   those utility colors in light mode so text remains readable. */
+html:not(.dark) .dashboard-workbench .text-zinc-50,
+html:not(.dark) .dashboard-workbench .text-zinc-100,
+html:not(.dark) .dashboard-workbench .text-zinc-200,
+html:not(.dark) .dashboard-workbench .text-zinc-300 {
+  color: #1c2924 !important;
+}
+
+html:not(.dark) .dashboard-workbench .text-zinc-400,
+html:not(.dark) .dashboard-workbench .text-zinc-500 {
+  color: #63736c !important;
+}
+
+html:not(.dark) .dashboard-workbench .text-zinc-600 {
+  color: #788780 !important;
+}
+
+html:not(.dark) .dashboard-workbench .text-emerald-300 {
+  color: #047857 !important;
+}
+
+html:not(.dark) .dashboard-workbench .text-cyan-300 {
+  color: #0e7490 !important;
+}
+
+html:not(.dark) .dashboard-workbench .text-violet-300 {
+  color: #6d28d9 !important;
+}
+
+html:not(.dark) .dashboard-workbench .border-white\/10 {
+  border-color: rgba(15, 54, 41, 0.12) !important;
+}
+
+html:not(.dark) .dashboard-workbench .bg-white\/\[0\.06\],
+html:not(.dark) .dashboard-workbench .bg-white\/\[0\.04\] {
+  background-color: rgba(255, 255, 255, 0.72) !important;
+}
+
+html:not(.dark) .dashboard-workbench .bg-black\/20 {
+  background-color: rgba(15, 54, 41, 0.055) !important;
+}
+
+html:not(.dark) .dashboard-workbench .bg-white\/10 {
+  background-color: rgba(15, 54, 41, 0.1) !important;
+}
+
+html:not(.dark) .dashboard-workbench .hover\:text-zinc-200:hover {
+  color: #1c2924 !important;
 }
 
 main::-webkit-scrollbar {

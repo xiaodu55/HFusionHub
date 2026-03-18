@@ -3,7 +3,12 @@ import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { get } from '@/api/request'
+import type { ApiResponse } from '@/api/types'
+import * as agentApi from '@/api/agent'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useTheme } from '@/composables/useTheme'
 import {
   Activity,
   Bell,
@@ -26,10 +31,18 @@ import {
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const { isDarkMode, initializeTheme, toggleTheme } = useTheme()
 
 const isSidebarOpen = ref(true)
-const isDarkMode = ref(true)
 const globalSearchQuery = ref('')
+const serviceDialogOpen = ref(false)
+const notificationsDialogOpen = ref(false)
+const serviceState = ref<'checking' | 'online' | 'offline'>('checking')
+const serviceCheckedAt = ref('')
+const serviceMessage = ref('正在检查应用服务…')
+const notificationsLoading = ref(false)
+const notificationsError = ref('')
+const notifications = ref<agentApi.AgentAlertEvent[]>([])
 
 const menuItems: Array<{
   path: string
@@ -53,6 +66,7 @@ const commandRoutes = [
   { keywords: ['对话', '聊天', 'chat'], path: '/chat' },
   { keywords: ['rag', '观测', '调试', '评估'], path: '/rag' },
   { keywords: ['开关', 'flag', '灰度'], path: '/admin/flags' },
+  { keywords: ['设置', '主题', '账户'], path: '/settings' },
 ]
 
 const isActive = (path: string) => {
@@ -65,6 +79,13 @@ const isActive = (path: string) => {
 const currentItem = computed(() => menuItems.find((item) => isActive(item.path)))
 const userDisplayName = computed(() => userStore.nickname || userStore.username || 'HFusionHub 用户')
 const userInitial = computed(() => userDisplayName.value.trim().slice(0, 1).toUpperCase() || 'H')
+const unreadNotificationCount = computed(() => notifications.value.length)
+const serviceLabel = computed(() => ({ checking: '检查中', online: '服务在线', offline: '服务异常' }[serviceState.value]))
+const serviceClass = computed(() => ({
+  checking: 'border-amber-400/20 bg-amber-400/10 text-amber-200',
+  online: 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300',
+  offline: 'border-rose-400/20 bg-rose-400/10 text-rose-200',
+}[serviceState.value]))
 const logoutButtonClass = computed(() =>
   [
     'w-full rounded-lg text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100',
@@ -72,18 +93,97 @@ const logoutButtonClass = computed(() =>
   ].join(' ')
 )
 
-const applyTheme = (dark: boolean) => {
-  document.documentElement.classList.toggle('dark', dark)
-}
-
 const toggleSidebar = () => {
   isSidebarOpen.value = !isSidebarOpen.value
 }
 
-const toggleTheme = () => {
-  isDarkMode.value = !isDarkMode.value
-  applyTheme(isDarkMode.value)
-  localStorage.setItem('hfusionhub-theme', isDarkMode.value ? 'dark' : 'light')
+const refreshServiceHealth = async () => {
+  serviceState.value = 'checking'
+  serviceMessage.value = '正在检查应用服务…'
+  try {
+    const response = await get<ApiResponse<{ status: string; timestamp?: string }>>('/health')
+    serviceState.value = response.data.status === 'UP' ? 'online' : 'offline'
+    serviceCheckedAt.value = response.data.timestamp || new Date().toISOString()
+    serviceMessage.value = serviceState.value === 'online' ? '应用服务响应正常。' : '应用服务返回了异常状态。'
+  } catch (error) {
+    serviceState.value = 'offline'
+    serviceCheckedAt.value = new Date().toISOString()
+    serviceMessage.value = error instanceof Error ? error.message : '无法连接到应用服务。'
+  }
+}
+
+const loadNotifications = async () => {
+  notificationsLoading.value = true
+  notificationsError.value = ''
+  try {
+    notifications.value = (await agentApi.getUnresolvedAlerts()).data
+  } catch (error) {
+    notificationsError.value = error instanceof Error ? error.message : '暂时无法加载通知'
+  } finally {
+    notificationsLoading.value = false
+  }
+}
+
+const openNotifications = async () => {
+  notificationsDialogOpen.value = true
+  await loadNotifications()
+}
+
+const resolveNotification = async (alertId: number) => {
+  try {
+    await agentApi.resolveAlert(alertId)
+    notifications.value = notifications.value.filter(alert => alert.id !== alertId)
+  } catch (error) {
+    notificationsError.value = error instanceof Error ? error.message : '无法解除该通知'
+  }
+}
+
+const formatDateTime = (value?: string) => value ? value.replace('T', ' ').slice(0, 16) : '刚刚'
+const severityLabel = (severity?: string) => ({ critical: '需要立即处理', warning: '需要关注', info: '提示' }[severity || ''] || '提示')
+const severityClass = (severity?: string) => ({
+  critical: 'border-rose-400/25 bg-rose-400/10 text-rose-200',
+  warning: 'border-amber-400/25 bg-amber-400/10 text-amber-200',
+  info: 'border-cyan-400/25 bg-cyan-400/10 text-cyan-200',
+}[severity || ''] || 'border-border bg-muted text-muted-foreground')
+
+const alertContent = (alert: agentApi.AgentAlertEvent) => {
+  const current = alert.currentValue ?? 0
+  const threshold = alert.thresholdValue ?? 0
+  const rate = `${Math.round(current * 100)}%`
+  const thresholdRate = `${Math.round(threshold * 100)}%`
+
+  switch (alert.metricName) {
+    case 'tool_failure_rate':
+      return {
+        title: '工具调用失败较多',
+        description: `最近的 Agent 任务中，约 ${rate} 的工具调用没有成功完成，已超过 ${thresholdRate} 的提醒阈值。`,
+        advice: '请到“Agent 任务”查看失败任务，确认 AI 服务和工具连接是否正常。',
+      }
+    case 'citation_miss_rate':
+      return {
+        title: '回答缺少知识来源',
+        description: `近期约 ${rate} 的回答没有附带可追溯的知识来源，已超过 ${thresholdRate} 的提醒阈值。`,
+        advice: '请检查知识库是否完成索引，并在“RAG 观测”中确认检索是否正常。',
+      }
+    case 'running_timeout':
+      return {
+        title: '有任务等待时间过长',
+        description: `检测到 ${Math.round(current)} 个任务长时间没有完成，已超过预设的等待阈值。`,
+        advice: '请到“Agent 任务”查看执行状态，可取消或重试卡住的任务。',
+      }
+    case 'approval_timeout':
+      return {
+        title: '有待确认的操作超时',
+        description: `检测到 ${Math.round(current)} 个需要人工确认的操作等待过久。`,
+        advice: '请前往“Agent 任务”完成批准或拒绝，避免任务一直停留在等待状态。',
+      }
+    default:
+      return {
+        title: alert.ruleName || '发现需要关注的任务',
+        description: '系统检测到一项运行指标超过了预设范围。',
+        advice: '请查看相关 Agent 任务，确认是否需要重试或调整配置。',
+      }
+  }
 }
 
 const handleGlobalSearch = () => {
@@ -103,9 +203,9 @@ const handleLogout = async () => {
 }
 
 onMounted(() => {
-  const storedTheme = localStorage.getItem('hfusionhub-theme')
-  isDarkMode.value = storedTheme ? storedTheme === 'dark' : true
-  applyTheme(isDarkMode.value)
+  initializeTheme()
+  void refreshServiceHealth()
+  void loadNotifications()
 })
 </script>
 
@@ -235,17 +335,24 @@ onMounted(() => {
         </form>
 
         <div class="flex shrink-0 items-center gap-2">
-          <span class="hidden items-center gap-2 rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-xs font-medium text-emerald-300 sm:flex">
-            <span class="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]" />
-            服务在线
-          </span>
+          <button
+            class="hidden items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors hover:bg-white/[0.08] sm:flex"
+            :class="serviceClass"
+            title="查看服务状态"
+            @click="serviceDialogOpen = true; refreshServiceHealth()"
+          >
+            <span class="h-2 w-2 rounded-full" :class="serviceState === 'online' ? 'bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]' : serviceState === 'offline' ? 'bg-rose-400' : 'bg-amber-300 animate-pulse'" />
+            {{ serviceLabel }}
+          </button>
           <Button
             variant="ghost"
             size="icon"
-            class="h-9 w-9 rounded-lg text-zinc-400 hover:bg-white/10 hover:text-white"
-            title="通知"
+            class="relative h-9 w-9 rounded-lg text-zinc-400 hover:bg-white/10 hover:text-white"
+            title="需要处理的事项"
+            @click="openNotifications"
           >
             <Bell class="h-4 w-4" />
+            <span v-if="unreadNotificationCount" class="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-rose-400 ring-2 ring-[#111413]" />
           </Button>
           <Button
             variant="ghost"
@@ -270,8 +377,8 @@ onMounted(() => {
             variant="ghost"
             size="icon"
             class="hidden h-9 w-9 rounded-lg text-zinc-400 hover:bg-white/10 hover:text-white sm:inline-flex"
-            title="系统设置"
-            @click="router.push('/admin/flags')"
+            title="设置"
+            @click="router.push('/settings')"
           >
             <Settings class="h-4 w-4" />
           </Button>
@@ -286,5 +393,35 @@ onMounted(() => {
 
       <Sparkles class="pointer-events-none absolute right-8 top-28 h-5 w-5 text-emerald-300/40" />
     </div>
+
+    <Dialog v-model:open="serviceDialogOpen">
+      <DialogContent class="max-w-md">
+        <DialogHeader>
+          <DialogTitle>服务状态</DialogTitle>
+          <DialogDescription>检查浏览器当前连接的应用服务。</DialogDescription>
+        </DialogHeader>
+        <div class="mt-4 rounded-xl border p-4" :class="serviceState === 'online' ? 'border-emerald-400/20 bg-emerald-400/[0.06]' : serviceState === 'offline' ? 'border-rose-400/20 bg-rose-400/[0.06]' : 'border-amber-400/20 bg-amber-400/[0.06]'">
+          <div class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full" :class="serviceState === 'online' ? 'bg-emerald-400' : serviceState === 'offline' ? 'bg-rose-400' : 'bg-amber-300 animate-pulse'" /><span class="font-medium">{{ serviceLabel }}</span></div>
+          <p class="mt-2 text-sm text-muted-foreground">{{ serviceMessage }}</p>
+          <p v-if="serviceCheckedAt" class="mt-3 text-xs text-muted-foreground">最近检查：{{ formatDateTime(serviceCheckedAt) }}</p>
+        </div>
+        <Button variant="outline" class="mt-4 w-full" @click="refreshServiceHealth">重新检查</Button>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="notificationsDialogOpen">
+      <DialogContent class="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>需要处理的事项</DialogTitle>
+          <DialogDescription>这里会提示可能影响 AI 回答或任务执行的问题。</DialogDescription>
+        </DialogHeader>
+        <div class="mt-4 max-h-[26rem] space-y-2 overflow-y-auto">
+          <div v-if="notificationsLoading" class="py-10 text-center text-sm text-muted-foreground">正在加载通知…</div>
+          <div v-else-if="notificationsError" class="rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-4 text-sm text-rose-100/85">{{ notificationsError }}</div>
+          <div v-else-if="!notifications.length" class="flex flex-col items-center justify-center py-10 text-center"><Bell class="h-7 w-7 text-emerald-300" /><p class="mt-3 text-sm font-medium">暂时没有需要处理的事项</p><p class="mt-1 text-xs text-muted-foreground">系统发现异常时会在这里用易懂的方式提醒你。</p></div>
+          <article v-for="alert in notifications" :key="alert.id" class="rounded-xl border border-border bg-muted/30 p-3.5"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><span class="text-sm font-medium">{{ alertContent(alert).title }}</span><span class="rounded-full border px-2 py-0.5 text-[11px]" :class="severityClass(alert.severity)">{{ severityLabel(alert.severity) }}</span></div><p class="mt-2 break-words text-sm leading-5 text-muted-foreground">{{ alertContent(alert).description }}</p><p class="mt-2 rounded-lg bg-background/60 p-2.5 text-xs leading-5 text-foreground/80"><strong>建议：</strong>{{ alertContent(alert).advice }}</p><div class="mt-2 flex items-center justify-between gap-3"><span class="text-xs text-muted-foreground">{{ formatDateTime(alert.createdAt) }}</span><details class="text-xs text-muted-foreground"><summary class="cursor-pointer hover:text-foreground">技术详情</summary><p class="mt-1 max-w-56 break-all font-mono">{{ alert.metricName }} · 当前值 {{ alert.currentValue }} · 阈值 {{ alert.thresholdValue }}</p></details></div></div><Button variant="outline" size="sm" class="shrink-0" @click="resolveNotification(alert.id)">标记已处理</Button></div></article>
+        </div>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

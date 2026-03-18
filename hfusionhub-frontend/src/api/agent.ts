@@ -88,6 +88,20 @@ export interface AgentMetrics {
   tokenUsage?: Record<string, unknown>
 }
 
+export interface AgentAlertEvent {
+  id: number
+  ruleId?: number
+  ruleName?: string
+  knowledgeBaseId?: number
+  severity?: 'critical' | 'warning' | 'info' | string
+  metricName?: string
+  currentValue?: number
+  thresholdValue?: number
+  message?: string
+  resolved?: boolean
+  createdAt?: string
+}
+
 export const listTasks = (params?: { status?: string; page?: number; pageSize?: number }): Promise<ApiResponse<PageResult<AgentTaskSummary>>> => get('/agent-task/list', params)
 export const getTask = (id: number): Promise<ApiResponse<AgentTaskDetail>> => get(`/agent-task/${id}`)
 export const getTaskStatus = (id: number): Promise<ApiResponse<any>> => get(`/agent-task/${id}/status`)
@@ -96,3 +110,5 @@ export const retryTask = (id: number): Promise<ApiResponse<string>> => post(`/ag
 export const cancelTask = (id: number): Promise<ApiResponse<boolean>> => post(`/agent-task/${id}/cancel`)
 export const getTaskMetrics = (id: number): Promise<ApiResponse<AgentMetrics>> => get(`/agent-observability/metrics/tasks/${id}`)
 export const getDashboard = (): Promise<ApiResponse<Record<string, unknown>>> => get('/agent-observability/dashboard')
+export const getUnresolvedAlerts = (): Promise<ApiResponse<AgentAlertEvent[]>> => get('/agent-observability/alerts/events/unresolved')
+export const resolveAlert = (id: number): Promise<ApiResponse<string>> => post(`/agent-observability/alerts/events/${id}/resolve`)
