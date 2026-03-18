@@ -44,7 +44,7 @@ const menuItems: Array<{
   { path: '/agent', label: 'Agent 任务', description: '执行与恢复', icon: Sparkles },
   { path: '/memory', label: '长期记忆', description: 'Agent 用户记忆', icon: User },
   { path: '/rag', label: 'RAG 观测', description: '检索评估', icon: Activity },
-  { path: '/admin/flags', label: '功能开关', description: '灰度控制', icon: ShieldCheck },
+  { path: '/admin/flags', label: '高级能力', description: '配置说明', icon: ShieldCheck },
 ]
 
 const commandRoutes = [
