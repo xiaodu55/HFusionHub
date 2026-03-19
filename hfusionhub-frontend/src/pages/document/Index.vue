@@ -21,7 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Plus, Search, FileText, Trash2, Upload, Play, Eye, Loader2, RefreshCw, RefreshCcw, Archive } from 'lucide-vue-next'
+import { Search, FileText, Trash2, Upload, Play, Eye, Loader2, RefreshCw, RefreshCcw, Archive, CheckCircle2, Clock3, Files, FolderOpen } from 'lucide-vue-next'
 import { formatDateTime } from '@/utils/date'
 
 const router = useRouter()
@@ -60,6 +60,8 @@ const uploadForm = ref({
 const uploading = ref(false)
 const syncing = ref(false)
 const hasEnabledKnowledgeBase = computed(() => knowledgeBases.value.some((kb) => kb.status === 0))
+const parsedDocumentCount = computed(() => documents.value.filter(doc => doc.status === 2).length)
+const processingDocumentCount = computed(() => documents.value.filter(doc => doc.status === 1 || processingDocs.value.has(doc.id)).length)
 
 const errorMessage = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? `${fallback}：${error.message}` : fallback
@@ -242,174 +244,18 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="space-y-6">
-    <!-- 页面头部 -->
-    <div class="flex items-center justify-between">
-      <div>
-        <h2 class="text-2xl font-bold">文档管理</h2>
-        <p class="text-muted-foreground">上传和管理文档</p>
-      </div>
-      <div class="flex items-center gap-2">
-        <Button variant="outline" @click="router.push('/document/recycle-bin')">
-          <Archive class="mr-2 h-4 w-4" />
-          回收站
-        </Button>
-        <Button variant="outline" @click="handleSyncAll" :disabled="syncing">
-          <RefreshCcw :class="['mr-2 h-4 w-4', { 'animate-spin': syncing }]" />
-          同步状态
-        </Button>
-        <Button :disabled="!hasEnabledKnowledgeBase" @click="isUploadDialogOpen = true">
-          <Upload class="mr-2 h-4 w-4" />
-          上传文档
-        </Button>
-      </div>
-    </div>
+  <div class="space-y-6 pb-4">
+    <section class="relative overflow-hidden rounded-2xl border border-border bg-card/80 shadow-[0_18px_45px_rgba(0,0,0,0.18)]"><div class="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-primary/10 blur-3xl" /><div class="relative flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"><div class="flex gap-4"><div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><Files class="h-5 w-5" /></div><div><p class="text-xs font-medium tracking-[0.16em] text-primary/90">DOCUMENT LIBRARY</p><h2 class="mt-1 text-2xl font-semibold tracking-tight">文档</h2><p class="mt-1 text-sm leading-6 text-muted-foreground">上传、解析并维护 AI 可以检索的资料。</p></div></div><div class="flex flex-wrap gap-2"><Button variant="outline" size="sm" @click="router.push('/document/recycle-bin')"><Archive class="mr-1.5 h-3.5 w-3.5" />回收站</Button><Button variant="outline" size="sm" :disabled="syncing" @click="handleSyncAll"><RefreshCcw :class="['mr-1.5 h-3.5 w-3.5', { 'animate-spin': syncing }]" />同步状态</Button><Button class="gap-2" :disabled="!hasEnabledKnowledgeBase" @click="isUploadDialogOpen = true"><Upload class="h-4 w-4" />上传文档</Button></div></div></section>
 
-    <!-- 筛选和搜索 -->
-    <div class="flex items-center gap-4">
-      <select
-        v-model="selectedKbId"
-        class="flex h-10 w-[200px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-      >
-        <option :value="0">全部知识库</option>
-        <option
-          v-for="kb in knowledgeBases"
-          :key="kb.id"
-          :value="kb.id"
-        >
-          {{ kb.name }}
-        </option>
-      </select>
-      <div class="relative flex-1">
-        <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          v-model="searchQuery"
-          placeholder="搜索文档..."
-          class="pl-10"
-        />
-      </div>
-    </div>
+    <Card class="border-border bg-card/80"><CardContent class="grid gap-3 p-4 md:grid-cols-[13rem_minmax(0,1fr)]"><select v-model="selectedKbId" class="h-10 rounded-md border border-input bg-background/70 px-3 text-sm outline-none focus:border-primary/50"><option :value="0">全部知识库</option><option v-for="kb in knowledgeBases" :key="kb.id" :value="kb.id">{{ kb.name }}</option></select><div class="relative"><Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input v-model="searchQuery" placeholder="搜索文档名称" class="pl-10" /></div></CardContent></Card>
 
-    <!-- 文档列表 -->
-    <div v-if="loading" class="text-center text-muted-foreground py-8">
-      加载中...
-    </div>
-    <div v-else-if="filteredDocuments.length === 0" class="text-center py-8">
-      <FileText class="mx-auto h-12 w-12 text-muted-foreground" />
-      <p class="mt-4 text-muted-foreground">
-        {{ searchQuery ? '没有找到匹配的文档' : '暂无文档，点击上方按钮上传' }}
-      </p>
-    </div>
-    <div v-else class="space-y-4">
-      <div
-        v-for="doc in filteredDocuments"
-        :key="doc.id"
-        class="flex items-center justify-between rounded-lg border p-4"
-      >
-        <div class="flex items-center gap-4">
-          <FileText class="h-8 w-8 text-muted-foreground" />
-          <div>
-            <p class="font-medium">{{ doc.title }}</p>
-            <p class="text-sm text-muted-foreground">
-              {{ doc.knowledgeBaseName }} · {{ formatFileSize(doc.fileSize) }} · {{ formatDateTime(doc.createdAt) }}
-            </p>
-            <p v-if="doc.username" class="text-sm text-muted-foreground">
-              上传者：{{ doc.username }}
-            </p>
-            <div v-if="processingDocs.has(doc.id)" class="mt-2 w-full max-w-md space-y-1">
-              <div class="h-2 rounded bg-muted">
-                <div
-                  class="h-2 rounded bg-primary transition-all"
-                  :style="{ width: `${processingProgress(doc.id)}%` }"
-                />
-              </div>
-              <p class="text-xs text-muted-foreground">
-                {{ getStageText(processingStatus[doc.id]?.stage) }} · {{ processingProgress(doc.id) }}% · 已用 {{ formatProcessingTime(processingStatus[doc.id]?.elapsedSeconds) }} · 预计剩余 {{ formatProcessingTime(processingStatus[doc.id]?.remainingSeconds) }}
-              </p>
-            </div>
-          </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <Badge :variant="getStatusBadge(doc.status).variant">
-            {{ getStatusBadge(doc.status).text }}
-          </Badge>
+    <section class="grid gap-3 sm:grid-cols-3"><div class="rounded-xl border border-border bg-card/70 p-4"><p class="text-sm text-muted-foreground">文档总数</p><p class="mt-2 text-2xl font-semibold">{{ documents.length }}</p></div><div class="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] p-4"><p class="text-sm text-muted-foreground">正在处理</p><p class="mt-2 text-2xl font-semibold text-cyan-200">{{ processingDocumentCount }}</p></div><div class="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] p-4"><p class="text-sm text-muted-foreground">已可检索</p><p class="mt-2 text-2xl font-semibold text-emerald-200">{{ parsedDocumentCount }}</p></div></section>
 
-          <!-- 解析失败时显示错误信息 -->
-          <div v-if="doc.status === 3 && doc.errorMessage" class="mt-2 max-w-xs">
-            <p class="text-xs text-destructive line-clamp-2" :title="doc.errorMessage">
-              {{ doc.errorMessage }}
-            </p>
-          </div>
+    <Card class="overflow-hidden border-border bg-card/80"><CardHeader class="flex-row items-center justify-between border-b border-border/70 p-5"><div><CardTitle class="text-base">文档列表</CardTitle><CardDescription class="mt-1">选择文档开始解析，完成后即可在对话中被检索。</CardDescription></div><span class="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">{{ filteredDocuments.length }} 条</span></CardHeader><CardContent class="p-4 sm:p-5"><div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">正在加载文档…</div><div v-else-if="filteredDocuments.length === 0" class="flex min-h-64 flex-col items-center justify-center text-center"><FileText class="h-10 w-10 text-muted-foreground/60" /><p class="mt-4 font-medium">{{ searchQuery ? '没有找到匹配的文档' : '还没有文档' }}</p><p class="mt-1 text-sm text-muted-foreground">{{ searchQuery ? '尝试更换搜索关键词' : '上传一份资料，AI 才能在对话中引用其中的信息。' }}</p></div><div v-else class="space-y-3"><article v-for="doc in filteredDocuments" :key="doc.id" class="rounded-xl border border-border bg-muted/20 p-4 transition-colors hover:border-primary/25 hover:bg-muted/40"><div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between"><div class="flex min-w-0 gap-3.5"><div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><FileText class="h-5 w-5" /></div><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h3 class="truncate font-medium">{{ doc.title }}</h3><Badge :variant="getStatusBadge(doc.status).variant">{{ getStatusBadge(doc.status).text }}</Badge></div><p class="mt-1 text-sm text-muted-foreground">{{ doc.knowledgeBaseName || '未归属知识库' }} · {{ formatFileSize(doc.fileSize) }} · {{ formatDateTime(doc.createdAt) }}</p><p v-if="doc.username" class="mt-1 text-xs text-muted-foreground">上传者：{{ doc.username }}</p><p v-if="doc.status === 3 && doc.errorMessage" class="mt-2 max-w-xl text-xs leading-5 text-destructive">解析失败：{{ doc.errorMessage }}</p><div v-if="processingDocs.has(doc.id)" class="mt-3 max-w-xl space-y-1.5"><div class="h-1.5 overflow-hidden rounded-full bg-muted"><div class="h-full rounded-full bg-primary transition-all" :style="{ width: `${processingProgress(doc.id)}%` }" /></div><p class="text-xs text-muted-foreground">{{ getStageText(processingStatus[doc.id]?.stage) }} · {{ processingProgress(doc.id) }}% · 已用 {{ formatProcessingTime(processingStatus[doc.id]?.elapsedSeconds) }} · 预计剩余 {{ formatProcessingTime(processingStatus[doc.id]?.remainingSeconds) }}</p></div></div></div><div class="flex flex-wrap items-center gap-2 xl:justify-end"><Button v-if="doc.status === 0" variant="outline" size="sm" :disabled="!isKnowledgeBaseEnabled(doc) || processingDocs.has(doc.id)" @click="handleStartVectorization(doc)"><Play class="mr-1.5 h-3.5 w-3.5" />开始解析</Button><Button v-if="doc.status === 1 || doc.status === 3" variant="outline" size="sm" :disabled="!isKnowledgeBaseEnabled(doc)" @click="handleResetDocument(doc)"><RefreshCw class="mr-1.5 h-3.5 w-3.5" />重新解析</Button><Button v-if="doc.status === 2" variant="outline" size="sm" @click="handleViewChunks(doc)"><Eye class="mr-1.5 h-3.5 w-3.5" />查看分块</Button><Button v-if="doc.status === 2" variant="outline" size="sm" :disabled="!isKnowledgeBaseEnabled(doc) || processingDocs.has(doc.id)" @click="handleReparsen(doc)"><Loader2 v-if="processingDocs.has(doc.id)" class="mr-1.5 h-3.5 w-3.5 animate-spin" /><RefreshCw v-else class="mr-1.5 h-3.5 w-3.5" />重新解析</Button><Button variant="ghost" size="icon" :disabled="doc.status === 4" title="移入回收站" @click="handleDelete(doc)"><Loader2 v-if="doc.status === 4" class="h-4 w-4 animate-spin" /><Trash2 v-else class="h-4 w-4 text-destructive" /></Button></div></div></article></div></CardContent></Card>
 
-          <!-- 开始解析按钮 -->
-          <Button
-            v-if="doc.status === 0"
-            variant="outline"
-            size="sm"
-            :disabled="!isKnowledgeBaseEnabled(doc) || processingDocs.has(doc.id)"
-            @click="handleStartVectorization(doc)"
-          >
-            <Loader2 v-if="processingDocs.has(doc.id)" class="mr-2 h-4 w-4 animate-spin" />
-            <Play v-else class="mr-2 h-4 w-4" />
-            {{ processingDocs.has(doc.id) ? '处理中...' : '开始解析' }}
-          </Button>
-
-          <!-- 重新解析按钮 -->
-          <Button
-            v-if="doc.status === 1 || doc.status === 3"
-            variant="outline"
-            size="sm"
-            :disabled="!isKnowledgeBaseEnabled(doc)"
-            @click="handleResetDocument(doc)"
-          >
-            <RefreshCw class="mr-2 h-4 w-4" />
-            重新解析
-          </Button>
-
-          <!-- 查看分块按钮 -->
-          <Button
-            v-if="doc.status === 2"
-            variant="outline"
-            size="sm"
-            @click="handleViewChunks(doc)"
-          >
-            <Eye class="mr-2 h-4 w-4" />
-            查看分块
-          </Button>
-
-          <!-- 重新解析按钮（已完成的文档） -->
-          <Button
-            v-if="doc.status === 2"
-            variant="outline"
-            size="sm"
-            :disabled="!isKnowledgeBaseEnabled(doc) || processingDocs.has(doc.id)"
-            @click="handleReparsen(doc)"
-          >
-            <Loader2 v-if="processingDocs.has(doc.id)" class="mr-2 h-4 w-4 animate-spin" />
-            <RefreshCw v-else class="mr-2 h-4 w-4" />
-            {{ processingDocs.has(doc.id) ? '处理中...' : '重新解析' }}
-          </Button>
-
-          <Button
-            variant="ghost"
-            size="icon"
-            :disabled="doc.status === 4"
-            @click="handleDelete(doc)"
-          >
-            <Loader2 v-if="doc.status === 4" class="h-4 w-4 animate-spin" />
-            <Trash2 v-else class="h-4 w-4 text-destructive" />
-          </Button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 上传文档对话框 -->
     <Dialog v-model:open="isUploadDialogOpen">
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>上传文档</DialogTitle>
-          <DialogDescription>上传文档到指定知识库</DialogDescription>
-        </DialogHeader>
+        <DialogHeader><DialogTitle>上传文档</DialogTitle><DialogDescription>先选择归属知识库；上传后再开始解析，资料才可用于对话检索。</DialogDescription></DialogHeader>
         <div class="space-y-4">
           <div class="space-y-2">
             <Label for="kb-select">选择知识库 *</Label>
@@ -434,7 +280,7 @@ onMounted(() => {
             <Input
               id="doc-title"
               v-model="uploadForm.title"
-              placeholder="请输入文档标题"
+              placeholder="请输入便于识别的文档标题"
             />
           </div>
           <div class="space-y-2">
@@ -445,7 +291,7 @@ onMounted(() => {
               @change="handleFileSelect"
             />
             <p class="text-sm text-muted-foreground">
-              支持 TXT、PDF、DOCX、MD 格式
+              支持 TXT、PDF、DOCX、MD 格式，单个文件不超过 10 MB
             </p>
           </div>
           <div v-if="uploadForm.file" class="rounded-lg bg-muted p-3">
@@ -455,26 +301,20 @@ onMounted(() => {
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" @click="isUploadDialogOpen = false">
-            取消
-          </Button>
+          <Button variant="outline" @click="isUploadDialogOpen = false">取消</Button>
           <Button
             :disabled="!uploadForm.file || !uploadForm.kbId || !uploadForm.title || uploading || knowledgeBases.find((kb) => kb.id === uploadForm.kbId)?.status !== 0"
             @click="handleUpload"
           >
-            {{ uploading ? '上传中...' : '上传' }}
+            {{ uploading ? '上传中...' : '上传文档' }}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
 
-    <!-- 模型选择对话框 -->
     <Dialog v-model:open="isModelDialogOpen">
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>选择嵌入模型</DialogTitle>
-          <DialogDescription>选择用于文档向量化的嵌入模型</DialogDescription>
-        </DialogHeader>
+        <DialogHeader><DialogTitle>选择解析模型</DialogTitle><DialogDescription>模型会将文档转换为可检索的知识片段。</DialogDescription></DialogHeader>
         <div class="space-y-4">
           <div v-if="loadingModels" class="text-center py-4">
             <Loader2 class="h-6 w-6 animate-spin mx-auto" />
