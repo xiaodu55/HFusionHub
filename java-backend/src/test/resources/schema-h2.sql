@@ -1,6 +1,6 @@
 -- =====================================================
 -- HFusionHub — H2 Test Schema (MySQL-compatible mode)
--- Combines V1–V4 migrations into a single H2-compatible DDL.
+-- Combines V1–V7 migrations into a single H2-compatible DDL.
 -- Used by Spring's sql.init when Flyway is disabled in tests.
 -- =====================================================
 
@@ -66,6 +66,8 @@ CREATE TABLE IF NOT EXISTS document (
     status SMALLINT NOT NULL DEFAULT 0,
     error_message VARCHAR(500) DEFAULT NULL,
     processed_at DATETIME DEFAULT NULL,
+    recycled_at DATETIME DEFAULT NULL,
+    recycle_expires_at DATETIME DEFAULT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted SMALLINT NOT NULL DEFAULT 0,
@@ -76,6 +78,7 @@ CREATE TABLE IF NOT EXISTS document (
 CREATE INDEX IF NOT EXISTS idx_doc_kb_id ON document (knowledge_base_id);
 CREATE INDEX IF NOT EXISTS idx_doc_status ON document (status);
 CREATE INDEX IF NOT EXISTS idx_doc_created_at ON document (created_at);
+CREATE INDEX IF NOT EXISTS idx_document_recycle_expires ON document (deleted, recycle_expires_at);
 
 -- =====================================================
 -- 对话表 (conversation)

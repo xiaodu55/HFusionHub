@@ -14,6 +14,9 @@
         <result column="chunk_count" property="chunkCount"/>
         <result column="status" property="status"/>
         <result column="error_message" property="errorMessage"/>
+        <result column="processed_at" property="processedAt"/>
+        <result column="recycled_at" property="recycledAt"/>
+        <result column="recycle_expires_at" property="recycleExpiresAt"/>
         <result column="created_at" property="createdAt"/>
         <result column="updated_at" property="updatedAt"/>
         <result column="deleted" property="deleted"/>
@@ -22,7 +25,9 @@
     <!-- 通用查询结果列 -->
     <sql id="Base_Column_List">
         id, knowledge_base_id, title, content, file_path, file_type, file_size,
-        chunk_count, status, error_message, created_at, updated_at, deleted
+        chunk_count, status, error_message, processed_at,
+        recycled_at, recycle_expires_at,
+        created_at, updated_at, deleted
     </sql>
 
     <!-- 根据知识库ID统计文档数量 -->

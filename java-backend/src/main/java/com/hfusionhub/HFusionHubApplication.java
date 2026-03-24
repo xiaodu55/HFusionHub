@@ -2,7 +2,6 @@ package com.hfusionhub;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * HFusionHub 主启动类
@@ -11,7 +10,6 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * @author HFusionHub Team
  */
 @SpringBootApplication
-@EnableScheduling
 public class HFusionHubApplication {
 
     public static void main(String[] args) {
