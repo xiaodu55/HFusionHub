@@ -119,6 +119,27 @@ CREATE TABLE IF NOT EXISTS prompt_template (
 CREATE INDEX IF NOT EXISTS idx_prompt_template_user_status ON prompt_template (user_id, status, updated_at);
 
 -- =====================================================
+-- Prompt template version history — V17
+-- =====================================================
+CREATE TABLE IF NOT EXISTS prompt_template_version (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    template_id BIGINT NOT NULL,
+    version INT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description VARCHAR(500) DEFAULT NULL,
+    content CLOB NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    operation VARCHAR(20) NOT NULL,
+    operator_id BIGINT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    FOREIGN KEY (template_id) REFERENCES prompt_template (id) ON DELETE CASCADE,
+    FOREIGN KEY (operator_id) REFERENCES sys_user (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ptv_template_version ON prompt_template_version (template_id, version);
+
+-- =====================================================
 -- 消息表 (message) — includes V4 request_id column
 -- =====================================================
 CREATE TABLE IF NOT EXISTS message (

@@ -29,6 +29,7 @@ from app.api.agent_observability_api import router as agent_obs_router
 from app.api.mcp import router as mcp_router
 from app.api.metrics import router as metrics_router
 from app.api.runtime import router as runtime_router
+from app.api.tools import router as tools_router
 from app.api.exception_handlers import (
     hfusionhub_exception_handler,
     http_exception_handler,
@@ -76,6 +77,7 @@ def create_app() -> FastAPI:
     # Metrics expose latency/error details; keep them on the internal network.
     app.include_router(metrics_router, dependencies=internal_dependencies)
     app.include_router(runtime_router, dependencies=internal_dependencies)
+    app.include_router(tools_router, dependencies=internal_dependencies)
 
     @app.get("/")
     async def root():

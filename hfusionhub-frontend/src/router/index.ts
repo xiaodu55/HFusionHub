@@ -76,6 +76,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/builder/Models.vue'),
       },
       {
+        path: 'builder/tools',
+        name: 'ToolCenter',
+        component: () => import('@/pages/builder/Tools.vue'),
+      },
+      {
         path: 'memory',
         name: 'Memory',
         component: () => import('@/pages/memory/Index.vue'),

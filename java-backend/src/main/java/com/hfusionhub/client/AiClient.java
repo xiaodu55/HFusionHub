@@ -408,6 +408,32 @@ public class AiClient {
     }
 
     /**
+     * Get the tool registry metadata from the Python AI service.
+     *
+     * <p>Calls {@code GET /api/tools/registry} on the Python side and returns
+     * the full tool list with name, description, risk level, permissions,
+     * timeout, and version-gating status.  Safe to call without a knowledge
+     * base — only metadata, no execution.</p>
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getToolRegistry() {
+        try {
+            String url = baseUrl + "/api/tools/registry";
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), Map.class);
+            if (response.getBody() == null) {
+                return Map.of("tools", List.of(), "total", 0,
+                        "error", "AI 服务返回了空的工具注册表。");
+            }
+            return new HashMap<>(response.getBody());
+        } catch (Exception e) {
+            log.warn("Tool registry unavailable: {}", e.getMessage());
+            return Map.of("tools", List.of(), "total", 0,
+                    "error", "暂时无法连接 AI 服务获取工具列表。");
+        }
+    }
+
+    /**
      * Get a safe snapshot of the AI runtime from the internal Python service.
      *
      * <p>Diagnostics must still be usable while the AI service is down, so a

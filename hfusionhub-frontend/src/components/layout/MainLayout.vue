@@ -27,6 +27,7 @@ import {
   Sparkles,
   Sun,
   User,
+  Wrench,
   X,
 } from 'lucide-vue-next'
 
@@ -54,6 +55,7 @@ const menuItems: Array<{
 }> = [
   { path: '/builder/prompts', label: 'Prompt 工作台', description: '模板与发布', icon: PenLine },
   { path: '/builder/models', label: '模型中心', description: '模型与运行状态', icon: Cpu },
+  { path: '/builder/tools', label: '工具中心', description: '能力与调用记录', icon: Wrench },
   { path: '/', label: '任务总览', description: '工作台', icon: Home },
   { path: '/knowledge-base', label: '知识库', description: '知识治理', icon: BookOpen },
   { path: '/document', label: '文档管理', description: '解析与索引', icon: FileText },
@@ -66,7 +68,7 @@ const menuItems: Array<{
 
 const menuGroups = [
   { label: '工作区', items: menuItems.filter((item) => ['/', '/knowledge-base', '/document', '/chat'].includes(item.path)) },
-  { label: '构建', items: menuItems.filter((item) => ['/builder/prompts', '/builder/models', '/agent'].includes(item.path)) },
+  { label: '构建', items: menuItems.filter((item) => ['/builder/prompts', '/builder/models', '/builder/tools', '/agent'].includes(item.path)) },
   { label: '运营', items: menuItems.filter((item) => ['/rag', '/memory'].includes(item.path)) },
   { label: '管理', items: menuItems.filter((item) => item.path === '/admin/flags') },
 ]
@@ -74,6 +76,7 @@ const menuGroups = [
 const commandRoutes = [
   { keywords: ['model', '模型', 'llm', 'embedding', '向量'], path: '/builder/models' },
   { keywords: ['prompt', '提示词', '模板'], path: '/builder/prompts' },
+  { keywords: ['工具', 'tool', 'mcp', '调用', '权限', '审批'], path: '/builder/tools' },
   { keywords: ['知识', '知识库', 'kb'], path: '/knowledge-base' },
   { keywords: ['文档', '文件', '索引', 'doc'], path: '/document' },
   { keywords: ['对话', '聊天', 'chat'], path: '/chat' },

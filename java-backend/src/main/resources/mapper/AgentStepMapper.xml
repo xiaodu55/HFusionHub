@@ -50,4 +50,33 @@
         DELETE FROM agent_step WHERE run_id = #{runId}
     </delete>
 
+    <select id="selectRecentToolCalls" resultType="java.util.HashMap">
+        SELECT
+            s.id            AS id,
+            s.action        AS tool_name,
+            s.duration_ms   AS duration_ms,
+            s.error_code    AS error_code,
+            s.output_summary AS error_summary,
+            s.created_at    AS created_at,
+            t.id            AS task_id,
+            t.query         AS task_query,
+            t.status        AS task_status
+        FROM agent_step s
+        JOIN agent_run r   ON s.run_id = r.id
+        JOIN agent_task t  ON r.task_id = t.id
+        WHERE s.step_type = 'tool_call'
+          AND t.user_id = #{userId}
+        ORDER BY s.created_at DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countToolCalls" resultType="int">
+        SELECT COUNT(*)
+        FROM agent_step s
+        JOIN agent_run r   ON s.run_id = r.id
+        JOIN agent_task t  ON r.task_id = t.id
+        WHERE s.step_type = 'tool_call'
+          AND t.user_id = #{userId}
+    </select>
+
 </mapper>

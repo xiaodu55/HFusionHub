@@ -3,6 +3,7 @@ package com.hfusionhub.controller;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.dto.PromptTemplateInfoDTO;
 import com.hfusionhub.dto.PromptTemplateSaveDTO;
+import com.hfusionhub.dto.PromptTemplateVersionDTO;
 import com.hfusionhub.service.PromptTemplateService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -46,5 +47,19 @@ public class PromptTemplateController {
     public R<Void> delete(@PathVariable Long id) {
         promptTemplateService.delete(id);
         return R.ok();
+    }
+
+    // ── Version history ───────────────────────────────────────────────
+
+    @GetMapping("/{id}/versions")
+    public R<List<PromptTemplateVersionDTO>> listVersions(@PathVariable Long id) {
+        return R.ok(promptTemplateService.listVersions(id));
+    }
+
+    @PostMapping("/{id}/rollback/{versionId}")
+    public R<PromptTemplateInfoDTO> rollback(@PathVariable Long id,
+                                              @PathVariable Long versionId) {
+        PromptTemplateInfoDTO result = promptTemplateService.rollback(id, versionId);
+        return R.ok("已回滚到目标版本，当前为草稿。请确认内容后重新发布。", result);
     }
 }
