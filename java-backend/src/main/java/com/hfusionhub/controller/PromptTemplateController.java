@@ -34,13 +34,15 @@ public class PromptTemplateController {
     }
 
     @PostMapping("/{id}/publish")
-    public R<PromptTemplateInfoDTO> publish(@PathVariable Long id) {
-        return R.ok("模板已发布，可用于新建对话", promptTemplateService.publish(id));
+    public R<PromptTemplateInfoDTO> publish(@PathVariable Long id,
+                                           @RequestParam Integer expectedVersion) {
+        return R.ok("模板已发布，可用于新建对话", promptTemplateService.publish(id, expectedVersion));
     }
 
     @PostMapping("/{id}/unpublish")
-    public R<PromptTemplateInfoDTO> unpublish(@PathVariable Long id) {
-        return R.ok("模板已撤回，不再用于新建对话", promptTemplateService.unpublish(id));
+    public R<PromptTemplateInfoDTO> unpublish(@PathVariable Long id,
+                                             @RequestParam Integer expectedVersion) {
+        return R.ok("模板已撤回，不再用于新建对话", promptTemplateService.unpublish(id, expectedVersion));
     }
 
     @DeleteMapping("/{id}")
@@ -58,8 +60,9 @@ public class PromptTemplateController {
 
     @PostMapping("/{id}/rollback/{versionId}")
     public R<PromptTemplateInfoDTO> rollback(@PathVariable Long id,
-                                              @PathVariable Long versionId) {
-        PromptTemplateInfoDTO result = promptTemplateService.rollback(id, versionId);
+                                              @PathVariable Long versionId,
+                                              @RequestParam Integer expectedVersion) {
+        PromptTemplateInfoDTO result = promptTemplateService.rollback(id, versionId, expectedVersion);
         return R.ok("已回滚到目标版本，当前为草稿。请确认内容后重新发布。", result);
     }
 }

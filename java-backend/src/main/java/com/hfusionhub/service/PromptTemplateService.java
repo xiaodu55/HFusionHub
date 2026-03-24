@@ -11,8 +11,8 @@ public interface PromptTemplateService {
     List<PromptTemplateInfoDTO> listMine();
     PromptTemplateInfoDTO create(PromptTemplateSaveDTO dto);
     PromptTemplateInfoDTO update(Long id, PromptTemplateSaveDTO dto);
-    PromptTemplateInfoDTO publish(Long id);
-    PromptTemplateInfoDTO unpublish(Long id);
+    PromptTemplateInfoDTO publish(Long id, Integer expectedVersion);
+    PromptTemplateInfoDTO unpublish(Long id, Integer expectedVersion);
     void delete(Long id);
     PromptTemplate getPublishedOwned(Long id, Long userId);
 
@@ -22,5 +22,5 @@ public interface PromptTemplateService {
     /** Rollback to a specific version snapshot (by its primary key).
      *  The restored content becomes a new DRAFT version;
      *  it must be re-published to affect conversations. */
-    PromptTemplateInfoDTO rollback(Long templateId, Long versionId);
+    PromptTemplateInfoDTO rollback(Long templateId, Long versionId, Integer expectedVersion);
 }

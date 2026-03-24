@@ -16,4 +16,8 @@ public class PromptTemplateSaveDTO {
     @NotBlank(message = "系统指令不能为空")
     @Size(max = 8000, message = "系统指令不能超过 8000 个字符")
     private String content;
+
+    /** 客户端当前持有的版本号，用于并发修改保护。与数据库版本不一致时拒绝覆盖（HTTP 409）。
+     *  创建时无需传递；更新/发布/撤回/回滚时必须携带。 */
+    private Integer expectedVersion;
 }

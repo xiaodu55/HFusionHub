@@ -1,6 +1,7 @@
 package com.hfusionhub.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.dto.PromptTemplateInfoDTO;
@@ -56,48 +57,92 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
     @Override
     @Transactional
     public PromptTemplateInfoDTO update(Long id, PromptTemplateSaveDTO dto) {
-        PromptTemplate template = requireOwned(id, JwtUtils.getCurrentUserId());
+        Long userId = JwtUtils.getCurrentUserId();
+        PromptTemplate template = requireOwned(id, userId);
         ensureNameAvailable(dto.getName(), template.getUserId(), id);
+
+        if (dto.getExpectedVersion() == null) {
+            throw new BusinessException("更新模板时必须携带 expectedVersion 参数，请刷新页面后重试");
+        }
+        int expectedVersion = dto.getExpectedVersion();
         boolean changed = !template.getName().equals(dto.getName().trim())
                 || !same(template.getDescription(), clean(dto.getDescription()))
                 || !template.getContent().equals(dto.getContent().trim());
 
-        if (changed) {
-            apply(template, dto);
-            template.setVersion((template.getVersion() == null ? 1 : template.getVersion()) + 1);
-            template.setStatus(PromptTemplate.STATUS_DRAFT);
-            promptTemplateMapper.updateById(template);
+        // Atomic optimistic-lock UPDATE: WHERE id = ? AND version = ?
+        UpdateWrapper<PromptTemplate> wrapper = new UpdateWrapper<>();
+        wrapper.eq("id", id)
+               .eq("version", expectedVersion)
+               .set("name", dto.getName().trim())
+               .set("description", clean(dto.getDescription()))
+               .set("content", dto.getContent().trim());
 
-            // Snapshot the NEW state AFTER increment (operation = EDIT)
-            insertVersion(template, PromptTemplateVersion.OP_EDIT, JwtUtils.getCurrentUserId());
+        if (changed) {
+            wrapper.set("status", PromptTemplate.STATUS_DRAFT)
+                   .setSql("version = version + 1");
+        }
+
+        int rows = promptTemplateMapper.update(null, wrapper);
+        if (rows == 0) {
+            throw versionConflict(id, expectedVersion);
+        }
+
+        if (changed) {
+            // Re-read to obtain the incremented version for the snapshot
+            template = promptTemplateMapper.selectById(id);
+            insertVersion(template, PromptTemplateVersion.OP_EDIT, userId);
         } else {
+            // Normalize in-memory values for the returned DTO
             apply(template, dto);
-            promptTemplateMapper.updateById(template);
         }
         return toInfo(template);
     }
 
     @Override
     @Transactional
-    public PromptTemplateInfoDTO publish(Long id) {
-        PromptTemplate template = requireOwned(id, JwtUtils.getCurrentUserId());
-        template.setStatus(PromptTemplate.STATUS_PUBLISHED);
-        promptTemplateMapper.updateById(template);
+    public PromptTemplateInfoDTO publish(Long id, Integer expectedVersion) {
+        Long userId = JwtUtils.getCurrentUserId();
+        requireOwned(id, userId); // ownership check
 
-        // Snapshot AFTER status change (operation = PUBLISH, same version)
-        insertVersion(template, PromptTemplateVersion.OP_PUBLISH, JwtUtils.getCurrentUserId());
+        // Atomic optimistic-lock UPDATE: WHERE id = ? AND version = ?
+        UpdateWrapper<PromptTemplate> wrapper = new UpdateWrapper<>();
+        wrapper.eq("id", id)
+               .eq("version", expectedVersion)
+               .set("status", PromptTemplate.STATUS_PUBLISHED)
+               .setSql("version = version + 1");
+
+        int rows = promptTemplateMapper.update(null, wrapper);
+        if (rows == 0) {
+            throw versionConflict(id, expectedVersion);
+        }
+
+        // Re-read for the snapshot (version has been incremented)
+        PromptTemplate template = promptTemplateMapper.selectById(id);
+        insertVersion(template, PromptTemplateVersion.OP_PUBLISH, userId);
         return toInfo(template);
     }
 
     @Override
     @Transactional
-    public PromptTemplateInfoDTO unpublish(Long id) {
-        PromptTemplate template = requireOwned(id, JwtUtils.getCurrentUserId());
-        template.setStatus(PromptTemplate.STATUS_DRAFT);
-        promptTemplateMapper.updateById(template);
+    public PromptTemplateInfoDTO unpublish(Long id, Integer expectedVersion) {
+        Long userId = JwtUtils.getCurrentUserId();
+        requireOwned(id, userId); // ownership check
 
-        // Snapshot AFTER status change (operation = UNPUBLISH, same version)
-        insertVersion(template, PromptTemplateVersion.OP_UNPUBLISH, JwtUtils.getCurrentUserId());
+        // Atomic optimistic-lock UPDATE: WHERE id = ? AND version = ?
+        UpdateWrapper<PromptTemplate> wrapper = new UpdateWrapper<>();
+        wrapper.eq("id", id)
+               .eq("version", expectedVersion)
+               .set("status", PromptTemplate.STATUS_DRAFT)
+               .setSql("version = version + 1");
+
+        int rows = promptTemplateMapper.update(null, wrapper);
+        if (rows == 0) {
+            throw versionConflict(id, expectedVersion);
+        }
+
+        // Re-read for the snapshot (version has been incremented)
+        PromptTemplate template = promptTemplateMapper.selectById(id);
+        insertVersion(template, PromptTemplateVersion.OP_UNPUBLISH, userId);
         return toInfo(template);
     }
 
@@ -131,7 +176,7 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
 
     @Override
     @Transactional
-    public PromptTemplateInfoDTO rollback(Long templateId, Long versionId) {
+    public PromptTemplateInfoDTO rollback(Long templateId, Long versionId, Integer expectedVersion) {
         Long userId = JwtUtils.getCurrentUserId();
         PromptTemplate template = requireOwned(templateId, userId);
 
@@ -146,21 +191,38 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
             ensureNameAvailable(target.getName(), userId, templateId);
         }
 
-        // Restore from target snapshot
-        template.setName(target.getName());
-        template.setDescription(target.getDescription());
-        template.setContent(target.getContent());
-        template.setVersion((template.getVersion() == null ? 1 : template.getVersion()) + 1);
-        template.setStatus(PromptTemplate.STATUS_DRAFT);
-        promptTemplateMapper.updateById(template);
+        // Atomic optimistic-lock UPDATE: WHERE id = ? AND version = ?
+        UpdateWrapper<PromptTemplate> wrapper = new UpdateWrapper<>();
+        wrapper.eq("id", templateId)
+               .eq("version", expectedVersion)
+               .set("name", target.getName())
+               .set("description", target.getDescription())
+               .set("content", target.getContent())
+               .set("status", PromptTemplate.STATUS_DRAFT)
+               .setSql("version = version + 1");
 
-        // Snapshot the NEW rolled-back state AFTER increment (operation = ROLLBACK)
+        int rows = promptTemplateMapper.update(null, wrapper);
+        if (rows == 0) {
+            throw versionConflict(templateId, expectedVersion);
+        }
+
+        // Re-read to obtain the incremented version for the snapshot
+        template = promptTemplateMapper.selectById(templateId);
         insertVersion(template, PromptTemplateVersion.OP_ROLLBACK, userId);
 
         return toInfo(template);
     }
 
     // ── Private helpers ───────────────────────────────────────────────
+
+    /** 原子更新失败时，查询当前版本号并抛出 HTTP 409 冲突异常。 */
+    private BusinessException versionConflict(Long id, int expectedVersion) {
+        PromptTemplate current = promptTemplateMapper.selectById(id);
+        int actualVersion = current != null && current.getVersion() != null ? current.getVersion() : -1;
+        return new BusinessException(409,
+                "模板已被其他操作更新（当前版本 v" + actualVersion
+                        + "，你的版本 v" + expectedVersion + "），请刷新后重试");
+    }
 
     private PromptTemplate requireOwned(Long id, Long userId) {
         PromptTemplate template = promptTemplateMapper.selectById(id);

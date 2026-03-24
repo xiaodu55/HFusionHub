@@ -149,12 +149,13 @@ const saveTemplate = async () => {
   if (!selected.value || !hasChanges.value || saving.value) return
   saving.value = true
   try {
-    const response = await promptTemplateApi.updatePromptTemplate(selected.value.id, normalize(editForm.value))
+    const payload = { ...normalize(editForm.value), expectedVersion: selected.value.version }
+    const response = await promptTemplateApi.updatePromptTemplate(selected.value.id, payload)
     replaceTemplate(response.data)
     selectTemplate(response.data)
     toast.success(`模板已保存为草稿，当前为版本 ${response.data.version}`)
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : '保存提示词模板失败')
+    handleVersionConflict(error, '保存提示词模板失败')
   } finally {
     saving.value = false
   }
@@ -164,16 +165,17 @@ const togglePublished = async () => {
   if (!selected.value || actionLoading.value) return
   actionLoading.value = true
   try {
+    const expectedVersion = selected.value.version
     const response = selected.value.status === 'PUBLISHED'
-      ? await promptTemplateApi.unpublishPromptTemplate(selected.value.id)
-      : await promptTemplateApi.publishPromptTemplate(selected.value.id)
+      ? await promptTemplateApi.unpublishPromptTemplate(selected.value.id, expectedVersion)
+      : await promptTemplateApi.publishPromptTemplate(selected.value.id, expectedVersion)
     replaceTemplate(response.data)
     selectTemplate(response.data)
     toast.success(response.data.status === 'PUBLISHED'
       ? '模板已发布，可在新建对话时选择。'
       : '模板已撤回，已有对话将不再使用它。')
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : '更新发布状态失败')
+    handleVersionConflict(error, '更新发布状态失败')
   } finally {
     actionLoading.value = false
   }
@@ -232,15 +234,33 @@ const rollbackToVersion = async () => {
   if (!confirm(`确定要回滚到 v${targetVersion} 吗？当前内容将被保存为历史版本，恢复后的内容为草稿，需重新发布。`)) return
   rollbackLoading.value = true
   try {
-    const response = await promptTemplateApi.rollbackPromptTemplate(selected.value.id, versionId)
+    const response = await promptTemplateApi.rollbackPromptTemplate(selected.value.id, versionId, selected.value.version)
     replaceTemplate(response.data)
     selectTemplate(response.data)
     showVersionHistory.value = false
     toast.success(`已回滚到 v${targetVersion}，当前为草稿（v${response.data.version}）。请确认内容后重新发布。`)
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : '回滚失败')
+    handleVersionConflict(error, '回滚失败')
   } finally {
     rollbackLoading.value = false
+  }
+}
+
+const handleVersionConflict = async (error: unknown, fallbackMessage: string) => {
+  const msg = error instanceof Error ? error.message : ''
+  if (msg.includes('已被其他操作更新')) {
+    // Refresh to get the latest version from server
+    await loadTemplates()
+    // Also refresh version history if the dialog is open
+    if (showVersionHistory.value && selected.value) {
+      try {
+        const res = await promptTemplateApi.listPromptTemplateVersions(selected.value.id)
+        versions.value = res.data
+      } catch { /* silently ignore — versions refresh is best-effort */ }
+    }
+    toast.error(`${msg} 已自动刷新为最新内容，请重新操作。`)
+  } else {
+    toast.error(msg || fallbackMessage)
   }
 }
 
