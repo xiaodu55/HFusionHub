@@ -408,6 +408,40 @@ public class AiClient {
     }
 
     /**
+     * Get a safe snapshot of the AI runtime from the internal Python service.
+     *
+     * <p>Diagnostics must still be usable while the AI service is down, so a
+     * structured unavailable response is returned instead of propagating a
+     * gateway exception to the UI.</p>
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getRuntimeOverview() {
+        try {
+            String url = baseUrl + "/api/runtime/overview";
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), Map.class);
+            if (response.getBody() == null) {
+                return Map.of(
+                        "status", "unavailable",
+                        "gateway_reachable", false,
+                        "detail", "AI 服务返回了空的运行状态。"
+                );
+            }
+
+            Map<String, Object> overview = new HashMap<>(response.getBody());
+            overview.put("gateway_reachable", true);
+            return overview;
+        } catch (Exception e) {
+            log.warn("AI runtime overview unavailable: {}", e.getMessage());
+            return Map.of(
+                    "status", "unavailable",
+                    "gateway_reachable", false,
+                    "detail", "暂时无法连接 AI 服务，请确认 AI 服务已启动后重试。"
+            );
+        }
+    }
+
+    /**
      * Notify Python AI of an approval decision — Agent V1 Step 5.
      *
      * Called by AgentTaskServiceImpl after updating MySQL agent_approval.

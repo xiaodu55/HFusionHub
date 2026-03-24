@@ -31,6 +31,9 @@ public class Conversation extends BaseEntity {
     @Schema(description = "关联知识库ID")
     private Long knowledgeBaseId;
 
+    /** Published prompt template selected for this conversation, if any. */
+    private Long promptTemplateId;
+
     /**
      * 用户ID
      */

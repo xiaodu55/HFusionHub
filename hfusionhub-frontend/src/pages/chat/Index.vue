@@ -3,7 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import * as conversationApi from '@/api/conversation'
 import * as knowledgeBaseApi from '@/api/knowledgeBase'
+import * as promptTemplateApi from '@/api/promptTemplate'
 import type { Conversation, KnowledgeBase } from '@/api/types'
+import type { PromptTemplate } from '@/api/promptTemplate'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -40,6 +42,7 @@ const toast = useToast()
 
 const conversations = ref<Conversation[]>([])
 const knowledgeBases = ref<KnowledgeBase[]>([])
+const promptTemplates = ref<PromptTemplate[]>([])
 const loading = ref(false)
 const loadError = ref(false)
 const searchQuery = ref('')
@@ -47,6 +50,7 @@ const isCreateDialogOpen = ref(false)
 const createForm = ref({
   title: '',
   knowledgeBaseId: undefined as number | undefined,
+  promptTemplateId: undefined as number | undefined,
 })
 
 const currentPage = ref(1)
@@ -93,13 +97,22 @@ const loadKnowledgeBases = async () => {
   }
 }
 
+const loadPromptTemplates = async () => {
+  try {
+    const res = await promptTemplateApi.listPromptTemplates()
+    promptTemplates.value = res.data.filter((template) => template.status === 'PUBLISHED')
+  } catch (error) {
+    console.error('加载提示词模板失败:', error)
+  }
+}
+
 const handlePageChange = (page: number) => {
   currentPage.value = page
   loadConversations()
 }
 
 const openCreateDialog = () => {
-  createForm.value = { title: '', knowledgeBaseId: undefined }
+  createForm.value = { title: '', knowledgeBaseId: undefined, promptTemplateId: undefined }
   isCreateDialogOpen.value = true
 }
 
@@ -114,6 +127,7 @@ const handleCreate = async () => {
     const res = await conversationApi.createConversation({
       title,
       knowledgeBaseId: createForm.value.knowledgeBaseId,
+      promptTemplateId: createForm.value.promptTemplateId,
     })
     isCreateDialogOpen.value = false
     const conversationId = res.data?.id
@@ -149,6 +163,7 @@ const getLastActivity = (conversation: Conversation) => conversation.updatedAt |
 onMounted(() => {
   loadConversations()
   loadKnowledgeBases()
+  loadPromptTemplates()
 })
 </script>
 
@@ -272,6 +287,14 @@ onMounted(() => {
               <option v-for="kb in knowledgeBases" :key="kb.id" :value="kb.id">{{ kb.name }}</option>
             </select>
             <p class="text-xs leading-5 text-muted-foreground">只显示当前可用的知识库。资料需完成解析后才会被 AI 检索。</p>
+          </div>
+          <div class="space-y-2">
+            <Label for="prompt-template-select">回答规则（可选）</Label>
+            <select id="prompt-template-select" v-model="createForm.promptTemplateId" class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+              <option :value="undefined">使用系统默认回答方式</option>
+              <option v-for="template in promptTemplates" :key="template.id" :value="template.id">{{ template.name }}</option>
+            </select>
+            <p class="text-xs leading-5 text-muted-foreground">仅显示已发布模板。可在 Prompt 工作台中创建和发布新的回答规则。</p>
           </div>
         </div>
         <DialogFooter>

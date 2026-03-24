@@ -194,7 +194,8 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
             List<Map<String, String>> history = List.of();
             if (task.getConversationId() != null) {
                 try {
-                    history = conversationService.getChatHistory(task.getConversationId());
+                    history = conversationService.getChatHistoryWithInstructions(
+                            task.getConversationId(), task.getUserId(), task.getQuery());
                 } catch (Exception e) {
                     log.warn("Failed to get chat history for conversation {}: {}",
                             task.getConversationId(), e.getMessage());

@@ -13,12 +13,14 @@ import {
   Activity,
   Bell,
   BookOpen,
+  Cpu,
   FileText,
   Home,
   LogOut,
   Menu,
   MessageSquare,
   Moon,
+  PenLine,
   Search,
   Settings,
   ShieldCheck,
@@ -50,6 +52,8 @@ const menuItems: Array<{
   description: string
   icon: Component
 }> = [
+  { path: '/builder/prompts', label: 'Prompt 工作台', description: '模板与发布', icon: PenLine },
+  { path: '/builder/models', label: '模型中心', description: '模型与运行状态', icon: Cpu },
   { path: '/', label: '任务总览', description: '工作台', icon: Home },
   { path: '/knowledge-base', label: '知识库', description: '知识治理', icon: BookOpen },
   { path: '/document', label: '文档管理', description: '解析与索引', icon: FileText },
@@ -60,7 +64,16 @@ const menuItems: Array<{
   { path: '/admin/flags', label: '高级能力', description: '配置说明', icon: ShieldCheck },
 ]
 
+const menuGroups = [
+  { label: '工作区', items: menuItems.filter((item) => ['/', '/knowledge-base', '/document', '/chat'].includes(item.path)) },
+  { label: '构建', items: menuItems.filter((item) => ['/builder/prompts', '/builder/models', '/agent'].includes(item.path)) },
+  { label: '运营', items: menuItems.filter((item) => ['/rag', '/memory'].includes(item.path)) },
+  { label: '管理', items: menuItems.filter((item) => item.path === '/admin/flags') },
+]
+
 const commandRoutes = [
+  { keywords: ['model', '模型', 'llm', 'embedding', '向量'], path: '/builder/models' },
+  { keywords: ['prompt', '提示词', '模板'], path: '/builder/prompts' },
   { keywords: ['知识', '知识库', 'kb'], path: '/knowledge-base' },
   { keywords: ['文档', '文件', '索引', 'doc'], path: '/document' },
   { keywords: ['对话', '聊天', 'chat'], path: '/chat' },
@@ -243,34 +256,24 @@ onMounted(() => {
         </Button>
       </div>
 
-      <nav class="flex-1 space-y-2 px-3 py-4">
-        <p
-          v-if="isSidebarOpen"
-          class="px-3 text-xs font-medium uppercase text-zinc-600"
-        >
-          Workspace
-        </p>
-        <router-link
-          v-for="item in menuItems"
-          :key="item.path"
-          :to="item.path"
-          :title="item.label"
-          :class="[
-            'nav-pill group flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium transition-all duration-200',
-            isActive(item.path)
-              ? 'is-active text-white'
-              : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100',
-            !isSidebarOpen && 'justify-center px-0',
-          ]"
-        >
-          <component :is="item.icon" class="h-5 w-5 shrink-0" />
-          <span v-if="isSidebarOpen" class="min-w-0">
-            <span class="block truncate">{{ item.label }}</span>
-            <span class="block truncate text-xs font-normal text-zinc-600 group-hover:text-zinc-400">
-              {{ item.description }}
-            </span>
-          </span>
-        </router-link>
+      <nav class="flex-1 space-y-5 overflow-y-auto px-3 py-4">
+        <section v-for="group in menuGroups" :key="group.label" class="space-y-1.5">
+          <p v-if="isSidebarOpen" class="px-3 text-[11px] font-medium uppercase tracking-[0.12em] text-zinc-600">{{ group.label }}</p>
+          <router-link
+            v-for="item in group.items"
+            :key="item.path"
+            :to="item.path"
+            :title="item.label"
+            :class="[
+              'nav-pill group flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium transition-all duration-200',
+              isActive(item.path) ? 'is-active text-white' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100',
+              !isSidebarOpen && 'justify-center px-0',
+            ]"
+          >
+            <component :is="item.icon" class="h-5 w-5 shrink-0" />
+            <span v-if="isSidebarOpen" class="min-w-0"><span class="block truncate">{{ item.label }}</span><span class="block truncate text-xs font-normal text-zinc-600 group-hover:text-zinc-400">{{ item.description }}</span></span>
+          </router-link>
+        </section>
       </nav>
 
       <div class="space-y-3 border-t border-white/10 p-3">

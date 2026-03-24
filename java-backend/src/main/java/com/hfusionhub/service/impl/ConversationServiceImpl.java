@@ -13,12 +13,14 @@ import com.hfusionhub.dto.MessageInfoDTO;
 import com.hfusionhub.dto.MessageSendDTO;
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.entity.Conversation;
+import com.hfusionhub.entity.PromptTemplate;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.entity.Message;
 import com.hfusionhub.entity.User;
 import com.hfusionhub.entity.AgentTask;
 import com.hfusionhub.entity.AgentRun;
 import com.hfusionhub.mapper.ConversationMapper;
+import com.hfusionhub.mapper.PromptTemplateMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.MessageMapper;
 import com.hfusionhub.mapper.UserMapper;
@@ -58,6 +60,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public class ConversationServiceImpl implements ConversationService {
 
     private final ConversationMapper conversationMapper;
+    private final PromptTemplateMapper promptTemplateMapper;
     private final MessageMapper messageMapper;
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final UserMapper userMapper;
@@ -88,8 +91,17 @@ public class ConversationServiceImpl implements ConversationService {
         }
 
         // 3. 创建对话
+        if (dto.getPromptTemplateId() != null) {
+            PromptTemplate template = promptTemplateMapper.selectById(dto.getPromptTemplateId());
+            if (template == null || !currentUserId.equals(template.getUserId())
+                    || !PromptTemplate.STATUS_PUBLISHED.equals(template.getStatus())) {
+                throw new BusinessException("请选择属于你的已发布提示词模板");
+            }
+        }
+
         Conversation conversation = new Conversation();
         conversation.setKnowledgeBaseId(dto.getKnowledgeBaseId());
+        conversation.setPromptTemplateId(dto.getPromptTemplateId());
         conversation.setUserId(currentUserId);
         conversation.setTitle(StringUtils.hasText(dto.getTitle()) ? dto.getTitle() : "新对话");
         conversationMapper.insert(conversation);
@@ -180,7 +192,7 @@ public class ConversationServiceImpl implements ConversationService {
         Conversation conversation = conversationMapper.selectById(dto.getConversationId());
         Long currentUserId = JwtUtils.getCurrentUserId();
         List<Map<String, String>> history = getChatHistory(conversation.getId());
-        history = withRelevantMemories(history, currentUserId, conversation.getKnowledgeBaseId(), dto.getContent());
+        history = withConversationInstructions(history, conversation, currentUserId, dto.getContent());
 
         // 阶段 2: 事务外调用 AI（释放数据库连接）
         // Agent V1: 有知识库 → /api/agent/v1/chat; 无知识库 → /api/chat
@@ -568,6 +580,19 @@ public class ConversationServiceImpl implements ConversationService {
                 .collect(Collectors.toList());
     }
 
+    @Override
+    public List<Map<String, String>> getChatHistoryWithInstructions(
+            Long conversationId, Long userId, String query) {
+        Conversation conversation = conversationMapper.selectById(conversationId);
+        if (conversation == null) {
+            throw new BusinessException("对话不存在");
+        }
+        if (!conversation.getUserId().equals(userId)) {
+            throw new BusinessException("无权访问该对话");
+        }
+        return withConversationInstructions(getChatHistory(conversationId), conversation, userId, query);
+    }
+
     /**
      * Add only active, user-owned memories to the model context.  The marker
      * makes their provenance explicit and keeps memory separate from chat
@@ -591,6 +616,31 @@ public class ConversationServiceImpl implements ConversationService {
         enriched.add(Map.of("role", "system", "content", context.toString()));
         enriched.addAll(history);
         return enriched;
+    }
+
+    /** Resolve the selected template at request time and add it as a controlled system instruction. */
+    private List<Map<String, String>> withConversationInstructions(
+            List<Map<String, String>> history,
+            Conversation conversation,
+            Long userId,
+            String query) {
+        List<Map<String, String>> enriched = withRelevantMemories(
+                history, userId, conversation.getKnowledgeBaseId(), query);
+        if (conversation.getPromptTemplateId() == null || userId == null) return enriched;
+
+        PromptTemplate template = promptTemplateMapper.selectById(conversation.getPromptTemplateId());
+        if (template == null || !userId.equals(template.getUserId())
+                || !PromptTemplate.STATUS_PUBLISHED.equals(template.getStatus())) {
+            return enriched;
+        }
+
+        List<Map<String, String>> withTemplate = new java.util.ArrayList<>();
+        withTemplate.add(Map.of(
+                "role", "system",
+                "content", "Conversation instruction (follow this unless it conflicts with system safety rules):\n"
+                        + template.getContent()));
+        withTemplate.addAll(enriched);
+        return withTemplate;
     }
 
     @Override
@@ -777,7 +827,7 @@ public class ConversationServiceImpl implements ConversationService {
 
         // 5. 获取对话历史
         List<Map<String, String>> history = getChatHistory(conversation.getId());
-        history = withRelevantMemories(history, currentUserId, conversation.getKnowledgeBaseId(), dto.getContent());
+        history = withConversationInstructions(history, conversation, currentUserId, dto.getContent());
 
         // 5.5. Agent V1 Step 4: 创建持久化 agent_task 和 agent_run
         final AgentTask agentTask = agentTaskService.createTask(
@@ -1091,12 +1141,19 @@ public class ConversationServiceImpl implements ConversationService {
 
         List<Long> conversationIds = conversations.stream().map(Conversation::getId).collect(Collectors.toList());
         List<Long> kbIds = conversations.stream().map(Conversation::getKnowledgeBaseId).filter(id -> id != null).distinct().collect(Collectors.toList());
+        List<Long> promptTemplateIds = conversations.stream().map(Conversation::getPromptTemplateId).filter(id -> id != null).distinct().collect(Collectors.toList());
         List<Long> userIds = conversations.stream().map(Conversation::getUserId).filter(id -> id != null).distinct().collect(Collectors.toList());
 
         // 批量查询知识库名称
         Map<Long, String> kbNameMap = new HashMap<>();
         if (!kbIds.isEmpty()) {
             knowledgeBaseMapper.selectBatchIds(kbIds).forEach(kb -> kbNameMap.put(kb.getId(), kb.getName()));
+        }
+
+        Map<Long, String> promptTemplateNameMap = new HashMap<>();
+        if (!promptTemplateIds.isEmpty()) {
+            promptTemplateMapper.selectBatchIds(promptTemplateIds)
+                    .forEach(template -> promptTemplateNameMap.put(template.getId(), template.getName()));
         }
 
         // 批量查询用户名
@@ -1121,6 +1178,8 @@ public class ConversationServiceImpl implements ConversationService {
                 .map(conv -> ConversationInfoDTO.builder()
                         .id(conv.getId())
                         .knowledgeBaseId(conv.getKnowledgeBaseId())
+                        .promptTemplateId(conv.getPromptTemplateId())
+                        .promptTemplateName(conv.getPromptTemplateId() == null ? null : promptTemplateNameMap.get(conv.getPromptTemplateId()))
                         .knowledgeBaseName(conv.getKnowledgeBaseId() != null ? kbNameMap.getOrDefault(conv.getKnowledgeBaseId(), "未知知识库") : null)
                         .userId(conv.getUserId())
                         .userName(userNameMap.getOrDefault(conv.getUserId(), "未知用户"))
@@ -1151,6 +1210,12 @@ public class ConversationServiceImpl implements ConversationService {
         }
 
         // 获取创建人名称
+        String promptTemplateName = null;
+        if (conversation.getPromptTemplateId() != null) {
+            PromptTemplate template = promptTemplateMapper.selectById(conversation.getPromptTemplateId());
+            promptTemplateName = template != null ? template.getName() : null;
+        }
+
         String userName = null;
         if (conversation.getUserId() != null) {
             User user = userMapper.selectById(conversation.getUserId());
@@ -1172,6 +1237,8 @@ public class ConversationServiceImpl implements ConversationService {
         return ConversationInfoDTO.builder()
                 .id(conversation.getId())
                 .knowledgeBaseId(conversation.getKnowledgeBaseId())
+                .promptTemplateId(conversation.getPromptTemplateId())
+                .promptTemplateName(promptTemplateName)
                 .knowledgeBaseName(kbName)
                 .userId(conversation.getUserId())
                 .userName(userName)

@@ -22,6 +22,12 @@ public class ConversationInfoDTO {
     @Schema(description = "关联知识库ID")
     private Long knowledgeBaseId;
 
+    @Schema(description = "关联提示词模板 ID")
+    private Long promptTemplateId;
+
+    @Schema(description = "关联提示词模板名称")
+    private String promptTemplateName;
+
     @Schema(description = "知识库名称")
     private String knowledgeBaseName;
 

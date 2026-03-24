@@ -66,6 +66,16 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/agent/Index.vue'),
       },
       {
+        path: 'builder/prompts',
+        name: 'PromptStudio',
+        component: () => import('@/pages/builder/Prompts.vue'),
+      },
+      {
+        path: 'builder/models',
+        name: 'ModelCenter',
+        component: () => import('@/pages/builder/Models.vue'),
+      },
+      {
         path: 'memory',
         name: 'Memory',
         component: () => import('@/pages/memory/Index.vue'),

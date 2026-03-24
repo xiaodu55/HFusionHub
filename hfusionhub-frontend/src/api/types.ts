@@ -101,6 +101,8 @@ export interface Conversation {
   title: string
   knowledgeBaseId: number
   knowledgeBaseName?: string
+  promptTemplateId?: number
+  promptTemplateName?: string
   userId: number
   userName?: string
   messageCount?: number
@@ -134,6 +136,7 @@ export interface Message {
 export interface ConversationCreateDTO {
   title: string
   knowledgeBaseId?: number
+  promptTemplateId?: number
 }
 
 export interface MessageSendDTO {

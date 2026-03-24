@@ -115,6 +115,13 @@ public interface ConversationService {
     List<Map<String, String>> getChatHistory(Long conversationId);
 
     /**
+     * Return history with the conversation's active prompt template and
+     * relevant memories.  Queue workers use this to match direct streaming.
+     */
+    List<Map<String, String>> getChatHistoryWithInstructions(
+            Long conversationId, Long userId, String query);
+
+    /**
      * V13 队列模式入口 — 校验权限、保存用户消息、创建 AgentTask + PENDING Run、
      * 记录 QUEUED 事件，返回 taskId 供前端订阅 SSE。
      *

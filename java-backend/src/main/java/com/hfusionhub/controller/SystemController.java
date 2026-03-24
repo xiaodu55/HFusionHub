@@ -78,4 +78,14 @@ public class SystemController {
 
         return R.ok(checks);
     }
+
+    /**
+     * Runtime state intended for the model center.  The Python service filters
+     * secrets before returning this data; Java only proxies it across the
+     * authenticated application boundary.
+     */
+    @GetMapping("/ai-runtime")
+    public R<Map<String, Object>> aiRuntime() {
+        return R.ok(aiClient.getRuntimeOverview());
+    }
 }

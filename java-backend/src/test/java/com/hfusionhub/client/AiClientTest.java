@@ -166,6 +166,17 @@ class AiClientTest {
     }
 
     @Test
+    void runtimeOverviewShouldReturnStructuredUnavailableStateWhenServiceIsDown() {
+        when(restTemplate.exchange(anyString(), any(), any(), any(Class.class)))
+                .thenThrow(new org.springframework.web.client.ResourceAccessException("Connection refused"));
+
+        Map<String, Object> result = aiClient.getRuntimeOverview();
+
+        assertEquals("unavailable", result.get("status"));
+        assertEquals(false, result.get("gateway_reachable"));
+    }
+
+    @Test
     void cancelRequestShouldReturnTrue() {
         Map<String, Object> responseBody = Map.of("status", "cancelled");
         org.springframework.http.ResponseEntity<Map> response =

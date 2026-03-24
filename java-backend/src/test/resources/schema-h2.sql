@@ -83,6 +83,7 @@ CREATE INDEX IF NOT EXISTS idx_doc_created_at ON document (created_at);
 CREATE TABLE IF NOT EXISTS conversation (
     id BIGINT NOT NULL AUTO_INCREMENT,
     knowledge_base_id BIGINT DEFAULT NULL,
+    prompt_template_id BIGINT DEFAULT NULL,
     user_id BIGINT NOT NULL,
     title VARCHAR(200) DEFAULT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -95,7 +96,27 @@ CREATE TABLE IF NOT EXISTS conversation (
 
 CREATE INDEX IF NOT EXISTS idx_conv_user_id ON conversation (user_id);
 CREATE INDEX IF NOT EXISTS idx_conv_kb_id ON conversation (knowledge_base_id);
+CREATE INDEX IF NOT EXISTS idx_conv_prompt_template ON conversation (prompt_template_id);
 CREATE INDEX IF NOT EXISTS idx_conv_created_at ON conversation (created_at);
+
+-- =====================================================
+-- Prompt templates — V16
+-- =====================================================
+CREATE TABLE IF NOT EXISTS prompt_template (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description VARCHAR(500) DEFAULT NULL,
+    content CLOB NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+    version INT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE (user_id, name),
+    FOREIGN KEY (user_id) REFERENCES sys_user (id)
+);
+CREATE INDEX IF NOT EXISTS idx_prompt_template_user_status ON prompt_template (user_id, status, updated_at);
 
 -- =====================================================
 -- 消息表 (message) — includes V4 request_id column
