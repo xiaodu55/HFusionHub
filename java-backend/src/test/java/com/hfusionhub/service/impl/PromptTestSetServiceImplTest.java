@@ -1,0 +1,326 @@
+package com.hfusionhub.service.impl;
+
+import cn.dev33.satoken.SaManager;
+import cn.dev33.satoken.context.SaTokenContext;
+import cn.dev33.satoken.context.model.SaRequest;
+import cn.dev33.satoken.context.model.SaResponse;
+import cn.dev33.satoken.context.model.SaStorage;
+import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
+import cn.dev33.satoken.stp.StpUtil;
+import com.hfusionhub.client.AiClient;
+import com.hfusionhub.common.exception.BusinessException;
+import com.hfusionhub.dto.PromptTestCaseDTO;
+import com.hfusionhub.dto.PromptTestCaseSaveDTO;
+import com.hfusionhub.dto.PromptTestSetDetailDTO;
+import com.hfusionhub.dto.PromptTestSetRunRequest;
+import com.hfusionhub.dto.PromptTestSetRunResponse;
+import com.hfusionhub.dto.PromptTestSetSaveDTO;
+import com.hfusionhub.entity.KnowledgeBase;
+import com.hfusionhub.entity.PromptTestCase;
+import com.hfusionhub.entity.PromptTestSet;
+import com.hfusionhub.mapper.KnowledgeBaseMapper;
+import com.hfusionhub.mapper.PromptTestCaseMapper;
+import com.hfusionhub.mapper.PromptTestSetMapper;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.*;
+
+/**
+ * Unit tests for {@link PromptTestSetServiceImpl} — prompt test case sets.
+ *
+ * <p>Verifies:
+ * <ul>
+ *   <li>Ownership validation on set and case operations.</li>
+ *   <li>Batch run: each question executed via AiClient, single-case failure does
+ *       not abort the whole run, {{var}} substitution applied.</li>
+ *   <li>KB ownership checked before batch run.</li>
+ *   <li>Empty set rejected.</li>
+ * </ul>
+ */
+class PromptTestSetServiceImplTest {
+
+    private PromptTestSetMapper testSetMapper;
+    private PromptTestCaseMapper testCaseMapper;
+    private KnowledgeBaseMapper knowledgeBaseMapper;
+    private AiClient aiClient;
+    private PromptTestSetServiceImpl service;
+
+    @BeforeEach
+    void setUp() {
+        SaManager.setSaTokenDao(new SaTokenDaoDefaultImpl());
+        SaManager.setSaTokenContext(new MockSaTokenContext());
+
+        testSetMapper = mock(PromptTestSetMapper.class);
+        testCaseMapper = mock(PromptTestCaseMapper.class);
+        knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        aiClient = mock(AiClient.class);
+        service = new PromptTestSetServiceImpl(testSetMapper, testCaseMapper, knowledgeBaseMapper, aiClient);
+    }
+
+    @AfterEach
+    void tearDown() {
+        StpUtil.logout();
+    }
+
+    private PromptTestSet ownedSet() {
+        PromptTestSet set = new PromptTestSet();
+        set.setId(10L);
+        set.setUserId(1L);
+        set.setName("回归集");
+        return set;
+    }
+
+    private PromptTestCase caseOf(Long id, String question, Map<String, Object> vars) {
+        PromptTestCase tc = new PromptTestCase();
+        tc.setId(id);
+        tc.setSetId(10L);
+        tc.setQuestion(question);
+        tc.setVariables(vars);
+        tc.setSortOrder(0);
+        return tc;
+    }
+
+    // ── Ownership ─────────────────────────────────────────────────────
+
+    @Test
+    void rejectsSetNotOwnedByCurrentUser() {
+        StpUtil.login(1L);
+        PromptTestSet set = ownedSet();
+        set.setUserId(2L);
+        when(testSetMapper.selectById(10L)).thenReturn(set);
+
+        PromptTestSetSaveDTO dto = new PromptTestSetSaveDTO();
+        dto.setName("x");
+        assertThrows(BusinessException.class, () -> service.getDetail(10L));
+    }
+
+    @Test
+    void rejectsCaseNotInSet() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        PromptTestCase foreign = caseOf(99L, "q", null);
+        foreign.setSetId(20L);
+        when(testCaseMapper.selectById(99L)).thenReturn(foreign);
+
+        PromptTestCaseSaveDTO dto = new PromptTestCaseSaveDTO();
+        dto.setQuestion("q");
+        assertThrows(BusinessException.class, () -> service.updateCase(10L, 99L, dto));
+    }
+
+    @Test
+    void rejectsDuplicateSetName() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectCount(any())).thenReturn(1L);
+
+        PromptTestSetSaveDTO dto = new PromptTestSetSaveDTO();
+        dto.setName("重复");
+        assertThrows(BusinessException.class, () -> service.create(dto));
+    }
+
+    // ── Batch run ─────────────────────────────────────────────────────
+
+    @Test
+    void rejectsEmptySetRun() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        when(testCaseMapper.selectList(any())).thenReturn(List.of());
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("模板");
+        assertThrows(BusinessException.class, () -> service.run(10L, request));
+    }
+
+    @Test
+    void rejectsForeignKnowledgeBase() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(caseOf(1L, "q", null)));
+
+        KnowledgeBase kb = new KnowledgeBase();
+        kb.setId(7L);
+        kb.setUserId(2L);
+        when(knowledgeBaseMapper.selectById(7L)).thenReturn(kb);
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("模板");
+        request.setKnowledgeBaseId(7L);
+        assertThrows(BusinessException.class, () -> service.run(10L, request));
+    }
+
+    @Test
+    void runsAllCasesAndSubstitutesVariables() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+
+        Map<String, Object> vars = new HashMap<>();
+        vars.put("role", "客服");
+        vars.put("topic", "退款");
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(
+                caseOf(1L, "如何退款？", vars),
+                caseOf(2L, "多久到账？", null)
+        ));
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答");
+        resp.setModel("deepseek-v4-flash");
+        resp.setTokenCount(100);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("你是{{role}}，关于{{topic}}请回答");
+        PromptTestSetRunResponse response = service.run(10L, request);
+
+        assertEquals(2, response.getTotalCases());
+        assertEquals(2, response.getSuccessCount());
+        assertEquals(0, response.getFailureCount());
+        assertEquals(2, response.getResults().size());
+
+        // Variable substitution applied for case 1
+        assertEquals("你是客服，关于退款请回答", response.getResults().get(0).getRenderedTemplate());
+        // Case 2 has no variables → template unchanged
+        assertEquals("你是{{role}}，关于{{topic}}请回答", response.getResults().get(1).getRenderedTemplate());
+    }
+
+    @Test
+    void substitutesChineseVariableNames() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+
+        Map<String, Object> vars = new HashMap<>();
+        vars.put("角色", "客服");
+        vars.put("主题", "退款");
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(caseOf(1L, "如何退款？", vars)));
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答");
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("你是{{角色}}，关于{{主题}}请回答");
+        PromptTestSetRunResponse response = service.run(10L, request);
+
+        assertEquals(1, response.getSuccessCount());
+        assertEquals("你是客服，关于退款请回答", response.getResults().get(0).getRenderedTemplate());
+    }
+
+    @Test
+    void singleCaseFailureDoesNotAbortRun() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(
+                caseOf(1L, "ok", null),
+                caseOf(2L, "boom", null)
+        ));
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答");
+        resp.setModel("deepseek-v4-flash");
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString()))
+                .thenReturn(resp)
+                .thenThrow(new RuntimeException("boom"));
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("模板");
+        PromptTestSetRunResponse response = service.run(10L, request);
+
+        assertEquals(2, response.getTotalCases());
+        assertEquals(1, response.getSuccessCount());
+        assertEquals(1, response.getFailureCount());
+        assertTrue(response.getResults().get(0).isSuccess());
+        assertFalse(response.getResults().get(1).isSuccess());
+        assertNotNull(response.getResults().get(1).getError());
+    }
+
+    @Test
+    void kbBoundRunUsesAgentV1Chat() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(caseOf(1L, "q", null)));
+
+        KnowledgeBase kb = new KnowledgeBase();
+        kb.setId(7L);
+        kb.setUserId(1L);
+        when(knowledgeBaseMapper.selectById(7L)).thenReturn(kb);
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答");
+        when(aiClient.agentV1Chat(anyString(), isNull(), anyLong(), any(), anyString(),
+                anyString(), anyInt(), isNull(), anyLong())).thenReturn(resp);
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("模板");
+        request.setKnowledgeBaseId(7L);
+        PromptTestSetRunResponse response = service.run(10L, request);
+
+        assertEquals(1, response.getSuccessCount());
+        verify(aiClient).agentV1Chat(eq("q"), isNull(), eq(7L), any(), eq("模板"),
+                eq("detailed"), eq(5), isNull(), eq(1L));
+    }
+
+    // ── Case CRUD ─────────────────────────────────────────────────────
+
+    @Test
+    void addCaseStoresQuestionAndVariables() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        when(testCaseMapper.selectList(any())).thenReturn(List.of());
+
+        PromptTestCaseSaveDTO dto = new PromptTestCaseSaveDTO();
+        dto.setQuestion("问题");
+        Map<String, Object> vars = new HashMap<>();
+        vars.put("role", "客服");
+        dto.setVariables(vars);
+
+        PromptTestCaseDTO result = service.addCase(10L, dto);
+
+        assertNotNull(result);
+        assertEquals("问题", result.getQuestion());
+        assertEquals("客服", result.getVariables().get("role"));
+    }
+
+    @Test
+    void deleteSetCascadesCases() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+
+        service.delete(10L);
+
+        verify(testCaseMapper).delete(any());
+        verify(testSetMapper).deleteById(10L);
+    }
+
+    /**
+     * Minimal in-memory SaTokenContext for unit tests without a servlet container.
+     */
+    private static class MockSaTokenContext implements SaTokenContext {
+        private final Map<String, Object> storage = new HashMap<>();
+
+        @Override
+        public SaRequest getRequest() { return mock(SaRequest.class); }
+
+        @Override
+        public SaResponse getResponse() { return mock(SaResponse.class); }
+
+        @Override
+        public SaStorage getStorage() {
+            return new SaStorage() {
+                @Override public Object getSource() { return storage; }
+                @Override public Object get(String key) { return storage.get(key); }
+                @Override public SaStorage set(String key, Object value) { storage.put(key, value); return this; }
+                @Override public SaStorage delete(String key) { storage.remove(key); return this; }
+            };
+        }
+
+        @Override public boolean matchPath(String pattern, String path) { return true; }
+        @Override public boolean isValid() { return true; }
+    }
+}

@@ -418,3 +418,34 @@ CREATE TABLE IF NOT EXISTS agent_recovery_event (
 
 CREATE INDEX IF NOT EXISTS idx_are_run ON agent_recovery_event (run_id);
 CREATE INDEX IF NOT EXISTS idx_are_created ON agent_recovery_event (created_at);
+
+-- =====================================================
+-- Prompt test sets — V18
+-- =====================================================
+CREATE TABLE IF NOT EXISTS prompt_test_set (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description VARCHAR(500) DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE (user_id, name),
+    FOREIGN KEY (user_id) REFERENCES sys_user (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pts_user_updated ON prompt_test_set (user_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS prompt_test_case (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    set_id BIGINT NOT NULL,
+    question VARCHAR(4000) NOT NULL,
+    variables VARCHAR(4000) DEFAULT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    FOREIGN KEY (set_id) REFERENCES prompt_test_set (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ptc_set_order ON prompt_test_case (set_id, sort_order);

@@ -86,6 +86,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/builder/TestBench.vue'),
       },
       {
+        path: 'builder/test-sets',
+        name: 'PromptTestSets',
+        component: () => import('@/pages/builder/TestSet.vue'),
+      },
+      {
         path: 'memory',
         name: 'Memory',
         component: () => import('@/pages/memory/Index.vue'),
