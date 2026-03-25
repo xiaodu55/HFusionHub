@@ -2,8 +2,12 @@ package com.hfusionhub.service;
 
 import com.hfusionhub.dto.PromptTestCaseDTO;
 import com.hfusionhub.dto.PromptTestCaseSaveDTO;
+import com.hfusionhub.dto.PromptTestSetCompareRequest;
+import com.hfusionhub.dto.PromptTestSetCompareResponse;
 import com.hfusionhub.dto.PromptTestSetDTO;
 import com.hfusionhub.dto.PromptTestSetDetailDTO;
+import com.hfusionhub.dto.PromptTestSetRunDetailDTO;
+import com.hfusionhub.dto.PromptTestSetRunDTO;
 import com.hfusionhub.dto.PromptTestSetRunResponse;
 import com.hfusionhub.dto.PromptTestSetRunRequest;
 import com.hfusionhub.dto.PromptTestSetSaveDTO;
@@ -32,6 +36,15 @@ public interface PromptTestSetService {
     /** 删除用例集中的一个用例 */
     void deleteCase(Long setId, Long caseId);
 
-    /** 用同一模板批量运行用例集中的所有问题 */
+    /** 用同一模板批量运行用例集中的所有问题，并保存运行历史 */
     PromptTestSetRunResponse run(Long setId, PromptTestSetRunRequest request);
+
+    /** 列出用例集的运行历史（新到旧） */
+    List<PromptTestSetRunDTO> listRuns(Long setId);
+
+    /** 获取一次运行的详情（含每个用例结果） */
+    PromptTestSetRunDetailDTO getRunDetail(Long runId);
+
+    /** 对比两次运行，逐用例给出回答/耗时/Token/成败 */
+    PromptTestSetCompareResponse compare(PromptTestSetCompareRequest request);
 }

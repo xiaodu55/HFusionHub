@@ -3,8 +3,12 @@ package com.hfusionhub.controller;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.dto.PromptTestCaseDTO;
 import com.hfusionhub.dto.PromptTestCaseSaveDTO;
+import com.hfusionhub.dto.PromptTestSetCompareRequest;
+import com.hfusionhub.dto.PromptTestSetCompareResponse;
 import com.hfusionhub.dto.PromptTestSetDTO;
 import com.hfusionhub.dto.PromptTestSetDetailDTO;
+import com.hfusionhub.dto.PromptTestSetRunDetailDTO;
+import com.hfusionhub.dto.PromptTestSetRunDTO;
 import com.hfusionhub.dto.PromptTestSetRunRequest;
 import com.hfusionhub.dto.PromptTestSetRunResponse;
 import com.hfusionhub.dto.PromptTestSetSaveDTO;
@@ -88,10 +92,30 @@ public class PromptTestSetController {
 
     // ── Batch run ─────────────────────────────────────────────────────
 
-    @Operation(summary = "批量运行用例集", description = "用同一模板对集内所有问题逐个运行，返回每个用例的结果。单例失败不中断整体。")
+    @Operation(summary = "批量运行用例集", description = "用同一模板对集内所有问题逐个运行，返回每个用例的结果。单例失败不中断整体，并保存运行历史。")
     @PostMapping("/{id}/run")
     public R<PromptTestSetRunResponse> run(@PathVariable Long id,
                                            @Valid @RequestBody PromptTestSetRunRequest request) {
         return R.ok("批量测试完成", promptTestSetService.run(id, request));
+    }
+
+    // ── Run history & comparison ──────────────────────────────────────
+
+    @Operation(summary = "列出用例集的运行历史", description = "新到旧，含模板版本快照与成功/失败统计")
+    @GetMapping("/{id}/runs")
+    public R<List<PromptTestSetRunDTO>> listRuns(@PathVariable Long id) {
+        return R.ok(promptTestSetService.listRuns(id));
+    }
+
+    @Operation(summary = "获取单次运行的详情", description = "含每个用例的回答、耗时、Token、来源")
+    @GetMapping("/runs/{runId}")
+    public R<PromptTestSetRunDetailDTO> runDetail(@PathVariable Long runId) {
+        return R.ok(promptTestSetService.getRunDetail(runId));
+    }
+
+    @Operation(summary = "对比两次运行", description = "按同一用例逐项对比回答、耗时、Token 与成败")
+    @PostMapping("/compare")
+    public R<PromptTestSetCompareResponse> compare(@Valid @RequestBody PromptTestSetCompareRequest request) {
+        return R.ok("对比完成", promptTestSetService.compare(request));
     }
 }

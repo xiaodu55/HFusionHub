@@ -10,11 +10,17 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.dto.PromptTestCaseDTO;
 import com.hfusionhub.dto.PromptTestCaseSaveDTO;
+import com.hfusionhub.dto.PromptTestSetCompareRequest;
+import com.hfusionhub.dto.PromptTestSetCompareResponse;
 import com.hfusionhub.dto.PromptTestSetDetailDTO;
+import com.hfusionhub.dto.PromptTestSetRunDTO;
+import com.hfusionhub.dto.PromptTestSetRunDetailDTO;
 import com.hfusionhub.dto.PromptTestSetRunRequest;
 import com.hfusionhub.dto.PromptTestSetRunResponse;
 import com.hfusionhub.dto.PromptTestSetSaveDTO;
+import com.hfusionhub.entity.PromptTemplate;
 import com.hfusionhub.entity.User;
+import com.hfusionhub.mapper.PromptTemplateMapper;
 import com.hfusionhub.mapper.UserMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +34,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -64,6 +71,9 @@ class PromptTestSetIntegrationTest {
     @Autowired
     private UserMapper userMapper;
 
+    @Autowired
+    private PromptTemplateMapper promptTemplateMapper;
+
     private Long userId;
 
     @BeforeEach
@@ -80,6 +90,17 @@ class PromptTestSetIntegrationTest {
         userId = user.getId();
 
         StpUtil.login(userId);
+    }
+
+    private PromptTemplate createTemplate(String name, int version, String content) {
+        PromptTemplate template = new PromptTemplate();
+        template.setUserId(userId);
+        template.setName(name);
+        template.setContent(content);
+        template.setVersion(version);
+        template.setStatus(PromptTemplate.STATUS_PUBLISHED);
+        promptTemplateMapper.insert(template);
+        return template;
     }
 
     @AfterEach
@@ -159,6 +180,155 @@ class PromptTestSetIntegrationTest {
         assertEquals("改后问题", tc.getQuestion());
         assertEquals("新值", tc.getVariables().get("变量"));
         assertEquals(42, tc.getVariables().get("num"));
+    }
+
+    @Test
+    void runPersistsHistoryAndReadsBack() {
+        Map<String, Object> vars = new HashMap<>();
+        vars.put("角色", "客服");
+        PromptTestSetDetailDTO created = createSetWithCase(vars);
+
+        PromptTemplate template = createTemplate("客服模板", 7, "你是{{角色}}，请回答");
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答内容");
+        resp.setModel("deepseek-v4-flash");
+        resp.setTokenCount(88);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateId(template.getId());
+        request.setTemplateVersion(99);
+        request.setTemplateName("伪造名称");
+        PromptTestSetRunResponse runResponse = service.run(created.getId(), request);
+
+        assertNotNull(runResponse.getRunId());
+        assertEquals(template.getId(), runResponse.getTemplateId());
+        assertEquals(7, runResponse.getTemplateVersion());
+        assertEquals("客服模板", runResponse.getTemplateName());
+
+        // Run history lists the persisted run
+        List<PromptTestSetRunDTO> runs = service.listRuns(created.getId());
+        assertEquals(1, runs.size());
+        assertEquals(runResponse.getRunId(), runs.get(0).getId());
+        assertEquals(7, runs.get(0).getTemplateVersion());
+        assertEquals("客服模板", runs.get(0).getTemplateName());
+        assertEquals(1, runs.get(0).getTotalCases());
+        assertEquals(1, runs.get(0).getSuccessCount());
+
+        // Run detail restores per-case result incl. JSON token usage/sources
+        PromptTestSetRunDetailDTO detail = service.getRunDetail(runResponse.getRunId());
+        assertEquals(1, detail.getResults().size());
+        assertEquals("回答内容", detail.getResults().get(0).getContent());
+        assertEquals(88, detail.getResults().get(0).getTokenCount());
+    }
+
+    @Test
+    void runWithBoundTemplateUsesDbContentDespiteEditedPayload() {
+        Map<String, Object> vars = new HashMap<>();
+        vars.put("角色", "客服");
+        PromptTestSetDetailDTO created = createSetWithCase(vars);
+
+        PromptTemplate template = createTemplate("客服模板", 7, "你是{{角色}}，来自模板");
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答内容");
+        resp.setModel("deepseek-v4-flash");
+        resp.setTokenCount(88);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        // Edited/payload content must be ignored when a template is bound
+        request.setTemplateId(template.getId());
+        request.setTemplateContent("被篡改的自定义内容");
+        request.setTemplateName("伪造名称");
+        service.run(created.getId(), request);
+
+        List<PromptTestSetRunDTO> runs = service.listRuns(created.getId());
+        assertEquals(1, runs.size());
+        assertEquals("客服模板", runs.get(0).getTemplateName());
+        assertEquals(7, runs.get(0).getTemplateVersion());
+        assertTrue(runs.get(0).getTemplateContent().contains("来自模板"));
+
+        // Rendered template must use the DB snapshot content
+        PromptTestSetRunDetailDTO detail = service.getRunDetail(runs.get(0).getId());
+        assertEquals("你是客服，来自模板", detail.getResults().get(0).getRenderedTemplate());
+    }
+
+    @Test
+    void runRejectsForeignTemplate() {
+        Map<String, Object> vars = new HashMap<>();
+        vars.put("角色", "客服");
+        PromptTestSetDetailDTO created = createSetWithCase(vars);
+
+        // Template owned by another user (impersonation attempt)
+        User other = new User();
+        other.setUsername("pts-other-" + System.nanoTime());
+        other.setPassword("test");
+        other.setNickname("OTHER");
+        other.setStatus(0);
+        userMapper.insert(other);
+
+        PromptTemplate foreign = new PromptTemplate();
+        foreign.setUserId(other.getId());
+        foreign.setName("他人模板");
+        foreign.setContent("你不是我");
+        foreign.setVersion(1);
+        foreign.setStatus(PromptTemplate.STATUS_PUBLISHED);
+        promptTemplateMapper.insert(foreign);
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("模板");
+        request.setTemplateId(foreign.getId());
+
+        com.hfusionhub.common.exception.BusinessException ex = assertThrows(
+                com.hfusionhub.common.exception.BusinessException.class,
+                () -> service.run(created.getId(), request));
+        assertTrue(ex.getMessage().contains("无权"));
+        assertEquals(0, service.listRuns(created.getId()).size());
+    }
+
+    @Test
+    void compareTwoTemplateVersionsPerCase() {
+        Map<String, Object> vars = new HashMap<>();
+        vars.put("主题", "退款");
+        PromptTestSetDetailDTO created = createSetWithCase(vars);
+
+        PromptTemplate tpl1 = createTemplate("对比模板v1", 1, "v1 模板：{{主题}}");
+        PromptTemplate tpl2 = createTemplate("对比模板v2", 2, "v2 模板：{{主题}}");
+
+        AiClient.ChatResponse resp1 = new AiClient.ChatResponse();
+        resp1.setContent("回答 v1");
+        resp1.setModel("deepseek-v4-flash");
+        resp1.setTokenCount(10);
+        AiClient.ChatResponse resp2 = new AiClient.ChatResponse();
+        resp2.setContent("回答 v2");
+        resp2.setModel("deepseek-v4-flash");
+        resp2.setTokenCount(20);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString()))
+                .thenReturn(resp1)
+                .thenReturn(resp2);
+
+        PromptTestSetRunRequest req1 = new PromptTestSetRunRequest();
+        req1.setTemplateId(tpl1.getId());
+        PromptTestSetRunResponse run1 = service.run(created.getId(), req1);
+
+        PromptTestSetRunRequest req2 = new PromptTestSetRunRequest();
+        req2.setTemplateId(tpl2.getId());
+        PromptTestSetRunResponse run2 = service.run(created.getId(), req2);
+
+        PromptTestSetCompareRequest compareRequest = new PromptTestSetCompareRequest();
+        compareRequest.setRunIdA(run1.getRunId());
+        compareRequest.setRunIdB(run2.getRunId());
+        PromptTestSetCompareResponse compare = service.compare(compareRequest);
+
+        assertEquals(1, compare.getRunA().getTemplateVersion());
+        assertEquals(2, compare.getRunB().getTemplateVersion());
+        assertEquals(1, compare.getComparedCases());
+        assertEquals(1, compare.getComparisons().size());
+        assertEquals("回答 v1", compare.getComparisons().get(0).getResultA().getContent());
+        assertEquals("回答 v2", compare.getComparisons().get(0).getResultB().getContent());
+        assertEquals(Boolean.FALSE, compare.getComparisons().get(0).getAnswerIdentical());
     }
 
     private static class MockSaTokenContext implements SaTokenContext {

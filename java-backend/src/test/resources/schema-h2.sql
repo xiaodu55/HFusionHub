@@ -449,3 +449,50 @@ CREATE TABLE IF NOT EXISTS prompt_test_case (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ptc_set_order ON prompt_test_case (set_id, sort_order);
+
+-- =====================================================
+-- Prompt test set run history — V19
+-- =====================================================
+CREATE TABLE IF NOT EXISTS prompt_test_set_run (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    set_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    template_id BIGINT DEFAULT NULL,
+    template_version INT DEFAULT NULL,
+    template_name VARCHAR(100) DEFAULT NULL,
+    template_content VARCHAR(4000) DEFAULT NULL,
+    knowledge_base_id BIGINT DEFAULT NULL,
+    total_cases INT NOT NULL DEFAULT 0,
+    success_count INT NOT NULL DEFAULT 0,
+    failure_count INT NOT NULL DEFAULT 0,
+    total_elapsed_ms BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    FOREIGN KEY (set_id) REFERENCES prompt_test_set (id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES sys_user (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ptsr_set_created ON prompt_test_set_run (set_id, created_at);
+
+CREATE TABLE IF NOT EXISTS prompt_test_case_result (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    run_id BIGINT NOT NULL,
+    case_id BIGINT NOT NULL,
+    question VARCHAR(4000) NOT NULL,
+    rendered_template VARCHAR(4000) DEFAULT NULL,
+    content VARCHAR(4000) DEFAULT NULL,
+    model VARCHAR(100) DEFAULT NULL,
+    token_count INT NOT NULL DEFAULT 0,
+    token_usage VARCHAR(4000) DEFAULT NULL,
+    sources VARCHAR(4000) DEFAULT NULL,
+    elapsed_ms BIGINT NOT NULL DEFAULT 0,
+    success BOOLEAN NOT NULL DEFAULT TRUE,
+    error VARCHAR(1000) DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    FOREIGN KEY (run_id) REFERENCES prompt_test_set_run (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ptcr_run ON prompt_test_case_result (run_id);
+CREATE INDEX IF NOT EXISTS idx_ptcr_case ON prompt_test_case_result (case_id);

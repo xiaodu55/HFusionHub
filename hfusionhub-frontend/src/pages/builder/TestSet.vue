@@ -1,19 +1,25 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Clock,
+  Diff,
   FlaskConical,
+  History,
   Layers,
   LoaderCircle,
+  Minus,
   Play,
   Plus,
   RefreshCw,
   Save,
+  Scale,
   Trash2,
   XCircle,
+  Zap,
 } from 'lucide-vue-next'
 import * as promptTemplateApi from '@/api/promptTemplate'
 import * as promptTestSetApi from '@/api/promptTestSet'
@@ -23,7 +29,9 @@ import type {
   PromptTestCase,
   PromptTestCaseResult,
   PromptTestSet,
+  PromptTestSetCompareResponse,
   PromptTestSetDetail,
+  PromptTestSetRun,
   PromptTestSetRunResponse,
 } from '@/api/promptTestSet'
 import type { KnowledgeBase } from '@/api/types'
@@ -61,9 +69,19 @@ const showCaseEditor = ref(false)
 const runTemplateContent = ref('')
 const runKbId = ref<number | undefined>(undefined)
 const runResult = ref<PromptTestSetRunResponse | null>(null)
+const selectedTemplate = ref<{ id: number; version: number; name: string } | null>(null)
+const selectedTemplateId = ref<number>(0)
+
+// run history & comparison
+const runs = ref<PromptTestSetRun[]>([])
+const compareA = ref<number | undefined>(undefined)
+const compareB = ref<number | undefined>(undefined)
+const comparison = ref<PromptTestSetCompareResponse | null>(null)
+const comparing = ref(false)
 
 // expanded case ids in the run report
 const expandedResults = ref<Set<number>>(new Set())
+const expandedCompare = ref<Set<number>>(new Set())
 
 // ── Computed ───────────────────────────────────────────────────────
 
@@ -135,15 +153,29 @@ const loadSets = async () => {
 const selectSet = async (id: number) => {
   selectedId.value = id
   runResult.value = null
+  comparison.value = null
+  compareA.value = undefined
+  compareB.value = undefined
   expandedResults.value = new Set()
+  expandedCompare.value = new Set()
   try {
     const res = await promptTestSetApi.getPromptTestSet(id)
     detail.value = res.data
     if (detail.value.cases.length > 0) {
       runTemplateContent.value = runTemplateContent.value || '你是一个专业的AI助手，请用中文回答。'
     }
+    await loadRuns(id)
   } catch (err) {
     toast.error(err instanceof Error ? err.message : '加载用例集详情失败')
+  }
+}
+
+const loadRuns = async (id: number) => {
+  try {
+    const res = await promptTestSetApi.listPromptTestSetRuns(id)
+    runs.value = res.data
+  } catch (err) {
+    console.error('加载运行历史失败:', err)
   }
 }
 
@@ -281,8 +313,10 @@ const runAll = async () => {
     const res = await promptTestSetApi.runPromptTestSet(selectedId.value, {
       templateContent: runTemplateContent.value.trim(),
       knowledgeBaseId: runKbId.value,
+      templateId: selectedTemplate.value?.id,
     })
     runResult.value = res.data
+    await loadRuns(selectedId.value)
     if (res.data.failureCount > 0) {
       toast.warning(`批量测试完成：${res.data.successCount} 成功，${res.data.failureCount} 失败`)
     } else {
@@ -293,6 +327,104 @@ const runAll = async () => {
   } finally {
     running.value = false
   }
+}
+
+const onTemplateSelect = (id: number) => {
+  selectedTemplateId.value = id
+  const t = templates.value.find((x) => x.id === id)
+  if (t) {
+    runTemplateContent.value = t.content
+    selectedTemplate.value = { id: t.id, version: t.version, name: t.name }
+  }
+}
+
+// Manual edits to the template content break the template association:
+// the run is then recorded as a custom template, not "某模板 vN".
+watch(runTemplateContent, (value) => {
+  const t = selectedTemplate.value
+  if (t && value !== (templates.value.find((x) => x.id === t.id)?.content ?? '')) {
+    selectedTemplate.value = null
+    selectedTemplateId.value = 0
+  }
+})
+
+const clearTemplate = () => {
+  runTemplateContent.value = ''
+  selectedTemplate.value = null
+  selectedTemplateId.value = 0
+}
+
+// ── Comparison ─────────────────────────────────────────────────────
+
+const canCompare = computed(
+  () => compareA.value !== undefined && compareB.value !== undefined
+    && compareA.value !== compareB.value && !comparing.value,
+)
+
+const runLabel = (r: PromptTestSetRun): string => {
+  if (r.templateName) return `${r.templateName} v${r.templateVersion ?? 0}`
+  return '自定义模板'
+}
+
+const selectRunForDetail = async (runId: number) => {
+  try {
+    const res = await promptTestSetApi.getPromptTestSetRun(runId)
+    runResult.value = {
+      setId: selectedId.value ?? 0,
+      runId: res.data.run.id,
+      totalCases: res.data.run.totalCases,
+      successCount: res.data.run.successCount,
+      failureCount: res.data.run.failureCount,
+      totalElapsedMs: res.data.run.totalElapsedMs,
+      results: res.data.results,
+    }
+    expandedResults.value = new Set()
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '加载运行详情失败')
+  }
+}
+
+const selectCompare = (side: 'A' | 'B', runId: number) => {
+  if (side === 'A') compareA.value = runId
+  else compareB.value = runId
+}
+
+const doCompare = async () => {
+  if (!canCompare.value || compareA.value === undefined || compareB.value === undefined) return
+  comparing.value = true
+  comparison.value = null
+  expandedCompare.value = new Set()
+  try {
+    const res = await promptTestSetApi.comparePromptTestSetRuns({
+      runIdA: compareA.value,
+      runIdB: compareB.value,
+    })
+    comparison.value = res.data
+    toast.success(`对比完成：${res.data.comparedCases} 个用例`)
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '对比失败')
+  } finally {
+    comparing.value = false
+  }
+}
+
+const toggleCompare = (id: number) => {
+  const next = new Set(expandedCompare.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expandedCompare.value = next
+}
+
+const compareToken = (r: PromptTestCaseResult | null): string => {
+  if (!r) return '-'
+  return String(r.tokenUsage?.total_tokens ?? r.tokenCount ?? 0)
+}
+
+const fmtDiff = (a: PromptTestCaseResult | null, b: PromptTestCaseResult | null, field: 'elapsedMs' | 'tokenCount'): string => {
+  if (!a || !b) return '-'
+  const diff = a[field] - b[field]
+  if (diff === 0) return '0'
+  return `${diff > 0 ? '+' : ''}${diff}`
 }
 
 const toggleResult = (id: number) => {
@@ -440,19 +572,24 @@ onMounted(() => {
           <CardContent class="space-y-4">
             <div class="space-y-1.5">
               <Label>模板（system 指令，≤8000 字符）</Label>
-              <select
-                v-model="runTemplateContent"
-                class="mb-1.5 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="" disabled>选择模板（内容将填入下方）</option>
-                <optgroup v-if="publishedTemplates.length" label="已发布">
-                  <option v-for="t in publishedTemplates" :key="t.id" :value="t.content">{{ t.name }} (v{{ t.version }})</option>
-                </optgroup>
-                <optgroup v-if="draftTemplates.length" label="草稿">
-                  <option v-for="t in draftTemplates" :key="t.id" :value="t.content">{{ t.name }} (v{{ t.version }})</option>
-                </optgroup>
-              </select>
+              <div class="mb-1.5 flex gap-2">
+                <select
+                  :value="selectedTemplateId"
+                  @change="onTemplateSelect(Number(($event.target as HTMLSelectElement).value))"
+                  class="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option :value="0">选择模板（内容将填入下方）</option>
+                  <optgroup v-if="publishedTemplates.length" label="已发布">
+                    <option v-for="t in publishedTemplates" :key="t.id" :value="t.id">{{ t.name }} (v{{ t.version }})</option>
+                  </optgroup>
+                  <optgroup v-if="draftTemplates.length" label="草稿">
+                    <option v-for="t in draftTemplates" :key="t.id" :value="t.id">{{ t.name }} (v{{ t.version }})</option>
+                  </optgroup>
+                </select>
+                <Button v-if="selectedTemplateId" variant="outline" size="sm" @click="clearTemplate">清除</Button>
+              </div>
               <textarea v-model="runTemplateContent" rows="5" maxlength="8000" class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 font-mono text-xs leading-6 outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" />
+              <p v-if="selectedTemplate" class="text-xs text-violet-300">已关联 {{ selectedTemplate.name }} v{{ selectedTemplate.version }}，本次运行将记录该模板版本用于对比。</p>
             </div>
 
             <div class="space-y-1.5">
@@ -529,6 +666,107 @@ onMounted(() => {
                     <p v-for="(s, idx) in r.sources" :key="idx" class="line-clamp-1 rounded-md bg-muted/50 px-2 py-1 font-mono text-xs text-muted-foreground">
                       {{ String(s.document_name || s.title || s.document_id || '') }}
                     </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <!-- Run history -->
+        <Card class="border-border/60 bg-card/50">
+          <CardHeader class="pb-3">
+            <CardTitle class="flex items-center gap-2 text-base"><History class="h-4 w-4 text-violet-300" /> 运行历史</CardTitle>
+            <CardDescription>保存每次批量运行结果，选择两次运行（不同模板版本）即可对比回答、耗时、Token 与成功率。</CardDescription>
+          </CardHeader>
+          <CardContent class="space-y-4">
+            <div v-if="runs.length === 0" class="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+              暂无运行历史。执行一次批量运行后会在此展示。
+            </div>
+
+            <template v-else>
+              <div class="space-y-2">
+                <div v-for="r in runs" :key="r.id" class="flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-card px-3 py-2.5">
+                  <button class="flex min-w-0 flex-1 items-center gap-3 text-left" @click="selectRunForDetail(r.id)">
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate text-sm font-medium text-cyan-300">{{ runLabel(r) }}</p>
+                      <p class="text-xs text-muted-foreground">{{ r.createdAt?.slice(0, 19).replace('T', ' ') }}</p>
+                    </div>
+                    <Badge variant="secondary">{{ r.successCount }}/{{ r.totalCases }} 成功</Badge>
+                    <span class="text-xs text-muted-foreground">{{ formatMs(r.totalElapsedMs) }}</span>
+                  </button>
+                  <label class="flex items-center gap-1 text-xs text-muted-foreground">
+                    <input type="radio" name="compareA" :checked="compareA === r.id" @change="selectCompare('A', r.id)" /> 左侧
+                  </label>
+                  <label class="flex items-center gap-1 text-xs text-muted-foreground">
+                    <input type="radio" name="compareB" :checked="compareB === r.id" @change="selectCompare('B', r.id)" /> 右侧
+                  </label>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <Button :disabled="!canCompare" class="flex-1" @click="doCompare">
+                  <LoaderCircle v-if="comparing" class="mr-2 h-4 w-4 animate-spin" />
+                  <Scale v-else class="mr-2 h-4 w-4" />
+                  {{ comparing ? '对比中…' : '对比两次运行' }}
+                </Button>
+                <Button variant="outline" @click="comparison = null">
+                  <RefreshCw class="mr-1 h-4 w-4" /> 清除
+                </Button>
+              </div>
+            </template>
+          </CardContent>
+        </Card>
+
+        <!-- Comparison result -->
+        <Card v-if="comparison" class="border-violet-400/25 bg-violet-400/5">
+          <CardHeader class="pb-3">
+            <CardTitle class="flex flex-wrap items-center gap-2 text-base">
+              <Scale class="h-4 w-4 text-violet-300" /> 版本对比
+              <Badge variant="outline" class="border-violet-400/25 text-violet-200">{{ runLabel(comparison.runA) }}</Badge>
+              <span class="text-xs text-muted-foreground">vs</span>
+              <Badge variant="outline" class="border-violet-400/25 text-violet-200">{{ runLabel(comparison.runB) }}</Badge>
+              <span class="ml-auto text-xs text-muted-foreground">共 {{ comparison.comparedCases }} 个用例</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent class="space-y-2">
+            <div v-for="c in comparison.comparisons" :key="c.caseId" class="rounded-xl border border-border/60 bg-card p-3">
+              <button class="flex w-full items-center gap-2 text-left" @click="toggleCompare(c.caseId)">
+                <span v-if="c.answerIdentical === true" class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-300"><Check class="h-3.5 w-3.5" /></span>
+                <span v-else-if="c.answerIdentical === false" class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400/15 text-amber-300"><Diff class="h-3.5 w-3.5" /></span>
+                <span v-else class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"><Minus class="h-3.5 w-3.5" /></span>
+                <span class="min-w-0 flex-1 text-sm font-medium">{{ c.question }}</span>
+                <span class="flex items-center gap-3 text-xs text-muted-foreground">
+                  <span class="flex items-center gap-1"><Clock class="h-3 w-3" /> 差 {{ fmtDiff(c.resultA, c.resultB, 'elapsedMs') }}ms</span>
+                  <span class="flex items-center gap-1"><Zap class="h-3 w-3" /> 差 {{ fmtDiff(c.resultA, c.resultB, 'tokenCount') }} token</span>
+                </span>
+                <ChevronDown v-if="expandedCompare.has(c.caseId)" class="h-3.5 w-3.5 text-violet-300" />
+                <ChevronRight v-else class="h-3.5 w-3.5 text-violet-300" />
+              </button>
+
+              <div v-if="expandedCompare.has(c.caseId)" class="mt-3 grid gap-3 border-t border-border/40 pt-3 sm:grid-cols-2">
+                <div class="rounded-xl border p-3" :class="(c.resultA?.success ?? false) ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-red-500/25 bg-red-500/5'">
+                  <p class="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    <span class="text-cyan-300">{{ runLabel(comparison.runA) }}</span>
+                    <span v-if="c.resultA?.success === false" class="text-red-400">失败</span>
+                  </p>
+                  <p v-if="c.resultA?.content" class="whitespace-pre-wrap text-sm leading-6">{{ c.resultA.content }}</p>
+                  <p v-else-if="c.resultA?.error" class="text-sm text-red-400">{{ c.resultA.error }}</p>
+                  <p v-else class="text-sm text-muted-foreground">（无回答）</p>
+                  <div class="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                    <span>{{ c.resultA ? formatMs(c.resultA.elapsedMs) : '-' }} · {{ compareToken(c.resultA) }} token</span>
+                  </div>
+                </div>
+                <div class="rounded-xl border p-3" :class="(c.resultB?.success ?? false) ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-red-500/25 bg-red-500/5'">
+                  <p class="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    <span class="text-cyan-300">{{ runLabel(comparison.runB) }}</span>
+                    <span v-if="c.resultB?.success === false" class="text-red-400">失败</span>
+                  </p>
+                  <p v-if="c.resultB?.content" class="whitespace-pre-wrap text-sm leading-6">{{ c.resultB.content }}</p>
+                  <p v-else-if="c.resultB?.error" class="text-sm text-red-400">{{ c.resultB.error }}</p>
+                  <p v-else class="text-sm text-muted-foreground">（无回答）</p>
+                  <div class="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                    <span>{{ c.resultB ? formatMs(c.resultB.elapsedMs) : '-' }} · {{ compareToken(c.resultB) }} token</span>
                   </div>
                 </div>
               </div>

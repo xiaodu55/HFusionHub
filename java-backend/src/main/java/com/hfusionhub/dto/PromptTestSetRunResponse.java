@@ -15,6 +15,18 @@ public class PromptTestSetRunResponse {
     @Schema(description = "用例集 ID")
     private Long setId;
 
+    @Schema(description = "本次运行记录 ID（用于历史与对比）")
+    private Long runId;
+
+    @Schema(description = "来源模板 ID（可选）")
+    private Long templateId;
+
+    @Schema(description = "来源模板版本号（可选）")
+    private Integer templateVersion;
+
+    @Schema(description = "来源模板名称（可选）")
+    private String templateName;
+
     @Schema(description = "用例总数")
     private int totalCases;
 

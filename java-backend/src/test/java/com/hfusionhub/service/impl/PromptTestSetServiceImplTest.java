@@ -9,8 +9,11 @@ import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.exception.BusinessException;
+import com.hfusionhub.dto.PromptTestCaseComparison;
 import com.hfusionhub.dto.PromptTestCaseDTO;
 import com.hfusionhub.dto.PromptTestCaseSaveDTO;
+import com.hfusionhub.dto.PromptTestSetCompareRequest;
+import com.hfusionhub.dto.PromptTestSetCompareResponse;
 import com.hfusionhub.dto.PromptTestSetDetailDTO;
 import com.hfusionhub.dto.PromptTestSetRunRequest;
 import com.hfusionhub.dto.PromptTestSetRunResponse;
@@ -20,7 +23,9 @@ import com.hfusionhub.entity.PromptTestCase;
 import com.hfusionhub.entity.PromptTestSet;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.PromptTestCaseMapper;
+import com.hfusionhub.mapper.PromptTestCaseResultMapper;
 import com.hfusionhub.mapper.PromptTestSetMapper;
+import com.hfusionhub.mapper.PromptTestSetRunMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,7 +56,10 @@ class PromptTestSetServiceImplTest {
     private PromptTestSetMapper testSetMapper;
     private PromptTestCaseMapper testCaseMapper;
     private KnowledgeBaseMapper knowledgeBaseMapper;
+    private com.hfusionhub.mapper.PromptTemplateMapper promptTemplateMapper;
     private AiClient aiClient;
+    private PromptTestSetRunMapper runMapper;
+    private PromptTestCaseResultMapper caseResultMapper;
     private PromptTestSetServiceImpl service;
 
     @BeforeEach
@@ -62,8 +70,12 @@ class PromptTestSetServiceImplTest {
         testSetMapper = mock(PromptTestSetMapper.class);
         testCaseMapper = mock(PromptTestCaseMapper.class);
         knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        promptTemplateMapper = mock(com.hfusionhub.mapper.PromptTemplateMapper.class);
         aiClient = mock(AiClient.class);
-        service = new PromptTestSetServiceImpl(testSetMapper, testCaseMapper, knowledgeBaseMapper, aiClient);
+        runMapper = mock(PromptTestSetRunMapper.class);
+        caseResultMapper = mock(PromptTestCaseResultMapper.class);
+        service = new PromptTestSetServiceImpl(
+                testSetMapper, testCaseMapper, knowledgeBaseMapper, promptTemplateMapper, aiClient, runMapper, caseResultMapper);
     }
 
     @AfterEach
@@ -296,6 +308,235 @@ class PromptTestSetServiceImplTest {
 
         verify(testCaseMapper).delete(any());
         verify(testSetMapper).deleteById(10L);
+    }
+
+    // ── Run history & comparison ──────────────────────────────────────
+
+    @Test
+    void listRunsRejectsForeignSet() {
+        StpUtil.login(1L);
+        PromptTestSet set = ownedSet();
+        set.setUserId(2L);
+        when(testSetMapper.selectById(10L)).thenReturn(set);
+        assertThrows(BusinessException.class, () -> service.listRuns(10L));
+    }
+
+    @Test
+    void runDetailRejectsForeignRun() {
+        StpUtil.login(1L);
+        com.hfusionhub.entity.PromptTestSetRun run = new com.hfusionhub.entity.PromptTestSetRun();
+        run.setId(99L);
+        run.setUserId(2L);
+        when(runMapper.selectById(99L)).thenReturn(run);
+        assertThrows(BusinessException.class, () -> service.getRunDetail(99L));
+    }
+
+    @Test
+    void compareRejectsRunsFromDifferentSets() {
+        StpUtil.login(1L);
+        com.hfusionhub.entity.PromptTestSetRun a = new com.hfusionhub.entity.PromptTestSetRun();
+        a.setId(1L); a.setUserId(1L); a.setSetId(10L);
+        com.hfusionhub.entity.PromptTestSetRun b = new com.hfusionhub.entity.PromptTestSetRun();
+        b.setId(2L); b.setUserId(1L); b.setSetId(20L);
+        when(runMapper.selectById(1L)).thenReturn(a);
+        when(runMapper.selectById(2L)).thenReturn(b);
+
+        PromptTestSetCompareRequest request = new PromptTestSetCompareRequest();
+        request.setRunIdA(1L);
+        request.setRunIdB(2L);
+        assertThrows(BusinessException.class, () -> service.compare(request));
+    }
+
+    @Test
+    void compareBuildsPerCaseRowsAndFlagsIdenticalAnswers() {
+        StpUtil.login(1L);
+        com.hfusionhub.entity.PromptTestSetRun a = new com.hfusionhub.entity.PromptTestSetRun();
+        a.setId(1L); a.setUserId(1L); a.setSetId(10L);
+        a.setTemplateVersion(1);
+        com.hfusionhub.entity.PromptTestSetRun b = new com.hfusionhub.entity.PromptTestSetRun();
+        b.setId(2L); b.setUserId(1L); b.setSetId(10L);
+        b.setTemplateVersion(2);
+        when(runMapper.selectById(1L)).thenReturn(a);
+        when(runMapper.selectById(2L)).thenReturn(b);
+
+        when(caseResultMapper.selectList(any())).thenReturn(List.of(
+                caseResult(1L, 1L, "问题A", "回答一", 100, 1200, true),
+                caseResult(2L, 1L, "问题B", "失败A", 50, 800, false)
+        ));
+
+        PromptTestSetCompareRequest request = new PromptTestSetCompareRequest();
+        request.setRunIdA(1L);
+        request.setRunIdB(2L);
+        PromptTestSetCompareResponse response = service.compare(request);
+
+        assertEquals(2, response.getComparedCases());
+        assertEquals(2, response.getComparisons().size());
+        assertEquals(1, response.getRunA().getTemplateVersion());
+        assertEquals(2, response.getRunB().getTemplateVersion());
+
+        // Case 1: same answer → identical=true
+        PromptTestCaseComparison c1 = response.getComparisons().get(0);
+        assertEquals(Boolean.TRUE, c1.getAnswerIdentical());
+        // Case 2: both failed → identical=null
+        assertEquals(null, response.getComparisons().get(1).getAnswerIdentical());
+    }
+
+    @Test
+    void runPersistsHistory() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        Map<String, Object> vars = new HashMap<>();
+        vars.put("role", "客服");
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(caseOf(1L, "如何退款？", vars)));
+
+        com.hfusionhub.entity.PromptTemplate template = new com.hfusionhub.entity.PromptTemplate();
+        template.setId(5L);
+        template.setUserId(1L);
+        template.setName("客服助手");
+        template.setVersion(3);
+        template.setContent("你是{{role}}");
+        when(promptTemplateMapper.selectById(5L)).thenReturn(template);
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答");
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("你是{{role}}");
+        request.setTemplateId(5L);
+        request.setTemplateVersion(99);
+        request.setTemplateName("伪造名称");
+
+        PromptTestSetRunResponse response = service.run(10L, request);
+
+        verify(runMapper).insert(argThat(r ->
+                r.getTemplateId().equals(5L) && r.getTemplateVersion().equals(3)
+                        && "客服助手".equals(r.getTemplateName())
+                        && r.getSuccessCount() == 1 && r.getSetId().equals(10L)));
+        verify(caseResultMapper).insert(argThat(e ->
+                e.getCaseId().equals(1L) && "你是客服".equals(e.getRenderedTemplate())));
+        assertEquals(5L, response.getTemplateId());
+        assertEquals(3, response.getTemplateVersion());
+        assertEquals("客服助手", response.getTemplateName());
+    }
+
+    @Test
+    void runRejectsForgedForeignTemplate() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(caseOf(1L, "如何退款？", null)));
+
+        com.hfusionhub.entity.PromptTemplate foreign = new com.hfusionhub.entity.PromptTemplate();
+        foreign.setId(5L);
+        foreign.setUserId(2L);
+        when(promptTemplateMapper.selectById(5L)).thenReturn(foreign);
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("模板");
+        request.setTemplateId(5L);
+        assertThrows(BusinessException.class, () -> service.run(10L, request));
+        verify(runMapper, never()).insert(any());
+    }
+
+    @Test
+    void runRejectsMissingTemplate() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(caseOf(1L, "如何退款？", null)));
+        when(promptTemplateMapper.selectById(5L)).thenReturn(null);
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("模板");
+        request.setTemplateId(5L);
+        assertThrows(BusinessException.class, () -> service.run(10L, request));
+        verify(runMapper, never()).insert(any());
+    }
+
+    @Test
+    void runWithBoundTemplateIgnoresEditedContentAndUsesRealSnapshot() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        Map<String, Object> vars = new HashMap<>();
+        vars.put("role", "客服");
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(caseOf(1L, "如何退款？", vars)));
+
+        com.hfusionhub.entity.PromptTemplate template = new com.hfusionhub.entity.PromptTemplate();
+        template.setId(5L);
+        template.setUserId(1L);
+        template.setName("客服助手");
+        template.setVersion(3);
+        template.setContent("你是{{role}}，来自模板");
+        when(promptTemplateMapper.selectById(5L)).thenReturn(template);
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答");
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        // Client-sent content differs from the real template snapshot (user edited it)
+        request.setTemplateContent("被篡改的自定义内容");
+        request.setTemplateId(5L);
+
+        PromptTestSetRunResponse response = service.run(10L, request);
+
+        // Execution + persisted content must come from the DB snapshot, not the edited payload
+        verify(aiClient).chat(eq("如何退款？"), isNull(), isNull(), any(), eq("你是客服，来自模板"));
+        verify(caseResultMapper).insert(argThat(e ->
+                "你是客服，来自模板".equals(e.getRenderedTemplate())));
+        verify(runMapper).insert(argThat(r ->
+                r.getTemplateId().equals(5L) && "客服助手".equals(r.getTemplateName())
+                        && "你是{{role}}，来自模板".equals(r.getTemplateContent())));
+        assertEquals("客服助手", response.getTemplateName());
+    }
+
+    @Test
+    void runWithoutTemplateClearsAssociation() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(caseOf(1L, "如何退款？", null)));
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答");
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("自定义模板");
+        request.setTemplateVersion(3);
+        request.setTemplateName("伪造名称");
+
+        PromptTestSetRunResponse response = service.run(10L, request);
+
+        verify(runMapper).insert(argThat(r ->
+                r.getTemplateId() == null && r.getTemplateVersion() == null
+                        && r.getTemplateName() == null
+                        && "自定义模板".equals(r.getTemplateContent())));
+        assertNull(response.getTemplateId());
+        assertNull(response.getTemplateName());
+    }
+
+    @Test
+    void runWithBlankContentRejected() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(caseOf(1L, "如何退款？", null)));
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("  ");
+        assertThrows(BusinessException.class, () -> service.run(10L, request));
+    }
+
+    private com.hfusionhub.entity.PromptTestCaseResultEntity caseResult(
+            Long caseId, Long runId, String question, String content, int tokens, long elapsed, boolean success) {
+        com.hfusionhub.entity.PromptTestCaseResultEntity e = new com.hfusionhub.entity.PromptTestCaseResultEntity();
+        e.setId(caseId);
+        e.setCaseId(caseId);
+        e.setRunId(runId);
+        e.setQuestion(question);
+        e.setContent(content);
+        e.setTokenCount(tokens);
+        e.setElapsedMs(elapsed);
+        e.setSuccess(success);
+        return e;
     }
 
     /**
