@@ -15,6 +15,7 @@ import {
   BookOpen,
   Cpu,
   FileText,
+  FlaskConical,
   Home,
   LogOut,
   Menu,
@@ -54,6 +55,7 @@ const menuItems: Array<{
   icon: Component
 }> = [
   { path: '/builder/prompts', label: 'Prompt 工作台', description: '模板与发布', icon: PenLine },
+  { path: '/builder/test-bench', label: '提示词测试台', description: '模板效果评测', icon: FlaskConical },
   { path: '/builder/models', label: '模型中心', description: '模型与运行状态', icon: Cpu },
   { path: '/builder/tools', label: '工具中心', description: '能力与调用记录', icon: Wrench },
   { path: '/', label: '任务总览', description: '工作台', icon: Home },
@@ -68,7 +70,7 @@ const menuItems: Array<{
 
 const menuGroups = [
   { label: '工作区', items: menuItems.filter((item) => ['/', '/knowledge-base', '/document', '/chat'].includes(item.path)) },
-  { label: '构建', items: menuItems.filter((item) => ['/builder/prompts', '/builder/models', '/builder/tools', '/agent'].includes(item.path)) },
+  { label: '构建', items: menuItems.filter((item) => ['/builder/prompts', '/builder/test-bench', '/builder/models', '/builder/tools', '/agent'].includes(item.path)) },
   { label: '运营', items: menuItems.filter((item) => ['/rag', '/memory'].includes(item.path)) },
   { label: '管理', items: menuItems.filter((item) => item.path === '/admin/flags') },
 ]
@@ -76,6 +78,7 @@ const menuGroups = [
 const commandRoutes = [
   { keywords: ['model', '模型', 'llm', 'embedding', '向量'], path: '/builder/models' },
   { keywords: ['prompt', '提示词', '模板'], path: '/builder/prompts' },
+  { keywords: ['测试', 'test', 'bench', '评测', '试验'], path: '/builder/test-bench' },
   { keywords: ['工具', 'tool', 'mcp', '调用', '权限', '审批'], path: '/builder/tools' },
   { keywords: ['知识', '知识库', 'kb'], path: '/knowledge-base' },
   { keywords: ['文档', '文件', '索引', 'doc'], path: '/document' },

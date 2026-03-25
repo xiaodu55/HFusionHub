@@ -1,9 +1,16 @@
 import json
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app.api.chat import CHAT_HISTORY_MAX_ITEMS, CHAT_MESSAGE_MAX_LENGTH, _agent_chunk_to_sse, active_requests
+from app.api.chat import (
+    CHAT_HISTORY_MAX_ITEMS,
+    CHAT_MESSAGE_MAX_LENGTH,
+    SYSTEM_PROMPT_MAX_LENGTH,
+    _agent_chunk_to_sse,
+    active_requests,
+)
 from app.main import create_app
 
 
@@ -72,3 +79,88 @@ def test_chat_rejects_oversized_history():
     response = client.post("/api/chat", json={"message": "hello", "history": history})
 
     assert response.status_code == 422
+
+
+# ── system_prompt contract (max 8000, bypasses 4000-char ChatMessage limit) ──
+
+@pytest.fixture
+def mock_agent(monkeypatch):
+    """Replace the agent factory so tests never hit a real LLM/Milvus."""
+    from app.core.agent import AgentResponse
+
+    captured = {"history": None}
+
+    class _MockAgent:
+        async def run(self, **kwargs):
+            captured["history"] = kwargs.get("history")
+            return AgentResponse(content="ok", model="deepseek-v4-flash", token_count=1)
+
+        async def run_stream(self, **kwargs):
+            yield "data: ok"
+
+    monkeypatch.setattr("app.api.chat.get_agent", lambda **kw: _MockAgent())
+    return captured
+
+
+def test_chat_accepts_8000_char_system_prompt(mock_agent):
+    """The exact 8000-char boundary must be accepted (was 422 before fix)."""
+    app = create_app()
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+    sp = "A" * SYSTEM_PROMPT_MAX_LENGTH
+
+    response = client.post("/api/chat", json={"message": "hi", "system_prompt": sp, "history": []})
+
+    assert response.status_code == 200
+    # system_prompt must reach the agent as a system message, intact
+    assert mock_agent["history"] is not None
+    assert mock_agent["history"][0]["role"] == "system"
+    assert mock_agent["history"][0]["content"] == sp
+
+
+def test_chat_accepts_4001_char_system_prompt(mock_agent):
+    """The 4001-8000 band that used to fail must now pass via system_prompt."""
+    app = create_app()
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+
+    response = client.post("/api/chat", json={"message": "hi", "system_prompt": "B" * 4001, "history": []})
+
+    assert response.status_code == 200
+
+
+def test_chat_rejects_8001_char_system_prompt():
+    """Over the 8000 boundary → 422."""
+    app = create_app()
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+
+    response = client.post("/api/chat", json={"message": "hi", "system_prompt": "C" * (SYSTEM_PROMPT_MAX_LENGTH + 1), "history": []})
+
+    assert response.status_code == 422
+
+
+def test_chat_still_rejects_oversized_history_entry():
+    """The 4000-char limit on regular history entries must be preserved."""
+    app = create_app()
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+    history = [{"role": "user", "content": "E" * (CHAT_MESSAGE_MAX_LENGTH + 1)}]
+
+    response = client.post("/api/chat", json={"message": "hi", "history": history})
+
+    assert response.status_code == 422
+
+
+def test_agent_v1_accepts_8000_char_system_prompt(mock_agent):
+    """Agent V1 endpoint must accept the full 8000-char system_prompt."""
+    app = create_app()
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+
+    response = client.post("/api/agent/v1/chat", json={
+        "message": "hi",
+        "knowledge_base_id": 1,
+        "user_id": 1,
+        "system_prompt": "D" * SYSTEM_PROMPT_MAX_LENGTH,
+        "history": [],
+    })
+
+    assert response.status_code == 200
+    assert mock_agent["history"][0]["role"] == "system"
+    assert len(mock_agent["history"][0]["content"]) == SYSTEM_PROMPT_MAX_LENGTH

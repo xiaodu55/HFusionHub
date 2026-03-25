@@ -4,8 +4,10 @@ import com.hfusionhub.common.exception.BusinessException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClient.RequestBodyUriSpec;
@@ -22,6 +24,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -196,5 +199,64 @@ class AiClientTest {
                 .thenReturn((org.springframework.http.ResponseEntity) response);
 
         assertFalse(aiClient.cancelRequest("unknown-id"));
+    }
+
+    // ── system_prompt contract (max 8000, bypasses 4000-char history limit) ──
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> captureRequestBody() {
+        ArgumentCaptor<HttpEntity> entityCaptor = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate).exchange(anyString(), any(), entityCaptor.capture(), any(Class.class));
+        return (Map<String, Object>) entityCaptor.getValue().getBody();
+    }
+
+    private void stubRestTemplateSuccess() {
+        AiClient.ChatResponse body = new AiClient.ChatResponse();
+        body.setContent("ok");
+        body.setModel("deepseek-v4-flash");
+        org.springframework.http.ResponseEntity<AiClient.ChatResponse> response =
+                new org.springframework.http.ResponseEntity<>(body, HttpStatus.OK);
+        when(restTemplate.exchange(anyString(), any(), any(), any(Class.class)))
+                .thenReturn((org.springframework.http.ResponseEntity) response);
+    }
+
+    @Test
+    void chatShouldSendTemplateAsSystemPromptFieldNotHistory() {
+        stubRestTemplateSuccess();
+        String template = "T".repeat(7999); // max-8000 band that used to fail in history
+
+        aiClient.chat("question", null, null, List.of(), template);
+
+        Map<String, Object> body = captureRequestBody();
+        assertTrue(body.containsKey("system_prompt"), "system_prompt key must be present");
+        assertEquals(template, body.get("system_prompt"));
+        assertEquals(List.of(), body.get("history"), "template must NOT be in history");
+        assertEquals(null, body.get("knowledge_base_id"));
+    }
+
+    @Test
+    void agentV1ChatShouldSendTemplateAsSystemPromptField() {
+        stubRestTemplateSuccess();
+        String template = "T".repeat(8000);
+
+        aiClient.agentV1Chat("question", null, 42L, List.of(),
+                template, "detailed", 5, null, 1L);
+
+        Map<String, Object> body = captureRequestBody();
+        assertTrue(body.containsKey("system_prompt"), "system_prompt key must be present");
+        assertEquals(template, body.get("system_prompt"));
+        assertEquals(List.of(), body.get("history"));
+        assertEquals(42L, ((Number) body.get("knowledge_base_id")).longValue());
+        assertEquals(1L, ((Number) body.get("user_id")).longValue());
+    }
+
+    @Test
+    void chatWithoutSystemPromptShouldOmitTheField() {
+        stubRestTemplateSuccess();
+
+        aiClient.chat("question", 1L, null, List.of());
+
+        Map<String, Object> body = captureRequestBody();
+        assertFalse(body.containsKey("system_prompt"), "system_prompt key must be absent when not provided");
     }
 }

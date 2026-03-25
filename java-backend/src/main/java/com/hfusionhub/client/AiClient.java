@@ -57,7 +57,7 @@ public class AiClient {
             List<Map<String, String>> history
     ) {
         return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                "detailed", 5, null, null, null);
+                "detailed", 5, null, null, null, null);
     }
 
     /**
@@ -72,7 +72,24 @@ public class AiClient {
             int maxToolSteps
     ) {
         return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                style, maxToolSteps, null, null, null);
+                style, maxToolSteps, null, null, null, null);
+    }
+
+    /**
+     * Chat with AI agent — general path with system prompt.
+     *
+     * @param systemPrompt Optional system instruction (max 8000 chars on Python side,
+     *                     bypasses the 4000-char ChatMessage limit).  Prepended to history.
+     */
+    public ChatResponse chat(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String systemPrompt
+    ) {
+        return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
+                "detailed", 5, null, null, null, systemPrompt);
     }
 
     /**
@@ -133,7 +150,36 @@ public class AiClient {
                     "Agent V1 requires a non-null user_id — Java session must provide authenticated user ID");
         }
         return doChat("/api/agent/v1/chat", message, conversationId, knowledgeBaseId,
-                history, style, maxToolSteps, requestId, userId, capabilityProfile);
+                history, style, maxToolSteps, requestId, userId, capabilityProfile, null);
+    }
+
+    /**
+     * Agent V1 chat with system prompt — for test bench and similar tooling.
+     *
+     * @param systemPrompt Optional system instruction (max 8000 chars on Python side,
+     *                     placed before history entries).
+     */
+    public ChatResponse agentV1Chat(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String systemPrompt,
+            String style,
+            int maxToolSteps,
+            String requestId,
+            Long userId
+    ) {
+        if (knowledgeBaseId == null || knowledgeBaseId <= 0) {
+            throw new BusinessException(StatusCode.BAD_REQUEST,
+                    "Agent V1 requires a non-null knowledge_base_id");
+        }
+        if (userId == null || userId <= 0) {
+            throw new BusinessException(StatusCode.BAD_REQUEST,
+                    "Agent V1 requires a non-null user_id — Java session must provide authenticated user ID");
+        }
+        return doChat("/api/agent/v1/chat", message, conversationId, knowledgeBaseId,
+                history, style, maxToolSteps, requestId, userId, null, systemPrompt);
     }
 
     private ChatResponse doChat(
@@ -146,7 +192,8 @@ public class AiClient {
             int maxToolSteps,
             String requestId,
             Long userId,
-            String capabilityProfile
+            String capabilityProfile,
+            String systemPrompt
     ) {
         try {
             Map<String, Object> request = new HashMap<>();
@@ -171,6 +218,9 @@ public class AiClient {
             // approval_required gating.  The model cannot set this itself.
             if (capabilityProfile != null && !capabilityProfile.isEmpty()) {
                 request.put("capability_profile", capabilityProfile);
+            }
+            if (systemPrompt != null && !systemPrompt.isEmpty()) {
+                request.put("system_prompt", systemPrompt);
             }
 
             HttpHeaders headers = new HttpHeaders();

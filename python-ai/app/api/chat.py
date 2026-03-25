@@ -73,6 +73,7 @@ CHAT_MESSAGE_MAX_LENGTH = 4000
 CHAT_HISTORY_MAX_ITEMS = 50
 CHAT_REQUEST_ID_MAX_LENGTH = 80
 CHAT_MODEL_MAX_LENGTH = 100
+SYSTEM_PROMPT_MAX_LENGTH = 8000
 
 _INPUT_SUMMARY_MAX_LENGTH = 2000
 _OUTPUT_SUMMARY_MAX_LENGTH = 2000
@@ -211,6 +212,8 @@ class ChatRequest(BaseModel):
     knowledge_base_id: Optional[int] = Field(None, ge=1)
     user_id: Optional[int] = Field(None, ge=1, description="Authenticated user ID — from Java session")
     history: List[ChatMessage] = Field(default_factory=list, max_length=CHAT_HISTORY_MAX_ITEMS)
+    system_prompt: Optional[str] = Field(None, max_length=SYSTEM_PROMPT_MAX_LENGTH,
+                                          description="System instruction prepended to history (max 8000 chars)")
     model: Optional[str] = Field(None, max_length=CHAT_MODEL_MAX_LENGTH)
     stream: bool = Field(False)
     request_id: Optional[str] = Field(None, max_length=CHAT_REQUEST_ID_MAX_LENGTH)
@@ -238,6 +241,8 @@ class AgentV1Request(BaseModel):
     user_id: int = Field(..., ge=1, description="REQUIRED — authenticated user ID from Java")
     conversation_id: Optional[int] = Field(None, ge=1)
     history: List[ChatMessage] = Field(default_factory=list, max_length=CHAT_HISTORY_MAX_ITEMS)
+    system_prompt: Optional[str] = Field(None, max_length=SYSTEM_PROMPT_MAX_LENGTH,
+                                          description="System instruction prepended to history (max 8000 chars)")
     model: Optional[str] = Field(None, max_length=CHAT_MODEL_MAX_LENGTH)
     stream: bool = Field(False)
     request_id: Optional[str] = Field(None, max_length=CHAT_REQUEST_ID_MAX_LENGTH)
@@ -278,6 +283,17 @@ class ChatResponse(BaseModel):
 
 
 # ── Helper ──────────────────────────────────────────────────────────────
+
+def _build_history_with_system_prompt(
+    history: List[Dict[str, str]],
+    system_prompt: Optional[str],
+) -> List[Dict[str, str]]:
+    """Prepend system_prompt to history if provided, bypassing the 4000-char
+    ChatMessage limit (system prompts can be up to SYSTEM_PROMPT_MAX_LENGTH)."""
+    if system_prompt and system_prompt.strip():
+        return [{"role": "system", "content": system_prompt}] + list(history)
+    return list(history)
+
 
 def _build_chat_response(response, style: str, extra_step_events: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
     """Build a ChatResponse from AgentResponse, syncing Java and V1 fields.
@@ -348,10 +364,10 @@ async def chat(request: ChatRequest):
     try:
         style = request.style if request.style in _VALID_STYLES else "detailed"
 
-        history = [
-            {"role": msg.role, "content": msg.content}
-            for msg in request.history
-        ]
+        history = _build_history_with_system_prompt(
+            [{"role": msg.role, "content": msg.content} for msg in request.history],
+            request.system_prompt,
+        )
 
         # Build execution context when user_id and KB are both present.
         execution_context = None
@@ -419,10 +435,10 @@ async def agent_v1_chat(request: AgentV1Request):
     try:
         style = request.style if request.style in _VALID_STYLES else "detailed"
 
-        history = [
-            {"role": msg.role, "content": msg.content}
-            for msg in request.history
-        ]
+        history = _build_history_with_system_prompt(
+            [{"role": msg.role, "content": msg.content} for msg in request.history],
+            request.system_prompt,
+        )
 
         # Agent V1 Step 3: build immutable execution context.
         # V1 is always read_only — write / external tools are rejected by
@@ -491,10 +507,10 @@ async def agent_v1_chat_stream(request: AgentV1Request):
     try:
         style = request.style if request.style in _VALID_STYLES else "detailed"
 
-        history = [
-            {"role": msg.role, "content": msg.content}
-            for msg in request.history
-        ]
+        history = _build_history_with_system_prompt(
+            [{"role": msg.role, "content": msg.content} for msg in request.history],
+            request.system_prompt,
+        )
 
         execution_context = AgentExecutionContext(
             user_id=request.user_id,
@@ -610,10 +626,10 @@ async def chat_stream(request: ChatRequest):
     try:
         style = request.style if request.style in _VALID_STYLES else "detailed"
 
-        history = [
-            {"role": msg.role, "content": msg.content}
-            for msg in request.history
-        ]
+        history = _build_history_with_system_prompt(
+            [{"role": msg.role, "content": msg.content} for msg in request.history],
+            request.system_prompt,
+        )
 
         agent = get_agent(
             knowledge_base_id=request.knowledge_base_id,
