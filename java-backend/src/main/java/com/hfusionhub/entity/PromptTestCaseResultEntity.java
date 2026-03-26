@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.hfusionhub.handler.JsonMapTypeHandler;
+import com.hfusionhub.handler.JsonStringListTypeHandler;
 import com.hfusionhub.handler.JsonTypeHandler;
 import lombok.Data;
 
@@ -35,7 +36,12 @@ public class PromptTestCaseResultEntity {
 
     private long elapsedMs;
     private boolean success;
+    private boolean passed;
     private String error;
+
+    /** Reasons for failing pass rules, e.g. ["缺少关键词: 退款", "未引用文档: 12"]. */
+    @TableField(typeHandler = JsonStringListTypeHandler.class)
+    private List<String> passNotes;
 
     private LocalDateTime createdAt;
 }

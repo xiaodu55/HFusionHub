@@ -17,6 +17,7 @@ import com.hfusionhub.dto.PromptTestSetCompareResponse;
 import com.hfusionhub.dto.PromptTestSetDetailDTO;
 import com.hfusionhub.dto.PromptTestSetRunRequest;
 import com.hfusionhub.dto.PromptTestSetRunResponse;
+import com.hfusionhub.dto.PromptTestCaseResult;
 import com.hfusionhub.dto.PromptTestSetSaveDTO;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.entity.PromptTestCase;
@@ -523,6 +524,141 @@ class PromptTestSetServiceImplTest {
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("  ");
         assertThrows(BusinessException.class, () -> service.run(10L, request));
+    }
+
+    // ── Pass rules ────────────────────────────────────────────────────
+
+    @Test
+    void passesWhenAnswerContainsAllExpectedKeywords() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        PromptTestCase tc = caseOf(1L, "如何退款？", null);
+        tc.setExpectedKeywords(List.of("退款", "7天"));
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(tc));
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("亲，您可以在7天内申请退款。");
+        resp.setModel("deepseek-v4-flash");
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunResponse response = service.run(10L, request("模板"));
+
+        PromptTestCaseResult r = response.getResults().get(0);
+        assertTrue(r.isSuccess());
+        assertTrue(r.isPassed());
+        assertNull(r.getPassNotes());
+        assertEquals(1, response.getPassCount());
+        assertEquals(100.0, response.getPassRate());
+    }
+
+    @Test
+    void failsWhenKeywordMissingCaseInsensitive() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        PromptTestCase tc = caseOf(1L, "如何退款？", null);
+        tc.setExpectedKeywords(List.of("REFUND", "客服"));
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(tc));
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("请致电400热线（不支持refund操作）。");
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunResponse response = service.run(10L, request("模板"));
+
+        PromptTestCaseResult r = response.getResults().get(0);
+        assertTrue(r.isSuccess());
+        assertFalse(r.isPassed());
+        assertNotNull(r.getPassNotes());
+        assertTrue(r.getPassNotes().stream().anyMatch(n -> n.contains("客服")));
+        assertEquals(0, response.getPassCount());
+        assertEquals(0.0, response.getPassRate());
+    }
+
+    @Test
+    void passesWhenAllRequiredDocumentsCited() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        PromptTestCase tc = caseOf(1L, "退款政策？", null);
+        tc.setRequiredDocumentIds(List.of(11L, 22L));
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(tc));
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("根据政策文档……");
+        resp.setSources(List.of(
+                Map.of("document_id", 11L, "chunk_id", "c1"),
+                Map.of("document_id", 22L, "chunk_id", "c2")
+        ));
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunResponse response = service.run(10L, request("模板"));
+
+        assertTrue(response.getResults().get(0).isPassed());
+        assertEquals(1, response.getPassCount());
+    }
+
+    @Test
+    void failsWhenRequiredDocumentNotCited() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        PromptTestCase tc = caseOf(1L, "退款政策？", null);
+        tc.setRequiredDocumentIds(List.of(11L, 33L));
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(tc));
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("根据政策文档……");
+        resp.setSources(List.of(Map.of("document_id", 11L, "chunk_id", "c1")));
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunResponse response = service.run(10L, request("模板"));
+
+        PromptTestCaseResult r = response.getResults().get(0);
+        assertTrue(r.isSuccess());
+        assertFalse(r.isPassed());
+        assertTrue(r.getPassNotes().stream().anyMatch(n -> n.contains("33")));
+        assertEquals(0, response.getPassCount());
+    }
+
+    @Test
+    void noRulesMeansPassedEqualsSuccess() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(caseOf(1L, "如何退款？", null)));
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("请致电400。");
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunResponse response = service.run(10L, request("模板"));
+
+        assertTrue(response.getResults().get(0).isPassed());
+        assertEquals(1, response.getPassCount());
+        assertEquals(100.0, response.getPassRate());
+    }
+
+    @Test
+    void failedCaseIsNeverPassed() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        PromptTestCase tc = caseOf(1L, "如何退款？", null);
+        tc.setExpectedKeywords(List.of("退款"));
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(tc));
+
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString()))
+                .thenThrow(new RuntimeException("boom"));
+
+        PromptTestSetRunResponse response = service.run(10L, request("模板"));
+
+        PromptTestCaseResult r = response.getResults().get(0);
+        assertFalse(r.isSuccess());
+        assertFalse(r.isPassed());
+        assertEquals(0, response.getPassCount());
+        assertEquals(0.0, response.getPassRate());
+    }
+
+    private PromptTestSetRunRequest request(String content) {
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent(content);
+        return request;
     }
 
     private com.hfusionhub.entity.PromptTestCaseResultEntity caseResult(

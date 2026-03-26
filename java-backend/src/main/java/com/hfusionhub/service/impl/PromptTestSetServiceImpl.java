@@ -37,9 +37,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -122,6 +124,8 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
         tc.setSetId(setId);
         tc.setQuestion(dto.getQuestion().trim());
         tc.setVariables(emptyToNull(dto.getVariables()));
+        tc.setExpectedKeywords(emptyToNullList(dto.getExpectedKeywords()));
+        tc.setRequiredDocumentIds(emptyToNullList(dto.getRequiredDocumentIds()));
         tc.setSortOrder(dto.getSortOrder() != null ? dto.getSortOrder() : nextSortOrder(setId));
         testCaseMapper.insert(tc);
         return toCaseDTO(tc);
@@ -134,6 +138,8 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
         PromptTestCase tc = requireCaseInSet(caseId, setId);
         tc.setQuestion(dto.getQuestion().trim());
         tc.setVariables(emptyToNull(dto.getVariables()));
+        tc.setExpectedKeywords(emptyToNullList(dto.getExpectedKeywords()));
+        tc.setRequiredDocumentIds(emptyToNullList(dto.getRequiredDocumentIds()));
         if (dto.getSortOrder() != null) tc.setSortOrder(dto.getSortOrder());
         testCaseMapper.updateById(tc);
         return toCaseDTO(tc);
@@ -174,18 +180,20 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
 
         long start = System.currentTimeMillis();
         int success = 0;
+        int pass = 0;
         List<PromptTestCaseResult> results = new ArrayList<>(cases.size());
 
         for (PromptTestCase tc : cases) {
             PromptTestCaseResult r = runSingle(set, tc, resolved, currentUserId);
             if (r.isSuccess()) success++;
+            if (r.isPassed()) pass++;
             results.add(r);
         }
 
         long totalElapsed = System.currentTimeMillis() - start;
 
         // Persist run history (run + per-case results) for version comparison.
-        Long runId = persistRun(set, currentUserId, resolved, results, success, totalElapsed);
+        Long runId = persistRun(set, currentUserId, resolved, results, success, pass, totalElapsed);
 
         return PromptTestSetRunResponse.builder()
                 .setId(set.getId())
@@ -196,6 +204,8 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
                 .totalCases(cases.size())
                 .successCount(success)
                 .failureCount(cases.size() - success)
+                .passCount(pass)
+                .passRate(computePassRate(pass, cases.size()))
                 .totalElapsedMs(totalElapsed)
                 .results(results)
                 .build();
@@ -233,7 +243,7 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
     }
 
     protected Long persistRun(PromptTestSet set, Long userId, PromptTestSetRunRequest request,
-                              List<PromptTestCaseResult> results, int success, long totalElapsed) {
+                              List<PromptTestCaseResult> results, int success, int pass, long totalElapsed) {
         PromptTestSetRun run = new PromptTestSetRun();
         run.setSetId(set.getId());
         run.setUserId(userId);
@@ -245,6 +255,7 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
         run.setTotalCases(results.size());
         run.setSuccessCount(success);
         run.setFailureCount(results.size() - success);
+        run.setPassCount(pass);
         run.setTotalElapsedMs(totalElapsed);
         runMapper.insert(run);
 
@@ -261,6 +272,8 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
             entity.setSources(r.getSources());
             entity.setElapsedMs(r.getElapsedMs());
             entity.setSuccess(r.isSuccess());
+            entity.setPassed(r.isPassed());
+            entity.setPassNotes(r.getPassNotes());
             entity.setError(r.getError());
             caseResultMapper.insert(entity);
         }
@@ -281,7 +294,7 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
                 aiResponse = aiClient.chat(
                         tc.getQuestion(), null, null, List.of(), rendered);
             }
-            return PromptTestCaseResult.builder()
+            PromptTestCaseResult result = PromptTestCaseResult.builder()
                     .caseId(tc.getId())
                     .question(tc.getQuestion())
                     .renderedTemplate(rendered)
@@ -293,6 +306,7 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
                     .elapsedMs(System.currentTimeMillis() - caseStart)
                     .success(true)
                     .build();
+            return evaluatePassRules(tc, result);
         } catch (Exception e) {
             log.warn("批量运行单个用例失败: setId={}, caseId={}: {}", set.getId(), tc.getId(), e.getMessage());
             return PromptTestCaseResult.builder()
@@ -301,9 +315,63 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
                     .renderedTemplate(rendered)
                     .elapsedMs(System.currentTimeMillis() - caseStart)
                     .success(false)
+                    .passed(false)
+                    .passNotes(List.of("运行失败: " + e.getMessage()))
                     .error(e.getMessage())
                     .build();
         }
+    }
+
+    /**
+     * 按通过规则评估用例结果：期望关键词须全部出现在回答中（不区分大小写），
+     * 必须引用的文档须全部出现在 sources 中。未配置规则时 passed 等于 success。
+     */
+    private PromptTestCaseResult evaluatePassRules(PromptTestCase tc, PromptTestCaseResult result) {
+        if (result.getContent() == null) {
+            result.setPassed(false);
+            result.setPassNotes(List.of("回答为空"));
+            return result;
+        }
+        List<String> notes = new ArrayList<>();
+        boolean passed = true;
+
+        List<String> keywords = tc.getExpectedKeywords();
+        if (keywords != null && !keywords.isEmpty()) {
+            String lower = result.getContent().toLowerCase();
+            for (String kw : keywords) {
+                if (kw == null || kw.isBlank()) continue;
+                if (!lower.contains(kw.toLowerCase())) {
+                    passed = false;
+                    notes.add("缺少关键词: " + kw);
+                }
+            }
+        }
+
+        List<Long> requiredDocs = tc.getRequiredDocumentIds();
+        if (requiredDocs != null && !requiredDocs.isEmpty()) {
+            Set<String> cited = new HashSet<>();
+            if (result.getSources() != null) {
+                for (Map<String, Object> src : result.getSources()) {
+                    Object docId = src.get("document_id");
+                    if (docId != null) cited.add(String.valueOf(docId));
+                }
+            }
+            for (Long docId : requiredDocs) {
+                if (!cited.contains(String.valueOf(docId))) {
+                    passed = false;
+                    notes.add("未引用文档: " + docId);
+                }
+            }
+        }
+
+        result.setPassed(passed);
+        result.setPassNotes(notes.isEmpty() ? null : notes);
+        return result;
+    }
+
+    private double computePassRate(int pass, int total) {
+        if (total <= 0) return 0;
+        return Math.round(pass * 1000.0 / total) / 10.0;
     }
 
     /** 将模板中的 {{var}} 替换为用例变量值，未提供变量的占位符原样保留。 */
@@ -444,6 +512,8 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
                 .totalCases(run.getTotalCases())
                 .successCount(run.getSuccessCount())
                 .failureCount(run.getFailureCount())
+                .passCount(run.getPassCount())
+                .passRate(computePassRate(run.getPassCount(), run.getTotalCases()))
                 .totalElapsedMs(run.getTotalElapsedMs())
                 .createdAt(run.getCreatedAt())
                 .build();
@@ -461,6 +531,8 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
                 .sources(entity.getSources())
                 .elapsedMs(entity.getElapsedMs())
                 .success(entity.isSuccess())
+                .passed(entity.isPassed())
+                .passNotes(entity.getPassNotes())
                 .error(entity.getError())
                 .build();
     }
@@ -492,6 +564,10 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
         return variables == null || variables.isEmpty() ? null : variables;
     }
 
+    private <T> List<T> emptyToNullList(List<T> values) {
+        return values == null || values.isEmpty() ? null : values;
+    }
+
     private PromptTestSetDTO toSetDTO(PromptTestSet set) {
         long count = testCaseMapper.selectCount(new LambdaQueryWrapper<PromptTestCase>()
                 .eq(PromptTestCase::getSetId, set.getId()));
@@ -521,6 +597,8 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
                 .id(tc.getId())
                 .question(tc.getQuestion())
                 .variables(tc.getVariables())
+                .expectedKeywords(tc.getExpectedKeywords())
+                .requiredDocumentIds(tc.getRequiredDocumentIds())
                 .sortOrder(tc.getSortOrder())
                 .build();
     }

@@ -28,6 +28,7 @@ public class PromptTestSetRun {
     private int totalCases;
     private int successCount;
     private int failureCount;
+    private int passCount;
     private long totalElapsedMs;
 
     private LocalDateTime createdAt;

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import {
+  AlertTriangle,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -61,7 +62,7 @@ const editingSetId = ref<number | null>(null)
 const showSetEditor = ref(false)
 
 // new / edit case form
-const caseForm = ref({ question: '', variables: '' })
+const caseForm = ref({ question: '', variables: '', expectedKeywords: '', requiredDocumentIds: '' })
 const editingCaseId = ref<number | null>(null)
 const showCaseEditor = ref(false)
 
@@ -248,7 +249,7 @@ const confirmDeleteSet = async () => {
 
 const openAddCase = () => {
   editingCaseId.value = null
-  caseForm.value = { question: '', variables: '' }
+  caseForm.value = { question: '', variables: '', expectedKeywords: '', requiredDocumentIds: '' }
   showCaseEditor.value = true
 }
 
@@ -257,6 +258,8 @@ const openEditCase = (tc: PromptTestCase) => {
   caseForm.value = {
     question: tc.question,
     variables: tc.variables && Object.keys(tc.variables).length ? JSON.stringify(tc.variables, null, 2) : '',
+    expectedKeywords: tc.expectedKeywords?.length ? tc.expectedKeywords.join(', ') : '',
+    requiredDocumentIds: tc.requiredDocumentIds?.length ? tc.requiredDocumentIds.join(', ') : '',
   }
   showCaseEditor.value = true
 }
@@ -269,9 +272,19 @@ const saveCase = async () => {
   }
   saving.value = true
   try {
+    const keywords = caseForm.value.expectedKeywords
+      .split(',')
+      .map((k) => k.trim())
+      .filter((k) => k.length > 0)
+    const docIds = caseForm.value.requiredDocumentIds
+      .split(',')
+      .map((d) => Number(d.trim()))
+      .filter((d) => !Number.isNaN(d) && d > 0)
     const payload = {
       question: caseForm.value.question.trim(),
       variables: caseVariables.value || undefined,
+      expectedKeywords: keywords.length ? keywords : undefined,
+      requiredDocumentIds: docIds.length ? docIds : undefined,
     }
     if (editingCaseId.value) {
       await promptTestSetApi.updatePromptTestCase(selectedId.value, editingCaseId.value, payload)
@@ -375,6 +388,8 @@ const selectRunForDetail = async (runId: number) => {
       totalCases: res.data.run.totalCases,
       successCount: res.data.run.successCount,
       failureCount: res.data.run.failureCount,
+      passCount: res.data.run.passCount,
+      passRate: res.data.run.passRate,
       totalElapsedMs: res.data.run.totalElapsedMs,
       results: res.data.results,
     }
@@ -619,19 +634,22 @@ onMounted(() => {
         <!-- Run report -->
         <Card v-if="runResult" class="border-border/60 bg-card/50">
           <CardHeader class="pb-3">
-            <CardTitle class="flex items-center gap-2 text-base">
+            <CardTitle class="flex flex-wrap items-center gap-2 text-base">
               运行报告
               <Badge variant="secondary">{{ runResult.successCount }}/{{ runResult.totalCases }} 成功</Badge>
+              <Badge variant="outline" class="border-emerald-400/25 text-emerald-300">{{ runResult.passCount }}/{{ runResult.totalCases }} 通过</Badge>
+              <Badge variant="outline" class="border-violet-400/25 text-violet-200">通过率 {{ runResult.passRate }}%</Badge>
               <span class="ml-auto flex items-center gap-1 text-xs font-normal text-muted-foreground">
                 <Clock class="h-3.5 w-3.5" /> 总耗时 {{ totalElapsed }}
               </span>
             </CardTitle>
           </CardHeader>
           <CardContent class="space-y-2">
-            <div v-for="r in runResult.results" :key="r.caseId" class="rounded-xl border p-3" :class="r.success ? 'border-border/60 bg-card' : 'border-red-500/30 bg-red-500/5'">
+            <div v-for="r in runResult.results" :key="r.caseId" class="rounded-xl border p-3" :class="r.passed ? 'border-emerald-500/25 bg-emerald-500/5' : r.success ? 'border-border/60 bg-card' : 'border-red-500/30 bg-red-500/5'">
               <button class="flex w-full items-start gap-2 text-left" @click="toggleResult(r.caseId)">
-                <CheckCircle2 v-if="r.success" class="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
-                <XCircle v-else class="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+                <CheckCircle2 v-if="r.passed" class="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+                <XCircle v-else-if="!r.success" class="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+                <AlertTriangle v-else class="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
                 <div class="min-w-0 flex-1">
                   <p class="text-sm font-medium">{{ r.question }}</p>
                   <div class="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
@@ -639,6 +657,8 @@ onMounted(() => {
                     <span v-if="r.model" class="text-cyan-300">{{ r.model }}</span>
                     <span>{{ resultToken(r) }} tokens</span>
                     <span v-if="r.success">来源 {{ resultSourceCount(r) }}</span>
+                    <span v-if="r.success && r.passed" class="text-emerald-300">通过</span>
+                    <span v-if="r.success && !r.passed" class="text-amber-300">未通过</span>
                     <span v-if="!r.success" class="text-red-400">{{ r.error }}</span>
                   </div>
                   <span v-if="expandedResults.has(r.caseId)" class="mt-0.5 flex items-center gap-0.5 text-[11px] text-violet-300">
@@ -651,6 +671,12 @@ onMounted(() => {
               </button>
 
               <div v-if="expandedResults.has(r.caseId)" class="mt-3 space-y-3 border-t border-border/40 pt-3">
+                <div v-if="r.passNotes && r.passNotes.length">
+                  <p class="mb-1 text-[11px] font-medium uppercase tracking-wide text-amber-300">未通过原因</p>
+                  <ul class="space-y-1">
+                    <li v-for="(note, ni) in r.passNotes" :key="ni" class="rounded-md bg-amber-400/10 px-2 py-1 font-mono text-xs text-amber-200">{{ note }}</li>
+                  </ul>
+                </div>
                 <div>
                   <p class="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">实际模板</p>
                   <pre class="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-2 font-mono text-xs">{{ r.renderedTemplate }}</pre>
@@ -693,6 +719,7 @@ onMounted(() => {
                       <p class="text-xs text-muted-foreground">{{ r.createdAt?.slice(0, 19).replace('T', ' ') }}</p>
                     </div>
                     <Badge variant="secondary">{{ r.successCount }}/{{ r.totalCases }} 成功</Badge>
+                    <Badge variant="outline" class="border-violet-400/25 text-violet-200">通过 {{ r.passRate }}%</Badge>
                     <span class="text-xs text-muted-foreground">{{ formatMs(r.totalElapsedMs) }}</span>
                   </button>
                   <label class="flex items-center gap-1 text-xs text-muted-foreground">
@@ -724,8 +751,10 @@ onMounted(() => {
             <CardTitle class="flex flex-wrap items-center gap-2 text-base">
               <Scale class="h-4 w-4 text-violet-300" /> 版本对比
               <Badge variant="outline" class="border-violet-400/25 text-violet-200">{{ runLabel(comparison.runA) }}</Badge>
+              <Badge variant="outline" class="border-violet-400/25 text-violet-200">通过率 {{ comparison.runA.passRate }}%</Badge>
               <span class="text-xs text-muted-foreground">vs</span>
               <Badge variant="outline" class="border-violet-400/25 text-violet-200">{{ runLabel(comparison.runB) }}</Badge>
+              <Badge variant="outline" class="border-violet-400/25 text-violet-200">通过率 {{ comparison.runB.passRate }}%</Badge>
               <span class="ml-auto text-xs text-muted-foreground">共 {{ comparison.comparedCases }} 个用例</span>
             </CardTitle>
           </CardHeader>
@@ -745,26 +774,36 @@ onMounted(() => {
               </button>
 
               <div v-if="expandedCompare.has(c.caseId)" class="mt-3 grid gap-3 border-t border-border/40 pt-3 sm:grid-cols-2">
-                <div class="rounded-xl border p-3" :class="(c.resultA?.success ?? false) ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-red-500/25 bg-red-500/5'">
+                <div class="rounded-xl border p-3" :class="(c.resultA?.success ?? false) ? (c.resultA?.passed ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-amber-500/25 bg-amber-500/5') : 'border-red-500/25 bg-red-500/5'">
                   <p class="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     <span class="text-cyan-300">{{ runLabel(comparison.runA) }}</span>
                     <span v-if="c.resultA?.success === false" class="text-red-400">失败</span>
+                    <span v-else-if="c.resultA?.passed" class="text-emerald-300">通过</span>
+                    <span v-else-if="c.resultA" class="text-amber-300">未通过</span>
                   </p>
                   <p v-if="c.resultA?.content" class="whitespace-pre-wrap text-sm leading-6">{{ c.resultA.content }}</p>
                   <p v-else-if="c.resultA?.error" class="text-sm text-red-400">{{ c.resultA.error }}</p>
                   <p v-else class="text-sm text-muted-foreground">（无回答）</p>
+                  <div v-if="c.resultA?.passNotes?.length" class="mt-2 space-y-1">
+                    <p v-for="(note, ni) in c.resultA.passNotes" :key="ni" class="rounded-md bg-amber-400/10 px-2 py-1 font-mono text-[11px] text-amber-200">{{ note }}</p>
+                  </div>
                   <div class="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
                     <span>{{ c.resultA ? formatMs(c.resultA.elapsedMs) : '-' }} · {{ compareToken(c.resultA) }} token</span>
                   </div>
                 </div>
-                <div class="rounded-xl border p-3" :class="(c.resultB?.success ?? false) ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-red-500/25 bg-red-500/5'">
+                <div class="rounded-xl border p-3" :class="(c.resultB?.success ?? false) ? (c.resultB?.passed ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-amber-500/25 bg-amber-500/5') : 'border-red-500/25 bg-red-500/5'">
                   <p class="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     <span class="text-cyan-300">{{ runLabel(comparison.runB) }}</span>
                     <span v-if="c.resultB?.success === false" class="text-red-400">失败</span>
+                    <span v-else-if="c.resultB?.passed" class="text-emerald-300">通过</span>
+                    <span v-else-if="c.resultB" class="text-amber-300">未通过</span>
                   </p>
                   <p v-if="c.resultB?.content" class="whitespace-pre-wrap text-sm leading-6">{{ c.resultB.content }}</p>
                   <p v-else-if="c.resultB?.error" class="text-sm text-red-400">{{ c.resultB.error }}</p>
                   <p v-else class="text-sm text-muted-foreground">（无回答）</p>
+                  <div v-if="c.resultB?.passNotes?.length" class="mt-2 space-y-1">
+                    <p v-for="(note, ni) in c.resultB.passNotes" :key="ni" class="rounded-md bg-amber-400/10 px-2 py-1 font-mono text-[11px] text-amber-200">{{ note }}</p>
+                  </div>
                   <div class="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
                     <span>{{ c.resultB ? formatMs(c.resultB.elapsedMs) : '-' }} · {{ compareToken(c.resultB) }} token</span>
                   </div>
@@ -818,6 +857,18 @@ onMounted(() => {
             <p class="text-xs text-muted-foreground" :class="caseVariablesValid ? '' : 'text-red-400'">
               {{ caseVariablesValid ? `模板中的 ${varBraces} 会替换为变量值` : '必须是 JSON 对象，如 {"role":"客服"}（数组/数字无效）' }}
             </p>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div class="space-y-1.5">
+              <Label>期望关键词（可选，逗号分隔）</Label>
+              <input v-model="caseForm.expectedKeywords" type="text" class="block w-full rounded-xl border border-input bg-background/60 px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="例如：退款, 7天" />
+              <p class="text-xs text-muted-foreground">AI 回答须包含每个关键词（不区分大小写）才判定通过</p>
+            </div>
+            <div class="space-y-1.5">
+              <Label>必须引用的文档 ID（可选，逗号分隔）</Label>
+              <input v-model="caseForm.requiredDocumentIds" type="text" class="block w-full rounded-xl border border-input bg-background/60 px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="例如：11, 22" />
+              <p class="text-xs text-muted-foreground">回答的来源中须引用这些文档才判定通过</p>
+            </div>
           </div>
           <div class="flex justify-end gap-2 pt-1">
             <Button variant="outline" @click="showCaseEditor = false">取消</Button>

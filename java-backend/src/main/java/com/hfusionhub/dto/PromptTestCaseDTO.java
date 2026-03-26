@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Data;
 
+import java.util.List;
 import java.util.Map;
 
 /** 提示词测试用例 */
@@ -20,6 +21,12 @@ public class PromptTestCaseDTO {
 
     @Schema(description = "模板变量值，如 {\"role\":\"客服\",\"topic\":\"退款\"}")
     private Map<String, Object> variables;
+
+    @Schema(description = "期望关键词")
+    private List<String> expectedKeywords;
+
+    @Schema(description = "必须引用的文档 ID")
+    private List<Long> requiredDocumentIds;
 
     @Schema(description = "排序号")
     private Integer sortOrder;

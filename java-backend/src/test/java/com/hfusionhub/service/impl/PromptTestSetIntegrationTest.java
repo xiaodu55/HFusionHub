@@ -18,6 +18,7 @@ import com.hfusionhub.dto.PromptTestSetRunDetailDTO;
 import com.hfusionhub.dto.PromptTestSetRunRequest;
 import com.hfusionhub.dto.PromptTestSetRunResponse;
 import com.hfusionhub.dto.PromptTestSetSaveDTO;
+import com.hfusionhub.dto.PromptTestCaseResult;
 import com.hfusionhub.entity.PromptTemplate;
 import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.PromptTemplateMapper;
@@ -116,6 +117,19 @@ class PromptTestSetIntegrationTest {
         PromptTestCaseSaveDTO caseDto = new PromptTestCaseSaveDTO();
         caseDto.setQuestion("如何申请退款？");
         caseDto.setVariables(variables);
+        service.addCase(created.getId(), caseDto);
+        return created;
+    }
+
+    private PromptTestSetDetailDTO createSetWithRules(List<String> keywords, List<Long> docIds) {
+        PromptTestSetSaveDTO setDto = new PromptTestSetSaveDTO();
+        setDto.setName("规则集-" + System.nanoTime());
+        PromptTestSetDetailDTO created = service.create(setDto);
+
+        PromptTestCaseSaveDTO caseDto = new PromptTestCaseSaveDTO();
+        caseDto.setQuestion("退款政策是什么？");
+        caseDto.setExpectedKeywords(keywords);
+        caseDto.setRequiredDocumentIds(docIds);
         service.addCase(created.getId(), caseDto);
         return created;
     }
@@ -329,6 +343,113 @@ class PromptTestSetIntegrationTest {
         assertEquals("回答 v1", compare.getComparisons().get(0).getResultA().getContent());
         assertEquals("回答 v2", compare.getComparisons().get(0).getResultB().getContent());
         assertEquals(Boolean.FALSE, compare.getComparisons().get(0).getAnswerIdentical());
+    }
+
+    @Test
+    void passRulesRoundTripThroughDb() {
+        PromptTestSetDetailDTO created = createSetWithRules(List.of("退款", "7天"), List.of(11L, 22L));
+
+        PromptTestSetDetailDTO detail = service.getDetail(created.getId());
+        PromptTestCaseDTO tc = detail.getCases().get(0);
+        assertEquals(List.of("退款", "7天"), tc.getExpectedKeywords());
+        assertEquals(List.of(11L, 22L), tc.getRequiredDocumentIds());
+    }
+
+    @Test
+    void runEvaluatesAndPersistsPassRules() {
+        PromptTestSetDetailDTO created = createSetWithRules(List.of("退款", "7天"), List.of(11L, 22L));
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("7天内支持退款，请参考政策。");
+        resp.setModel("deepseek-v4-flash");
+        resp.setTokenCount(30);
+        resp.setSources(List.of(
+                Map.of("document_id", 11L, "chunk_id", "c1"),
+                Map.of("document_id", 22L, "chunk_id", "c2")
+        ));
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("你是客服助手");
+        PromptTestSetRunResponse runResponse = service.run(created.getId(), request);
+
+        assertEquals(1, runResponse.getPassCount());
+        assertEquals(100.0, runResponse.getPassRate());
+        assertTrue(runResponse.getResults().get(0).isPassed());
+
+        List<PromptTestSetRunDTO> runs = service.listRuns(created.getId());
+        assertEquals(1, runs.get(0).getPassCount());
+        assertEquals(100.0, runs.get(0).getPassRate());
+
+        PromptTestSetRunDetailDTO detail = service.getRunDetail(runResponse.getRunId());
+        assertTrue(detail.getResults().get(0).isPassed());
+    }
+
+    @Test
+    void runRecordsPassNotesWhenRuleFails() {
+        PromptTestSetDetailDTO created = createSetWithRules(List.of("退款", "7天"), List.of(11L, 22L));
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("请拨打400咨询。");
+        resp.setModel("deepseek-v4-flash");
+        resp.setTokenCount(30);
+        resp.setSources(List.of(Map.of("document_id", 11L, "chunk_id", "c1")));
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("你是客服助手");
+        PromptTestSetRunResponse runResponse = service.run(created.getId(), request);
+
+        assertEquals(0, runResponse.getPassCount());
+        assertEquals(0.0, runResponse.getPassRate());
+
+        // persisted pass_notes survive the round trip
+        PromptTestSetRunDetailDTO detail = service.getRunDetail(runResponse.getRunId());
+        PromptTestCaseResult persisted = detail.getResults().get(0);
+        assertFalse(persisted.isPassed());
+        assertNotNull(persisted.getPassNotes());
+        assertTrue(persisted.getPassNotes().stream().anyMatch(n -> n.contains("7天")));
+        assertTrue(persisted.getPassNotes().stream().anyMatch(n -> n.contains("22")));
+    }
+
+    @Test
+    void compareReportsPassRatePerVersion() {
+        Map<String, Object> vars = new HashMap<>();
+        vars.put("主题", "退款");
+        PromptTestSetDetailDTO created = createSetWithRules(List.of("退款"), List.of());
+
+        PromptTemplate tpl1 = createTemplate("通过模板", 1, "v1 模板：{{主题}}");
+        PromptTemplate tpl2 = createTemplate("失败模板", 2, "v2 模板：{{主题}}");
+
+        AiClient.ChatResponse resp1 = new AiClient.ChatResponse();
+        resp1.setContent("我们支持退款流程。");
+        resp1.setModel("deepseek-v4-flash");
+        resp1.setTokenCount(10);
+        AiClient.ChatResponse resp2 = new AiClient.ChatResponse();
+        resp2.setContent("请联系客服。");
+        resp2.setModel("deepseek-v4-flash");
+        resp2.setTokenCount(20);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString()))
+                .thenReturn(resp1)
+                .thenReturn(resp2);
+
+        PromptTestSetRunRequest req1 = new PromptTestSetRunRequest();
+        req1.setTemplateId(tpl1.getId());
+        PromptTestSetRunResponse run1 = service.run(created.getId(), req1);
+
+        PromptTestSetRunRequest req2 = new PromptTestSetRunRequest();
+        req2.setTemplateId(tpl2.getId());
+        PromptTestSetRunResponse run2 = service.run(created.getId(), req2);
+
+        PromptTestSetCompareRequest compareRequest = new PromptTestSetCompareRequest();
+        compareRequest.setRunIdA(run1.getRunId());
+        compareRequest.setRunIdB(run2.getRunId());
+        PromptTestSetCompareResponse compare = service.compare(compareRequest);
+
+        assertEquals(100.0, compare.getRunA().getPassRate());
+        assertEquals(0.0, compare.getRunB().getPassRate());
+        assertTrue(compare.getComparisons().get(0).getResultA().isPassed());
+        assertFalse(compare.getComparisons().get(0).getResultB().isPassed());
     }
 
     private static class MockSaTokenContext implements SaTokenContext {

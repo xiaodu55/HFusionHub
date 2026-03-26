@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.List;
 import java.util.Map;
 
 /** 提示词测试用例添加/更新请求 */
@@ -19,6 +20,12 @@ public class PromptTestCaseSaveDTO {
 
     @Schema(description = "模板变量值，如 {\"role\":\"客服\",\"topic\":\"退款\"}")
     private Map<String, Object> variables;
+
+    @Schema(description = "期望关键词——AI 回答必须包含每个关键词（不区分大小写），用于自动判定通过")
+    private List<String> expectedKeywords;
+
+    @Schema(description = "必须引用的文档 ID——AI 回答的来源必须包含这些文档，用于自动判定通过")
+    private List<Long> requiredDocumentIds;
 
     @Schema(description = "排序号，越大越靠后")
     private Integer sortOrder;

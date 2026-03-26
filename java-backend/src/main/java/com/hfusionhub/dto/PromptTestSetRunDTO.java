@@ -39,6 +39,12 @@ public class PromptTestSetRunDTO {
     @Schema(description = "失败数")
     private int failureCount;
 
+    @Schema(description = "通过数（满足通过规则的用例数）")
+    private int passCount;
+
+    @Schema(description = "通过率（0-100，保留一位小数）")
+    private double passRate;
+
     @Schema(description = "总耗时（毫秒）")
     private long totalElapsedMs;
 

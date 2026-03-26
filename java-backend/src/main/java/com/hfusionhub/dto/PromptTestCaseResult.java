@@ -43,6 +43,12 @@ public class PromptTestCaseResult {
     @Schema(description = "是否成功")
     private boolean success;
 
+    @Schema(description = "是否通过（成功且满足全部通过规则；未配置规则时等于 success）")
+    private boolean passed;
+
+    @Schema(description = "未通过原因，如 [\"缺少关键词: 退款\"]")
+    private List<String> passNotes;
+
     @Schema(description = "失败时的错误信息")
     private String error;
 }

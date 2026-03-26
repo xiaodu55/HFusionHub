@@ -16,6 +16,8 @@ export interface PromptTestCase {
   id: number
   question: string
   variables?: Record<string, string | number | boolean> | null
+  expectedKeywords?: string[] | null
+  requiredDocumentIds?: number[] | null
   sortOrder: number
 }
 
@@ -36,6 +38,8 @@ export interface PromptTestSetSaveDTO {
 export interface PromptTestCaseSaveDTO {
   question: string
   variables?: Record<string, string | number | boolean>
+  expectedKeywords?: string[]
+  requiredDocumentIds?: number[]
   sortOrder?: number
 }
 
@@ -58,6 +62,8 @@ export interface PromptTestCaseResult {
   sources?: Array<Record<string, unknown>> | null
   elapsedMs: number
   success: boolean
+  passed: boolean
+  passNotes?: string[] | null
   error?: string | null
 }
 
@@ -70,6 +76,8 @@ export interface PromptTestSetRunResponse {
   totalCases: number
   successCount: number
   failureCount: number
+  passCount: number
+  passRate: number
   totalElapsedMs: number
   results: PromptTestCaseResult[]
 }
@@ -83,6 +91,8 @@ export interface PromptTestSetRun {
   totalCases: number
   successCount: number
   failureCount: number
+  passCount: number
+  passRate: number
   totalElapsedMs: number
   createdAt: string
 }
