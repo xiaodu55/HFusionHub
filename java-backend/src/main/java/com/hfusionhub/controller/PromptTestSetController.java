@@ -10,7 +10,7 @@ import com.hfusionhub.dto.PromptTestSetDetailDTO;
 import com.hfusionhub.dto.PromptTestSetRunDetailDTO;
 import com.hfusionhub.dto.PromptTestSetRunDTO;
 import com.hfusionhub.dto.PromptTestSetRunRequest;
-import com.hfusionhub.dto.PromptTestSetRunResponse;
+import com.hfusionhub.dto.PromptTestSetRunStatusDTO;
 import com.hfusionhub.dto.PromptTestSetSaveDTO;
 import com.hfusionhub.service.PromptTestSetService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -92,11 +92,29 @@ public class PromptTestSetController {
 
     // ── Batch run ─────────────────────────────────────────────────────
 
-    @Operation(summary = "批量运行用例集", description = "用同一模板对集内所有问题逐个运行，返回每个用例的结果。单例失败不中断整体，并保存运行历史。")
+    @Operation(summary = "提交批量运行", description = "用同一模板对集内所有问题逐个运行。异步入队，立即返回任务状态，通过 /runs/{runId}/status 轮询进度，支持取消与失败重试。")
     @PostMapping("/{id}/run")
-    public R<PromptTestSetRunResponse> run(@PathVariable Long id,
-                                           @Valid @RequestBody PromptTestSetRunRequest request) {
-        return R.ok("批量测试完成", promptTestSetService.run(id, request));
+    public R<PromptTestSetRunStatusDTO> run(@PathVariable Long id,
+                                            @Valid @RequestBody PromptTestSetRunRequest request) {
+        return R.ok("批量测试已提交", promptTestSetService.run(id, request));
+    }
+
+    @Operation(summary = "查询批量运行任务状态", description = "轮询实时进度（progressCount/totalCases）与终态")
+    @GetMapping("/runs/{runId}/status")
+    public R<PromptTestSetRunStatusDTO> runStatus(@PathVariable Long runId) {
+        return R.ok(promptTestSetService.getRunStatus(runId));
+    }
+
+    @Operation(summary = "取消批量运行", description = "取消排队中或执行中的任务；已完成的运行不能取消")
+    @PostMapping("/runs/{runId}/cancel")
+    public R<PromptTestSetRunStatusDTO> cancelRun(@PathVariable Long runId) {
+        return R.ok("批量测试已取消", promptTestSetService.cancelRun(runId));
+    }
+
+    @Operation(summary = "重试失败的批量运行", description = "重新排队已失败/已取消的运行（attempt+1），清除旧结果")
+    @PostMapping("/runs/{runId}/retry")
+    public R<PromptTestSetRunStatusDTO> retryRun(@PathVariable Long runId) {
+        return R.ok("已重新提交批量测试", promptTestSetService.retryRun(runId));
     }
 
     // ── Run history & comparison ──────────────────────────────────────

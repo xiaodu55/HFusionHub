@@ -17,11 +17,14 @@ import com.hfusionhub.dto.PromptTestSetRunDTO;
 import com.hfusionhub.dto.PromptTestSetRunDetailDTO;
 import com.hfusionhub.dto.PromptTestSetRunRequest;
 import com.hfusionhub.dto.PromptTestSetRunResponse;
+import com.hfusionhub.dto.PromptTestSetRunStatusDTO;
 import com.hfusionhub.dto.PromptTestSetSaveDTO;
 import com.hfusionhub.dto.PromptTestCaseResult;
 import com.hfusionhub.entity.PromptTemplate;
+import com.hfusionhub.entity.PromptTestSetRun;
 import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.PromptTemplateMapper;
+import com.hfusionhub.mapper.PromptTestSetRunMapper;
 import com.hfusionhub.mapper.UserMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +44,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -74,6 +78,9 @@ class PromptTestSetIntegrationTest {
 
     @Autowired
     private PromptTemplateMapper promptTemplateMapper;
+
+    @Autowired
+    private PromptTestSetRunMapper runMapper;
 
     private Long userId;
 
@@ -134,6 +141,18 @@ class PromptTestSetIntegrationTest {
         return created;
     }
 
+    /** Submit then synchronously execute (queue is disabled in the test profile). */
+    private PromptTestSetRunResponse runAndExecute(Long setId, PromptTestSetRunRequest request) {
+        PromptTestSetRunStatusDTO status = service.run(setId, request);
+        return service.executeRun(status.getId());
+    }
+
+    private PromptTestSetRunRequest request(String content) {
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent(content);
+        return request;
+    }
+
     @Test
     void saveThenReadBackRestoresVariablesMap() {
         Map<String, Object> vars = new HashMap<>();
@@ -169,7 +188,7 @@ class PromptTestSetIntegrationTest {
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是{{角色}}，关于{{主题}}（{{topic}}）请回答");
-        PromptTestSetRunResponse result = service.run(created.getId(), request);
+        PromptTestSetRunResponse result = runAndExecute(created.getId(), request);
 
         assertEquals(1, result.getTotalCases());
         assertEquals(1, result.getSuccessCount());
@@ -214,7 +233,7 @@ class PromptTestSetIntegrationTest {
         request.setTemplateId(template.getId());
         request.setTemplateVersion(99);
         request.setTemplateName("伪造名称");
-        PromptTestSetRunResponse runResponse = service.run(created.getId(), request);
+        PromptTestSetRunResponse runResponse = runAndExecute(created.getId(), request);
 
         assertNotNull(runResponse.getRunId());
         assertEquals(template.getId(), runResponse.getTemplateId());
@@ -256,7 +275,7 @@ class PromptTestSetIntegrationTest {
         request.setTemplateId(template.getId());
         request.setTemplateContent("被篡改的自定义内容");
         request.setTemplateName("伪造名称");
-        service.run(created.getId(), request);
+        runAndExecute(created.getId(), request);
 
         List<PromptTestSetRunDTO> runs = service.listRuns(created.getId());
         assertEquals(1, runs.size());
@@ -325,11 +344,11 @@ class PromptTestSetIntegrationTest {
 
         PromptTestSetRunRequest req1 = new PromptTestSetRunRequest();
         req1.setTemplateId(tpl1.getId());
-        PromptTestSetRunResponse run1 = service.run(created.getId(), req1);
+        PromptTestSetRunResponse run1 = runAndExecute(created.getId(), req1);
 
         PromptTestSetRunRequest req2 = new PromptTestSetRunRequest();
         req2.setTemplateId(tpl2.getId());
-        PromptTestSetRunResponse run2 = service.run(created.getId(), req2);
+        PromptTestSetRunResponse run2 = runAndExecute(created.getId(), req2);
 
         PromptTestSetCompareRequest compareRequest = new PromptTestSetCompareRequest();
         compareRequest.setRunIdA(run1.getRunId());
@@ -371,7 +390,7 @@ class PromptTestSetIntegrationTest {
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是客服助手");
-        PromptTestSetRunResponse runResponse = service.run(created.getId(), request);
+        PromptTestSetRunResponse runResponse = runAndExecute(created.getId(), request);
 
         assertEquals(1, runResponse.getPassCount());
         assertEquals(100.0, runResponse.getPassRate());
@@ -398,7 +417,7 @@ class PromptTestSetIntegrationTest {
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是客服助手");
-        PromptTestSetRunResponse runResponse = service.run(created.getId(), request);
+        PromptTestSetRunResponse runResponse = runAndExecute(created.getId(), request);
 
         assertEquals(0, runResponse.getPassCount());
         assertEquals(0.0, runResponse.getPassRate());
@@ -435,11 +454,11 @@ class PromptTestSetIntegrationTest {
 
         PromptTestSetRunRequest req1 = new PromptTestSetRunRequest();
         req1.setTemplateId(tpl1.getId());
-        PromptTestSetRunResponse run1 = service.run(created.getId(), req1);
+        PromptTestSetRunResponse run1 = runAndExecute(created.getId(), req1);
 
         PromptTestSetRunRequest req2 = new PromptTestSetRunRequest();
         req2.setTemplateId(tpl2.getId());
-        PromptTestSetRunResponse run2 = service.run(created.getId(), req2);
+        PromptTestSetRunResponse run2 = runAndExecute(created.getId(), req2);
 
         PromptTestSetCompareRequest compareRequest = new PromptTestSetCompareRequest();
         compareRequest.setRunIdA(run1.getRunId());
@@ -450,6 +469,124 @@ class PromptTestSetIntegrationTest {
         assertEquals(0.0, compare.getRunB().getPassRate());
         assertTrue(compare.getComparisons().get(0).getResultA().isPassed());
         assertFalse(compare.getComparisons().get(0).getResultB().isPassed());
+    }
+
+    // ── Async lifecycle (queue / progress / cancel / retry) ───────────
+
+    @Test
+    void queuedRunThenExecutePersistsStatusAndProgress() {
+        Map<String, Object> vars = new HashMap<>();
+        vars.put("角色", "客服");
+        PromptTestSetDetailDTO created = createSetWithCase(vars);
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答");
+        resp.setModel("deepseek-v4-flash");
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("你是{{角色}}");
+
+        PromptTestSetRunStatusDTO queued = service.run(created.getId(), request);
+        assertEquals("pending", queued.getStatus());
+        assertEquals(1, queued.getTotalCases());
+        assertEquals(0, queued.getProgressCount());
+
+        // The queued run is visible to the worker queue
+        assertEquals(1, service.listQueuedRuns(10).stream()
+                .filter(r -> r.getId().equals(queued.getId())).count());
+        assertTrue(service.claimRun(queued.getId()));
+        // Guarded claim: second attempt fails because it is already running
+        assertFalse(service.claimRun(queued.getId()));
+
+        service.executeRun(queued.getId());
+
+        PromptTestSetRunStatusDTO done = service.getRunStatus(queued.getId());
+        assertEquals("succeeded", done.getStatus());
+        assertEquals(1, done.getProgressCount());
+        assertEquals(1, done.getSuccessCount());
+        assertEquals(100.0, done.getPassRate());
+        assertNotNull(done.getStartedAt());
+        assertNotNull(done.getCompletedAt());
+    }
+
+    @Test
+    void cancelPendingRunRemovesFromQueue() {
+        PromptTestSetDetailDTO created = createSetWithCase(new HashMap<>(Map.of("角色", "客服")));
+
+        PromptTestSetRunStatusDTO queued = service.run(created.getId(), request("你是{{角色}}"));
+        PromptTestSetRunStatusDTO cancelled = service.cancelRun(queued.getId());
+        assertEquals("cancelled", cancelled.getStatus());
+
+        // Cancelled run is no longer queued and won't execute
+        assertEquals(0, service.listQueuedRuns(10).stream()
+                .filter(r -> r.getId().equals(queued.getId())).count());
+        assertFalse(service.claimRun(queued.getId()));
+        assertNull(service.executeRun(queued.getId()));
+
+        // History still records the cancelled run
+        assertEquals(1, service.listRuns(created.getId()).size());
+    }
+
+    @Test
+    void failedRunCanBeRetriedWithNextAttempt() {
+        PromptTestSetDetailDTO created = createSetWithCase(new HashMap<>(Map.of("角色", "客服")));
+
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString()))
+                .thenThrow(new RuntimeException("boom"));
+
+        PromptTestSetRunStatusDTO queued = service.run(created.getId(), request("你是{{角色}}"));
+        service.executeRun(queued.getId());
+
+        PromptTestSetRunStatusDTO failed = service.getRunStatus(queued.getId());
+        assertEquals("succeeded", failed.getStatus());
+        assertEquals(1, failed.getFailureCount());
+        assertEquals(0, failed.getSuccessCount());
+
+        // Retry re-queues (attempt 2) and clears previous results
+        PromptTestSetRunStatusDTO requeued = service.retryRun(queued.getId());
+        assertEquals("pending", requeued.getStatus());
+        assertEquals(2, requeued.getAttemptNumber());
+
+        // Now the AI succeeds → batch completes (doReturn to avoid replaying the throwing stub)
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答");
+        doReturn(resp).when(aiClient).chat(anyString(), isNull(), isNull(), any(), anyString());
+        service.executeRun(queued.getId());
+
+        PromptTestSetRunStatusDTO done = service.getRunStatus(queued.getId());
+        assertEquals("succeeded", done.getStatus());
+        assertEquals(2, done.getAttemptNumber());
+        assertEquals(1, done.getSuccessCount());
+        assertEquals(0, done.getFailureCount());
+
+        // Run detail reflects only the retried results (old ones cleared)
+        assertEquals(1, service.getRunDetail(queued.getId()).getResults().size());
+    }
+
+    @Test
+    void recoveryMarksStaleRunningRunAsFailed() throws Exception {
+        PromptTestSetDetailDTO created = createSetWithCase(new HashMap<>(Map.of("角色", "客服")));
+
+        PromptTestSetRunStatusDTO queued = service.run(created.getId(), request("你是{{角色}}"));
+        assertTrue(service.claimRun(queued.getId()));
+
+        // Simulate a worker that died mid-run: started long ago, still running
+        PromptTestSetRun stale = new PromptTestSetRun();
+        stale.setId(queued.getId());
+        stale.setStatus("running");
+        stale.setStartedAt(java.time.LocalDateTime.now().minusMinutes(120));
+        runMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<PromptTestSetRun>()
+                .eq(PromptTestSetRun::getId, queued.getId())
+                .set(PromptTestSetRun::getStatus, "running")
+                .set(PromptTestSetRun::getStartedAt, java.time.LocalDateTime.now().minusMinutes(120)));
+
+        int marked = service.markStaleRunsFailed(30);
+        assertEquals(1, marked);
+
+        PromptTestSetRunStatusDTO recovered = service.getRunStatus(queued.getId());
+        assertEquals("failed", recovered.getStatus());
+        assertNotNull(recovered.getErrorMessage());
     }
 
     private static class MockSaTokenContext implements SaTokenContext {

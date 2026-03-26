@@ -48,6 +48,24 @@ public class PromptTestSetRunDTO {
     @Schema(description = "总耗时（毫秒）")
     private long totalElapsedMs;
 
+    @Schema(description = "任务状态：pending|running|succeeded|failed|cancelled")
+    private String status;
+
+    @Schema(description = "重试次数")
+    private int attemptNumber;
+
+    @Schema(description = "已完成用例数")
+    private int progressCount;
+
+    @Schema(description = "终态失败原因")
+    private String errorMessage;
+
+    @Schema(description = "开始执行时间")
+    private LocalDateTime startedAt;
+
+    @Schema(description = "结束时间")
+    private LocalDateTime completedAt;
+
     @Schema(description = "运行时间")
     private LocalDateTime createdAt;
 }

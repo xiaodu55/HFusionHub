@@ -8,6 +8,7 @@ import cn.dev33.satoken.context.model.SaStorage;
 import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.hfusionhub.client.AiClient;
+import com.hfusionhub.common.constant.PromptTestSetRunStatus;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.dto.PromptTestCaseComparison;
 import com.hfusionhub.dto.PromptTestCaseDTO;
@@ -17,11 +18,13 @@ import com.hfusionhub.dto.PromptTestSetCompareResponse;
 import com.hfusionhub.dto.PromptTestSetDetailDTO;
 import com.hfusionhub.dto.PromptTestSetRunRequest;
 import com.hfusionhub.dto.PromptTestSetRunResponse;
+import com.hfusionhub.dto.PromptTestSetRunStatusDTO;
 import com.hfusionhub.dto.PromptTestCaseResult;
 import com.hfusionhub.dto.PromptTestSetSaveDTO;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.entity.PromptTestCase;
 import com.hfusionhub.entity.PromptTestSet;
+import com.hfusionhub.entity.PromptTestSetRun;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.PromptTestCaseMapper;
 import com.hfusionhub.mapper.PromptTestCaseResultMapper;
@@ -34,6 +37,7 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -63,6 +67,9 @@ class PromptTestSetServiceImplTest {
     private PromptTestCaseResultMapper caseResultMapper;
     private PromptTestSetServiceImpl service;
 
+    /** The most recently inserted run row (mocked persistence). */
+    private final AtomicReference<PromptTestSetRun> insertedRun = new AtomicReference<>();
+
     @BeforeEach
     void setUp() {
         SaManager.setSaTokenDao(new SaTokenDaoDefaultImpl());
@@ -76,7 +83,20 @@ class PromptTestSetServiceImplTest {
         runMapper = mock(PromptTestSetRunMapper.class);
         caseResultMapper = mock(PromptTestCaseResultMapper.class);
         service = new PromptTestSetServiceImpl(
-                testSetMapper, testCaseMapper, knowledgeBaseMapper, promptTemplateMapper, aiClient, runMapper, caseResultMapper);
+                testSetMapper, testCaseMapper, knowledgeBaseMapper, promptTemplateMapper, aiClient,
+                runMapper, caseResultMapper, 2, 0);
+
+        // Simulate DB identity assignment + read-back for the async execute path.
+        insertedRun.set(null);
+        when(runMapper.insert(any())).thenAnswer(inv -> {
+            PromptTestSetRun r = inv.getArgument(0);
+            if (r.getId() == null) r.setId(1L);
+            insertedRun.set(r);
+            return 1;
+        });
+        when(runMapper.selectById(1L)).thenAnswer(inv -> insertedRun.get());
+        when(runMapper.selectById(anyLong())).thenAnswer(inv -> insertedRun.get());
+        when(runMapper.update(any(), any())).thenReturn(1);
     }
 
     @AfterEach
@@ -190,7 +210,7 @@ class PromptTestSetServiceImplTest {
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是{{role}}，关于{{topic}}请回答");
-        PromptTestSetRunResponse response = service.run(10L, request);
+        PromptTestSetRunResponse response = runAndExecute(10L, request);
 
         assertEquals(2, response.getTotalCases());
         assertEquals(2, response.getSuccessCount());
@@ -219,7 +239,7 @@ class PromptTestSetServiceImplTest {
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是{{角色}}，关于{{主题}}请回答");
-        PromptTestSetRunResponse response = service.run(10L, request);
+        PromptTestSetRunResponse response = runAndExecute(10L, request);
 
         assertEquals(1, response.getSuccessCount());
         assertEquals("你是客服，关于退款请回答", response.getResults().get(0).getRenderedTemplate());
@@ -243,7 +263,7 @@ class PromptTestSetServiceImplTest {
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("模板");
-        PromptTestSetRunResponse response = service.run(10L, request);
+        PromptTestSetRunResponse response = runAndExecute(10L, request);
 
         assertEquals(2, response.getTotalCases());
         assertEquals(1, response.getSuccessCount());
@@ -272,7 +292,7 @@ class PromptTestSetServiceImplTest {
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("模板");
         request.setKnowledgeBaseId(7L);
-        PromptTestSetRunResponse response = service.run(10L, request);
+        PromptTestSetRunResponse response = runAndExecute(10L, request);
 
         assertEquals(1, response.getSuccessCount());
         verify(aiClient).agentV1Chat(eq("q"), isNull(), eq(7L), any(), eq("模板"),
@@ -408,12 +428,14 @@ class PromptTestSetServiceImplTest {
         request.setTemplateVersion(99);
         request.setTemplateName("伪造名称");
 
-        PromptTestSetRunResponse response = service.run(10L, request);
+        PromptTestSetRunResponse response = runAndExecute(10L, request);
 
+        // Insert happens at submit time with the resolved DB snapshot (counts filled later).
+        // Async submit status is verified separately (runQueuesPendingRunAndReturnsStatus).
         verify(runMapper).insert(argThat(r ->
                 r.getTemplateId().equals(5L) && r.getTemplateVersion().equals(3)
                         && "客服助手".equals(r.getTemplateName())
-                        && r.getSuccessCount() == 1 && r.getSetId().equals(10L)));
+                        && r.getTotalCases() == 1 && r.getSetId().equals(10L)));
         verify(caseResultMapper).insert(argThat(e ->
                 e.getCaseId().equals(1L) && "你是客服".equals(e.getRenderedTemplate())));
         assertEquals(5L, response.getTemplateId());
@@ -478,7 +500,7 @@ class PromptTestSetServiceImplTest {
         request.setTemplateContent("被篡改的自定义内容");
         request.setTemplateId(5L);
 
-        PromptTestSetRunResponse response = service.run(10L, request);
+        PromptTestSetRunResponse response = runAndExecute(10L, request);
 
         // Execution + persisted content must come from the DB snapshot, not the edited payload
         verify(aiClient).chat(eq("如何退款？"), isNull(), isNull(), any(), eq("你是客服，来自模板"));
@@ -505,7 +527,7 @@ class PromptTestSetServiceImplTest {
         request.setTemplateVersion(3);
         request.setTemplateName("伪造名称");
 
-        PromptTestSetRunResponse response = service.run(10L, request);
+        PromptTestSetRunResponse response = runAndExecute(10L, request);
 
         verify(runMapper).insert(argThat(r ->
                 r.getTemplateId() == null && r.getTemplateVersion() == null
@@ -541,7 +563,7 @@ class PromptTestSetServiceImplTest {
         resp.setModel("deepseek-v4-flash");
         when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
 
-        PromptTestSetRunResponse response = service.run(10L, request("模板"));
+        PromptTestSetRunResponse response = runAndExecute(10L, request("模板"));
 
         PromptTestCaseResult r = response.getResults().get(0);
         assertTrue(r.isSuccess());
@@ -563,7 +585,7 @@ class PromptTestSetServiceImplTest {
         resp.setContent("请致电400热线（不支持refund操作）。");
         when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
 
-        PromptTestSetRunResponse response = service.run(10L, request("模板"));
+        PromptTestSetRunResponse response = runAndExecute(10L, request("模板"));
 
         PromptTestCaseResult r = response.getResults().get(0);
         assertTrue(r.isSuccess());
@@ -590,7 +612,7 @@ class PromptTestSetServiceImplTest {
         ));
         when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
 
-        PromptTestSetRunResponse response = service.run(10L, request("模板"));
+        PromptTestSetRunResponse response = runAndExecute(10L, request("模板"));
 
         assertTrue(response.getResults().get(0).isPassed());
         assertEquals(1, response.getPassCount());
@@ -609,7 +631,7 @@ class PromptTestSetServiceImplTest {
         resp.setSources(List.of(Map.of("document_id", 11L, "chunk_id", "c1")));
         when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
 
-        PromptTestSetRunResponse response = service.run(10L, request("模板"));
+        PromptTestSetRunResponse response = runAndExecute(10L, request("模板"));
 
         PromptTestCaseResult r = response.getResults().get(0);
         assertTrue(r.isSuccess());
@@ -628,7 +650,7 @@ class PromptTestSetServiceImplTest {
         resp.setContent("请致电400。");
         when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
 
-        PromptTestSetRunResponse response = service.run(10L, request("模板"));
+        PromptTestSetRunResponse response = runAndExecute(10L, request("模板"));
 
         assertTrue(response.getResults().get(0).isPassed());
         assertEquals(1, response.getPassCount());
@@ -646,7 +668,7 @@ class PromptTestSetServiceImplTest {
         when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString()))
                 .thenThrow(new RuntimeException("boom"));
 
-        PromptTestSetRunResponse response = service.run(10L, request("模板"));
+        PromptTestSetRunResponse response = runAndExecute(10L, request("模板"));
 
         PromptTestCaseResult r = response.getResults().get(0);
         assertFalse(r.isSuccess());
@@ -655,10 +677,156 @@ class PromptTestSetServiceImplTest {
         assertEquals(0.0, response.getPassRate());
     }
 
+    // ── Async lifecycle (queue / progress / cancel / retry) ───────────
+
+    @Test
+    void runQueuesPendingRunAndReturnsStatus() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(
+                caseOf(1L, "如何退款？", null),
+                caseOf(2L, "多久到账？", null)
+        ));
+
+        PromptTestSetRunRequest request = new PromptTestSetRunRequest();
+        request.setTemplateContent("模板");
+        PromptTestSetRunStatusDTO status = service.run(10L, request);
+
+        assertNotNull(status.getId());
+        assertEquals(PromptTestSetRunStatus.PENDING, status.getStatus());
+        assertEquals(2, status.getTotalCases());
+        assertEquals(0, status.getProgressCount());
+        assertEquals(1, status.getAttemptNumber());
+        verify(runMapper).insert(argThat(r ->
+                PromptTestSetRunStatus.PENDING.equals(r.getStatus())
+                        && r.getTotalCases() == 2 && r.getSetId().equals(10L)));
+        verify(aiClient, never()).chat(anyString(), any(), any(), any(), anyString());
+    }
+
+    @Test
+    void executeRunMarksSucceededAndAdvancesProgress() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(
+                caseOf(1L, "q1", null),
+                caseOf(2L, "q2", null)
+        ));
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答");
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunStatusDTO queued = service.run(10L, request("模板"));
+        PromptTestSetRunResponse response = service.executeRun(queued.getId());
+
+        assertEquals(PromptTestSetRunStatus.SUCCEEDED, insertedRun.get().getStatus());
+        assertEquals(2, insertedRun.get().getProgressCount());
+        assertEquals(2, response.getSuccessCount());
+        assertEquals(2, response.getResults().size());
+        verify(caseResultMapper, times(2)).insert(any());
+    }
+
+    @Test
+    void singleCaseRetriesOnTransientFailure() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(caseOf(1L, "q1", null)));
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答");
+        // First attempt fails transiently, retry succeeds
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString()))
+                .thenThrow(new RuntimeException("boom"))
+                .thenReturn(resp);
+
+        PromptTestSetRunStatusDTO queued = service.run(10L, request("模板"));
+        PromptTestSetRunResponse response = service.executeRun(queued.getId());
+
+        assertEquals(1, response.getSuccessCount());
+        assertTrue(response.getResults().get(0).isSuccess());
+        verify(aiClient, times(2)).chat(anyString(), isNull(), isNull(), any(), anyString());
+    }
+
+    @Test
+    void cancelPendingRunPreventsExecution() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(caseOf(1L, "如何退款？", null)));
+
+        PromptTestSetRunStatusDTO queued = service.run(10L, request("模板"));
+        PromptTestSetRunStatusDTO cancelled = service.cancelRun(queued.getId());
+
+        assertEquals(PromptTestSetRunStatus.CANCELLED, cancelled.getStatus());
+        // Worker skips already-terminal runs
+        assertNull(service.executeRun(queued.getId()));
+        verify(caseResultMapper, never()).insert(any());
+        verify(aiClient, never()).chat(anyString(), any(), any(), any(), anyString());
+    }
+
+    @Test
+    void cancelTerminalRunIsNoOp() {
+        StpUtil.login(1L);
+        when(testSetMapper.selectById(10L)).thenReturn(ownedSet());
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(caseOf(1L, "如何退款？", null)));
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答");
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunStatusDTO queued = service.run(10L, request("模板"));
+        service.executeRun(queued.getId());
+
+        PromptTestSetRunStatusDTO cancelled = service.cancelRun(queued.getId());
+        assertEquals(PromptTestSetRunStatus.SUCCEEDED, cancelled.getStatus());
+    }
+
+    @Test
+    void retryFailedRunRequeuesWithNextAttempt() {
+        StpUtil.login(1L);
+        PromptTestSetRun failed = new PromptTestSetRun();
+        failed.setId(7L);
+        failed.setUserId(1L);
+        failed.setSetId(10L);
+        failed.setStatus(PromptTestSetRunStatus.FAILED);
+        failed.setAttemptNumber(1);
+        PromptTestSetRun requeued = new PromptTestSetRun();
+        requeued.setId(7L);
+        requeued.setUserId(1L);
+        requeued.setSetId(10L);
+        requeued.setStatus(PromptTestSetRunStatus.PENDING);
+        requeued.setAttemptNumber(2);
+        when(runMapper.selectById(7L)).thenReturn(failed, requeued);
+
+        PromptTestSetRunStatusDTO status = service.retryRun(7L);
+
+        assertEquals(PromptTestSetRunStatus.PENDING, status.getStatus());
+        assertEquals(2, status.getAttemptNumber());
+        verify(caseResultMapper).delete(any());
+        verify(runMapper).update(isNull(), any());
+    }
+
+    @Test
+    void retrySucceededRunIsRejected() {
+        StpUtil.login(1L);
+        PromptTestSetRun done = new PromptTestSetRun();
+        done.setId(8L);
+        done.setUserId(1L);
+        done.setSetId(10L);
+        done.setStatus(PromptTestSetRunStatus.SUCCEEDED);
+        done.setAttemptNumber(1);
+        when(runMapper.selectById(8L)).thenReturn(done);
+
+        assertThrows(BusinessException.class, () -> service.retryRun(8L));
+        verify(caseResultMapper, never()).delete(any());
+    }
+
     private PromptTestSetRunRequest request(String content) {
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent(content);
         return request;
+    }
+
+    /** Submit then synchronously execute (mirrors the worker path in tests with queue disabled). */
+    private PromptTestSetRunResponse runAndExecute(Long setId, PromptTestSetRunRequest request) {
+        PromptTestSetRunStatusDTO status = service.run(setId, request);
+        return service.executeRun(status.getId());
     }
 
     private com.hfusionhub.entity.PromptTestCaseResultEntity caseResult(

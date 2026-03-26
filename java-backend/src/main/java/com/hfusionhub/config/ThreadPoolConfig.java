@@ -48,4 +48,21 @@ public class ThreadPoolConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * 提示词测试用例集批量运行 Worker 线程池 — 异步执行批量评测任务
+     */
+    @Bean("promptTestSetRunExecutor")
+    public Executor promptTestSetRunExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("pts-run-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(60);
+        executor.initialize();
+        return executor;
+    }
 }

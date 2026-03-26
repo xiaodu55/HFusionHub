@@ -152,6 +152,24 @@ agent:
   cancel-flag-ttl-seconds: ${AGENT_CANCEL_FLAG_TTL_SECONDS:3600}
   instance-id: ${AGENT_WORKER_INSTANCE_ID:}
 
+# =====================================================
+# 提示词测试用例集 批量运行异步队列（排队/进度/取消/重试）
+# =====================================================
+prompt-test-set:
+  run:
+    # true=新批量运行入队由 Worker 异步执行（排队+实时进度+可取消）
+    # false=提交即完成（仅用于测试，需手动调用 executeRun）
+    queue-enabled: ${PROMPT_TEST_SET_QUEUE_ENABLED:true}
+    poll-delay-ms: ${PROMPT_TEST_SET_POLL_DELAY_MS:2000}
+    batch-size: ${PROMPT_TEST_SET_BATCH_SIZE:5}
+    # 单个用例失败后的重试总尝试次数（含首次）
+    case-retry-max-attempts: ${PROMPT_TEST_SET_CASE_RETRY_MAX_ATTEMPTS:2}
+    # 用例重试间隔（毫秒）
+    case-retry-delay-ms: ${PROMPT_TEST_SET_CASE_RETRY_DELAY_MS:500}
+    recovery-delay-ms: ${PROMPT_TEST_SET_RECOVERY_DELAY_MS:30000}
+    # running 状态超过该分钟数视为失联，恢复扫描将其置为 failed
+    stale-running-minutes: ${PROMPT_TEST_SET_STALE_RUNNING_MINUTES:30}
+
 # 日志配置
 logging:
   level:

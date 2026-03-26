@@ -70,6 +70,7 @@ export interface PromptTestCaseResult {
 export interface PromptTestSetRunResponse {
   setId: number
   runId?: number
+  status?: string
   templateId?: number
   templateVersion?: number
   templateName?: string
@@ -80,6 +81,31 @@ export interface PromptTestSetRunResponse {
   passRate: number
   totalElapsedMs: number
   results: PromptTestCaseResult[]
+}
+
+export type PromptTestSetRunStatus =
+  | 'pending'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+
+export interface PromptTestSetRunStatusDTO {
+  id: number
+  setId: number
+  status: PromptTestSetRunStatus
+  attemptNumber: number
+  progressCount: number
+  totalCases: number
+  successCount: number
+  failureCount: number
+  passCount: number
+  passRate: number
+  errorMessage?: string | null
+  scheduledAt?: string | null
+  startedAt?: string | null
+  completedAt?: string | null
+  createdAt: string
 }
 
 export interface PromptTestSetRun {
@@ -94,6 +120,12 @@ export interface PromptTestSetRun {
   passCount: number
   passRate: number
   totalElapsedMs: number
+  status?: string
+  attemptNumber?: number
+  progressCount?: number
+  errorMessage?: string | null
+  startedAt?: string | null
+  completedAt?: string | null
   createdAt: string
 }
 
@@ -139,8 +171,14 @@ export const updatePromptTestCase = (setId: number, caseId: number, data: Prompt
 export const deletePromptTestCase = (setId: number, caseId: number): Promise<ApiResponse<void>> =>
   del(`/prompt-test-sets/${setId}/cases/${caseId}`)
 
-export const runPromptTestSet = (setId: number, data: PromptTestSetRunRequest): Promise<ApiResponse<PromptTestSetRunResponse>> =>
+export const runPromptTestSet = (setId: number, data: PromptTestSetRunRequest): Promise<ApiResponse<PromptTestSetRunStatusDTO>> =>
   post(`/prompt-test-sets/${setId}/run`, data)
+export const getPromptTestSetRunStatus = (runId: number): Promise<ApiResponse<PromptTestSetRunStatusDTO>> =>
+  get(`/prompt-test-sets/runs/${runId}/status`)
+export const cancelPromptTestSetRun = (runId: number): Promise<ApiResponse<PromptTestSetRunStatusDTO>> =>
+  post(`/prompt-test-sets/runs/${runId}/cancel`)
+export const retryPromptTestSetRun = (runId: number): Promise<ApiResponse<PromptTestSetRunStatusDTO>> =>
+  post(`/prompt-test-sets/runs/${runId}/retry`)
 
 // ── Run history & comparison ─────────────────────────────────────────
 

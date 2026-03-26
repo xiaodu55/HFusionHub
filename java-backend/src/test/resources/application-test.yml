@@ -128,6 +128,17 @@ agent:
   cancel-flag-ttl-seconds: 60
   instance-id: test-worker
 
+# Prompt test set async run — queue disabled in tests (tests drive executeRun directly)
+prompt-test-set:
+  run:
+    queue-enabled: false
+    poll-delay-ms: 50
+    batch-size: 5
+    case-retry-max-attempts: 2
+    case-retry-delay-ms: 0
+    recovery-delay-ms: 5000
+    stale-running-minutes: 30
+
 logging:
   level:
     root: WARN

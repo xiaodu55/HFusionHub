@@ -10,7 +10,9 @@ import com.hfusionhub.dto.PromptTestSetRunDetailDTO;
 import com.hfusionhub.dto.PromptTestSetRunDTO;
 import com.hfusionhub.dto.PromptTestSetRunResponse;
 import com.hfusionhub.dto.PromptTestSetRunRequest;
+import com.hfusionhub.dto.PromptTestSetRunStatusDTO;
 import com.hfusionhub.dto.PromptTestSetSaveDTO;
+import com.hfusionhub.entity.PromptTestSetRun;
 
 import java.util.List;
 
@@ -36,8 +38,29 @@ public interface PromptTestSetService {
     /** 删除用例集中的一个用例 */
     void deleteCase(Long setId, Long caseId);
 
-    /** 用同一模板批量运行用例集中的所有问题，并保存运行历史 */
-    PromptTestSetRunResponse run(Long setId, PromptTestSetRunRequest request);
+    /** 用同一模板批量运行用例集中的所有问题。异步入队，立即返回任务状态。 */
+    PromptTestSetRunStatusDTO run(Long setId, PromptTestSetRunRequest request);
+
+    /** Worker 执行主体：逐用例运行并增量持久化，结束时收敛到终态。幂等。 */
+    PromptTestSetRunResponse executeRun(Long runId);
+
+    /** 获取批量运行任务的实时状态（轮询进度） */
+    PromptTestSetRunStatusDTO getRunStatus(Long runId);
+
+    /** 取消排队中或执行中的批量运行任务 */
+    PromptTestSetRunStatusDTO cancelRun(Long runId);
+
+    /** 重新排队一个已失败/已取消的运行（清除旧结果，attempt+1） */
+    PromptTestSetRunStatusDTO retryRun(Long runId);
+
+    /** 列出当前可派发的排队运行（供 Worker 认领） */
+    List<PromptTestSetRun> listQueuedRuns(int limit);
+
+    /** 认领一个排队运行（pending→running，守卫更新）。成功返回 true。 */
+    boolean claimRun(Long runId);
+
+    /** 恢复扫描：将失联的 running 运行标记为 failed */
+    int markStaleRunsFailed(long staleMinutes);
 
     /** 列出用例集的运行历史（新到旧） */
     List<PromptTestSetRunDTO> listRuns(Long setId);

@@ -469,6 +469,13 @@ CREATE TABLE IF NOT EXISTS prompt_test_set_run (
     failure_count INT NOT NULL DEFAULT 0,
     pass_count INT NOT NULL DEFAULT 0,
     total_elapsed_ms BIGINT NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'succeeded',
+    attempt_number INT NOT NULL DEFAULT 1,
+    progress_count INT NOT NULL DEFAULT 0,
+    error_message VARCHAR(2000) DEFAULT NULL,
+    scheduled_at TIMESTAMP DEFAULT NULL,
+    started_at TIMESTAMP DEFAULT NULL,
+    completed_at TIMESTAMP DEFAULT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -477,6 +484,7 @@ CREATE TABLE IF NOT EXISTS prompt_test_set_run (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ptsr_set_created ON prompt_test_set_run (set_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_ptsr_status_scheduled ON prompt_test_set_run (status, scheduled_at);
 
 CREATE TABLE IF NOT EXISTS prompt_test_case_result (
     id BIGINT NOT NULL AUTO_INCREMENT,

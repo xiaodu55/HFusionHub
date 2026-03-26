@@ -18,6 +18,9 @@ public class PromptTestSetRunResponse {
     @Schema(description = "本次运行记录 ID（用于历史与对比）")
     private Long runId;
 
+    @Schema(description = "任务状态（completed 时为 succeeded）")
+    private String status;
+
     @Schema(description = "来源模板 ID（可选）")
     private Long templateId;
 

@@ -31,6 +31,22 @@ public class PromptTestSetRun {
     private int passCount;
     private long totalElapsedMs;
 
+    /** pending|running|succeeded|failed|cancelled */
+    private String status;
+
+    /** 重试次数（每次 retry 递增） */
+    private int attemptNumber;
+
+    /** 已完成用例数（用于实时进度） */
+    private int progressCount;
+
+    /** 终态失败原因（供前端展示） */
+    private String errorMessage;
+
+    private LocalDateTime scheduledAt;
+    private LocalDateTime startedAt;
+    private LocalDateTime completedAt;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

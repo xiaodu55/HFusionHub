@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   AlertTriangle,
   Check,
@@ -33,7 +33,9 @@ import type {
   PromptTestSetCompareResponse,
   PromptTestSetDetail,
   PromptTestSetRun,
+  PromptTestSetRunDetail,
   PromptTestSetRunResponse,
+  PromptTestSetRunStatusDTO,
 } from '@/api/promptTestSet'
 import type { KnowledgeBase } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
@@ -70,8 +72,12 @@ const showCaseEditor = ref(false)
 const runTemplateContent = ref('')
 const runKbId = ref<number | undefined>(undefined)
 const runResult = ref<PromptTestSetRunResponse | null>(null)
+const runStatus = ref<PromptTestSetRunStatusDTO | null>(null)
 const selectedTemplate = ref<{ id: number; version: number; name: string } | null>(null)
 const selectedTemplateId = ref<number>(0)
+let pollTimer: number | null = null
+const cancelling = ref(false)
+const retrying = ref(false)
 
 // run history & comparison
 const runs = ref<PromptTestSetRun[]>([])
@@ -132,6 +138,17 @@ const totalElapsed = computed(() => {
   return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`
 })
 
+const progressPercent = computed(() => {
+  const s = runStatus.value
+  if (!s || s.totalCases <= 0) return 0
+  return Math.round((s.progressCount / s.totalCases) * 100)
+})
+
+const isRunActive = computed(() => {
+  const s = runStatus.value
+  return !!s && (s.status === 'pending' || s.status === 'running')
+})
+
 const varBraces = '{{变量}}'
 
 // ── Data loading ───────────────────────────────────────────────────
@@ -153,7 +170,10 @@ const loadSets = async () => {
 
 const selectSet = async (id: number) => {
   selectedId.value = id
+  stopPolling()
+  running.value = false
   runResult.value = null
+  runStatus.value = null
   comparison.value = null
   compareA.value = undefined
   compareB.value = undefined
@@ -315,12 +335,20 @@ const confirmDeleteCase = async (tc: PromptTestCase) => {
   }
 }
 
-// ── Batch run ──────────────────────────────────────────────────────
+// ── Batch run (async queue + polling) ───────────────────────────────
+
+const stopPolling = () => {
+  if (pollTimer !== null) {
+    window.clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
 
 const runAll = async () => {
   if (!canRun.value || !selectedId.value || !detail.value) return
   running.value = true
   runResult.value = null
+  runStatus.value = null
   expandedResults.value = new Set()
   try {
     const res = await promptTestSetApi.runPromptTestSet(selectedId.value, {
@@ -328,18 +356,112 @@ const runAll = async () => {
       knowledgeBaseId: runKbId.value,
       templateId: selectedTemplate.value?.id,
     })
-    runResult.value = res.data
-    await loadRuns(selectedId.value)
-    if (res.data.failureCount > 0) {
-      toast.warning(`批量测试完成：${res.data.successCount} 成功，${res.data.failureCount} 失败`)
-    } else {
-      toast.success(`批量测试完成：${res.data.successCount} 个用例全部成功`)
-    }
+    runStatus.value = res.data
+    toast.success(`批量测试已提交（第 ${res.data.attemptNumber} 次尝试），正在排队…`)
+    startPolling(res.data.id)
   } catch (err) {
-    toast.error(err instanceof Error ? err.message : '批量测试失败')
-  } finally {
+    toast.error(err instanceof Error ? err.message : '提交批量测试失败')
     running.value = false
   }
+}
+
+const startPolling = (runId: number) => {
+  stopPolling()
+  pollTimer = window.setInterval(() => pollRunStatus(runId), 1500)
+  pollRunStatus(runId)
+}
+
+const pollRunStatus = async (runId: number) => {
+  try {
+    const res = await promptTestSetApi.getPromptTestSetRunStatus(runId)
+    runStatus.value = res.data
+    const status = res.data.status
+    if (status === 'succeeded' || status === 'failed') {
+      stopPolling()
+      running.value = false
+      await loadRunDetail(res.data.id)
+      await loadRuns(selectedId.value ?? 0)
+      if (status === 'succeeded') {
+        const msg = `${res.data.successCount}/${res.data.totalCases} 成功，通过率 ${res.data.passRate}%`
+        if (res.data.failureCount > 0) toast.warning(`批量测试完成：${msg}`)
+        else toast.success(`批量测试完成：${msg}`)
+      } else {
+        toast.error(`批量测试失败：${res.data.errorMessage || '未知原因'}`)
+      }
+    } else if (status === 'cancelled') {
+      stopPolling()
+      running.value = false
+      await loadRunDetail(res.data.id)
+      toast.warning('批量测试已取消')
+    }
+  } catch (err) {
+    console.error('轮询批量运行状态失败:', err)
+  }
+}
+
+const loadRunDetail = async (runId: number) => {
+  try {
+    const res = await promptTestSetApi.getPromptTestSetRun(runId)
+    applyRunDetail(res.data)
+  } catch (err) {
+    console.error('加载运行详情失败:', err)
+  }
+}
+
+const applyRunDetail = (detail: PromptTestSetRunDetail) => {
+  runResult.value = {
+    setId: selectedId.value ?? 0,
+    runId: detail.run.id,
+    status: detail.run.status,
+    totalCases: detail.run.totalCases,
+    successCount: detail.run.successCount,
+    failureCount: detail.run.failureCount,
+    passCount: detail.run.passCount,
+    passRate: detail.run.passRate,
+    totalElapsedMs: detail.run.totalElapsedMs,
+    results: detail.results,
+  }
+  expandedResults.value = new Set()
+}
+
+const cancelRun = async () => {
+  if (!runStatus.value || cancelling.value) return
+  cancelling.value = true
+  try {
+    const res = await promptTestSetApi.cancelPromptTestSetRun(runStatus.value.id)
+    runStatus.value = res.data
+    toast.success('正在取消批量测试…')
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '取消失败')
+  } finally {
+    cancelling.value = false
+  }
+}
+
+const retryRun = async () => {
+  if (!runStatus.value || retrying.value) return
+  retrying.value = true
+  try {
+    const res = await promptTestSetApi.retryPromptTestSetRun(runStatus.value.id)
+    runStatus.value = res.data
+    runResult.value = null
+    expandedResults.value = new Set()
+    running.value = true
+    toast.success('已重新提交，正在排队…')
+    startPolling(res.data.id)
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '重试失败')
+  } finally {
+    retrying.value = false
+  }
+}
+
+const clearRun = () => {
+  stopPolling()
+  running.value = false
+  runResult.value = null
+  runStatus.value = null
+  expandedResults.value = new Set()
 }
 
 const onTemplateSelect = (id: number) => {
@@ -382,18 +504,7 @@ const runLabel = (r: PromptTestSetRun): string => {
 const selectRunForDetail = async (runId: number) => {
   try {
     const res = await promptTestSetApi.getPromptTestSetRun(runId)
-    runResult.value = {
-      setId: selectedId.value ?? 0,
-      runId: res.data.run.id,
-      totalCases: res.data.run.totalCases,
-      successCount: res.data.run.successCount,
-      failureCount: res.data.run.failureCount,
-      passCount: res.data.run.passCount,
-      passRate: res.data.run.passRate,
-      totalElapsedMs: res.data.run.totalElapsedMs,
-      results: res.data.results,
-    }
-    expandedResults.value = new Set()
+    applyRunDetail(res.data)
   } catch (err) {
     toast.error(err instanceof Error ? err.message : '加载运行详情失败')
   }
@@ -463,6 +574,10 @@ const formatMs = (ms: number): string => (ms >= 1000 ? `${(ms / 1000).toFixed(2)
 onMounted(() => {
   loadSets()
   loadTemplatesAndKbs()
+})
+
+onBeforeUnmount(() => {
+  stopPolling()
 })
 </script>
 
@@ -618,13 +733,49 @@ onMounted(() => {
               </select>
             </div>
 
+            <!-- Running progress / cancel -->
+            <div v-if="isRunActive" class="rounded-xl border border-violet-400/25 bg-violet-400/5 p-3">
+              <div class="flex items-center justify-between gap-2">
+                <p class="flex items-center gap-2 text-sm text-violet-200">
+                  <LoaderCircle class="h-4 w-4 animate-spin" />
+                  {{ runStatus?.status === 'pending' ? '排队中…' : `正在运行 ${runStatus?.progressCount ?? 0}/${runStatus?.totalCases ?? 0}` }}
+                </p>
+                <span class="text-xs text-muted-foreground">第 {{ runStatus?.attemptNumber ?? 1 }} 次尝试</span>
+              </div>
+              <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div class="h-full rounded-full bg-violet-400 transition-all duration-300" :style="{ width: `${progressPercent}%` }" />
+              </div>
+              <div class="mt-2 flex justify-between text-[11px] text-muted-foreground">
+                <span>{{ progressPercent }}%</span>
+                <span>通过率 {{ runStatus?.passRate ?? 0 }}%</span>
+              </div>
+              <div class="mt-3 flex gap-2">
+                <Button variant="outline" class="flex-1 text-destructive hover:text-destructive" :disabled="cancelling" @click="cancelRun">
+                  <XCircle class="mr-1 h-4 w-4" /> {{ cancelling ? '取消中…' : '取消运行' }}
+                </Button>
+              </div>
+            </div>
+
+            <!-- Terminal failure / cancelled → retry -->
+            <div v-else-if="runStatus && (runStatus.status === 'failed' || runStatus.status === 'cancelled')" class="rounded-xl border p-3" :class="runStatus.status === 'cancelled' ? 'border-amber-400/25 bg-amber-400/5' : 'border-red-500/30 bg-red-500/5'">
+              <p class="flex items-center gap-2 text-sm" :class="runStatus.status === 'cancelled' ? 'text-amber-200' : 'text-red-300'">
+                <XCircle class="h-4 w-4" />
+                {{ runStatus.status === 'cancelled' ? `批量测试已取消（第 ${runStatus.attemptNumber} 次尝试）` : `批量测试失败：${runStatus.errorMessage || '未知原因'}` }}
+              </p>
+              <div class="mt-3 flex gap-2">
+                <Button class="flex-1" :disabled="retrying" @click="retryRun">
+                  <RefreshCw class="mr-1 h-4 w-4" /> {{ retrying ? '重新提交中…' : '重新运行' }}
+                </Button>
+              </div>
+            </div>
+
             <div class="flex items-center gap-2">
               <Button :disabled="!canRun" class="flex-1" @click="runAll">
                 <LoaderCircle v-if="running" class="mr-2 h-4 w-4 animate-spin" />
                 <Play v-else class="mr-2 h-4 w-4" />
                 {{ running ? '运行中…' : `批量运行 ${detail?.cases.length ?? 0} 个用例` }}
               </Button>
-              <Button variant="outline" @click="runResult = null">
+              <Button variant="outline" @click="clearRun">
                 <RefreshCw class="mr-1 h-4 w-4" /> 清除
               </Button>
             </div>
