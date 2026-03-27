@@ -40,6 +40,9 @@ public class PromptTestSetRun {
     /** 已完成用例数（用于实时进度） */
     private int progressCount;
 
+    /** 每次执行唯一、不可复用的乐观锁令牌；重试时重新生成，用于隔离残留的旧 Worker。 */
+    private String executionToken;
+
     /** 终态失败原因（供前端展示） */
     private String errorMessage;
 

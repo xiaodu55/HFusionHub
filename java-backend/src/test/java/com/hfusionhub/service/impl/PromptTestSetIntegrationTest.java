@@ -8,6 +8,7 @@ import cn.dev33.satoken.context.model.SaStorage;
 import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.hfusionhub.client.AiClient;
+import com.hfusionhub.common.constant.PromptTestSetRunStatus;
 import com.hfusionhub.dto.PromptTestCaseDTO;
 import com.hfusionhub.dto.PromptTestCaseSaveDTO;
 import com.hfusionhub.dto.PromptTestSetCompareRequest;
@@ -35,11 +36,17 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -47,6 +54,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -81,6 +90,9 @@ class PromptTestSetIntegrationTest {
 
     @Autowired
     private PromptTestSetRunMapper runMapper;
+
+    @Autowired
+    private PromptTestSetCaseWriter caseWriter;
 
     private Long userId;
 
@@ -138,6 +150,18 @@ class PromptTestSetIntegrationTest {
         caseDto.setExpectedKeywords(keywords);
         caseDto.setRequiredDocumentIds(docIds);
         service.addCase(created.getId(), caseDto);
+        return created;
+    }
+
+    private PromptTestSetDetailDTO createSetWithCases(int n) {
+        PromptTestSetSaveDTO setDto = new PromptTestSetSaveDTO();
+        setDto.setName("并发集-" + System.nanoTime());
+        PromptTestSetDetailDTO created = service.create(setDto);
+        for (int i = 0; i < n; i++) {
+            PromptTestCaseSaveDTO caseDto = new PromptTestCaseSaveDTO();
+            caseDto.setQuestion("问题" + i);
+            service.addCase(created.getId(), caseDto);
+        }
         return created;
     }
 
@@ -587,6 +611,238 @@ class PromptTestSetIntegrationTest {
         PromptTestSetRunStatusDTO recovered = service.getRunStatus(queued.getId());
         assertEquals("failed", recovered.getStatus());
         assertNotNull(recovered.getErrorMessage());
+    }
+
+    // ── Concurrency: cancel→retry and cross-instance isolation ────────
+
+    /**
+     * 取消执行中的任务后「立即重试」：retry 重新生成 execution_token，因此仍在
+     * AI 调用中阻塞的旧 Worker 在释放后第一次守卫写入（进度推进）即失效并中止，
+     * 不会把结果写入新一轮任务，也不会覆盖新一轮的 pending 状态。
+     *
+     * <p>此测试使用真实的 H2 + MyBatis-Plus（守卫更新为原子 SQL），且主线程与
+     * Worker 线程分别自动提交，以还原生产环境的并发时序。
+     */
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void cancelThenImmediateRetryIsolatesStaleWorker() throws Exception {
+        PromptTestSetDetailDTO created = createSetWithCases(3);
+
+        AtomicInteger calls = new AtomicInteger();
+        CountDownLatch workerInChat = new CountDownLatch(1);
+        CountDownLatch releaseWorker = new CountDownLatch(1);
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答");
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenAnswer(inv -> {
+            if (calls.incrementAndGet() == 1) {
+                workerInChat.countDown();
+                releaseWorker.await(10, TimeUnit.SECONDS);
+            }
+            return resp;
+        });
+
+        PromptTestSetRunStatusDTO queued = service.run(created.getId(), request("你是{{角色}}"));
+        Long runId = queued.getId();
+        assertTrue(service.claimRun(runId));
+        String tokenBefore = runMapper.selectById(runId).getExecutionToken();
+        assertNotNull(tokenBefore);
+
+        // 旧 Worker 启动并在首个 AI 调用内阻塞。
+        AtomicReference<Throwable> workerError = new AtomicReference<>();
+        Thread worker = new Thread(() -> {
+            try {
+                service.executeRun(runId);
+            } catch (Throwable t) {
+                workerError.set(t);
+            }
+        }, "pts-stale-worker");
+        worker.start();
+        assertTrue(workerInChat.await(10, TimeUnit.SECONDS), "worker never entered AI call");
+
+        // 取消执行中的任务，然后立刻重试（attempt 2，重新生成 token）。
+        PromptTestSetRunStatusDTO cancelled = service.cancelRun(runId);
+        assertEquals("cancelled", cancelled.getStatus());
+        PromptTestSetRunStatusDTO requeued = service.retryRun(runId);
+        assertEquals("pending", requeued.getStatus());
+        assertEquals(2, requeued.getAttemptNumber());
+        String tokenAfter = runMapper.selectById(runId).getExecutionToken();
+        assertNotNull(tokenAfter);
+        assertNotEquals("retry must regenerate the execution token", tokenBefore, tokenAfter);
+
+        // 释放旧 Worker：其守卫式进度写入因 token 不匹配命中 0 行而中止。
+        releaseWorker.countDown();
+        worker.join(10_000);
+        assertFalse(worker.isAlive());
+        assertNull(workerError.get());
+
+        // 旧 Worker 没有污染新一轮：run 保持 pending（新 token），进度 0，无任何结果。
+        assertEquals("pending", runMapper.selectById(runId).getStatus());
+        assertEquals(0, runMapper.selectById(runId).getProgressCount());
+        assertEquals(0, service.getRunDetail(runId).getResults().size());
+        assertEquals(1, calls.get(), "stale worker must abort after exactly one AI call");
+
+        // 新一轮完整执行（attempt 2），结果数与成功数完全来自本轮，无串扰。
+        PromptTestSetRunResponse done = service.executeRun(runId);
+        assertEquals(3, done.getSuccessCount());
+        PromptTestSetRunStatusDTO status = service.getRunStatus(runId);
+        assertEquals("succeeded", status.getStatus());
+        assertEquals(2, status.getAttemptNumber());
+        assertEquals(3, service.getRunDetail(runId).getResults().size());
+
+        service.delete(created.getId());
+    }
+
+    /**
+     * 跨实例取消：Worker A（实例 A）正在执行，实例 B 的取消操作仅把 DB 状态置为
+     * CANCELLED（B 的 cancelledRuns 内存标志对 A 不可见）。A 在下一个守卫写入
+     * （状态离开 pending/running）时失效并中止，不产生重复 AI 调用或脏结果。
+     */
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void crossInstanceCancelStopsStaleWorkerViaGuardedWrites() throws Exception {
+        PromptTestSetDetailDTO created = createSetWithCases(3);
+
+        AtomicInteger calls = new AtomicInteger();
+        CountDownLatch workerInChat = new CountDownLatch(1);
+        CountDownLatch releaseWorker = new CountDownLatch(1);
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答");
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenAnswer(inv -> {
+            if (calls.incrementAndGet() == 1) {
+                workerInChat.countDown();
+                releaseWorker.await(10, TimeUnit.SECONDS);
+            }
+            return resp;
+        });
+
+        PromptTestSetRunStatusDTO queued = service.run(created.getId(), request("你是{{角色}}"));
+        Long runId = queued.getId();
+        assertTrue(service.claimRun(runId));
+
+        AtomicReference<Throwable> workerError = new AtomicReference<>();
+        Thread worker = new Thread(() -> {
+            try {
+                service.executeRun(runId);
+            } catch (Throwable t) {
+                workerError.set(t);
+            }
+        }, "pts-worker-A");
+        worker.start();
+        assertTrue(workerInChat.await(10, TimeUnit.SECONDS), "worker never entered AI call");
+
+        // 模拟实例 B 取消：直接翻转 DB 状态，B 的 cancelledRuns 标志对 A 不可见。
+        // 与真实跨实例取消一致——隔离完全依赖 DB 上的守卫写入。
+        runMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<PromptTestSetRun>()
+                .eq(PromptTestSetRun::getId, runId)
+                .eq(PromptTestSetRun::getStatus, PromptTestSetRunStatus.RUNNING)
+                .set(PromptTestSetRun::getStatus, PromptTestSetRunStatus.CANCELLED)
+                .set(PromptTestSetRun::getCompletedAt, java.time.LocalDateTime.now()));
+
+        releaseWorker.countDown();
+        worker.join(10_000);
+        assertFalse(worker.isAlive());
+        assertNull(workerError.get());
+
+        // Worker A 在下一个守卫写入中止：状态保持 cancelled，无结果写入，无多余 AI 调用。
+        assertEquals("cancelled", runMapper.selectById(runId).getStatus());
+        assertEquals(0, runMapper.selectById(runId).getProgressCount());
+        assertEquals(0, service.getRunDetail(runId).getResults().size());
+        assertEquals(1, calls.get(), "worker must not keep calling AI after cross-instance cancel");
+
+        service.delete(created.getId());
+    }
+
+    /**
+     * 「进度已写、结果未写」窗口：worker 的原子写事务在「守卫更新成功（进度已写、未提交、
+     * 已持有 run 行 X 锁）」与「结果插入」之间被钩子卡住。此时取消+重试必须阻塞在 worker
+     * 事务持有的锁上；worker 提交后重试执行并清除其提交的结果。最终无残留脏数据、run 回到
+     * pending + 新 token，旧 Worker 不再发起额外 AI 调用。
+     *
+     * <p>该窗口在未原子化实现下会让旧 Worker 无条件插入旧 token 的结果行（DB 残留脏数据）；
+     * 原子化后由「单事务 + 行锁互斥」彻底消除。
+     */
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void atomicWriteSerializesAgainstRetry_noDirtyResultsInProgressWrittenWindow() throws Exception {
+        PromptTestSetDetailDTO created = createSetWithCases(1);
+
+        CountDownLatch inWindow = new CountDownLatch(1);
+        CountDownLatch releaseWorker = new CountDownLatch(1);
+        CountDownLatch cancelDone = new CountDownLatch(1);
+        AtomicReference<Throwable> cancelError = new AtomicReference<>();
+
+        AiClient.ChatResponse resp = new AiClient.ChatResponse();
+        resp.setContent("回答");
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+
+        PromptTestSetRunStatusDTO queued = service.run(created.getId(), request("你是{{角色}}"));
+        Long runId = queued.getId();
+        assertTrue(service.claimRun(runId));
+        String tokenBefore = runMapper.selectById(runId).getExecutionToken();
+        assertNotNull(tokenBefore);
+
+        // 在「进度已写、结果未写」窗口同步点注入阻塞（生产环境该钩子为空，不改变行为）。
+        Object originalHook = ReflectionTestUtils.getField(caseWriter, "caseWriteHook");
+        ReflectionTestUtils.setField(caseWriter, "caseWriteHook",
+                (PromptTestSetCaseWriter.CaseWriteHook) () -> {
+                    inWindow.countDown();
+                    try {
+                        releaseWorker.await(10, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+        try {
+            Thread worker = new Thread(() -> {
+                try {
+                    service.executeRun(runId);
+                } catch (Throwable t) {
+                    // 忽略——由主线程断言负责
+                }
+            }, "pts-window-worker");
+            worker.start();
+
+            assertTrue(inWindow.await(10, TimeUnit.SECONDS),
+                    "worker never reached the progress-written window");
+
+            // 取消+重试在另一线程执行：worker 事务持有 run 行 X 锁，二者必须阻塞到 worker 提交。
+            Thread cancelThread = new Thread(() -> {
+                try {
+                    service.cancelRun(runId);
+                    service.retryRun(runId);
+                } catch (Throwable t) {
+                    cancelError.set(t);
+                } finally {
+                    cancelDone.countDown();
+                }
+            }, "pts-window-cancel");
+            cancelThread.start();
+
+            // 互斥验证：worker 事务未提交时，取消+重试不得提前完成。
+            Thread.sleep(300);
+            assertFalse(cancelDone.await(50, TimeUnit.MILLISECONDS),
+                    "cancel/retry must block on the worker's active transaction");
+
+            // 释放 worker → 结果插入并提交事务 → 重试随后执行并清除其结果。
+            releaseWorker.countDown();
+            worker.join(10_000);
+            cancelThread.join(10_000);
+            assertFalse(worker.isAlive());
+            assertNull(cancelError.get());
+
+            // 无残留：重试已清除 worker 提交的结果行；run 回到 pending + 新 token + attempt 2。
+            assertEquals(0, service.getRunDetail(runId).getResults().size());
+            PromptTestSetRun fresh = runMapper.selectById(runId);
+            assertEquals("pending", fresh.getStatus());
+            assertEquals(2, fresh.getAttemptNumber());
+            assertEquals(0, fresh.getProgressCount());
+            assertNotEquals(tokenBefore, fresh.getExecutionToken());
+            // 旧 Worker 只发起了这一次 AI 调用（唯一用例提交后即因守卫失效而中止）。
+            verify(aiClient, times(1)).chat(anyString(), isNull(), isNull(), any(), anyString());
+        } finally {
+            ReflectionTestUtils.setField(caseWriter, "caseWriteHook", originalHook);
+            service.delete(created.getId());
+        }
     }
 
     private static class MockSaTokenContext implements SaTokenContext {

@@ -472,6 +472,7 @@ CREATE TABLE IF NOT EXISTS prompt_test_set_run (
     status VARCHAR(20) NOT NULL DEFAULT 'succeeded',
     attempt_number INT NOT NULL DEFAULT 1,
     progress_count INT NOT NULL DEFAULT 0,
+    execution_token VARCHAR(64) DEFAULT NULL,
     error_message VARCHAR(2000) DEFAULT NULL,
     scheduled_at TIMESTAMP DEFAULT NULL,
     started_at TIMESTAMP DEFAULT NULL,
@@ -502,10 +503,12 @@ CREATE TABLE IF NOT EXISTS prompt_test_case_result (
     passed BOOLEAN NOT NULL DEFAULT TRUE,
     pass_notes VARCHAR(4000) DEFAULT NULL,
     error VARCHAR(1000) DEFAULT NULL,
+    execution_token VARCHAR(64) DEFAULT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     FOREIGN KEY (run_id) REFERENCES prompt_test_set_run (id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_ptcr_run ON prompt_test_case_result (run_id);
+CREATE INDEX IF NOT EXISTS idx_ptcr_run_token ON prompt_test_case_result (run_id, execution_token);
 CREATE INDEX IF NOT EXISTS idx_ptcr_case ON prompt_test_case_result (case_id);

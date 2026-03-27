@@ -1,5 +1,6 @@
 package com.hfusionhub.common.constant;
 
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -18,6 +19,9 @@ public final class PromptTestSetRunStatus {
 
     /** 终态集合：到达后不再执行，可通过 retry 重新排队。 */
     public static final Set<String> TERMINAL_STATUSES = Set.of(SUCCEEDED, FAILED, CANCELLED);
+
+    /** 活跃状态集合：Worker 仅允许在其上写入进度/结果/终态。 */
+    public static final List<String> ACTIVE_STATUSES = List.of(PENDING, RUNNING);
 
     private PromptTestSetRunStatus() {
     }

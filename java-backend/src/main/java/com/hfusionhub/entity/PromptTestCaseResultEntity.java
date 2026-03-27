@@ -43,5 +43,8 @@ public class PromptTestCaseResultEntity {
     @TableField(typeHandler = JsonStringListTypeHandler.class)
     private List<String> passNotes;
 
+    /** 产出该结果的执行令牌（run 当前 attempt 的 execution_token） */
+    private String executionToken;
+
     private LocalDateTime createdAt;
 }

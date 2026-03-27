@@ -84,7 +84,8 @@ class PromptTestSetServiceImplTest {
         caseResultMapper = mock(PromptTestCaseResultMapper.class);
         service = new PromptTestSetServiceImpl(
                 testSetMapper, testCaseMapper, knowledgeBaseMapper, promptTemplateMapper, aiClient,
-                runMapper, caseResultMapper, 2, 0);
+                runMapper, caseResultMapper, new PromptTestSetCaseWriter(runMapper, caseResultMapper),
+                2, 0);
 
         // Simulate DB identity assignment + read-back for the async execute path.
         insertedRun.set(null);
