@@ -53,7 +53,7 @@ public class ThreadPoolConfig {
      * 提示词测试用例集批量运行 Worker 线程池 — 异步执行批量评测任务
      */
     @Bean("promptTestSetRunExecutor")
-    public Executor promptTestSetRunExecutor() {
+    public ThreadPoolTaskExecutor promptTestSetRunExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(1);
         executor.setMaxPoolSize(2);

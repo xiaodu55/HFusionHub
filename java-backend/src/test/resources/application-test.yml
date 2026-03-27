@@ -138,6 +138,7 @@ prompt-test-set:
     case-retry-delay-ms: 0
     recovery-delay-ms: 5000
     stale-running-minutes: 30
+    shutdown-timeout-ms: 5000
 
 logging:
   level:

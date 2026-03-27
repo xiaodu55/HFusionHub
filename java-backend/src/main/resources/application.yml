@@ -169,6 +169,8 @@ prompt-test-set:
     recovery-delay-ms: ${PROMPT_TEST_SET_RECOVERY_DELAY_MS:30000}
     # running 状态超过该分钟数视为失联，恢复扫描将其置为 failed
     stale-running-minutes: ${PROMPT_TEST_SET_STALE_RUNNING_MINUTES:30}
+    # 优雅停机：停止轮询后等待已提交的批量运行任务结束的最长毫秒数，超时交由 stale 恢复兜底
+    shutdown-timeout-ms: ${PROMPT_TEST_SET_SHUTDOWN_TIMEOUT_MS:30000}
 
 # 日志配置
 logging:
