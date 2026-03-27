@@ -11,6 +11,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+
 /**
  * 提示词测试集批量运行的单用例「原子写」。
  *
@@ -55,12 +57,15 @@ public class PromptTestSetCaseWriter {
                                PromptTestCaseResult result) {
         Long runId = run.getId();
         int updated = runMapper.update(null, PromptTestSetRunGuards.activeRunGuard(runId, token)
-                .set(PromptTestSetRun::getProgressCount, newProgress));
+                .set(PromptTestSetRun::getProgressCount, newProgress)
+                // 每个用例写入即刷新心跳：长时批量正常推进不会被误判为失联
+                .set(PromptTestSetRun::getHeartbeatAt, LocalDateTime.now()));
         if (updated == 0) {
             log.info("Prompt test set run {} stale — atomic case write rejected, worker aborts", runId);
             return false;
         }
         run.setProgressCount(newProgress);
+        run.setHeartbeatAt(LocalDateTime.now());
         if (caseWriteHook != null) {
             caseWriteHook.onProgressWrittenBeforeInsert();
         }

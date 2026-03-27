@@ -48,6 +48,10 @@ public class PromptTestSetRun {
 
     private LocalDateTime scheduledAt;
     private LocalDateTime startedAt;
+
+    /** 最近一次心跳时间：每处理一个用例刷新一次，用于失联判断（避免长时运行被误判）。 */
+    private LocalDateTime heartbeatAt;
+
     private LocalDateTime completedAt;
 
     private LocalDateTime createdAt;

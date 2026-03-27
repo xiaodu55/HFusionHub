@@ -595,7 +595,7 @@ class PromptTestSetIntegrationTest {
         PromptTestSetRunStatusDTO queued = service.run(created.getId(), request("你是{{角色}}"));
         assertTrue(service.claimRun(queued.getId()));
 
-        // Simulate a worker that died mid-run: started long ago, still running
+        // Simulate a worker that died mid-run: last heartbeat long ago, still running
         PromptTestSetRun stale = new PromptTestSetRun();
         stale.setId(queued.getId());
         stale.setStatus("running");
@@ -603,7 +603,8 @@ class PromptTestSetIntegrationTest {
         runMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<PromptTestSetRun>()
                 .eq(PromptTestSetRun::getId, queued.getId())
                 .set(PromptTestSetRun::getStatus, "running")
-                .set(PromptTestSetRun::getStartedAt, java.time.LocalDateTime.now().minusMinutes(120)));
+                .set(PromptTestSetRun::getStartedAt, java.time.LocalDateTime.now().minusMinutes(120))
+                .set(PromptTestSetRun::getHeartbeatAt, java.time.LocalDateTime.now().minusMinutes(120)));
 
         int marked = service.markStaleRunsFailed(30);
         assertEquals(1, marked);
@@ -611,6 +612,27 @@ class PromptTestSetIntegrationTest {
         PromptTestSetRunStatusDTO recovered = service.getRunStatus(queued.getId());
         assertEquals("failed", recovered.getStatus());
         assertNotNull(recovered.getErrorMessage());
+    }
+
+    @Test
+    void runningRunWithFreshHeartbeatIsNotReclaimed() throws Exception {
+        PromptTestSetDetailDTO created = createSetWithCase(new HashMap<>(Map.of("角色", "客服")));
+
+        PromptTestSetRunStatusDTO queued = service.run(created.getId(), request("你是{{角色}}"));
+        assertTrue(service.claimRun(queued.getId()));
+
+        // 正常运行很久（started_at 已远超阈值），但最近一次心跳仍是新鲜的 → 不失联
+        runMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<PromptTestSetRun>()
+                .eq(PromptTestSetRun::getId, queued.getId())
+                .set(PromptTestSetRun::getStatus, "running")
+                .set(PromptTestSetRun::getStartedAt, java.time.LocalDateTime.now().minusMinutes(120))
+                .set(PromptTestSetRun::getHeartbeatAt, java.time.LocalDateTime.now().minusSeconds(30)));
+
+        int marked = service.markStaleRunsFailed(30);
+        assertEquals(0, marked);
+
+        PromptTestSetRunStatusDTO stillRunning = service.getRunStatus(queued.getId());
+        assertEquals("running", stillRunning.getStatus());
     }
 
     // ── Concurrency: cancel→retry and cross-instance isolation ────────

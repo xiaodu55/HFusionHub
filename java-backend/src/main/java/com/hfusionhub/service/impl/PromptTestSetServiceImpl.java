@@ -364,6 +364,7 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
                 .set(PromptTestSetRun::getErrorMessage, null)
                 .set(PromptTestSetRun::getScheduledAt, LocalDateTime.now())
                 .set(PromptTestSetRun::getStartedAt, null)
+                .set(PromptTestSetRun::getHeartbeatAt, null)
                 .set(PromptTestSetRun::getCompletedAt, null));
         PromptTestSetRun fresh = runMapper.selectById(runId);
         log.info("Prompt test set run {} re-queued for retry (attempt {})", runId, fresh.getAttemptNumber());
@@ -384,19 +385,25 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
 
     @Override
     public boolean claimRun(Long runId) {
+        LocalDateTime now = LocalDateTime.now();
         return runMapper.update(null, new LambdaUpdateWrapper<PromptTestSetRun>()
                 .eq(PromptTestSetRun::getId, runId)
                 .eq(PromptTestSetRun::getStatus, PromptTestSetRunStatus.PENDING)
                 .set(PromptTestSetRun::getStatus, PromptTestSetRunStatus.RUNNING)
-                .set(PromptTestSetRun::getStartedAt, LocalDateTime.now())) > 0;
+                .set(PromptTestSetRun::getStartedAt, now)
+                .set(PromptTestSetRun::getHeartbeatAt, now)) > 0;
     }
 
     @Override
     public int markStaleRunsFailed(long staleMinutes) {
         LocalDateTime threshold = LocalDateTime.now().minusMinutes(staleMinutes);
+        // 失联判断改为基于心跳：正常运行每处理一个用例都会刷新 heartbeat_at，
+        // 只有「最近一次心跳超过 threshold」或「从未处理过用例（heartbeat 为空）
+        // 且 startedAt 超过 threshold」的 running 运行才视为失联。
         List<PromptTestSetRun> stale = runMapper.selectList(new LambdaQueryWrapper<PromptTestSetRun>()
                 .eq(PromptTestSetRun::getStatus, PromptTestSetRunStatus.RUNNING)
-                .lt(PromptTestSetRun::getStartedAt, threshold));
+                .and(w -> w.isNull(PromptTestSetRun::getHeartbeatAt).and(q -> q.lt(PromptTestSetRun::getStartedAt, threshold))
+                        .or().lt(PromptTestSetRun::getHeartbeatAt, threshold)));
         int marked = 0;
         for (PromptTestSetRun run : stale) {
             try {

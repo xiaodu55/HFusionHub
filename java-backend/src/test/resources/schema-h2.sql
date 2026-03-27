@@ -476,6 +476,7 @@ CREATE TABLE IF NOT EXISTS prompt_test_set_run (
     error_message VARCHAR(2000) DEFAULT NULL,
     scheduled_at TIMESTAMP DEFAULT NULL,
     started_at TIMESTAMP DEFAULT NULL,
+    heartbeat_at TIMESTAMP DEFAULT NULL,
     completed_at TIMESTAMP DEFAULT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -486,6 +487,7 @@ CREATE TABLE IF NOT EXISTS prompt_test_set_run (
 
 CREATE INDEX IF NOT EXISTS idx_ptsr_set_created ON prompt_test_set_run (set_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_ptsr_status_scheduled ON prompt_test_set_run (status, scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_ptsr_status_heartbeat ON prompt_test_set_run (status, heartbeat_at);
 
 CREATE TABLE IF NOT EXISTS prompt_test_case_result (
     id BIGINT NOT NULL AUTO_INCREMENT,
