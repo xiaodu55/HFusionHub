@@ -1,0 +1,76 @@
+name: Nightly Evaluation (Runtime)
+
+# Runs the Phase-1 runtime track against a live Python AI service on a schedule.
+# The offline gate already runs on every push/PR in ci.yml; this workflow measures
+# the answer-layer metrics (latency, tokens, cost, refusal, tool success) that
+# only a live service can produce.
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # 02:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      update_baseline:
+        description: 'Re-freeze the runtime baseline with tonight''s results'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  # Controlled target only: EVAL_BASE_URL comes from a repo Variable and the token
+  # from the EVAL_INTERNAL_TOKEN Secret. There is NO manual base_url/token input, so
+  # the token can never be redirected to an arbitrary address from a trigger payload.
+  EVAL_BASE_URL: ${{ vars.EVAL_BASE_URL }}
+  EVAL_INTERNAL_TOKEN: ${{ secrets.EVAL_INTERNAL_TOKEN }}
+
+jobs:
+  # The runtime track needs a live deployment that has the synthetic KB indexed
+  # at kb_id=101 with the document titles from python-ai/evaluation/kb. When the
+  # secret/variable are not configured the evaluation steps are skipped (step-level
+  # guard on env.EVAL_*), never printing or accepting the token anywhere.
+  eval-runtime:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python-ai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: python-ai/requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Check runtime evaluation configuration
+        if: ${{ env.EVAL_INTERNAL_TOKEN == '' || env.EVAL_BASE_URL == '' }}
+        run: echo "::notice::Runtime evaluation skipped — set the EVAL_INTERNAL_TOKEN secret and EVAL_BASE_URL variable to enable."
+      - name: Restore runtime baseline (most recent version)
+        if: ${{ env.EVAL_INTERNAL_TOKEN != '' && env.EVAL_BASE_URL != '' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: python-ai/evaluation/baseline/runtime_baseline.json
+          key: runtime-baseline-${{ hashFiles('python-ai/evaluation/suite/cases.jsonl') }}-${{ github.run_id }}
+          restore-keys: |
+            runtime-baseline-${{ hashFiles('python-ai/evaluation/suite/cases.jsonl') }}-
+      - name: Run runtime evaluation gate
+        if: ${{ env.EVAL_INTERNAL_TOKEN != '' && env.EVAL_BASE_URL != '' }}
+        run: |
+          args=(--base-url "${EVAL_BASE_URL}" --token "${EVAL_INTERNAL_TOKEN}" --fail-on-regression)
+          if [ "${UPDATE_BASELINE}" = "true" ]; then args+=(--update-baseline); fi
+          python scripts/eval_runtime.py "${args[@]}"
+        env:
+          UPDATE_BASELINE: ${{ github.event.inputs.update_baseline == 'true' }}
+      - name: Persist re-frozen runtime baseline
+        if: ${{ success() && github.event.inputs.update_baseline == 'true' && env.EVAL_INTERNAL_TOKEN != '' && env.EVAL_BASE_URL != '' }}
+        uses: actions/cache/save@v4
+        with:
+          path: python-ai/evaluation/baseline/runtime_baseline.json
+          key: runtime-baseline-${{ hashFiles('python-ai/evaluation/suite/cases.jsonl') }}-${{ github.run_id }}
+      - name: Upload runtime evaluation report
+        if: ${{ always() && env.EVAL_INTERNAL_TOKEN != '' && env.EVAL_BASE_URL != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-runtime-report
+          path: python-ai/evaluation/reports/*
+          if-no-files-found: warn

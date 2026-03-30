@@ -132,6 +132,19 @@ python scripts/eval_runtime.py --token <internal-token> \
 （exit 1），避免「更新用例后仍拿旧基线做无效对比」。`--update-baseline` 是显式再冻结操作，
 会绕过该校验并写入新哈希——修改 KB/用例后必须重新执行它以再冻结基线。
 
+## CI 集成（Phase 2）
+
+- **PR 门禁**：`.github/workflows/ci.yml` 的 `eval-offline` job 在每次 push/PR 到 main 时执行
+  `python scripts/eval_offline.py --fail-on-regression`（SHA-256 冻结校验 → 门禁 → 基线回归
+  判定），失败即构建失败阻断合并；报告上传为 `eval-offline-report` artifact。
+- **Nightly 运行时**：`.github/workflows/eval-nightly.yml` 每日 02:00 UTC（可 `workflow_dispatch`
+  手动触发）对 live 服务跑运行时轨道，需要仓库 Secret `EVAL_INTERNAL_TOKEN` 与 Variable
+  `EVAL_BASE_URL`，且目标环境已以 kb_id=101 索引合成 KB。
+- **基线再冻结**：离线基线修改用例后本地 `--update-baseline` 提交；运行时基线经
+  `actions/cache` 持久化，手动触发时勾选 `update_baseline`。
+
+详见 `docs/CI_GATES.md`。
+
 ## 分阶段设计说明
 
 ### P7 GraphRAG guardrails

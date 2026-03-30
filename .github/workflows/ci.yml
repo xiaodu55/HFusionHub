@@ -37,6 +37,33 @@ jobs:
       - name: Run tests
         run: pytest -q tests --durations=20
 
+  # ─── Phase 1/2 评测门禁（离线，免模型免数据库，PR 阻断）───
+  eval-offline:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python-ai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: python-ai/requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Verify frozen suite integrity (SHA-256)
+        run: python -c "from app.core.rag.eval_baseline import verify_suite_integrity; verify_suite_integrity('evaluation/suite/cases.jsonl','evaluation/suite/suite_manifest.json'); print('frozen suite OK')"
+      - name: Run offline evaluation gate
+        run: python scripts/eval_offline.py --fail-on-regression
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-offline-report
+          path: python-ai/evaluation/reports/*
+          if-no-files-found: warn
+
   # ─── Java 后端 ───
   java:
     runs-on: ubuntu-latest
