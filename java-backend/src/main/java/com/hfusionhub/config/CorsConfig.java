@@ -19,10 +19,12 @@ public class CorsConfig {
      */
     private static final String[] ALLOWED_ORIGINS = {
             "http://localhost:5173",  // Vite 开发服务器
-            "http://localhost:3000",  // 其他前端端口
+            "http://localhost:3000",  // 前端端口
+            "http://localhost:3001",  // 前端端口（端口占用时 Vite 自动递增）
             "http://localhost:8080",  // 前端部署端口
             "http://127.0.0.1:5173",
-            "http://127.0.0.1:3000"
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:3001"
     };
 
     /**
