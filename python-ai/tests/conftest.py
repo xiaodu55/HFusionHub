@@ -2,6 +2,7 @@
 Pytest Configuration — 测试配置与隔离 fixture。
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -20,6 +21,10 @@ from app.utils.config import config
 
 config.INTERNAL_API_TOKEN = "test-internal-token"
 config.EMBEDDING_ALLOW_FALLBACK = True
+
+# Tests run without a Java backend — use transparent degradation so feature
+# flags don't override env-var-based config (preserves existing test behavior).
+os.environ.setdefault("FEATURE_FLAG_DEGRADATION", "transparent")
 
 
 # ── Milvus 隔离 fixture ─────────────────────────────────────────────────

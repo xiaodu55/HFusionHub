@@ -96,6 +96,10 @@ class CrossEncoderReranker:
 
 def get_reranker() -> Reranker:
     from app.utils.config import config
+    from app.utils.feature_flag import feature_flags
+
+    if not feature_flags.is_enabled("rag.reranker.enabled"):
+        return DisabledReranker(reason="rag.reranker.enabled is OFF via feature flag")
 
     mode = config.RAG_RERANKER_MODE.lower().strip()
     if mode in {"", "disabled", "off", "none"}:

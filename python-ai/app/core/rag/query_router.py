@@ -37,6 +37,7 @@ from .utils import (
     NEIGHBOR_RELATION_SCORE,
 )
 from app.utils.config import config as app_config
+from app.utils.feature_flag import feature_flags
 
 logger = logging.getLogger(__name__)
 
@@ -435,7 +436,7 @@ class QueryRouter:
             ChannelType.GRAPH: ChannelConfig(
                 channel_type=ChannelType.GRAPH,
                 weight=DEFAULT_CHANNEL_WEIGHT * 0.3,
-                enabled=app_config.RAG_GRAPH_ENABLED,
+                enabled=app_config.RAG_GRAPH_ENABLED and feature_flags.is_enabled("rag.graph.enabled"),
             ),
         }
 

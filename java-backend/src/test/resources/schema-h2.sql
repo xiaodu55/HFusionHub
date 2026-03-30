@@ -514,3 +514,59 @@ CREATE TABLE IF NOT EXISTS prompt_test_case_result (
 CREATE INDEX IF NOT EXISTS idx_ptcr_run ON prompt_test_case_result (run_id);
 CREATE INDEX IF NOT EXISTS idx_ptcr_run_token ON prompt_test_case_result (run_id, execution_token);
 CREATE INDEX IF NOT EXISTS idx_ptcr_case ON prompt_test_case_result (case_id);
+
+-- =====================================================
+-- Feature Flags (V24)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS feature_flag (
+    id            BIGINT NOT NULL AUTO_INCREMENT,
+    flag_key      VARCHAR(100) NOT NULL,
+    flag_type     VARCHAR(20) NOT NULL DEFAULT 'boolean',
+    description   VARCHAR(500) DEFAULT NULL,
+    enabled       BOOLEAN NOT NULL DEFAULT FALSE,
+    percentage    INT          DEFAULT NULL,
+    whitelist     TEXT         DEFAULT NULL,
+    blacklist     TEXT         DEFAULT NULL,
+    start_time    TIMESTAMP    DEFAULT NULL,
+    end_time      TIMESTAMP    DEFAULT NULL,
+    created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted       TINYINT  NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    UNIQUE (flag_key)
+);
+
+CREATE TABLE IF NOT EXISTS feature_flag_rule (
+    id            BIGINT NOT NULL AUTO_INCREMENT,
+    flag_id       BIGINT       NOT NULL,
+    scope         VARCHAR(20)  NOT NULL,
+    scope_value   VARCHAR(200) DEFAULT NULL,
+    enabled       BOOLEAN      DEFAULT NULL,
+    percentage    INT          DEFAULT NULL,
+    whitelist     TEXT         DEFAULT NULL,
+    blacklist     TEXT         DEFAULT NULL,
+    created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted       TINYINT  NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    FOREIGN KEY (flag_id) REFERENCES feature_flag (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ff_rule_flag ON feature_flag_rule (flag_id);
+CREATE INDEX IF NOT EXISTS idx_ff_rule_scope ON feature_flag_rule (scope, scope_value);
+
+CREATE TABLE IF NOT EXISTS feature_flag_audit_log (
+    id            BIGINT NOT NULL AUTO_INCREMENT,
+    flag_id       BIGINT       NOT NULL,
+    flag_key      VARCHAR(100) NOT NULL,
+    action        VARCHAR(20)  NOT NULL,
+    operator_id   BIGINT       DEFAULT NULL,
+    old_value     TEXT         DEFAULT NULL,
+    new_value     TEXT         DEFAULT NULL,
+    reason        VARCHAR(500) DEFAULT NULL,
+    created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ff_audit_flag ON feature_flag_audit_log (flag_id);
+CREATE INDEX IF NOT EXISTS idx_ff_audit_time ON feature_flag_audit_log (created_at);

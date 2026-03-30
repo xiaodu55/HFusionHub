@@ -10,6 +10,7 @@ from .execution_context import AgentExecutionContext, ApprovalRequest
 from .citation import normalize_source
 from ..tools import ToolExecutionPolicy, create_v1_registry
 from app.utils.config import config
+from app.utils.feature_flag import feature_flags
 from .collaboration import (
     ExpertRole,
     CollaborationTask,
@@ -68,11 +69,31 @@ def get_agent(
                 _want_1_1 = True
             if getattr(execution_context, 'capability_profile', None) == 'approval_write':
                 _want_1_1 = True
-        registry_version = "1.1" if _want_1_1 else "1.0"
+        # Runtime feature flag: agent.write_tools.enabled must be ON for V1.1
+        _ff_write = feature_flags.is_enabled(
+            "agent.write_tools.enabled",
+            user_id=getattr(execution_context, 'user_id', None) if execution_context else None,
+            knowledge_base_id=knowledge_base_id,
+        )
+        registry_version = "1.1" if (_want_1_1 and _ff_write) else "1.0"
         tool_registry = create_v1_registry(knowledge_base_id, agent_version=registry_version)
 
+    # Runtime feature flag override: if agent.enabled is OFF via Java feature
+    # flag, force agent workflow and multi-agent off regardless of env config.
+    _ff_agent_enabled = feature_flags.is_enabled(
+        "agent.enabled",
+        user_id=getattr(execution_context, 'user_id', None) if execution_context else None,
+        knowledge_base_id=knowledge_base_id,
+    )
+    _ff_workflow = config.RAG_AGENT_WORKFLOW_ENABLED and _ff_agent_enabled
+    _ff_multi = config.RAG_MULTI_AGENT_ENABLED and _ff_agent_enabled and feature_flags.is_enabled(
+        "agent.multi_agent.enabled",
+        user_id=getattr(execution_context, 'user_id', None) if execution_context else None,
+        knowledge_base_id=knowledge_base_id,
+    )
+
     tool_policy = None
-    if config.RAG_AGENT_WORKFLOW_ENABLED:
+    if _ff_workflow:
         tool_policy = ToolExecutionPolicy(
             allowed_names=set(config.RAG_AGENT_ALLOWED_TOOLS),
             knowledge_base_id=knowledge_base_id,
@@ -82,13 +103,13 @@ def get_agent(
     agent = ReactAgent(
         knowledge_base_id=knowledge_base_id,
         model=model,
-        max_steps=config.RAG_AGENT_MAX_STEPS if config.RAG_AGENT_WORKFLOW_ENABLED else 5,
+        max_steps=config.RAG_AGENT_MAX_STEPS if _ff_workflow else 5,
         tool_policy=tool_policy,
         tool_registry=tool_registry,
         execution_context=execution_context,
         **kwargs
     )
-    if not config.RAG_AGENT_WORKFLOW_ENABLED:
+    if not _ff_workflow:
         return agent
     bounded_agent = SingleAgentWorkflow(
         delegate=agent,
@@ -97,7 +118,7 @@ def get_agent(
         max_retries=config.RAG_AGENT_MAX_RETRIES,
         retry_delay_seconds=config.RAG_AGENT_RETRY_DELAY_SECONDS,
     )
-    if not (config.RAG_MULTI_AGENT_ENABLED and knowledge_base_id and knowledge_base_id > 0):
+    if not (_ff_multi and knowledge_base_id and knowledge_base_id > 0):
         return bounded_agent
     return BoundedMultiAgentWorkflow(
         delegate=bounded_agent,

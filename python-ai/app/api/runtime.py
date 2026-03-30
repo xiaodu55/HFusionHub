@@ -15,6 +15,7 @@ from fastapi import APIRouter
 
 from app.core.vectorstore.milvus_store import vector_store_status
 from app.utils.config import config
+from app.utils.feature_flag import feature_flags
 
 
 router = APIRouter(tags=["runtime"])
@@ -179,10 +180,13 @@ def _status_payload() -> dict[str, Any]:
         ],
         "features": {
             "hybrid_retrieval": config.RAG_HYBRID_ENABLED,
-            "graph_retrieval": config.RAG_GRAPH_ENABLED,
-            "reranker": config.RAG_RERANKER_MODE,
-            "agent_workflow": config.RAG_AGENT_WORKFLOW_ENABLED,
-            "multi_agent": config.RAG_MULTI_AGENT_ENABLED,
+            "graph_retrieval": config.RAG_GRAPH_ENABLED and feature_flags.is_enabled("rag.graph.enabled"),
+            "reranker": config.RAG_RERANKER_MODE if feature_flags.is_enabled("rag.reranker.enabled") else "disabled",
+            "agent_workflow": config.RAG_AGENT_WORKFLOW_ENABLED and feature_flags.is_enabled("agent.enabled"),
+            "multi_agent": config.RAG_MULTI_AGENT_ENABLED and feature_flags.is_enabled("agent.multi_agent.enabled"),
+            "write_tools": feature_flags.is_enabled("agent.write_tools.enabled"),
+            "web_search": feature_flags.is_enabled("agent.web_search.enabled"),
+            "approval_required": feature_flags.is_enabled("approval.required_for_write"),
         },
     }
 
