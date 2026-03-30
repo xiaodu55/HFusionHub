@@ -1,5 +1,5 @@
 # HFusionHub Python AI Engine — direct dependencies
-# Run pip-compile requirements.in requirements-dev.in to regenerate requirements.txt
+# Rebuild lock separately: pip-compile --generate-hashes --allow-unsafe --output-file=requirements.txt requirements.in
 
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0

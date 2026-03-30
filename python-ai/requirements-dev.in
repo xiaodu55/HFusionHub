@@ -1,8 +1,9 @@
 # HFusionHub Python AI Engine — development dependencies
-# Run pip-compile requirements.in requirements-dev.in to regenerate requirements.txt
+# Rebuild lock separately: pip-compile --generate-hashes --allow-unsafe --output-file=requirements-dev.txt requirements-dev.in
 
 -r requirements.in
 
-pytest>=8.0
-pytest-asyncio>=0.23
+pytest==8.3.5
+pytest-asyncio==0.25.3
+pytest-timeout==2.3.1
 pip-tools>=7.4
