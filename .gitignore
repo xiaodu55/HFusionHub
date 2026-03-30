@@ -91,6 +91,9 @@ python-ai/milvus_data_test.db/
 python-ai/chunks_store.json
 python-ai/data/
 
+# --- Python AI evaluation reports (generated; baselines stay committed) ---
+python-ai/evaluation/reports/
+
 # --- Test / Debug files ---
 test_response.json
 *_response.json

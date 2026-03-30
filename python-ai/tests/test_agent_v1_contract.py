@@ -362,6 +362,7 @@ class TestAgentV1EndToEnd:
                             "title": "测试文档.pdf",
                             "excerpt": "这是测试文档的摘要内容，用于验证来源字段格式。",
                             "score": 0.95,
+                            "knowledge_base_id": 1,
                         }
                     ],
                 }, ensure_ascii=False)
@@ -1266,6 +1267,7 @@ class TestNormalizeSource:
             "title": "财务报告.pdf",
             "excerpt": "营收达到12.8亿元，同比增长23%...",
             "score": 0.923,
+            "knowledge_base_id": 4,
         }
         result = normalize_source(canonical)
         assert result == canonical
@@ -1431,6 +1433,7 @@ class TestSseSourceRegression:
                     "title": "测试文档.pdf",
                     "excerpt": "这是测试文档的摘要内容，用于验证来源字段格式。",
                     "score": 0.95,
+                    "knowledge_base_id": 1,
                 }
             ],
             agent_run_id="test-sse-regression",
@@ -1456,6 +1459,7 @@ class TestSseSourceRegression:
                             "title": "测试文档.pdf",
                             "excerpt": "这是测试文档的摘要内容，用于验证来源字段格式。",
                             "score": 0.95,
+                            "knowledge_base_id": 1,
                         }
                     ],
                 }, ensure_ascii=False)

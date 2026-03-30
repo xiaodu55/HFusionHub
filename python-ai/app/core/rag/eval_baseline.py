@@ -1,0 +1,611 @@
+"""Fixed-format evaluation report, gates and baseline-diff for Phase 1.
+
+The report schema is shared by the two execution tracks:
+
+- ``offline`` (hermetic, PR): deterministic retrieval / citation metrics from the
+  synthetic index.  Refusal correctness and tool success are answer-layer
+  properties that cannot be measured without a model, so they are reported as
+  ``None`` (N/A) here.
+- ``runtime`` (Nightly/Staging): real latency, token usage, cost and tool
+  success measured against the live service.
+
+Both tracks emit the *same* JSON + Markdown structure, so results are directly
+comparable and can be diffed against a stored baseline.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any, Iterable, Optional, Sequence
+
+
+# ---------------------------------------------------------------------------
+# Suite case model
+# ---------------------------------------------------------------------------
+
+METRIC_LABELS: dict[str, str] = {
+    "recall_at_5": "Recall@5",
+    "ndcg_at_10": "nDCG@10",
+    "citation_accuracy": "引用准确率 (citation accuracy)",
+    "citation_faithfulness": "引用忠实度 (citation faithfulness)",
+    "refusal_correctness": "拒答正确率 (refusal correctness)",
+    "tool_success_rate": "工具成功率 (tool success rate)",
+    "p95_latency_ms": "P95 延迟 (ms)",
+    "avg_latency_ms": "平均延迟 (ms)",
+    "p50_latency_ms": "P50 延迟 (ms)",
+    "tokens_per_task": "单任务 Token 数",
+    "cost_usd_per_task": "单任务成本 (USD)",
+    "error_rate": "错误率",
+    "scope_violations": "越界检索数",
+}
+
+
+@dataclass(frozen=True)
+class EvalCase:
+    """One ground-truth case from the frozen suite."""
+
+    case_id: str
+    category: str
+    query: str
+    kb_id: int
+    expected_chunk_ids: tuple[str, ...]
+    expected_document_names: tuple[str, ...]
+    key_facts: tuple[str, ...]
+    refusal: str
+    risk_labels: tuple[str, ...]
+    tool: Optional[dict[str, Any]] = None
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "EvalCase":
+        required = {"id", "category", "query", "kb_id",
+                    "expected_chunk_ids", "expected_document_names"}
+        missing = required - value.keys()
+        if missing:
+            raise ValueError(f"evaluation case missing fields: {sorted(missing)}")
+        return cls(
+            case_id=str(value["id"]),
+            category=str(value["category"]),
+            query=str(value["query"]),
+            kb_id=int(value["kb_id"]),
+            expected_chunk_ids=tuple(map(str, value["expected_chunk_ids"])),
+            expected_document_names=tuple(map(str, value["expected_document_names"])),
+            key_facts=tuple(map(str, value.get("key_facts", []))),
+            refusal=str(value.get("refusal", "none")),
+            risk_labels=tuple(map(str, value.get("risk_labels", []))),
+            tool=value.get("tool"),
+        )
+
+
+def load_cases(path: Any) -> list[EvalCase]:
+    """Load the frozen JSONL suite, rejecting duplicates and malformed lines."""
+    cases: list[EvalCase] = []
+    seen_ids: set[str] = set()
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            case = EvalCase.from_dict(json.loads(line))
+        except (json.JSONDecodeError, TypeError, ValueError) as error:
+            raise ValueError(f"invalid evaluation case at {path}:{line_number}: {error}") from error
+        if case.case_id in seen_ids:
+            raise ValueError(f"duplicate evaluation case id: {case.case_id}")
+        seen_ids.add(case.case_id)
+        cases.append(case)
+    if not cases:
+        raise ValueError("evaluation suite must contain at least one case")
+    return cases
+
+
+def verify_suite_integrity(cases_path: Any, suite_manifest_path: Any) -> dict:
+    """Verify the frozen suite is byte-identical to what was pinned at freeze time.
+
+    Computes the SHA-256 of ``cases.jsonl`` and compares it against
+    ``suite_manifest.json.cases_sha256``.  Any modification of the cases after
+    freezing (intentional or not) raises ``ValueError``, so both evaluation
+    tracks refuse to run against a tampered or drifted suite.
+    """
+    manifest = json.loads(Path(suite_manifest_path).read_text(encoding="utf-8"))
+    pinned = str(manifest.get("cases_sha256", ""))
+    if not pinned:
+        raise ValueError(
+            f"{suite_manifest_path} is missing cases_sha256; freeze the suite first"
+        )
+    digest = hashlib.sha256(Path(cases_path).read_bytes()).hexdigest()
+    if digest != pinned:
+        raise ValueError(
+            f"cases.jsonl SHA-256 mismatch: computed {digest} != pinned {pinned}; "
+            "the suite was modified after freezing. Rebuild with build_suite.py "
+            "and update the manifest if the change is intentional."
+        )
+    return manifest
+
+
+# ---------------------------------------------------------------------------
+# Outcome and metrics
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class CaseOutcome:
+    case_id: str
+    category: str
+    retrieved_chunk_ids: list[str]
+    expected_chunk_ids: tuple[str, ...]
+    expected_document_names: tuple[str, ...]
+    scope_violations: int
+    citation_faithfulness: Optional[float]
+    refusal_expected: bool
+    refusal_correct: Optional[bool]
+    tool: Optional[dict[str, Any]]
+    cited_chunk_ids: list[str] = field(default_factory=list)
+    latency_ms: Optional[float] = None
+    tokens: Optional[int] = None
+    cost_usd: Optional[float] = None
+    tool_success: Optional[bool] = None
+    error: Optional[str] = None
+
+    @property
+    def has_expected(self) -> bool:
+        return bool(self.expected_chunk_ids)
+
+    @property
+    def hit_at_5(self) -> bool:
+        return bool(set(self.expected_chunk_ids) & set(self.retrieved_chunk_ids[:5]))
+
+
+@dataclass(frozen=True)
+class Metrics:
+    recall_at_5: Optional[float] = None
+    ndcg_at_10: Optional[float] = None
+    citation_accuracy: Optional[float] = None
+    citation_faithfulness: Optional[float] = None
+    refusal_correctness: Optional[float] = None
+    tool_success_rate: Optional[float] = None
+    p95_latency_ms: Optional[float] = None
+    avg_latency_ms: Optional[float] = None
+    p50_latency_ms: Optional[float] = None
+    tokens_per_task: Optional[float] = None
+    cost_usd_per_task: Optional[float] = None
+    error_rate: float = 0.0
+    scope_violations: int = 0
+
+    def to_dict(self) -> dict[str, Optional[float]]:
+        return asdict(self)
+
+
+def _percentile(sorted_values: Sequence[float], percentile: float) -> float:
+    if not sorted_values:
+        return 0.0
+    index = min(int(len(sorted_values) * percentile), len(sorted_values) - 1)
+    return float(sorted_values[index])
+
+
+def aggregate_metrics(outcomes: Sequence[CaseOutcome], top_k: int = 10,
+                      exclude_refusal_from_citation: bool = False) -> Metrics:
+    """Aggregate the fixed-format metrics from per-case outcomes.
+
+    ``exclude_refusal_from_citation`` excludes ``refusal == "required"`` cases
+    from citation aggregates.  The runtime track enables it because a correctly
+    refused answer carries no citations by design; the offline track keeps them
+    to also measure retrieval of sensitive content.
+    """
+    if not outcomes:
+        raise ValueError("at least one outcome is required")
+
+    valid = [o for o in outcomes if o.error is None]
+    total_expected = sum(len(o.expected_chunk_ids) for o in valid)
+
+    recall_numerator = 0
+    ndcg_values: list[float] = []
+    for outcome in valid:
+        expected = set(outcome.expected_chunk_ids)
+        if not expected:
+            continue
+        retrieved = outcome.retrieved_chunk_ids
+        recall_numerator += len(expected & set(retrieved[:5]))
+        ndcg_values.append(
+            _ndcg(retrieved[:top_k], expected, top_k=top_k)
+        )
+
+    # citation metrics over cases with expected chunks.  The citation set is the
+    # chunks the answer actually used (``cited_chunk_ids``); it falls back to the
+    # full retrieved set when the caller did not supply it.
+    citation_outcomes = [
+        o for o in valid
+        if o.has_expected and not (exclude_refusal_from_citation and o.refusal_expected)
+    ]
+    citation_accuracy = None
+    citation_faithfulness = None
+    if citation_outcomes:
+        accurate = sum(
+            1 for o in citation_outcomes
+            if set(o.expected_chunk_ids) & set(o.cited_chunk_ids or o.retrieved_chunk_ids)
+        )
+        citation_accuracy = accurate / len(citation_outcomes)
+        faithfulness_values = [o.citation_faithfulness for o in citation_outcomes
+                               if o.citation_faithfulness is not None]
+        if faithfulness_values:
+            citation_faithfulness = sum(faithfulness_values) / len(faithfulness_values)
+
+    # refusal correctness is an answer-layer property; computed only when the
+    # caller (runtime track) supplies per-case signals.
+    refusal_values = [o.refusal_correct for o in valid
+                      if o.refusal_expected and o.refusal_correct is not None]
+    refusal_correctness = None
+    if refusal_values:
+        refusal_correctness = sum(1 for value in refusal_values if value) / len(refusal_values)
+
+    tool_values = [o.tool_success for o in valid
+                   if o.tool is not None and o.tool_success is not None]
+    tool_success_rate = None
+    if tool_values:
+        tool_success_rate = sum(1 for value in tool_values if value) / len(tool_values)
+
+    latencies = sorted(o.latency_ms for o in valid if o.latency_ms is not None)
+    token_values = [o.tokens for o in valid if o.tokens is not None]
+    cost_values = [o.cost_usd for o in valid if o.cost_usd is not None]
+
+    return Metrics(
+        recall_at_5=(recall_numerator / total_expected) if total_expected else None,
+        ndcg_at_10=(sum(ndcg_values) / len(ndcg_values)) if ndcg_values else None,
+        citation_accuracy=citation_accuracy,
+        citation_faithfulness=citation_faithfulness,
+        refusal_correctness=refusal_correctness,
+        tool_success_rate=tool_success_rate,
+        p95_latency_ms=_percentile(latencies, 0.95) if latencies else None,
+        avg_latency_ms=(sum(latencies) / len(latencies)) if latencies else None,
+        p50_latency_ms=_percentile(latencies, 0.5) if latencies else None,
+        tokens_per_task=(sum(token_values) / len(token_values)) if token_values else None,
+        cost_usd_per_task=(sum(cost_values) / len(cost_values)) if cost_values else None,
+        error_rate=sum(1 for o in outcomes if o.error is not None) / len(outcomes),
+        scope_violations=sum(o.scope_violations for o in valid),
+    )
+
+
+def _ndcg(retrieved: Sequence[str], expected: Iterable[str], top_k: int) -> float:
+    expected_set = set(expected)
+    relevant_count = len(expected_set)
+    if not relevant_count:
+        return 0.0
+    dcg = sum(
+        1 / math.log2(rank + 1)
+        for rank, chunk_id in enumerate(retrieved, start=1)
+        if chunk_id in expected_set
+    )
+    ideal_dcg = sum(1 / math.log2(rank + 1)
+                    for rank in range(1, min(relevant_count, top_k) + 1))
+    return dcg / ideal_dcg if ideal_dcg else 0.0
+
+
+def compute_citation_faithfulness(
+    cited_chunk_ids: Sequence[str], expected_chunk_ids: Sequence[str]
+) -> Optional[float]:
+    cited = list(cited_chunk_ids)
+    if not cited:
+        return None
+    expected = set(expected_chunk_ids)
+    if not expected:
+        return None
+    return len(expected & set(cited)) / len(cited)
+
+
+def runtime_citation_faithfulness(
+    answer: str,
+    cited_docs: Sequence[str],
+    key_facts: Sequence[str],
+    doc_text_by_title: dict[str, str],
+    support_threshold: float = 0.5,
+    answer_threshold: float = 0.5,
+) -> Optional[float]:
+    """Runtime citation faithfulness: fraction of key facts that the *answer*
+    actually states **and** that are lexically supported by the cited documents.
+
+    The metric name means *the answer's claims are backed by the citations*.
+    ``key_facts`` are the ground-truth claims the answer should make.  A fact is
+    deemed faithful only when BOTH conditions hold:
+
+    * **answer support** — at least ``answer_threshold`` of its distinct tokens
+      appear in the answer text (the answer must actually make the claim), and
+    * **citation support** — at least ``support_threshold`` of its distinct
+      tokens appear in a cited document's content (the citation must back it).
+
+    This prevents an answer that is entirely wrong or fabricated — but happens to
+    cite the right documents — from scoring full marks: it fails the answer
+    support check.  Deterministic (no LLM), using the same CJK-bigram tokenizer
+    as the synthetic index.
+
+    Returns ``None`` when the case has no key facts, and ``0.0`` when nothing
+    was cited.
+    """
+    from .synthetic_index import tokenize
+
+    facts = [fact for fact in key_facts if fact and tokenize(fact)]
+    if not facts:
+        return None
+    if not cited_docs:
+        return 0.0
+    cited_text = "\n".join(doc_text_by_title.get(title, "") for title in cited_docs)
+    cited_tokens = set(tokenize(cited_text))
+    answer_tokens = set(tokenize(answer))
+    faithful = 0
+    for fact in facts:
+        distinct = set(tokenize(fact))
+        if not distinct:
+            continue
+        answer_overlap = len(distinct & answer_tokens) / len(distinct)
+        citation_overlap = len(distinct & cited_tokens) / len(distinct)
+        if answer_overlap >= answer_threshold and citation_overlap >= support_threshold:
+            faithful += 1
+    return faithful / len(facts)
+
+
+# ---------------------------------------------------------------------------
+# Evaluation report
+# ---------------------------------------------------------------------------
+
+@dataclass
+class EvaluationReport:
+    track: str
+    suite_version: str
+    kb_id: int
+    kb_version: str
+    suite_sha256: str
+    generated_at: str
+    case_count: int
+    category_counts: dict[str, int]
+    metrics: Metrics
+    baseline_metrics: dict[str, Optional[float]] = field(default_factory=dict)
+    diffs: dict[str, Optional[float]] = field(default_factory=dict)
+    regressions: list[str] = field(default_factory=list)
+    gate_failures: list[str] = field(default_factory=list)
+    outcomes: list[CaseOutcome] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "track": self.track,
+            "suite_version": self.suite_version,
+            "kb_id": self.kb_id,
+            "kb_version": self.kb_version,
+            "suite_sha256": self.suite_sha256,
+            "generated_at": self.generated_at,
+            "case_count": self.case_count,
+            "category_counts": self.category_counts,
+            "metrics": self.metrics.to_dict(),
+            "baseline_metrics": self.baseline_metrics,
+            "diffs": self.diffs,
+            "regressions": self.regressions,
+            "gate_failures": self.gate_failures,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Gates
+# ---------------------------------------------------------------------------
+
+GATE_ORDER = [
+    "recall_at_5",
+    "ndcg_at_10",
+    "citation_accuracy",
+    "citation_faithfulness",
+    "refusal_correctness",
+    "tool_success_rate",
+    "p95_latency_ms",
+    "error_rate",
+    "scope_violations",
+]
+
+
+def check_gates(
+    metrics: Metrics,
+    thresholds: dict[str, float],
+) -> list[str]:
+    """Return human-readable failures for quality gates.
+
+    ``thresholds`` maps a metric key to a minimum (for higher-is-better metrics)
+    or a maximum (for ``p95_latency_ms``, ``error_rate`` and
+    ``scope_violations``, which are lower-is-better).
+    """
+    failures: list[str] = []
+    for key in GATE_ORDER:
+        if key not in thresholds:
+            continue
+        threshold = thresholds[key]
+        value = getattr(metrics, key)
+        if value is None:
+            # A gate for a metric this track cannot produce is skipped, not failed.
+            continue
+        label = METRIC_LABELS.get(key, key)
+        if key in ("p95_latency_ms", "error_rate", "scope_violations"):
+            if value > threshold:
+                failures.append(f"{label}={value:.3f} exceeds maximum {threshold:.3f}")
+        elif value < threshold:
+            failures.append(f"{label}={value:.3f} is below minimum {threshold:.3f}")
+    return failures
+
+
+# ---------------------------------------------------------------------------
+# Baseline + diff
+# ---------------------------------------------------------------------------
+
+# per-metric regression tolerances:
+# quality metrics: absolute drop allowed; latency/token/cost: relative increase allowed
+QUALITY_ABS_TOLERANCE = 0.03
+RELATIVE_TOLERANCE = 0.15  # latency / tokens / cost
+RELATIVE_LATENCY_TOLERANCE = 0.20
+
+
+def _is_higher_is_better(key: str) -> bool:
+    return key not in ("p95_latency_ms", "avg_latency_ms", "p50_latency_ms",
+                       "tokens_per_task", "cost_usd_per_task",
+                       "error_rate", "scope_violations")
+
+
+def diff_against_baseline(
+    current: Metrics,
+    baseline: dict[str, Optional[float]],
+) -> tuple[dict[str, Optional[float]], list[str]]:
+    """Return ``(deltas, regressions)``.  A metric is only compared when both
+    sides have a non-null value."""
+    current_dict = current.to_dict()
+    deltas: dict[str, Optional[float]] = {}
+    regressions: list[str] = []
+
+    for key, baseline_value in baseline.items():
+        current_value = current_dict.get(key)
+        if baseline_value is None or current_value is None:
+            deltas[key] = None
+            continue
+        delta = float(current_value) - float(baseline_value)
+        deltas[key] = delta
+        label = METRIC_LABELS.get(key, key)
+        if _is_higher_is_better(key):
+            tolerance = QUALITY_ABS_TOLERANCE
+            if delta < -tolerance:
+                regressions.append(f"{label} dropped {abs(delta):.3f} vs baseline {baseline_value:.3f}")
+        else:
+            if baseline_value == 0:
+                tolerance = QUALITY_ABS_TOLERANCE
+            elif key in ("p95_latency_ms", "avg_latency_ms", "p50_latency_ms"):
+                tolerance = baseline_value * RELATIVE_LATENCY_TOLERANCE
+            else:
+                tolerance = abs(baseline_value) * RELATIVE_TOLERANCE
+            if delta > tolerance:
+                regressions.append(f"{label} increased {delta:.3f} vs baseline {baseline_value:.3f}")
+    return deltas, regressions
+
+
+def load_baseline(
+    path: Any,
+    required_suite_sha256: Optional[str] = None,
+) -> Optional[dict[str, Optional[float]]]:
+    """Load a stored baseline ``metrics`` mapping, or ``None`` if absent.
+
+    When ``required_suite_sha256`` is given, the baseline is only valid if it
+    was recorded for the same frozen suite.  A baseline that is missing the pin
+    or was recorded for a different ``cases_sha256`` raises ``ValueError``, so
+    a stale baseline can never silently feed a comparison — the operator must
+    re-freeze with ``--update-baseline``.
+    """
+    path = Path(path)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    metrics = data.get("metrics")
+    if not isinstance(metrics, dict):
+        return None
+    if required_suite_sha256 is not None:
+        recorded = str(data.get("suite_sha256") or "")
+        if recorded != required_suite_sha256:
+            raise ValueError(
+                f"baseline {path} was recorded for suite {recorded or '(unpinned)'}, "
+                f"current suite is {required_suite_sha256}; re-run with --update-baseline "
+                "to re-freeze the baseline before comparing."
+            )
+    return {key: (float(value) if value is not None else None)
+            for key, value in metrics.items()}
+
+
+def save_baseline(
+    metrics: Metrics,
+    path: Any,
+    *,
+    track: str,
+    suite_version: str,
+    kb_version: str,
+    suite_sha256: str,
+    generated_at: str,
+) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "track": track,
+        "suite_version": suite_version,
+        "kb_version": kb_version,
+        "suite_sha256": suite_sha256,
+        "generated_at": generated_at,
+        "metrics": metrics.to_dict(),
+    }
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Markdown rendering
+# ---------------------------------------------------------------------------
+
+def _fmt(value: Optional[float], digits: int = 3) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:.{digits}f}"
+
+
+def render_markdown(report: EvaluationReport) -> str:
+    lines: list[str] = [
+        f"# HFusionHub 评测报告 ({report.track})",
+        "",
+        f"- **suite_version**: {report.suite_version}",
+        f"- **kb_version**: {report.kb_version}  (kb_id={report.kb_id})",
+        f"- **cases_sha256**: {report.suite_sha256[:16]}…",
+        f"- **case_count**: {report.case_count}",
+        f"- **generated_at**: {report.generated_at}",
+        "",
+        "## 指标 (fixed-format)",
+        "",
+        "| 指标 | 本次 | 基线 | 差异 |",
+        "|------|------|------|------|",
+    ]
+    metric_keys = [
+        "recall_at_5", "ndcg_at_10", "citation_accuracy", "citation_faithfulness",
+        "refusal_correctness", "tool_success_rate", "p95_latency_ms",
+        "tokens_per_task", "cost_usd_per_task", "error_rate", "scope_violations",
+    ]
+    for key in metric_keys:
+        label = METRIC_LABELS.get(key, key)
+        current = getattr(report.metrics, key)
+        baseline = report.baseline_metrics.get(key)
+        delta = report.diffs.get(key)
+        delta_text = "N/A"
+        if delta is not None:
+            delta_text = f"{delta:+.3f}"
+        lines.append(
+            f"| {label} | {_fmt(current)} | {_fmt(baseline)} | {delta_text} |"
+        )
+
+    lines += [
+        "",
+        "## 分类明细",
+        "",
+        "| 类别 | 用例数 |",
+        "|------|--------|",
+    ]
+    for category, count in sorted(report.category_counts.items()):
+        lines.append(f"| {category} | {count} |")
+
+    lines += ["", "## 基线对比与回归"]
+    if report.regressions:
+        lines.append("")
+        lines.append("⚠️ 回归项：")
+        for regression in report.regressions:
+            lines.append(f"- {regression}")
+    elif report.baseline_metrics:
+        lines.append("")
+        lines.append("无回归。")
+    else:
+        lines.append("")
+        lines.append("无基线可对比（首次运行可用 --update-baseline 写入基线）。")
+
+    lines += ["", "## 门禁", ""]
+    if report.gate_failures:
+        for failure in report.gate_failures:
+            lines.append(f"- ❌ {failure}")
+    else:
+        lines.append("- 全部通过 ✅")
+    return "\n".join(lines)

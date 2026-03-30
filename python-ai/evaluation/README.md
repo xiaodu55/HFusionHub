@@ -1,68 +1,150 @@
-# Retrieval evaluation suite
+# HFusionHub 评测系统（Phase 1：评测基线）
 
-Copy `retrieval_cases.example.jsonl` to a version-controlled JSONL file and
-replace every placeholder with a representative question and one or more
-relevant stable `chunk_id` values from the same knowledge base.
+双轨评测：**PR/CI 使用离线评测器**做可重复的检索、引用与安全门禁；**Nightly/Staging
+使用运行时 Agent 级评测**采集真实 P95 延迟、Token、成本与工具成功率。两条轨道输出
+**同一固定格式报告**，可直接与已冻结基线对比差异。
 
-Run the suite against the locally configured index:
+## 目录结构
 
-```bash
-python scripts/evaluate_retrieval.py \
-  --cases evaluation/retrieval_cases.jsonl \
-  --top-k 5 \
-  --minimum-recall 0.70 \
-  --minimum-mrr 0.60 \
-  --maximum-scope-violations 0
+```
+evaluation/
+├── kb/                       # 合成业务知识库（已提交，冻结）
+│   ├── kb_manifest.json      # KB 版本 + 文档/分块清单（生成后提交）
+│   ├── build_kb_manifest.py  # 从 Markdown `## [slug]` 标题生成 manifest
+│   └── docs/*.md             # 10 篇中文业务文档（HR/售后/物流/信息安全…）
+├── suite/                    # 评测用例集（已提交，冻结）
+│   ├── suite_definitions.py  # 用例数据源（7 类，220 条）
+│   ├── build_suite.py        # 校验引用 + 生成 cases.jsonl / suite_manifest.json
+│   ├── cases.jsonl           # 冻结后的用例（评测实际消费产物）
+│   └── suite_manifest.json   # 套件版本、KB 版本、类别数、cases 的 SHA-256
+├── baseline/                 # 基线（已提交）
+│   └── offline_baseline.json # 离线轨道基线指标
+└── reports/                  # 生成报告（gitignore，不提交）
 ```
 
-The command emits JSON with Recall@k, hit rate, MRR@k, nDCG@k, per-case ranks,
-and knowledge-base scope violations. It exits non-zero whenever a supplied
-quality threshold is not met, so the same command can be used in CI.
-# Retrieval evaluation workflow
+## 用例 Schema（cases.jsonl）
 
-P3 keeps a version-controlled JSONL ground-truth suite for CI. P4 records each
-manual or automated run in `RAG_EVALUATION_DB_PATH`; only aggregate metrics and
-failed case IDs are retained, never the test questions or chunk contents.
+每条用例字段：
 
-For P6, first establish a baseline with the reranker disabled. Then compare it
-against `RAG_RERANKER_MODE=lexical`; install the optional cross-encoder extra
-only if the real benchmark improves without an unacceptable latency increase.
+| 字段 | 说明 |
+|------|------|
+| `id` | 唯一 ID（nq-/cd-/rf-/pt-/pi-/tl-/ld- 前缀） |
+| `category` | `normal`/`cross_document`/`refusal`/`permission`/`injection`/`tool`/`long_document` |
+| `query` | 问题 |
+| `kb_id` | 合成知识库 ID（101） |
+| `expected_chunk_ids` | 期望命中分块（`{doc}#{section}`，由 build_suite 校验存在性） |
+| `expected_document_names` | 期望文档标题（运行时按标题匹配真实检索来源） |
+| `key_facts` | 该问题对应的关键事实（供评审与运行时答案校验） |
+| `refusal` | `none` 或 `required`（无答案/敏感内容必须拒答） |
+| `risk_labels` | `permission`/`injection`/`confidentiality` |
+| `tool` | tool 类用例期望的工具（`{"name": ...}`） |
 
-## P7 GraphRAG guardrails
+## 固定格式报告（两条轨道相同）
 
-`RAG_GRAPH_ENABLED` remains `false` by default.  The graph index is built
-after a document's chunks have been inserted and stores `knowledge_base_id`,
-`document_id`, and `chunk_id` evidence for every entity and relation.  It uses
-deterministic co-occurrence extraction for this MVP, so it is repeatable and
-does not add an LLM call to ingestion.
+`Recall@5、nDCG@10、引用准确率、引用忠实度、拒答正确率、工具成功率、
+P95/P50/平均延迟、单任务 Token、单任务成本、错误率、越界检索数`。
 
-When enabling it for a benchmark, re-index the documents in that knowledge
-base first, then compare the existing metrics and `graph_hit_rate` from the
-evaluation response.  A graph candidate is eligible only if its source chunk
-still exists in the selected KB; missing, stale, or malformed graph data is
-discarded rather than falling back to a global graph.
+- 离线轨道：检索/引用指标为确定性数值；拒答正确率、工具成功率、延迟、Token、成本
+  属答案层/运行时属性，报告为 `N/A`（由运行时轨道填充）。
+- 运行时轨道：全部指标真实测量。引用/召回按**文档标题**匹配真实检索来源，且每条来源携带
+  **`knowledge_base_id`**（可区分同名文档是否来自其它知识库）；引用忠实度要求答案文本
+  **确实陈述**了 key_facts **且**该事实得到被引用文档正文支撑（双重判定，确定性）；拒答
+  正确率依据回答文本的关键词与 `status` 启发式判定；成本由 `token_usage` 与可配置单价推算。
 
-## P8 multimodal evidence guardrails
+## 运行时契约测试
 
-P8 uses the normal scoped chunk index rather than a global image index.  Native
-DOCX/Markdown tables and optional OCR output are stored as regular chunks with
-source metadata (`kind`, image hash, DOCX part or PDF page).  This keeps the
-current citation, knowledge-base scope, deletion and debug trace guarantees.
+`tests/test_eval_runtime_contract.py`（31 项）以 mock 覆盖运行时轨道全部关键契约：
+SHA-256 冻结校验（匹配/篡改/缺失 pin）、跨 KB 越界来源检测（含同名跨 KB 泄露）、基线
+suite-SHA 绑定、请求异常处理、拒答检测（拒答文本 / `insufficient_evidence` / 泄露）、工具
+成功/失败/未调用、成本计算、由 key_facts 支撑且校验回答内容的引用忠实度，以及门禁失败
+列表与退出码语义。
 
-It is disabled by default.  To benchmark it, install the optional Python
-package and a local Tesseract executable, then configure the OCR language and
-enable both flags before re-indexing representative documents:
+## 修改知识库或用例的流程
+
+1. 编辑 `kb/docs/*.md`，保持 `## [slug]` 分块标题；更新 KB 版本。
+2. 运行 `python evaluation/kb/build_kb_manifest.py` 重新生成并提交 `kb_manifest.json`。
+3. 编辑 `evaluation/suite/suite_definitions.py` 增删用例。
+4. 运行 `python evaluation/suite/build_suite.py`：校验所有分块引用、类别覆盖，
+   输出 `cases.jsonl` + `suite_manifest.json`（含 SHA-256），一起提交。
+5. 重新运行离线评测并 `--update-baseline` 更新基线。
+
+任何对 `cases.jsonl` 的无意改动都会被 `suite_manifest.cases_sha256` 捕获，并且两个评测
+脚本在运行前都会执行 `verify_suite_integrity` 做 SHA-256 校验：**篡改用例后脚本直接
+退出（exit 1）并提示差异**，不会带着旧哈希继续运行。
+
+## 离线评测（PR 门禁，免模型免数据库）
 
 ```bash
-pip install -r requirements-multimodal.txt
-# Windows: set RAG_MULTIMODAL_OCR_COMMAND to the full tesseract.exe path if it is not on PATH
-RAG_MULTIMODAL_ENABLED=true
-RAG_MULTIMODAL_OCR_ENABLED=true
-RAG_MULTIMODAL_OCR_LANGUAGE=eng
+python scripts/eval_offline.py
+# 结果: 无门禁失败则 exit 0；低于阈值或（--fail-on-regression）检出回归则 exit 1
+python scripts/eval_offline.py --update-baseline          # 记录/更新基线
+python scripts/eval_offline.py --minimum-recall 0.90      # 自定义阈值
 ```
 
-The implementation hard-limits images per document, image byte size, OCR
-output and per-image execution time.  A missing `pypdf`, a missing OCR engine,
-a corrupted image or OCR timeout only skips that enrichment; the source text
-and tables continue indexing.  Compare P8's `multimodal_hit_rate` with the
-existing Recall@k and MRR before keeping it enabled.
+门禁默认值：Recall@5≥0.85、nDCG@10≥0.75、引用准确率≥0.85、引用忠实度≥0.30、
+越界检索=0。离线检索由 `app/core/rag/synthetic_index.py` 的确定性 BM25 完成，
+跨机器/CI 结果一致，且只检索 kb_id=101。
+
+## 运行时评测（Nightly/Staging）
+
+要求合成 KB 已以 kb_id=101 索引到目标环境，且文档标题与 `evaluation/kb` 一致。
+
+```bash
+python scripts/eval_runtime.py --token <internal-token> \
+    --base-url http://localhost:9000 \
+    --concurrency 4 \
+    --prompt-price-per-1m 0.10 --completion-price-per-1m 0.40 \
+    --update-baseline
+```
+
+运行时轨道的保证与门禁：
+
+- 运行前同样执行 `verify_suite_integrity`（SHA-256 冻结校验）。
+- **跨 KB 泄露检测**：凡引用来源携带权威 `knowledge_base_id` 且不等于当前用例
+  `kb_id`（101）即计为越界——即使该来源的文档标题与合成 KB 内某文档**同名**也会被识别；
+  未携带 kb_id 的来源退回标题检查（标题缺失或不在合成 KB 文档集内计越界）。
+  `scope_violations` 受 `--maximum-scope-violations`（默认 0）门禁约束。
+- **错误率门禁**：`--maximum-error-rate`（默认 0.02），大量请求失败时 exit 1。
+- **引用忠实度＝答案断言 × 引用支撑**：对每条 `key_facts`，按确定性 CJK bigram 分词，
+  要求该事实（a）确实出现在回答文本中（`--answer-threshold` 默认 0.5）**且**（b）出现在
+  所引用文档的正文中（`--support-threshold` 默认 0.5），两者同时满足才算该事实忠实。
+  即使回答引用正确文档、但内容完全编造或答非所问（未陈述该事实），忠实度仍为 0。
+  仅比较「返回文档标题属于预期标题」不构成忠实度。
+- **受限并发**：`--concurrency`（默认 4）通过 `asyncio.Semaphore` 限制并发请求数。
+- 拒答正确率依据回答文本关键词与 `status` 启发式判定；工具成功率依据
+  `tool_calls_count`/`failed_tool`/`status`；成本由 `token_usage` 与可配置单价推算。
+- 引用/召回类指标按**文档标题**匹配；拒答类（`refusal == "required"`）用例从引用
+  聚合中剔除（正确拒答本身不含引用），其行为由拒答正确率衡量。
+
+## 基线对比与回归检测
+
+`eval_baseline.py::diff_against_baseline` 对基线与本次逐项比较：
+
+- 质量类指标（Recall/nDCG/引用/拒答/工具）：绝对下降 > 0.03 视为回归。
+- 延迟：相对上升 > 20% 视为回归。
+- Token/成本：相对上升 > 15% 视为回归。
+- 越界检索/错误率：上升即回归。
+
+缺失一侧值（如离线轨道的 `N/A`）不参与比较。无基线时报告提示首次运行可写入基线。
+
+**基线绑定冻结套件**：基线文件记录录制时的 `cases_sha256`。两脚本在对比前会校验该值与
+当前 `suite_manifest.cases_sha256` 一致；不一致或未钉入哈希的旧基线会**拒绝对比**并提示
+（exit 1），避免「更新用例后仍拿旧基线做无效对比」。`--update-baseline` 是显式再冻结操作，
+会绕过该校验并写入新哈希——修改 KB/用例后必须重新执行它以再冻结基线。
+
+## 分阶段设计说明
+
+### P7 GraphRAG guardrails
+
+`RAG_GRAPH_ENABLED` 默认 `false`。图索引在分块入库后构建，存
+`knowledge_base_id`、`document_id`、`chunk_id` 证据，使用确定性共现抽取，
+可复现且不增加入库 LLM 调用。启用基准评测时先重建该 KB 的索引，再与现有
+指标和 `graph_hit_rate` 对比；图候选仅当源分块仍存在时才合法，缺失/过期数据
+被丢弃而非回退全局图。
+
+### P8 multimodal evidence guardrails
+
+P8 使用普通 scoped 分块索引而非全局图像索引。原生 DOCX/Markdown 表格与可选 OCR
+输出作为带 `kind`、图像哈希、DOCX 部件或 PDF 页元数据的常规分块存储，保持现有
+引用、KB 作用域、删除与调试追踪保证。默认禁用，基准评测时启用相关标志并重建索引，
+将 `multimodal_hit_rate` 与现有 Recall@k/MRR 对比后再决定是否保留。

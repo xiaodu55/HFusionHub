@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # ── Canonical keys produced by normalize_source ──
 CANONICAL_SOURCE_KEYS = frozenset({
     "document_id", "chunk_id", "title", "excerpt", "score",
+    "knowledge_base_id",
 })
 
 # Sentinel returned when every extraction path fails.
@@ -28,6 +29,7 @@ _EMPTY_CITATION: Dict[str, Any] = {
     "title": "",
     "excerpt": "",
     "score": 0.0,
+    "knowledge_base_id": None,
 }
 
 
@@ -175,6 +177,29 @@ def _extract_score(source: Dict[str, Any]) -> float:
         return 0.0
 
 
+def _extract_kb_id(source: Dict[str, Any]) -> Optional[int]:
+    """Extract the knowledge-base id, preferring metadata then top level.
+
+    Present on retrieval results produced inside a knowledge base scope.
+    Returns ``None`` when the source carries no scoping information.
+    """
+    meta = source.get("metadata")
+    if isinstance(meta, dict):
+        raw = meta.get("knowledge_base_id")
+        if raw is not None:
+            try:
+                return int(raw)
+            except (TypeError, ValueError):
+                pass
+    raw = source.get("knowledge_base_id")
+    if raw is not None:
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
 def normalize_source(
     source: Union[Dict[str, Any], Any],
 ) -> Dict[str, Any]:
@@ -218,6 +243,7 @@ def normalize_source(
             "content": getattr(source, "content", ""),
             "score": getattr(source, "score", 0.0) or 0.0,
             "metadata": metadata,
+            "knowledge_base_id": getattr(source, "knowledge_base_id", None),
         }
 
     # ── Already canonical → return as-is ─────────────────────────────
@@ -228,6 +254,7 @@ def normalize_source(
             "title": d["title"],
             "excerpt": d["excerpt"],
             "score": d["score"],
+            "knowledge_base_id": d.get("knowledge_base_id"),
         }
 
     # ── Normalise from raw format ────────────────────────────────────
@@ -237,6 +264,7 @@ def normalize_source(
     title = _extract_title(d, doc_id)
     excerpt = _extract_excerpt(d)
     score = _extract_score(d)
+    knowledge_base_id = _extract_kb_id(d)
 
     return {
         "document_id": doc_id,
@@ -244,4 +272,5 @@ def normalize_source(
         "title": title,
         "excerpt": excerpt,
         "score": score,
+        "knowledge_base_id": knowledge_base_id,
     }

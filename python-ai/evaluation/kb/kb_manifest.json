@@ -1,0 +1,463 @@
+{
+  "kb_id": 101,
+  "version": "1.0.0",
+  "name": "synthetic-business-kb",
+  "document_count": 10,
+  "section_count": 96,
+  "documents": [
+    {
+      "doc_id": "employee-privacy-policy",
+      "title": "云帆智能员工隐私数据政策",
+      "filename": "docs/employee-privacy-policy.md",
+      "sections": [
+        {
+          "section_id": "scope",
+          "title": "适用范围"
+        },
+        {
+          "section_id": "collected-data",
+          "title": "收集的数据范围"
+        },
+        {
+          "section_id": "purpose",
+          "title": "数据使用目的"
+        },
+        {
+          "section_id": "access-limits",
+          "title": "访问权限限制"
+        },
+        {
+          "section_id": "retention",
+          "title": "数据留存期限"
+        },
+        {
+          "section_id": "disclosure",
+          "title": "对外披露限制"
+        },
+        {
+          "section_id": "employee-rights",
+          "title": "员工权利"
+        },
+        {
+          "section_id": "breach-notification",
+          "title": "泄露通知义务"
+        }
+      ]
+    },
+    {
+      "doc_id": "hr-handbook",
+      "title": "云帆智能员工手册",
+      "filename": "docs/hr-handbook.md",
+      "sections": [
+        {
+          "section_id": "welcome",
+          "title": "入职欢迎"
+        },
+        {
+          "section_id": "working-hours",
+          "title": "工作时间与考勤"
+        },
+        {
+          "section_id": "leave-types",
+          "title": "假期类型总览"
+        },
+        {
+          "section_id": "annual-leave",
+          "title": "年假规则"
+        },
+        {
+          "section_id": "sick-leave",
+          "title": "病假规则"
+        },
+        {
+          "section_id": "expense-reimbursement",
+          "title": "差旅与报销制度"
+        },
+        {
+          "section_id": "promotion",
+          "title": "晋升通道"
+        },
+        {
+          "section_id": "salary-review",
+          "title": "薪酬回顾"
+        },
+        {
+          "section_id": "probation",
+          "title": "试用期管理"
+        },
+        {
+          "section_id": "dress-code",
+          "title": "着装与行为规范"
+        },
+        {
+          "section_id": "overtime",
+          "title": "加班管理"
+        },
+        {
+          "section_id": "confidentiality",
+          "title": "保密义务"
+        },
+        {
+          "section_id": "resignation",
+          "title": "离职流程"
+        },
+        {
+          "section_id": "holidays",
+          "title": "法定节假日安排"
+        }
+      ]
+    },
+    {
+      "doc_id": "it-support-runbook",
+      "title": "云帆智能 IT 运维故障处理手册",
+      "filename": "docs/it-support-runbook.md",
+      "sections": [
+        {
+          "section_id": "incident-priority",
+          "title": "故障分级"
+        },
+        {
+          "section_id": "network-outage",
+          "title": "网络中断处理"
+        },
+        {
+          "section_id": "server-crash",
+          "title": "服务器宕机处理"
+        },
+        {
+          "section_id": "database-failure",
+          "title": "数据库故障处理"
+        },
+        {
+          "section_id": "backup-restore",
+          "title": "备份与恢复"
+        },
+        {
+          "section_id": "security-incident",
+          "title": "安全事件处理"
+        },
+        {
+          "section_id": "emergency-contact",
+          "title": "应急联系机制"
+        },
+        {
+          "section_id": "oncall-rotation",
+          "title": "值班轮换制度"
+        },
+        {
+          "section_id": "change-management",
+          "title": "变更管理"
+        },
+        {
+          "section_id": "postmortem",
+          "title": "事后复盘"
+        }
+      ]
+    },
+    {
+      "doc_id": "permissions-matrix",
+      "title": "云帆智能系统权限矩阵",
+      "filename": "docs/permissions-matrix.md",
+      "sections": [
+        {
+          "section_id": "role-definitions",
+          "title": "角色定义"
+        },
+        {
+          "section_id": "finance-access",
+          "title": "财务权限"
+        },
+        {
+          "section_id": "hr-access",
+          "title": "人力资源权限"
+        },
+        {
+          "section_id": "admin-access",
+          "title": "超级管理员权限"
+        },
+        {
+          "section_id": "support-access",
+          "title": "客服专员权限"
+        },
+        {
+          "section_id": "user-access",
+          "title": "普通员工权限"
+        },
+        {
+          "section_id": "approve-write",
+          "title": "审批与写权限"
+        },
+        {
+          "section_id": "separation-of-duties",
+          "title": "职责分离"
+        },
+        {
+          "section_id": "access-review",
+          "title": "权限复核"
+        },
+        {
+          "section_id": "revocation",
+          "title": "权限回收"
+        }
+      ]
+    },
+    {
+      "doc_id": "pricing-plans",
+      "title": "云帆智能订阅方案与价格",
+      "filename": "docs/pricing-plans.md",
+      "sections": [
+        {
+          "section_id": "plans-overview",
+          "title": "方案总览"
+        },
+        {
+          "section_id": "free-plan",
+          "title": "免费版"
+        },
+        {
+          "section_id": "basic-plan",
+          "title": "基础版"
+        },
+        {
+          "section_id": "pro-plan",
+          "title": "专业版"
+        },
+        {
+          "section_id": "family-plan",
+          "title": "家庭版"
+        },
+        {
+          "section_id": "payment-methods",
+          "title": "支付方式"
+        },
+        {
+          "section_id": "price-changes",
+          "title": "价格调整规则"
+        },
+        {
+          "section_id": "discount",
+          "title": "优惠与折扣"
+        },
+        {
+          "section_id": "upgrade",
+          "title": "方案升级"
+        },
+        {
+          "section_id": "cancel-subscription",
+          "title": "取消订阅"
+        }
+      ]
+    },
+    {
+      "doc_id": "product-catalog",
+      "title": "云帆智能智能家居产品目录",
+      "filename": "docs/product-catalog.md",
+      "sections": [
+        {
+          "section_id": "overview",
+          "title": "产品线总览"
+        },
+        {
+          "section_id": "smart-speaker",
+          "title": "智能音箱 S1"
+        },
+        {
+          "section_id": "security-camera",
+          "title": "智能摄像头 C2"
+        },
+        {
+          "section_id": "smart-gateway",
+          "title": "智能网关 G3"
+        },
+        {
+          "section_id": "sensor-kit",
+          "title": "传感器套件 SK4"
+        },
+        {
+          "section_id": "app-usage",
+          "title": "云帆 App 使用入门"
+        },
+        {
+          "section_id": "warranty",
+          "title": "质保政策"
+        },
+        {
+          "section_id": "accessories",
+          "title": "配件与扩展"
+        },
+        {
+          "section_id": "dimmer-switch",
+          "title": "智能调光开关 D5"
+        },
+        {
+          "section_id": "doorbell",
+          "title": "智能门铃 V6"
+        }
+      ]
+    },
+    {
+      "doc_id": "refund-policy",
+      "title": "云帆智能退款与售后政策",
+      "filename": "docs/refund-policy.md",
+      "sections": [
+        {
+          "section_id": "refund-overview",
+          "title": "退款政策总览"
+        },
+        {
+          "section_id": "refund-period",
+          "title": "退款时限"
+        },
+        {
+          "section_id": "refund-conditions",
+          "title": "退款适用条件"
+        },
+        {
+          "section_id": "refund-methods",
+          "title": "退款方式与到账时间"
+        },
+        {
+          "section_id": "exchange",
+          "title": "换货流程"
+        },
+        {
+          "section_id": "warranty-claim",
+          "title": "质保期内故障处理"
+        },
+        {
+          "section_id": "no-refund-cases",
+          "title": "不予退款的情形"
+        },
+        {
+          "section_id": "refund-timeline",
+          "title": "各环节处理时限汇总"
+        }
+      ]
+    },
+    {
+      "doc_id": "security-policy",
+      "title": "云帆智能信息安全与数据保护策略",
+      "filename": "docs/security-policy.md",
+      "sections": [
+        {
+          "section_id": "policy-purpose",
+          "title": "策略目的"
+        },
+        {
+          "section_id": "data-classification",
+          "title": "数据分级"
+        },
+        {
+          "section_id": "access-control",
+          "title": "访问控制原则"
+        },
+        {
+          "section_id": "password-policy",
+          "title": "密码与凭证策略"
+        },
+        {
+          "section_id": "encryption",
+          "title": "数据加密要求"
+        },
+        {
+          "section_id": "incident-reporting",
+          "title": "安全事件报告义务"
+        },
+        {
+          "section_id": "third-party",
+          "title": "第三方与供应商管理"
+        },
+        {
+          "section_id": "data-retention",
+          "title": "数据留存与销毁"
+        },
+        {
+          "section_id": "audit",
+          "title": "审计与合规"
+        },
+        {
+          "section_id": "remote-access",
+          "title": "远程访问控制"
+        }
+      ]
+    },
+    {
+      "doc_id": "service-credits",
+      "title": "云帆智能服务积分与优惠券政策",
+      "filename": "docs/service-credits.md",
+      "sections": [
+        {
+          "section_id": "credits-overview",
+          "title": "积分政策总览"
+        },
+        {
+          "section_id": "earning-credits",
+          "title": "积分获取规则"
+        },
+        {
+          "section_id": "credit-expiry",
+          "title": "积分有效期"
+        },
+        {
+          "section_id": "coupon-types",
+          "title": "优惠券类型"
+        },
+        {
+          "section_id": "coupon-rules",
+          "title": "优惠券使用规则"
+        },
+        {
+          "section_id": "credits-refund",
+          "title": "退款与积分处理"
+        },
+        {
+          "section_id": "gift-coupon",
+          "title": "赠品与礼品卡"
+        },
+        {
+          "section_id": "terms",
+          "title": "其他条款"
+        }
+      ]
+    },
+    {
+      "doc_id": "shipping-policy",
+      "title": "云帆智能物流配送政策",
+      "filename": "docs/shipping-policy.md",
+      "sections": [
+        {
+          "section_id": "shipping-overview",
+          "title": "配送政策总览"
+        },
+        {
+          "section_id": "shipping-fee",
+          "title": "运费标准"
+        },
+        {
+          "section_id": "shipping-time",
+          "title": "配送时效"
+        },
+        {
+          "section_id": "free-shipping",
+          "title": "免运费条件"
+        },
+        {
+          "section_id": "delivery-tracking",
+          "title": "物流查询"
+        },
+        {
+          "section_id": "lost-package",
+          "title": "丢件与破损处理"
+        },
+        {
+          "section_id": "return-shipping",
+          "title": "退货物流安排"
+        },
+        {
+          "section_id": "overseas",
+          "title": "港澳台及海外配送"
+        }
+      ]
+    }
+  ]
+}
