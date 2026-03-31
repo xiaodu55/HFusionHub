@@ -9,12 +9,21 @@ import logging
 # Add project root to Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Configure logging so background task logs are visible
+# Configure logging — include trace_id from contextvars via LoggerAdapter
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    format="%(asctime)s [%(levelname)s] [%(trace_id)s] %(name)s: %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
+
+# Inject trace_id into every log record via a filter
+class TraceFilter(logging.Filter):
+    def filter(self, record):
+        from app.utils.trace import get_trace_id
+        record.trace_id = get_trace_id() or "-"
+        return True
+
+logging.getLogger().addFilter(TraceFilter())
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
@@ -37,6 +46,7 @@ from app.api.exception_handlers import (
 )
 from app.core.exceptions import HFusionHubException
 from app.api.internal_auth import require_internal_token
+from app.api.trace_middleware import TraceMiddleware
 
 
 def create_app() -> FastAPI:
@@ -57,6 +67,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Distributed tracing — extract X-Trace-ID from upstream (Java) or generate fresh
+    app.add_middleware(TraceMiddleware)
 
     # Register exception handlers
     app.add_exception_handler(HFusionHubException, hfusionhub_exception_handler)

@@ -119,6 +119,17 @@ def record_embedding_request(latency_seconds: float, is_error: bool = False):
         _metrics.inc("embedding_errors_total")
 
 
+def record_eval_gate_failure():
+    """Record an eval gate failure (called when runtime eval fails a gate)."""
+    _metrics.inc("eval_gate_failures")
+
+
+def set_citation_faithfulness(value: float):
+    """Set the current citation faithfulness gauge."""
+    with _metrics._lock:
+        _metrics._histograms["citation_faithfulness_current"] = [value]
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------

@@ -639,6 +639,11 @@ public class AiClient {
             throw new BusinessException(StatusCode.INTERNAL_ERROR, "PYTHON_AI_INTERNAL_TOKEN 未配置");
         }
         headers.set("X-Internal-Token", internalApiToken);
+        // Propagate distributed trace ID to Python AI service
+        String traceId = com.hfusionhub.config.TraceContext.getTraceId();
+        if (traceId != null) {
+            headers.set(com.hfusionhub.config.TraceContext.HEADER_NAME, traceId);
+        }
     }
 
     /**

@@ -1,0 +1,92 @@
+"""Tests for the TraceMiddleware — verifying X-Trace-ID propagation through FastAPI."""
+
+from __future__ import annotations
+
+import pytest
+from httpx import AsyncClient, ASGITransport
+
+from app.main import create_app
+from app.utils.trace import HEADER_NAME
+
+
+@pytest.fixture
+def app():
+    return create_app()
+
+
+@pytest.fixture
+def transport(app):
+    return ASGITransport(app=app)
+
+
+class TestTraceMiddleware:
+    """Integration tests using FastAPI TestClient (httpx AsyncClient)."""
+
+    @pytest.mark.asyncio
+    async def test_generates_trace_id_when_no_header(self, transport):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/health")
+            assert HEADER_NAME in resp.headers
+            trace_id = resp.headers[HEADER_NAME]
+            assert trace_id is not None
+            assert len(trace_id) == 32
+
+    @pytest.mark.asyncio
+    async def test_passthrough_existing_trace_id(self, transport):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/health",
+                headers={HEADER_NAME: "my-custom-trace-999"},
+            )
+            assert resp.headers[HEADER_NAME] == "my-custom-trace-999"
+
+    @pytest.mark.asyncio
+    async def test_returns_same_id_in_response_as_sent(self, transport):
+        """The trace ID returned in the response must match what was sent."""
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            sent_id = "abcdef1234567890abcdef1234567890"
+            resp = await client.get(
+                "/health",
+                headers={HEADER_NAME: sent_id},
+            )
+            assert resp.headers[HEADER_NAME] == sent_id
+
+    @pytest.mark.asyncio
+    async def test_concurrent_requests_get_different_ids(self, transport):
+        """Two parallel requests must not share trace IDs."""
+        import asyncio
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async def fetch():
+                resp = await client.get("/health")
+                return resp.headers[HEADER_NAME]
+
+            results = await asyncio.gather(fetch(), fetch(), fetch())
+            # All three should have different IDs
+            assert len(set(results)) == 3
+
+    @pytest.mark.asyncio
+    async def test_empty_header_triggers_generation(self, transport):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/health",
+                headers={HEADER_NAME: "   "},
+            )
+            # Blank header should trigger generation, not passthrough
+            assert resp.headers[HEADER_NAME] != "   "
+            assert len(resp.headers[HEADER_NAME]) == 32
+
+    @pytest.mark.asyncio
+    async def test_trace_id_is_32_hex_chars(self, transport):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/health")
+            tid = resp.headers[HEADER_NAME]
+            assert len(tid) == 32
+            int(tid, 16)  # should be valid hex
+
+    @pytest.mark.asyncio
+    async def test_health_endpoint_has_trace_id(self, transport):
+        """Even the health endpoint should have trace propagation."""
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/health")
+            assert HEADER_NAME in resp.headers

@@ -1,65 +1,194 @@
 {
-  "title": "HFusionHub — Service Dashboard",
-  "uid": "hfusionhub",
+  "title": "HFusionHub — SLO Dashboard",
+  "uid": "hfusionhub-slo",
+  "tags": ["hfusionhub", "slo"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": []
+  },
   "panels": [
     {
-      "title": "Chat Requests / min",
+      "title": "Chat Availability (SLO: ≥99.9%)",
       "type": "stat",
       "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
-      "targets": [{ "expr": "rate(hfusionhub_chat_requests_total_total[5m]) * 60" }]
+      "targets": [{
+        "expr": "(sum(rate(hfusionhub_chat_requests_total_total[5m])) - sum(rate(hfusionhub_chat_errors_total_total[5m]))) / sum(rate(hfusionhub_chat_requests_total_total[5m]))",
+        "legendFormat": "Availability"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.999 },
+              { "color": "green", "value": 0.9999 }
+            ]
+          },
+          "mappings": []
+        }
+      }
     },
     {
       "title": "Chat Error Rate",
       "type": "stat",
       "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
-      "targets": [{ "expr": "rate(hfusionhub_chat_errors_total_total[5m]) / rate(hfusionhub_chat_requests_total_total[5m])" }]
+      "targets": [{
+        "expr": "sum(rate(hfusionhub_chat_errors_total_total[5m])) / sum(rate(hfusionhub_chat_requests_total_total[5m]))",
+        "legendFormat": "Error Rate"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.01 },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        }
+      }
     },
     {
-      "title": "Uptime",
+      "title": "P95 Chat Latency (SLO: ≤20s)",
       "type": "stat",
       "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
-      "targets": [{ "expr": "hfusionhub_uptime_seconds" }],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum(rate(hfusionhub_chat_latency_seconds_bucket[5m])) by (le))",
+        "legendFormat": "P95"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 20 }
+            ]
+          }
+        }
+      }
     },
     {
-      "title": "Embedding Requests / min",
+      "title": "Service Uptime",
       "type": "stat",
       "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
-      "targets": [{ "expr": "rate(hfusionhub_embedding_requests_total_total[5m]) * 60" }]
+      "targets": [{
+        "expr": "hfusionhub_uptime_seconds",
+        "legendFormat": "Uptime"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 60 }
+            ]
+          }
+        }
+      }
     },
     {
-      "title": "Chat Latency (p50/p95/p99)",
+      "title": "Chat Latency (p50 / p95 / p99)",
       "type": "timeseries",
       "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
       "targets": [
-        { "expr": "hfusionhub_chat_latency_seconds{quantile=\"0.5\"}", "legendFormat": "p50" },
-        { "expr": "hfusionhub_chat_latency_seconds{quantile=\"0.95\"}", "legendFormat": "p95" },
-        { "expr": "hfusionhub_chat_latency_seconds{quantile=\"0.99\"}", "legendFormat": "p99" }
+        { "expr": "histogram_quantile(0.50, sum(rate(hfusionhub_chat_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(hfusionhub_chat_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(hfusionhub_chat_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p99" }
       ],
       "fieldConfig": { "defaults": { "unit": "s" } }
     },
     {
-      "title": "RAG Retrieval Latency (p50/p95/p99)",
+      "title": "RAG Retrieval Latency (p50 / p95 / p99)",
       "type": "timeseries",
       "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
       "targets": [
-        { "expr": "hfusionhub_rag_retrieval_latency_seconds{quantile=\"0.5\"}", "legendFormat": "p50" },
-        { "expr": "hfusionhub_rag_retrieval_latency_seconds{quantile=\"0.95\"}", "legendFormat": "p95" },
-        { "expr": "hfusionhub_rag_retrieval_latency_seconds{quantile=\"0.99\"}", "legendFormat": "p99" }
+        { "expr": "histogram_quantile(0.50, sum(rate(hfusionhub_rag_retrieval_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(hfusionhub_rag_retrieval_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(hfusionhub_rag_retrieval_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p99" }
       ],
       "fieldConfig": { "defaults": { "unit": "s" } }
     },
     {
       "title": "Request Rate Overview",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 12, "w": 24, "h": 8 },
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
       "targets": [
-        { "expr": "rate(hfusionhub_chat_requests_total_total[5m]) * 60", "legendFormat": "Chat" },
-        { "expr": "rate(hfusionhub_rag_retrievals_total_total[5m]) * 60", "legendFormat": "RAG Retrieval" },
-        { "expr": "rate(hfusionhub_embedding_requests_total_total[5m]) * 60", "legendFormat": "Embedding" }
+        { "expr": "rate(hfusionhub_chat_requests_total_total[5m]) * 60", "legendFormat": "Chat Requests/min" },
+        { "expr": "rate(hfusionhub_rag_retrievals_total_total[5m]) * 60", "legendFormat": "RAG Retrievals/min" },
+        { "expr": "rate(hfusionhub_embedding_requests_total_total[5m]) * 60", "legendFormat": "Embeddings/min" }
       ]
+    },
+    {
+      "title": "Embedding Requests / min",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 12, "w": 6, "h": 4 },
+      "targets": [{
+        "expr": "rate(hfusionhub_embedding_requests_total_total[5m]) * 60",
+        "legendFormat": "Embeddings/min"
+      }]
+    },
+    {
+      "title": "Chat Requests / min",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 12, "w": 6, "h": 4 },
+      "targets": [{
+        "expr": "rate(hfusionhub_chat_requests_total_total[5m]) * 60",
+        "legendFormat": "Chat/min"
+      }]
+    },
+    {
+      "title": "HTTP Request Latency (First Token Proxy)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(hfusionhub_http_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(hfusionhub_http_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p95 (SLO: ≤3s)" },
+        { "expr": "histogram_quantile(0.99, sum(rate(hfusionhub_http_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Service Health",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 20, "w": 6, "h": 4 },
+      "targets": [
+        { "expr": "up{job=\"hfusionhub-python-ai\"}", "legendFormat": "Python AI" },
+        { "expr": "up{job=\"hfusionhub-java-backend\"}", "legendFormat": "Java Backend" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ]
+        }
+      }
+    },
+    {
+      "title": "Agent Error Rate (10m window)",
+      "type": "timeseries",
+      "gridPos": { "x": 18, "y": 20, "w": 6, "h": 4 },
+      "targets": [{
+        "expr": "sum(rate(hfusionhub_chat_errors_total_total[10m])) / sum(rate(hfusionhub_chat_requests_total_total[10m]))",
+        "legendFormat": "Error Rate"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.01 }
+            ]
+          }
+        }
+      }
     }
-  ],
-  "refresh": "30s",
-  "time": { "from": "now-1h", "to": "now" }
+  ]
 }

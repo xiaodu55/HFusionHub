@@ -1,5 +1,6 @@
 package com.hfusionhub.common.result;
 
+import com.hfusionhub.config.TraceContext;
 import lombok.Data;
 
 import java.io.Serializable;
@@ -34,8 +35,14 @@ public class R<T> implements Serializable {
      */
     private long timestamp;
 
+    /**
+     * 分布式追踪 ID — 透传自请求头 X-Trace-ID，供前端关联服务端日志
+     */
+    private String traceId;
+
     public R() {
         this.timestamp = System.currentTimeMillis();
+        this.traceId = TraceContext.getTraceId();
     }
 
     public static <T> R<T> ok() {

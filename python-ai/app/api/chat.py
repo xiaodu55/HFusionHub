@@ -361,6 +361,9 @@ async def chat(request: ChatRequest):
 
     For Agent V1 (KB-required, V1 tools only), use ``POST /api/agent/v1/chat``.
     """
+    import time as _time
+    _start = _time.perf_counter()
+    _is_error = False
     try:
         style = request.style if request.style in _VALID_STYLES else "detailed"
 
@@ -416,7 +419,11 @@ async def chat(request: ChatRequest):
         return _build_chat_response(response, style)
 
     except Exception as e:
+        _is_error = True
         raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}") from e
+    finally:
+        from app.api.metrics import record_chat_request
+        record_chat_request(_time.perf_counter() - _start, is_error=_is_error)
 
 
 @router.post("/api/agent/v1/chat")
@@ -432,6 +439,9 @@ async def agent_v1_chat(request: AgentV1Request):
     the Java-supplied fields.  The model cannot forge ``user_id`` or
     ``knowledge_base_id`` — the Registry strips them from tool input.
     """
+    import time as _time
+    _start = _time.perf_counter()
+    _is_error = False
     try:
         style = request.style if request.style in _VALID_STYLES else "detailed"
 
@@ -489,7 +499,11 @@ async def agent_v1_chat(request: AgentV1Request):
         return _build_chat_response(response, style)
 
     except Exception as e:
+        _is_error = True
         raise HTTPException(status_code=500, detail=f"Agent V1 error: {str(e)}") from e
+    finally:
+        from app.api.metrics import record_chat_request
+        record_chat_request(_time.perf_counter() - _start, is_error=_is_error)
 
 
 @router.post("/api/agent/v1/chat/stream")

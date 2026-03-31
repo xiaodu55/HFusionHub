@@ -380,6 +380,15 @@ def main() -> int:
     markdown_path = args.markdown or report_path.with_suffix(".md")
     markdown_path.write_text(render_markdown(report), encoding="utf-8")
 
+    # Record citation faithfulness for Prometheus monitoring
+    try:
+        from app.api.metrics import set_citation_faithfulness
+        cf = report.metrics.get("citation_faithfulness")
+        if cf is not None:
+            set_citation_faithfulness(float(cf))
+    except Exception:
+        pass
+
     print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
     print(f"\nmarkdown report: {markdown_path}")
 
@@ -398,6 +407,12 @@ def main() -> int:
         print("Evaluation failed:", file=sys.stderr)
         for failure in failures:
             print(f"  - {failure}", file=sys.stderr)
+        # Record gate failure metric for Prometheus alerting
+        try:
+            from app.api.metrics import record_eval_gate_failure
+            record_eval_gate_failure()
+        except Exception:
+            pass
         return 1
     return 0
 

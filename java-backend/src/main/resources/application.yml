@@ -178,3 +178,21 @@ logging:
     root: INFO
     com.hfusionhub: INFO
     com.hfusionhub.mapper: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{trace_id:-}] %-5level %logger{36} - %msg%n"
+
+# Actuator / Micrometer — Prometheus scrape endpoint
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: hfusionhub-backend

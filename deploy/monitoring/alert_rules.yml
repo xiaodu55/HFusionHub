@@ -1,0 +1,229 @@
+# SLO Alert Rules for HFusionHub
+# Covers: Chat availability, Agent failure rate, P95 latency, Tool success,
+#         Unauthorized access, Daily cost, Eval quality regression, Queue backlog
+
+groups:
+  # ── SLO: Availability & Error Rate ────────────────────────────────────────
+  - name: hfusionhub_slo_availability
+    rules:
+      - alert: ChatAvailabilityBelowSLO
+        expr: |
+          (
+            sum(rate(hfusionhub_chat_requests_total_total[5m]))
+            - sum(rate(hfusionhub_chat_errors_total_total[5m]))
+          )
+          / sum(rate(hfusionhub_chat_requests_total_total[5m]))
+          < 0.999
+        for: 5m
+        labels:
+          severity: critical
+          slo: availability
+        annotations:
+          summary: "Chat availability below 99.9% SLO"
+          description: "Chat success rate is {{ $value | humanizePercentage }} over the last 5 minutes (SLO target: 99.9%)."
+          runbook: "Check Python AI service logs and Java→Python connectivity."
+
+      - alert: ChatErrorRateHigh
+        expr: |
+          sum(rate(hfusionhub_chat_errors_total_total[5m]))
+          / sum(rate(hfusionhub_chat_requests_total_total[5m]))
+          > 0.05
+        for: 3m
+        labels:
+          severity: warning
+          slo: error_rate
+        annotations:
+          summary: "Chat error rate exceeds 5%"
+          description: "Chat error rate is {{ $value | humanizePercentage }} over the last 3 minutes."
+
+  # ── SLO: P95 Latency ─────────────────────────────────────────────────────
+  - name: hfusionhub_slo_latency
+    rules:
+      - alert: ChatP95LatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(hfusionhub_chat_latency_seconds_bucket[5m])) by (le)
+          ) > 20
+        for: 5m
+        labels:
+          severity: warning
+          slo: latency
+        annotations:
+          summary: "Chat P95 latency exceeds 20s SLO"
+          description: "Chat P95 latency is {{ $value | humanizeDuration }} over the last 5 minutes (SLO target: ≤20s)."
+
+      - alert: FirstTokenP95LatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(hfusionhub_http_latency_seconds_bucket[5m])) by (le)
+          ) > 3
+        for: 5m
+        labels:
+          severity: warning
+          slo: latency
+        annotations:
+          summary: "First Token P95 latency exceeds 3s SLO"
+          description: "First token P95 latency is {{ $value | humanizeDuration }} over the last 5 minutes (SLO target: ≤3s)."
+
+      - alert: P95LatencyCritical
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(hfusionhub_chat_latency_seconds_bucket[5m])) by (le)
+          ) > 60
+        for: 3m
+        labels:
+          severity: critical
+          slo: latency
+        annotations:
+          summary: "Chat P95 latency exceeds 60s (critical)"
+          description: "Chat P95 latency is {{ $value | humanizeDuration }} — likely a stuck or timeout request."
+
+  # ── SLO: Tool Success Rate ────────────────────────────────────────────────
+  - name: hfusionhub_slo_tools
+    rules:
+      - alert: ToolSuccessRateLow
+        expr: |
+          (
+            sum(hfusionhub_chat_requests_total_total)
+            - sum(hfusionhub_chat_errors_total_total)
+          )
+          / sum(hfusionhub_chat_requests_total_total)
+          < 0.99
+        for: 10m
+        labels:
+          severity: warning
+          slo: tool_success
+        annotations:
+          summary: "Agent success rate below 99% SLO"
+          description: "Agent success rate is {{ $value | humanizePercentage }} over the last 10 minutes."
+
+      - alert: ToolFailureRateHigh
+        expr: |
+          sum(rate(hfusionhub_chat_errors_total_total[10m]))
+          / sum(rate(hfusionhub_chat_requests_total_total[10m]))
+          > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          slo: tool_success
+        annotations:
+          summary: "Tool failure rate exceeds 1%"
+          description: "Tool failure rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+  # ── SLO: Unauthorized Access ──────────────────────────────────────────────
+  - name: hfusionhub_slo_security
+    rules:
+      - alert: UnauthorizedAccessAttempt
+        expr: |
+          sum(increase(http_requests_total{status="401"}[5m])) > 10
+        for: 1m
+        labels:
+          severity: critical
+          slo: security
+        annotations:
+          summary: "Multiple 401 Unauthorized responses detected"
+          description: "{{ $value }} unauthorized access attempts in the last 5 minutes. Possible credential stuffing or token leakage."
+
+      - alert: UnauthorizedToolAccess
+        expr: |
+          sum(increase(http_requests_total{status="403"}[5m])) > 5
+        for: 1m
+        labels:
+          severity: critical
+          slo: security
+        annotations:
+          summary: "Multiple 403 Forbidden responses detected"
+          description: "{{ $value }} forbidden access attempts in the last 5 minutes. Possible privilege escalation attempt."
+
+  # ── SLO: Eval Quality Regression ──────────────────────────────────────────
+  - name: hfusionhub_slo_quality
+    rules:
+      - alert: EvalQualityRegression
+        expr: |
+          increase(hfusionhub_eval_gate_failures_total[24h]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          slo: quality
+        annotations:
+          summary: "Runtime eval gate failure detected"
+          description: "The nightly runtime evaluation detected a quality gate failure in the last 24 hours. Check eval-runtime-report artifact."
+
+      - alert: CitationFaithfulnessLow
+        expr: |
+          hfusionhub_citation_faithfulness < 0.60
+        for: 1h
+        labels:
+          severity: warning
+          slo: quality
+        annotations:
+          summary: "Citation faithfulness below 60% threshold"
+          description: "Citation faithfulness is {{ $value | humanizePercentage }} — sources cited may not support the answer."
+
+  # ── SLO: Daily Cost ───────────────────────────────────────────────────────
+  - name: hfusionhub_slo_cost
+    rules:
+      - alert: DailyCostExceedsBudget
+        expr: |
+          sum(increase(hfusionhub_chat_requests_total_total[24h]))
+          * 0.001
+          > 10.0
+        for: 0m
+        labels:
+          severity: warning
+          slo: cost
+        annotations:
+          summary: "Estimated daily cost exceeds $10 budget"
+          description: "Based on request volume, estimated daily cost is ${{ $value | printf \"%.2f\" }}."
+
+  # ── SLO: Service Health ───────────────────────────────────────────────────
+  - name: hfusionhub_slo_health
+    rules:
+      - alert: PythonAIServiceDown
+        expr: |
+          up{job="hfusionhub-python-ai"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          slo: availability
+        annotations:
+          summary: "Python AI service is DOWN"
+          description: "Python AI service has been unreachable for over 1 minute."
+
+      - alert: JavaBackendDown
+        expr: |
+          up{job="hfusionhub-java-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          slo: availability
+        annotations:
+          summary: "Java backend service is DOWN"
+          description: "Java backend service has been unreachable for over 1 minute."
+
+      - alert: HighMemoryUsage
+        expr: |
+          jvm_memory_used_bytes{area="heap"}
+          / jvm_memory_max_bytes{area="heap"}
+          > 0.90
+        for: 5m
+        labels:
+          severity: warning
+          slo: health
+        annotations:
+          summary: "Java heap usage above 90%"
+          description: "Java heap memory usage is {{ $value | humanizePercentage }}."
+
+  # ── SLO: Queue & Async Backlog ────────────────────────────────────────────
+  - name: hfusionhub_slo_queue
+    rules:
+      - alert: AgentQueueBacklogHigh
+        expr: |
+          hfusionhub_agent_queue_depth > 50
+        for: 10m
+        labels:
+          severity: warning
+          slo: queue
+        annotations:
+          summary: "Agent queue backlog exceeds 50 tasks"
+          description: "Agent queue depth is {{ $value }} — requests may be delayed."
