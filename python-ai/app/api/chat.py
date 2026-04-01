@@ -63,6 +63,7 @@ from pydantic import BaseModel, Field
 from app.core.agent import get_agent, get_agent_run_store
 from app.core.agent.agent import AgentResponse
 from app.core.agent.execution_context import AgentExecutionContext
+from app.core.policy.masking import build_arguments_summary
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -250,6 +251,10 @@ class AgentV1Request(BaseModel):
     max_tool_steps: Optional[int] = Field(5, ge=1, le=10)
     temperature: Optional[float] = Field(0.3, ge=0.0, le=2.0)
     capability_profile: Optional[str] = Field(None, pattern="^(approval_write)$")
+    user_role: Optional[str] = Field(None, pattern="^(user|admin)$",
+                                     description="Authenticated user role from Java (user|admin)")
+    environment: Optional[str] = Field(None, max_length=32,
+                                       description="Deployment environment override")
 
 
 class ChatResponse(BaseModel):
@@ -460,6 +465,8 @@ async def agent_v1_chat(request: AgentV1Request):
             agent_run_id=request.request_id or str(uuid4()),
             mode="read_only",
             capability_profile=request.capability_profile,
+            user_role=request.user_role or "user",
+            environment=request.environment,
         )
 
         # Agent V1: knowledge_base_id is always present (enforced by Pydantic).
@@ -533,6 +540,8 @@ async def agent_v1_chat_stream(request: AgentV1Request):
             agent_run_id=request.request_id or str(uuid4()),
             mode="read_only",
             capability_profile=request.capability_profile,
+            user_role=request.user_role or "user",
+            environment=request.environment,
         )
 
         agent = get_agent(
@@ -717,6 +726,10 @@ class AgentResumeRequest(BaseModel):
     history: List[ChatMessage] = Field(default_factory=list, max_length=CHAT_HISTORY_MAX_ITEMS)
     conversation_id: Optional[int] = Field(None, ge=1)
     model: Optional[str] = Field(None, max_length=CHAT_MODEL_MAX_LENGTH)
+    execution_token: Optional[str] = Field(None, max_length=64,
+                                           description="One-time DB token issued by Java on approval (REQUIRED for approved executions)")
+    user_role: Optional[str] = Field(None, pattern="^(user|admin)$")
+    environment: Optional[str] = Field(None, max_length=32)
 
 
 @router.post("/api/agent/v1/chat/decide")
@@ -766,6 +779,26 @@ async def agent_v1_decide(request: AgentResumeRequest):
         input_hash[:16], request.user_id, request.knowledge_base_id,
     )
 
+    # Step 1.5: Consume the one-time execution token BEFORE anything runs.
+    # MySQL is the single source of truth: exactly one replica may consume the
+    # token; every other attempt (replay / cross-replica / stale) is rejected
+    # with 409 and the approved tool is NOT executed.
+    from app.core.tools.execution_token import consume_execution_token
+    consumed = await consume_execution_token(
+        approval_id=request.approval_id,
+        execution_token=request.execution_token,
+    )
+    if not consumed:
+        logger.warning(
+            "Execution-token not consumed, rejecting approval execution: "
+            "approval=%s token_present=%s",
+            request.approval_id, bool(request.execution_token),
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="execution token is missing, already used, or revoked",
+        )
+
     # Step 2: Create V1.1 registry for the approved KB, then register a
     # one-shot scoped grant so the write tool passes the approval gate.
     registry = create_v1_registry(
@@ -787,6 +820,8 @@ async def agent_v1_decide(request: AgentResumeRequest):
         agent_run_id=str(uuid4()),
         mode="read_write",
         capability_profile="approval_write",
+        user_role=request.user_role or "user",
+        environment=request.environment,
     )
 
     # Step 4: Execute the approved tool DIRECTLY.
@@ -841,7 +876,7 @@ async def agent_v1_decide(request: AgentResumeRequest):
             "action": request.tool_name,
             "knowledge_base_id": request.knowledge_base_id,
             "input_summary": _truncate(
-                json.dumps(request.tool_input, ensure_ascii=False),
+                build_arguments_summary(request.tool_input),
                 _INPUT_SUMMARY_MAX_LENGTH,
             ),
             "output_summary": _truncate(
@@ -880,7 +915,7 @@ async def agent_v1_decide(request: AgentResumeRequest):
             "action": request.tool_name,
             "knowledge_base_id": request.knowledge_base_id,
             "input_summary": _truncate(
-                json.dumps(request.tool_input, ensure_ascii=False),
+                build_arguments_summary(request.tool_input),
                 _INPUT_SUMMARY_MAX_LENGTH,
             ),
             "output_summary": _truncate(result.message, _OUTPUT_SUMMARY_MAX_LENGTH),

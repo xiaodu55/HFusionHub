@@ -42,6 +42,7 @@ public class SaTokenConfig implements WebMvcConfigurer {
                             "/health",
                             "/vectorize/*/callback",
                             "/internal/feature-flags/snapshot",
+                            "/internal/agent/**",
                             "/doc.html",
                             "/swagger-ui.html",
                             "/swagger-ui/**",

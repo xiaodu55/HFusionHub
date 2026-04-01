@@ -205,6 +205,9 @@ class ToolRegistry:
         # spec name → (ToolSpec, BaseTool instance)
         self._specs: Dict[str, ToolSpec] = {}
         self._instances: Dict[str, BaseTool] = {}
+        # Policy engine instance (swappable in tests).
+        from app.core.policy.engine import PolicyEngine
+        self._policy_engine = PolicyEngine()
 
         # Register all known tools.  The agent_version gate is applied in
         # get_tools(), so non-V1 tools exist internally but are never exposed
@@ -397,21 +400,33 @@ class ToolRegistry:
             )
 
             if not scoped_grant_consumed:
-                # Mode gate: read_only mode requires approval for write/external tools.
-                if not context.allows_risk_level(spec.risk_level):
+                # ── Policy engine: tri-state governance (allow/deny/needs-approval) ──
+                # Defines whether this tool runs, needs a human, or is refused.
+                # The scoped grant above (one-shot), when present, short-circuits
+                # policy because the grant IS the post-approval authorization.
+                from app.core.policy.engine import PolicyAction
+                verdict = self._policy_engine.evaluate(
+                    tool_name=tool_name,
+                    risk_level=spec.risk_level,
+                    required_permissions=frozenset(spec.required_permissions or []),
+                    ctx=self._build_policy_context(context),
+                )
+                if verdict.action == PolicyAction.DENY:
+                    return ToolResult.failure(
+                        tool_name=tool_name,
+                        error_code=ErrorCode.PERMISSION_DENIED,
+                        message=verdict.reason,
+                    )
+                if verdict.action == PolicyAction.NEEDS_APPROVAL:
                     summary_input = dict(tool_input)
                     summary_input.pop("knowledge_base_id", None)
                     summary_input.pop("user_id", None)
                     return ToolResult.approval_required(
                         tool_name=tool_name,
                         tool_input=summary_input,
-                        message=(
-                            f"工具 '{tool_name}' 风险等级为 {spec.risk_level}，"
-                            f"当前模式 {context.mode} 需要人工审批"
-                        ),
+                        message=verdict.reason,
                     )
-
-                # Required-permission check.
+                # ALLOW → required-permission check (approval may still gate above).
                 for perm in spec.required_permissions:
                     if not context.has_permission(perm):
                         return ToolResult.failure(
@@ -422,7 +437,7 @@ class ToolRegistry:
                                 f"当前上下文未授予该权限"
                             ),
                         )
-            # else: scoped grant consumed — skip ALL permission/mode checks.
+            # else: scoped grant consumed — skip ALL permission/mode/policy checks.
             # The grant IS the authorization for this exact tool+parameters.
 
         # KB-scope enforcement (read OR write KB tools)
@@ -516,6 +531,50 @@ class ToolRegistry:
             )
 
     # ── Input validation ──────────────────────────────────────────────
+
+    # ── Policy context ─────────────────────────────────────────────────
+
+    def _build_policy_context(self, context: Any) -> PolicyContext:
+        """Translate an AgentExecutionContext into a PolicyContext, resolving flags."""
+        # Resolve feature flags lazily; transparent/fail-open modes return True,
+        # so the registry's policy defaults mirror current behavior in tests.
+        from app.core.policy.engine import PolicyContext
+        from app.utils.feature_flag import feature_flags
+        from app.utils.config import config
+
+        user_id = getattr(context, "user_id", 0)
+        kb_id = getattr(context, "knowledge_base_id", self._knowledge_base_id) or 0
+        environment = getattr(context, "environment", None) or config.SERVER_ENV
+        flags = {
+            # The flag client resolves user/kb/environment scoped overrides; in
+            # tests these default to True via transparent degradation.
+            "agent.write_tools.enabled": feature_flags.is_enabled(
+                "agent.write_tools.enabled", user_id=user_id, knowledge_base_id=kb_id,
+                environment=environment,
+            ),
+            "agent.web_search.enabled": feature_flags.is_enabled(
+                "agent.web_search.enabled", user_id=user_id, knowledge_base_id=kb_id,
+                environment=environment,
+            ),
+            "approval.required_for_write": feature_flags.is_enabled(
+                "approval.required_for_write", user_id=user_id, knowledge_base_id=kb_id,
+                environment=environment,
+            ),
+            "policy.admin_bypass_approval": feature_flags.is_enabled(
+                "policy.admin_bypass_approval", user_id=user_id, knowledge_base_id=kb_id,
+                environment=environment,
+            ),
+        }
+        return PolicyContext(
+            user_id=getattr(context, "user_id", 0),
+            knowledge_base_id=kb_id,
+            role=getattr(context, "user_role", "user") or "user",
+            environment=environment,
+            mode=getattr(context, "mode", "read_only"),
+            capability_profile=getattr(context, "capability_profile", None),
+            flags=flags,
+            permissions=frozenset(getattr(context, "permissions", frozenset()) or frozenset()),
+        )
 
     @staticmethod
     def _validate_input(spec: ToolSpec, tool_input: Dict[str, Any]) -> Optional[str]:

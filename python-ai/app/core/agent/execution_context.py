@@ -67,8 +67,11 @@ class AgentExecutionContext:
     agent_run_id: str = ""
     mode: str = MODE_READ_ONLY
     capability_profile: Optional[str] = None
+    user_role: str = "user"
+    environment: Optional[str] = None
 
     _VALID_PROFILES = {None, "approval_write"}
+    _VALID_ROLES = {"user", "admin"}
 
     def __post_init__(self):
         if self.mode not in _VALID_MODES:
@@ -81,6 +84,10 @@ class AgentExecutionContext:
             raise ValueError(
                 f"Invalid capability_profile: {self.capability_profile!r}. "
                 f"Must be one of {self._VALID_PROFILES}"
+            )
+        if self.user_role not in self._VALID_ROLES:
+            raise ValueError(
+                f"Invalid user_role: {self.user_role!r}. Must be one of {self._VALID_ROLES}"
             )
 
     # ── Permission helpers ────────────────────────────────────────────────
@@ -115,6 +122,8 @@ class AgentExecutionContext:
             "agent_run_id": self.agent_run_id,
             "mode": self.mode,
             "capability_profile": self.capability_profile,
+            "user_role": self.user_role,
+            "environment": self.environment,
         }
 
 

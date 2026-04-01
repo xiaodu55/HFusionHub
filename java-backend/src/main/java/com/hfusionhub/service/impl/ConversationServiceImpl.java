@@ -24,6 +24,7 @@ import com.hfusionhub.mapper.PromptTemplateMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.MessageMapper;
 import com.hfusionhub.mapper.UserMapper;
+import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.common.constant.AgentConstants;
 import com.hfusionhub.service.ConversationService;
 import com.hfusionhub.service.AgentTaskService;
@@ -218,7 +219,8 @@ public class ConversationServiceImpl implements ConversationService {
                         dto.getContent(), dto.getConversationId(),
                         conversation.getKnowledgeBaseId(), history,
                         "detailed", 5, requestId, currentUserId,
-                        effectiveCapability);
+                        effectiveCapability,
+                        JwtUtils.hasRole(CommonConstants.ROLE_ADMIN) ? "admin" : "user");
             } else {
                 aiResponse = aiClient.chat(
                         dto.getContent(), dto.getConversationId(),

@@ -196,6 +196,24 @@ public interface AgentTaskService {
      */
     int expireApprovals();
 
+    /**
+     * 消耗一次性执行令牌（原子操作）。
+     *
+     * <p>仅当令牌处于 {@code issued} 状态时才返回 {@code true} 并将其置为
+     * {@code consumed}；重复调用、令牌缺失或已消耗都会返回 {@code false}，
+     * 从而保证“批准后恰好执行一次”。</p>
+     *
+     * @param approvalId 审批UUID
+     * @param executionToken 批准时签发的一次性执行令牌
+     * @return 是否成功消耗（首次成功；重复提交/错误令牌失败）
+     */
+    boolean consumeExecutionToken(String approvalId, String executionToken);
+
+    /**
+     * 查询审批记录（含执行令牌状态）——用于审计。
+     */
+    AgentApproval getApprovalWithToken(String approvalId);
+
     // ================================================================
     // V13: 队列调度
     // ================================================================

@@ -19,6 +19,7 @@ import com.hfusionhub.mapper.AgentRunMapper;
 import com.hfusionhub.mapper.AgentStepMapper;
 import com.hfusionhub.mapper.AgentTaskMapper;
 import com.hfusionhub.mapper.MessageMapper;
+import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.entity.Message;
 import com.hfusionhub.service.AgentTaskService;
 import lombok.RequiredArgsConstructor;
@@ -49,6 +50,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     private final AgentStepMapper stepMapper;
     private final AgentApprovalMapper approvalMapper;
     private final MessageMapper messageMapper;
+    private final UserMapper userMapper;
     private final AiClient aiClient;
     private final com.hfusionhub.service.AgentTaskQueueService queueService;
     private final com.hfusionhub.service.AgentStatusEventService statusEventService;
@@ -61,6 +63,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             AgentStepMapper stepMapper,
             AgentApprovalMapper approvalMapper,
             MessageMapper messageMapper,
+            UserMapper userMapper,
             AiClient aiClient,
             @Lazy com.hfusionhub.service.AgentTaskQueueService queueService,
             com.hfusionhub.service.AgentStatusEventService statusEventService,
@@ -70,6 +73,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         this.stepMapper = stepMapper;
         this.approvalMapper = approvalMapper;
         this.messageMapper = messageMapper;
+        this.userMapper = userMapper;
         this.aiClient = aiClient;
         this.queueService = queueService;
         this.statusEventService = statusEventService;
@@ -495,6 +499,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         approval.setTaskId(taskId);
         approval.setRunId(runId);
         approval.setUserId(userId);
+        approval.setUserRole(resolveUserRole(userId));
+        approval.setTraceId(com.hfusionhub.config.TraceContext.getTraceId());
         approval.setToolName(toolName);
         approval.setToolInputHash(toolInputHash);
         approval.setToolInput(toolInput != null ? toolInput : "{}");
@@ -579,11 +585,33 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         approval.setDecidedBy(decidedBy);
         approval.setReason(reason);
 
+        // ── Issue a durable one-time execution token (durable single-execution).
+        // Only the first approve can change the token from 'none' → 'issued'
+        // (guarded in SQL against concurrent duplicates).  It is consumed by the
+        // Java consume endpoint / Python decide before the tool runs, so a
+        // replayed approve/resume can never execute the tool twice.
+        String executionToken = null;
+        if ("approved".equals(decision)) {
+            executionToken = java.util.UUID.randomUUID().toString();
+            try {
+                int issued = approvalMapper.issueExecutionToken(
+                        approval.getId(), executionToken, AgentConstants.EXECUTION_TOKEN_ISSUED,
+                        LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+                if (issued != 1) {
+                    log.warn("Could not issue execution token for approval {} — approval not in issueable state", approvalId);
+                    executionToken = null;
+                }
+            } catch (Exception e) {
+                log.error("Failed to issue execution token for approval {}: {}", approvalId, e.getMessage());
+                executionToken = null;
+            }
+        }
+
         // ── Phase 2: Call Python (outside any transaction — recordStep
         //        and completeRun manage their own transactions). ──
         if ("approved".equals(decision) && task != null && run != null) {
             try {
-                resumeAgentAfterApproval(approval, task, run);
+                resumeAgentAfterApproval(approval, task, run, executionToken);
             } catch (Exception e) {
                 String errorMsg = e.getClass().getSimpleName() + ": "
                         + (e.getMessage() != null ? e.getMessage() : "(null message)");
@@ -640,7 +668,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
      * so that the MySQL approval update is committed before the (potentially
      * slow) tool execution.
      */
-    private void resumeAgentAfterApproval(AgentApproval approval, AgentTask task, AgentRun run) {
+    private void resumeAgentAfterApproval(AgentApproval approval, AgentTask task, AgentRun run,
+                                          String executionToken) {
         Long runId = run.getId();
         // Build chat history from messages
         List<Map<String, String>> history = List.of();
@@ -668,7 +697,9 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                 task.getQuery(),
                 history,
                 conversationId,
-                run.getModel()
+                run.getModel(),
+                executionToken,
+                approval.getUserRole()
         );
 
         // Record step events from the resumed run
@@ -799,6 +830,29 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     @Override
     public AgentApproval getApproval(String approvalId) {
         return approvalMapper.selectByApprovalId(approvalId);
+    }
+
+    @Override
+    public AgentApproval getApprovalWithToken(String approvalId) {
+        return approvalMapper.selectByApprovalId(approvalId);
+    }
+
+    @Override
+    @Transactional
+    public boolean consumeExecutionToken(String approvalId, String executionToken) {
+        if (approvalId == null || executionToken == null || executionToken.isBlank()) {
+            return false;
+        }
+        String consumedAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        int updated = approvalMapper.consumeExecutionToken(approvalId, executionToken, consumedAt);
+        if (updated == 1) {
+            log.info("Execution token consumed for approval {} (token={}...) — single execution granted",
+                    approvalId, executionToken.substring(0, Math.min(8, executionToken.length())));
+            return true;
+        }
+        log.warn("Execution token consume rejected for approval {} (already consumed / revoked / mismatch)",
+                approvalId);
+        return false;
     }
 
     @Override
@@ -1051,5 +1105,22 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         if (text == null) return null;
         if (text.length() <= maxLen) return text;
         return text.substring(0, maxLen - 3) + "...";
+    }
+
+    /**
+     * Resolve a user's role for policy evaluation (approval target context).
+     * Defaults to {@code "user"} when the account cannot be read.
+     */
+    private String resolveUserRole(Long userId) {
+        try {
+            if (userId == null) return "user";
+            com.hfusionhub.entity.User user = userMapper.selectById(userId);
+            if (user != null && user.getRole() != null && !user.getRole().isBlank()) {
+                return user.getRole();
+            }
+        } catch (Exception e) {
+            log.debug("resolveUserRole({}) failed — defaulting to user: {}", userId, e.getMessage());
+        }
+        return "user";
     }
 }

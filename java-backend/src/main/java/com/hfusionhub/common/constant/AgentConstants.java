@@ -145,6 +145,22 @@ public interface AgentConstants {
     /** 审批过期 */
     String ERR_APPROVAL_EXPIRED = "approval_expired";
 
+    // ============================================================
+    // 审批执行令牌状态（Agent 工具治理）
+    // ============================================================
+
+    /** 令牌未签发 */
+    String EXECUTION_TOKEN_NONE = "none";
+
+    /** 令牌已签发（批准后、执行前） */
+    String EXECUTION_TOKEN_ISSUED = "issued";
+
+    /** 令牌已消耗（已执行一次） */
+    String EXECUTION_TOKEN_CONSUMED = "consumed";
+
+    /** 令牌已撤销（补偿路径） */
+    String EXECUTION_TOKEN_REVOKED = "revoked";
+
     /** 默认可重试错误码 */
     Set<String> DEFAULT_RETRYABLE_ERROR_CODES = Set.of(
             ERR_TIMEOUT, ERR_EXECUTION_TIMEOUT, ERR_CONNECTION_ERROR, ERR_TOOL_ERROR, ERR_INTERNAL_ERROR

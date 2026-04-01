@@ -57,7 +57,7 @@ public class AiClient {
             List<Map<String, String>> history
     ) {
         return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                "detailed", 5, null, null, null, null);
+                "detailed", 5, null, null, null, null, null);
     }
 
     /**
@@ -72,7 +72,7 @@ public class AiClient {
             int maxToolSteps
     ) {
         return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                style, maxToolSteps, null, null, null, null);
+                style, maxToolSteps, null, null, null, null, null);
     }
 
     /**
@@ -89,7 +89,7 @@ public class AiClient {
             String systemPrompt
     ) {
         return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                "detailed", 5, null, null, null, systemPrompt);
+                "detailed", 5, null, null, null, systemPrompt, null);
     }
 
     /**
@@ -119,7 +119,7 @@ public class AiClient {
             Long userId
     ) {
         return agentV1Chat(message, conversationId, knowledgeBaseId, history,
-                style, maxToolSteps, requestId, userId, null);
+                style, maxToolSteps, requestId, userId, null, null);
     }
 
     /**
@@ -139,7 +139,8 @@ public class AiClient {
             int maxToolSteps,
             String requestId,
             Long userId,
-            String capabilityProfile
+            String capabilityProfile,
+            String userRole
     ) {
         if (knowledgeBaseId == null || knowledgeBaseId <= 0) {
             throw new BusinessException(StatusCode.BAD_REQUEST,
@@ -150,7 +151,7 @@ public class AiClient {
                     "Agent V1 requires a non-null user_id — Java session must provide authenticated user ID");
         }
         return doChat("/api/agent/v1/chat", message, conversationId, knowledgeBaseId,
-                history, style, maxToolSteps, requestId, userId, capabilityProfile, null);
+                history, style, maxToolSteps, requestId, userId, capabilityProfile, null, userRole);
     }
 
     /**
@@ -179,7 +180,7 @@ public class AiClient {
                     "Agent V1 requires a non-null user_id — Java session must provide authenticated user ID");
         }
         return doChat("/api/agent/v1/chat", message, conversationId, knowledgeBaseId,
-                history, style, maxToolSteps, requestId, userId, null, systemPrompt);
+                history, style, maxToolSteps, requestId, userId, null, systemPrompt, null);
     }
 
     private ChatResponse doChat(
@@ -193,7 +194,8 @@ public class AiClient {
             String requestId,
             Long userId,
             String capabilityProfile,
-            String systemPrompt
+            String systemPrompt,
+            String userRole
     ) {
         try {
             Map<String, Object> request = new HashMap<>();
@@ -218,6 +220,11 @@ public class AiClient {
             // approval_required gating.  The model cannot set this itself.
             if (capabilityProfile != null && !capabilityProfile.isEmpty()) {
                 request.put("capability_profile", capabilityProfile);
+            }
+            // Agent governance: authenticatec role (user|admin) so Python's policy
+            // engine can apply role-based rules (e.g. admin bypass for approvals).
+            if (userRole != null && !userRole.isEmpty()) {
+                request.put("user_role", userRole);
             }
             if (systemPrompt != null && !systemPrompt.isEmpty()) {
                 request.put("system_prompt", systemPrompt);
@@ -549,7 +556,9 @@ public class AiClient {
             String query,
             List<Map<String, String>> history,
             Long conversationId,
-            String model
+            String model,
+            String executionToken,
+            String userRole
     ) {
         try {
             Map<String, Object> request = new HashMap<>();
@@ -572,6 +581,11 @@ public class AiClient {
             request.put("history", history != null ? history : List.of());
             if (conversationId != null) request.put("conversation_id", conversationId);
             if (model != null) request.put("model", model);
+            // Durable one-time execution token (MySQL-backed).  Python MUST
+            // consume it via the Java internal endpoint before running the tool;
+            // a replayed approve/resume is rejected without side effects.
+            if (executionToken != null) request.put("execution_token", executionToken);
+            if (userRole != null) request.put("user_role", userRole);
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
