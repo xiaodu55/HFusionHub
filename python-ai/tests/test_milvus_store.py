@@ -1,9 +1,14 @@
+"""Tests for the milvus_store backward-compatible facade and vector store status."""
+
 from app.core.vectorstore import milvus_store
+from app.core.vectorstore import factory
+from app.core.vectorstore.milvus_lite import MilvusLiteStore
 
 
 def test_vector_store_status_reports_connection_failure(monkeypatch):
-    monkeypatch.setattr(milvus_store, "get_milvus_client", lambda: None)
+    """When the underlying store cannot connect, status reports the error."""
     monkeypatch.setattr(milvus_store, "_last_connection_error", "directory is locked")
+    monkeypatch.setattr(milvus_store, "get_milvus_client", lambda: None)
 
     status = milvus_store.vector_store_status()
 
@@ -11,7 +16,10 @@ def test_vector_store_status_reports_connection_failure(monkeypatch):
     assert status["error"] == "directory is locked"
 
 
-def test_create_collection_reuses_compatible_collection(monkeypatch):
+def test_create_collection_reuses_compatible_collection():
+    """create_collection returns existing client when schema is compatible."""
+    factory.reset_vector_store()
+
     class FakeClient:
         create_calls = 0
 
@@ -36,15 +44,23 @@ def test_create_collection_reuses_compatible_collection(monkeypatch):
             self.create_calls += 1
 
     client = FakeClient()
-    monkeypatch.setattr(milvus_store, "get_milvus_client", lambda: client)
+    store = MilvusLiteStore()
+    store._client = client
+    factory._store = store
 
-    result = milvus_store.create_collection()
+    try:
+        result = store.ensure_collection()
 
-    assert result is client
-    assert client.create_calls == 0
+        assert result is client
+        assert client.create_calls == 0
+    finally:
+        factory.reset_vector_store()
 
 
-def test_create_collection_refuses_to_drop_incompatible_collection(monkeypatch):
+def test_create_collection_refuses_to_drop_incompatible_collection():
+    """create_collection returns None when schema is incompatible (no drop)."""
+    factory.reset_vector_store()
+
     class FakeIndexParams:
         def add_index(self, **kwargs):
             return None
@@ -80,10 +96,15 @@ def test_create_collection_refuses_to_drop_incompatible_collection(monkeypatch):
             self.exists = True
 
     client = FakeClient()
-    monkeypatch.setattr(milvus_store, "get_milvus_client", lambda: client)
+    store = MilvusLiteStore()
+    store._client = client
+    factory._store = store
 
-    result = milvus_store.create_collection()
+    try:
+        result = store.ensure_collection()
 
-    assert result is None
-    assert client.drop_calls == 0
-    assert client.create_calls == 0
+        assert result is None
+        assert client.drop_calls == 0
+        assert client.create_calls == 0
+    finally:
+        factory.reset_vector_store()

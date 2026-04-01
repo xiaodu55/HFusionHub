@@ -15,4 +15,7 @@ public class DocumentChunkCallbackDTO {
     private String contentExcerpt;
     private Integer charCount;
     private Map<String, Object> metadata;
+    private String embeddingModel;
+    private Integer embeddingDimension;
+    private String embeddingVersion;
 }

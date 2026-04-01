@@ -25,6 +25,8 @@ public class DocumentIndexJob extends BaseEntity {
     private Long knowledgeBaseId;
     private String indexVersion;
     private String embeddingModel;
+    private Integer embeddingDimension;
+    private String embeddingVersion;
     private String status;
     private Integer attempt;
     private Integer chunkCount;

@@ -712,16 +712,18 @@ public class VectorizationServiceImpl implements VectorizationService {
         // 构建回调URL，用于Python引擎处理完成后通知Java后端
         String callbackUrl = callbackBaseUrl + "/vectorize/" + document.getId() + "/callback";
 
-        Map<String, Object> request = Map.of(
-                "document_id", String.valueOf(document.getId()),
-                "file_path", document.getFilePath(),
-                "file_type", document.getFileType() != null ? document.getFileType() : "md",
-                "knowledge_base_id", document.getKnowledgeBaseId() != null ? document.getKnowledgeBaseId() : 0,
-                "document_title", document.getTitle(),
-                "index_version", job.getIndexVersion(),
-                "callback_url", callbackUrl,
-                "callback_secret", callbackSecret,
-                "embedding_model", job.getEmbeddingModel()
+        Map<String, Object> request = Map.ofEntries(
+                Map.entry("document_id", String.valueOf(document.getId())),
+                Map.entry("file_path", document.getFilePath()),
+                Map.entry("file_type", document.getFileType() != null ? document.getFileType() : "md"),
+                Map.entry("knowledge_base_id", document.getKnowledgeBaseId() != null ? document.getKnowledgeBaseId() : 0),
+                Map.entry("document_title", document.getTitle()),
+                Map.entry("index_version", job.getIndexVersion()),
+                Map.entry("callback_url", callbackUrl),
+                Map.entry("callback_secret", callbackSecret),
+                Map.entry("embedding_model", job.getEmbeddingModel()),
+                Map.entry("embedding_dimension", job.getEmbeddingDimension() != null ? job.getEmbeddingDimension() : 1024),
+                Map.entry("embedding_version", job.getEmbeddingVersion() != null ? job.getEmbeddingVersion() : "v1")
         );
 
         HttpHeaders headers = internalHeaders();
@@ -750,6 +752,9 @@ public class VectorizationServiceImpl implements VectorizationService {
         chunk.setContentExcerpt(truncate(callbackChunk.getContentExcerpt(), 1000));
         chunk.setCharCount(callbackChunk.getCharCount());
         chunk.setMetadata(toJson(callbackChunk.getMetadata()));
+        chunk.setEmbeddingModel(callbackChunk.getEmbeddingModel());
+        chunk.setEmbeddingDimension(callbackChunk.getEmbeddingDimension());
+        chunk.setEmbeddingVersion(callbackChunk.getEmbeddingVersion());
         return chunk;
     }
 

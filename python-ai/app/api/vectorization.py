@@ -682,6 +682,7 @@ async def _notify_callback_async(
 
 def _callback_chunk_metadata(chunks: List[VectorChunk]) -> List[Dict[str, Any]]:
     """Build a bounded callback payload; full text stays in the vector store."""
+    from app.utils.config import config
     return [
         {
             "chunkId": chunk.chunk_id,
@@ -691,6 +692,9 @@ def _callback_chunk_metadata(chunks: List[VectorChunk]) -> List[Dict[str, Any]]:
             "contentExcerpt": chunk.content[:1000],
             "charCount": len(chunk.content),
             "metadata": _json_safe_metadata(chunk.metadata),
+            "embeddingModel": config.EMBEDDING_MODEL,
+            "embeddingDimension": config.EMBEDDING_DIMENSION,
+            "embeddingVersion": "v1",
         }
         for chunk in chunks
     ]

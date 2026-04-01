@@ -271,10 +271,16 @@ spec:
               value: "0.0.0.0"
             - name: SERVER_PORT
               value: {{ .Values.pythonAi.port | quote }}
-            - name: MILVUS_LITE_PATH
-              value: /data/milvus_data.db
-            - name: CHUNKS_STORE_PATH
-              value: /data/chunks_store.json
+            - name: VECTOR_STORE_MODE
+              value: {{ .Values.vectorStore.mode | quote }}
+            - name: SERVER_ENV
+              value: {{ .Values.vectorStore.env | quote }}
+            - name: MILVUS_HOST
+              value: {{ tpl .Values.vectorStore.host $ | quote }}
+            - name: MILVUS_PORT
+              value: {{ .Values.vectorStore.port | quote }}
+            - name: MILVUS_COLLECTION
+              value: {{ .Values.vectorStore.collection | quote }}
             - name: DOCUMENT_STORAGE_ROOT
               value: /app/uploads/documents
           resources:
@@ -296,28 +302,12 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 3
           volumeMounts:
-            - name: python-data
-              mountPath: /data
             - name: shared-uploads
               mountPath: /app/uploads
       volumes:
-        - name: python-data
-          persistentVolumeClaim:
-            claimName: {{ .Release.Name }}-python-pvc
         - name: shared-uploads
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-uploads-pvc
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: {{ .Release.Name }}-python-pvc
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: {{ .Values.pythonAi.persistence.size }}
 {{- end }}
 
 ---
@@ -332,6 +322,94 @@ spec:
   resources:
     requests:
       storage: {{ .Values.sharedStorage.uploadsSize }}
+
+---
+# --- Milvus standalone (production vector store) ---
+{{- if .Values.milvus.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-milvus
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: {{ .Values.milvus.port }}
+      targetPort: {{ .Values.milvus.port }}
+  selector:
+    app: {{ .Release.Name }}-milvus
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-milvus
+spec:
+  serviceName: {{ .Release.Name }}-milvus
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-milvus
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-milvus
+    spec:
+      containers:
+        - name: milvus
+          image: {{ .Values.milvus.image }}
+          ports:
+            - containerPort: {{ .Values.milvus.port }}
+          env:
+            - name: ETCD_USE_EMBED
+              value: "true"
+            - name: COMMON_STORAGETYPE
+              value: "local"
+          resources:
+            {{- toYaml .Values.milvus.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9091
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/milvus
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.milvus.persistence.size }}
+{{- end }}
+
+---
+# --- Python AI HorizontalPodAutoscaler ---
+{{- if and .Values.pythonAi.enabled (gt (int .Values.pythonAi.minReplicas) 0) }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Release.Name }}-python
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Release.Name }}-python
+  minReplicas: {{ .Values.pythonAi.minReplicas }}
+  maxReplicas: {{ .Values.pythonAi.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+{{- end }}
 
 ---
 # --- Frontend ---

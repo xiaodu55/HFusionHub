@@ -23,6 +23,13 @@ class Config:
     MILVUS_COLLECTION = os.getenv("MILVUS_COLLECTION", "hfusionhub_chunks")
     MILVUS_LITE_PATH = os.getenv("MILVUS_LITE_PATH", "./milvus_data.db")
 
+    # Vector store mode: "lite" (single-process embedded) or "cluster" (remote Milvus).
+    # Production / staging environments MUST use "cluster".
+    VECTOR_STORE_MODE = os.getenv("VECTOR_STORE_MODE", "lite")
+
+    # Environment name — controls hard safety gates (e.g. vector store mode).
+    SERVER_ENV = os.getenv("SERVER_ENV", "development")
+
     # Server Configuration
     SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
     SERVER_PORT = int(os.getenv("SERVER_PORT", "9000"))
@@ -59,6 +66,7 @@ class Config:
 
     # Embedding Configuration
     EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", "1024"))
+    EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "unknown")
     EMBEDDING_MAX_RETRIES = int(os.getenv("EMBEDDING_MAX_RETRIES", "3"))
     EMBEDDING_RETRY_DELAY = float(os.getenv("EMBEDDING_RETRY_DELAY", "1.0"))
     # Allow random-vector fallback ONLY in test environments.  Production must

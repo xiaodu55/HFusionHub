@@ -57,6 +57,26 @@ services:
   #     OLLAMA_KEEP_ALIVE: 24h
   #   restart: unless-stopped
 
+  # Milvus standalone for production vector storage (replaces embedded Lite).
+  milvus:
+    image: milvusdb/milvus:v2.4-latest
+    container_name: hfusionhub-milvus
+    environment:
+      ETCD_USE_EMBED: "true"
+      COMMON_STORAGETYPE: local
+    ports:
+      - "127.0.0.1:19530:19530"
+      - "127.0.0.1:9091:9091"
+    volumes:
+      - milvus-data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
   # -----------------------------------------------------------------------
   # Application Services
   # -----------------------------------------------------------------------
@@ -110,6 +130,10 @@ services:
       SERVER_HOST: "0.0.0.0"
       SERVER_PORT: "9000"
       MILVUS_LITE_PATH: /data/milvus_data.db
+      MILVUS_HOST: milvus
+      MILVUS_PORT: "19530"
+      VECTOR_STORE_MODE: cluster
+      SERVER_ENV: production
       CHUNKS_STORE_PATH: /data/chunks_store.json
       UPLOAD_DIR: /data/uploads
       DOCUMENT_STORAGE_ROOT: /app/uploads/documents
@@ -124,6 +148,8 @@ services:
       - uploads-data:/app/uploads
     depends_on:
       java-backend:
+        condition: service_healthy
+      milvus:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://localhost:9000/ready || exit 1"]
@@ -155,3 +181,4 @@ volumes:
   mysql-data:
   python-data:
   uploads-data:
+  milvus-data:

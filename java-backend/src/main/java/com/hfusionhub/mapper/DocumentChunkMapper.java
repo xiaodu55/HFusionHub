@@ -38,7 +38,8 @@ public interface DocumentChunkMapper extends BaseMapper<DocumentChunk> {
      * 同时为后续 DBA 优化（索引提示、分区裁剪）留下锚点。</p>
      */
     @Select("SELECT chunk_id, document_id, knowledge_base_id, index_version, "
-            + "chunk_index, block_type, outline_path, content_excerpt, char_count, metadata "
+            + "chunk_index, block_type, outline_path, content_excerpt, char_count, metadata, "
+            + "embedding_model, embedding_dimension, embedding_version "
             + "FROM document_chunk WHERE chunk_id = #{chunkId}")
     DocumentChunk selectByChunkId(@Param("chunkId") String chunkId);
 }

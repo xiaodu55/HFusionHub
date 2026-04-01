@@ -63,13 +63,39 @@ pythonAi:
   enabled: true
   image: hfusionhub/python-ai:latest
   port: 9000
-  replicas: 1
-  persistence:
-    size: 5Gi
+  # Stateless: >=2 replicas in production. No per-pod RWO state is required
+  # because vector data lives in Milvus and uploads are on a shared RWX volume.
+  replicas: 2
+  minReplicas: 2
+  maxReplicas: 8
   resources:
     requests:
       memory: "512Mi"
       cpu: "250m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+# --- Vector store / Milvus ---
+vectorStore:
+  mode: cluster
+  env: production
+  host: "{{ .Release.Name }}-milvus"
+  port: "19530"
+  collection: hfusionhub_chunks
+
+# Bundled Milvus standalone. Set milvus.enabled=false and point
+# vectorStore.host at an externally-managed Milvus service when required.
+milvus:
+  enabled: true
+  image: milvusdb/milvus:v2.4-latest
+  port: 19530
+  persistence:
+    size: 20Gi
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
     limits:
       memory: "2Gi"
       cpu: "1000m"
