@@ -9,6 +9,7 @@ import com.hfusionhub.entity.AgentApproval;
 import com.hfusionhub.entity.AgentRun;
 import com.hfusionhub.service.AgentStatusEventService;
 import com.hfusionhub.service.AgentTaskService;
+import com.hfusionhub.service.ApprovalEventSseManager;
 
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
  * Agent 任务管理控制器
@@ -33,6 +35,7 @@ public class AgentTaskController {
 
     private final AgentTaskService agentTaskService;
     private final AgentStatusEventService statusEventService;
+    private final ApprovalEventSseManager approvalEventSseManager;
 
     @Operation(summary = "获取任务详情（含所有 Run 和 Step 时间线）")
     @GetMapping("/{taskId}")
@@ -115,6 +118,9 @@ public class AgentTaskController {
         if (approvalId == null || approvalId.isBlank()) return R.fail("approvalId 不能为空");
         if (decision == null || (!"approved".equals(decision) && !"denied".equals(decision)))
             return R.fail("decision 必须为 approved 或 denied");
+        if ("denied".equals(decision) && (reason == null || reason.isBlank())) {
+            return R.fail("拒绝时必须填写原因");
+        }
 
         // 安全校验：审批记录必须属于该任务
         AgentApproval approval = agentTaskService.getApproval(approvalId);
@@ -130,6 +136,13 @@ public class AgentTaskController {
     public R<List<AgentApproval>> listPendingApprovals() {
         Long userId = JwtUtils.getCurrentUserId();
         return R.ok(agentTaskService.listPendingApprovals(userId));
+    }
+
+    @Operation(summary = "当前用户的审批实时流（SSE：snapshot + 状态变更 diff）")
+    @GetMapping(value = "/approvals/stream", produces = "text/event-stream")
+    public SseEmitter streamApprovals() {
+        Long userId = JwtUtils.getCurrentUserId();
+        return approvalEventSseManager.register(userId);
     }
 
     // ================================================================

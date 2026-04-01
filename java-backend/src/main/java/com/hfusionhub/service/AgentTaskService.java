@@ -162,7 +162,8 @@ public interface AgentTaskService {
      * @return 审批记录
      */
     AgentApproval pauseForApproval(Long taskId, Long runId, Long userId,
-                                   String toolName, String toolInput, String argumentsSummary);
+                                   String toolName, String toolInput, String argumentsSummary,
+                                   String riskLevel);
 
     /**
      * 审批决定（批准/拒绝）

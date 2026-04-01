@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
@@ -16,6 +16,7 @@ import {
   Cpu,
   FileText,
   FlaskConical,
+  Fingerprint,
   Home,
   LogOut,
   Menu,
@@ -64,6 +65,7 @@ const menuItems: Array<{
   { path: '/document', label: '文档管理', description: '解析与索引', icon: FileText },
   { path: '/chat', label: '智能对话', description: '多轮问答', icon: MessageSquare },
   { path: '/agent', label: 'Agent 任务', description: '执行与恢复', icon: Sparkles },
+  { path: '/approvals', label: '工具审批', description: '人工确认', icon: Fingerprint },
   { path: '/memory', label: '长期记忆', description: 'Agent 用户记忆', icon: User },
   { path: '/rag', label: 'RAG 观测', description: '检索评估', icon: Activity },
   { path: '/admin/flags', label: '高级能力', description: '配置说明', icon: ShieldCheck },
@@ -72,7 +74,7 @@ const menuItems: Array<{
 const menuGroups = [
   { label: '工作区', items: menuItems.filter((item) => ['/', '/knowledge-base', '/document', '/chat'].includes(item.path)) },
   { label: '构建', items: menuItems.filter((item) => ['/builder/prompts', '/builder/test-bench', '/builder/test-sets', '/builder/models', '/builder/tools', '/agent'].includes(item.path)) },
-  { label: '运营', items: menuItems.filter((item) => ['/rag', '/memory'].includes(item.path)) },
+  { label: '运营', items: menuItems.filter((item) => ['/approvals', '/rag', '/memory'].includes(item.path)) },
   { label: '管理', items: menuItems.filter((item) => item.path === '/admin/flags') },
 ]
 
@@ -159,6 +161,21 @@ const resolveNotification = async (alertId: number) => {
   }
 }
 
+const pendingApprovals = ref(0)
+let approvalPollTimer: ReturnType<typeof setInterval> | null = null
+const loadPendingApprovals = async () => {
+  try {
+    const res = (await get('/agent-task/approvals/pending')) as ApiResponse<unknown[]>
+    pendingApprovals.value = Array.isArray(res.data) ? res.data.length : 0
+  } catch (error) {
+    pendingApprovals.value = 0
+  }
+}
+const pollPendingApprovals = () => {
+  loadPendingApprovals()
+  approvalPollTimer = setInterval(loadPendingApprovals, 30000)
+}
+
 const formatDateTime = (value?: string) => value ? value.replace('T', ' ').slice(0, 16) : '刚刚'
 const severityLabel = (severity?: string) => ({ critical: '需要立即处理', warning: '需要关注', info: '提示' }[severity || ''] || '提示')
 const severityClass = (severity?: string) => ({
@@ -227,6 +244,11 @@ onMounted(() => {
   initializeTheme()
   void refreshServiceHealth()
   void loadNotifications()
+  pollPendingApprovals()
+})
+
+onBeforeUnmount(() => {
+  if (approvalPollTimer) clearInterval(approvalPollTimer)
 })
 </script>
 
@@ -280,6 +302,13 @@ onMounted(() => {
           >
             <component :is="item.icon" class="h-5 w-5 shrink-0" />
             <span v-if="isSidebarOpen" class="min-w-0"><span class="block truncate">{{ item.label }}</span><span class="block truncate text-xs font-normal text-zinc-600 group-hover:text-zinc-400">{{ item.description }}</span></span>
+            <span
+              v-if="item.path === '/approvals' && pendingApprovals > 0"
+              class="ml-auto shrink-0 rounded-full bg-amber-400/20 px-2 py-0.5 text-xs font-semibold text-amber-300"
+              :title="`${pendingApprovals} 条待审批`"
+            >
+              {{ pendingApprovals }}
+            </span>
           </router-link>
         </section>
       </nav>

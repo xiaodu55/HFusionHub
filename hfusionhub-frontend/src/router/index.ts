@@ -66,6 +66,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/agent/Index.vue'),
       },
       {
+        path: 'approvals',
+        name: 'Approvals',
+        component: () => import('@/pages/approval/Index.vue'),
+      },
+      {
         path: 'builder/prompts',
         name: 'PromptStudio',
         component: () => import('@/pages/builder/Prompts.vue'),

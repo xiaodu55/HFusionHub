@@ -2235,7 +2235,7 @@ class TestEndToEndApprovalFlow:
         agent._get_llm = _make_stub_llm_react([
             'Thought: 用户要求写入笔记，调用write_note。\n'
             'Action: write_note\n'
-            'Action Input: {"content": "e2e test note"}',
+            'Action Input: {"content": "e2e test note", "api_key": "sk-live-123"}',
             'Thought: 笔记已写入。\nFinal Answer: 完成。',
         ])
 
@@ -2252,6 +2252,17 @@ class TestEndToEndApprovalFlow:
         detail = _json.loads(response.error_detail) if response.error_detail else {}
         assert detail.get("event") == "approval_required"
         assert detail.get("tool_name") == "write_note"
+        assert detail.get("risk_level") == "read_write", (
+            "approval payload must carry the tool's risk_level for the UI"
+        )
+        summary = detail.get("arguments_summary", "")
+        assert isinstance(summary, str) and summary, "arguments_summary must be a masked string"
+        assert "sk-live-123" not in summary, (
+            "arguments_summary must mask sensitive keys — raw secret leaked"
+        )
+        assert "content" in summary, (
+            "non-sensitive keys remain visible so approvers can review the request"
+        )
 
     @pytest.mark.asyncio
     async def test_full_approve_execute_consume_flow(self):

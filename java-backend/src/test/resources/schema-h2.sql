@@ -369,6 +369,7 @@ CREATE TABLE IF NOT EXISTS agent_approval (
     user_role         VARCHAR(20) DEFAULT 'user',
     trace_id          VARCHAR(64) DEFAULT NULL,
     tool_name         VARCHAR(50) NOT NULL,
+    risk_level        VARCHAR(32) DEFAULT 'read_only',
     tool_input_hash   VARCHAR(64) NOT NULL,
     execution_token   VARCHAR(64) DEFAULT NULL,
     execution_token_status VARCHAR(16) DEFAULT 'none',

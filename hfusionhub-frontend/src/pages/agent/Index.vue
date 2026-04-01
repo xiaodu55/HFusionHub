@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   AlertCircle,
   Bot,
@@ -8,6 +9,7 @@ import {
   CircleDashed,
   Clock3,
   FileSearch,
+  Fingerprint,
   Gauge,
   LoaderCircle,
   RefreshCw,
@@ -27,6 +29,7 @@ import { useToast } from '@/composables/useToast'
 
 type StatusTone = 'success' | 'danger' | 'warning' | 'progress' | 'neutral'
 
+const router = useRouter()
 const toast = useToast()
 const loading = ref(false)
 const loadingDetail = ref(false)
@@ -175,6 +178,11 @@ const eventText = (event: agentApi.AgentStatusEvent) => {
 const runTime = (run: agentApi.AgentRun) => formatDuration(run.durationMs)
 const stepLabel = (step: agentApi.AgentStep) => step.action || step.stepType || '执行步骤'
 
+const openApprovals = () => {
+  if (!selected.value) return
+  router.push({ path: '/approvals', query: { taskId: selected.value.id } })
+}
+
 onMounted(load)
 </script>
 
@@ -301,6 +309,7 @@ onMounted(load)
               <div class="flex shrink-0 gap-2">
                 <Button v-if="canRetry" variant="outline" size="sm" :disabled="actionLoading" class="gap-1.5" @click="retry"><RotateCcw class="h-3.5 w-3.5" />重试</Button>
                 <Button v-if="canCancel" variant="outline" size="sm" :disabled="actionLoading" class="gap-1.5" @click="cancel"><XCircle class="h-3.5 w-3.5" />取消</Button>
+                <Button variant="outline" size="sm" class="gap-1.5" @click="openApprovals"><Fingerprint class="h-3.5 w-3.5" />审批记录</Button>
               </div>
             </div>
           </CardHeader>

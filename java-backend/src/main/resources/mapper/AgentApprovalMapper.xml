@@ -11,6 +11,7 @@
         <result column="user_role" property="userRole"/>
         <result column="trace_id" property="traceId"/>
         <result column="tool_name" property="toolName"/>
+        <result column="risk_level" property="riskLevel"/>
         <result column="tool_input_hash" property="toolInputHash"/>
         <result column="execution_token" property="executionToken"/>
         <result column="execution_token_status" property="executionTokenStatus"/>
@@ -28,7 +29,7 @@
 
     <sql id="Base_Column_List">
         id, approval_id, task_id, run_id, user_id, user_role, trace_id, tool_name,
-        tool_input_hash, execution_token, execution_token_status,
+        risk_level, tool_input_hash, execution_token, execution_token_status,
         execution_token_issued_at, execution_token_consumed_at, tool_input,
         arguments_summary, status, decided_by, decided_at, reason, expires_at, created_at
     </sql>
@@ -51,6 +52,14 @@
         FROM agent_approval
         WHERE user_id = #{userId} AND status = 'pending' AND expires_at > NOW()
         ORDER BY created_at DESC
+    </select>
+
+    <select id="selectRecentByUserId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_approval
+        WHERE user_id = #{userId}
+        ORDER BY created_at DESC
+        LIMIT #{limit}
     </select>
 
     <select id="selectExpiredPending" resultMap="BaseResultMap">
@@ -86,6 +95,13 @@
         WHERE approval_id = #{approvalId}
           AND execution_token = #{token}
           AND execution_token_status = 'issued'
+    </update>
+
+    <update id="updateExecutionOutcome">
+        UPDATE agent_approval
+        SET status = #{status}
+        WHERE id = #{id}
+          AND status = 'approved'
     </update>
 
 </mapper>

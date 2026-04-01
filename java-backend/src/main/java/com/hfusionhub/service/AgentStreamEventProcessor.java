@@ -190,6 +190,8 @@ public class AgentStreamEventProcessor {
             String toolInput = eventNode.has("tool_input") ? eventNode.get("tool_input").toString() : "{}";
             String argumentsSummary = eventNode.has("arguments_summary") && !eventNode.get("arguments_summary").isNull()
                     ? eventNode.get("arguments_summary").asText() : "";
+            String riskLevel = eventNode.has("risk_level") && !eventNode.get("risk_level").isNull()
+                    ? eventNode.get("risk_level").asText() : "read_only";
 
             // Look up task context via the run
             AgentRun currentRun = agentTaskService.getRunById(runId);
@@ -201,7 +203,7 @@ public class AgentStreamEventProcessor {
                 }
                 Long taskUserId = taskDetail.getUserId();
                 agentTaskService.pauseForApproval(currentRun.getTaskId(), runId, taskUserId,
-                        toolName, toolInput, argumentsSummary);
+                        toolName, toolInput, argumentsSummary, riskLevel);
 
                 // Record status event
                 statusEventService.record(currentRun.getTaskId(), runId, "APPROVAL_REQUIRED",

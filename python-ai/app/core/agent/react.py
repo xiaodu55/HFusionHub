@@ -39,10 +39,40 @@ from ..rag import (
     EvaluationSample,
     get_adaptive_retrieval_planner,
 )
+from ..policy import build_arguments_summary
 
 logger = logging.getLogger(__name__)
 
 NO_SUFFICIENT_EVIDENCE_REPLY = "我在当前知识库中未检索到足够依据，无法基于资料回答这个问题。"
+
+
+def _approval_required_payload(
+    action: str,
+    action_input: Any,
+    tools: list,
+    message: str,
+) -> Dict[str, Any]:
+    """Build the approval_required event payload for Java interception.
+
+    Carries the tool's ``risk_level`` (from its spec) and a masked
+    ``arguments_summary`` (never raw PII / full content).
+    """
+    risk_level = "read_only"
+    for t in tools:
+        if isinstance(t, dict) and t.get("name") == action:
+            spec = t.get("_spec")
+            risk_level = getattr(spec, "risk_level", "read_only")
+            break
+    args = action_input if isinstance(action_input, dict) else {}
+    return {
+        "event": "approval_required",
+        "tool_name": action,
+        "tool_input": action_input,
+        "arguments_summary": build_arguments_summary(args),
+        "risk_level": risk_level,
+        "reason": message,
+    }
+
 
 # ── Evidence integrity constants ───────────────────────────────────────
 _MIN_COMPRESSION_SAFETY_RATIO = 0.25
@@ -815,13 +845,9 @@ class ReactAgent(Agent):
                             max_tool_steps=self.max_steps,
                             style_used=self.style,
                             failed_tool=action,
-                            error_detail=json.dumps({
-                                "event": "approval_required",
-                                "tool_name": action,
-                                "tool_input": action_input,
-                                "arguments_summary": json.dumps(action_input, ensure_ascii=False)[:500],
-                                "reason": obs_data.get("message", ""),
-                            }, ensure_ascii=False),
+                            error_detail=json.dumps(_approval_required_payload(
+                                action, action_input, tools, obs_data.get("message", "")),
+                                ensure_ascii=False),
                         )
                 except (json.JSONDecodeError, TypeError):
                     pass
@@ -1400,14 +1426,9 @@ class ReactAgent(Agent):
                                 "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
                             }, ensure_ascii=False)
                             # Emit the approval_required event for Java interception
-                            yield _json.dumps({
-                                "event": "approval_required",
-                                "tool_name": action,
-                                "tool_input": action_input,
-                                "arguments_summary": _json.dumps(action_input, ensure_ascii=False)[:500],
-                                "reason": obs_data.get("message", ""),
-                                "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
-                            }, ensure_ascii=False)
+                            yield _json.dumps(_approval_required_payload(
+                                action, action_input, tools, obs_data.get("message", "")),
+                                ensure_ascii=False)
                             return  # Stop streaming — wait for human decision
                     except (_json.JSONDecodeError, TypeError):
                         pass

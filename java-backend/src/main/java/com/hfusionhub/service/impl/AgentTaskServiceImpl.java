@@ -482,7 +482,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     @Transactional
     public AgentApproval pauseForApproval(Long taskId, Long runId, Long userId,
                                           String toolName, String toolInput,
-                                          String argumentsSummary) {
+                                          String argumentsSummary, String riskLevel) {
         AgentTask task = taskMapper.selectById(taskId);
         if (task == null) throw new BusinessException("任务不存在: " + taskId);
 
@@ -502,6 +502,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         approval.setUserRole(resolveUserRole(userId));
         approval.setTraceId(com.hfusionhub.config.TraceContext.getTraceId());
         approval.setToolName(toolName);
+        approval.setRiskLevel(riskLevel != null && !riskLevel.isBlank() ? riskLevel : "read_only");
         approval.setToolInputHash(toolInputHash);
         approval.setToolInput(toolInput != null ? toolInput : "{}");
         approval.setArgumentsSummary(argumentsSummary);
@@ -795,6 +796,20 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             contentPreview = aiResponse.getContent().substring(0,
                     Math.min(100, aiResponse.getContent().length()));
         }
+
+        // Record the approval's execution outcome so the UI/audit can show
+        // executed / failed (not just approved).  Guarded to 'approved' state.
+        String outcomeStatus = AgentConstants.STATUS_SUCCEEDED.equals(mappedStatus)
+                ? "executed" : "failed";
+        int outcomeRows = approvalMapper.updateExecutionOutcome(approval.getId(), outcomeStatus);
+        if (outcomeRows == 1) {
+            log.info("Approval {} execution outcome recorded: {} (run mapped={})",
+                    approval.getApprovalId(), outcomeStatus, mappedStatus);
+        } else {
+            log.warn("Approval {} execution outcome NOT recorded (status != approved): {}",
+                    approval.getApprovalId(), outcomeStatus);
+        }
+
         log.info("Agent run {} resumed after approval {}: status={} answer={}",
                 runId, approval.getApprovalId(), mappedStatus, contentPreview);
     }

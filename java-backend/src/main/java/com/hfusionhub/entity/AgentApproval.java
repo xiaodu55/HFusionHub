@@ -41,6 +41,9 @@ public class AgentApproval {
     @Schema(description = "工具名称")
     private String toolName;
 
+    @Schema(description = "工具风险等级: read_only|read_write|external")
+    private String riskLevel;
+
     @Schema(description = "工具参数SHA-256摘要")
     private String toolInputHash;
 
