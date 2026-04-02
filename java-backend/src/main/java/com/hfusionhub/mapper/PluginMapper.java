@@ -23,6 +23,8 @@ public interface PluginMapper extends BaseMapper<Plugin> {
 
     List<Plugin> selectEnabledPlugins();
 
+    List<Plugin> selectCircuitOpenPlugins();
+
     int updateStatus(@Param("id") Long id, @Param("status") String status);
 
     int updateEnabled(@Param("id") Long id, @Param("enabled") Boolean enabled);
@@ -31,5 +33,21 @@ public interface PluginMapper extends BaseMapper<Plugin> {
                        @Param("artifactPath") String artifactPath,
                        @Param("artifactHash") String artifactHash);
 
+    int updateCanary(@Param("id") Long id, @Param("canaryWeight") java.math.BigDecimal canaryWeight);
+
+    int updateHealth(@Param("id") Long id, @Param("healthStatus") String healthStatus);
+
+    int updateVulnerability(@Param("id") Long id, @Param("vulnerabilityStatus") String vulnerabilityStatus);
+
+    int updateContainerImage(@Param("id") Long id, @Param("containerImage") String containerImage);
+
+    int openCircuitBreaker(@Param("id") Long id, @Param("cooldownMinutes") int cooldownMinutes);
+
     int countActiveByUserId(@Param("userId") Long userId);
+
+    /**
+     * Get all versions of a plugin (by name) for canary routing.
+     * Returns all enabled plugins with the same name, ordered by version.
+     */
+    List<Plugin> selectVersionsByPluginName(@Param("name") String name);
 }

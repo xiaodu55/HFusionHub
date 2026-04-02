@@ -17,6 +17,8 @@ services:
       timeout: 5s
       retries: 20
     restart: unless-stopped
+    networks:
+      - backend
 
   redis7:
     image: redis:7-alpine
@@ -32,6 +34,74 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+    networks:
+      - backend
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "127.0.0.1:9002:9000"
+      - "127.0.0.1:9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - backend
+
+  plugin-runner:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.plugin-runner
+    container_name: plugin-runner
+    ports:
+      - "127.0.0.1:9100:9100"
+    environment:
+      PLUGIN_RUNNER_TOKEN: ${PLUGIN_RUNNER_TOKEN:?PLUGIN_RUNNER_TOKEN must be set}
+      PLUGIN_RUNNER_HOST: "0.0.0.0"
+      PLUGIN_RUNNER_PORT: "9100"
+      DOCKER_HOST: ${DOCKER_HOST:-tcp://host.docker.internal:2376}
+      DOCKER_TLS_CERTDIR: "/certs"
+      DOCKER_CERT_PATH: "/certs/client"
+      DOCKER_TLS_VERIFY: "1"
+    volumes:
+      - plugin-runner-certs:/certs:ro
+      - plugin-artifacts:/opt/plugin-artifacts
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9100/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - backend
+      - plugin-isolated
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  backend:
+    driver: bridge
+  plugin-isolated:
+    driver: bridge
+    internal: true
 
 volumes:
   mysql-data:
+  minio-data:
+  plugin-runner-certs:
+  plugin-artifacts:

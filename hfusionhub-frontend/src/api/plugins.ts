@@ -1,4 +1,4 @@
-import { get, post } from './request'
+import { get, post, upload } from './request'
 import type { ApiResponse } from './types'
 
 // ── Plugin Types ──────────────────────────────────────────────────────
@@ -17,7 +17,7 @@ export interface PluginEntry {
   maxHfusionhubVersion: string | null
   iconUrl: string | null
   source: 'local' | 'git' | 'wheel'
-  status: 'active' | 'disabled' | 'failed' | 'pending'
+  status: 'active' | 'disabled' | 'failed' | 'pending' | 'circuit_open'
   manifestHash: string | null
   artifactPath: string | null
   artifactHash: string | null
@@ -26,12 +26,22 @@ export interface PluginEntry {
   enabled: boolean
   installedBy: number | null
   installedAt: string | null
+  canaryWeight: number | null
+  circuitOpenUntil: string | null
+  previousVersion: string | null
+  healthStatus: string | null
+  lastHealthCheck: string | null
+  sbomJson: string | null
+  vulnerabilityStatus: string | null
+  lastScanAt: string | null
+  containerImage: string | null
   createdAt: string
   updatedAt: string
 }
 
 export interface PluginAuditLog {
   id: number
+  eventId: string | null
   pluginName: string
   action: string
   operatorId: number | null
@@ -62,9 +72,17 @@ export const getPlugin = (pluginId: string): Promise<ApiResponse<PluginEntry>> =
 export const listEnabledPlugins = (): Promise<ApiResponse<PluginEntry[]>> =>
   get('/plugin/enabled')
 
-/** 安装插件 */
+/** 安装插件（JSON manifest） */
 export const installPlugin = (manifest: Record<string, unknown>): Promise<ApiResponse<PluginEntry>> =>
   post('/plugin/install', manifest)
+
+/** 上传 wheel 文件并安装插件 */
+export const installPluginWithWheel = (manifest: Record<string, unknown>, wheelFile: File): Promise<ApiResponse<PluginEntry>> => {
+  const formData = new FormData()
+  formData.append('manifest', new Blob([JSON.stringify(manifest)], { type: 'application/json' }))
+  formData.append('wheel', wheelFile)
+  return upload('/plugin/install/upload', formData)
+}
 
 /** 启用插件 */
 export const enablePlugin = (pluginId: string): Promise<ApiResponse<PluginEntry>> =>
@@ -78,6 +96,22 @@ export const disablePlugin = (pluginId: string, reason?: string): Promise<ApiRes
 export const uninstallPlugin = (pluginId: string, reason?: string): Promise<ApiResponse<void>> =>
   post(`/plugin/${pluginId}/uninstall`, reason ? { reason } : {})
 
+/** 设置金丝雀流量权重 */
+export const setCanary = (pluginId: string, weight: number): Promise<ApiResponse<PluginEntry>> =>
+  post(`/plugin/${pluginId}/canary`, { weight })
+
+/** 提合金丝雀为正式版本 */
+export const promoteCanary = (pluginId: string): Promise<ApiResponse<PluginEntry>> =>
+  post(`/plugin/${pluginId}/canary/promote`)
+
+/** 回滚到上一版本 */
+export const rollbackPlugin = (pluginId: string): Promise<ApiResponse<PluginEntry>> =>
+  post(`/plugin/${pluginId}/rollback`)
+
 /** 获取插件审计日志 */
 export const getPluginAuditLogs = (pluginId: string, limit = 20): Promise<ApiResponse<PluginAuditLog[]>> =>
   get(`/plugin/${pluginId}/audit-logs`, { limit })
+
+/** 导出审计日志 */
+export const exportAuditLogs = (pluginId?: string, format = 'json', limit = 100): Promise<ApiResponse<PluginAuditLog[]>> =>
+  get('/plugin/audit-logs/export', { pluginId, format, limit })

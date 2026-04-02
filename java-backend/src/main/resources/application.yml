@@ -105,12 +105,18 @@ ai-service:
   base-url: ${AI_SERVICE_URL:http://localhost:9000}
   timeout: ${AI_SERVICE_TIMEOUT:120000}
 
-# MinIO 配置
+# MinIO 配置 (port 9002 — avoid conflict with Python AI :9000)
 minio:
-  endpoint: http://localhost:9000
-  access-key: ${MINIO_ACCESS_KEY:}
-  secret-key: ${MINIO_SECRET_KEY:}
-  bucket-name: hfusionhub
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9002}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  bucket-name: ${MINIO_BUCKET:hfusionhub}
+
+# Plugin Runner 配置
+plugin-runner:
+  base-url: ${PLUGIN_RUNNER_URL:http://localhost:9100}
+  token: ${PLUGIN_RUNNER_TOKEN:plugin-runner-secret}
+  timeout: ${PLUGIN_RUNNER_TIMEOUT:60000}
 
 # 管理员初始化配置
 # ADMIN_PASSWORD 环境变量控制首次部署时的管理员账户创建

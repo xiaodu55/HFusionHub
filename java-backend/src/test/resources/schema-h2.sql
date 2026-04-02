@@ -607,6 +607,16 @@ CREATE TABLE IF NOT EXISTS plugin (
     created_at             TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at             TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted                TINYINT      NOT NULL DEFAULT 0,
+    canary_weight          DECIMAL(3,2) DEFAULT 0.00,
+    circuit_open_until     TIMESTAMP    NULL,
+    previous_version       VARCHAR(32)  DEFAULT NULL,
+    health_status          VARCHAR(16)  DEFAULT 'unknown',
+    last_health_check      TIMESTAMP    NULL,
+    sbom_json              TEXT         DEFAULT NULL,
+    vulnerability_status   VARCHAR(16)  DEFAULT 'pending',
+    last_scan_at           TIMESTAMP    NULL,
+    container_image        VARCHAR(256) DEFAULT NULL,
+    image_digest           VARCHAR(128) DEFAULT NULL,
     PRIMARY KEY (id),
     UNIQUE (plugin_id),
     FOREIGN KEY (installed_by) REFERENCES sys_user (id) ON DELETE SET NULL
@@ -652,3 +662,42 @@ CREATE TABLE IF NOT EXISTS plugin_dependency (
 );
 
 CREATE INDEX IF NOT EXISTS idx_plugin_dep_plugin ON plugin_dependency (plugin_id);
+
+-- =====================================================
+-- 插件执行指标表 (plugin_execution_metric) — V30
+-- =====================================================
+CREATE TABLE IF NOT EXISTS plugin_execution_metric (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    plugin_id BIGINT NOT NULL,
+    metric_name VARCHAR(128) NOT NULL,
+    metric_value DOUBLE NOT NULL,
+    labels TEXT DEFAULT NULL,
+    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =====================================================
+-- 插件健康检查日志表 (plugin_health_log) — V30
+-- =====================================================
+CREATE TABLE IF NOT EXISTS plugin_health_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    plugin_id BIGINT NOT NULL,
+    check_type VARCHAR(32) NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    details TEXT DEFAULT NULL,
+    duration_ms FLOAT DEFAULT NULL,
+    checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =====================================================
+-- 插件版本历史表 (plugin_version_history) — V30
+-- =====================================================
+CREATE TABLE IF NOT EXISTS plugin_version_history (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    plugin_id BIGINT NOT NULL,
+    version VARCHAR(32) NOT NULL,
+    artifact_key VARCHAR(500) DEFAULT NULL,
+    artifact_hash VARCHAR(64) DEFAULT NULL,
+    manifest_json TEXT DEFAULT NULL,
+    is_canary TINYINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

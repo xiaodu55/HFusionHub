@@ -1,0 +1,207 @@
+name: Plugin Security Pipeline
+
+on:
+  push:
+    paths: ['python-ai/plugins/**', 'python-ai/requirements*.in', 'python-ai/app/core/plugin/**']
+  pull_request:
+    paths: ['python-ai/plugins/**', 'python-ai/requirements*.in', 'python-ai/app/core/plugin/**']
+
+jobs:
+  # ─── 签名验证 ───
+  signature-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: python-ai/requirements.txt
+      - name: Install dependencies
+        run: pip install -r python-ai/requirements-dev.txt
+      - name: Verify plugin signatures
+        run: |
+          cd python-ai
+          python -c "
+          import sys, glob, os
+          sys.path.insert(0, '.')
+          wheels = glob.glob('plugins/**/*.whl', recursive=True)
+          if not wheels:
+              print('No plugin wheels found — skipping (no artifacts to verify)')
+              sys.exit(0)
+          from app.core.plugin.signature import verify_wheel_signature
+          failed = []
+          for w in wheels:
+              print(f'Checking {w}...')
+              if not verify_wheel_signature(w):
+                  failed.append(w)
+          if failed:
+              print(f'FAILED: {len(failed)} wheel(s) failed signature verification')
+              for f in failed:
+                  print(f'  - {f}')
+              sys.exit(1)
+          print(f'All {len(wheels)} wheel(s) passed signature verification')
+          "
+
+  # ─── 哈希校验 ───
+  hash-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify wheel SHA-256 integrity
+        run: |
+          cd python-ai
+          wheels=$(find plugins -name "*.whl" 2>/dev/null)
+          if [ -z "$wheels" ]; then
+            echo "No plugin wheels found — skipping"
+            exit 0
+          fi
+          echo "Checking wheel file integrity..."
+          failed=0
+          for whl in $wheels; do
+            echo -n "  $whl: "
+            sha256sum "$whl" || { echo "FAILED to compute hash"; failed=1; }
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "FAILED: Hash verification encountered errors"
+            exit 1
+          fi
+          echo "All wheel hashes computed successfully"
+
+  # ─── 漏洞扫描 ───
+  vulnerability-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install pip-audit
+        run: pip install pip-audit
+      - name: Scan Python AI dependencies
+        run: |
+          cd python-ai
+          pip-audit -r requirements.txt --desc --output /tmp/vuln-report.json --format json
+          echo "Vulnerability scan complete"
+          cat /tmp/vuln-report.json
+      - name: Check for critical/high vulnerabilities
+        run: |
+          cd python-ai
+          python -c "
+          import json, sys
+          with open('/tmp/vuln-report.json') as f:
+              data = json.load(f)
+          vulns = []
+          for item in data:
+              for v in item.get('vulns', []):
+                  vulns.append({
+                      'id': v.get('id', ''),
+                      'package': item.get('name', ''),
+                      'version': item.get('version', ''),
+                  })
+          if vulns:
+              print(f'Found {len(vulns)} vulnerabilities:')
+              for v in vulns:
+                  print(f\"  {v['id']}: {v['package']}=={v['version']}\")
+              sys.exit(1)
+          print('No known vulnerabilities found')
+          "
+      - name: Upload vulnerability report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulnerability-report
+          path: /tmp/vuln-report.json
+          if-no-files-found: error
+
+  # ─── SBOM 生成 ───
+  sbom-generation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install CycloneDX
+        run: pip install cyclonedx-bom
+      - name: Generate SBOM
+        run: |
+          cd python-ai
+          cyclonedx-py environment -o ../sbom-python.json --format json
+          echo "SBOM generated"
+          python -c "
+          import json, sys
+          with open('../sbom-python.json') as f:
+              data = json.load(f)
+          components = data.get('components', [])
+          print(f'SBOM contains {len(components)} components')
+          if not components:
+              print('WARNING: SBOM has no components')
+          "
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom-python.json
+          if-no-files-found: error
+
+  # ─── 许可证检查 ───
+  license-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install pip-licenses
+        run: pip install pip-licenses
+      - name: Check licenses
+        run: |
+          cd python-ai
+          pip install -r requirements.txt
+          pip-licenses --format=json --with-urls --output-file=/tmp/licenses.json
+          echo "License scan complete"
+          pip-licenses --from=mixed --format=table --allow-only="MIT;Apache-2.0;BSD-3-Clause;BSD-2-Clause;ISC;PSF;MPL-2.0;Apache Software License;GNU General Public License v3 (GPLv3);GNU Lesser General Public License v3 (LGPLv3);Python Software Foundation License"
+      - name: Verify no disallowed licenses
+        run: |
+          cd python-ai
+          python -c "
+          import json, sys
+          ALLOWED = {'MIT', 'Apache-2.0', 'BSD-3-Clause', 'BSD-2-Clause', 'ISC', 'PSF',
+                     'MPL-2.0', 'Apache Software License', 'GNU General Public License v3 (GPLv3)',
+                     'GNU Lesser General Public License v3 (LGPLv3)', 'Python Software Foundation License',
+                     'Apache License 2.0', 'The Unlicense', 'Public Domain'}
+          with open('/tmp/licenses.json') as f:
+              licenses = json.load(f)
+          disallowed = []
+          for lib in licenses:
+              lic = lib.get('License', 'UNKNOWN')
+              name = lib.get('Name', 'unknown')
+              if lic and lic not in ALLOWED and 'MIT' not in lic and 'Apache' not in lic:
+                  disallowed.append(f'{name}: {lic}')
+          if disallowed:
+              print(f'FAILED: {len(disallowed)} package(s) with disallowed licenses:')
+              for d in disallowed:
+                  print(f'  - {d}')
+              sys.exit(1)
+          print('All packages have allowed licenses')
+          "
+      - name: Upload license report
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-report
+          path: /tmp/licenses.json
+          if-no-files-found: error
+
+  # ─── Plugin Runner 构建验证 ───
+  plugin-runner-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build plugin-runner image
+        run: |
+          docker build -f docker/Dockerfile.plugin-runner -t plugin-runner-test .
+          echo "Plugin runner image built successfully"

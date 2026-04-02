@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
@@ -58,13 +59,13 @@ public class Plugin extends BaseEntity {
     @Schema(description = "来源: local|git|wheel")
     private String source;
 
-    @Schema(description = "状态: active|disabled|failed|pending")
+    @Schema(description = "状态: active|disabled|failed|pending|circuit_open")
     private String status;
 
     @Schema(description = "manifest JSON SHA-256")
     private String manifestHash;
 
-    @Schema(description = "wheel 文件路径")
+    @Schema(description = "wheel 文件 MinIO 路径")
     private String artifactPath;
 
     @Schema(description = "wheel 文件 SHA-256")
@@ -86,4 +87,34 @@ public class Plugin extends BaseEntity {
 
     @Schema(description = "安装时间")
     private LocalDateTime installedAt;
+
+    @Schema(description = "金丝雀流量权重 (0.00-1.00)")
+    private BigDecimal canaryWeight;
+
+    @Schema(description = "熔断器开启截止时间")
+    private LocalDateTime circuitOpenUntil;
+
+    @Schema(description = "上一版本（用于回滚）")
+    private String previousVersion;
+
+    @Schema(description = "健康状态: healthy|unhealthy|unknown")
+    private String healthStatus;
+
+    @Schema(description = "最近健康检查时间")
+    private LocalDateTime lastHealthCheck;
+
+    @Schema(description = "CycloneDX SBOM JSON")
+    private String sbomJson;
+
+    @Schema(description = "漏洞状态: clean|vulnerable|pending|error")
+    private String vulnerabilityStatus;
+
+    @Schema(description = "最近漏洞扫描时间")
+    private LocalDateTime lastScanAt;
+
+    @Schema(description = "Docker 镜像标签")
+    private String containerImage;
+
+    @Schema(description = "Docker 镜像 SHA-256 摘要，用于供应链完整性校验")
+    private String imageDigest;
 }

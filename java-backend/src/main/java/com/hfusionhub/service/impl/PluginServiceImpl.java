@@ -11,11 +11,16 @@ import com.hfusionhub.mapper.PluginAuditLogMapper;
 import com.hfusionhub.mapper.PluginDependencyMapper;
 import com.hfusionhub.mapper.PluginMapper;
 import com.hfusionhub.service.PluginService;
+import com.hfusionhub.storage.MinioArtifactStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.ByteArrayInputStream;
+import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -34,11 +39,41 @@ public class PluginServiceImpl implements PluginService {
     private final PluginMapper pluginMapper;
     private final PluginAuditLogMapper auditLogMapper;
     private final PluginDependencyMapper dependencyMapper;
+    private final MinioArtifactStore artifactStore;
+
+    @Value("${minio.bucket-name:hfusionhub}")
+    private String bucketName;
 
     @Override
     @Transactional
     public Plugin install(Map<String, Object> manifest) {
-        // Validate required fields
+        return doInstall(manifest, null, null);
+    }
+
+    @Override
+    @Transactional
+    public Plugin installWithWheel(Map<String, Object> manifest, byte[] wheelData, String wheelFilename) {
+        String artifactHash = (String) manifest.get("artifact_hash");
+        if (artifactHash == null || artifactHash.isBlank()) {
+            throw new IllegalArgumentException("manifest 缺少必填字段: artifact_hash");
+        }
+
+        String name = String.valueOf(manifest.get("name"));
+        String version = String.valueOf(manifest.get("version"));
+
+        String objectKey = artifactStore.uploadWheel(
+                name, version, artifactHash,
+                new ByteArrayInputStream(wheelData), wheelData.length);
+
+        manifest.put("artifact_path", objectKey);
+
+        String presignedUrl = artifactStore.getPresignedUrl(objectKey, Duration.ofHours(1));
+        manifest.put("wheel_url", presignedUrl);
+
+        return doInstall(manifest, objectKey, artifactHash);
+    }
+
+    private Plugin doInstall(Map<String, Object> manifest, String objectKey, String artifactHash) {
         for (String field : REQUIRED_MANIFEST_FIELDS) {
             if (!manifest.containsKey(field) || manifest.get(field) == null
                     || String.valueOf(manifest.get(field)).isBlank()) {
@@ -46,25 +81,22 @@ public class PluginServiceImpl implements PluginService {
             }
         }
 
-        // Mandatory artifact_hash for supply chain integrity
-        String artifactHash = (String) manifest.get("artifact_hash");
-        if (artifactHash == null || artifactHash.isBlank()) {
+        String hash = artifactHash != null ? artifactHash : (String) manifest.get("artifact_hash");
+        if (hash == null || hash.isBlank()) {
             throw new IllegalArgumentException("manifest 缺少必填字段: artifact_hash（供应链完整性校验）");
         }
-        if (artifactHash.length() != 64 || !artifactHash.matches("[0-9a-f]{64}")) {
+        if (hash.length() != 64 || !hash.matches("[0-9a-f]{64}")) {
             throw new IllegalArgumentException("artifact_hash 必须是64位十六进制SHA-256");
         }
 
         String name = String.valueOf(manifest.get("name"));
         String version = String.valueOf(manifest.get("version"));
 
-        // Check duplicate (including logically deleted rows — unique per name+version)
         Plugin existing = pluginMapper.selectByNameVersionAny(name, version);
         if (existing != null) {
             throw new IllegalStateException("插件已存在: " + name + "@" + version);
         }
 
-        // Create plugin entity
         Plugin plugin = new Plugin();
         plugin.setPluginId(UUID.randomUUID().toString());
         plugin.setName(name);
@@ -82,26 +114,19 @@ public class PluginServiceImpl implements PluginService {
         plugin.setEnabled(true);
         plugin.setInstalledBy(JwtUtils.getCurrentUserId());
         plugin.setInstalledAt(java.time.LocalDateTime.now());
-
-        // Hash the manifest
         plugin.setManifestHash(computeManifestHash(manifest));
+        plugin.setArtifactHash(hash);
 
-        // Artifact hash (mandatory for supply chain integrity)
-        plugin.setArtifactHash(artifactHash);
-
-        // Artifact path
-        String artifactPath = (String) manifest.get("artifact_path");
-        if (artifactPath != null) {
-            plugin.setArtifactPath(artifactPath);
+        String path = objectKey != null ? objectKey : (String) manifest.get("artifact_path");
+        if (path != null) {
+            plugin.setArtifactPath(path);
         }
 
-        // Sandbox config
         Map<String, Object> sandbox = (Map<String, Object>) manifest.get("sandbox");
         if (sandbox != null) {
             plugin.setSandboxConfig(toJson(sandbox));
         }
 
-        // Permissions
         List<String> perms = (List<String>) manifest.get("permissions");
         if (perms != null) {
             plugin.setPermissions(toJson(perms));
@@ -109,7 +134,6 @@ public class PluginServiceImpl implements PluginService {
 
         pluginMapper.insert(plugin);
 
-        // Save dependencies
         List<Map<String, Object>> deps = (List<Map<String, Object>>) manifest.get("dependencies");
         if (deps != null) {
             for (Map<String, Object> dep : deps) {
@@ -122,7 +146,6 @@ public class PluginServiceImpl implements PluginService {
             }
         }
 
-        // Audit log
         writeAuditLog(plugin.getId(), plugin.getName(), "install",
                 JwtUtils.getCurrentUserId(), null, toJson(manifest), null);
 
@@ -156,7 +179,7 @@ public class PluginServiceImpl implements PluginService {
     public Plugin enable(String pluginId) {
         Plugin plugin = requirePlugin(pluginId);
         if (Boolean.TRUE.equals(plugin.getEnabled()) && "active".equals(plugin.getStatus())) {
-            return plugin; // already enabled
+            return plugin;
         }
         pluginMapper.updateEnabled(plugin.getId(), true);
         pluginMapper.updateStatus(plugin.getId(), "active");
@@ -201,12 +224,89 @@ public class PluginServiceImpl implements PluginService {
     public void uninstall(String pluginId, String reason) {
         Plugin plugin = requirePlugin(pluginId);
         pluginMapper.deleteById(plugin.getId());
+        if (plugin.getArtifactPath() != null) {
+            try {
+                artifactStore.deleteWheel(plugin.getArtifactPath());
+            } catch (Exception e) {
+                log.warn("Failed to delete artifact from MinIO: {}", e.getMessage());
+            }
+        }
         writeAuditLog(plugin.getId(), plugin.getName(), "uninstall",
                 JwtUtils.getCurrentUserId(),
                 Map.of("status", plugin.getStatus(), "enabled", plugin.getEnabled()).toString(),
                 Map.of("status", "deleted").toString(),
                 reason);
         log.info("插件已卸载: {}@{}", plugin.getName(), plugin.getVersion());
+    }
+
+    @Override
+    @Transactional
+    public Plugin setCanary(String pluginId, BigDecimal weight) {
+        Plugin plugin = requirePlugin(pluginId);
+        if (weight.compareTo(BigDecimal.ZERO) < 0 || weight.compareTo(new BigDecimal("1.00")) > 0) {
+            throw new IllegalArgumentException("canary_weight 必须在 0.00-1.00 之间");
+        }
+        pluginMapper.updateCanary(plugin.getId(), weight);
+        writeAuditLog(plugin.getId(), plugin.getName(), "canary",
+                JwtUtils.getCurrentUserId(),
+                Map.of("canary_weight", plugin.getCanaryWeight()).toString(),
+                Map.of("canary_weight", weight).toString(),
+                null);
+        return pluginMapper.selectByPluginId(pluginId);
+    }
+
+    @Override
+    @Transactional
+    public Plugin promoteCanary(String pluginId) {
+        Plugin plugin = requirePlugin(pluginId);
+        pluginMapper.updateCanary(plugin.getId(), BigDecimal.ZERO);
+        pluginMapper.updateStatus(plugin.getId(), "active");
+        pluginMapper.updateEnabled(plugin.getId(), true);
+        writeAuditLog(plugin.getId(), plugin.getName(), "promote",
+                JwtUtils.getCurrentUserId(),
+                Map.of("canary_weight", plugin.getCanaryWeight(), "status", plugin.getStatus()).toString(),
+                Map.of("canary_weight", 0, "status", "active").toString(),
+                null);
+        return pluginMapper.selectByPluginId(pluginId);
+    }
+
+    @Override
+    @Transactional
+    public Plugin rollback(String pluginId) {
+        Plugin plugin = requirePlugin(pluginId);
+        if (plugin.getPreviousVersion() == null) {
+            throw new IllegalStateException("插件没有可回滚的版本");
+        }
+        String oldVersion = plugin.getVersion();
+        plugin.setVersion(plugin.getPreviousVersion());
+        plugin.setPreviousVersion(oldVersion);
+        pluginMapper.updateById(plugin);
+        writeAuditLog(plugin.getId(), plugin.getName(), "rollback",
+                JwtUtils.getCurrentUserId(),
+                Map.of("version", oldVersion).toString(),
+                Map.of("version", plugin.getPreviousVersion()).toString(),
+                null);
+        return pluginMapper.selectByPluginId(pluginId);
+    }
+
+    @Override
+    public List<Map<String, Object>> exportAuditLogs(String pluginId, String format, int limit) {
+        Plugin plugin = pluginId != null ? pluginMapper.selectByPluginId(pluginId) : null;
+        Long dbPluginId = plugin != null ? plugin.getId() : null;
+        List<PluginAuditLog> logs = auditLogMapper.selectByPluginId(dbPluginId, limit);
+        return logs.stream().map(l -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", l.getId());
+            m.put("event_id", l.getEventId());
+            m.put("plugin_name", l.getPluginName());
+            m.put("action", l.getAction());
+            m.put("operator_id", l.getOperatorId());
+            m.put("old_value", l.getOldValue());
+            m.put("new_value", l.getNewValue());
+            m.put("reason", l.getReason());
+            m.put("created_at", l.getCreatedAt());
+            return m;
+        }).collect(Collectors.toList());
     }
 
     @Override
@@ -232,6 +332,28 @@ public class PluginServiceImpl implements PluginService {
     }
 
     @Override
+    public List<Map<String, Object>> getPluginVersions(Long pluginId) {
+        Plugin plugin = pluginMapper.selectById(pluginId);
+        if (plugin == null) {
+            return List.of();
+        }
+
+        // Get all versions of this plugin (by name) for canary routing
+        List<Plugin> allVersions = pluginMapper.selectVersionsByPluginName(plugin.getName());
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Plugin v : allVersions) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("version", v.getVersion());
+            entry.put("container_image", v.getContainerImage());
+            entry.put("image_digest", v.getImageDigest());
+            entry.put("canary_weight", v.getCanaryWeight());
+            entry.put("status", v.getStatus());
+            result.add(entry);
+        }
+        return result;
+    }
+
+    @Override
     public List<Map<String, Object>> getPluginToolSpecs() {
         List<Plugin> enabled = pluginMapper.selectEnabledPlugins();
         List<Map<String, Object>> specs = new ArrayList<>();
@@ -240,6 +362,8 @@ public class PluginServiceImpl implements PluginService {
             spec.put("plugin_id", p.getPluginId());
             spec.put("name", p.getName());
             spec.put("version", p.getVersion());
+            spec.put("container_image", p.getContainerImage());
+            spec.put("canary_weight", p.getCanaryWeight());
             if (p.getPermissions() != null) {
                 spec.put("permissions", parseJsonList(p.getPermissions()));
             }
@@ -272,7 +396,6 @@ public class PluginServiceImpl implements PluginService {
     }
 
     private String computeManifestHash(Map<String, Object> manifest) {
-        // Deterministic JSON serialization then SHA-256
         String canonical = manifest.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
                 .map(e -> e.getKey() + ":" + e.getValue())
@@ -293,7 +416,6 @@ public class PluginServiceImpl implements PluginService {
     @SuppressWarnings("unchecked")
     private String toJson(Object obj) {
         if (obj == null) return null;
-        // Simple JSON serialization using Jackson if available, else toString
         try {
             com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
             return mapper.writeValueAsString(obj);

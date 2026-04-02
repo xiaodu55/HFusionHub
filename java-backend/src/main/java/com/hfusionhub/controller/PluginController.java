@@ -9,7 +9,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -20,7 +22,7 @@ import java.util.NoSuchElementException;
  * @author HFusionHub Team
  */
 @Slf4j
-@Tag(name = "工具插件管理", description = "插件安装、启用/禁用、卸载、审计日志")
+@Tag(name = "工具插件管理", description = "插件安装、启用/禁用、卸载、金丝雀发布、回滚、审计日志")
 @RestController
 @RequestMapping("/plugin")
 @RequiredArgsConstructor
@@ -28,7 +30,7 @@ public class PluginController {
 
     private final PluginService pluginService;
 
-    @Operation(summary = "安装插件")
+    @Operation(summary = "安装插件（JSON manifest）")
     @PostMapping("/install")
     public R<Plugin> install(@RequestBody Map<String, Object> manifest) {
         try {
@@ -38,6 +40,25 @@ public class PluginController {
             return R.fail(400, e.getMessage());
         } catch (IllegalStateException e) {
             return R.fail(409, e.getMessage());
+        }
+    }
+
+    @Operation(summary = "上传 wheel 文件并安装插件")
+    @PostMapping("/install/upload")
+    public R<Plugin> installWithWheel(
+            @RequestPart("manifest") Map<String, Object> manifest,
+            @RequestPart("wheel") MultipartFile wheel) {
+        try {
+            byte[] wheelData = wheel.getBytes();
+            String filename = wheel.getOriginalFilename();
+            Plugin plugin = pluginService.installWithWheel(manifest, wheelData, filename);
+            return R.ok(plugin);
+        } catch (IllegalArgumentException e) {
+            return R.fail(400, e.getMessage());
+        } catch (IllegalStateException e) {
+            return R.fail(409, e.getMessage());
+        } catch (Exception e) {
+            return R.fail(500, "上传失败: " + e.getMessage());
         }
     }
 
@@ -102,6 +123,43 @@ public class PluginController {
         }
     }
 
+    @Operation(summary = "设置金丝雀流量权重")
+    @PostMapping("/{pluginId}/canary")
+    public R<Plugin> setCanary(
+            @PathVariable String pluginId,
+            @RequestBody Map<String, Object> body) {
+        try {
+            BigDecimal weight = new BigDecimal(String.valueOf(body.get("weight")));
+            return R.ok(pluginService.setCanary(pluginId, weight));
+        } catch (NoSuchElementException e) {
+            return R.fail("插件不存在");
+        } catch (IllegalArgumentException e) {
+            return R.fail(400, e.getMessage());
+        }
+    }
+
+    @Operation(summary = "提升金丝雀为正式版本")
+    @PostMapping("/{pluginId}/canary/promote")
+    public R<Plugin> promoteCanary(@PathVariable String pluginId) {
+        try {
+            return R.ok(pluginService.promoteCanary(pluginId));
+        } catch (NoSuchElementException e) {
+            return R.fail("插件不存在");
+        }
+    }
+
+    @Operation(summary = "回滚到上一版本")
+    @PostMapping("/{pluginId}/rollback")
+    public R<Plugin> rollback(@PathVariable String pluginId) {
+        try {
+            return R.ok(pluginService.rollback(pluginId));
+        } catch (NoSuchElementException e) {
+            return R.fail("插件不存在");
+        } catch (IllegalStateException e) {
+            return R.fail(400, e.getMessage());
+        }
+    }
+
     @Operation(summary = "获取插件审计日志")
     @GetMapping("/{pluginId}/audit-logs")
     public R<List<Map<String, Object>>> getAuditLogs(
@@ -112,6 +170,15 @@ public class PluginController {
             return R.fail("插件不存在");
         }
         return R.ok(pluginService.getAuditLogs(plugin.getId(), limit));
+    }
+
+    @Operation(summary = "导出审计日志")
+    @GetMapping("/audit-logs/export")
+    public R<List<Map<String, Object>>> exportAuditLogs(
+            @RequestParam(required = false) String pluginId,
+            @RequestParam(defaultValue = "json") String format,
+            @RequestParam(defaultValue = "100") int limit) {
+        return R.ok(pluginService.exportAuditLogs(pluginId, format, limit));
     }
 
     @Operation(summary = "获取插件 ToolSpec 列表（供 Python AI 拉取）")

@@ -51,6 +51,14 @@ class SubprocessConfig:
     blocked_domains: List[str] = field(default_factory=list)
     allowed_paths: List[str] = field(default_factory=list)
     blocked_paths: List[str] = field(default_factory=list)
+    runner_mode: str = "subprocess"  # "subprocess" | "container"
+    container_image: Optional[str] = None
+    plugin_id: Optional[str] = None
+    user_id: Optional[int] = None
+    container_digest: Optional[str] = None
+    fail_closed: bool = True  # Production: fail if container runner unavailable
+    java_backend_url: Optional[str] = None  # Java backend URL for canary version fetch
+    internal_token: Optional[str] = None    # Internal token for Java backend auth
 
 
 @dataclass
@@ -342,13 +350,93 @@ def execute_in_sandbox(
     tool_input: Dict[str, Any],
     config: SubprocessConfig,
 ) -> SubprocessResult:
-    """Execute a plugin tool in an isolated subprocess with sandbox constraints.
+    """Execute a plugin tool with sandbox constraints.
 
+    Dispatches to container runner or subprocess based on config.runner_mode.
     This is the ONLY way to run plugin code. The main process NEVER imports
     plugin modules directly.
 
     Returns SubprocessResult with success/failure and any output.
     """
+    if config.runner_mode == "container":
+        try:
+            from app.core.plugin.container_runner import (
+                execute_in_container,
+                execute_with_canary,
+                ContainerConfig,
+            )
+            import asyncio
+
+            container_config = ContainerConfig(
+                cpu_limit=config.cpu_seconds / 10.0 if config.cpu_seconds > 0 else 1.0,
+                memory_limit=f"{config.memory_mb}m",
+                timeout=config.timeout_seconds,
+                allowed_domains=config.allowed_domains,
+                blocked_domains=config.blocked_domains,
+            )
+
+            java_backend_url = config.java_backend_url or os.environ.get(
+                "JAVA_BACKEND_URL", "http://localhost:8080"
+            )
+            internal_token = config.internal_token or os.environ.get(
+                "INTERNAL_API_TOKEN", ""
+            )
+
+            loop = asyncio.new_event_loop()
+            try:
+                # Use canary routing when plugin_id and user_id are available
+                if config.plugin_id and config.user_id:
+                    result = loop.run_until_complete(
+                        execute_with_canary(
+                            plugin_id=config.plugin_id,
+                            tool_name=tool_name,
+                            tool_input=tool_input,
+                            user_id=config.user_id,
+                            config=container_config,
+                            java_backend_url=java_backend_url,
+                            internal_token=internal_token,
+                        )
+                    )
+                elif config.container_image:
+                    result = loop.run_until_complete(
+                        execute_in_container(
+                            image_tag=config.container_image,
+                            tool_name=tool_name,
+                            tool_input=tool_input,
+                            config=container_config,
+                            plugin_id=config.plugin_id,
+                            user_id=config.user_id,
+                            image_digest=config.container_digest,
+                        )
+                    )
+                else:
+                    return SubprocessResult(
+                        success=False,
+                        error="Container mode requires plugin_id+user_id (canary) or container_image (direct)",
+                        error_code="container_config_incomplete",
+                        duration_ms=0.0,
+                    )
+                return SubprocessResult(
+                    success=result.success,
+                    data=result.data,
+                    error=result.error,
+                    error_code=result.error_code,
+                    duration_ms=result.duration_ms,
+                    resource_usage=result.resource_usage,
+                )
+            finally:
+                loop.close()
+        except Exception as e:
+            if config.fail_closed:
+                logger.error("Container execution failed, fail_closed=True, refusing fallback: %s", e)
+                return SubprocessResult(
+                    success=False,
+                    error=f"Container runner unavailable (fail_closed): {e}",
+                    error_code="container_runner_unavailable",
+                    duration_ms=0.0,
+                )
+            logger.warning("Container execution failed, falling back to subprocess: %s", e)
+
     start_time = time.monotonic()
     parent_conn, child_conn = Pipe(duplex=False)
 

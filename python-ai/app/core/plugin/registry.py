@@ -56,7 +56,7 @@ class RegisteredPlugin:
     def extract_dir(self) -> str:
         return self.descriptor.extract_dir
 
-    def to_subprocess_config(self) -> SubprocessConfig:
+    def to_subprocess_config(self, user_id: Optional[int] = None) -> SubprocessConfig:
         """Convert sandbox config to SubprocessConfig for the runner."""
         cfg = SubprocessConfig()
         if self.sandbox and self.sandbox._config:
@@ -73,6 +73,19 @@ class RegisteredPlugin:
                 cfg.memory_mb = sc.resources.memory_mb
                 cfg.timeout_seconds = sc.resources.timeout_seconds
                 cfg.max_open_files = sc.resources.max_open_files
+            # Container mode settings from sandbox config
+            if sc.runner:
+                cfg.runner_mode = sc.runner.mode or "subprocess"
+                cfg.fail_closed = sc.runner.fail_closed
+
+        # Always set plugin identity for execution
+        cfg.plugin_id = self.plugin_id
+        cfg.user_id = user_id
+
+        # Java backend for canary version fetch
+        cfg.java_backend_url = os.environ.get("JAVA_BACKEND_URL", "http://localhost:8080")
+        cfg.internal_token = os.environ.get("INTERNAL_API_TOKEN", "")
+
         return cfg
 
 
@@ -191,11 +204,16 @@ def execute_plugin_tool(
     tool_name: str,
     tool_input: Dict[str, Any],
     trace_id: Optional[str] = None,
+    user_id: Optional[int] = None,
 ) -> SubprocessResult:
     """Execute a plugin tool in a sandboxed subprocess.
 
     This is the ONLY entry point for plugin code execution.
     The main process NEVER imports plugin modules.
+
+    When user_id is provided and the plugin has container mode enabled,
+    canary routing (execute_with_canary) is used for sticky version selection
+    with digest-verified container execution.
     """
     plugin = get_plugin(plugin_id)
     if not plugin:
@@ -212,8 +230,8 @@ def execute_plugin_tool(
             error_code="plugin_disabled",
         )
 
-    # Build subprocess config from sandbox
-    sub_config = plugin.to_subprocess_config()
+    # Build subprocess config from sandbox, passing user_id for canary routing
+    sub_config = plugin.to_subprocess_config(user_id=user_id)
 
     start_time = time.monotonic()
     result = execute_in_sandbox(

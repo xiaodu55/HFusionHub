@@ -46,6 +46,24 @@ public class InternalPluginController {
         return R.ok(pluginService.getPluginToolSpecs());
     }
 
+    @GetMapping("/{pluginId}/versions")
+    public R<List<Map<String, Object>>> getPluginVersions(
+            @PathVariable String pluginId,
+            HttpServletRequest request) {
+        if (!constantTimeEquals(expectedToken, request.getHeader("X-Internal-Token"))) {
+            return R.fail(403, "Forbidden: invalid or missing X-Internal-Token");
+        }
+
+        var plugin = pluginService.getByPluginId(pluginId);
+        if (plugin == null) {
+            return R.fail(404, "Plugin not found");
+        }
+
+        // Get all versions from version history (including current)
+        List<Map<String, Object>> versions = pluginService.getPluginVersions(plugin.getId());
+        return R.ok(versions);
+    }
+
     @GetMapping("/sandbox-config")
     public R<Map<String, Object>> getSandboxConfig(@RequestParam String pluginId,
                                                    HttpServletRequest request) {

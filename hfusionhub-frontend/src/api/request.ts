@@ -75,4 +75,12 @@ export const del = <T = any>(url: string, config?: AxiosRequestConfig): Promise<
   return service.delete(url, config)
 }
 
+export const upload = <T = any>(url: string, formData: FormData, config?: AxiosRequestConfig): Promise<T> => {
+  return service.post(url, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 300000,
+    ...config,
+  })
+}
+
 export default service

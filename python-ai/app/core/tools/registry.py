@@ -637,10 +637,12 @@ class ToolRegistry:
                 message=f"插件已禁用: {plugin_id}",
             )
 
-        # Extract trace_id from context if available
+        # Extract trace_id and user_id from context if available
         trace_id = None
+        user_id = None
         if context is not None:
             trace_id = getattr(context, 'trace_id', None)
+            user_id = getattr(context, 'user_id', None)
 
         started = time.monotonic()
         result = execute_plugin_tool(
@@ -648,6 +650,7 @@ class ToolRegistry:
             tool_name=tool_name,
             tool_input=safe_input,
             trace_id=trace_id,
+            user_id=user_id,
         )
         elapsed = round((time.monotonic() - started) * 1000, 2)
 

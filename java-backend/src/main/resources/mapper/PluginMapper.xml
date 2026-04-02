@@ -25,6 +25,16 @@
         <result column="enabled" property="enabled"/>
         <result column="installed_by" property="installedBy"/>
         <result column="installed_at" property="installedAt"/>
+        <result column="canary_weight" property="canaryWeight"/>
+        <result column="circuit_open_until" property="circuitOpenUntil"/>
+        <result column="previous_version" property="previousVersion"/>
+        <result column="health_status" property="healthStatus"/>
+        <result column="last_health_check" property="lastHealthCheck"/>
+        <result column="sbom_json" property="sbomJson"/>
+        <result column="vulnerability_status" property="vulnerabilityStatus"/>
+        <result column="last_scan_at" property="lastScanAt"/>
+        <result column="container_image" property="containerImage"/>
+        <result column="image_digest" property="imageDigest"/>
         <result column="created_at" property="createdAt"/>
         <result column="updated_at" property="updatedAt"/>
         <result column="deleted" property="deleted"/>
@@ -34,7 +44,11 @@
         id, plugin_id, name, display_name, description, version, author, author_email,
         license, min_hfusionhub_version, max_hfusionhub_version, icon_url, source,
         status, manifest_hash, artifact_path, artifact_hash, sandbox_config,
-        permissions, enabled, installed_by, installed_at, created_at, updated_at, deleted
+        permissions, enabled, installed_by, installed_at,
+        canary_weight, circuit_open_until, previous_version,
+        health_status, last_health_check, sbom_json,
+        vulnerability_status, last_scan_at, container_image, image_digest,
+        created_at, updated_at, deleted
     </sql>
 
     <select id="selectByPluginId" resultMap="BaseResultMap">
@@ -63,6 +77,15 @@
         ORDER BY name ASC, version DESC
     </select>
 
+    <select id="selectCircuitOpenPlugins" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM plugin
+        WHERE status = 'circuit_open'
+          AND circuit_open_until IS NOT NULL
+          AND circuit_open_until &lt; NOW()
+          AND deleted = 0
+    </select>
+
     <update id="updateStatus">
         UPDATE plugin
         SET status = #{status}, updated_at = CURRENT_TIMESTAMP
@@ -82,6 +105,53 @@
             updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id} AND deleted = 0
     </update>
+
+    <update id="updateCanary">
+        UPDATE plugin
+        SET canary_weight = #{canaryWeight},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="updateHealth">
+        UPDATE plugin
+        SET health_status = #{healthStatus},
+            last_health_check = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="updateVulnerability">
+        UPDATE plugin
+        SET vulnerability_status = #{vulnerabilityStatus},
+            last_scan_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="updateContainerImage">
+        UPDATE plugin
+        SET container_image = #{containerImage},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="openCircuitBreaker">
+        UPDATE plugin
+        SET status = 'circuit_open',
+            circuit_open_until = DATE_ADD(NOW(), INTERVAL #{cooldownMinutes} MINUTE),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <select id="selectVersionsByPluginName" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM plugin
+        WHERE name = #{name}
+          AND status IN ('active', 'pending')
+          AND deleted = 0
+        ORDER BY version DESC
+    </select>
 
     <select id="countActiveByUserId" resultType="int">
         SELECT COUNT(*)

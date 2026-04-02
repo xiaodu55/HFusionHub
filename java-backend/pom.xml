@@ -132,6 +132,13 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- MinIO Object Storage -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>8.5.9</version>
+        </dependency>
+
         <!-- H2 Database for testing -->
         <dependency>
             <groupId>com.h2database</groupId>

@@ -8,11 +8,13 @@ import {
   Download,
   Eye,
   EyeOff,
+  GitBranch,
   LoaderCircle,
   Package,
   RefreshCw,
   ShieldCheck,
   ShieldOff,
+  ShieldAlert,
   Trash2,
   Wrench,
   XCircle,
@@ -45,6 +47,11 @@ const actionReason = ref('')
 const showReasonDialog = ref(false)
 const pendingActionPluginId = ref<string | null>(null)
 
+// ── Canary state ───────────────────────────────────────────────────
+const showCanaryDialog = ref(false)
+const canaryWeight = ref(0.1)
+const canaryPluginId = ref<string | null>(null)
+
 // ── Status helpers ───────────────────────────────────────────────────
 
 const statusMeta = (status: string) => {
@@ -53,8 +60,19 @@ const statusMeta = (status: string) => {
     disabled: { label: '已禁用', icon: EyeOff, class: 'border-slate-400/25 bg-slate-400/10 text-slate-300' },
     failed: { label: '失败', icon: XCircle, class: 'border-red-400/25 bg-red-400/10 text-red-300' },
     pending: { label: '待激活', icon: Clock, class: 'border-amber-400/25 bg-amber-400/10 text-amber-200' },
+    circuit_open: { label: '熔断', icon: ShieldAlert, class: 'border-orange-400/25 bg-orange-400/10 text-orange-300' },
   }
   return map[status] || { label: status, icon: AlertTriangle, class: 'border-border bg-muted text-muted-foreground' }
+}
+
+const vulnStatusMeta = (status: string | null) => {
+  const map: Record<string, { label: string; class: string }> = {
+    clean: { label: '安全', class: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' },
+    vulnerable: { label: '存在漏洞', class: 'border-red-400/25 bg-red-400/10 text-red-300' },
+    pending: { label: '待扫描', class: 'border-amber-400/25 bg-amber-400/10 text-amber-200' },
+    error: { label: '扫描失败', class: 'border-slate-400/25 bg-slate-400/10 text-slate-300' },
+  }
+  return map[status || 'pending'] || { label: status || '未知', class: 'border-border bg-muted text-muted-foreground' }
 }
 
 const sourceLabel = (source: string) => {
@@ -209,6 +227,43 @@ const closeReasonDialog = () => {
   confirmingAction.value = null
 }
 
+// ── Canary actions ──────────────────────────────────────────────────
+
+const openCanaryDialog = (plugin: PluginEntry) => {
+  canaryPluginId.value = plugin.pluginId
+  canaryWeight.value = (plugin.canaryWeight as number) || 0.1
+  showCanaryDialog.value = true
+}
+
+const handleSetCanary = async () => {
+  if (!canaryPluginId.value) return
+  try {
+    await pluginsApi.setCanary(canaryPluginId.value, canaryWeight.value)
+    showCanaryDialog.value = false
+    await loadPlugins()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '设置金丝雀失败'
+  }
+}
+
+const handlePromoteCanary = async (pluginId: string) => {
+  try {
+    await pluginsApi.promoteCanary(pluginId)
+    await loadPlugins()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '提升失败'
+  }
+}
+
+const handleRollback = async (pluginId: string) => {
+  try {
+    await pluginsApi.rollbackPlugin(pluginId)
+    await loadPlugins()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '回滚失败'
+  }
+}
+
 // ── Computed ──────────────────────────────────────────────────────────
 
 const filteredPlugins = computed(() => {
@@ -305,7 +360,20 @@ onMounted(loadPlugins)
           <div v-if="plugin.author" class="text-xs text-muted-foreground">
             作者: {{ plugin.author }}
           </div>
-          <div class="flex gap-2 pt-2">
+          <div v-if="plugin.vulnerabilityStatus" class="text-xs">
+            <Badge :class="vulnStatusMeta(plugin.vulnerabilityStatus).class">
+              <ShieldCheck class="h-3 w-3 mr-1" />
+              {{ vulnStatusMeta(plugin.vulnerabilityStatus).label }}
+            </Badge>
+          </div>
+          <div v-if="plugin.canaryWeight && Number(plugin.canaryWeight) > 0" class="text-xs text-amber-300">
+            金丝雀权重: {{ (Number(plugin.canaryWeight) * 100).toFixed(0) }}%
+          </div>
+          <div v-if="plugin.previousVersion" class="text-xs text-muted-foreground">
+            <GitBranch class="inline h-3 w-3 mr-1" />
+            上一版本: {{ plugin.previousVersion }}
+          </div>
+          <div class="flex flex-wrap gap-2 pt-2">
             <Button
               v-if="!plugin.enabled"
               size="sm"
@@ -325,6 +393,25 @@ onMounted(loadPlugins)
             >
               <EyeOff class="h-3 w-3" />
               禁用
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              @click="openCanaryDialog(plugin)"
+              class="gap-1"
+            >
+              <Wrench class="h-3 w-3" />
+              金丝雀
+            </Button>
+            <Button
+              v-if="plugin.previousVersion"
+              size="sm"
+              variant="outline"
+              @click="handleRollback(plugin.pluginId)"
+              class="gap-1"
+            >
+              <RefreshCw class="h-3 w-3" />
+              回滚
             </Button>
             <Button
               size="sm"
@@ -430,6 +517,34 @@ onMounted(loadPlugins)
             >
               确认{{ confirmingAction === 'uninstall' ? '卸载' : '禁用' }}
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+
+    <!-- Canary dialog -->
+    <div v-if="showCanaryDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <Card class="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>设置金丝雀流量</CardTitle>
+          <CardDescription>按用户 ID 稳定分流，同一用户始终访问同一版本</CardDescription>
+        </CardHeader>
+        <CardContent class="space-y-4">
+          <div>
+            <label class="text-sm font-medium">流量权重 (0-100%)</label>
+            <input
+              v-model.number="canaryWeight"
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              class="mt-2 w-full"
+            />
+            <p class="text-xs text-muted-foreground mt-1">{{ (canaryWeight * 100).toFixed(0) }}% 流量将路由到金丝雀版本</p>
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <Button variant="outline" @click="showCanaryDialog = false">取消</Button>
+            <Button @click="handleSetCanary">确认设置</Button>
           </div>
         </CardContent>
       </Card>

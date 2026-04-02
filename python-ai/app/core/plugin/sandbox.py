@@ -62,10 +62,17 @@ class ResourceConfig:
     max_open_files: int = 64
 
 @dataclass(frozen=True)
+class RunnerConfig:
+    """Container runner mode configuration."""
+    mode: str = "subprocess"  # "subprocess" | "container"
+    fail_closed: bool = True  # Production: fail if container runner unavailable
+
+@dataclass(frozen=True)
 class SandboxConfig:
     network: Optional[NetworkConfig] = None
     filesystem: Optional[FilesystemConfig] = None
     resources: Optional[ResourceConfig] = None
+    runner: Optional[RunnerConfig] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SandboxConfig":
@@ -79,7 +86,10 @@ class SandboxConfig:
         res_data = data.get("resources")
         res = ResourceConfig(**res_data) if res_data else None
 
-        return cls(network=net, filesystem=fs, resources=res)
+        run_data = data.get("runner")
+        run = RunnerConfig(**run_data) if run_data else None
+
+        return cls(network=net, filesystem=fs, resources=res, runner=run)
 
 
 # ── Sandbox Errors ───────────────────────────────────────────────────
