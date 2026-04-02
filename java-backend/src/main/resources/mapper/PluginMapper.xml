@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hfusionhub.mapper.PluginMapper">
+
+    <resultMap id="BaseResultMap" type="com.hfusionhub.entity.Plugin">
+        <id column="id" property="id"/>
+        <result column="plugin_id" property="pluginId"/>
+        <result column="name" property="name"/>
+        <result column="display_name" property="displayName"/>
+        <result column="description" property="description"/>
+        <result column="version" property="version"/>
+        <result column="author" property="author"/>
+        <result column="author_email" property="authorEmail"/>
+        <result column="license" property="license"/>
+        <result column="min_hfusionhub_version" property="minHfusionhubVersion"/>
+        <result column="max_hfusionhub_version" property="maxHfusionhubVersion"/>
+        <result column="icon_url" property="iconUrl"/>
+        <result column="source" property="source"/>
+        <result column="status" property="status"/>
+        <result column="manifest_hash" property="manifestHash"/>
+        <result column="artifact_path" property="artifactPath"/>
+        <result column="artifact_hash" property="artifactHash"/>
+        <result column="sandbox_config" property="sandboxConfig"/>
+        <result column="permissions" property="permissions"/>
+        <result column="enabled" property="enabled"/>
+        <result column="installed_by" property="installedBy"/>
+        <result column="installed_at" property="installedAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+        <result column="deleted" property="deleted"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, plugin_id, name, display_name, description, version, author, author_email,
+        license, min_hfusionhub_version, max_hfusionhub_version, icon_url, source,
+        status, manifest_hash, artifact_path, artifact_hash, sandbox_config,
+        permissions, enabled, installed_by, installed_at, created_at, updated_at, deleted
+    </sql>
+
+    <select id="selectByPluginId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM plugin
+        WHERE plugin_id = #{pluginId} AND deleted = 0
+    </select>
+
+    <select id="selectByNameVersion" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM plugin
+        WHERE name = #{name} AND version = #{version} AND deleted = 0
+    </select>
+
+    <select id="selectByNameVersionAny" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM plugin
+        WHERE name = #{name} AND version = #{version}
+        LIMIT 1
+    </select>
+
+    <select id="selectEnabledPlugins" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM plugin
+        WHERE enabled = 1 AND deleted = 0
+        ORDER BY name ASC, version DESC
+    </select>
+
+    <update id="updateStatus">
+        UPDATE plugin
+        SET status = #{status}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="updateEnabled">
+        UPDATE plugin
+        SET enabled = #{enabled}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <update id="updateArtifact">
+        UPDATE plugin
+        SET artifact_path = #{artifactPath},
+            artifact_hash = #{artifactHash},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND deleted = 0
+    </update>
+
+    <select id="countActiveByUserId" resultType="int">
+        SELECT COUNT(*)
+        FROM plugin
+        WHERE installed_by = #{userId} AND deleted = 0
+    </select>
+
+</mapper>

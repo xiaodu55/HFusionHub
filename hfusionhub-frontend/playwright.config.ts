@@ -13,7 +13,7 @@ export default defineConfig({
     : [['html', { open: 'on-failure' }]],
 
   use: {
-    baseURL: process.env.BASE_URL || 'http://localhost:3001',
+    baseURL: process.env.BASE_URL || 'http://localhost:3000',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -32,7 +32,7 @@ export default defineConfig({
     ? undefined
     : {
         command: 'npm run dev',
-        port: 3001,
+        port: 3000,
         reuseExistingServer: true,
         timeout: 30_000,
       },

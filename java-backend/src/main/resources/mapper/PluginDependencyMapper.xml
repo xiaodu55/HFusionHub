@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hfusionhub.mapper.PluginDependencyMapper">
+
+    <resultMap id="BaseResultMap" type="com.hfusionhub.entity.PluginDependency">
+        <id column="id" property="id"/>
+        <result column="plugin_id" property="pluginId"/>
+        <result column="dependency_name" property="dependencyName"/>
+        <result column="dependency_version" property="dependencyVersion"/>
+        <result column="optional" property="optional"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, plugin_id, dependency_name, dependency_version, optional, created_at
+    </sql>
+
+    <select id="selectByPluginId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM plugin_dependency
+        WHERE plugin_id = #{pluginId}
+        ORDER BY dependency_name ASC
+    </select>
+
+    <delete id="deleteByPluginId">
+        DELETE FROM plugin_dependency WHERE plugin_id = #{pluginId}
+    </delete>
+
+</mapper>

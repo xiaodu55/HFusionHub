@@ -86,6 +86,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/builder/Tools.vue'),
       },
       {
+        path: 'builder/plugins',
+        name: 'Plugins',
+        component: () => import('@/pages/builder/Plugins.vue'),
+      },
+      {
         path: 'builder/test-bench',
         name: 'PromptTestBench',
         component: () => import('@/pages/builder/TestBench.vue'),

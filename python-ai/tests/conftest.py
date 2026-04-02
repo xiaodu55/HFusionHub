@@ -60,3 +60,14 @@ def tmp_milvus_db(tmp_path, monkeypatch):
     ms._client = _orig_client
     ms.MILVUS_LITE_PATH = _orig_ms_path
     config.MILVUS_LITE_PATH = _orig_cfg_path
+
+
+# ── Audit SQLite 隔离 fixture ───────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _isolate_audit_db(tmp_path):
+    """Redirect audit SQLite to a temp dir for every test, then restore."""
+    from app.core.plugin import audit as audit_mod
+    audit_mod._reset_db(str(tmp_path))
+    yield
+    audit_mod._reset_db(None)

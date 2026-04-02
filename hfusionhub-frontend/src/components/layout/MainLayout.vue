@@ -22,6 +22,7 @@ import {
   Menu,
   MessageSquare,
   Moon,
+  Package,
   PenLine,
   Search,
   Settings,
@@ -60,6 +61,7 @@ const menuItems: Array<{
   { path: '/builder/test-sets', label: '测试用例集', description: '批量回归评测', icon: FlaskConical },
   { path: '/builder/models', label: '模型中心', description: '模型与运行状态', icon: Cpu },
   { path: '/builder/tools', label: '工具中心', description: '能力与调用记录', icon: Wrench },
+  { path: '/builder/plugins', label: '插件管理', description: '安装与沙箱', icon: Package },
   { path: '/', label: '任务总览', description: '工作台', icon: Home },
   { path: '/knowledge-base', label: '知识库', description: '知识治理', icon: BookOpen },
   { path: '/document', label: '文档管理', description: '解析与索引', icon: FileText },
@@ -73,7 +75,7 @@ const menuItems: Array<{
 
 const menuGroups = [
   { label: '工作区', items: menuItems.filter((item) => ['/', '/knowledge-base', '/document', '/chat'].includes(item.path)) },
-  { label: '构建', items: menuItems.filter((item) => ['/builder/prompts', '/builder/test-bench', '/builder/test-sets', '/builder/models', '/builder/tools', '/agent'].includes(item.path)) },
+  { label: '构建', items: menuItems.filter((item) => ['/builder/prompts', '/builder/test-bench', '/builder/test-sets', '/builder/models', '/builder/tools', '/builder/plugins', '/agent'].includes(item.path)) },
   { label: '运营', items: menuItems.filter((item) => ['/approvals', '/rag', '/memory'].includes(item.path)) },
   { label: '管理', items: menuItems.filter((item) => item.path === '/admin/flags') },
 ]
@@ -84,6 +86,7 @@ const commandRoutes = [
   { keywords: ['测试', 'test', 'bench', '评测', '试验'], path: '/builder/test-bench' },
   { keywords: ['用例', '用例集', '批量', '回归', 'test-set', 'suite'], path: '/builder/test-sets' },
   { keywords: ['工具', 'tool', 'mcp', '调用', '权限', '审批'], path: '/builder/tools' },
+  { keywords: ['插件', 'plugin', '沙箱', 'sandbox', '安装'], path: '/builder/plugins' },
   { keywords: ['知识', '知识库', 'kb'], path: '/knowledge-base' },
   { keywords: ['文档', '文件', '索引', 'doc'], path: '/document' },
   { keywords: ['对话', '聊天', 'chat'], path: '/chat' },

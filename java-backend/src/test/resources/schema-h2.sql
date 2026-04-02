@@ -577,3 +577,78 @@ CREATE TABLE IF NOT EXISTS feature_flag_audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_ff_audit_flag ON feature_flag_audit_log (flag_id);
 CREATE INDEX IF NOT EXISTS idx_ff_audit_time ON feature_flag_audit_log (created_at);
+
+-- =====================================================
+-- 工具插件表 (plugin) — V29
+-- =====================================================
+CREATE TABLE IF NOT EXISTS plugin (
+    id                     BIGINT       NOT NULL AUTO_INCREMENT,
+    plugin_id              VARCHAR(36)  NOT NULL,
+    name                   VARCHAR(100) NOT NULL,
+    display_name           VARCHAR(200) DEFAULT NULL,
+    description            CLOB         DEFAULT NULL,
+    version                VARCHAR(32)  NOT NULL,
+    author                 VARCHAR(100) DEFAULT NULL,
+    author_email           VARCHAR(200) DEFAULT NULL,
+    license                VARCHAR(64)  DEFAULT NULL,
+    min_hfusionhub_version VARCHAR(32)  DEFAULT NULL,
+    max_hfusionhub_version VARCHAR(32)  DEFAULT NULL,
+    icon_url               VARCHAR(500) DEFAULT NULL,
+    source                 VARCHAR(32)  NOT NULL DEFAULT 'local',
+    status                 VARCHAR(20)  NOT NULL DEFAULT 'active',
+    manifest_hash          VARCHAR(64)  DEFAULT NULL,
+    artifact_path          VARCHAR(500) DEFAULT NULL,
+    artifact_hash          VARCHAR(64)  DEFAULT NULL,
+    sandbox_config         CLOB         DEFAULT NULL,
+    permissions            CLOB         DEFAULT NULL,
+    enabled                TINYINT      NOT NULL DEFAULT 1,
+    installed_by           BIGINT       DEFAULT NULL,
+    installed_at           TIMESTAMP    NULL DEFAULT NULL,
+    created_at             TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at             TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                TINYINT      NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    UNIQUE (plugin_id),
+    FOREIGN KEY (installed_by) REFERENCES sys_user (id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_plugin_name ON plugin (name);
+CREATE INDEX IF NOT EXISTS idx_plugin_status ON plugin (status);
+
+-- =====================================================
+-- 插件审计日志表 (plugin_audit_log) — V29
+-- =====================================================
+CREATE TABLE IF NOT EXISTS plugin_audit_log (
+    id          BIGINT       NOT NULL AUTO_INCREMENT,
+    event_id    VARCHAR(36)  DEFAULT NULL,
+    plugin_id   BIGINT       NOT NULL,
+    plugin_name VARCHAR(100) DEFAULT NULL,
+    action      VARCHAR(32)  NOT NULL,
+    operator_id BIGINT       DEFAULT NULL,
+    old_value   CLOB         DEFAULT NULL,
+    new_value   CLOB         DEFAULT NULL,
+    reason      VARCHAR(500) DEFAULT NULL,
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE (event_id),
+    FOREIGN KEY (plugin_id) REFERENCES plugin (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_plugin_audit_plugin ON plugin_audit_log (plugin_id);
+CREATE INDEX IF NOT EXISTS idx_plugin_audit_time ON plugin_audit_log (created_at);
+
+-- =====================================================
+-- 插件依赖表 (plugin_dependency) — V29
+-- =====================================================
+CREATE TABLE IF NOT EXISTS plugin_dependency (
+    id                 BIGINT       NOT NULL AUTO_INCREMENT,
+    plugin_id          BIGINT       NOT NULL,
+    dependency_name    VARCHAR(100) NOT NULL,
+    dependency_version VARCHAR(32)  DEFAULT NULL,
+    optional           TINYINT      NOT NULL DEFAULT 0,
+    created_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    FOREIGN KEY (plugin_id) REFERENCES plugin (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_plugin_dep_plugin ON plugin_dependency (plugin_id);

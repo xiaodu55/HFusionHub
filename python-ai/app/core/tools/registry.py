@@ -298,9 +298,61 @@ class ToolRegistry:
         self._register(time_spec, TimeTool())
         self._register(web_spec, WebSearchTool())
 
+        # Register plugin tools (sandboxed subprocess execution)
+        self.register_plugin_tools()
+
     def _register(self, spec: ToolSpec, instance: BaseTool) -> None:
         self._specs[spec.name] = spec
         self._instances[spec.name] = instance
+
+    def register_plugin_tools(self) -> int:
+        """Register all enabled plugin tools into this registry.
+
+        Plugin tools are loaded from the plugin registry and injected as
+        ToolSpec objects with _plugin_id metadata.  Execution is routed
+        through the sandboxed subprocess runner.
+
+        Returns the number of plugin tools registered.
+        """
+        try:
+            from app.core.plugin.registry import list_all_tool_specs
+        except ImportError:
+            return 0
+
+        plugin_specs = list_all_tool_specs(enabled_only=True)
+        count = 0
+        for pspec in plugin_specs:
+            name = pspec.get("name")
+            if not name or name in self._specs:
+                continue  # skip duplicates
+
+            plugin_id = pspec.get("_plugin_id", "")
+            plugin_name = pspec.get("_plugin_name", "")
+            plugin_version = pspec.get("_plugin_version", "")
+
+            spec = ToolSpec(
+                name=name,
+                description=pspec.get("description", f"Plugin tool from {plugin_name}"),
+                input_schema=pspec.get("input_schema", {"type": "object", "properties": {}}),
+                output_schema=pspec.get("output_schema", {"type": "object"}),
+                risk_level=pspec.get("risk_level", RiskLevel.READ_ONLY),
+                timeout_seconds=pspec.get("timeout_seconds", 10.0),
+                required_permissions=pspec.get("required_permissions", []),
+                error_codes=pspec.get("error_codes", {}),
+                agent_version=pspec.get("agent_version", self._agent_version),
+            )
+            # Attach plugin metadata for routing
+            spec._plugin_id = plugin_id  # type: ignore
+            spec._plugin_name = plugin_name  # type: ignore
+
+            self._specs[name] = spec
+            # No local instance — execution goes through sandbox runner
+            self._instances[name] = None  # type: ignore
+            count += 1
+
+        if count:
+            logger.info("已注册 %d 个插件工具到 ToolRegistry", count)
+        return count
 
     # ── Tool discovery ────────────────────────────────────────────────
 
@@ -480,6 +532,27 @@ class ToolRegistry:
                 or Permissions.KB_WRITE in spec.required_permissions):
             safe_input["knowledge_base_id"] = self._knowledge_base_id
 
+        # ── Plugin tool routing ─────────────────────────────────────
+        # If the tool spec carries a _plugin_id, it was registered by
+        # the plugin system.  Route through the sandboxed subprocess
+        # runner instead of the local instance path.
+        plugin_id = getattr(spec, '_plugin_id', None) or (
+            spec.__dict__.get('_plugin_id') if hasattr(spec, '__dict__') else None
+        )
+        # Also check the raw tools dict for plugin metadata
+        if plugin_id is None and tool_name in self._specs:
+            raw = self._specs[tool_name]
+            plugin_id = getattr(raw, '_plugin_id', None)
+
+        if plugin_id is not None:
+            return await self._execute_plugin_tool(
+                plugin_id=plugin_id,
+                tool_name=tool_name,
+                safe_input=safe_input,
+                timeout_seconds=timeout_seconds or spec.timeout_seconds,
+                context=context,
+            )
+
         instance = self._instances.get(tool_name)
         if instance is None:
             return ToolResult.failure(
@@ -527,6 +600,69 @@ class ToolRegistry:
                 tool_name=tool_name,
                 error_code=ErrorCode.INTERNAL,
                 message=f"{spec.error_codes.get(ErrorCode.INTERNAL, '工具内部错误')}: {e}",
+                duration_ms=elapsed,
+            )
+
+    # ── Plugin tool execution ─────────────────────────────────────────
+
+    async def _execute_plugin_tool(
+        self,
+        plugin_id: str,
+        tool_name: str,
+        safe_input: Dict[str, Any],
+        timeout_seconds: float,
+        context: Optional[Any] = None,
+    ) -> ToolResult:
+        """Execute a plugin tool through the sandboxed subprocess runner.
+
+        This is the bridge between the Agent ToolRegistry and the plugin
+        sandbox system.  All plugin code runs in an isolated subprocess
+        with resource limits, network/filesystem restrictions, and timeout
+        enforcement.
+        """
+        from app.core.plugin.registry import execute_plugin_tool, get_plugin
+
+        plugin = get_plugin(plugin_id)
+        if plugin is None:
+            return ToolResult.failure(
+                tool_name=tool_name,
+                error_code=ErrorCode.NOT_FOUND,
+                message=f"插件未注册: {plugin_id}",
+            )
+
+        if not plugin.enabled:
+            return ToolResult.failure(
+                tool_name=tool_name,
+                error_code=ErrorCode.PERMISSION_DENIED,
+                message=f"插件已禁用: {plugin_id}",
+            )
+
+        # Extract trace_id from context if available
+        trace_id = None
+        if context is not None:
+            trace_id = getattr(context, 'trace_id', None)
+
+        started = time.monotonic()
+        result = execute_plugin_tool(
+            plugin_id=plugin_id,
+            tool_name=tool_name,
+            tool_input=safe_input,
+            trace_id=trace_id,
+        )
+        elapsed = round((time.monotonic() - started) * 1000, 2)
+
+        if result.success:
+            return ToolResult.success(
+                tool_name=tool_name,
+                data=result.data,
+                duration_ms=elapsed,
+            )
+        else:
+            error_code = result.error_code or ErrorCode.INTERNAL
+            return ToolResult.failure(
+                tool_name=tool_name,
+                error_code=error_code,
+                message=result.error or "插件执行失败",
                 duration_ms=elapsed,
             )
 
