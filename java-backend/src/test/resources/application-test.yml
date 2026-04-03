@@ -140,6 +140,16 @@ prompt-test-set:
     stale-running-minutes: 30
     shutdown-timeout-ms: 5000
 
+# Tenant — non-strict mode for tests (defaults to tenant 1 when no context set).
+# Tenant-line SQL interceptor is DISABLED in tests because it interferes with
+# MyBatis-Plus lambda cache resolution for entities without a tenantId field.
+# Tenant isolation in tests is enforced at the service layer via userId filtering.
+hfusionhub:
+  tenant:
+    enabled: false
+    strict: false
+    default-tenant-id: 1
+
 logging:
   level:
     root: WARN

@@ -564,15 +564,8 @@ class TestRunnerIntegration:
         except Exception:
             pass
 
-        # 2. Resolve a local base image (OFFLINE, no Docker Hub)
-        client = docker_lib.from_env()
-        base_image = self._resolve_local_image(client)
-
-        # Tag as a plugin image the runner will accept
-        if not any(t.startswith("hfusionhub-plugin-test-int") for t in base_image.tags):
-            base_image.tag("hfusionhub-plugin-test-int", "v1")
-        TestRunnerIntegration._plugin_digest = \
-            base_image.attrs.get("RepoDigests", [""])[0]
+        # 2. Build a real test plugin image (fixed entry + deterministic tools).
+        self._build_test_image()
 
         # 3. Start plugin-runner subprocess
         env = os.environ.copy()
@@ -639,32 +632,101 @@ class TestRunnerIntegration:
             proc.kill()
             proc.wait()
 
+    @classmethod
+    def _build_test_image(cls):
+        """Build the hfusionhub-plugin-test-int image with the fixed entry point.
+
+        Reuses a local python base image to stay OFFLINE (no Docker Hub pulls).
+        Falls back to busybox (no tool execution, only digest/network checks).
+        """
+        import docker as docker_lib
+
+        client = docker_lib.from_env()
+
+        run_tool_src = os.path.join(
+            os.path.dirname(__file__), "..", "..", "docker", "plugin-runner", "run_tool.py"
+        )
+        with open(run_tool_src, "r", encoding="utf-8") as f:
+            run_tool = f.read()
+
+        fixture_dir = os.path.join(os.path.dirname(__file__), "container_fixture")
+        with open(os.path.join(fixture_dir, "plugin.py"), "r", encoding="utf-8") as f:
+            plugin_py = f.read()
+
+        build_dir = os.path.join(os.path.dirname(__file__), ".tmp-plugin-build")
+        os.makedirs(build_dir, exist_ok=True)
+        with open(os.path.join(build_dir, "run_tool.py"), "w", encoding="utf-8") as f:
+            f.write(run_tool)
+        with open(os.path.join(build_dir, "plugin.py"), "w", encoding="utf-8") as f:
+            f.write(plugin_py)
+
+        base = cls._resolve_local_python_image(client)
+
+        dockerfile = (
+            f"FROM {base}\n"
+            "RUN apt-get update && apt-get install -y --no-install-recommends "
+            "iptables netcat-openbsd && rm -rf /var/lib/apt/lists/*\n"
+            "WORKDIR /opt/plugin\n"
+            "COPY run_tool.py /opt/plugin/run_tool.py\n"
+            "COPY plugin.py /opt/plugin/plugin.py\n"
+            "RUN chmod +x /opt/plugin/run_tool.py\n"
+        )
+        with open(os.path.join(build_dir, "Dockerfile"), "w", encoding="utf-8") as f:
+            f.write(dockerfile)
+
+        try:
+            img, _build_logs = client.images.build(
+                path=build_dir,
+                tag=cls._plugin_tag,
+                rm=True,
+            )
+        except Exception as e:
+            pytest.fail(f"Failed to build test plugin image: {e}")
+
+        # Resolve the digest (RepoDigest if pushed, else image Id).
+        repo = img.attrs.get("RepoDigests") or []
+        cls._plugin_digest = repo[0] if repo else img.attrs.get("Id")
+        if not cls._plugin_digest:
+            pytest.fail("Built test image has no resolvable digest")
+
     @staticmethod
-    def _resolve_local_image(client):
-        """Find a local image suitable for testing. NEVER pulls from the internet."""
+    def _resolve_local_python_image(client):
+        """Find a local python base image to build from (OFFLINE).
+
+        Returns the image TAG usable directly in a Dockerfile FROM clause
+        (e.g. 'python:3.12-slim'). Requires a tagged python image — without
+        one the integration tests cannot validate tool execution, network
+        policy, or resource limits, so we fail rather than silently skip.
+        """
         candidates = [
-            "busybox:latest",
-            "alpine:3.19",
-            "redis:7-alpine",
-            "redis:6-alpine",
+            "python:3.12-slim",
+            "python:3.11-slim",
+            "python:3.10-slim",
+            "python:3.9-slim",
         ]
         for tag in candidates:
             try:
                 img = client.images.get(tag)
-                return img
+                if img.tags:
+                    return img.tags[0]
             except Exception:
                 continue
-        # Last resort: pick the smallest tagged local image
+
+        # Try any locally-present, tagged python image.
         try:
             images = client.images.list()
-            for img in sorted(images, key=lambda i: i.attrs.get("Size", 0)):
-                if img.tags:
-                    return img
+            for img in images:
+                if not img.tags:
+                    continue
+                first_tag = img.tags[0]
+                if first_tag.startswith("python:"):
+                    return first_tag
         except Exception:
             pass
-        pytest.skip(
-            "No local Docker image available for integration tests. "
-            "Pull 'busybox' or 'alpine' manually to enable these tests."
+
+        pytest.fail(
+            "Integration tests require a tagged local Python base image "
+            "(e.g. 'python:3.12-slim'). Pull one to enable them."
         )
 
     def test_health_endpoint(self):
@@ -719,16 +781,16 @@ class TestRunnerIntegration:
         assert "digest" in detail.lower()
 
     def test_execute_with_valid_digest_succeeds(self):
-        """P0-3: Container executes via Runner with valid digest."""
+        """P0-3: Container executes via Runner with valid digest, returns tool output."""
         if not self._plugin_digest:
-            pytest.skip("Local test image has no RepoDigests")
+            pytest.skip("Local test image has no resolvable digest")
         import httpx
         resp = httpx.post(
             f"{self.RUNNER_URL}/execute",
             json={
                 "image_tag": self._plugin_tag,
-                "tool_name": "test_tool",
-                "tool_input": {"key": "value"},
+                "tool_name": "echo_tool",
+                "tool_input": {"text": "hello-container"},
                 "image_digest": self._plugin_digest,
                 "config": {"timeout": 8.0},
             },
@@ -737,24 +799,62 @@ class TestRunnerIntegration:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data.get("error_code") != "missing_digest", \
-            f"Should not reject digest: {data}"
+        assert data.get("success") is True, \
+            f"Expected success=True, got: {data}"
+        # Deterministic output from the echo_tool fixture.
+        assert data.get("data") == {
+            "echo": "hello-container",
+            "tool": "echo_tool",
+            "source": "container",
+        }, f"Unexpected tool output: {data.get('data')}"
 
     def test_unallowed_network_blocked(self):
-        """P0-3: Container network restricted by allowed_domains."""
+        """P0-3: Container network restricted — tool calling a non-whitelisted
+        domain fails while the runner still reports success at HTTP level."""
         if not self._plugin_digest:
-            pytest.skip("Local test image has no RepoDigests")
+            pytest.skip("Local test image has no resolvable digest")
         import httpx
         resp = httpx.post(
             f"{self.RUNNER_URL}/execute",
             json={
                 "image_tag": self._plugin_tag,
-                "tool_name": "test_tool",
+                "tool_name": "network_probe_tool",
+                "tool_input": {"url": "http://example.com/"},
+                "image_digest": self._plugin_digest,
+                "config": {
+                    "timeout": 12.0,
+                    "allowed_domains": ["no-such-domain.example"],
+                },
+            },
+            headers={"X-Runner-Token": self.RUNNER_TOKEN},
+            timeout=25.0,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("success") is True, f"Runner should not fail: {data}"
+        # The network probe tool must report failure: example.com is not whitelisted.
+        tool_data = data.get("data") or {}
+        assert tool_data.get("ok") is False, \
+            f"Tool should have been blocked from network, got: {tool_data}"
+
+    def test_resource_limits_applied(self):
+        """P0-3: Container runs with Memory/NanoCpus/PidsLimit/read-only rootfs."""
+        if not self._plugin_digest:
+            pytest.skip("Local test image has no resolvable digest")
+        import httpx
+        resp = httpx.post(
+            f"{self.RUNNER_URL}/execute",
+            json={
+                "image_tag": self._plugin_tag,
+                "tool_name": "resource_report_tool",
                 "tool_input": {},
                 "image_digest": self._plugin_digest,
                 "config": {
                     "timeout": 8.0,
-                    "allowed_domains": ["no-such-domain.example"],
+                    "memory_limit": "64m",
+                    "cpu_limit": 0.5,
+                    "pids_limit": 128,
+                    "read_only_rootfs": True,
                 },
             },
             headers={"X-Runner-Token": self.RUNNER_TOKEN},
@@ -762,7 +862,18 @@ class TestRunnerIntegration:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert isinstance(data, dict)
+        limits = data.get("resource_limits") or {}
+        assert limits.get("memory_bytes") == 64 * 1024 * 1024, \
+            f"Memory limit not enforced: {limits}"
+        # CPU limit enforced via cpu_quota/cpu_period ratio (0.5 CPU).
+        quota = limits.get("cpu_quota")
+        period = limits.get("cpu_period") or 100000
+        assert quota == int(0.5 * 100000) and period == 100000, \
+            f"CPU limit not enforced: {limits}"
+        assert limits.get("pids_limit") == 128, \
+            f"PidsLimit not enforced: {limits}"
+        assert limits.get("read_only_rootfs") is True, \
+            f"read-only rootfs not enforced: {limits}"
 
 class TestSecureByDefault:
     """Verify that defaults enforce security: digest required, fail_closed."""
@@ -796,3 +907,90 @@ class TestSecureByDefault:
         selected = select_canary_version(versions, user_id=1, plugin_id="p")
         # Should prefer stable when no canary routing needed
         assert selected is not None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 7. execute_in_sandbox fail-closed (container mode never falls back)
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestContainerFailClosedNoSubprocess:
+    """P0: container mode must NEVER fall back to a subprocess.
+
+    Even when a manifest sets fail_closed=False, container execution that
+    fails for ANY reason must return an error instead of downgrading to a
+    subprocess. Subprocess execution is only available via explicit
+    runner_mode="subprocess".
+    """
+
+    def _runner_unreachable_config(self, fail_closed: bool):
+        from app.core.plugin.sandbox_runner import SubprocessConfig
+        return SubprocessConfig(
+            runner_mode="container",
+            container_image="hfusionhub-plugin-test:v1",
+            container_digest="sha256:abc123",
+            fail_closed=fail_closed,
+        )
+
+    @staticmethod
+    def _patch_runner_unreachable():
+        """Patch container_runner httpx to raise ConnectError (runner down)."""
+        import httpx as httpx_mod
+        from unittest.mock import AsyncMock
+
+        async def _raise_connect_error(*args, **kwargs):
+            raise httpx_mod.ConnectError("Connection refused")
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.post = _raise_connect_error
+
+        return patch(
+            "app.core.plugin.container_runner.httpx.AsyncClient",
+            return_value=mock_client,
+        )
+
+    def test_container_fail_closed_never_spawns_subprocess(self):
+        """Container failure must not spawn a subprocess."""
+        from app.core.plugin.sandbox_runner import execute_in_sandbox
+
+        with self._patch_runner_unreachable(), patch(
+            "app.core.plugin.sandbox_runner.Process",
+            MagicMock(
+                side_effect=AssertionError(
+                    "Process spawned — container mode must not fall back to subprocess"
+                )
+            ),
+        ):
+            result = execute_in_sandbox(
+                plugin_dir="/tmp/plugin",
+                plugin_name="test",
+                tool_name="test_tool",
+                tool_input={},
+                config=self._runner_unreachable_config(fail_closed=True),
+            )
+        assert result.success is False
+        assert result.error_code in ("runner_unreachable", "container_runner_unavailable")
+        # Crucially: no subprocess fallback happened (Process was a failing stub).
+
+    def test_container_fail_closed_even_when_manifest_disables(self):
+        """Manifest fail_closed=False must NOT re-enable subprocess fallback."""
+        from app.core.plugin.sandbox_runner import execute_in_sandbox
+
+        with self._patch_runner_unreachable(), patch(
+            "app.core.plugin.sandbox_runner.Process",
+            MagicMock(
+                side_effect=AssertionError(
+                    "Process spawned — container mode must never downgrade to subprocess"
+                )
+            ),
+        ):
+            result = execute_in_sandbox(
+                plugin_dir="/tmp/plugin",
+                plugin_name="test",
+                tool_name="test_tool",
+                tool_input={},
+                config=self._runner_unreachable_config(fail_closed=False),
+            )
+        assert result.success is False
+        assert result.error_code in ("container_runner_unavailable", "runner_unreachable")

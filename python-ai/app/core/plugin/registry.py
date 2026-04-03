@@ -76,7 +76,10 @@ class RegisteredPlugin:
             # Container mode settings from sandbox config
             if sc.runner:
                 cfg.runner_mode = sc.runner.mode or "subprocess"
-                cfg.fail_closed = sc.runner.fail_closed
+                # Container mode is ALWAYS fail-closed — production cannot let a
+                # plugin manifest disable it. Subprocess execution must be chosen
+                # explicitly via runner.mode="subprocess", never as a fallback.
+                cfg.fail_closed = True if cfg.runner_mode == "container" else sc.runner.fail_closed
 
         # Always set plugin identity for execution
         cfg.plugin_id = self.plugin_id

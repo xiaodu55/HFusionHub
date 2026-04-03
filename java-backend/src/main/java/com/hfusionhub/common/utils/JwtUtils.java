@@ -11,6 +11,8 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 
+import com.hfusionhub.entity.TenantMember;
+
 /**
  * JWT 工具类（基于 Sa-Token）
  *
@@ -32,9 +34,49 @@ public class JwtUtils implements StpInterface {
      */
     @Override
     public List<String> getPermissionList(Object loginId, String loginType) {
-        // 这里可以查询数据库获取用户权限
-        // 暂时返回空列表
+        try {
+            Long userId = Long.parseLong(loginId.toString());
+            User user = userMapper.selectById(userId);
+            if (user == null) return List.of();
+
+            // Platform admin gets all permissions
+            if (Boolean.TRUE.equals(user.getPlatformAdmin())) {
+                return List.of("*");
+            }
+
+            // Tenant-scoped permissions based on member role
+            if (user.getTenantId() != null) {
+                // Load tenant member role and its permissions
+                var member = getUserTenantMember(user);
+                if (member != null && member.getRole() != null) {
+                    List<String> perms = getPermissionsForRole(member.getRole());
+                    if (!perms.isEmpty()) return perms;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("获取用户权限失败: loginId={}", loginId, e);
+        }
         return List.of();
+    }
+
+    private TenantMember getUserTenantMember(User user) {
+        try {
+            var mapper = SpringContextHolder.getBean(
+                com.hfusionhub.mapper.TenantMemberMapper.class);
+            return mapper.selectByTenantAndUser(user.getTenantId(), user.getId());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private List<String> getPermissionsForRole(String role) {
+        try {
+            var mapper = SpringContextHolder.getBean(
+                com.hfusionhub.mapper.RolePermissionMapper.class);
+            return mapper.selectPermissionsByRole(role);
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     /**

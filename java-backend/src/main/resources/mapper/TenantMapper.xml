@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hfusionhub.mapper.TenantMapper">
+
+    <resultMap id="BaseResultMap" type="com.hfusionhub.entity.Tenant">
+        <id column="id" property="id"/>
+        <result column="name" property="name"/>
+        <result column="slug" property="slug"/>
+        <result column="plan_tier" property="planTier"/>
+        <result column="status" property="status"/>
+        <result column="created_by" property="createdBy"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+        <result column="deleted" property="deleted"/>
+    </resultMap>
+
+    <select id="selectBySlug" resultMap="BaseResultMap">
+        SELECT * FROM tenant WHERE slug = #{slug} AND deleted = 0
+    </select>
+
+    <select id="selectByUserId" resultMap="BaseResultMap">
+        SELECT t.* FROM tenant t
+        INNER JOIN tenant_member tm ON t.id = tm.tenant_id
+        WHERE tm.user_id = #{userId} AND tm.deleted = 0 AND t.deleted = 0
+    </select>
+</mapper>

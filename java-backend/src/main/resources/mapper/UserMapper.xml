@@ -15,6 +15,8 @@
         <result column="status" property="status"/>
         <result column="last_login_time" property="lastLoginTime"/>
         <result column="last_login_ip" property="lastLoginIp"/>
+        <result column="tenant_id" property="tenantId"/>
+        <result column="platform_admin" property="platformAdmin"/>
         <result column="created_at" property="createdAt"/>
         <result column="updated_at" property="updatedAt"/>
         <result column="deleted" property="deleted"/>
@@ -23,7 +25,8 @@
     <!-- 通用查询结果列 -->
     <sql id="Base_Column_List">
         id, username, password, nickname, email, phone, avatar, role, status,
-        last_login_time, last_login_ip, created_at, updated_at, deleted
+        last_login_time, last_login_ip, tenant_id, platform_admin,
+        created_at, updated_at, deleted
     </sql>
 
 </mapper>

@@ -86,4 +86,16 @@ public class User extends BaseEntity {
      */
     @Schema(description = "最后登录IP")
     private String lastLoginIp;
+
+    /**
+     * 所属租户ID
+     */
+    @Schema(description = "所属租户ID")
+    private Long tenantId;
+
+    /**
+     * 平台管理员标记: true 表示平台级管理员（跨租户）
+     */
+    @Schema(description = "平台管理员标记")
+    private Boolean platformAdmin;
 }

@@ -97,6 +97,7 @@ class ExecuteResponse(BaseModel):
     error_code: Optional[str] = None
     duration_ms: float = 0.0
     resource_usage: Optional[Dict[str, Any]] = None
+    resource_limits: Optional[Dict[str, Any]] = None
     container_id: Optional[str] = None
 
 
@@ -139,13 +140,38 @@ def _validate_image_tag(image_tag: str) -> None:
         raise HTTPException(status_code=400, detail=f"Invalid image tag format: {image_tag}")
 
 
+def _normalize_image_digest(raw: Optional[str]) -> Optional[str]:
+    """Extract and validate a canonical sha256:<64 hex> digest.
+
+    Accepts either a bare digest ('sha256:<64 hex>') or a repository-qualified
+    digest ('repo:tag@sha256:<64 hex>', e.g. from Docker RepoDigests). Returns
+    the normalized 'sha256:<64 hex>' string, or None when no complete,
+    well-formed digest is present. Short prefixes or malformed strings are
+    rejected (never accepted via substring matching).
+    """
+    if not raw:
+        return None
+    text = raw.strip().lower()
+    if "@" in text:
+        text = text.rsplit("@", 1)[1]
+    m = re.fullmatch(r"sha256:[0-9a-f]{64}", text)
+    return m.group(0) if m else None
+
+
 def _build_network_commands(config: ContainerConfig) -> List[str]:
-    """Build iptables commands to enforce network policies inside the container."""
+    """Build iptables commands to enforce network policies inside the container.
+
+    All domain-based rules are resolved to IPs first (dig +short) because
+    iptables cannot resolve hostnames itself, and unresolvable domains must
+    not abort the whole entrypoint.
+    """
     commands = []
 
     # Drop metadata endpoints always (resolve to IPs first)
     for domain in GLOBAL_BLOCKED_DOMAINS:
-        commands.append(f"iptables -A OUTPUT -d {domain} -j DROP")
+        if domain.startswith("*."):
+            domain = domain[2:]
+        commands.append(f"for ip in $(dig +short {domain} 2>/dev/null); do iptables -A OUTPUT -d $ip -j DROP; done")
 
     # If allowed_domains is set, block everything except those domains
     if config.allowed_domains:
@@ -206,10 +232,11 @@ async def execute_tool(
 
     try:
         # Validate digest FIRST — before any Docker operation
-        if not req.image_digest or not req.image_digest.strip():
+        expected_digest = _normalize_image_digest(req.image_digest)
+        if expected_digest is None:
             raise HTTPException(
                 status_code=400,
-                detail="image_digest is required for container execution"
+                detail="image_digest is required and must be a full sha256:<64 hex> digest"
             )
 
         # Resolve image: try local first, then pull from registry
@@ -220,30 +247,62 @@ async def execute_tool(
             logger.info("Pulling image: %s", req.image_tag)
             pulled_image = docker_client.images.pull(req.image_tag)
 
-        # Verify digest against actual image
-        actual_digest = pulled_image.attrs.get("RepoDigests", [""])[0]
-        if req.image_digest not in actual_digest:
+        # Verify digest against actual image via constant-time comparison.
+        # Prefer the registry RepoDigest (manifest digest); fall back to the
+        # image Id (config digest) for locally-built images that were never
+        # pushed. Both are normalized to sha256:<64 hex> before comparing.
+        actual_digest = None
+        for repo_digest in pulled_image.attrs.get("RepoDigests", []):
+            candidate = _normalize_image_digest(repo_digest)
+            if candidate is not None:
+                actual_digest = candidate
+                break
+        if actual_digest is None:
+            actual_digest = _normalize_image_digest(pulled_image.attrs.get("Id"))
+
+        if actual_digest is None:
             raise HTTPException(
                 status_code=400,
-                detail=f"Image digest mismatch: expected {req.image_digest}, got {actual_digest}"
+                detail=f"Image has no valid digest to verify against: RepoDigests={pulled_image.attrs.get('RepoDigests', [])}, Id={pulled_image.attrs.get('Id')}"
             )
-        logger.info("Image digest verified: %s", req.image_digest)
+        if not hmac.compare_digest(actual_digest, expected_digest):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Image digest mismatch: expected {expected_digest}, got {actual_digest}"
+            )
+        logger.info("Image digest verified via constant-time compare: %s", expected_digest)
 
         # Build network policy commands
         network_commands = _build_network_commands(req.config)
 
-        # Prepare entrypoint script that enforces network policy then runs tool
-        # Write to a temp file in container and execute - this avoids quoting issues
+        # Prepare entrypoint that enforces network policy THEN invokes the fixed
+        # plugin entry point. Tool name + JSON input are passed via env vars.
         script_lines = ["#!/bin/sh", "set -e"]
         for cmd in network_commands:
             script_lines.append(cmd)
-        script_lines.append(f'python -c "import sys; exec(sys.stdin.read())"')
+        script_lines.append(
+            '[ -f /opt/plugin/run_tool.py ] || { echo "missing /opt/plugin/run_tool.py"; exit 2; }'
+        )
+        script_lines.append("python /opt/plugin/run_tool.py")
         entrypoint_script = "\n".join(script_lines)
+
+        # Resolve the network: use the configured isolated network if it
+        # exists; otherwise fall back to the default bridge. The network-policy
+        # enforcement itself happens INSIDE the container via iptables OUTPUT
+        # rules, so connectivity isolation does not depend on a custom network.
+        network_name = req.config.network
+        try:
+            docker_client.networks.get(network_name)
+        except Exception:
+            logger.warning(
+                "Network '%s' not found — falling back to default bridge", network_name
+            )
+            network_name = None
 
         container = docker_client.containers.run(
             image=pulled_image.id,
             detach=True,
-            network=req.config.network,
+            network=network_name,
             mem_limit=req.config.memory_limit,
             cpu_quota=int(req.config.cpu_limit * 100000),
             cpu_period=100000,
@@ -300,6 +359,25 @@ async def execute_tool(
         except Exception:
             pass
 
+        # Report the ACTUAL resource limits enforced on the container so tests
+        # (and audits) can verify Memory/NanoCpus/PidsLimit/read-only rootfs.
+        resource_limits = {}
+        try:
+            hc = container.attrs.get("HostConfig", {})
+            resource_limits = {
+                "memory_bytes": hc.get("Memory"),
+                "nano_cpus": hc.get("NanoCpus"),
+                "cpu_quota": hc.get("CpuQuota"),
+                "cpu_period": hc.get("CpuPeriod"),
+                "pids_limit": hc.get("PidsLimit"),
+                "read_only_rootfs": hc.get("ReadonlyRootfs"),
+                "cap_drop": hc.get("CapDrop"),
+                "security_opt": hc.get("SecurityOpt"),
+                "tmpfs": list((hc.get("Tmpfs") or {}).keys()),
+            }
+        except Exception as e:
+            logger.warning("Failed to read container resource limits: %s", e)
+
         if exit_code != 0:
             return ExecuteResponse(
                 success=False,
@@ -307,19 +385,40 @@ async def execute_tool(
                 error_code="container_error",
                 duration_ms=elapsed_ms,
                 resource_usage=resource_usage,
+                resource_limits=resource_limits,
                 container_id=container.short_id,
             )
 
+        # The fixed entry point (run_tool.py) emits a single JSON object:
+        # {"success": bool, "data": ..., "error": ...}. Unwrap it so the
+        # plugin's actual tool result lands in ExecuteResponse.data.
+        tool_result = None
         try:
-            data = json.loads(logs.strip().split("\n")[-1]) if logs.strip() else None
+            tool_result = json.loads(logs.strip().split("\n")[-1]) if logs.strip() else None
         except (json.JSONDecodeError, IndexError):
-            data = {"raw_output": logs}
+            tool_result = {"raw_output": logs}
+
+        if isinstance(tool_result, dict) and "success" in tool_result:
+            tool_success = bool(tool_result.get("success"))
+            tool_error = tool_result.get("error")
+            tool_data = tool_result.get("data")
+            return ExecuteResponse(
+                success=tool_success,
+                data=tool_data,
+                error=tool_error if not tool_success else None,
+                error_code="plugin_execution_error" if not tool_success else None,
+                duration_ms=elapsed_ms,
+                resource_usage=resource_usage,
+                resource_limits=resource_limits,
+                container_id=container.short_id,
+            )
 
         return ExecuteResponse(
             success=True,
-            data=data,
+            data=tool_result,
             duration_ms=elapsed_ms,
             resource_usage=resource_usage,
+            resource_limits=resource_limits,
             container_id=container.short_id,
         )
     except HTTPException:

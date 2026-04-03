@@ -54,6 +54,8 @@ public class PromptTestSetRun {
 
     private LocalDateTime completedAt;
 
+    private Long tenantId;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

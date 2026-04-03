@@ -56,7 +56,7 @@ class SubprocessConfig:
     plugin_id: Optional[str] = None
     user_id: Optional[int] = None
     container_digest: Optional[str] = None
-    fail_closed: bool = True  # Production: fail if container runner unavailable
+    fail_closed: bool = True  # Deprecated for container mode; container is ALWAYS fail-closed
     java_backend_url: Optional[str] = None  # Java backend URL for canary version fetch
     internal_token: Optional[str] = None    # Internal token for Java backend auth
 
@@ -356,6 +356,11 @@ def execute_in_sandbox(
     This is the ONLY way to run plugin code. The main process NEVER imports
     plugin modules directly.
 
+    Container mode is fail-CLOSED: if container execution fails for any
+    reason, we NEVER fall back to a subprocess. Falling back would bypass the
+    stronger container isolation. To run via subprocess, the caller must
+    explicitly use `runner_mode="subprocess"` — never as an exception fallback.
+
     Returns SubprocessResult with success/failure and any output.
     """
     if config.runner_mode == "container":
@@ -427,15 +432,15 @@ def execute_in_sandbox(
             finally:
                 loop.close()
         except Exception as e:
-            if config.fail_closed:
-                logger.error("Container execution failed, fail_closed=True, refusing fallback: %s", e)
-                return SubprocessResult(
-                    success=False,
-                    error=f"Container runner unavailable (fail_closed): {e}",
-                    error_code="container_runner_unavailable",
-                    duration_ms=0.0,
-                )
-            logger.warning("Container execution failed, falling back to subprocess: %s", e)
+            # Container mode is fail-CLOSED: NEVER fall back to subprocess.
+            # Subprocess execution must be chosen explicitly via runner_mode="subprocess".
+            logger.error("Container execution failed, refusing subprocess fallback: %s", e)
+            return SubprocessResult(
+                success=False,
+                error=f"Container runner failed (fail_closed): {e}",
+                error_code="container_runner_unavailable",
+                duration_ms=0.0,
+            )
 
     start_time = time.monotonic()
     parent_conn, child_conn = Pipe(duplex=False)

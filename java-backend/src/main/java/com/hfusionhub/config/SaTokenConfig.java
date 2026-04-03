@@ -3,13 +3,14 @@ package com.hfusionhub.config;
 import cn.dev33.satoken.interceptor.SaInterceptor;
 import cn.dev33.satoken.router.SaRouter;
 import cn.dev33.satoken.stp.StpUtil;
+import com.hfusionhub.tenant.TenantContextInterceptor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * Sa-Token 配置 — 认证拦截器 + 登录限流拦截器
+ * Sa-Token 配置 — 认证拦截器 + 登录限流拦截器 + 租户上下文
  *
  * @author HFusionHub Team
  */
@@ -18,9 +19,10 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class SaTokenConfig implements WebMvcConfigurer {
 
     private final LoginRateLimitInterceptor loginRateLimitInterceptor;
+    private final TenantContextInterceptor tenantContextInterceptor;
 
     /**
-     * 注册拦截器链：限流（order 1）→ 认证（order 2）
+     * 注册拦截器链：限流（1）→ 认证（2）→ 租户上下文（3）
      *
      * @param registry 拦截器注册表
      */
@@ -51,5 +53,10 @@ public class SaTokenConfig implements WebMvcConfigurer {
                     )
                     .check(r -> StpUtil.checkLogin());
         })).addPathPatterns("/**").order(2);
+
+        // Tenant context — runs AFTER auth so we can resolve the user's tenant
+        registry.addInterceptor(tenantContextInterceptor)
+                .addPathPatterns("/**")
+                .order(3);
     }
 }

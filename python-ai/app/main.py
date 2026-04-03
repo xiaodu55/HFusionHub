@@ -48,6 +48,7 @@ from app.api.exception_handlers import (
 from app.core.exceptions import HFusionHubException
 from app.api.internal_auth import require_internal_token
 from app.api.trace_middleware import TraceMiddleware
+from app.api.tenant_middleware import TenantMiddleware
 
 
 def create_app() -> FastAPI:
@@ -71,6 +72,9 @@ def create_app() -> FastAPI:
 
     # Distributed tracing — extract X-Trace-ID from upstream (Java) or generate fresh
     app.add_middleware(TraceMiddleware)
+
+    # Tenant context — extract X-Tenant-Id from upstream (Java) or default to tenant 1
+    app.add_middleware(TenantMiddleware)
 
     # Register exception handlers
     app.add_exception_handler(HFusionHubException, hfusionhub_exception_handler)

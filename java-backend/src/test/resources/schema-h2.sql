@@ -701,3 +701,94 @@ CREATE TABLE IF NOT EXISTS plugin_version_history (
     is_canary TINYINT NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- =====================================================
+-- V32 — Tenant, Organization Member & Role-Permission
+-- =====================================================
+CREATE TABLE IF NOT EXISTS tenant (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name        VARCHAR(100) NOT NULL,
+    slug        VARCHAR(50) NOT NULL UNIQUE,
+    plan_tier   VARCHAR(20) NOT NULL DEFAULT 'free',
+    status      VARCHAR(20) NOT NULL DEFAULT 'active',
+    created_by  BIGINT DEFAULT NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted     TINYINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS tenant_member (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id   BIGINT NOT NULL,
+    user_id     BIGINT NOT NULL,
+    role        VARCHAR(20) NOT NULL DEFAULT 'member',
+    joined_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted     TINYINT NOT NULL DEFAULT 0,
+    UNIQUE (tenant_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS role_permission (
+    role        VARCHAR(20) NOT NULL,
+    permission  VARCHAR(100) NOT NULL,
+    PRIMARY KEY (role, permission)
+);
+
+-- Seed role permissions (H2: simple INSERTs since table is freshly created)
+INSERT INTO role_permission (role, permission) VALUES ('owner', 'kb:create');
+INSERT INTO role_permission (role, permission) VALUES ('owner', 'kb:delete');
+INSERT INTO role_permission (role, permission) VALUES ('owner', 'kb:manage');
+INSERT INTO role_permission (role, permission) VALUES ('owner', 'conversation:create');
+INSERT INTO role_permission (role, permission) VALUES ('owner', 'conversation:delete');
+INSERT INTO role_permission (role, permission) VALUES ('owner', 'plugin:install');
+INSERT INTO role_permission (role, permission) VALUES ('owner', 'plugin:manage');
+INSERT INTO role_permission (role, permission) VALUES ('owner', 'member:invite');
+INSERT INTO role_permission (role, permission) VALUES ('owner', 'member:remove');
+INSERT INTO role_permission (role, permission) VALUES ('owner', 'member:manage');
+INSERT INTO role_permission (role, permission) VALUES ('owner', 'tenant:manage');
+INSERT INTO role_permission (role, permission) VALUES ('owner', 'tenant:delete');
+INSERT INTO role_permission (role, permission) VALUES ('owner', 'billing:view');
+INSERT INTO role_permission (role, permission) VALUES ('owner', 'quota:view');
+INSERT INTO role_permission (role, permission) VALUES ('owner', 'quota:manage');
+INSERT INTO role_permission (role, permission) VALUES ('admin', 'kb:create');
+INSERT INTO role_permission (role, permission) VALUES ('admin', 'kb:delete');
+INSERT INTO role_permission (role, permission) VALUES ('admin', 'kb:manage');
+INSERT INTO role_permission (role, permission) VALUES ('admin', 'conversation:create');
+INSERT INTO role_permission (role, permission) VALUES ('admin', 'conversation:delete');
+INSERT INTO role_permission (role, permission) VALUES ('admin', 'plugin:install');
+INSERT INTO role_permission (role, permission) VALUES ('admin', 'plugin:manage');
+INSERT INTO role_permission (role, permission) VALUES ('admin', 'member:invite');
+INSERT INTO role_permission (role, permission) VALUES ('admin', 'member:remove');
+INSERT INTO role_permission (role, permission) VALUES ('admin', 'member:manage');
+INSERT INTO role_permission (role, permission) VALUES ('admin', 'quota:view');
+INSERT INTO role_permission (role, permission) VALUES ('admin', 'billing:view');
+INSERT INTO role_permission (role, permission) VALUES ('member', 'kb:create');
+INSERT INTO role_permission (role, permission) VALUES ('member', 'kb:manage');
+INSERT INTO role_permission (role, permission) VALUES ('member', 'conversation:create');
+INSERT INTO role_permission (role, permission) VALUES ('member', 'plugin:install');
+INSERT INTO role_permission (role, permission) VALUES ('viewer', 'kb:read');
+INSERT INTO role_permission (role, permission) VALUES ('viewer', 'conversation:read');
+
+-- Add tenant_id to sys_user (H2-compatible ALTER)
+ALTER TABLE sys_user ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE sys_user ADD COLUMN platform_admin TINYINT DEFAULT 0;
+
+-- Insert default tenant for tests
+INSERT INTO tenant (id, name, slug, plan_tier, status) VALUES
+    (1, 'Default', 'default', 'enterprise', 'active');
+
+-- Add tenant_id column to existing H2 tables (only those created above)
+ALTER TABLE knowledge_base ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE conversation ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE agent_task ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE prompt_template ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE prompt_test_set ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE prompt_test_set_run ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE plugin ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE plugin_audit_log ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE agent_approval ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE document ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE message ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE agent_run ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE agent_step ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1;

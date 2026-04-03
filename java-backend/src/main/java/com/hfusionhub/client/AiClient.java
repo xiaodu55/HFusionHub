@@ -658,6 +658,11 @@ public class AiClient {
         if (traceId != null) {
             headers.set(com.hfusionhub.config.TraceContext.HEADER_NAME, traceId);
         }
+        // Propagate tenant context to Python AI
+        Long tenantId = com.hfusionhub.tenant.TenantContext.getTenantId();
+        if (tenantId != null) {
+            headers.set("X-Tenant-Id", tenantId.toString());
+        }
     }
 
     /**
