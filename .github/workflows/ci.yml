@@ -37,6 +37,46 @@ jobs:
       - name: Run tests
         run: pytest -q tests --durations=20
 
+  # ─── Python AI 容器专项（阻断门禁）───
+  # 数据面关键安全门禁：容器插件执行（digest 校验、固定入口、网络/资源限制）。
+  # 与常规 python 测试分离，单独预置 Docker + Python 基础镜像，避免镜像环境差异
+  # 导致容器专项失效（缺镜像即 FAIL，绝不静默跳过）。
+  python-container:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python-ai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: python-ai/requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Pre-pull Python base image (blocking)
+        # 预置并缓存 Python 基础镜像，确保容器专项不因拉取/解析差异而失效。
+        run: |
+          docker pull python:3.12-slim
+          docker image ls python:3.12-slim
+          echo "::debug::Python base image ready"
+      - name: Run container plugin gates (fail on ANY skip)
+        # Run the container suite exactly ONCE, capture the output, and fail if
+        # anything was skipped. Any skip (missing Docker daemon, missing base
+        # image, etc.) means the P0 container gate did not actually execute.
+        shell: bash
+        run: |
+          set -euo pipefail
+          output=$(python -m pytest -q tests/test_plugin_container.py -rs 2>&1)
+          echo "$output"
+          # pytest summary formats: '39 passed in ...' or '33 passed, 6 skipped in ...'
+          skipped=$(echo "$output" | grep -oE '[0-9]+ skipped' | grep -oE '^[0-9]+' | awk '{s+=$1} END{print s+0}')
+          if [ "$skipped" -gt 0 ]; then
+            echo "::error::Container suite skipped ${skipped} test(s) — P0 container gate cannot pass."
+            exit 1
+          fi
+
   # ─── Phase 1/2 评测门禁（离线，免模型免数据库，PR 阻断）───
   eval-offline:
     runs-on: ubuntu-latest
