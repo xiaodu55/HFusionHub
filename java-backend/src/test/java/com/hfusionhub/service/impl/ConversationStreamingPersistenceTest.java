@@ -190,6 +190,45 @@ class ConversationStreamingPersistenceTest {
         assertTrueContains(events, "RUN_SUCCEEDED");
     }
 
+    /**
+     * 异步纯 content + [DONE] 流：与额度结算测试的最大区别是显式断言
+     * 助手消息真实落库（现有结算测试仅发送 [DONE]、无 content）。
+     * 本用例只关心消息持久化，不走任何结构化 Agent 事件。
+     */
+    @Test
+    void asyncContentCompletionPersistsAssistantMessage() {
+        String requestId = "persist-content-1";
+        String assistantRequestId = "persist-content-1:assistant";
+
+        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString()))
+                .thenReturn(Flux.just(
+                        "data: {\"content\":\"Hello from pure content\"}\n\n",
+                        "data: {\"content\":\" stream\"}\n\n",
+                        "data: [DONE]\n\n"
+                ).subscribeOn(Schedulers.single()));
+
+        MessageSendDTO dto = new MessageSendDTO();
+        dto.setConversationId(conversationId);
+        dto.setContent("hello world");
+        dto.setRequestId(requestId);
+
+        conversationService.sendMessageStream(dto, new SseEmitter(), 1L, new AtomicBoolean(false));
+
+        Message assistant = waitForAssistantMessage(assistantRequestId);
+        assertNotNull(assistant, "assistant message should be persisted after content + [DONE]");
+        assertEquals("assistant", assistant.getRole());
+        // 两个 content chunk 顺序拼接
+        assertEquals("Hello from pure content stream", assistant.getContent());
+        assertEquals(conversationId, assistant.getConversationId());
+
+        // 用户消息也应落库
+        Message user = messageMapper.selectOne(Wrappers.<Message>lambdaQuery()
+                .eq(Message::getRole, "user")
+                .eq(Message::getRequestId, requestId));
+        assertNotNull(user, "user message should be persisted");
+        assertEquals("hello world", user.getContent());
+    }
+
     private Message waitForAssistantMessage(String assistantRequestId) {
         long deadline = System.currentTimeMillis() + 8000;
         Message assistant = null;
