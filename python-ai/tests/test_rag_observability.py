@@ -146,7 +146,7 @@ def test_trace_api_exposes_trace_and_stats():
         top_k=3,
         latency_ms=12.5,
     ))
-    client = TestClient(create_app(), headers={"X-Internal-Token": "test-internal-token"})
+    client = TestClient(create_app(), headers={"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "1"})
 
     listed = client.get("/api/rag/traces", params={"knowledge_base_id": 1})
     detail = client.get(f"/api/rag/traces/{trace.trace_id}", params={"knowledge_base_id": 1})
@@ -187,7 +187,7 @@ def test_debug_search_api_returns_a_scoped_full_trace(monkeypatch):
     retriever = MultiChannelRetriever(postprocessor=get_postprocessor())
     retriever.router = FakeRouter()
     monkeypatch.setattr(rag_api, "get_retriever", lambda: retriever)
-    client = TestClient(create_app(), headers={"X-Internal-Token": "test-internal-token"})
+    client = TestClient(create_app(), headers={"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "1"})
 
     response = client.post("/api/rag/debug/search", json={
         "query": "What is RAG?",
@@ -221,7 +221,7 @@ def test_trace_api_filters_paginates_and_exports_records():
         error="graph unavailable",
         results=[{"source": "graph", "document_id": 2}],
     ))
-    client = TestClient(create_app(), headers={"X-Internal-Token": "test-internal-token"})
+    client = TestClient(create_app(), headers={"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "1"})
 
     listed = client.get("/api/rag/traces", params={
         "query": "vector",
@@ -251,7 +251,7 @@ def test_evaluation_api_uses_retrieval_evaluator(monkeypatch):
     monkeypatch.setattr(rag_api, "get_retriever", lambda: FakeRetriever())
     store = EvaluationRunStore(":memory:")
     monkeypatch.setattr(rag_api, "get_evaluation_run_store", lambda: store)
-    client = TestClient(create_app(), headers={"X-Internal-Token": "test-internal-token"})
+    client = TestClient(create_app(), headers={"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "1"})
 
     response = client.post("/api/rag/evaluate", json={
         "knowledge_base_id": 1,

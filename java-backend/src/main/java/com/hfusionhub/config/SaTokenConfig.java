@@ -54,9 +54,26 @@ public class SaTokenConfig implements WebMvcConfigurer {
                     .check(r -> StpUtil.checkLogin());
         })).addPathPatterns("/**").order(2);
 
-        // Tenant context — runs AFTER auth so we can resolve the user's tenant
+        // Tenant context — runs AFTER auth so we can resolve the user's tenant.
+        // Only business routes participate.  Infrastructure/certuration routes
+        // (/health, /user/login, /user/register, Swagger, internal feature-flag
+        // snapshot) carry no tenant context and must NOT be rejected in strict
+        // mode.  Callback routes stay intercepted so X-Tenant-Id is honoured
+        // for the guarded Python->Java vectorize callback.
         registry.addInterceptor(tenantContextInterceptor)
                 .addPathPatterns("/**")
+                .excludePathPatterns(
+                        "/health",
+                        "/user/login",
+                        "/user/register",
+                        "/doc.html",
+                        "/swagger-ui.html",
+                        "/swagger-ui/**",
+                        "/v3/api-docs/**",
+                        "/webjars/**",
+                        "/internal/feature-flags/snapshot",
+                        "/internal/agent/**"
+                )
                 .order(3);
     }
 }

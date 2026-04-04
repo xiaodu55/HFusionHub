@@ -2,6 +2,7 @@ package com.hfusionhub.scheduler;
 
 import com.hfusionhub.entity.DeletionTask;
 import com.hfusionhub.service.DeletionService;
+import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -23,6 +24,10 @@ public class DeletionTaskScheduler {
 
     @Scheduled(fixedDelay = 30_000)
     public void processPendingTasks() {
+        TenantContext.runAsSystem(() -> doProcessPendingTasks());
+    }
+
+    private void doProcessPendingTasks() {
         List<DeletionTask> tasks = deletionService.getPendingTasks();
         if (tasks.isEmpty()) return;
 

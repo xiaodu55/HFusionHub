@@ -3,6 +3,7 @@ package com.hfusionhub.scheduler;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.hfusionhub.entity.Document;
 import com.hfusionhub.mapper.DocumentMapper;
+import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -40,6 +41,10 @@ public class OrphanCleanupScheduler {
      */
     @Scheduled(fixedDelay = 3_600_000)
     public void cleanupOrphanFiles() {
+        TenantContext.runAsSystem(() -> doCleanupOrphanFiles());
+    }
+
+    private void doCleanupOrphanFiles() {
         String userDir = System.getProperty("user.dir");
         Path uploadPath = Paths.get(userDir, UPLOAD_DIR);
 

@@ -1,6 +1,7 @@
 package com.hfusionhub.scheduler;
 
 import com.hfusionhub.service.AgentTaskQueueService;
+import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -40,7 +41,7 @@ public class AgentTaskRecoveryManager implements ApplicationListener<Application
         // Run async on worker executor to avoid blocking startup
         CompletableFuture.runAsync(() -> {
             try {
-                int recovered = queueService.recoverAll();
+                int recovered = TenantContext.runAsSystem(queueService::recoverAll);
                 log.info("Startup recovery completed: {} runs processed", recovered);
             } catch (Exception e) {
                 log.error("Startup recovery error", e);

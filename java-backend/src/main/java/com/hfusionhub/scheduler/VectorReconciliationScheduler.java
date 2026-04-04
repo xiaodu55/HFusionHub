@@ -1,6 +1,7 @@
 package com.hfusionhub.scheduler;
 
 import com.hfusionhub.service.VectorReconciliationService;
+import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -25,7 +26,8 @@ public class VectorReconciliationScheduler {
 
     @Scheduled(cron = "${vector-reconciliation.cron:0 0 3 * * *}")
     public void runPeriodicReconciliation() {
-        Map<String, Object> summary = reconciliationService.reconcileAll();
+        Map<String, Object> summary = TenantContext.runAsSystem(
+                reconciliationService::reconcileAll);
         Object healthy = summary.get("healthy");
         long orphans = ((Number) summary.get("total_orphan_vectors")).longValue();
         long missing = ((Number) summary.get("total_missing_vectors")).longValue();

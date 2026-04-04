@@ -19,6 +19,7 @@ import com.hfusionhub.service.AgentTaskQueueService;
 import com.hfusionhub.service.AgentTaskService;
 import com.hfusionhub.service.ConversationService;
 import com.hfusionhub.service.TaskEventSseManager;
+import com.hfusionhub.tenant.TenantContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -140,8 +141,10 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
                 }
                 inflightRuns.put(run.getId(), workerId);
                 final Long runIdToExecute = run.getId();
+                final Long runTenantId = run.getTenantId();
                 java.util.concurrent.CompletableFuture.runAsync(
-                        () -> executeRun(runIdToExecute, workerId), agentWorkerExecutor);
+                        () -> TenantContext.runAs(runTenantId,
+                                () -> executeRun(runIdToExecute, workerId)), agentWorkerExecutor);
                 dispatched++;
                 log.info("Worker {} claimed run id={} uuid={} taskId={}",
                         workerId, run.getId(), run.getRunUuid(), run.getTaskId());

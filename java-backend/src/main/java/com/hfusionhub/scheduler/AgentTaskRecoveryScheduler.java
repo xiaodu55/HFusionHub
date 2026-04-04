@@ -1,6 +1,7 @@
 package com.hfusionhub.scheduler;
 
 import com.hfusionhub.service.AgentTaskQueueService;
+import com.hfusionhub.tenant.TenantContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
@@ -36,7 +37,7 @@ public class AgentTaskRecoveryScheduler implements ApplicationListener<Applicati
         log.info("Agent recovery scheduler starting: sweep every 30s");
         scheduler.scheduleWithFixedDelay(() -> {
             try {
-                int recovered = queueService.recoverAll();
+                int recovered = TenantContext.runAsSystem(queueService::recoverAll);
                 if (recovered > 0) {
                     log.info("Recovery sweep: {} runs processed", recovered);
                 }

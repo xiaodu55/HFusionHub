@@ -1695,6 +1695,7 @@ class TestChunkStoreFallback:
             "4": [{
                 "chunk_id": "4_chunk_0000",
                 "document_id": "4",
+                "tenant_id": 1,
                 "content": "Full chunk content from persistent store.",
                 "metadata": json.dumps({"document_title": "Persisted Title.pdf"}),
             }],
@@ -1734,6 +1735,7 @@ class TestChunkStoreFallback:
             "5": [{
                 "chunk_id": "5_chunk_0001",
                 "document_id": "5",
+                "tenant_id": 1,
                 "content": "Recovered content.",
                 "metadata": json.dumps({"document_title": "Recovered Document.pdf"}),
             }],
@@ -1767,6 +1769,7 @@ class TestChunkStoreFallback:
             "6": [{
                 "chunk_id": "6_chunk_0000",
                 "document_id": "6",
+                "tenant_id": 1,
                 "content": "Just content, no title metadata at all.",
                 "metadata": "{}",
             }],

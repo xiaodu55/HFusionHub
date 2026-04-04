@@ -32,7 +32,16 @@ public class MybatisPlusConfig {
     private static final Set<String> TENANT_IGNORE_TABLES = Set.of(
         "sys_user", "tenant", "tenant_member", "role_permission",
         "tool", "feature_flag", "feature_flag_rule", "feature_flag_audit_log",
-        "system_notice", "notice_recipient", "flyway_schema_history"
+        "system_notice", "notice_recipient", "flyway_schema_history", "tenant_audit_log",
+        // Resource tables that predate tenant isolation and lack a tenant_id
+        // column; they are reached only via a tenant-scoped parent and must not
+        // be auto-filtered (the tenant-line interceptor would produce invalid
+        // SQL referencing a non-existent column).
+        "document_chunk", "document_index_job", "deletion_task",
+        "prompt_template_version", "prompt_test_case", "prompt_test_case_result",
+        "agent_status_event", "agent_recovery_event",
+        "plugin_dependency", "plugin_execution_metric", "plugin_health_log",
+        "plugin_version_history"
     );
 
     /**
@@ -49,8 +58,10 @@ public class MybatisPlusConfig {
             tenantInterceptor.setTenantLineHandler(new TenantLineHandler() {
                 @Override
                 public Expression getTenantId() {
-                    Long tenantId = TenantContext.getTenantId();
-                    return new LongValue(tenantId != null ? tenantId : 1L);
+                    // FAIL-CLOSED: a tenant-scoped query MUST run in an explicit
+                    // tenant context.  No silent default to tenant 1 — otherwise
+                    // a scheduler or missed context would read the wrong tenant.
+                    return new LongValue(TenantContext.requireTenantId());
                 }
 
                 @Override
@@ -60,6 +71,11 @@ public class MybatisPlusConfig {
 
                 @Override
                 public boolean ignoreTable(String tableName) {
+                    // Cross-tenant maintenance tasks opt into system scope so
+                    // their queries are NOT tenant-filtered.
+                    if (TenantContext.isSystemScope()) {
+                        return true;
+                    }
                     return TENANT_IGNORE_TABLES.contains(tableName);
                 }
             });

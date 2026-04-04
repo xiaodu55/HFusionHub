@@ -3,6 +3,7 @@ package com.hfusionhub.scheduler;
 import com.hfusionhub.entity.Document;
 import com.hfusionhub.mapper.DocumentMapper;
 import com.hfusionhub.service.DeletionService;
+import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -24,13 +25,15 @@ public class RecycleBinCleanupScheduler {
 
     @Scheduled(fixedDelayString = "${document.recycle.cleanup-delay-ms:3600000}")
     public void scheduleExpiredDocuments() {
-        List<Document> expired = documentMapper.selectExpiredRecycled(100);
-        for (Document document : expired) {
-            try {
-                deletionService.createTask("DOCUMENT_PURGE", document.getId());
-            } catch (Exception e) {
-                log.warn("创建回收站过期清理任务失败: documentId={}", document.getId(), e);
+        TenantContext.runAsSystem(() -> {
+            List<Document> expired = documentMapper.selectExpiredRecycled(100);
+            for (Document document : expired) {
+                try {
+                    deletionService.createTask("DOCUMENT_PURGE", document.getId());
+                } catch (Exception e) {
+                    log.warn("创建回收站过期清理任务失败: documentId={}", document.getId(), e);
+                }
             }
-        }
+        });
     }
 }

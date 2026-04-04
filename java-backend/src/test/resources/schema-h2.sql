@@ -770,6 +770,16 @@ INSERT INTO role_permission (role, permission) VALUES ('member', 'plugin:install
 INSERT INTO role_permission (role, permission) VALUES ('viewer', 'kb:read');
 INSERT INTO role_permission (role, permission) VALUES ('viewer', 'conversation:read');
 
+-- V34 — tenant_audit_log (global, not tenant-scoped)
+CREATE TABLE IF NOT EXISTS tenant_audit_log (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    operator_id BIGINT NOT NULL,
+    from_tenant BIGINT NOT NULL,
+    to_tenant   BIGINT NOT NULL,
+    action      VARCHAR(500) NOT NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Add tenant_id to sys_user (H2-compatible ALTER)
 ALTER TABLE sys_user ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1;
 ALTER TABLE sys_user ADD COLUMN platform_admin TINYINT DEFAULT 0;

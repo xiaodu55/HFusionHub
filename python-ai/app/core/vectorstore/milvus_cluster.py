@@ -27,6 +27,7 @@ from pymilvus import (
 from app.utils.config import config
 from app.core.vectorstore.base import VectorStoreProtocol, VectorStoreStatus
 from app.core.chunker.text_chunker import VectorChunk
+from app.core.tenant.context import require_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,13 @@ class MilvusClusterStore(VectorStoreProtocol):
                     if missing:
                         logger.error("Milvus schema missing fields: %s; refusing drop", sorted(missing))
                         return None
+                    if "tenant_id" not in field_map:
+                        try:
+                            self._migrate_add_tenant_field(client)
+                        except Exception as exc:
+                            self._last_error = f"tenant_id migration failed: {exc}"
+                            logger.error("FATAL: %s", self._last_error)
+                            return None
                     emb = field_map.get("embedding", {})
                     dim = (emb.get("params") or {}).get("dim") or emb.get("dim")
                     if dim is not None and dim != config.EMBEDDING_DIMENSION:
@@ -112,6 +120,7 @@ class MilvusClusterStore(VectorStoreProtocol):
                 FieldSchema(name="chunk_id", dtype=DataType.VARCHAR, is_primary=True, max_length=128),
                 FieldSchema(name="document_id", dtype=DataType.VARCHAR, max_length=64),
                 FieldSchema(name="knowledge_base_id", dtype=DataType.INT64),
+                FieldSchema(name="tenant_id", dtype=DataType.INT64),
                 FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=65535),
                 FieldSchema(name="block_type", dtype=DataType.VARCHAR, max_length=20),
                 FieldSchema(name="outline_path", dtype=DataType.VARCHAR, max_length=2000),
@@ -153,6 +162,92 @@ class MilvusClusterStore(VectorStoreProtocol):
             logger.exception("Failed to drop collection")
             return False
 
+    # ── Tenant isolation ─────────────────────────────────────────────────────
+
+    _BACKFILL_PAGE_SIZE = 512
+
+    def _migrate_add_tenant_field(self, client: MilvusClient) -> None:
+        """Add the tenant_id field to a legacy collection and backfill ALL rows.
+
+        A HARD safety gate: any failure to add the field or backfill, or any
+        residual row still missing tenant_id after validation, is raised so the
+        service refuses to serve un-isolatable historical vectors.
+        """
+        logger.info("Migrating Milvus cluster collection to add tenant_id")
+        try:
+            client.add_collection_field(
+                collection_name=self._collection_name,
+                field_name="tenant_id",
+                data_type=DataType.INT64,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to add tenant_id field to %s: {exc}" % self._collection_name
+            ) from exc
+
+        client.load_collection(self._collection_name)
+
+        all_fields = [
+            "chunk_id", "document_id", "knowledge_base_id", "tenant_id",
+            "content", "block_type", "outline_path", "metadata", "embedding",
+        ]
+        offset = 0
+        total_updated = 0
+        while True:
+            page = client.query(
+                collection_name=self._collection_name,
+                filter="",
+                output_fields=[f for f in all_fields if f != "tenant_id"],
+                limit=self._BACKFILL_PAGE_SIZE,
+                offset=offset,
+            )
+            if not page:
+                break
+            rows = []
+            for row in page:
+                rows.append({
+                    "chunk_id": row.get("chunk_id"),
+                    "document_id": row.get("document_id"),
+                    "knowledge_base_id": row.get("knowledge_base_id"),
+                    "tenant_id": 1,
+                    "content": row.get("content"),
+                    "block_type": row.get("block_type"),
+                    "outline_path": row.get("outline_path", "[]"),
+                    "metadata": row.get("metadata", "{}"),
+                    "embedding": row.get("embedding"),
+                })
+            if rows:
+                client.upsert(collection_name=self._collection_name, data=rows)
+                total_updated += len(rows)
+            offset += len(page)
+            if len(page) < self._BACKFILL_PAGE_SIZE:
+                break
+
+        missing = client.query(
+            collection_name=self._collection_name,
+            filter="tenant_id == 0 or tenant_id == null",
+            output_fields=["chunk_id"],
+            limit=1,
+        )
+        logger.info("Backfilled %d rows to tenant 1", total_updated)
+        if missing:
+            raise RuntimeError(
+                f"Milvus backfill validation failed: {len(missing)} rows still "
+                f"missing tenant_id in {self._collection_name}"
+            )
+
+    def _tenant_filter(self, knowledge_base_id: Optional[int] = None,
+                       document_id: Optional[str] = None) -> Optional[str]:
+        """Build a filter expression that ALWAYS scopes to the active tenant."""
+        tenant_id = require_tenant_id()  # fail-closed: no default tenant
+        parts = [f"tenant_id == {tenant_id}"]
+        if knowledge_base_id:
+            parts.append(f"knowledge_base_id == {knowledge_base_id}")
+        if document_id:
+            escaped = str(document_id).replace('"', '\\"')
+            parts.append(f'document_id == "{escaped}"')
+        return " and ".join(parts)
+
     # ── Write ────────────────────────────────────────────────────────────────
 
     def insert_chunks(
@@ -162,6 +257,7 @@ class MilvusClusterStore(VectorStoreProtocol):
         document_id: str,
         knowledge_base_id: Optional[int] = None,
     ) -> bool:
+        tenant_id = require_tenant_id()  # fail-closed
         try:
             client = self.ensure_collection()
             if client is None:
@@ -174,6 +270,7 @@ class MilvusClusterStore(VectorStoreProtocol):
                     "chunk_id": chunk.chunk_id,
                     "document_id": document_id,
                     "knowledge_base_id": knowledge_base_id or 0,
+                    "tenant_id": tenant_id,
                     "content": chunk.content,
                     "block_type": chunk.block_type,
                     "outline_path": outline_path_str,
@@ -182,7 +279,7 @@ class MilvusClusterStore(VectorStoreProtocol):
                 })
 
             client.insert(collection_name=self._collection_name, data=data)
-            logger.info("Inserted %d chunks into Milvus cluster", len(data))
+            logger.info("Inserted %d chunks into Milvus cluster (tenant %d)", len(data), tenant_id)
             return True
         except Exception as exc:
             logger.exception("Failed to insert chunks into Milvus cluster")
@@ -190,11 +287,12 @@ class MilvusClusterStore(VectorStoreProtocol):
 
     def delete_document_chunks(self, document_id: str) -> bool:
         try:
+            tenant_id = require_tenant_id()
             client = self._get_client()
             if client is not None and client.has_collection(self._collection_name):
                 client.delete(
                     collection_name=self._collection_name,
-                    filter=f'document_id == "{document_id}"',
+                    filter=self._tenant_filter(document_id=document_id),
                 )
             return True
         except Exception as exc:
@@ -205,11 +303,15 @@ class MilvusClusterStore(VectorStoreProtocol):
         if not chunk_ids:
             return True
         try:
+            tenant_id = require_tenant_id()
             client = self._get_client()
             if client is not None and client.has_collection(self._collection_name):
                 escaped = [str(cid).replace('"', '\\"') for cid in chunk_ids]
                 values = ",".join(f'"{c}"' for c in escaped)
-                client.delete(collection_name=self._collection_name, filter=f"chunk_id in [{values}]")
+                client.delete(
+                    collection_name=self._collection_name,
+                    filter=f"tenant_id == {tenant_id} and chunk_id in [{values}]",
+                )
             return True
         except Exception as exc:
             logger.error("Failed to delete chunk IDs from cluster: %s", exc)
@@ -243,19 +345,17 @@ class MilvusClusterStore(VectorStoreProtocol):
 
             client.load_collection(self._collection_name)
 
-            filters = []
-            if document_id:
-                filters.append(f'document_id == "{document_id}"')
-            if knowledge_base_id:
-                filters.append(f"knowledge_base_id == {knowledge_base_id}")
-            filter_expr = " and ".join(filters) if filters else None
+            # Tenant isolation: always scope retrieval to the active tenant.
+            filter_expr = self._tenant_filter(
+                knowledge_base_id=knowledge_base_id, document_id=document_id
+            )
 
             results = client.search(
                 collection_name=self._collection_name,
                 data=[query_embedding],
                 limit=top_k,
                 search_params={"metric_type": "COSINE", "params": {"nprobe": 16}},
-                output_fields=["chunk_id", "document_id", "knowledge_base_id", "content", "block_type", "outline_path", "metadata"],
+                output_fields=["chunk_id", "document_id", "knowledge_base_id", "tenant_id", "content", "block_type", "outline_path", "metadata"],
                 filter=filter_expr,
             )
 
@@ -297,13 +397,14 @@ class MilvusClusterStore(VectorStoreProtocol):
             filters = [f'document_id == "{document_id}"']
             if block_type:
                 filters.append(f'block_type == "{block_type}"')
-            filter_expr = " and ".join(filters)
+            filter_expr = self._tenant_filter(document_id=document_id) if block_type is None \
+                else " and ".join([self._tenant_filter(document_id=document_id), f'block_type == "{block_type}"'])
 
             # Milvus doesn't natively paginate; query all then slice.
             results = client.query(
                 collection_name=self._collection_name,
                 filter=filter_expr,
-                output_fields=["chunk_id", "document_id", "knowledge_base_id", "content", "block_type", "outline_path", "metadata"],
+                output_fields=["chunk_id", "document_id", "knowledge_base_id", "tenant_id", "content", "block_type", "outline_path", "metadata"],
                 limit=16384,
             )
 
@@ -317,13 +418,15 @@ class MilvusClusterStore(VectorStoreProtocol):
 
     def get_chunk_detail(self, chunk_id: str) -> Optional[Dict[str, Any]]:
         try:
+            tenant_id = require_tenant_id()
             client = self._get_client()
             if client is None:
                 return None
+            escaped = str(chunk_id).replace('"', '\\"')
             results = client.query(
                 collection_name=self._collection_name,
-                filter=f'chunk_id == "{chunk_id}"',
-                output_fields=["chunk_id", "document_id", "knowledge_base_id", "content", "block_type", "outline_path", "metadata"],
+                filter=f'tenant_id == {tenant_id} and chunk_id == "{escaped}"',
+                output_fields=["chunk_id", "document_id", "knowledge_base_id", "tenant_id", "content", "block_type", "outline_path", "metadata"],
             )
             return results[0] if results else None
         except Exception as exc:
@@ -340,7 +443,7 @@ class MilvusClusterStore(VectorStoreProtocol):
             if not client.has_collection(self._collection_name):
                 return []
             client.load_collection(self._collection_name)
-            filter_expr = f"knowledge_base_id == {knowledge_base_id}" if knowledge_base_id else None
+            filter_expr = self._tenant_filter(knowledge_base_id=knowledge_base_id)
             results = client.query(
                 collection_name=self._collection_name,
                 filter=filter_expr,
@@ -360,7 +463,7 @@ class MilvusClusterStore(VectorStoreProtocol):
             if not client.has_collection(self._collection_name):
                 return 0
             client.load_collection(self._collection_name)
-            filter_expr = f"knowledge_base_id == {knowledge_base_id}" if knowledge_base_id else None
+            filter_expr = self._tenant_filter(knowledge_base_id=knowledge_base_id)
             results = client.query(
                 collection_name=self._collection_name,
                 filter=filter_expr,
@@ -386,9 +489,11 @@ class MilvusClusterStore(VectorStoreProtocol):
             if not client.has_collection(self._collection_name):
                 return {}
             client.load_collection(self._collection_name)
-            filter_expr = (f"knowledge_base_id == {knowledge_base_id}" if knowledge_base_id else None)
 
-            output = ["chunk_id", "document_id", "knowledge_base_id", "content",
+            # Tenant isolation: scope the chunk corpus to the active tenant.
+            filter_expr = self._tenant_filter(knowledge_base_id=knowledge_base_id)
+
+            output = ["chunk_id", "document_id", "knowledge_base_id", "tenant_id", "content",
                       "block_type", "outline_path", "metadata"]
             grouped: Dict[str, List[Dict[str, Any]]] = {}
             offset = 0

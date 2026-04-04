@@ -32,6 +32,7 @@ def test_create_collection_reuses_compatible_collection():
                     {"name": "chunk_id"},
                     {"name": "document_id"},
                     {"name": "knowledge_base_id"},
+                    {"name": "tenant_id"},
                     {"name": "content"},
                     {
                         "name": "embedding",

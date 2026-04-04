@@ -112,28 +112,48 @@ class ScopedGraphStore:
             return chunk.get(name, default)
         return getattr(chunk, name, default)
 
-    def replace_document(self, knowledge_base_id: int, document_id: str, chunks: Sequence[Any]) -> None:
+    def replace_document(self, knowledge_base_id: int, document_id: str, chunks: Sequence[Any],
+                         tenant_id: Optional[int] = None) -> None:
         """Replace one document's graph evidence after vector indexing succeeds."""
         if knowledge_base_id is None:
             raise ValueError("knowledge_base_id is required for graph indexing")
         kb_id = int(knowledge_base_id)
         document_id = str(document_id)
+        if tenant_id is None:
+            from app.core.tenant.context import require_tenant_id
+            tenant_id = require_tenant_id()  # fail-closed: no default tenant
         with self._lock:
             graph = self._read()
-            nodes = [
-                {**node, "evidence": [item for item in node.get("evidence", []) if str(item.get("document_id")) != document_id]}
-                for node in graph["nodes"]
-                if int(node.get("knowledge_base_id", -1)) != kb_id or any(
-                    str(item.get("document_id")) != document_id for item in node.get("evidence", [])
-                )
-            ]
-            edges = [
-                {**edge, "evidence": [item for item in edge.get("evidence", []) if str(item.get("document_id")) != document_id]}
-                for edge in graph["edges"]
-                if int(edge.get("knowledge_base_id", -1)) != kb_id or any(
-                    str(item.get("document_id")) != document_id for item in edge.get("evidence", [])
-                )
-            ]
+
+            def _owner(item: Dict[str, Any]) -> int:
+                return int(item.get("tenant_id", 1))
+
+            nodes = []
+            for node in graph["nodes"]:
+                if _owner(node) != tenant_id:
+                    nodes.append(node)
+                    continue
+                if int(node.get("knowledge_base_id", -1)) == kb_id and any(
+                    str(item.get("document_id")) == document_id for item in node.get("evidence", [])
+                ):
+                    evidence = [item for item in node.get("evidence", []) if str(item.get("document_id")) != document_id]
+                    if evidence:
+                        nodes.append({**node, "evidence": evidence})
+                    continue
+                nodes.append(node)
+            edges = []
+            for edge in graph["edges"]:
+                if _owner(edge) != tenant_id:
+                    edges.append(edge)
+                    continue
+                if int(edge.get("knowledge_base_id", -1)) == kb_id and any(
+                    str(item.get("document_id")) == document_id for item in edge.get("evidence", [])
+                ):
+                    evidence = [item for item in edge.get("evidence", []) if str(item.get("document_id")) != document_id]
+                    if evidence:
+                        edges.append({**edge, "evidence": evidence})
+                    continue
+                edges.append(edge)
             nodes = [node for node in nodes if node.get("evidence")]
             edges = [edge for edge in edges if edge.get("evidence")]
             nodes_by_id = {str(node["id"]): node for node in nodes}
@@ -152,6 +172,7 @@ class ScopedGraphStore:
                     node = nodes_by_id.setdefault(node_id, {
                         "id": node_id,
                         "knowledge_base_id": kb_id,
+                        "tenant_id": tenant_id,
                         "name": term,
                         "normalized_name": normalized,
                         "evidence": [],
@@ -168,6 +189,7 @@ class ScopedGraphStore:
                         edge = edges_by_id.setdefault(edge_id, {
                             "id": edge_id,
                             "knowledge_base_id": kb_id,
+                            "tenant_id": tenant_id,
                             "source_id": left,
                             "target_id": right,
                             "relation_type": "co_occurs_in",
@@ -179,21 +201,36 @@ class ScopedGraphStore:
 
             self._write({"nodes": list(nodes_by_id.values()), "edges": list(edges_by_id.values())})
 
-    def remove_document(self, knowledge_base_id: int, document_id: str) -> None:
+    def remove_document(self, knowledge_base_id: int, document_id: str, tenant_id: Optional[int] = None) -> None:
         self.replace_document(knowledge_base_id, document_id, [])
 
-    def remove_document_from_all_scopes(self, document_id: str) -> None:
-        """Garbage-collect a deleted document without guessing its KB."""
+    def remove_document_from_tenant_scopes(self, tenant_id: int, document_id: str) -> None:
+        """Garbage-collect a deleted document, scoped to ONE tenant.
+
+        The active tenant is a hard isolation boundary: a cross-tenant request
+        must never be able to purge another tenant's graph content.  Only nodes
+        and edges that belong to the given tenant and reference the document are
+        touched; nodes without a tenant stamp (pre-tenant migration) are treated
+        as legacy tenant 1.
+        """
         document_id = str(document_id)
         with self._lock:
             graph = self._read()
             nodes = []
             for node in graph["nodes"]:
+                owner = int(node.get("tenant_id", 1))
+                if owner != tenant_id:
+                    nodes.append(node)
+                    continue
                 evidence = [item for item in node.get("evidence", []) if str(item.get("document_id")) != document_id]
                 if evidence:
                     nodes.append({**node, "evidence": evidence})
             edges = []
             for edge in graph["edges"]:
+                owner = int(edge.get("tenant_id", 1))
+                if owner != tenant_id:
+                    edges.append(edge)
+                    continue
                 evidence = [item for item in edge.get("evidence", []) if str(item.get("document_id")) != document_id]
                 if evidence:
                     edges.append({**edge, "evidence": evidence})

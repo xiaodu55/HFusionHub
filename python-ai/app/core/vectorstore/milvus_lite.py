@@ -25,6 +25,7 @@ from pymilvus import (
 from app.utils.config import config
 from app.core.vectorstore.base import VectorStoreProtocol, VectorStoreStatus
 from app.core.chunker.text_chunker import VectorChunk
+from app.core.tenant.context import require_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +44,53 @@ CHUNKS_STORE_PATH = (
 )
 
 
+def _migrate_co_store_layout(store: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize the JSON co-store to the tenant-keyed physical layout.
+
+    Legacy stores were keyed by ``document_id`` (value = list of chunks).  The
+    hardened layout is ``tenant_id -> document_id -> chunks`` so that every
+    read/write/delete anchors at the ACTIVE tenant root — a cross-tenant
+    operation can never touch another tenant's rows.  Legacy rows are folded
+    into tenant 1 (the historical default), which matches the Milvus backfill.
+    """
+    if not isinstance(store, dict):
+        return {}
+    is_legacy = any(isinstance(v, list) for v in store.values())
+    if not is_legacy:
+        return store
+    migrated: Dict[str, Any] = {}
+    for doc_id, chunks in store.items():
+        if not isinstance(chunks, list):
+            continue
+        for c in chunks:
+            tenant = str(int(c.get("tenant_id", 1)))
+            doc = str(c.get("document_id", doc_id))
+            migrated.setdefault(tenant, {}).setdefault(doc, []).append(c)
+    return migrated
+
+
+def _co_store_tenant_root(store: Dict[str, Any], tenant_key: str) -> Dict[str, List[Dict]]:
+    """Return the tenant-keyed root of the co-store for a concrete tenant id.
+
+    Lazily creates the bucket so writes can anchor to an empty tenant without
+    touching any sibling tenant's data.
+    """
+    root = store.get(tenant_key)
+    if not isinstance(root, dict):
+        root = {}
+        store[tenant_key] = root
+    return root
+
+
 class MilvusLiteStore(VectorStoreProtocol):
     """Embedded Milvus Lite backend (file-backed, single-process)."""
 
+    _V2_SUFFIX = "_v2"
+    _ACTIVE_COLLECTION_MARKER = ".active_collection.json"
+
     def __init__(self) -> None:
-        self._collection_name = config.MILVUS_COLLECTION
+        self._base_collection = config.MILVUS_COLLECTION
+        self._collection_name = self._load_active_collection() or self._base_collection
         self._client: Optional[MilvusClient] = None
         self._lock = threading.RLock()
         self._last_error: Optional[str] = None
@@ -82,6 +125,16 @@ class MilvusLiteStore(VectorStoreProtocol):
                 mode="lite",
                 error=self._last_error or "Milvus Lite connection failed",
             )
+        # A recorded migration failure means the store is serving (or about to
+        # serve) un-isolatable legacy data — it must report NOT ready.
+        if self._last_error:
+            return VectorStoreStatus(
+                ready=False,
+                collection=self._collection_name,
+                collection_exists=client.has_collection(self._collection_name),
+                mode="lite",
+                error=self._last_error,
+            )
         try:
             return VectorStoreStatus(
                 ready=True,
@@ -98,55 +151,207 @@ class MilvusLiteStore(VectorStoreProtocol):
         if client is None:
             return None
         try:
-            if client.has_collection(self._collection_name):
-                try:
-                    schema = client.describe_collection(self._collection_name)
-                    field_map = {f.get("name"): f for f in schema.get("fields", [])}
-                    required = {"chunk_id", "document_id", "knowledge_base_id", "content", "embedding"}
-                    missing = required - set(field_map.keys())
-                    if missing:
-                        logger.error("Milvus schema missing fields: %s; refusing drop", sorted(missing))
-                        return None
-                    emb = field_map.get("embedding", {})
-                    dim = (emb.get("params") or {}).get("dim") or emb.get("dim")
-                    if dim is not None and dim != config.EMBEDDING_DIMENSION:
-                        logger.error(
-                            "Milvus embedding dimension mismatch: got %s, expected %s; refusing drop",
-                            dim, config.EMBEDDING_DIMENSION,
-                        )
-                        return None
-                except Exception as exc:
-                    logger.warning("Schema check failed (keeping collection): %s", exc)
-                return client
+            # Fresh deployment: no active marker and no base collection → create
+            # the initial tenant-keyed collection (WITH tenant_id) directly.
+            if self._collection_name == self._base_collection:
+                if client.has_collection(self._base_collection):
+                    # Legacy collection lacks tenant_id.  Milvus Lite cannot
+                    # ALTER a schema in place, so we copy all rows into a
+                    # <name>_v2 collection stamped tenant_id=1, validate, and
+                    # only then switch the active collection — the legacy
+                    # collection is retained as a rollback backup.
+                    base_fields = {
+                        f.get("name"): f
+                        for f in client.describe_collection(self._base_collection).get("fields", [])
+                    }
+                    if "tenant_id" not in base_fields:
+                        self._migrate_legacy_to_v2(client)
+                else:
+                    self._create_tenant_collection(client, self._base_collection)
+                    self._persist_active_collection(self._base_collection)
 
-            fields = [
-                FieldSchema(name="chunk_id", dtype=DataType.VARCHAR, is_primary=True, max_length=128),
-                FieldSchema(name="document_id", dtype=DataType.VARCHAR, max_length=64),
-                FieldSchema(name="knowledge_base_id", dtype=DataType.INT64),
-                FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=65535),
-                FieldSchema(name="block_type", dtype=DataType.VARCHAR, max_length=20),
-                FieldSchema(name="outline_path", dtype=DataType.VARCHAR, max_length=2000),
-                FieldSchema(name="metadata", dtype=DataType.VARCHAR, max_length=4000),
-                FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=config.EMBEDDING_DIMENSION),
-            ]
-            schema = CollectionSchema(fields=fields, description="Document chunks for RAG")
-            index_params = client.prepare_index_params()
-            index_params.add_index(
-                field_name="embedding",
-                metric_type="COSINE",
-                index_type="IVF_FLAT",
-                params={"nlist": 128},
-            )
-            client.create_collection(
-                collection_name=self._collection_name,
-                schema=schema,
-                index_params=index_params,
-            )
-            logger.info("Created collection: %s", self._collection_name)
+            # Active collection is now the (possibly migrated) V2 collection.
+            if not client.has_collection(self._collection_name):
+                logger.error("Active collection %s missing", self._collection_name)
+                return None
+            schema = client.describe_collection(self._collection_name)
+            field_map = {f.get("name"): f for f in schema.get("fields", [])}
+            required = {"chunk_id", "document_id", "knowledge_base_id", "content", "embedding"}
+            missing = required - set(field_map.keys())
+            if missing:
+                logger.error("Milvus schema missing fields: %s; refusing drop", sorted(missing))
+                return None
+            emb = field_map.get("embedding", {})
+            dim = (emb.get("params") or {}).get("dim") or emb.get("dim")
+            if dim is not None and dim != config.EMBEDDING_DIMENSION:
+                logger.error(
+                    "Milvus embedding dimension mismatch: got %s, expected %s; refusing drop",
+                    dim, config.EMBEDDING_DIMENSION,
+                )
+                return None
             return client
+
         except Exception as exc:
-            logger.exception("Failed to create collection")
+            # Migration failure must NOT switch the read path.
+            self._last_error = f"tenant_id migration failed: {exc}"
+            logger.error("FATAL: %s", self._last_error)
             return None
+
+    def _migrate_legacy_to_v2(self, client: MilvusClient) -> str:
+        """Copy legacy rows into <name>_v2 stamped tenant_id=1.
+
+        Read all records, write them (plus ``tenant_id``) into a new ``_v2``
+        collection, build the index, validate row/pk parity and tenant-1
+        retrieval, then atomically switch the active collection.  The legacy
+        collection is kept as a rollback backup.  Any failure raises WITHOUT
+        switching the read path (idempotent: a validated ``_v2`` is reused).
+        """
+        v2 = self._base_collection + self._V2_SUFFIX
+
+        # 1. Read every legacy row (paginated) from the old collection.
+        legacy_rows = self._read_all_rows(client, self._base_collection)
+        legacy_ids = {str(r["chunk_id"]) for r in legacy_rows}
+
+        # 2. Build the tenant-keyed V2 collection unless an already-valid one exists.
+        if client.has_collection(v2) and self._validate_v2(client, v2, legacy_ids):
+            logger.info("Reusing already-migrated collection %s", v2)
+        else:
+            self._drop_collection_if_exists(client, v2)
+            self._create_tenant_collection(client, v2)
+
+            if legacy_rows:
+                client.load_collection(v2)
+                for offset_db in range(0, len(legacy_rows), self._BACKFILL_PAGE_SIZE):
+                    batch = [
+                        {**row, "tenant_id": 1}
+                        for row in legacy_rows[offset_db:offset_db + self._BACKFILL_PAGE_SIZE]
+                    ]
+                    client.insert(collection_name=v2, data=batch)
+                client.load_collection(v2)
+
+            # 3. Validate parity + tenant-1 retrieval before switching.
+            if not self._validate_v2(client, v2, legacy_ids):
+                raise RuntimeError(
+                    f"V2 migration validation failed for {v2} (rows={len(legacy_rows)})"
+                )
+
+        # 4. Atomic switch: persist marker first, then flip the in-memory active.
+        self._persist_active_collection(v2)
+        self._collection_name = v2
+        logger.info("Switched active collection %s -> %s (%d rows)",
+                    self._base_collection, v2, len(legacy_rows))
+        return v2
+
+    def _create_tenant_collection(self, client: MilvusClient, name: str) -> None:
+        """Create a collection whose schema includes the ``tenant_id`` column."""
+        fields = [
+            FieldSchema(name="chunk_id", dtype=DataType.VARCHAR, is_primary=True, max_length=128),
+            FieldSchema(name="document_id", dtype=DataType.VARCHAR, max_length=64),
+            FieldSchema(name="knowledge_base_id", dtype=DataType.INT64),
+            FieldSchema(name="tenant_id", dtype=DataType.INT64),
+            FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=65535),
+            FieldSchema(name="block_type", dtype=DataType.VARCHAR, max_length=20),
+            FieldSchema(name="outline_path", dtype=DataType.VARCHAR, max_length=2000),
+            FieldSchema(name="metadata", dtype=DataType.VARCHAR, max_length=4000),
+            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=config.EMBEDDING_DIMENSION),
+        ]
+        schema = CollectionSchema(fields=fields, description="Document chunks for RAG (tenant-keyed)")
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="embedding", metric_type="COSINE",
+                               index_type="IVF_FLAT", params={"nlist": 128})
+        client.create_collection(collection_name=name, schema=schema, index_params=index_params)
+        logger.info("Created collection %s", name)
+
+    def _read_all_rows(self, client: MilvusClient, collection: str) -> List[Dict[str, Any]]:
+        fields = [
+            "chunk_id", "document_id", "knowledge_base_id",
+            "content", "block_type", "outline_path", "metadata", "embedding",
+        ]
+        rows: List[Dict[str, Any]] = []
+        offset = 0
+        while True:
+            page = client.query(
+                collection_name=collection, filter="",
+                output_fields=fields, limit=self._BACKFILL_PAGE_SIZE, offset=offset,
+            )
+            if not page:
+                break
+            rows.extend(page)
+            offset += len(page)
+            if len(page) < self._BACKFILL_PAGE_SIZE:
+                break
+        return rows
+
+    def _read_all_ids(self, client: MilvusClient, collection: str,
+                      filter_expr: str = "", output_field: str = "chunk_id") -> set:
+        """Paginate the primary keys (or any single field) for an expression.
+
+        Unlike a single ``limit=16384`` query, this is unbounded — large legacy
+        sets (>16,384 rows) validate correctly instead of alarming the parity
+        check into a false failure.
+        """
+        ids: set = set()
+        offset = 0
+        while True:
+            page = client.query(
+                collection_name=collection, filter=filter_expr,
+                output_fields=[output_field], limit=self._BACKFILL_PAGE_SIZE, offset=offset,
+            )
+            if not page:
+                break
+            ids.update(str(r[output_field]) for r in page)
+            offset += len(page)
+            if len(page) < self._BACKFILL_PAGE_SIZE:
+                break
+        return ids
+
+    def _validate_v2(self, client: MilvusClient, v2: str, legacy_ids: set) -> bool:
+        """Row count + primary-key parity, plus tenant-1 retrievability."""
+        try:
+            schema = client.describe_collection(v2)
+            if "tenant_id" not in {f.get("name") for f in schema.get("fields", [])}:
+                return False
+            client.load_collection(v2)
+            migrated_ids = self._read_all_ids(client, v2, filter_expr="tenant_id == 1")
+            if migrated_ids != legacy_ids:
+                logger.error("V2 primary-key/tenant-1 parity mismatch for %s", v2)
+                return False
+            return True
+        except Exception as exc:
+            logger.error("V2 validation error for %s: %s", v2, exc)
+            return False
+
+    def _drop_collection_if_exists(self, client: MilvusClient, name: str) -> None:
+        try:
+            if client.has_collection(name):
+                client.drop_collection(name)
+                logger.info("Dropped stale migration target %s", name)
+        except Exception as exc:
+            logger.warning("Could not drop stale migration target %s: %s", name, exc)
+
+    # ── Active-collection persistence (atomic switch marker) ─────────────────
+
+    def _marker_path(self) -> Path:
+        return Path(str(MILVUS_LITE_PATH) + self._ACTIVE_COLLECTION_MARKER)
+
+    def _load_active_collection(self) -> Optional[str]:
+        try:
+            p = self._marker_path()
+            if p.exists():
+                data = json.loads(p.read_text(encoding="utf-8"))
+                name = data.get("active_collection")
+                if name:
+                    return str(name)
+        except Exception as exc:
+            logger.warning("Failed to read active-collection marker: %s", exc)
+        return None
+
+    def _persist_active_collection(self, name: str) -> None:
+        p = self._marker_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        tmp.write_text(json.dumps({"active_collection": name}), encoding="utf-8")
+        os.replace(tmp, p)
 
     def drop_collection(self) -> bool:
         if os.getenv("MILVUS_ALLOW_COLLECTION_DROP", "false").lower() != "true":
@@ -164,6 +369,26 @@ class MilvusLiteStore(VectorStoreProtocol):
             logger.exception("Failed to drop collection")
             return False
 
+    # ── Tenant isolation ─────────────────────────────────────────────────────
+
+    _BACKFILL_PAGE_SIZE = 512
+
+    def _tenant_filter(self, knowledge_base_id: Optional[int] = None,
+                       document_id: Optional[str] = None) -> Optional[str]:
+        """Build a filter expression that ALWAYS scopes to the active tenant."""
+        tenant_id = require_tenant_id()  # fail-closed: no default tenant
+        parts = [f"tenant_id == {tenant_id}"]
+        if knowledge_base_id:
+            parts.append(f"knowledge_base_id == {knowledge_base_id}")
+        if document_id:
+            escaped = str(document_id).replace('"', '\\"')
+            parts.append(f'document_id == "{escaped}"')
+        return " and ".join(parts)
+
+    def _tenant_co_store_key(self) -> str:
+        """Return the per-tenant document-grouped co-store view keyed by tenant."""
+        return str(require_tenant_id())
+
     # ── Write ────────────────────────────────────────────────────────────────
 
     def insert_chunks(
@@ -173,6 +398,7 @@ class MilvusLiteStore(VectorStoreProtocol):
         document_id: str,
         knowledge_base_id: Optional[int] = None,
     ) -> bool:
+        tenant_id = require_tenant_id()  # fail-closed
         try:
             client = self.ensure_collection()
             if client is None:
@@ -185,6 +411,7 @@ class MilvusLiteStore(VectorStoreProtocol):
                     "chunk_id": chunk.chunk_id,
                     "document_id": document_id,
                     "knowledge_base_id": knowledge_base_id or 0,
+                    "tenant_id": tenant_id,
                     "content": chunk.content,
                     "block_type": chunk.block_type,
                     "outline_path": outline_path_str,
@@ -193,7 +420,7 @@ class MilvusLiteStore(VectorStoreProtocol):
                 })
 
             client.insert(collection_name=self._collection_name, data=data)
-            logger.info("Inserted %d chunks into Milvus Lite", len(data))
+            logger.info("Inserted %d chunks into Milvus Lite (tenant %d)", len(data), tenant_id)
 
             # Mirror to JSON co-store
             store_records = []
@@ -203,6 +430,7 @@ class MilvusLiteStore(VectorStoreProtocol):
                     "chunk_id": chunk.chunk_id,
                     "document_id": document_id,
                     "knowledge_base_id": knowledge_base_id or 0,
+                    "tenant_id": tenant_id,
                     "content": chunk.content,
                     "block_type": chunk.block_type,
                     "outline_path": outline_path_str,
@@ -216,14 +444,15 @@ class MilvusLiteStore(VectorStoreProtocol):
 
     def delete_document_chunks(self, document_id: str) -> bool:
         try:
+            tenant_id = require_tenant_id()
             client = self._get_client()
             if client is not None and client.has_collection(self._collection_name):
                 client.delete(
                     collection_name=self._collection_name,
-                    filter=f'document_id == "{document_id}"',
+                    filter=self._tenant_filter(document_id=document_id),
                 )
             store = self._load_co_store()
-            store.pop(str(document_id), None)
+            store.setdefault(str(tenant_id), {}).pop(str(document_id), None)
             self._write_co_store(store)
             return True
         except Exception as exc:
@@ -234,11 +463,15 @@ class MilvusLiteStore(VectorStoreProtocol):
         if not chunk_ids:
             return True
         try:
+            tenant_id = require_tenant_id()
             client = self._get_client()
             if client is not None and client.has_collection(self._collection_name):
                 escaped = [str(cid).replace('"', '\\"') for cid in chunk_ids]
                 values = ",".join(f'"{c}"' for c in escaped)
-                client.delete(collection_name=self._collection_name, filter=f"chunk_id in [{values}]")
+                client.delete(
+                    collection_name=self._collection_name,
+                    filter=f"tenant_id == {tenant_id} and chunk_id in [{values}]",
+                )
             return True
         except Exception as exc:
             logger.error("Failed to delete chunk IDs: %s", exc)
@@ -272,19 +505,17 @@ class MilvusLiteStore(VectorStoreProtocol):
 
             client.load_collection(self._collection_name)
 
-            filters = []
-            if document_id:
-                filters.append(f'document_id == "{document_id}"')
-            if knowledge_base_id:
-                filters.append(f"knowledge_base_id == {knowledge_base_id}")
-            filter_expr = " and ".join(filters) if filters else None
+            # Tenant isolation: always scope retrieval to the active tenant.
+            filter_expr = self._tenant_filter(
+                knowledge_base_id=knowledge_base_id, document_id=document_id
+            )
 
             results = client.search(
                 collection_name=self._collection_name,
                 data=[query_embedding],
                 limit=top_k,
                 search_params={"metric_type": "COSINE", "params": {"nprobe": 16}},
-                output_fields=["chunk_id", "document_id", "knowledge_base_id", "content", "block_type", "outline_path", "metadata"],
+                output_fields=["chunk_id", "document_id", "knowledge_base_id", "tenant_id", "content", "block_type", "outline_path", "metadata"],
                 filter=filter_expr,
             )
 
@@ -316,8 +547,10 @@ class MilvusLiteStore(VectorStoreProtocol):
         self, document_id: str, page: int = 1, size: int = 20, block_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         try:
+            tenant_id = require_tenant_id()
             store = self._load_co_store()
-            all_chunks = store.get(str(document_id), [])
+            tenant_key = str(tenant_id)
+            all_chunks = store.get(tenant_key, {}).get(str(document_id), [])
             if block_type:
                 all_chunks = [c for c in all_chunks if c.get("block_type") == block_type]
             total = len(all_chunks)
@@ -330,13 +563,15 @@ class MilvusLiteStore(VectorStoreProtocol):
 
     def get_chunk_detail(self, chunk_id: str) -> Optional[Dict[str, Any]]:
         try:
+            tenant_id = require_tenant_id()
             client = self._get_client()
             if client is None:
                 return None
+            escaped = str(chunk_id).replace('"', '\\"')
             results = client.query(
                 collection_name=self._collection_name,
-                filter=f'chunk_id == "{chunk_id}"',
-                output_fields=["chunk_id", "document_id", "knowledge_base_id", "content", "block_type", "outline_path", "metadata"],
+                filter=f'tenant_id == {tenant_id} and chunk_id == "{escaped}"',
+                output_fields=["chunk_id", "document_id", "knowledge_base_id", "tenant_id", "content", "block_type", "outline_path", "metadata"],
             )
             return results[0] if results else None
         except Exception as exc:
@@ -353,14 +588,8 @@ class MilvusLiteStore(VectorStoreProtocol):
             if not client.has_collection(self._collection_name):
                 return []
             client.load_collection(self._collection_name)
-            filter_expr = f"knowledge_base_id == {knowledge_base_id}" if knowledge_base_id else None
-            results = client.query(
-                collection_name=self._collection_name,
-                filter=filter_expr,
-                output_fields=["chunk_id"],
-                limit=16384,
-            )
-            return [r["chunk_id"] for r in results]
+            filter_expr = self._tenant_filter(knowledge_base_id=knowledge_base_id)
+            return sorted(self._read_all_ids(client, self._collection_name, filter_expr))
         except Exception as exc:
             logger.error("Failed to list chunk IDs: %s", exc)
             return []
@@ -373,23 +602,18 @@ class MilvusLiteStore(VectorStoreProtocol):
             if not client.has_collection(self._collection_name):
                 return 0
             client.load_collection(self._collection_name)
-            filter_expr = f"knowledge_base_id == {knowledge_base_id}" if knowledge_base_id else None
-            results = client.query(
-                collection_name=self._collection_name,
-                filter=filter_expr,
-                output_fields=["chunk_id"],
-                limit=16384,
-            )
-            return len(results)
+            filter_expr = self._tenant_filter(knowledge_base_id=knowledge_base_id)
+            return len(self._read_all_ids(client, self._collection_name, filter_expr))
         except Exception as exc:
             logger.error("Failed to count chunks: %s", exc)
             return 0
 
     def all_chunks(self, knowledge_base_id: Optional[int] = None) -> Dict[str, List[Dict[str, Any]]]:
-        """Return all chunks from the JSON co-store, grouped by document_id."""
+        """Return all chunks of the active tenant from the JSON co-store."""
+        tenant_id = require_tenant_id()
         store = self._load_co_store()
         grouped: Dict[str, List[Dict[str, Any]]] = {}
-        for document_id, chunks in store.items():
+        for document_id, chunks in store.get(str(tenant_id), {}).items():
             for chunk in chunks:
                 if knowledge_base_id is not None and chunk.get("knowledge_base_id") != knowledge_base_id:
                     continue
@@ -398,18 +622,18 @@ class MilvusLiteStore(VectorStoreProtocol):
 
     # ── JSON co-store (private) ──────────────────────────────────────────────
 
-    def _load_co_store(self) -> Dict[str, List[Dict]]:
+    def _load_co_store(self) -> Dict[str, Any]:
         try:
             p = Path(CHUNKS_STORE_PATH)
             if p.exists():
                 with p.open("r", encoding="utf-8") as f:
                     val = json.load(f)
-                    return val if isinstance(val, dict) else {}
+                    return _migrate_co_store_layout(val)
         except Exception as exc:
             logger.error("Co-store load error: %s", exc)
         return {}
 
-    def _write_co_store(self, store: Dict[str, List[Dict]]) -> None:
+    def _write_co_store(self, store: Dict[str, Any]) -> None:
         try:
             p = Path(CHUNKS_STORE_PATH)
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -424,5 +648,7 @@ class MilvusLiteStore(VectorStoreProtocol):
 
     def _save_to_co_store(self, document_id: str, chunks: List[Dict]) -> None:
         store = self._load_co_store()
-        store[document_id] = chunks
+        tenant_key = self._tenant_co_store_key()
+        tenant_root = _co_store_tenant_root(store, tenant_key)
+        tenant_root[str(document_id)] = chunks
         self._write_co_store(store)

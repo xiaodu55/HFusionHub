@@ -1,6 +1,7 @@
 package com.hfusionhub.scheduler;
 
 import com.hfusionhub.service.AgentAlertService;
+import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -25,7 +26,7 @@ public class AgentAlertScheduler {
     public void runAlertChecks() {
         log.debug("Starting scheduled agent alert checks...");
         try {
-            var events = alertService.checkAllActiveAlerts();
+            var events = TenantContext.runAsSystem(alertService::checkAllActiveAlerts);
             if (!events.isEmpty()) {
                 log.warn("Alert check triggered {} new alert events", events.size());
                 for (var event : events) {

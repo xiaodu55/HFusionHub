@@ -47,6 +47,7 @@ from app.api.exception_handlers import (
 )
 from app.core.exceptions import HFusionHubException
 from app.api.internal_auth import require_internal_token
+from app.api.deps import require_tenant
 from app.api.trace_middleware import TraceMiddleware
 from app.api.tenant_middleware import TenantMiddleware
 
@@ -85,18 +86,22 @@ def create_app() -> FastAPI:
     # Every operational route is called by the Java application service.  Keep
     # only /health unauthenticated so infrastructure can probe availability.
     internal_dependencies = [Depends(require_internal_token)]
-    app.include_router(vectorization_router, dependencies=internal_dependencies)
-    app.include_router(chat_router, dependencies=internal_dependencies)
-    app.include_router(rag_router, dependencies=internal_dependencies)
-    app.include_router(agent_obs_router, dependencies=internal_dependencies)
+    # Data-touching routers require BOTH the internal token and an explicit,
+    # verifiable tenant context (fail-closed — no default tenant).
+    tenant_dependencies = [Depends(require_internal_token), Depends(require_tenant)]
+    app.include_router(vectorization_router, dependencies=tenant_dependencies)
+    app.include_router(chat_router, dependencies=tenant_dependencies)
+    app.include_router(rag_router, dependencies=tenant_dependencies)
+    # Applies on top of the internal token on the MCP data handler.
+    app.include_router(agent_obs_router, dependencies=tenant_dependencies)
     # The MCP router keeps initialize/tools-list public for protocol discovery;
     # its tools/call handler separately enforces the internal token.
     app.include_router(mcp_router)
     # Metrics expose latency/error details; keep them on the internal network.
     app.include_router(metrics_router, dependencies=internal_dependencies)
     app.include_router(runtime_router, dependencies=internal_dependencies)
-    app.include_router(tools_router, dependencies=internal_dependencies)
-    app.include_router(plugin_admin_router, dependencies=internal_dependencies)
+    app.include_router(tools_router, dependencies=tenant_dependencies)
+    app.include_router(plugin_admin_router, dependencies=tenant_dependencies)
 
     @app.get("/")
     async def root():

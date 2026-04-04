@@ -1,6 +1,7 @@
 package com.hfusionhub.scheduler;
 
 import com.hfusionhub.service.AgentTaskQueueService;
+import com.hfusionhub.tenant.TenantContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -40,7 +41,7 @@ public class AgentTaskWorkerScheduler implements ApplicationListener<Application
         // Poll every 5s — uses agent worker executor internally for execution
         scheduler.scheduleWithFixedDelay(() -> {
             try {
-                int dispatched = queueService.pollAndDispatch();
+                int dispatched = TenantContext.runAsSystem(queueService::pollAndDispatch);
                 if (dispatched > 0) {
                     log.info("Worker dispatched {} agent runs", dispatched);
                 }
@@ -52,7 +53,7 @@ public class AgentTaskWorkerScheduler implements ApplicationListener<Application
         // Heartbeat every 15s
         scheduler.scheduleWithFixedDelay(() -> {
             try {
-                queueService.heartbeatInFlightRuns();
+                TenantContext.runAsSystem(queueService::heartbeatInFlightRuns);
             } catch (Exception e) {
                 log.error("Agent task heartbeat error", e);
             }

@@ -13,7 +13,37 @@ def test_business_routes_require_the_java_service_token():
     assert client.get("/api/rag/traces").status_code == 401
     assert client.get(
         "/api/rag/traces", headers={"X-Internal-Token": "test-internal-token"}
-    ).status_code == 422  # Authenticated, but the required KB scope is absent.
+    ).status_code == 400  # Authenticated, but tenant context is missing (fail-closed).
+    assert client.get(
+        "/api/rag/traces",
+        headers={"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "1"},
+    ).status_code == 422  # Token + tenant present, but the required KB scope is absent.
+
+
+def test_data_endpoints_never_fall_back_to_a_default_tenant():
+    """Missing or forged tenant context must be rejected, never defaulted to 1."""
+    client = TestClient(create_app())
+    base = {"X-Internal-Token": "test-internal-token"}
+
+    # Missing tenant -> 400.
+    resp = client.post("/api/parse", headers=base, json={})
+    assert resp.status_code == 400
+
+    # Forged (non-integer) tenant -> 400.
+    resp = client.post(
+        "/api/parse",
+        headers={**base, "X-Tenant-Id": "not-a-number"},
+        json={},
+    )
+    assert resp.status_code == 400
+
+    # Valid tenant -> passes the tenant gate (fails later on validation).
+    resp = client.post(
+        "/api/parse",
+        headers={**base, "X-Tenant-Id": "1"},
+        json={},
+    )
+    assert resp.status_code == 422
 
 
 def test_vectorization_path_must_stay_under_document_storage(tmp_path, monkeypatch):

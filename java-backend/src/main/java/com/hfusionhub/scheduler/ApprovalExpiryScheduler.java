@@ -1,6 +1,7 @@
 package com.hfusionhub.scheduler;
 
 import com.hfusionhub.service.AgentTaskService;
+import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -21,7 +22,7 @@ public class ApprovalExpiryScheduler {
     @Scheduled(fixedDelay = 60_000)
     public void expireApprovals() {
         try {
-            int count = agentTaskService.expireApprovals();
+            int count = TenantContext.runAsSystem(agentTaskService::expireApprovals);
             if (count > 0) {
                 log.info("Expired {} pending approvals", count);
             }

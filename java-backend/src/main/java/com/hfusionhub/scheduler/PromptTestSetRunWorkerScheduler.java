@@ -2,6 +2,7 @@ package com.hfusionhub.scheduler;
 
 import com.hfusionhub.entity.PromptTestSetRun;
 import com.hfusionhub.service.PromptTestSetService;
+import com.hfusionhub.tenant.TenantContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -192,31 +193,34 @@ public class PromptTestSetRunWorkerScheduler implements ApplicationListener<Appl
             if (shuttingDown) {
                 return;
             }
-            List<PromptTestSetRun> queued = promptTestSetService.listQueuedRuns(batchSize);
-            for (PromptTestSetRun run : queued) {
-                if (promptTestSetService.claimRun(run.getId())) {
-                    // 先登记一个独立的 tracking Future，再提交任务。任务可能在 submit() 返回前就执行完成，
-                    // 但其 finally 移除的是这个已预先登记的 tracking Future（不受提交时序影响），
-                    // 避免了「任务已完成后仍把完成的 Future 重新加入 inFlight」的发布竞态。
-                    CompletableFuture<Void> tracking = new CompletableFuture<>();
-                    inFlight.add(tracking);
-                    try {
+            TenantContext.runAsSystem(() -> {
+                List<PromptTestSetRun> queued = promptTestSetService.listQueuedRuns(batchSize);
+                for (PromptTestSetRun run : queued) {
+                    if (promptTestSetService.claimRun(run.getId())) {
+                        // 先登记一个独立的 tracking Future，再提交任务。任务可能在 submit() 返回前就执行完成，
+                        // 但其 finally 移除的是这个已预先登记的 tracking Future（不受提交时序影响），
+                        // 避免了「任务已完成后仍把完成的 Future 重新加入 inFlight」的发布竞态。
+                        CompletableFuture<Void> tracking = new CompletableFuture<>();
+                        inFlight.add(tracking);
+                        try {
                         runExecutor.submit(() -> {
                             try {
-                                promptTestSetService.executeRun(run.getId());
+                                TenantContext.runAs(run.getTenantId(),
+                                        () -> promptTestSetService.executeRun(run.getId()));
                             } finally {
                                 inFlight.remove(tracking);
                                 tracking.complete(null);
                             }
                         });
-                    } catch (RejectedExecutionException e) {
-                        // 停机过程中运行线程池已关闭——已认领的 run 交由 recovery 兜底
-                        inFlight.remove(tracking);
-                        log.warn("Run {} claimed but scheduler is shutting down — not dispatched, "
-                                + "left for recovery", run.getId());
+                        } catch (RejectedExecutionException e) {
+                            // 停机过程中运行线程池已关闭——已认领的 run 交由 recovery 兜底
+                            inFlight.remove(tracking);
+                            log.warn("Run {} claimed but scheduler is shutting down — not dispatched, "
+                                    + "left for recovery", run.getId());
+                        }
                     }
                 }
-            }
+            });
         } catch (Exception e) {
             log.error("Prompt test set run worker polling error", e);
         } finally {

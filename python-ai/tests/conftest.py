@@ -26,6 +26,21 @@ config.EMBEDDING_ALLOW_FALLBACK = True
 # flags don't override env-var-based config (preserves existing test behavior).
 os.environ.setdefault("FEATURE_FLAG_DEGRADATION", "transparent")
 
+from app.core.tenant.context import set_tenant_id, clear_tenant_id
+
+
+@pytest.fixture(autouse=True)
+def _tenant_context():
+    """Give every test a deterministic tenant context (default tenant 1).
+
+    The HTTP middleware normally populates this contextvar; unit tests that
+    call the vector store / services directly bypass the middleware, so we seed
+    it here.  Tests that need a different tenant set the contextvar explicitly.
+    """
+    set_tenant_id(1)
+    yield
+    clear_tenant_id()
+
 
 # ── Milvus 隔离 fixture ─────────────────────────────────────────────────
 

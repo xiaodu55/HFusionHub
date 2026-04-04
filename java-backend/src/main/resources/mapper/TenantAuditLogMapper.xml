@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hfusionhub.mapper.TenantAuditLogMapper">
+
+    <insert id="insertCrossTenant">
+        INSERT INTO tenant_audit_log (operator_id, from_tenant, to_tenant, action)
+        VALUES (#{operatorId}, #{fromTenant}, #{toTenant}, #{action})
+    </insert>
+
+</mapper>

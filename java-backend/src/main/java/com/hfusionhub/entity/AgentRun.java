@@ -33,6 +33,12 @@ public class AgentRun {
     private Long taskId;
 
     /**
+     * 所属租户ID
+     */
+    @Schema(description = "所属租户ID")
+    private Long tenantId;
+
+    /**
      * UUID，对应 Python 的 agent_run_id
      */
     @Schema(description = "运行UUID")

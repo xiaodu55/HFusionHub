@@ -39,7 +39,7 @@ def test_agent_chunk_to_sse_drops_evaluation_events():
 
 def test_cancel_registered_stream_task():
     app = create_app()
-    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "1"})
     task = MagicMock()
     task.done.return_value = False
     active_requests["test-request"] = task
@@ -54,7 +54,7 @@ def test_cancel_registered_stream_task():
 
 def test_cancel_unknown_stream_task_returns_not_found():
     app = create_app()
-    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "1"})
 
     response = client.post("/api/chat/cancel?request_id=missing-request")
 
@@ -64,7 +64,7 @@ def test_cancel_unknown_stream_task_returns_not_found():
 
 def test_chat_rejects_oversized_message():
     app = create_app()
-    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "1"})
 
     response = client.post("/api/chat", json={"message": "x" * (CHAT_MESSAGE_MAX_LENGTH + 1)})
 
@@ -73,7 +73,7 @@ def test_chat_rejects_oversized_message():
 
 def test_chat_rejects_oversized_history():
     app = create_app()
-    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "1"})
     history = [{"role": "user", "content": "hello"}] * (CHAT_HISTORY_MAX_ITEMS + 1)
 
     response = client.post("/api/chat", json={"message": "hello", "history": history})
@@ -105,7 +105,7 @@ def mock_agent(monkeypatch):
 def test_chat_accepts_8000_char_system_prompt(mock_agent):
     """The exact 8000-char boundary must be accepted (was 422 before fix)."""
     app = create_app()
-    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "1"})
     sp = "A" * SYSTEM_PROMPT_MAX_LENGTH
 
     response = client.post("/api/chat", json={"message": "hi", "system_prompt": sp, "history": []})
@@ -120,7 +120,7 @@ def test_chat_accepts_8000_char_system_prompt(mock_agent):
 def test_chat_accepts_4001_char_system_prompt(mock_agent):
     """The 4001-8000 band that used to fail must now pass via system_prompt."""
     app = create_app()
-    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "1"})
 
     response = client.post("/api/chat", json={"message": "hi", "system_prompt": "B" * 4001, "history": []})
 
@@ -130,7 +130,7 @@ def test_chat_accepts_4001_char_system_prompt(mock_agent):
 def test_chat_rejects_8001_char_system_prompt():
     """Over the 8000 boundary → 422."""
     app = create_app()
-    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "1"})
 
     response = client.post("/api/chat", json={"message": "hi", "system_prompt": "C" * (SYSTEM_PROMPT_MAX_LENGTH + 1), "history": []})
 
@@ -140,7 +140,7 @@ def test_chat_rejects_8001_char_system_prompt():
 def test_chat_still_rejects_oversized_history_entry():
     """The 4000-char limit on regular history entries must be preserved."""
     app = create_app()
-    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "1"})
     history = [{"role": "user", "content": "E" * (CHAT_MESSAGE_MAX_LENGTH + 1)}]
 
     response = client.post("/api/chat", json={"message": "hi", "history": history})
@@ -151,7 +151,7 @@ def test_chat_still_rejects_oversized_history_entry():
 def test_agent_v1_accepts_8000_char_system_prompt(mock_agent):
     """Agent V1 endpoint must accept the full 8000-char system_prompt."""
     app = create_app()
-    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token"})
+    client = TestClient(app, headers={"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "1"})
 
     response = client.post("/api/agent/v1/chat", json={
         "message": "hi",

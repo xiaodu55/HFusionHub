@@ -65,8 +65,9 @@ def test_all_chunks_paginates_with_kb_filter():
     assert len(all_chunk_ids) == 1500
     assert len(set(all_chunk_ids)) == 1500
 
-    # filter must remain a pure expression (no limit/offset embedded).
-    assert all(call["filter"] == "knowledge_base_id == 7" for call in client.calls)
+    # filter must remain a pure expression (no limit/offset embedded) and
+    # must scope to the active tenant (hard isolation boundary).
+    assert all(call["filter"] == "tenant_id == 1 and knowledge_base_id == 7" for call in client.calls)
     # offsets must advance: 0 then 1000.
     offsets = [call["offset"] for call in client.calls]
     assert offsets == [0, 1000]

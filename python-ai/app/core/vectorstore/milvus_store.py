@@ -17,6 +17,7 @@ from app.utils.config import config
 from app.core.chunker.text_chunker import VectorChunk
 from app.core.vectorstore.milvus_lite import MILVUS_LITE_PATH as _LITE_PATH_DEFAULT
 from app.core.vectorstore.milvus_lite import CHUNKS_STORE_PATH as _CO_STORE_DEFAULT
+from app.core.vectorstore.milvus_lite import _migrate_co_store_layout
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,11 @@ def _get_store():
 
 
 def vector_store_status() -> Dict[str, Any]:
-    """Return a safe readiness summary for health checks and diagnostics."""
+    """Return a safe readiness summary for health checks and diagnostics.
+
+    In lite mode this also triggers the lazy ensure/migration so that a failed
+    tenant_id backfill surfaces here and is reported as NOT ready (fail-closed).
+    """
     # If tests have patched get_milvus_client to return None, use the
     # module-level _last_connection_error for the error message.
     patched_client = get_milvus_client()
@@ -56,7 +61,18 @@ def vector_store_status() -> Dict[str, Any]:
             "collection": config.MILVUS_COLLECTION,
             "error": _last_connection_error,
         }
-    status = _get_store().status()
+    # Trigger ensure/migration so a failed migration blocks readiness.
+    # (Cheap in cluster mode? ensure_collection is guarded by has_collection;
+    # we only force the migration path for the file-backed lite store.)
+    store = _get_store()
+    if config.VECTOR_STORE_MODE != "cluster":
+        ensure_collection()
+    status = store.status()
+    # A migration failure recorded on the store must flip readiness off.
+    last_error = getattr(store, "_last_error", None)
+    if last_error:
+        status.ready = False
+        status.error = status.error or last_error
     return {
         "ready": status.ready,
         "collection": status.collection,
@@ -128,11 +144,12 @@ def delete_chunk_ids(chunk_ids: List[str]) -> bool:
 # ── Chunk corpus accessors — used by query_router / citation ────────────────
 
 def _load_chunks_store() -> Dict[str, List[Dict]]:
-    """Return every chunk grouped by ``document_id`` for BM25 / citation.
+    """Return the active tenant's chunks grouped by ``document_id``.
 
     In cluster mode the corpus is read from Milvus (no per-pod JSON co-store).
-    In lite mode it is read from the local JSON co-store.  The module-level
-    ``CHUNKS_STORE_PATH`` is honoured in lite mode so that tests may patch it.
+    In lite mode it is read from the local JSON co-store, filtered to the
+    current tenant.  The module-level ``CHUNKS_STORE_PATH`` is honoured in lite
+    mode so that tests may patch it.
     """
     store = _get_store()
     if config.VECTOR_STORE_MODE == "cluster":
@@ -144,7 +161,24 @@ def _load_chunks_store() -> Dict[str, List[Dict]]:
         if p.exists():
             with p.open("r", encoding="utf-8") as f:
                 val = _json.load(f)
-                return val if isinstance(val, dict) else {}
+                if not isinstance(val, dict):
+                    return {}
+                # Tenant isolation: normalize to the tenant-keyed physical
+                # layout, then return ONLY the active tenant's document root.
+                val = _migrate_co_store_layout(val)
+                try:
+                    from app.core.tenant.context import require_tenant_id
+                    tid = str(require_tenant_id())
+                except Exception:
+                    return {}
+                tenant_root = val.get(tid, {})
+                if not isinstance(tenant_root, dict):
+                    return {}
+                scoped: Dict[str, List[Dict]] = {}
+                for doc_id, chunks in tenant_root.items():
+                    for c in chunks:
+                        scoped.setdefault(str(c.get("document_id", doc_id)), []).append(c)
+                return scoped
     except Exception as exc:
         logger.error("Co-store load error: %s", exc)
     return {}

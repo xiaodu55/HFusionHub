@@ -45,6 +45,7 @@ from app.utils.validators import (
     validate_file_upload,
     validate_document_id
 )
+from app.core.tenant.context import set_tenant_id, clear_tenant_id, require_tenant_id
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -182,6 +183,10 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
     """
     logger.info(f"[Vectorization] Received parse request: {request.document_id}")
 
+    # Hard tenant boundary: the active tenant is resolved from the verified
+    # request context and threaded into the background task explicitly.
+    tenant_id = require_tenant_id()
+
     # Validate request synchronously (fast)
     validate_document_id(request.document_id)
     file_type, resolved_path = validate_file_upload(
@@ -218,6 +223,7 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
         file_path=resolved_path,
         file_type=file_type,
         knowledge_base_id=request.knowledge_base_id,
+        tenant_id=tenant_id,
         document_title=request.document_title,
         index_version=request.index_version,
         callback_url=request.callback_url,
@@ -265,6 +271,7 @@ async def _process_document_background(
     file_path: str,
     file_type: str,
     knowledge_base_id: int,
+    tenant_id: int,
     document_title: Optional[str] = None,
     index_version: str = "",
     callback_url: str = None,
@@ -308,6 +315,9 @@ async def _process_document_background(
         }
 
     try:
+        # Background tasks run outside the HTTP request context, so restore the
+        # tenant boundary explicitly before touching tenant-scoped storage.
+        set_tenant_id(tenant_id)
         # Step 1: Parse document
         logger.info(f"[Vectorization] Parsing document: {document_id}, file: {file_path}")
         _update_status("PROCESSING", "Parsing document...", stage="parsing", progress=10)
@@ -495,6 +505,9 @@ async def _process_document_background(
             except Exception as callback_error:
                 logger.error(f"[Vectorization] Callback also failed: {callback_error}")
 
+    finally:
+        clear_tenant_id()
+
 
 @router.get("/api/chunks/{document_id}", response_model=ChunkResponse)
 async def get_chunks(document_id: str, page: int = 1, size: int = 20, block_type: str = None):
@@ -596,7 +609,12 @@ async def remove_document_chunks(document_id: str):
         raise MilvusException(f"删除文档 {document_id} 的分块失败")
     try:
         from app.core.rag.scoped_graph import get_scoped_graph_store
-        get_scoped_graph_store(config.RAG_GRAPH_INDEX_PATH).remove_document_from_all_scopes(document_id)
+        from app.core.tenant.context import require_tenant_id
+        # Tenant-scoped graph cleanup: a cross-tenant request must never be
+        # able to purge another tenant's graph content.
+        get_scoped_graph_store(config.RAG_GRAPH_INDEX_PATH).remove_document_from_tenant_scopes(
+            require_tenant_id(), document_id,
+        )
     except Exception as graph_error:
         logger.warning("[Vectorization] Scoped graph cleanup unavailable for %s: %s", document_id, graph_error)
     _task_status_store.pop(document_id, None)

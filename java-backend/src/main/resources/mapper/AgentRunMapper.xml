@@ -5,6 +5,7 @@
     <resultMap id="BaseResultMap" type="com.hfusionhub.entity.AgentRun">
         <id column="id" property="id"/>
         <result column="task_id" property="taskId"/>
+        <result column="tenant_id" property="tenantId"/>
         <result column="run_uuid" property="runUuid"/>
         <result column="attempt_number" property="attemptNumber"/>
         <result column="status" property="status"/>
@@ -30,7 +31,7 @@
     </resultMap>
 
     <sql id="Base_Column_List">
-        id, task_id, run_uuid, attempt_number, status, scheduled_at, lease_holder,
+        id, task_id, tenant_id, run_uuid, attempt_number, status, scheduled_at, lease_holder,
         lease_expires_at, heartbeat_at, dispatch_count, model, style, max_tool_steps,
         token_usage, tool_calls_count, error_code, error_detail, failed_tool,
         started_at, completed_at, duration_ms, created_at, updated_at

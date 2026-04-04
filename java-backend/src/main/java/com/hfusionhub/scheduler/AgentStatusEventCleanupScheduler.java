@@ -1,6 +1,7 @@
 package com.hfusionhub.scheduler;
 
 import com.hfusionhub.service.AgentStatusEventService;
+import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -21,7 +22,7 @@ public class AgentStatusEventCleanupScheduler {
     @Scheduled(cron = "0 30 3 * * ?")
     public void cleanupEvents() {
         try {
-            int deleted = statusEventService.cleanupEvents();
+            int deleted = TenantContext.runAsSystem(statusEventService::cleanupEvents);
             log.debug("Cleaned up {} expired agent status events", deleted);
         } catch (Exception e) {
             log.error("Agent status event cleanup error", e);

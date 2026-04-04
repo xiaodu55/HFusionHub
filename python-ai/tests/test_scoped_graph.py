@@ -59,6 +59,57 @@ def test_scoped_graph_fails_closed_when_source_chunk_was_deleted(tmp_path):
     assert results == []
 
 
+def test_graph_records_carry_tenant_stamp(tmp_path):
+    store = ScopedGraphStore(tmp_path / "graph.json")
+    store.replace_document(1, "doc-a", _chunks_store()["doc-a"], tenant_id=7)
+
+    graph = store._read()
+    assert graph["nodes"]
+    assert {n.get("tenant_id") for n in graph["nodes"]} == {7}
+    assert {e.get("tenant_id") for e in graph["edges"]} == {7}
+
+
+def test_graph_removal_is_tenant_scoped(tmp_path):
+    """Deleting a doc id in tenant 2 must NOT purge tenant 1's graph."""
+    store = ScopedGraphStore(tmp_path / "graph.json")
+    store.replace_document(1, "shared-doc", _chunks_store()["doc-a"], tenant_id=1)
+    store.replace_document(2, "shared-doc", _chunks_store()["doc-b"], tenant_id=2)
+
+    # Tenant 2 removes the SAME document id.
+    store.remove_document_from_tenant_scopes(2, "shared-doc")
+
+    graph = store._read()
+    # Tenant 1's node/edge evidence must survive.
+    assert graph["nodes"]
+    t1_evidence = [n for n in graph["nodes"] if n.get("tenant_id") == 1]
+    assert t1_evidence
+    assert any(str(e.get("document_id")) == "shared-doc" for n in t1_evidence for e in n.get("evidence", []))
+    # Tenant 2's node/edge evidence must be gone.
+    t2_nodes = [n for n in graph["nodes"] if n.get("tenant_id") == 2]
+    assert not any(e.get("document_id") == "shared-doc" for n in t2_nodes for e in n.get("evidence", []))
+
+
+def test_graph_legacy_records_are_treated_as_tenant_1(tmp_path):
+    """Pre-tenant graph records (no tenant_id) belong to legacy tenant 1 only."""
+    store = ScopedGraphStore(tmp_path / "graph.json")
+    store.replace_document(1, "legacy-doc", _chunks_store()["doc-a"], tenant_id=1)
+    # Simulate legacy records written before tenant stamping.
+    graph = store._read()
+    for node in graph["nodes"]:
+        node.pop("tenant_id", None)
+    for edge in graph["edges"]:
+        edge.pop("tenant_id", None)
+    store._write(graph)
+
+    # Tenant 2 cannot purge legacy data (it defaults to tenant 1 ownership).
+    store.remove_document_from_tenant_scopes(2, "legacy-doc")
+    assert store._read()["nodes"]
+
+    # Tenant 1 CAN purge it.
+    store.remove_document_from_tenant_scopes(1, "legacy-doc")
+    assert store._read()["nodes"] == []
+
+
 @pytest.mark.asyncio
 async def test_graph_channel_attaches_source_chunk_and_path_metadata(tmp_path):
     store = ScopedGraphStore(tmp_path / "graph.json")
