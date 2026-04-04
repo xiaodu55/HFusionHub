@@ -29,6 +29,10 @@ import com.hfusionhub.common.constant.AgentConstants;
 import com.hfusionhub.service.ConversationService;
 import com.hfusionhub.service.AgentTaskService;
 import com.hfusionhub.service.MemoryService;
+import com.hfusionhub.service.UsageLedgerService;
+import com.hfusionhub.config.QuotaProperties;
+import com.hfusionhub.quota.UsageMeter;
+import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -68,6 +72,8 @@ public class ConversationServiceImpl implements ConversationService {
     private final AiClient aiClient;
     private final AgentTaskService agentTaskService;
     private final MemoryService memoryService;
+    private final UsageLedgerService usageLedgerService;
+    private final QuotaProperties quotaProperties;
     private final com.hfusionhub.service.AgentStreamEventProcessor streamEventProcessor;
 
     private static final int REQUEST_ID_MAX_LENGTH = 64;
@@ -204,6 +210,11 @@ public class ConversationServiceImpl implements ConversationService {
         // business rules before passing it to Python.  Regular chat is always null.
         String effectiveCapability = resolveCapabilityProfile(
                 dto.getCapabilityProfile(), conversation, currentUserId);
+        // 用量账本：预占上界 = 输入估算 + 服务端最大输出（幂等键为 chat:<requestId>）
+        final String usageKey = "chat:" + requestId;
+        final long inputEstimate = estimateChatTokens(dto.getContent());
+        final long reserveTokens = inputEstimate + quotaProperties.getChatMaxOutputTokens();
+        usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, usageKey, reserveTokens, "message", requestId);
         AiClient.ChatResponse aiResponse;
         try {
             if (conversation.getKnowledgeBaseId() != null && conversation.getKnowledgeBaseId() > 0) {
@@ -230,15 +241,22 @@ public class ConversationServiceImpl implements ConversationService {
             // Re-throw BusinessExceptions directly — they represent explicit
             // configuration or permission errors that MUST NOT be silently
             // converted to a fallback answer.
+            usageLedgerService.release(UsageMeter.CHAT_TOKENS, usageKey);
             throw e;
         } catch (Exception e) {
             log.error("Failed to get AI response: {}", e.getMessage(), e);
+            usageLedgerService.release(UsageMeter.CHAT_TOKENS, usageKey);
             return saveAssistantMessage(dto.getConversationId(),
                     aiUnavailableMessage(e), "fallback", 0, List.of(),
                     conversation, dto.getContent(), assistantRequestId);
         }
 
         // 阶段 3: 保存助手消息 + 更新标题（短事务）
+        // 用量账本：按实际 token 结算，封顶在预占上界内（Python 未返回时按预占上界结算）
+        long realTokens = aiResponse.getTokenCount() > 0
+                ? aiResponse.getTokenCount() : reserveTokens;
+        long chargeTokens = Math.min(reserveTokens, realTokens);
+        usageLedgerService.settle(UsageMeter.CHAT_TOKENS, usageKey, chargeTokens, "message", requestId);
         return saveAssistantMessageV1(dto.getConversationId(), aiResponse,
                 conversation, dto.getContent(), assistantRequestId);
     }
@@ -442,6 +460,42 @@ public class ConversationServiceImpl implements ConversationService {
 
     private Message findUserByRequestId(String requestId) {
         return findMessageByRequestId("user", requestId);
+    }
+
+    /**
+     * 聊天 token 预占估算：按内容长度粗估，至少 64 token。
+     */
+    private long estimateChatTokens(String content) {
+        int length = content == null ? 0 : content.length();
+        return Math.max(64, length / 4);
+    }
+
+    /**
+     * 结算/退回流式聊天的用量，AtomicBoolean 保证只执行一次。
+     * 在 Reactor 线程调用，需以预捕获的租户 ID 恢复 TenantContext。
+     * 结算量 = min(预占上界, 输入估算 + 实际输出/4)，封顶在预留内。
+     * 内部吞异常，避免账本失败影响 SSE 主流程。
+     */
+    private void finalizeChatUsage(Long tenantId, String usageKey, long reserveTokens,
+                                   long inputEstimate, AtomicBoolean usageFinalized,
+                                   boolean success, int outputChars) {
+        if (usageFinalized.compareAndSet(false, true)) {
+            TenantContext.runAs(tenantId, () -> {
+                try {
+                    if (success) {
+                        long charge = Math.min(reserveTokens,
+                                inputEstimate + Math.max(0, outputChars) / 4);
+                        usageLedgerService.settle(
+                                UsageMeter.CHAT_TOKENS, usageKey, charge, "message", usageKey);
+                    } else {
+                        usageLedgerService.release(UsageMeter.CHAT_TOKENS, usageKey);
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to finalize chat usage for {}: {}", usageKey, e.getMessage());
+                }
+                return null;
+            });
+        }
     }
 
     private Message findAssistantByRequestId(String requestId) {
@@ -861,6 +915,16 @@ public class ConversationServiceImpl implements ConversationService {
             return;
         }
 
+        // 用量账本：预占上界 = 输入估算 + 服务端最大输出（幂等键为 chat:<requestId>）。
+        // 流式回调和 doFinally 在 Reactor 线程执行，先捕获租户 ID，结算/退回用
+        // TenantContext.runAs 恢复上下文。
+        final Long streamTenantId = TenantContext.requireTenantId();
+        final String usageKey = "chat:" + requestId;
+        final long streamInputEstimate = estimateChatTokens(dto.getContent());
+        final long streamReserveTokens = streamInputEstimate + quotaProperties.getChatMaxOutputTokens();
+        final AtomicBoolean usageFinalized = new AtomicBoolean(false);
+        usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, usageKey, streamReserveTokens, "message", requestId);
+
         reactor.core.publisher.Flux<String> sseFlux;
         if (isKbBound) {
             sseFlux = aiClient.agentV1ChatStream(
@@ -874,13 +938,29 @@ public class ConversationServiceImpl implements ConversationService {
         }
 
         sseFlux = sseFlux.doFinally(signalType -> {
-                    // Cleanup: remove from active requests and signal completion
-                    activeStreamRequests.remove(requestId, streamCancellation);
-                    streamCancellation.completed.complete(null);
+                    // Reactor 线程无租户上下文，先恢复再结算/退回
+                    TenantContext.runAs(streamTenantId, () -> {
+                        // Usage safety net: if no subscriber path finalized the
+                        // reservation (edge case), settle on completion else release.
+                        if (usageFinalized.compareAndSet(false, true)) {
+                            if (signalType == reactor.core.publisher.SignalType.ON_COMPLETE) {
+                                long charge = Math.min(streamReserveTokens,
+                                        streamInputEstimate + responseBuilder.length() / 4);
+                                usageLedgerService.settle(
+                                        UsageMeter.CHAT_TOKENS, usageKey, charge, "message", usageKey);
+                            } else {
+                                usageLedgerService.release(UsageMeter.CHAT_TOKENS, usageKey);
+                            }
+                        }
+                        // Cleanup: remove from active requests and signal completion
+                        activeStreamRequests.remove(requestId, streamCancellation);
+                        streamCancellation.completed.complete(null);
+                        return null;
+                    });
                 });
 
         reactor.core.Disposable subscription = sseFlux.subscribe(
-                chunk -> {
+                chunk -> TenantContext.runAs(streamTenantId, () -> {
                     if (cancelled.get()) return;
 
                     // Python streaming emits SSE formatted lines:
@@ -907,6 +987,8 @@ public class ConversationServiceImpl implements ConversationService {
                                         dto.getConversationId(), responseBuilder.toString(),
                                         "streaming", accumulatedSources, assistantRequestId);
                             }
+                        finalizeChatUsage(streamTenantId, usageKey, streamReserveTokens,
+                                streamInputEstimate, usageFinalized, true, responseBuilder.length());
                         return;
                     }
 
@@ -932,6 +1014,8 @@ public class ConversationServiceImpl implements ConversationService {
                         if (isCancelled) {
                             log.info("Python AI request cancelled: {}", requestId);
                             agentTaskService.cancelRun(agentRun.getId());
+                            finalizeChatUsage(streamTenantId, usageKey, streamReserveTokens,
+                                    streamInputEstimate, usageFinalized, false, 0);
                             try { emitter.send(SseEmitter.event().data("[DONE]")); emitter.complete(); } catch (Exception ignored) {}
                             return;
                         }
@@ -953,9 +1037,11 @@ public class ConversationServiceImpl implements ConversationService {
                     } catch (Exception e) {
                         log.warn("Failed to parse SSE chunk: {}", data, e);
                     }
-                },
-                error -> {
+                }),
+                error -> TenantContext.runAs(streamTenantId, () -> {
                     // onError
+                    finalizeChatUsage(streamTenantId, usageKey, streamReserveTokens,
+                            streamInputEstimate, usageFinalized, false, 0);
                     if (cancelled.get()) {
                         log.info("Stream cancelled by client, requestId: {}", requestId);
                         agentTaskService.cancelRun(agentRun.getId());
@@ -989,9 +1075,12 @@ public class ConversationServiceImpl implements ConversationService {
                     } catch (Exception ex) {
                         emitter.completeWithError(ex);
                     }
-                },
-                () -> {
+                }),
+                () -> TenantContext.runAs(streamTenantId, () -> {
                     // onComplete: ensure emitter is closed and assistant saved.
+                    finalizeChatUsage(streamTenantId, usageKey, streamReserveTokens,
+                            streamInputEstimate, usageFinalized,
+                            responseBuilder.length() > 0, responseBuilder.length());
                     // Agent V1 Step 5 safety net: if the run is still in 'running'
                     // state (no run_completed / run_error / approval_required was
                     // received), converge it to failed so nothing stays running forever.
@@ -1033,7 +1122,7 @@ public class ConversationServiceImpl implements ConversationService {
                             // ignore
                         }
                     }
-                }
+                })
         );
 
         // Track the subscription for cancellation

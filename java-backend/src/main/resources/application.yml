@@ -188,6 +188,32 @@ logging:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{trace_id:-}] %-5level %logger{36} - %msg%n"
 
 # Actuator / Micrometer — Prometheus scrape endpoint
+# =====================================================
+# Tenant quota plan defaults (used when no tenant_quota override exists)
+# =====================================================
+hfusionhub:
+  quota:
+    # Server-side upper bound for a single chat output (tokens). Used as the
+    # reservation ceiling: reserve = input estimate + max-output-tokens.
+    chat:
+      max-output-tokens: ${QUOTA_CHAT_MAX_OUTPUT_TOKENS:8192}
+    defaults:
+      free:
+        chat-tokens: 100000
+        agent-tokens: 100000
+        index-chunks: 5000
+        plugin-executions: 100
+      pro:
+        chat-tokens: 1000000
+        agent-tokens: 1000000
+        index-chunks: 50000
+        plugin-executions: 1000
+      enterprise:
+        chat-tokens: 10000000
+        agent-tokens: 10000000
+        index-chunks: 500000
+        plugin-executions: 10000
+
 management:
   endpoints:
     web:

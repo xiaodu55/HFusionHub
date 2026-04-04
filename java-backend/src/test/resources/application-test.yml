@@ -149,6 +149,25 @@ hfusionhub:
     enabled: false
     strict: false
     default-tenant-id: 1
+  quota:
+    chat:
+      max-output-tokens: 512
+    defaults:
+      free:
+        chat-tokens: 1000
+        agent-tokens: 1000
+        index-chunks: 100
+        plugin-executions: 10
+      pro:
+        chat-tokens: 10000
+        agent-tokens: 10000
+        index-chunks: 1000
+        plugin-executions: 100
+      enterprise:
+        chat-tokens: 100000
+        agent-tokens: 100000
+        index-chunks: 10000
+        plugin-executions: 1000
 
 logging:
   level:
