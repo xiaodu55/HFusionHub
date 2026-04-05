@@ -76,6 +76,25 @@ pythonAi:
       memory: "2Gi"
       cpu: "1000m"
 
+# --- Isolated Plugin Runner ---
+# The runner reaches a dedicated Docker Engine over TLS. It is deliberately
+# not given a host docker.sock mount. Provide a Kubernetes TLS secret with
+# ca.pem, cert.pem and key.pem keys, then set tlsSecretName and dockerHost.
+pluginRunner:
+  enabled: true
+  image: hfusionhub/plugin-runner:latest
+  port: 9100
+  dockerHost: ""
+  tlsSecretName: ""
+  artifactsSize: 1Gi
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
 # --- Vector store / Milvus ---
 vectorStore:
   mode: cluster
@@ -132,3 +151,4 @@ secrets:
   callbackSecret: ""
   adminPassword: ""
   deepseekApiKey: ""
+  pluginRunnerToken: ""

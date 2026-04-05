@@ -29,7 +29,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -201,7 +201,7 @@ def _build_network_commands(config: ContainerConfig) -> List[str]:
 # ── Endpoints ────────────────────────────────────────────────────────
 
 @app.get("/health")
-async def health():
+async def health(response: Response):
     docker_ok = _check_docker()
     images_count = 0
     if docker_ok:
@@ -211,8 +211,14 @@ async def health():
             images_count = len(images)
         except Exception:
             pass
+    if not docker_ok:
+        # A process that cannot reach its dedicated Docker Engine cannot
+        # execute plugins. Report it as not ready so orchestrators do not
+        # route work to a fail-closed runner that is effectively unavailable.
+        response.status_code = 503
+
     return HealthResponse(
-        status="healthy" if docker_ok else "degraded",
+        status="healthy" if docker_ok else "unavailable",
         docker_connected=docker_ok,
         images_count=images_count,
     )

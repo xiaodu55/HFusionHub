@@ -25,7 +25,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 PLUGIN_RUNNER_URL = os.environ.get("PLUGIN_RUNNER_URL", "http://localhost:9100")
-PLUGIN_RUNNER_TOKEN = os.environ.get("PLUGIN_RUNNER_TOKEN", "plugin-runner-secret")
+PLUGIN_RUNNER_TOKEN = os.environ.get("PLUGIN_RUNNER_TOKEN", "")
 DEFAULT_TIMEOUT = float(os.environ.get("PLUGIN_RUNNER_TIMEOUT", "60"))
 
 
@@ -83,6 +83,13 @@ async def execute_in_container(
             success=False,
             error="image_digest is required for container execution",
             error_code="missing_digest",
+            duration_ms=0.0,
+        )
+    if not PLUGIN_RUNNER_TOKEN:
+        return ContainerResult(
+            success=False,
+            error="PLUGIN_RUNNER_TOKEN is not configured; execution blocked (fail_closed)",
+            error_code="runner_not_configured",
             duration_ms=0.0,
         )
 

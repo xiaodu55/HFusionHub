@@ -304,6 +304,24 @@ class TestExecuteInContainerDigest:
         assert result.success is False
         assert result.error_code == "missing_digest"
 
+    def test_runner_token_missing_fails_closed_without_http_call(self):
+        """A missing production secret rejects execution before network I/O."""
+        import asyncio
+
+        with patch("app.core.plugin.container_runner.PLUGIN_RUNNER_TOKEN", ""), patch(
+            "app.core.plugin.container_runner.httpx.AsyncClient"
+        ) as client:
+            result = asyncio.run(execute_in_container(
+                image_tag="hfusionhub-plugin-test:v1",
+                tool_name="test_tool",
+                tool_input={},
+                image_digest="sha256:abc123",
+            ))
+
+        assert result.success is False
+        assert result.error_code == "runner_not_configured"
+        client.assert_not_called()
+
     def test_runner_unreachable_fail_closed(self):
         """When runner is unreachable, returns runner_unreachable error."""
         import asyncio
@@ -321,6 +339,8 @@ class TestExecuteInContainerDigest:
         with patch(
             "app.core.plugin.container_runner.httpx.AsyncClient",
             return_value=mock_client,
+        ), patch(
+            "app.core.plugin.container_runner.PLUGIN_RUNNER_TOKEN", "test-runner-token",
         ):
             result = asyncio.run(execute_in_container(
                 image_tag="hfusionhub-plugin-test:v1",
@@ -348,6 +368,8 @@ class TestExecuteInContainerDigest:
         with patch(
             "app.core.plugin.container_runner.httpx.AsyncClient",
             return_value=mock_client,
+        ), patch(
+            "app.core.plugin.container_runner.PLUGIN_RUNNER_TOKEN", "test-runner-token",
         ):
             result = asyncio.run(execute_in_container(
                 image_tag="hfusionhub-plugin-test:v1",
@@ -738,7 +760,8 @@ class TestRunnerIntegration:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] in ("healthy", "degraded")
+        assert data["status"] == "healthy"
+        assert data["docker_connected"] is True
 
     def test_execute_missing_digest_rejected(self):
         """P0-1: Runner rejects execution without image_digest (HTTP 400)."""
@@ -955,6 +978,8 @@ class TestContainerFailClosedNoSubprocess:
         from app.core.plugin.sandbox_runner import execute_in_sandbox
 
         with self._patch_runner_unreachable(), patch(
+            "app.core.plugin.container_runner.PLUGIN_RUNNER_TOKEN", "test-runner-token",
+        ), patch(
             "app.core.plugin.sandbox_runner.Process",
             MagicMock(
                 side_effect=AssertionError(
@@ -978,6 +1003,8 @@ class TestContainerFailClosedNoSubprocess:
         from app.core.plugin.sandbox_runner import execute_in_sandbox
 
         with self._patch_runner_unreachable(), patch(
+            "app.core.plugin.container_runner.PLUGIN_RUNNER_TOKEN", "test-runner-token",
+        ), patch(
             "app.core.plugin.sandbox_runner.Process",
             MagicMock(
                 side_effect=AssertionError(

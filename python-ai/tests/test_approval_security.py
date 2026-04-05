@@ -422,10 +422,17 @@ class TestDecideEndpointE2E(unittest.TestCase):
     """Integration tests against the running /api/agent/v1/chat/decide endpoint.
 
     Requires: Python service running on localhost:9000 with PYTHON_AI_INTERNAL_TOKEN set.
+
+    Successful approved executions require a matching, durable execution token
+    issued by the Java backend. That cross-service success path is covered by
+    the Java controller and Python token-contract tests; this live endpoint
+    suite verifies the Python service's fail-closed boundary without inventing
+    a token outside the Java approval lifecycle.
     """
 
     BASE = "http://localhost:9000"
     TOKEN = os.getenv("PYTHON_AI_INTERNAL_TOKEN", "")
+    TENANT_ID = os.getenv("HFUSIONHUB_LIVE_E2E_TENANT_ID", "1")
 
     def _decide(self, approval_id, decision, tool_name, tool_input,
                 user_id, knowledge_base_id, reason=None):
@@ -443,12 +450,19 @@ class TestDecideEndpointE2E(unittest.TestCase):
             "history": [],
             "model": "test",
         }
+        if decision == "approved":
+            canonical = json.dumps(tool_input, sort_keys=True, ensure_ascii=False,
+                                   separators=(",", ":"))
+            body["expected_tool_input_hash"] = hashlib.sha256(
+                canonical.encode("utf-8")
+            ).hexdigest()
         req = urllib.request.Request(
             f"{self.BASE}/api/agent/v1/chat/decide",
             data=json.dumps(body).encode("utf-8"),
             headers={
                 "Content-Type": "application/json",
                 "X-Internal-Token": self.TOKEN,
+                "X-Tenant-Id": self.TENANT_ID,
             },
             method="POST",
         )
@@ -456,10 +470,14 @@ class TestDecideEndpointE2E(unittest.TestCase):
             with urllib.request.urlopen(req, timeout=30) as resp:
                 return resp.status, json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
-            return e.code, e.read().decode("utf-8")
+            body = e.read().decode("utf-8")
+            try:
+                return e.code, json.loads(body)
+            except json.JSONDecodeError:
+                return e.code, body
 
-    def test_approve_write_note_success(self):
-        """Approve → write_note executes once → returns completed with KB ID."""
+    def test_approve_without_issued_token_is_rejected_before_execution(self):
+        """An approval without Java's durable token must never execute a tool."""
         status, data = self._decide(
             approval_id="e2e-test-001",
             decision="approved",
@@ -468,15 +486,8 @@ class TestDecideEndpointE2E(unittest.TestCase):
             user_id=1,
             knowledge_base_id=1,
         )
-        self.assertEqual(status, 200)
-        self.assertEqual(data["status"], "completed")
-        # Verify KB ID is in the step event
-        steps = data.get("step_events", [])
-        self.assertGreater(len(steps), 0)
-        step = steps[0]
-        self.assertEqual(step.get("knowledge_base_id"), 1)
-        # Verify tool was write_note
-        self.assertEqual(step.get("action"), "write_note")
+        self.assertEqual(status, 409)
+        self.assertIn("execution token", data["message"].lower())
 
     def test_deny_returns_denied(self):
         """Deny → returns denied status."""

@@ -143,6 +143,10 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       LLM_ALLOW_MOCK: "false"
       EMBEDDING_ALLOW_FALLBACK: "false"
+      # The runner owns the Docker API connection. Python only reaches this
+      # internal service and must fail closed if it is unavailable.
+      PLUGIN_RUNNER_URL: http://plugin-runner:9100
+      PLUGIN_RUNNER_TOKEN: ${PLUGIN_RUNNER_TOKEN:?required}
     volumes:
       - python-data:/data
       - uploads-data:/app/uploads
@@ -151,6 +155,8 @@ services:
         condition: service_healthy
       milvus:
         condition: service_healthy
+      plugin-runner:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://localhost:9000/ready || exit 1"]
       interval: 15s
@@ -158,6 +164,44 @@ services:
       retries: 5
       start_period: 30s
     restart: unless-stopped
+
+  # Container plugin execution service. It connects to a separately
+  # provisioned Docker Engine over TLS; never mount docker.sock here.
+  plugin-runner:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.plugin-runner
+    container_name: hfusionhub-plugin-runner
+    expose:
+      - "9100"
+    environment:
+      PLUGIN_RUNNER_TOKEN: ${PLUGIN_RUNNER_TOKEN:?required}
+      PLUGIN_ARTIFACTS_DIR: /opt/plugin-artifacts
+      DOCKER_HOST: ${PLUGIN_RUNNER_DOCKER_HOST:?required}
+      DOCKER_TLS_VERIFY: "1"
+      DOCKER_CERT_PATH: /certs/client
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - plugin-artifacts:/opt/plugin-artifacts
+    secrets:
+      - source: plugin-runner-ca
+        target: /certs/client/ca.pem
+      - source: plugin-runner-cert
+        target: /certs/client/cert.pem
+      - source: plugin-runner-key
+        target: /certs/client/key.pem
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9100/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
 
   frontend:
     build:
@@ -182,3 +226,12 @@ volumes:
   python-data:
   uploads-data:
   milvus-data:
+  plugin-artifacts:
+
+secrets:
+  plugin-runner-ca:
+    file: ${PLUGIN_RUNNER_CA_CERT_FILE:?required}
+  plugin-runner-cert:
+    file: ${PLUGIN_RUNNER_CLIENT_CERT_FILE:?required}
+  plugin-runner-key:
+    file: ${PLUGIN_RUNNER_CLIENT_KEY_FILE:?required}
