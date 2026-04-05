@@ -87,12 +87,18 @@ python-ai/.env
 # --- Python AI generated data ---
 python-ai/uploads/
 python-ai/milvus_data.db/
+python-ai/milvus_data.db.active_collection.json
 python-ai/milvus_data_test.db/
 python-ai/chunks_store.json
 python-ai/data/
 
 # --- Python AI evaluation reports (generated; baselines stay committed) ---
 python-ai/evaluation/reports/
+python-ai/evaluation/*.db
+python-ai/evaluation/rag_scoped_graph.json
+
+# --- Python AI test build artifacts ---
+python-ai/tests/.tmp-*/
 
 # --- Test / Debug files ---
 test_response.json
