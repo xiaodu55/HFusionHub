@@ -9,7 +9,8 @@ RUN useradd --no-create-home --shell /bin/false pluginuser
 WORKDIR /opt/plugin-runner
 
 COPY python-ai/requirements.txt /opt/requirements.txt
-RUN pip install --no-cache-dir -r /opt/requirements.txt && \
+RUN sed 's/uvicorn\[standard\]/uvicorn/g' /opt/requirements.txt > /tmp/requirements.txt && \
+    pip install --no-cache-dir -r /tmp/requirements.txt && \
     pip install --no-cache-dir docker>=7.0.0 httpx>=0.27.0
 
 COPY docker/plugin-runner/ /opt/plugin-runner/

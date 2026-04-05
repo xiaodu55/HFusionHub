@@ -12,12 +12,82 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate Docker Compose configuration
+      - name: Validate dev Docker Compose configuration
         run: docker compose -f docker/docker-compose.yml config -q
         env:
           MYSQL_ROOT_PASSWORD: ci-test-root
           MYSQL_PASSWORD: ci-test-pass
           REDIS_PASSWORD: ci-test-redis
+      - name: Validate production Docker Compose configuration
+        # deploy/docker-compose.prod.yml uses :?required to force secrets;
+        # supply benign values so `config -q` renders the full graph (Java,
+        # Python, Milvus, plugin-runner, frontend) exactly as it would deploy.
+        run: docker compose -f deploy/docker-compose.prod.yml config -q
+        env:
+          MYSQL_ROOT_PASSWORD: ci-test-root
+          MYSQL_PASSWORD: ci-test-pass
+          REDIS_PASSWORD: ci-test-redis
+          PYTHON_AI_INTERNAL_TOKEN: ci-test-internal-token
+          CALLBACK_SECRET: ci-test-callback
+          ADMIN_PASSWORD: ci-test-admin
+          DEEPSEEK_API_KEY: ci-test-deepseek
+          PLUGIN_RUNNER_TOKEN: ci-test-runner-token
+          PLUGIN_RUNNER_DOCKER_HOST: tcp://remote-docker:2376
+          PLUGIN_RUNNER_CA_CERT_FILE: deploy/runner-tls/ca.pem
+          PLUGIN_RUNNER_CLIENT_CERT_FILE: deploy/runner-tls/cert.pem
+          PLUGIN_RUNNER_CLIENT_KEY_FILE: deploy/runner-tls/key.pem
+      - name: Validate monitoring Docker Compose configuration
+        run: docker compose -f deploy/docker-compose.monitoring.yml config -q
+
+  # ─── Helm Chart 渲染门禁 ───
+  # 本机常缺 Helm，故真实渲染门禁放到 CI：helm lint 校验 chart 一致性，
+  # helm template 在注入必填 secrets / runner TLS / dockerHost 后用一组
+  # CI 自包含 values 实际渲染出全部 Kubernetes 资源（含 plugin-runner 的
+  # 最小权限安全上下文、Milvus StatefulSet、Ingress），任一 required 字段缺失
+  # 或模板语法错误都会让该 job 失败，杜绝"本机能跑、发布机渲染爆炸"。
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - name: Lint chart
+        run: helm lint deploy/helm/hfusionhub
+      - name: Render chart with minimal valid values
+        # Enable the Opt-in pluginRunner path (TLS + isolated Docker Engine)
+        # and provide every Secret so secrets.required checks pass.  All
+        # templates live in templates/all.yaml, so helm renders every Kind into
+        # a single multi-document YAML stream.
+        run: |
+          helm template hfusionhub deploy/helm/hfusionhub \
+            --set secrets.mysqlRootPassword=ci-root \
+            --set secrets.mysqlPassword=ci-pass \
+            --set secrets.pythonAiInternalToken=ci-internal \
+            --set secrets.callbackSecret=ci-callback \
+            --set secrets.adminPassword=ci-admin \
+            --set secrets.deepseekApiKey=ci-deepseek \
+            --set secrets.pluginRunnerToken=ci-runner \
+            --set pluginRunner.dockerHost=tcp://remote-docker:2376 \
+            --set pluginRunner.tlsSecretName=hfusionhub-runner-tls \
+            > /tmp/hfusionhub-render.yaml
+      - name: Validate rendered manifests against Kubernetes schemas
+        # kubeconform checks every YAML document (multi-doc stream) against
+        # the official Kubernetes JSON schema — catches template bugs that
+        # `helm template` alone (syntax-only) would miss.
+        run: |
+          docker run --rm -v /tmp/hfusionhub-render.yaml:/data/manifests.yaml \
+            ghcr.io/yannh/kubeconform:latest \
+            -strict -ignore-missing-schemas /data/manifests.yaml
+      - name: Assert rendered resources are non-empty
+        run: |
+          docs=$(awk '/^---[[:space:]]*$/{n++} END{print n+1}' /tmp/hfusionhub-render.yaml)
+          if [ "$docs" -lt 12 ]; then
+            echo "::error::Expected >=12 rendered Kubernetes resources, got ${docs}."
+            exit 1
+          fi
+          echo "Rendered $docs Kubernetes resources."
 
   # ─── Python AI 服务 ───
   python:

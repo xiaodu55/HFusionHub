@@ -59,8 +59,9 @@ services:
 
   # Milvus standalone for production vector storage (replaces embedded Lite).
   milvus:
-    image: milvusdb/milvus:v2.4-latest
+    image: milvusdb/milvus:v2.4.0
     container_name: hfusionhub-milvus
+    command: ["milvus", "run", "standalone"]
     environment:
       ETCD_USE_EMBED: "true"
       COMMON_STORAGETYPE: local
@@ -191,7 +192,9 @@ services:
       - source: plugin-runner-key
         target: /certs/client/key.pem
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9100/health"]
+      # 503 是 runner 连不上隔离引擎时的故意 fail-closed 语义（进程仍存活，
+      # 但不可执行插件）。healthcheck 只验证进程能响应 HTTP，不接受 2xx 才计活。
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:9100/health"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -206,7 +209,7 @@ services:
   frontend:
     build:
       context: ..
-      dockerfile: ../deploy/Dockerfile.frontend
+      dockerfile: deploy/Dockerfile.frontend
     container_name: hfusionhub-frontend
     ports:
       - "80:80"
@@ -214,7 +217,9 @@ services:
       java-backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://localhost:80/ || exit 1"]
+      # 用 127.0.0.1 而非 localhost：nginx 只 listen 80(IPv4)，容器内 localhost
+      # 常解析到 ::1(Ipv6)，导致 Connection refused 误判 unhealthy。
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/ || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3

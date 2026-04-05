@@ -104,3 +104,6 @@ python-ai/tests/.tmp-*/
 test_response.json
 *_response.json
 *.response.json
+
+# --- Runner TLS 私钥（绝不提交；由 scripts/generate-runner-tls.sh 生成） ---
+deploy/runner-tls/

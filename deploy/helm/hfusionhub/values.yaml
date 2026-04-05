@@ -107,7 +107,7 @@ vectorStore:
 # vectorStore.host at an externally-managed Milvus service when required.
 milvus:
   enabled: true
-  image: milvusdb/milvus:v2.4-latest
+  image: milvusdb/milvus:v2.4.0
   port: 19530
   persistence:
     size: 20Gi
