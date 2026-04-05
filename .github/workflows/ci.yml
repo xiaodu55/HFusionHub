@@ -274,7 +274,7 @@ jobs:
       - name: Build Frontend image
         uses: docker/build-push-action@v6
         with:
-          context: hfusionhub-frontend
+          context: .
           file: deploy/Dockerfile.frontend
           push: false
           cache-from: type=gha
