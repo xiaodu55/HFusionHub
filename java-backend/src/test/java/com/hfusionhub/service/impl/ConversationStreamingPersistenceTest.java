@@ -36,6 +36,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -147,7 +148,8 @@ class ConversationStreamingPersistenceTest {
                                 + "\"step_type\":\"retrieval\",\"action\":\"search\","
                                 + "\"input_summary\":\"q\",\"output_summary\":\"docs\"}\n\n",
                         "data: {\"event\":\"run_completed\",\"status\":\"completed\","
-                                + "\"tool_calls_count\":2}\n\n",
+                                + "\"tool_calls_count\":2,\"token_usage\":{\"prompt_tokens\":100,"
+                                + "\"completion_tokens\":40,\"total_tokens\":140}}\n\n",
                         "data: [DONE]\n\n"
                 ).subscribeOn(Schedulers.single()));
 
@@ -173,6 +175,8 @@ class ConversationStreamingPersistenceTest {
         assertFalse(runs.isEmpty(), "agent_run should be persisted");
         AgentRun run = waitForTerminalRun(runs.get(0).getId());
         assertEquals(AgentConstants.STATUS_SUCCEEDED, run.getStatus());
+        assertEquals(Map.of("prompt_tokens", 100, "completion_tokens", 40, "total_tokens", 140),
+                run.getTokenUsage());
 
         AgentStep step = agentStepMapper.selectOne(Wrappers.<AgentStep>lambdaQuery()
                 .eq(AgentStep::getRunId, run.getId())

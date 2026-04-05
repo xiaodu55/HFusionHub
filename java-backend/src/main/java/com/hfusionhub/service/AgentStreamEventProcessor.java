@@ -138,7 +138,11 @@ public class AgentStreamEventProcessor {
             String rawStatus = eventNode.has("status") ? eventNode.get("status").asText() : "completed";
             String status = AgentConstants.mapPythonStatus(rawStatus);
             int toolCalls = eventNode.has("tool_calls_count") ? eventNode.get("tool_calls_count").asInt() : 0;
-            agentTaskService.completeRun(runId, status, null, null, toolCalls, 0,
+            Map<String, Object> tokenUsage = null;
+            if (eventNode.has("token_usage") && eventNode.get("token_usage").isObject()) {
+                tokenUsage = objectMapper.convertValue(eventNode.get("token_usage"), Map.class);
+            }
+            agentTaskService.completeRun(runId, status, null, tokenUsage, toolCalls, 0,
                     null, null, null);
 
             // Record status event

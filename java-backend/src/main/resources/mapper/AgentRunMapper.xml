@@ -134,6 +134,16 @@
           AND status IN ('running', 'waiting_approval')
     </update>
 
+    <update id="updateCompletionMetadata">
+        UPDATE agent_run
+        SET model = COALESCE(#{model}, model),
+            token_usage = #{tokenUsage, typeHandler=com.hfusionhub.handler.JsonMapTypeHandler},
+            tool_calls_count = #{toolCallsCount},
+            duration_ms = #{durationMs},
+            updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
     <update id="requeueOrphan">
         UPDATE agent_run
         SET status = 'pending',

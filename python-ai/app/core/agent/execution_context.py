@@ -63,6 +63,7 @@ class AgentExecutionContext:
 
     user_id: int
     knowledge_base_id: int
+    tenant_id: Optional[int] = None
     permissions: FrozenSet[str] = field(default_factory=lambda: frozenset({"knowledge_base:read"}))
     agent_run_id: str = ""
     mode: str = MODE_READ_ONLY
@@ -80,6 +81,8 @@ class AgentExecutionContext:
             raise ValueError(f"user_id must be positive, got {self.user_id}")
         if self.knowledge_base_id <= 0:
             raise ValueError(f"knowledge_base_id must be positive, got {self.knowledge_base_id}")
+        if self.tenant_id is not None and self.tenant_id <= 0:
+            raise ValueError(f"tenant_id must be positive when set, got {self.tenant_id}")
         if self.capability_profile not in self._VALID_PROFILES:
             raise ValueError(
                 f"Invalid capability_profile: {self.capability_profile!r}. "
@@ -118,6 +121,7 @@ class AgentExecutionContext:
         return {
             "user_id": self.user_id,
             "knowledge_base_id": self.knowledge_base_id,
+            "tenant_id": self.tenant_id,
             "permissions": sorted(self.permissions),
             "agent_run_id": self.agent_run_id,
             "mode": self.mode,

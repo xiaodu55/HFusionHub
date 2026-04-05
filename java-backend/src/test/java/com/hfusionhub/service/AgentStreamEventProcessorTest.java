@@ -1,9 +1,15 @@
 package com.hfusionhub.service;
 
 import com.hfusionhub.common.constant.AgentConstants;
+import com.hfusionhub.service.AgentStatusEventService;
+import com.hfusionhub.service.AgentTaskService;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 /**
  * AgentStreamEventProcessor 单元测试 — SSE 解析、状态映射
@@ -91,6 +97,21 @@ class AgentStreamEventProcessorTest {
     void mapPythonStatusUnknown() {
         assertEquals(AgentConstants.STATUS_FAILED,
                 AgentConstants.mapPythonStatus("some_unknown_status"));
+    }
+
+    @Test
+    void runCompletedForwardsTokenUsageForDurableSettlement() {
+        AgentTaskService taskService = mock(AgentTaskService.class);
+        AgentStreamEventProcessor processor = new AgentStreamEventProcessor(
+                taskService, mock(AgentStatusEventService.class));
+
+        processor.handleLine("data: {\"event\":\"run_completed\",\"status\":\"completed\","
+                + "\"tool_calls_count\":2,\"token_usage\":{\"prompt_tokens\":100,"
+                + "\"completion_tokens\":40,\"total_tokens\":140}}", 9L);
+
+        verify(taskService).completeRun(eq(9L), eq(AgentConstants.STATUS_SUCCEEDED), isNull(),
+                eq(Map.of("prompt_tokens", 100, "completion_tokens", 40, "total_tokens", 140)),
+                eq(2), eq(0L), isNull(), isNull(), isNull());
     }
 
     @Test

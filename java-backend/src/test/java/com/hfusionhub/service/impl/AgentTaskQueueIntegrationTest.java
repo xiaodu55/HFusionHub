@@ -522,6 +522,9 @@ class AgentTaskQueueIntegrationTest {
 
             verify(usageLedgerService).settle(eq(UsageMeter.AGENT_TOKENS),
                     eq("agent_run:uuid-8001"), eq(140L), eq("agent_run"), eq("8001"));
+            verify(runMapper).updateCompletionMetadata(eq(8001L), eq("deepseek"),
+                    eq(Map.of("prompt_tokens", 100, "completion_tokens", 40, "total_tokens", 140)),
+                    eq(3), eq(500L));
         } finally {
             TenantContext.clear();
         }

@@ -93,6 +93,13 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
                            @Param("failedTool") String failedTool,
                            @Param("completedAt") LocalDateTime completedAt);
 
+    /** Persist metadata only after {@link #completeRunGuarded} won the terminal-state race. */
+    int updateCompletionMetadata(@Param("id") Long id,
+                                 @Param("model") String model,
+                                 @Param("tokenUsage") java.util.Map<String, Object> tokenUsage,
+                                 @Param("toolCallsCount") Integer toolCallsCount,
+                                 @Param("durationMs") Long durationMs);
+
     /**
      * 孤儿重派：重置为 pending, 换新 UUID, 计数+1, 清空执行痕迹
      * @return 影响行数

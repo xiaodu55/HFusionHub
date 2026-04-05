@@ -637,22 +637,61 @@ class ToolRegistry:
                 message=f"插件已禁用: {plugin_id}",
             )
 
-        # Extract trace_id and user_id from context if available
+        # Identity is supplied by Java-authenticated request context only.
         trace_id = None
         user_id = None
+        tenant_id = None
+        agent_run_id = None
         if context is not None:
             trace_id = getattr(context, 'trace_id', None)
             user_id = getattr(context, 'user_id', None)
+            tenant_id = getattr(context, 'tenant_id', None)
+            agent_run_id = getattr(context, 'agent_run_id', None)
+
+        if not isinstance(user_id, int) or user_id < 1 or not isinstance(tenant_id, int) or tenant_id < 1:
+            return ToolResult.failure(
+                tool_name=tool_name,
+                error_code=ErrorCode.PERMISSION_DENIED,
+                message="Plugin execution requires a verified user and tenant context",
+            )
+
+        from app.core.plugin.quota import transition_plugin_execution
+
+        execution_id = f"plugin:{agent_run_id or trace_id or 'request'}:{uuid4()}"
+        quota_args = {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "execution_id": execution_id,
+            "plugin_id": plugin_id,
+            "tool_name": tool_name,
+        }
+        if not await transition_plugin_execution("reserve", **quota_args):
+            return ToolResult.failure(
+                tool_name=tool_name,
+                error_code=ErrorCode.PERMISSION_DENIED,
+                message="Plugin execution denied because quota reservation was not accepted",
+            )
 
         started = time.monotonic()
-        result = execute_plugin_tool(
-            plugin_id=plugin_id,
-            tool_name=tool_name,
-            tool_input=safe_input,
-            trace_id=trace_id,
-            user_id=user_id,
-        )
+        try:
+            result = execute_plugin_tool(
+                plugin_id=plugin_id,
+                tool_name=tool_name,
+                tool_input=safe_input,
+                trace_id=trace_id,
+                user_id=user_id,
+            )
+        except Exception:
+            await transition_plugin_execution("release", **quota_args)
+            raise
         elapsed = round((time.monotonic() - started) * 1000, 2)
+
+        terminal_operation = "settle" if result.success else "release"
+        if not await transition_plugin_execution(terminal_operation, **quota_args):
+            logger.error(
+                "Plugin execution completed but quota terminal transition is pending: execution_id=%s",
+                execution_id,
+            )
 
         if result.success:
             return ToolResult.success(

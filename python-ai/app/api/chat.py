@@ -63,6 +63,7 @@ from pydantic import BaseModel, Field
 from app.core.agent import get_agent, get_agent_run_store
 from app.core.agent.agent import AgentResponse
 from app.core.agent.execution_context import AgentExecutionContext
+from app.core.tenant.context import get_tenant_id
 from app.core.policy.masking import build_arguments_summary
 
 router = APIRouter()
@@ -383,6 +384,7 @@ async def chat(request: ChatRequest):
             execution_context = AgentExecutionContext(
                 user_id=request.user_id,
                 knowledge_base_id=request.knowledge_base_id,
+                tenant_id=get_tenant_id(),
                 permissions=frozenset({"knowledge_base:read"}),
                 agent_run_id=request.request_id or str(uuid4()),
                 mode="read_only",
@@ -461,6 +463,7 @@ async def agent_v1_chat(request: AgentV1Request):
         execution_context = AgentExecutionContext(
             user_id=request.user_id,
             knowledge_base_id=request.knowledge_base_id,
+            tenant_id=get_tenant_id(),
             permissions=frozenset({"knowledge_base:read"}),
             agent_run_id=request.request_id or str(uuid4()),
             mode="read_only",
@@ -536,6 +539,7 @@ async def agent_v1_chat_stream(request: AgentV1Request):
         execution_context = AgentExecutionContext(
             user_id=request.user_id,
             knowledge_base_id=request.knowledge_base_id,
+            tenant_id=get_tenant_id(),
             permissions=frozenset({"knowledge_base:read"}),
             agent_run_id=request.request_id or str(uuid4()),
             mode="read_only",
@@ -816,6 +820,7 @@ async def agent_v1_decide(request: AgentResumeRequest):
     execution_context = AgentExecutionContext(
         user_id=request.user_id,
         knowledge_base_id=request.knowledge_base_id,
+        tenant_id=get_tenant_id(),
         permissions=frozenset({"knowledge_base:read", "knowledge_base:write"}),
         agent_run_id=str(uuid4()),
         mode="read_write",

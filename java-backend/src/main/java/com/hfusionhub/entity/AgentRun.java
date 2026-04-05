@@ -15,7 +15,7 @@ import java.util.Map;
  * @author HFusionHub Team
  */
 @Data
-@TableName("agent_run")
+@TableName(value = "agent_run", autoResultMap = true)
 @Schema(description = "Agent运行记录")
 public class AgentRun {
 

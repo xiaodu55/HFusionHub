@@ -7,6 +7,9 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
 /**
  * 用量预占状态机 Mapper
  *
@@ -44,4 +47,10 @@ public interface UsageReservationMapper extends BaseMapper<UsageReservation> {
     int tryRelease(@Param("tenantId") Long tenantId,
                    @Param("meter") String meter,
                    @Param("requestId") String requestId);
+
+    /** Stale plugin reservations are recoverable because plugin runtime has no durable worker lease. */
+    @Select("SELECT * FROM usage_reservation WHERE meter = 'plugin_executions' AND state = 'RESERVED' "
+            + "AND updated_at < #{staleBefore} ORDER BY id ASC LIMIT #{limit}")
+    List<UsageReservation> selectStalePluginReservations(@Param("staleBefore") LocalDateTime staleBefore,
+                                                          @Param("limit") int limit);
 }

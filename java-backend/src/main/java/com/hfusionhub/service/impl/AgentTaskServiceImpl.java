@@ -268,6 +268,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         if (tokenUsage != null) run.setTokenUsage(tokenUsage);
         run.setToolCallsCount(toolCallsCount);
         run.setDurationMs(actualDuration);
+        runMapper.updateCompletionMetadata(runId, model, tokenUsage, toolCallsCount, actualDuration);
 
         log.info("Agent run {} completed: status={} duration={}ms toolCalls={}",
                 runId, status, actualDuration, toolCallsCount);
