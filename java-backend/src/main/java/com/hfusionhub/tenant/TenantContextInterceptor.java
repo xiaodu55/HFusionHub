@@ -114,6 +114,11 @@ public class TenantContextInterceptor implements HandlerInterceptor {
                     log.warn("Invalid X-Tenant-Id header on callback: {}", headerTenant);
                 }
             }
+            // A verified callback may omit X-Tenant-Id. The callback service
+            // derives the authoritative tenant from the document ownership
+            // chain before it performs tenant-scoped work. Do not require a
+            // caller-controlled header merely to enter that bootstrap path.
+            return true;
         }
 
         // 3. Default tenant only in non-strict mode (e.g. tests)

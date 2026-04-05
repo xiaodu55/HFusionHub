@@ -14,12 +14,17 @@ import com.hfusionhub.entity.Document;
 import com.hfusionhub.entity.DocumentChunk;
 import com.hfusionhub.entity.DocumentIndexJob;
 import com.hfusionhub.entity.KnowledgeBase;
+import com.hfusionhub.entity.User;
 import com.hfusionhub.enums.DocumentStatus;
 import com.hfusionhub.mapper.DocumentChunkMapper;
 import com.hfusionhub.mapper.DocumentIndexJobMapper;
 import com.hfusionhub.mapper.DocumentMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
+import com.hfusionhub.mapper.UserMapper;
+import com.hfusionhub.quota.UsageMeter;
+import com.hfusionhub.service.UsageLedgerService;
 import com.hfusionhub.service.VectorizationService;
+import com.hfusionhub.tenant.TenantContext;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -56,8 +61,10 @@ public class VectorizationServiceImpl implements VectorizationService {
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final DocumentIndexJobMapper documentIndexJobMapper;
     private final DocumentChunkMapper documentChunkMapper;
+    private final UserMapper userMapper;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final UsageLedgerService usageLedgerService;
 
     @Value("${python-ai.engine.url:http://localhost:8001}")
     private String pythonEngineUrl;
@@ -76,6 +83,9 @@ public class VectorizationServiceImpl implements VectorizationService {
 
     @Value("${rag.index.max-attempts:3}")
     private int maxAttempts;
+
+    @Value("${hfusionhub.quota.index.bytes-per-chunk-estimate:300}")
+    private long bytesPerChunkEstimate;
 
     @Override
     public void startVectorization(Long documentId, String model) {
@@ -107,6 +117,10 @@ public class VectorizationServiceImpl implements VectorizationService {
 
         // A new request supersedes any callback from an older worker.  The
         // version is sent to Python and checked again when it calls back.
+        List<DocumentIndexJob> supersededJobs = documentIndexJobMapper.selectList(
+                new LambdaQueryWrapper<DocumentIndexJob>()
+                        .eq(DocumentIndexJob::getDocumentId, documentId)
+                        .eq(DocumentIndexJob::getStatus, "PROCESSING"));
         documentIndexJobMapper.update(
                 null,
                 new LambdaUpdateWrapper<DocumentIndexJob>()
@@ -115,6 +129,10 @@ public class VectorizationServiceImpl implements VectorizationService {
                         .set(DocumentIndexJob::getStatus, "SUPERSEDED")
                         .set(DocumentIndexJob::getCompletedAt, LocalDateTime.now())
         );
+        // 退回被取代的索引任务预占
+        for (DocumentIndexJob superseded : supersededJobs) {
+            releaseIndexChunks(document, superseded);
+        }
         DocumentIndexJob job = new DocumentIndexJob();
         job.setDocumentId(documentId);
         job.setKnowledgeBaseId(document.getKnowledgeBaseId());
@@ -125,6 +143,23 @@ public class VectorizationServiceImpl implements VectorizationService {
         job.setChunkCount(0);
         job.setStartedAt(LocalDateTime.now());
         documentIndexJobMapper.insert(job);
+
+        // 用量账本：按文件大小估算分块数上界预占（幂等键为 index_chunks:<indexVersion>）。
+        // 回调按实际 chunk 数结算；失败/超时/被取代时退回。恢复路径在 runAsSystem 中执行，
+        // 无租户上下文，需按文档归属解析租户后预占。
+        try {
+            reserveIndexChunks(document, job);
+        } catch (BusinessException e) {
+            log.warn("索引配额预占失败: documentId={} version={}", documentId, job.getIndexVersion(), e);
+            document.setStatus(DocumentStatus.FAILED.getCode());
+            document.setErrorMessage(e.getMessage());
+            documentMapper.updateById(document);
+            job.setStatus("FAILED");
+            job.setErrorMessage(truncate(e.getMessage(), 1000));
+            job.setCompletedAt(LocalDateTime.now());
+            documentIndexJobMapper.updateById(job);
+            throw e;
+        }
 
         // 3. 更新状态为处理中
         document.setStatus(DocumentStatus.PROCESSING.getCode());
@@ -137,6 +172,7 @@ public class VectorizationServiceImpl implements VectorizationService {
         } catch (Exception e) {
             String failureMessage = describeEngineStartFailure(e);
             log.error("调用Python引擎失败", e);
+            releaseIndexChunks(document, job);
             document.setStatus(DocumentStatus.FAILED.getCode());
             document.setErrorMessage(failureMessage);
             documentMapper.updateById(document);
@@ -203,6 +239,22 @@ public class VectorizationServiceImpl implements VectorizationService {
     @Override
     @Transactional
     public void updateDocumentStatus(Long documentId, DocumentIndexCallbackDTO callback) {
+        // Signed callbacks intentionally do not need a client-supplied tenant
+        // header. Bootstrap the tenant from durable document ownership under a
+        // narrowly scoped system lookup, then run all callback writes inside
+        // that tenant boundary.
+        Long tenantId = resolveDocumentTenantById(documentId);
+        if (tenantId == null) {
+            log.warn("Cannot resolve tenant for document callback: documentId={}", documentId);
+            return;
+        }
+        TenantContext.runAs(tenantId, () -> {
+            updateDocumentStatusInTenant(documentId, callback);
+            return null;
+        });
+    }
+
+    private void updateDocumentStatusInTenant(Long documentId, DocumentIndexCallbackDTO callback) {
         Document document = documentMapper.selectById(documentId);
         if (document == null) {
             log.warn("文档不存在: {}", documentId);
@@ -259,6 +311,13 @@ public class VectorizationServiceImpl implements VectorizationService {
         currentJob.setErrorMessage(docStatus == DocumentStatus.FAILED ? truncate(callback.getMessage(), 1000) : null);
         currentJob.setCompletedAt(LocalDateTime.now());
         documentIndexJobMapper.updateById(currentJob);
+        // 用量账本：完成按实际分块数结算，失败退回预占。
+        // 回调线程无登录上下文，按文档归属租户解析后结算/退回。
+        if (docStatus == DocumentStatus.COMPLETED) {
+            settleIndexChunks(document, currentJob, chunkCount);
+        } else if (docStatus == DocumentStatus.FAILED) {
+            releaseIndexChunks(document, currentJob);
+        }
         log.info("文档状态已更新: {} -> {}", documentId, docStatus);
     }
 
@@ -298,6 +357,8 @@ public class VectorizationServiceImpl implements VectorizationService {
                 document.setStatus(DocumentStatus.FAILED.getCode());
                 document.setErrorMessage("索引任务超过最大重试次数");
                 documentMapper.updateById(document);
+                // 用量账本：重试耗尽，退回预占
+                releaseIndexChunks(document, exhaustedJob);
             }
         }
 
@@ -909,5 +970,91 @@ public class VectorizationServiceImpl implements VectorizationService {
             return null;
         }
         return value.length() <= maxLength ? value : value.substring(0, maxLength);
+    }
+
+    // ================================================================
+    // 用量账本 — INDEX_CHUNKS
+    // ================================================================
+
+    /**
+     * 按文件大小估算分块数上界（向上取整）。文件大小未知时退回到一个
+     * 保守默认值，保证预占量 > 0（usage_ledger 对 amount <= 0 直接忽略）。
+     * 使用 ceil 避免整数除法低估预占（如 301 bytes / 300 = 2 而非 1），
+     * 防止索引越过额度门槛。
+     */
+    private long estimateIndexChunks(Document document) {
+        Long fileSize = document.getFileSize();
+        if (fileSize == null || fileSize <= 0) {
+            return 100L;
+        }
+        long chunkBytes = Math.max(bytesPerChunkEstimate, 1);
+        long estimate = (fileSize + chunkBytes - 1) / chunkBytes;
+        return Math.max(1L, estimate);
+    }
+
+    private String indexReservationKey(String indexVersion) {
+        return "INDEX_CHUNKS:" + indexVersion;
+    }
+
+    /**
+     * 按文档归属租户解析。回调/恢复线程没有登录上下文，
+     * 需经 document → knowledgeBase → user 解析 tenantId。
+     */
+    private Long resolveDocumentTenant(Document document) {
+        KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
+        if (knowledgeBase == null || knowledgeBase.getUserId() == null) {
+            return null;
+        }
+        User owner = userMapper.selectById(knowledgeBase.getUserId());
+        return owner != null ? owner.getTenantId() : null;
+    }
+
+    private Long resolveDocumentTenantById(Long documentId) {
+        return TenantContext.runAsSystem(() -> {
+            Document document = documentMapper.selectById(documentId);
+            return document == null ? null : resolveDocumentTenant(document);
+        });
+    }
+
+    private void reserveIndexChunks(Document document, DocumentIndexJob job) {
+        Long tenantId = resolveDocumentTenant(document);
+        if (tenantId == null) {
+            log.warn("无法解析文档 {} 的租户，跳过索引预占", document.getId());
+            return;
+        }
+        long estimate = estimateIndexChunks(document);
+        TenantContext.runAs(tenantId, () -> {
+            usageLedgerService.reserve(UsageMeter.INDEX_CHUNKS,
+                    indexReservationKey(job.getIndexVersion()), estimate,
+                    "document_index", String.valueOf(document.getId()));
+            return null;
+        });
+    }
+
+    private void settleIndexChunks(Document document, DocumentIndexJob job, int actualChunks) {
+        Long tenantId = resolveDocumentTenant(document);
+        if (tenantId == null) {
+            log.warn("无法解析文档 {} 的租户，跳过索引结算", document.getId());
+            return;
+        }
+        TenantContext.runAs(tenantId, () -> {
+            usageLedgerService.settle(UsageMeter.INDEX_CHUNKS,
+                    indexReservationKey(job.getIndexVersion()), Math.max(actualChunks, 0),
+                    "document_index", String.valueOf(document.getId()));
+            return null;
+        });
+    }
+
+    private void releaseIndexChunks(Document document, DocumentIndexJob job) {
+        Long tenantId = resolveDocumentTenant(document);
+        if (tenantId == null) {
+            log.warn("无法解析文档 {} 的租户，跳过索引退回", document.getId());
+            return;
+        }
+        TenantContext.runAs(tenantId, () -> {
+            usageLedgerService.release(UsageMeter.INDEX_CHUNKS,
+                    indexReservationKey(job.getIndexVersion()));
+            return null;
+        });
     }
 }

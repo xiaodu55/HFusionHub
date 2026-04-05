@@ -12,11 +12,16 @@ import com.hfusionhub.entity.Document;
 import com.hfusionhub.entity.DocumentChunk;
 import com.hfusionhub.entity.DocumentIndexJob;
 import com.hfusionhub.entity.KnowledgeBase;
+import com.hfusionhub.entity.User;
 import com.hfusionhub.enums.DocumentStatus;
 import com.hfusionhub.mapper.DocumentChunkMapper;
 import com.hfusionhub.mapper.DocumentIndexJobMapper;
 import com.hfusionhub.mapper.DocumentMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
+import com.hfusionhub.mapper.UserMapper;
+import com.hfusionhub.quota.UsageMeter;
+import com.hfusionhub.service.UsageLedgerService;
+import com.hfusionhub.tenant.TenantContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,6 +44,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -59,6 +66,12 @@ class VectorizationServiceImplTest {
     private DocumentChunkMapper documentChunkMapper;
 
     @Mock
+    private UserMapper userMapper;
+
+    @Mock
+    private UsageLedgerService usageLedgerService;
+
+    @Mock
     private RestTemplate restTemplate;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -70,8 +83,23 @@ class VectorizationServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        // 纯 Mockito 环境无 Spring 容器，需手动初始化 LambdaWrapper 的实体缓存
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(
+                        new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""),
+                com.hfusionhub.entity.DocumentIndexJob.class);
         ReflectionTestUtils.setField(vectorizationService, "objectMapper", objectMapper);
         ReflectionTestUtils.setField(vectorizationService, "internalApiToken", "test-token");
+        ReflectionTestUtils.setField(vectorizationService, "callbackSecret", "test-secret");
+        ReflectionTestUtils.setField(vectorizationService, "pythonEngineUrl", "http://localhost:9000");
+        ReflectionTestUtils.setField(vectorizationService, "bytesPerChunkEstimate", 300L);
+        // Signed callbacks without X-Tenant-Id derive the tenant through
+        // document -> knowledge base -> owner before processing the payload.
+        // Keep that durable ownership available to callback-focused tests.
+        org.mockito.Mockito.lenient().when(knowledgeBaseMapper.selectById(20L))
+                .thenReturn(ownedKnowledgeBase());
+        org.mockito.Mockito.lenient().when(userMapper.selectById(1L))
+                .thenReturn(ownerUser(7L));
         jwtUtilsMock = org.mockito.Mockito.mockStatic(JwtUtils.class);
         jwtUtilsMock.when(JwtUtils::isLogin).thenReturn(true);
         jwtUtilsMock.when(JwtUtils::getCurrentUserId).thenReturn(1L);
@@ -80,6 +108,7 @@ class VectorizationServiceImplTest {
     @AfterEach
     void tearDown() {
         jwtUtilsMock.close();
+        TenantContext.clear();
     }
 
     @Test
@@ -370,20 +399,120 @@ class VectorizationServiceImplTest {
     }
 
     @Test
-    void getChunkDetailMapsNullMetadataGracefully() {
-        Document document = ownedDocument(DocumentStatus.COMPLETED);
-        DocumentChunk persistedChunk = persistedChunk("chunk-c3", 10L, 2, "text", "minimal chunk");
-        persistedChunk.setOutlinePath(null);
-        persistedChunk.setMetadata(null);
-        when(documentChunkMapper.selectByChunkId("chunk-c3")).thenReturn(persistedChunk);
+    void headerlessCallbackResolvesDocumentTenantAndSettlesIndexChunkUsage() {
+        Document document = ownedDocument(DocumentStatus.PROCESSING);
+        DocumentIndexJob job = job("version-1", "PROCESSING", 0);
+        DocumentIndexCallbackDTO callback = callback("COMPLETED", "version-1", 2);
+        callback.setChunks(List.of(chunk("chunk-1", 0), chunk("chunk-2", 1)));
         when(documentMapper.selectById(10L)).thenReturn(document);
+        when(documentIndexJobMapper.selectLatestByDocumentId(10L)).thenReturn(job);
         when(knowledgeBaseMapper.selectById(20L)).thenReturn(ownedKnowledgeBase());
+        when(userMapper.selectById(1L)).thenReturn(ownerUser(7L));
 
-        ChunkDTO result = vectorizationService.getChunkDetail("chunk-c3");
+        vectorizationService.updateDocumentStatus(10L, callback);
 
-        assertEquals("chunk-c3", result.getChunkId());
-        assertEquals(List.of(), result.getOutlinePath());
-        assertEquals(Map.of(), result.getMetadata());
+        verify(usageLedgerService).settle(
+                eq(UsageMeter.INDEX_CHUNKS), eq("INDEX_CHUNKS:version-1"),
+                eq(2L), eq("document_index"), eq("10"));
+        assertNull(TenantContext.getTenantId());
+    }
+
+    @Test
+    void failedCallbackReleasesIndexChunkUsage() {
+        Document document = ownedDocument(DocumentStatus.PROCESSING);
+        DocumentIndexJob job = job("version-1", "PROCESSING", 0);
+        DocumentIndexCallbackDTO callback = callback("FAILED", "version-1", 0);
+        callback.setMessage("embedding failure");
+        when(documentMapper.selectById(10L)).thenReturn(document);
+        when(documentIndexJobMapper.selectLatestByDocumentId(10L)).thenReturn(job);
+        when(knowledgeBaseMapper.selectById(20L)).thenReturn(ownedKnowledgeBase());
+        when(userMapper.selectById(1L)).thenReturn(ownerUser(7L));
+
+        vectorizationService.updateDocumentStatus(10L, callback);
+
+        verify(usageLedgerService).release(eq(UsageMeter.INDEX_CHUNKS), eq("INDEX_CHUNKS:version-1"));
+        verify(usageLedgerService, never()).settle(
+                any(), any(), anyLong(), any(), any());
+    }
+
+    @Test
+    void startVectorizationReservesIndexChunksOnEstimatedUpperBound() throws Exception {
+        java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("vec-meta", ".md");
+        try {
+            Document document = ownedDocument(DocumentStatus.PENDING);
+            document.setFilePath(tempFile.toString());
+            document.setFileSize(30000L);
+            KnowledgeBase kb = ownedKnowledgeBase();
+            when(documentMapper.selectById(10L)).thenReturn(document);
+            when(knowledgeBaseMapper.selectById(20L)).thenReturn(kb);
+            when(userMapper.selectById(1L)).thenReturn(ownerUser(7L));
+            when(documentIndexJobMapper.countByDocumentId(10L)).thenReturn(0);
+            org.mockito.Mockito.doReturn(
+                    new org.springframework.http.ResponseEntity<>("ok", org.springframework.http.HttpStatus.OK))
+                    .when(restTemplate).exchange(org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            eq(String.class));
+            ArgumentCaptor<com.hfusionhub.entity.DocumentIndexJob> jobCaptor =
+                    ArgumentCaptor.forClass(com.hfusionhub.entity.DocumentIndexJob.class);
+
+            vectorizationService.startVectorization(10L, "ollama");
+
+            verify(documentIndexJobMapper).insert(jobCaptor.capture());
+            String version = jobCaptor.getValue().getIndexVersion();
+            // 30000 bytes / 300 bytes-per-chunk = 100 chunks reserved
+            ArgumentCaptor<Long> amountCaptor = ArgumentCaptor.forClass(Long.class);
+            verify(usageLedgerService).reserve(
+                    eq(UsageMeter.INDEX_CHUNKS), eq("INDEX_CHUNKS:" + version),
+                    amountCaptor.capture(), eq("document_index"), eq("10"));
+            assertEquals(100L, amountCaptor.getValue());
+        } finally {
+            java.nio.file.Files.deleteIfExists(tempFile);
+        }
+    }
+
+    @Test
+    void startVectorizationReservesCeilingChunksWhenFileSizeNotDivisible() throws Exception {
+        // P0: 预占必须是上界 — 301 bytes / 300 bytes-per-chunk = ceil(301/300) = 2，
+        // 整数除法 1 会低估预占，令索引越过额度门槛。
+        java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("vec-ceil", ".md");
+        try {
+            Document document = ownedDocument(DocumentStatus.PENDING);
+            document.setFilePath(tempFile.toString());
+            document.setFileSize(301L);
+            KnowledgeBase kb = ownedKnowledgeBase();
+            when(documentMapper.selectById(10L)).thenReturn(document);
+            when(knowledgeBaseMapper.selectById(20L)).thenReturn(kb);
+            when(userMapper.selectById(1L)).thenReturn(ownerUser(7L));
+            when(documentIndexJobMapper.countByDocumentId(10L)).thenReturn(0);
+            org.mockito.Mockito.doReturn(
+                    new org.springframework.http.ResponseEntity<>("ok", org.springframework.http.HttpStatus.OK))
+                    .when(restTemplate).exchange(org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            eq(String.class));
+            ArgumentCaptor<com.hfusionhub.entity.DocumentIndexJob> jobCaptor =
+                    ArgumentCaptor.forClass(com.hfusionhub.entity.DocumentIndexJob.class);
+
+            vectorizationService.startVectorization(10L, "ollama");
+
+            verify(documentIndexJobMapper).insert(jobCaptor.capture());
+            String version = jobCaptor.getValue().getIndexVersion();
+            ArgumentCaptor<Long> amountCaptor = ArgumentCaptor.forClass(Long.class);
+            verify(usageLedgerService).reserve(
+                    eq(UsageMeter.INDEX_CHUNKS), eq("INDEX_CHUNKS:" + version),
+                    amountCaptor.capture(), eq("document_index"), eq("10"));
+            assertEquals(2L, amountCaptor.getValue());
+        } finally {
+            java.nio.file.Files.deleteIfExists(tempFile);
+        }
+    }
+
+    private User ownerUser(Long tenantId) {
+        User user = new User();
+        user.setId(1L);
+        user.setTenantId(tenantId);
+        return user;
     }
 
     private Document ownedDocument(DocumentStatus status) {

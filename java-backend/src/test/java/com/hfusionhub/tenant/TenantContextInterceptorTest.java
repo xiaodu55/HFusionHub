@@ -107,6 +107,18 @@ class TenantContextInterceptorTest {
     }
 
     @Test
+    void verifiedCallbackWithoutTenantHeaderIsAllowedForServiceSideResolution() {
+        try (MockedStatic<JwtUtils> jwt = mockStatic(JwtUtils.class)) {
+            jwt.when(JwtUtils::isLogin).thenReturn(false);
+            request.setServletPath("/vectorize/42/callback");
+            request.setAttribute(TenantContextInterceptor.CALLBACK_VERIFIED_ATTR, Boolean.TRUE);
+
+            assertTrue(interceptor.preHandle(request, response, null));
+            assertNull(TenantContext.getTenantId());
+        }
+    }
+
+    @Test
     void callbackPathOutsideVectorizeRejected() {
         try (MockedStatic<JwtUtils> jwt = mockStatic(JwtUtils.class)) {
             jwt.when(JwtUtils::isLogin).thenReturn(false);

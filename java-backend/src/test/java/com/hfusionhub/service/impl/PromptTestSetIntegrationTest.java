@@ -27,9 +27,13 @@ import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.PromptTemplateMapper;
 import com.hfusionhub.mapper.PromptTestSetRunMapper;
 import com.hfusionhub.mapper.UserMapper;
+import com.hfusionhub.tenant.TenantContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -68,6 +72,7 @@ import static org.mockito.Mockito.when;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @ActiveProfiles("test")
 @Transactional
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class PromptTestSetIntegrationTest {
 
     @MockBean
@@ -100,12 +105,14 @@ class PromptTestSetIntegrationTest {
     void setUp() {
         SaManager.setSaTokenDao(new SaTokenDaoDefaultImpl());
         SaManager.setSaTokenContext(new MockSaTokenContext());
+        TenantContext.setTenantId(1L);
 
         User user = new User();
         user.setUsername("pts-int-" + System.nanoTime());
         user.setPassword("test");
         user.setNickname("PTS");
         user.setStatus(0);
+        user.setTenantId(1L);
         userMapper.insert(user);
         userId = user.getId();
 
@@ -126,6 +133,7 @@ class PromptTestSetIntegrationTest {
     @AfterEach
     void tearDown() {
         StpUtil.logout();
+        TenantContext.clear();
     }
 
     private PromptTestSetDetailDTO createSetWithCase(Map<String, Object> variables) {
@@ -498,6 +506,7 @@ class PromptTestSetIntegrationTest {
     // ── Async lifecycle (queue / progress / cancel / retry) ───────────
 
     @Test
+    @Order(1)
     void queuedRunThenExecutePersistsStatusAndProgress() {
         Map<String, Object> vars = new HashMap<>();
         vars.put("角色", "客服");
@@ -517,7 +526,10 @@ class PromptTestSetIntegrationTest {
         assertEquals(0, queued.getProgressCount());
 
         // The queued run is visible to the worker queue
-        assertEquals(1, service.listQueuedRuns(10).stream()
+        // Other async-lifecycle cases can leave committed pending rows in the
+        // shared H2 context; use a window large enough to assert this run is
+        // discoverable rather than assuming it is among the first ten.
+        assertEquals(1, service.listQueuedRuns(100).stream()
                 .filter(r -> r.getId().equals(queued.getId())).count());
         assertTrue(service.claimRun(queued.getId()));
         // Guarded claim: second attempt fails because it is already running

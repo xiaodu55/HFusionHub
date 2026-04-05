@@ -193,6 +193,27 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
                 return;
             }
 
+            // 用量账本：Worker 路径未走 startRun，需在此预占 AGENT_TOKENS
+            // （幂等；超限抛 QUOTA_EXCEEDED，随后回滚本次执行）。
+            try {
+                agentTaskService.reserveAgentRunUsage(runId);
+            } catch (com.hfusionhub.common.exception.BusinessException quotaError) {
+                // A run without an authoritative tenant cannot be charged.
+                // Fail closed before constructing or subscribing to an AI request.
+                log.error("Rejecting run {} before AI execution: {}", runId, quotaError.getMessage());
+                agentTaskService.failRun(runId, "tenant_unresolvable", quotaError.getMessage(), null);
+                handleTerminalFailure(task, run, "tenant_unresolvable", quotaError.getMessage());
+                return;
+            }
+            // reserveAgentRunUsage backfills legacy run.tenantId from the task
+            // owner. Re-read it before entering the AI path so no work is
+            // performed under a null or stale worker context.
+            run = runMapper.selectById(runId);
+            if (run == null || run.getTenantId() == null) {
+                throw new IllegalStateException("Reserved agent run has no tenant: " + runId);
+            }
+            TenantContext.setTenantId(run.getTenantId());
+
             // 3. Build chat history and call AI
             List<Map<String, String>> history = List.of();
             if (task.getConversationId() != null) {
@@ -436,6 +457,8 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
             log.info("Run {} timeout already converged by another path", runId);
             return;
         }
+        // 用量账本：直接 completeRunGuarded 绕过 completeRun，需显式退回
+        agentTaskService.finalizeAgentRunUsage(runId, AgentConstants.STATUS_TIMED_OUT, null);
 
         AgentTask currentTask = taskMapper.selectById(run.getTaskId());
         if (currentTask == null) currentTask = task;
@@ -541,6 +564,8 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
         run.setLeaseExpiresAt(null);
         run.setHeartbeatAt(null);
         runMapper.updateById(run);
+        // 用量账本：supersede 直接写终态，退回预占
+        agentTaskService.finalizeAgentRunUsage(run.getId(), AgentConstants.STATUS_FAILED, null);
 
         // Audit recovery event
         AgentRecoveryEvent auditEvent = new AgentRecoveryEvent();
@@ -574,6 +599,8 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
                             AgentConstants.ERR_WATCHDOG_TIMEOUT,
                             "看门狗超时：租约过期且执行超过 " + timeoutSeconds + " 秒",
                             null, now);
+                    agentTaskService.finalizeAgentRunUsage(run.getId(),
+                            AgentConstants.STATUS_TIMED_OUT, null);
                     AgentTask task = taskMapper.selectById(run.getTaskId());
                     if (task != null) {
                         handleTerminalFailure(task, run, AgentConstants.ERR_WATCHDOG_TIMEOUT,
@@ -646,6 +673,8 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
                     AgentConstants.ERR_WATCHDOG_TIMEOUT,
                     "孤儿重派次数耗尽: dispatchCount=" + run.getDispatchCount(),
                     null, LocalDateTime.now());
+            agentTaskService.finalizeAgentRunUsage(run.getId(),
+                    AgentConstants.STATUS_TIMED_OUT, null);
             AgentTask task = taskMapper.selectById(run.getTaskId());
             if (task != null) {
                 handleTerminalFailure(task, run, AgentConstants.ERR_WATCHDOG_TIMEOUT,
@@ -662,6 +691,9 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
         } catch (Exception e) {
             log.debug("Best-effort cancel of orphaned Python task {} failed: {}", run.getRunUuid(), e.getMessage());
         }
+
+        // 用量账本：孤儿重派会生成新 uuid，旧 uuid 的预占需先退回
+        agentTaskService.finalizeAgentRunUsage(run.getId(), AgentConstants.STATUS_FAILED, null);
 
         // Delete steps for idempotent re-execution
         stepMapper.deleteByRunId(run.getId());

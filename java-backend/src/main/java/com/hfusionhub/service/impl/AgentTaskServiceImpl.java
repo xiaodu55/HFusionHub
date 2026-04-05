@@ -21,7 +21,11 @@ import com.hfusionhub.mapper.AgentTaskMapper;
 import com.hfusionhub.mapper.MessageMapper;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.entity.Message;
+import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.service.AgentTaskService;
+import com.hfusionhub.service.UsageLedgerService;
+import com.hfusionhub.tenant.TenantContext;
+import com.hfusionhub.config.QuotaProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
@@ -55,6 +59,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     private final com.hfusionhub.service.AgentTaskQueueService queueService;
     private final com.hfusionhub.service.AgentStatusEventService statusEventService;
     private final com.hfusionhub.common.utils.RedisUtils redisUtils;
+    private final UsageLedgerService usageLedgerService;
+    private final QuotaProperties quotaProperties;
 
     @SuppressWarnings("java:S107")
     public AgentTaskServiceImpl(
@@ -67,7 +73,9 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             AiClient aiClient,
             @Lazy com.hfusionhub.service.AgentTaskQueueService queueService,
             com.hfusionhub.service.AgentStatusEventService statusEventService,
-            com.hfusionhub.common.utils.RedisUtils redisUtils) {
+            com.hfusionhub.common.utils.RedisUtils redisUtils,
+            UsageLedgerService usageLedgerService,
+            QuotaProperties quotaProperties) {
         this.taskMapper = taskMapper;
         this.runMapper = runMapper;
         this.stepMapper = stepMapper;
@@ -78,6 +86,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         this.queueService = queueService;
         this.statusEventService = statusEventService;
         this.redisUtils = redisUtils;
+        this.usageLedgerService = usageLedgerService;
+        this.quotaProperties = quotaProperties;
     }
     @org.springframework.beans.factory.annotation.Value("${agent.run.lease-seconds:120}")
     private int leaseSeconds;
@@ -162,6 +172,10 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         task.setCurrentRunId(run.getId());
         taskMapper.updateById(task);
 
+        // 用量账本：预占 AGENT_TOKENS（幂等键 agent_run:<runUuid>）。
+        // 流式路径在请求线程调用，当前 TenantContext 已就绪。
+        reserveAgentRunUsage(run.getId());
+
         log.info("Started agent run id={} uuid={} attempt={} for task={} leaseHolder={}",
                 run.getId(), runUuid, attemptNumber, taskId, leaseHolder);
         return run;
@@ -234,6 +248,9 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             return;
         }
 
+        // 用量账本：终态结算/退回（succeeded 结算，其余退回）。幂等。
+        finalizeAgentRunUsage(runId, status, tokenUsage);
+
         // 同步更新 task 状态 — 守护：仅当 task.currentRunId == run.id
         AgentTask task = taskMapper.selectById(run.getTaskId());
         if (task != null) {
@@ -268,6 +285,109 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     public void cancelRun(Long runId) {
         completeRun(runId, AgentConstants.STATUS_CANCELLED, null, null, 0, 0,
                 AgentConstants.ERR_CANCELLED, "用户取消", null);
+    }
+
+    @Override
+    @Transactional
+    public void reserveAgentRunUsage(Long runId) {
+        AgentRun run = runMapper.selectById(runId);
+        if (run == null || run.getRunUuid() == null) {
+            throw new BusinessException("Agent run does not exist or has no run UUID: " + runId);
+        }
+        AgentTask task = taskMapper.selectById(run.getTaskId());
+        Long tenantId = resolveRunTenant(run, task);
+        if (tenantId == null) {
+            throw new BusinessException("Cannot execute agent run without a resolvable tenant: " + runId);
+        }
+        // Backfill legacy runs so subsequent worker code and finalization use
+        // the same durable tenant identity, rather than a thread-local value.
+        if (run.getTenantId() == null) {
+            run.setTenantId(tenantId);
+            runMapper.updateById(run);
+        }
+        String query = task != null ? task.getQuery() : null;
+        int maxToolSteps = run.getMaxToolSteps() != null ? run.getMaxToolSteps() : 5;
+        long estimate = estimateAgentTokens(query, maxToolSteps);
+        final Long tenant = tenantId;
+        final String usageKey = "agent_run:" + run.getRunUuid();
+        TenantContext.runAs(tenant, () -> {
+            usageLedgerService.reserve(UsageMeter.AGENT_TOKENS, usageKey, estimate,
+                    "agent_run", String.valueOf(runId));
+            return null;
+        });
+    }
+
+    @Override
+    @Transactional
+    public void finalizeAgentRunUsage(Long runId, String status,
+                                      Map<String, Object> tokenUsage) {
+        AgentRun run = runMapper.selectById(runId);
+        if (run == null || run.getRunUuid() == null) {
+            return;
+        }
+        Long tenantId = resolveRunTenant(run, null);
+        if (tenantId == null) {
+            log.warn("Cannot finalize AGENT_TOKENS for run {} — tenant unresolvable", runId);
+            return;
+        }
+        final Long tenant = tenantId;
+        final String usageKey = "agent_run:" + run.getRunUuid();
+        TenantContext.runAs(tenant, () -> {
+            if (AgentConstants.STATUS_SUCCEEDED.equals(status)) {
+                long actual = extractTotalTokens(tokenUsage);
+                usageLedgerService.settle(UsageMeter.AGENT_TOKENS, usageKey, actual,
+                        "agent_run", String.valueOf(runId));
+            } else {
+                usageLedgerService.release(UsageMeter.AGENT_TOKENS, usageKey);
+            }
+            return null;
+        });
+    }
+
+    /**
+     * Resolves the durable owner for an Agent run.  AgentTask has no tenant
+     * column, so a legacy run without tenant_id must be attributed through its
+     * task owner.  Do not use a request/worker thread-local as an authority.
+     */
+    private Long resolveRunTenant(AgentRun run, AgentTask task) {
+        if (run.getTenantId() != null) {
+            return run.getTenantId();
+        }
+        AgentTask resolvedTask = task != null ? task : taskMapper.selectById(run.getTaskId());
+        if (resolvedTask == null || resolvedTask.getUserId() == null) {
+            return null;
+        }
+        com.hfusionhub.entity.User owner = userMapper.selectById(resolvedTask.getUserId());
+        return owner != null ? owner.getTenantId() : null;
+    }
+
+    /**
+     * Agent 用量预占估算：输入按内容长度粗估（至少 64），
+     * 上界追加 输出上限 × (maxToolSteps + 1)（多步工具调用各计一次输出）。
+     */
+    private long estimateAgentTokens(String query, int maxToolSteps) {
+        long inputEstimate = Math.max(64,
+                (query == null ? 0 : query.length()) / 4);
+        int steps = Math.max(1, maxToolSteps);
+        return inputEstimate + quotaProperties.getChatMaxOutputTokens() * (steps + 1L);
+    }
+
+    /**
+     * 从 tokenUsage 字典提取实际 total_tokens（缺省 0）。
+     */
+    private long extractTotalTokens(Map<String, Object> tokenUsage) {
+        if (tokenUsage == null) {
+            return 0L;
+        }
+        Object total = tokenUsage.get("total_tokens");
+        if (total instanceof Number n) {
+            return Math.max(0L, n.longValue());
+        }
+        Object prompt = tokenUsage.get("prompt_tokens");
+        Object completion = tokenUsage.get("completion_tokens");
+        long p = prompt instanceof Number pn ? Math.max(0L, pn.longValue()) : 0L;
+        long c = completion instanceof Number cn ? Math.max(0L, cn.longValue()) : 0L;
+        return p + c;
     }
 
     // ================================================================
@@ -558,6 +678,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                 run.setErrorDetail("审批被拒绝: " + (reason != null ? reason : "无理由"));
                 run.setCompletedAt(java.time.LocalDateTime.now());
                 runMapper.updateById(run);
+                // 用量账本：审批拒绝直接写终态，绕过 completeRun，退回预占
+                finalizeAgentRunUsage(run.getId(), AgentConstants.STATUS_FAILED, null);
             }
             // V13: record event
             statusEventService.record(approval.getTaskId(), approval.getRunId(),
@@ -630,6 +752,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                             checkRun.setErrorDetail("审批后恢复执行失败: " + errorMsg);
                             checkRun.setCompletedAt(LocalDateTime.now());
                             runMapper.updateById(checkRun);
+                            finalizeAgentRunUsage(checkRun.getId(), AgentConstants.STATUS_FAILED, null);
                             AgentTask checkTask = taskMapper.selectById(
                                     checkRun.getTaskId());
                             if (checkTask != null && !AgentConstants.TERMINAL_STATUSES.contains(
@@ -647,6 +770,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                         run.setErrorDetail("审批后恢复执行失败: " + errorMsg);
                         run.setCompletedAt(LocalDateTime.now());
                         runMapper.updateById(run);
+                        finalizeAgentRunUsage(run.getId(), AgentConstants.STATUS_FAILED, null);
                         if (task != null && !AgentConstants.TERMINAL_STATUSES.contains(task.getStatus())) {
                             task.setStatus(AgentConstants.STATUS_FAILED);
                             taskMapper.updateById(task);
@@ -781,6 +905,9 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         freshRun.setCompletedAt(LocalDateTime.now());
         runMapper.updateById(freshRun);
 
+        // 用量账本：审批恢复直接写终态，绕过 completeRun，需显式结算/退回
+        finalizeAgentRunUsage(freshRun.getId(), mappedStatus, tokenUsage);
+
         AgentTask freshTask = taskMapper.selectById(freshRun.getTaskId());
         if (freshTask != null) {
             freshTask.setStatus(mappedStatus);
@@ -901,6 +1028,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                 run.setErrorDetail("审批超时（5分钟未响应）");
                 run.setCompletedAt(java.time.LocalDateTime.now());
                 runMapper.updateById(run);
+                finalizeAgentRunUsage(run.getId(), AgentConstants.STATUS_FAILED, null);
             }
             // V13: record event
             statusEventService.record(a.getTaskId(), a.getRunId(), "RUN_FAILED",

@@ -5,7 +5,9 @@ import com.hfusionhub.common.constant.AgentConstants;
 import com.hfusionhub.entity.AgentRun;
 import com.hfusionhub.entity.AgentTask;
 import com.hfusionhub.mapper.*;
+import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.service.*;
+import com.hfusionhub.tenant.TenantContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -41,6 +43,8 @@ class AgentTaskQueueIntegrationTest {
     private MessageMapper messageMapper;
     private TaskEventSseManager sseManager;
     private com.hfusionhub.common.utils.RedisUtils redisUtils;
+    private com.hfusionhub.service.UsageLedgerService usageLedgerService;
+    private com.hfusionhub.config.QuotaProperties quotaProperties;
 
     @BeforeEach
     void setUp() {
@@ -63,10 +67,14 @@ class AgentTaskQueueIntegrationTest {
         // Real AgentTaskServiceImpl
         AgentApprovalMapper approvalMapper = mock(AgentApprovalMapper.class);
         AgentTaskQueueService queueServiceRef = mock(AgentTaskQueueService.class);
+        usageLedgerService = mock(com.hfusionhub.service.UsageLedgerService.class);
+        quotaProperties = mock(com.hfusionhub.config.QuotaProperties.class);
+        when(quotaProperties.getChatMaxOutputTokens()).thenReturn(8192L);
         agentTaskService = new AgentTaskServiceImpl(
                 taskMapper, runMapper, stepMapper, approvalMapper, messageMapper,
                 mock(com.hfusionhub.mapper.UserMapper.class),
-                aiClient, queueServiceRef, statusEventService, redisUtils);
+                aiClient, queueServiceRef, statusEventService, redisUtils,
+                usageLedgerService, quotaProperties);
         ReflectionTestUtils.setField(agentTaskService, "leaseSeconds", 120);
         ReflectionTestUtils.setField(agentTaskService, "cancelFlagTtlSeconds", 3600);
 
@@ -213,6 +221,36 @@ class AgentTaskQueueIntegrationTest {
         assertEquals("Hello World", saved.getContent());
         assertEquals(50L, saved.getConversationId());
         assertEquals("req-500:assistant", saved.getRequestId());
+    }
+
+    @Test
+    void workerRejectsUnresolvableTenantBeforeCallingAi() {
+        AgentTask task = new AgentTask();
+        task.setId(560L);
+        task.setStatus(AgentConstants.STATUS_PENDING);
+        task.setCurrentRunId(56L);
+        task.setQuery("must not execute without a tenant");
+        // userId intentionally absent: run -> task -> owner cannot resolve.
+
+        AgentRun run = buildClaimedRun(56L, 560L);
+        run.setTenantId(null);
+
+        when(runMapper.selectQueuedRuns(any(), eq(5))).thenReturn(List.of(run));
+        when(runMapper.claimRun(eq(56L), eq("test-worker"), any(), any(), any())).thenReturn(1);
+        when(runMapper.selectById(56L)).thenReturn(run);
+        when(runMapper.releaseLease(eq(56L), anyString())).thenReturn(1);
+        when(taskMapper.selectById(560L)).thenReturn(task);
+        when(redisUtils.hasKey(anyString())).thenReturn(false);
+        when(runMapper.completeRunGuarded(eq(56L), eq(AgentConstants.STATUS_FAILED),
+                eq("tenant_unresolvable"), anyString(), isNull(), any())).thenReturn(1);
+        when(taskMapper.updateById(any(AgentTask.class))).thenReturn(1);
+
+        assertEquals(1, queueService.pollAndDispatch());
+
+        verify(aiClient, never()).streamChat(anyString(), any(), any(), any(), anyString());
+        verify(aiClient, never()).agentV1ChatStream(anyString(), any(), any(), any(), anyString(), any(), any());
+        verify(runMapper).completeRunGuarded(eq(56L), eq(AgentConstants.STATUS_FAILED),
+                eq("tenant_unresolvable"), anyString(), isNull(), any());
     }
 
     @Test
@@ -412,6 +450,138 @@ class AgentTaskQueueIntegrationTest {
         ));
     }
 
+    // ================================================================
+    // AGENT_TOKENS 用量账本
+    // ================================================================
+
+    @Test
+    void startRunReservesAgentTokensKeyedByRunUuid() {
+        TenantContext.setTenantId(1L);
+        try {
+            AgentTask task = new AgentTask();
+            task.setId(700L);
+            task.setStatus(AgentConstants.STATUS_PENDING);
+            task.setRequestId("req-700");
+            task.setUserId(1L);
+            task.setQuery("如何部署HFusionHub？");
+            task.setConversationId(10L);
+
+            AgentRun inserted = new AgentRun();
+            inserted.setId(7001L);
+            inserted.setTenantId(1L);
+
+            when(taskMapper.selectById(700L)).thenReturn(task);
+            when(runMapper.selectByTaskId(700L)).thenReturn(List.of());
+            when(runMapper.insert(any(AgentRun.class))).thenAnswer(inv -> {
+                AgentRun r = inv.getArgument(0);
+                r.setId(7001L);
+                return 1;
+            });
+            // startRun 内部 reserve 会再查一次 run（拿 runUuid / tenantId）
+            when(runMapper.selectById(7001L)).thenAnswer(inv -> {
+                AgentRun copy = new AgentRun();
+                copy.setId(7001L);
+                copy.setTaskId(700L);
+                copy.setTenantId(1L);
+                copy.setRunUuid("uuid-7001");
+                return copy;
+            });
+            when(taskMapper.updateById(any(AgentTask.class))).thenReturn(1);
+
+            agentTaskService.startRun(700L, "uuid-7001", "deepseek", "detailed", 5);
+
+            // reserve 量 = 输入估算(64) + 8192 × (5+1) = 49216，幂等键 agent_run:uuid-7001
+            verify(usageLedgerService).reserve(eq(UsageMeter.AGENT_TOKENS),
+                    eq("agent_run:uuid-7001"), eq(49216L),
+                    eq("agent_run"), eq("7001"));
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    @Test
+    void completeRunSucceedsSettlesWithActualTokens() {
+        TenantContext.setTenantId(1L);
+        try {
+            AgentRun run = new AgentRun();
+            run.setId(8001L);
+            run.setTaskId(800L);
+            run.setTenantId(1L);
+            run.setRunUuid("uuid-8001");
+            run.setStatus(AgentConstants.STATUS_RUNNING);
+            run.setStartedAt(LocalDateTime.now());
+
+            when(runMapper.selectById(8001L)).thenReturn(run);
+            when(runMapper.completeRunGuarded(eq(8001L), anyString(), any(),
+                    any(), any(), any())).thenReturn(1);
+            when(taskMapper.selectById(800L)).thenReturn(null);
+
+            agentTaskService.completeRun(8001L, AgentConstants.STATUS_SUCCEEDED, "deepseek",
+                    Map.of("prompt_tokens", 100, "completion_tokens", 40, "total_tokens", 140),
+                    3, 500, null, null, null);
+
+            verify(usageLedgerService).settle(eq(UsageMeter.AGENT_TOKENS),
+                    eq("agent_run:uuid-8001"), eq(140L), eq("agent_run"), eq("8001"));
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    @Test
+    void completeRunFailureReleasesReservation() {
+        TenantContext.setTenantId(1L);
+        try {
+            AgentRun run = new AgentRun();
+            run.setId(8002L);
+            run.setTaskId(801L);
+            run.setTenantId(1L);
+            run.setRunUuid("uuid-8002");
+            run.setStatus(AgentConstants.STATUS_RUNNING);
+            run.setStartedAt(LocalDateTime.now());
+
+            when(runMapper.selectById(8002L)).thenReturn(run);
+            when(runMapper.completeRunGuarded(eq(8002L), anyString(), any(),
+                    any(), any(), any())).thenReturn(1);
+            when(taskMapper.selectById(801L)).thenReturn(null);
+
+            agentTaskService.completeRun(8002L, AgentConstants.STATUS_FAILED, "deepseek",
+                    null, 0, 500, "internal_error", "boom", null);
+
+            verify(usageLedgerService).release(eq(UsageMeter.AGENT_TOKENS),
+                    eq("agent_run:uuid-8002"));
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    @Test
+    void recoveryWatchdogTimeoutReleasesReservation() {
+        TenantContext.setTenantId(1L);
+        try {
+            AgentRun run = new AgentRun();
+            run.setId(10001L);
+            run.setTaskId(1000L);
+            run.setTenantId(1L);
+            run.setRunUuid("uuid-10001");
+            run.setStatus(AgentConstants.STATUS_RUNNING);
+            run.setStartedAt(LocalDateTime.now().minusSeconds(200));
+            run.setLeaseExpiresAt(LocalDateTime.now().minusSeconds(10));
+
+            when(runMapper.selectLeaseExpiredRuns(any(), eq(10))).thenReturn(List.of(run));
+            when(runMapper.completeRunGuarded(eq(10001L), eq(AgentConstants.STATUS_TIMED_OUT),
+                    any(), any(), any(), any())).thenReturn(1);
+            when(runMapper.selectById(10001L)).thenReturn(run);
+            when(taskMapper.selectById(1000L)).thenReturn(null);
+
+            queueService.recoverAll();
+
+            verify(usageLedgerService).release(eq(UsageMeter.AGENT_TOKENS),
+                    eq("agent_run:uuid-10001"));
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
     // ── helpers ──
 
     /**
@@ -422,6 +592,7 @@ class AgentTaskQueueIntegrationTest {
         AgentRun run = new AgentRun();
         run.setId(runId);
         run.setTaskId(taskId);
+        run.setTenantId(1L);
         run.setStatus(AgentConstants.STATUS_RUNNING); // claimed → running
         run.setRunUuid(UUID.randomUUID().toString());
         run.setScheduledAt(LocalDateTime.now());

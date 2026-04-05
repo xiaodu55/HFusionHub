@@ -95,6 +95,30 @@ public interface AgentTaskService {
      */
     void cancelRun(Long runId);
 
+    /**
+     * 预占 AGENT_TOKENS 用量（幂等，以 run_uuid 为键）。
+     *
+     * <p>在运行真正执行前调用：流式路径在 startRun，队列路径在 Worker 认领后。
+     * 预占上界 = 输入估算 + 服务端最大输出 × (maxToolSteps + 1)。失败抛
+     * QUOTA_EXCEEDED，已存在的重复预占幂等跳过。</p>
+     *
+     * @param runId 运行ID
+     */
+    void reserveAgentRunUsage(Long runId);
+
+    /**
+     * 结算/退回 AGENT_TOKENS 用量（幂等，以 run_uuid 为键）。
+     *
+     * <p>在每次终态转移处调用：{@link #completeRun}（含 failRun/cancelRun）、
+     * 审批恢复、队列直接 completeRunGuarded 的超时/看门狗/孤儿、supersede 等。
+     * status 为 succeeded 时按实际 total_tokens 结算（封顶预占），其余一律退回。</p>
+     *
+     * @param runId      运行ID
+     * @param status     终态（succeeded 结算，其余退回）
+     * @param tokenUsage 实际 token 用量（可为 null，此时结算 0）
+     */
+    void finalizeAgentRunUsage(Long runId, String status, java.util.Map<String, Object> tokenUsage);
+
     // ================================================================
     // 查询方法
     // ================================================================

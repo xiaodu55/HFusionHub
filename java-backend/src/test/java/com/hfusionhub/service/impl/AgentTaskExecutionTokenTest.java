@@ -59,7 +59,9 @@ class AgentTaskExecutionTokenTest {
         service = new AgentTaskServiceImpl(
                 taskMapper, runMapper, stepMapper, approvalMapper,
                 messageMapper, userMapper, aiClient, queueService,
-                statusEventService, redisUtils);
+                statusEventService, redisUtils,
+                mock(com.hfusionhub.service.UsageLedgerService.class),
+                mock(com.hfusionhub.config.QuotaProperties.class));
     }
 
     @Test
