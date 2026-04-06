@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -30,13 +31,17 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 PLUGIN_RUNNER_TOKEN = os.environ.get("PLUGIN_RUNNER_TOKEN", "")
 PLUGIN_ARTIFACTS_DIR = os.environ.get("PLUGIN_ARTIFACTS_DIR", "/opt/plugin-artifacts")
 IMAGE_ALLOWLIST_PREFIX = "hfusionhub-plugin-"
+# Docker SDK images.list(name=...) does a reference glob; a bare prefix matches
+# nothing (repo segments aren't filtered by substring), so append '*' to match
+# all hfusionhub-plugin-* images regardless of tag.
+IMAGE_ALLOWLIST_GLOB = f"{IMAGE_ALLOWLIST_PREFIX}*"
 
 # Domains that plugin containers are NEVER allowed to reach, regardless of config
 GLOBAL_BLOCKED_DOMAINS = [
@@ -74,8 +79,8 @@ class ContainerConfig(BaseModel):
     timeout: float = 30.0
     network: str = "plugin-isolated"
     read_only_rootfs: bool = True
-    allowed_domains: List[str] = []
-    blocked_domains: List[str] = []
+    allowed_domains: List[str] = Field(default_factory=list)
+    blocked_domains: List[str] = Field(default_factory=list)
     tmpfs_size: str = "100m"
     pids_limit: int = 256
 
@@ -158,12 +163,63 @@ def _normalize_image_digest(raw: Optional[str]) -> Optional[str]:
     return m.group(0) if m else None
 
 
+def _is_ip_or_cidr(value: str) -> bool:
+    """True when value is already an IP address or CIDR block.
+
+    IP literals must be enforced directly — `dig +short <ip>` returns nothing
+    for a bare address (no PTR path guaranteed), so hostname-based resolution
+    would silently skip the rule.
+    """
+    if not value:
+        return False
+    try:
+        ipaddress.ip_network(value, strict=False)
+        return True
+    except ValueError:
+        return False
+
+
+_HOSTNAME_RE = re.compile(
+    r"(?=.{1,253}\Z)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*"
+    r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.?\Z"
+)
+
+
+def _normalize_network_target(value: str) -> str:
+    """Validate a network-policy target before it is interpolated into sh.
+
+    Targets come from plugin configuration and later appear in a `dig` command.
+    Only hostnames, IP literals, and CIDR blocks are accepted, so an untrusted
+    value cannot alter the generated shell program.
+    """
+    target = value.strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="Network policy target must not be empty")
+    if _is_ip_or_cidr(target):
+        return target
+    if not _HOSTNAME_RE.fullmatch(target):
+        raise HTTPException(status_code=400, detail=f"Invalid network policy target: {value!r}")
+    return target.rstrip(".").lower()
+
+
+def _net_rule(target: str, jump: str) -> str:
+    """Emit one iptables OUTPUT rule for an IP literal/CIDR or hostname.
+
+    IP/CIDR targets are enforced directly. Hostnames are resolved at runtime
+    via `dig +short` (iptables cannot resolve names itself); unresolvable
+    names produce no rule without aborting the entrypoint.
+    """
+    if _is_ip_or_cidr(target):
+        return f"iptables -A OUTPUT -d {target} -j {jump}"
+    return f"for ip in $(dig +short {target} 2>/dev/null); do iptables -A OUTPUT -d $ip -j {jump}; done"
+
+
 def _build_network_commands(config: ContainerConfig) -> List[str]:
     """Build iptables commands to enforce network policies inside the container.
 
-    All domain-based rules are resolved to IPs first (dig +short) because
-    iptables cannot resolve hostnames itself, and unresolvable domains must
-    not abort the whole entrypoint.
+    Domain-based rules are resolved to IPs first (dig +short) because iptables
+    cannot resolve hostnames itself, and unresolvable domains must not abort
+    the whole entrypoint. IP/CIDR literals are enforced directly.
     """
     commands = []
 
@@ -171,7 +227,7 @@ def _build_network_commands(config: ContainerConfig) -> List[str]:
     for domain in GLOBAL_BLOCKED_DOMAINS:
         if domain.startswith("*."):
             domain = domain[2:]
-        commands.append(f"for ip in $(dig +short {domain} 2>/dev/null); do iptables -A OUTPUT -d $ip -j DROP; done")
+        commands.append(_net_rule(_normalize_network_target(domain), "DROP"))
 
     # If allowed_domains is set, block everything except those domains
     if config.allowed_domains:
@@ -184,7 +240,7 @@ def _build_network_commands(config: ContainerConfig) -> List[str]:
         for domain in config.allowed_domains:
             if domain.startswith("*."):
                 domain = domain[2:]
-            commands.append(f"for ip in $(dig +short {domain} 2>/dev/null); do iptables -A OUTPUT -d $ip -j ACCEPT; done")
+            commands.append(_net_rule(_normalize_network_target(domain), "ACCEPT"))
         # Default policy: drop all other OUTPUT
         commands.append("iptables -A OUTPUT -j DROP")
 
@@ -193,7 +249,7 @@ def _build_network_commands(config: ContainerConfig) -> List[str]:
         for domain in config.blocked_domains:
             if domain.startswith("*."):
                 domain = domain[2:]
-            commands.append(f"for ip in $(dig +short {domain} 2>/dev/null); do iptables -A OUTPUT -d $ip -j DROP; done")
+            commands.append(_net_rule(_normalize_network_target(domain), "DROP"))
 
     return commands
 
@@ -207,7 +263,7 @@ async def health(response: Response):
     if docker_ok:
         try:
             docker_client = _get_docker()
-            images = docker_client.images.list(IMAGE_ALLOWLIST_PREFIX)
+            images = docker_client.images.list(IMAGE_ALLOWLIST_GLOB)
             images_count = len(images)
         except Exception:
             pass
@@ -451,7 +507,7 @@ async def execute_tool(
 async def list_images(x_runner_token: Optional[str] = Header(None)):
     _verify_token(x_runner_token)
     docker_client = _get_docker()
-    images = docker_client.images.list(IMAGE_ALLOWLIST_PREFIX)
+    images = docker_client.images.list(IMAGE_ALLOWLIST_GLOB)
     return {
         "images": [
             {

@@ -67,6 +67,7 @@ CI 已把 `java` / `python` / `python-container` / `eval-offline` / `helm` / `do
 - [ ] `DOCKER_HOST` 不可达时 `/health` 返回 503（Runner fail-closed）
 - [ ] 镜像 digest 登记后才会执行；未登记 / 不匹配返回 400
 - [ ] 允许/禁止域名清单生效：元数据端点固定禁止
+- [ ] 隔离 Dind 演练 exit 0 后执行 `scripts/plugin-e2e-acceptance.ps1`：正确/错误 digest、镜像白名单、资源限制和网络 allow/block 均通过
 
 ## 4. 配额账本幂等
 

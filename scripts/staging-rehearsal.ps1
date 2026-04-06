@@ -31,10 +31,13 @@
 param(
     [switch]$NoDind,
     [switch]$Down,
-    [switch]$PruneVolumes
+    [switch]$PruneVolumes,
+    [string]$DindProxy = $env:DIND_PROXY
 )
 
-$ErrorActionPreference = "Stop"
+# 注意：不设 "Stop"。native 命令（docker）写 stderr 时会被 Stop 当作终止
+# 错误抛出，即使 2>$null 也无法抑制。脚本统一用 $LASTEXITCODE 判断成败。
+$ErrorActionPreference = "Continue"
 $Root = Split-Path -Parent $PSScriptRoot
 $ComposeFile = Join-Path $Root "deploy\docker-compose.prod.yml"
 $EnvFile = Join-Path $Root "deploy\.env"
@@ -100,7 +103,13 @@ $tlsFiles = @{
     "PLUGIN_RUNNER_CLIENT_KEY_FILE"     = (Join-Path $TlsDir "key.pem")
 }
 foreach ($k in $tlsFiles.Keys) {
-    if (-not (Select-String -Path $EnvFile -Pattern "^$k=[^ ]+" -Quiet)) {
+    if (Select-String -Path $EnvFile -Pattern "^$k=" -Quiet) {
+        $lines = Get-Content $EnvFile
+        $lines = $lines | ForEach-Object {
+            if ($_ -match "^$k=") { "$k=$($tlsFiles[$k])" } else { $_ }
+        }
+        Set-Content -Path $EnvFile -Value $lines
+    } else {
         Add-Content -Path $EnvFile -Value "$k=$($tlsFiles[$k])"
         Write-Host "已为 $k 写入绝对路径 $($tlsFiles[$k])"
     }
@@ -122,51 +131,137 @@ if ($tlsMissing.Count -gt 0) {
     if ($LASTEXITCODE -ne 0) { throw "无法生成 TLS 证书" }
 }
 
+# The runner uses root-level files as Compose secrets, while docker:dind
+# requires its own /certs/{server,client} layout. Materialize copies without
+# reissuing a previously generated CA/client certificate set.
+$dindLayout = Join-Path $TlsDir "dind-certs"
+$dindLayoutMissing = @(
+    "server\ca.pem", "server\cert.pem", "server\key.pem",
+    "client\ca.pem", "client\cert.pem", "client\key.pem"
+) | Where-Object { -not (Test-Path (Join-Path $dindLayout $_)) }
+if ($dindLayoutMissing.Count -gt 0) {
+    Write-Host "补齐 docker:dind TLS 证书目录..."
+    $genMounted = Join-Path (Split-Path $PSScriptRoot) "generate-runner-tls.sh"
+    docker run --rm `
+        --entrypoint /bin/sh `
+        -v "${PSScriptRoot}:/work:ro" `
+        -v "${TlsDir}:/out" `
+        alpine/openssl:3.3.0 -c "cp /work/generate-runner-tls.sh /tmp/gen.sh && sh /tmp/gen.sh /out --dind-layout"
+    if ($LASTEXITCODE -ne 0) { throw "无法补齐 docker:dind TLS 证书目录" }
+}
+
+function Test-DindReady {
+    param([string]$CertPath)
+    $previous = @{
+        DOCKER_HOST       = $env:DOCKER_HOST
+        DOCKER_TLS_VERIFY = $env:DOCKER_TLS_VERIFY
+        DOCKER_CERT_PATH  = $env:DOCKER_CERT_PATH
+    }
+    try {
+        $env:DOCKER_HOST = "tcp://127.0.0.1:2376"
+        $env:DOCKER_TLS_VERIFY = "1"
+        $env:DOCKER_CERT_PATH = $CertPath
+        docker version --format '{{.Server.Version}}' 2>$null | Out-Null
+        return $LASTEXITCODE -eq 0
+    } finally {
+        foreach ($key in $previous.Keys) {
+            if ($null -eq $previous[$key]) { Remove-Item "Env:$key" -ErrorAction SilentlyContinue }
+            else { Set-Item "Env:$key" $previous[$key] }
+        }
+    }
+}
+
+if ($DindProxy) {
+    $DindProxy = $DindProxy -replace '://(127\.0\.0\.1|localhost)(?=[:/])', '://host.docker.internal'
+}
+
 # ── 3. 隔离 Docker Engine（演练用 dind）────────────────────────────────
 $useDind = -not $NoDind
+if ($NoDind) {
+    # Do not let an earlier rehearsal make a no-Dind run appear healthy.
+    # This container name is owned exclusively by this script.
+    $existing = docker ps -a --format '{{.Names}}' | Select-String -Quiet $DindName
+    if ($existing) { docker rm -f $DindName 2>$null | Out-Null }
+}
 if ($useDind) {
     $already = docker ps --format '{{.Names}}' | Select-String -Quiet $DindName
     if ($already) {
         Write-Host "[dind] 演练引擎已在运行：$DindName"
     } else {
-        Write-Host "[dind] 启动隔离演练引擎（docker:dind）..."
-        docker rm -f $DindName 2>$null | Out-Null
-        docker run -d --privileged --name $DindName -p 127.0.0.1:2376:2376 `
-            docker:dind --host=tcp://0.0.0.0:2376 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "无法启动 dind（嵌套虚拟化可能被禁）。runner 将无法连引擎，预期 503。"
+        # dind 引擎走 TLS：docker:dind 用 DOCKER_TLS_CERTDIR 下的自管 CA
+        # （server/{ca,cert,key}.pem），SAN 含 host.docker.internal/localhost/127.0.0.1，
+        # 与 runner 客户端证书同 CA。runner 经 host.docker.internal:2376 访问。
+        $DindCerts = $dindLayout
+        if (-not (Test-Path (Join-Path $DindCerts "server\ca.pem"))) {
+            Write-Warning "缺少 dind 引擎证书目录 $DindCerts\server（请先运行 generate-runner-tls.sh）。runner 将无法连引擎，预期 503。"
             $useDind = $false
         } else {
-            Write-Host "[dind] 演练引擎已启动：$DindName"
+            Write-Host "[dind] 启动隔离演练引擎（docker:dind + TLS）..."
+            $existing = docker ps -a --format '{{.Names}}' | Select-String -Quiet $DindName
+            if ($existing) { docker rm -f $DindName 2>$null | Out-Null }
+            $dindArgs = @('run', '-d', '--privileged', '--name', $DindName,
+                '-p', '127.0.0.1:2376:2376',
+                '-e', 'DOCKER_TLS_CERTDIR=/certs',
+                '-v', "${DindCerts}:/certs:ro",
+                'docker:dind')
+            if ($DindProxy) {
+                $dindArgs = @('run', '-d', '--privileged', '--name', $DindName,
+                    '-p', '127.0.0.1:2376:2376',
+                    '-e', 'DOCKER_TLS_CERTDIR=/certs',
+                    '-e', "HTTP_PROXY=$DindProxy", '-e', "HTTPS_PROXY=$DindProxy",
+                    '-e', 'NO_PROXY=localhost,127.0.0.1,host.docker.internal',
+                    '-v', "${DindCerts}:/certs:ro",
+                    'docker:dind')
+            }
+            & docker $dindArgs 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "无法启动 dind（嵌套虚拟化可能被禁）。runner 将无法连引擎，预期 503。"
+                $useDind = $false
+            } elseif (Test-DindReady -CertPath (Join-Path $DindCerts "client")) {
+                Write-Host "[dind] 演练引擎已启动：$DindName（TLS 加密）"
+            } else {
+                Write-Warning "dind 已启动但 TLS 握手失败。runner 将无法连引擎，预期 503。"
+                docker rm -f $DindName 2>$null | Out-Null
+                $useDind = $false
+            }
         }
     }
 }
 
-# DOCKER_HOST 注入（生产由真实隔离引擎地址覆盖）
+if ($useDind -and -not (Test-DindReady -CertPath (Join-Path $dindLayout "client"))) {
+    Write-Warning "现有 dind 引擎 TLS 握手失败，runner 将无法连引擎，预期 503。"
+    docker rm -f $DindName 2>$null | Out-Null
+    $useDind = $false
+}
+
+# 让 dind 接入 compose 网络，runner 经 host.docker.internal 访问宿主映射端口。
 if ($useDind) {
-    $set = @{
-        PLUGIN_RUNNER_DOCKER_HOST      = "tcp://host.docker.internal:2376"
-        PLUGIN_RUNNER_CA_CERT_FILE     = Join-Path $TlsDir "ca.pem"
-        PLUGIN_RUNNER_CLIENT_CERT_FILE = Join-Path $TlsDir "cert.pem"
-        PLUGIN_RUNNER_CLIENT_KEY_FILE  = Join-Path $TlsDir "key.pem"
+    $netName = "deploy_default"
+    $netExists = $false
+    docker network inspect $netName 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { $netExists = $true }
+    if ($netExists) {
+        docker network connect $netName $DindName 2>$null
+        if ($LASTEXITCODE -eq 0) { Write-Host "[dind] 已接入网络 $netName" }
+    } else {
+        Write-Host "[dind] 网络 $netName 尚不存在，跳过显式接入（compose up 会自动创建）。"
     }
-    foreach ($k in $set.Keys) {
-        if (Select-String -Path $EnvFile -Pattern "^$k=" -Quiet) {
-            $lines = Get-Content $EnvFile
-            $lines = $lines | ForEach-Object {
-                if ($_ -match "^$k=") { "$k=$($set[$k])" } else { $_ }
-            }
-            Set-Content -Path $EnvFile -Value $lines
-        } else {
-            Add-Content -Path $EnvFile -Value "$k=$($set[$k])"
-        }
-    }
+}
+
+# The runner host is process-scoped below. Never persist a rehearsal endpoint
+# in deploy/.env: a subsequent -NoDind run must not contact a real engine.
+$runnerDockerHost = if ($useDind) {
+    "tcp://host.docker.internal:2376"
+} else {
+    "tcp://127.0.0.1:2377"
 }
 
 # ── 4. 拉起全链路 ───────────────────────────────────────────────────────
 Write-Host "==> 拉起 prod compose（首次会构建镜像，耗时较长）..."
 Push-Location $Root
 try {
+    $previousRunnerDockerHost = $env:PLUGIN_RUNNER_DOCKER_HOST
+    $env:PLUGIN_RUNNER_DOCKER_HOST = $runnerDockerHost
     docker compose -f $ComposeFile up -d --build
     if ($LASTEXITCODE -ne 0) {
         Write-Host "::error::compose up 失败 rc=$LASTEXITCODE"
@@ -174,6 +269,11 @@ try {
         exit 1
     }
 } finally {
+    if ($null -eq $previousRunnerDockerHost) {
+        Remove-Item Env:PLUGIN_RUNNER_DOCKER_HOST -ErrorAction SilentlyContinue
+    } else {
+        $env:PLUGIN_RUNNER_DOCKER_HOST = $previousRunnerDockerHost
+    }
     Pop-Location
 }
 
@@ -230,13 +330,24 @@ Write-Host ""
 Write-Host "  端点探活:"
 Write-Host "    java    /api/health -> $(Probe http://127.0.0.1:8080/api/health)"
 Write-Host "    python  /ready      -> $(Probe http://127.0.0.1:9000/ready)"
-Write-Host "    runner  /health     -> $(Probe http://127.0.0.1:9100/health)"
 Write-Host "    frontend /          -> $(Probe http://127.0.0.1:80/)"
 
-if ($fails.Count -eq 0 -and (-not $NoDind)) {
+# runner 端口 9100 仅 expose 未发布到宿主，故在容器内探活
+$runnerHealth = docker exec hfusionhub-plugin-runner sh -c "curl -s http://127.0.0.1:9100/health" 2>$null
+Write-Host "    runner  /health     -> $runnerHealth"
+$runnerConnected = $runnerHealth -match '"docker_connected":true'
+if ($useDind -and -not $runnerConnected) {
+    $fails.Add("plugin-runner-engine")
+    Write-Host "    runner engine connection -> FAIL"
+} elseif (-not $useDind -and $runnerConnected) {
+    $fails.Add("plugin-runner-fail-closed")
+    Write-Host "    runner fail-closed state -> FAIL"
+}
+
+if ($fails.Count -eq 0 -and $useDind) {
     Write-Host "结论：全链路健康（runner 已连演练引擎）。"
     exit 0
-} elseif ($fails.Count -eq 0 -and $NoDind) {
+} elseif ($fails.Count -eq 0 -and (-not $useDind)) {
     Write-Host "结论：应用全链路 healthy，但 runner 未连隔离引擎（预期 503）。"
     Write-Host "      如需全绿，请提供真实 PLUGIN_RUNNER_DOCKER_HOST 或启用嵌套虚拟化。"
     exit 3

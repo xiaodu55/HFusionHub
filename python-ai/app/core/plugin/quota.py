@@ -31,7 +31,7 @@ async def transition_plugin_execution(
         logger.error("Plugin quota transition rejected locally: operation=%s execution=%s", normalized, execution_id)
         return False
 
-    url = f"{backend_url or config.JAVA_BACKEND_URL}/internal/plugin/executions/quota"
+    url = f"{backend_url or config.JAVA_BACKEND_URL}/api/internal/plugin/executions/quota"
     payload = {
         "operation": normalized.upper(), "tenant_id": tenant_id, "user_id": user_id,
         "execution_id": execution_id, "plugin_id": plugin_id, "tool_name": tool_name,

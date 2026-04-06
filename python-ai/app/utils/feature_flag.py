@@ -63,7 +63,7 @@ class FeatureFlagClient:
         self._cache: dict = {}          # flag_key → {enabled, rules, fetched_at}
         self._lock = threading.Lock()
         self._last_fetch: float = 0
-        self._fetch_url = f"{config.JAVA_BACKEND_URL}/internal/feature-flags/snapshot"
+        self._fetch_url = f"{config.JAVA_BACKEND_URL}/api/internal/feature-flags/snapshot"
         self._internal_token = getattr(config, "INTERNAL_API_TOKEN", "")
 
     # ── public API ──────────────────────────────────────────

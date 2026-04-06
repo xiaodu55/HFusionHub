@@ -45,6 +45,7 @@ public class SaTokenConfig implements WebMvcConfigurer {
                             "/vectorize/*/callback",
                             "/internal/feature-flags/snapshot",
                             "/internal/agent/**",
+                            "/internal/plugin/**",
                             "/doc.html",
                             "/swagger-ui.html",
                             "/swagger-ui/**",
@@ -72,7 +73,8 @@ public class SaTokenConfig implements WebMvcConfigurer {
                         "/v3/api-docs/**",
                         "/webjars/**",
                         "/internal/feature-flags/snapshot",
-                        "/internal/agent/**"
+                        "/internal/agent/**",
+                        "/internal/plugin/**"
                 )
                 .order(3);
     }

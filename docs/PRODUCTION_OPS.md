@@ -217,3 +217,46 @@ curl -fsS http://127.0.0.1:9100/health         # Runner（503=Engine 不可达�
 - `deploy/docker-compose.prod.yml`、`deploy/helm/hfusionhub/`
 - `V35__usage_ledger.sql`、`V31__plugin_image_digest.sql`、`V29__tool_plugin_sandbox.sql`
 - `.github/workflows/ci.yml`（Helm 渲染 / compose 校验门禁）
+
+## 7. Isolated Engine Rehearsal
+
+Run the full local rehearsal only with a disposable `docker:dind` Engine. The
+runner receives TLS client files as Compose secrets; it never receives the host
+Docker socket. The certificate generator now creates both the Compose files
+(`ca.pem`, `cert.pem`, `key.pem`) and the `dind-certs/{server,client}` layout.
+
+```powershell
+# Windows. If the host proxy is v2rayN on 127.0.0.1:10808, pass it explicitly.
+powershell -ExecutionPolicy Bypass -File scripts/staging-rehearsal.ps1 `
+  -DindProxy http://127.0.0.1:10808
+
+# Expected: exit 0 and Runner health reports docker_connected:true.
+# Fail-closed control: expected exit 3 and Runner health returns HTTP 503.
+powershell -ExecutionPolicy Bypass -File scripts/staging-rehearsal.ps1 -NoDind
+```
+
+```bash
+# Linux/macOS equivalent. DIND_PROXY is optional and is translated from
+# localhost to host.docker.internal for the nested daemon.
+bash scripts/staging-rehearsal.sh --dind-proxy http://127.0.0.1:10808
+bash scripts/staging-rehearsal.sh --no-dind
+```
+
+The rehearsal injects the Dind endpoint only into the Compose process. It does
+not persist a local or production `PLUGIN_RUNNER_DOCKER_HOST` in `deploy/.env`.
+This prevents a `--no-dind` validation run from accidentally contacting an
+existing Engine.
+
+After the exit-0 rehearsal, run the runtime boundary checks:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/plugin-e2e-acceptance.ps1
+```
+
+The acceptance script builds `hfusionhub-plugin-acceptance:v1` in the isolated
+Engine and verifies valid and invalid digests, image allowlist enforcement,
+CPU/memory/PID/read-only limits, plus an allowed and blocked in-engine network
+probe. It removes its temporary HTTP server and image unless `-KeepImage` is
+specified. Approval-token and quota reserve/settle remain tenant-bound
+application contracts and are verified by the Java/Python test suites rather
+than synthetic requests without a tenant, plugin record, and agent run.

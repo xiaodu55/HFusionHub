@@ -182,6 +182,10 @@ services:
       DOCKER_TLS_VERIFY: "1"
       DOCKER_CERT_PATH: /certs/client
       PYTHONDONTWRITEBYTECODE: "1"
+    # Required by the local docker:dind rehearsal on Linux. Docker Desktop
+    # already provides this hostname; the host-gateway entry is harmless there.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - plugin-artifacts:/opt/plugin-artifacts
     secrets:

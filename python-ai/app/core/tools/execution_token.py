@@ -48,7 +48,7 @@ async def consume_execution_token(
         logger.warning("Execution-token consume skipped: token is empty")
         return False
 
-    url = f"{backend_url or config.JAVA_BACKEND_URL}/internal/agent/approvals/consume"
+    url = f"{backend_url or config.JAVA_BACKEND_URL}/api/internal/agent/approvals/consume"
     payload = {
         "approval_id": str(approval_id),
         "execution_token": token,

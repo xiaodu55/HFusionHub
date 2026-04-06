@@ -43,7 +43,7 @@ async def test_quota_client_uses_internal_envelope_and_fixed_contract(monkeypatc
     )
 
     assert accepted is True
-    assert client.calls[0][0] == "http://java.test/internal/plugin/executions/quota"
+    assert client.calls[0][0] == "http://java.test/api/internal/plugin/executions/quota"
     assert client.calls[0][1]["json"] == {
         "operation": "RESERVE", "tenant_id": 11, "user_id": 7,
         "execution_id": "exec-1", "plugin_id": "plugin-1", "tool_name": "lookup",

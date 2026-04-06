@@ -200,7 +200,7 @@ async def fetch_plugin_versions(plugin_id: str, java_backend_url: str, internal_
     """Fetch all versions of a plugin from Java backend for canary routing."""
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(
-            f"{java_backend_url}/internal/plugin/{plugin_id}/versions",
+            f"{java_backend_url}/api/internal/plugin/{plugin_id}/versions",
             headers={"X-Internal-Token": internal_token},
         )
         resp.raise_for_status()
