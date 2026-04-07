@@ -171,6 +171,15 @@ function Test-DindReady {
     }
 }
 
+function Wait-DindReady {
+    param([string]$CertPath, [int]$Tries = 30)
+    for ($i = 0; $i -lt $Tries; $i++) {
+        if (Test-DindReady -CertPath $CertPath) { return $true }
+        Start-Sleep -Seconds 1
+    }
+    return $false
+}
+
 if ($DindProxy) {
     $DindProxy = $DindProxy -replace '://(127\.0\.0\.1|localhost)(?=[:/])', '://host.docker.internal'
 }
@@ -217,7 +226,7 @@ if ($useDind) {
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "无法启动 dind（嵌套虚拟化可能被禁）。runner 将无法连引擎，预期 503。"
                 $useDind = $false
-            } elseif (Test-DindReady -CertPath (Join-Path $DindCerts "client")) {
+            } elseif (Wait-DindReady -CertPath (Join-Path $DindCerts "client")) {
                 Write-Host "[dind] 演练引擎已启动：$DindName（TLS 加密）"
             } else {
                 Write-Warning "dind 已启动但 TLS 握手失败。runner 将无法连引擎，预期 503。"
@@ -228,7 +237,7 @@ if ($useDind) {
     }
 }
 
-if ($useDind -and -not (Test-DindReady -CertPath (Join-Path $dindLayout "client"))) {
+if ($useDind -and -not (Wait-DindReady -CertPath (Join-Path $dindLayout "client"))) {
     Write-Warning "现有 dind 引擎 TLS 握手失败，runner 将无法连引擎，预期 503。"
     docker rm -f $DindName 2>$null | Out-Null
     $useDind = $false

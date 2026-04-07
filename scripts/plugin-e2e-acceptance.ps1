@@ -28,6 +28,7 @@ if (-not $DindCertPath) {
     $DindCertPath = Join-Path $Root "deploy\runner-tls\dind-certs\client"
 }
 $Fixture = Join-Path $Root "docker\plugin-runner\acceptance-fixture"
+$NetworkName = "plugin-isolated"
 
 function Get-EnvFileValue {
     param([string]$Name)
@@ -42,11 +43,15 @@ function Invoke-DindDocker {
         DOCKER_HOST = $env:DOCKER_HOST
         DOCKER_TLS_VERIFY = $env:DOCKER_TLS_VERIFY
         DOCKER_CERT_PATH = $env:DOCKER_CERT_PATH
+        DOCKER_BUILDKIT = $env:DOCKER_BUILDKIT
     }
     try {
         $env:DOCKER_HOST = $DindHost
         $env:DOCKER_TLS_VERIFY = "1"
         $env:DOCKER_CERT_PATH = $DindCertPath
+        # Docker Desktop's selected Buildx builder can ignore DOCKER_HOST.
+        # The legacy client path deliberately builds against the isolated daemon.
+        $env:DOCKER_BUILDKIT = "0"
         $output = & docker @Arguments
         if ($LASTEXITCODE -ne 0) { throw "dind docker command failed: docker $($Arguments -join ' ')" }
         return $output
@@ -77,8 +82,10 @@ try:
 except urllib.error.HTTPError as error:
     print(json.dumps({"status": error.code, "body": json.loads(error.read())}))
 '@
-    $raw = & docker exec -e "RUNNER_TOKEN=$RunnerToken" -e "RUNNER_PAYLOAD=$payload" `
-        hfusionhub-plugin-runner python -c $clientCode
+    # Feed code through stdin instead of `python -c`: Docker Desktop's Windows
+    # argument parsing strips nested quotes from a Python command string.
+    $raw = $clientCode | & docker exec -i -e "RUNNER_TOKEN=$RunnerToken" -e "RUNNER_PAYLOAD=$payload" `
+        hfusionhub-plugin-runner python -
     if ($LASTEXITCODE -ne 0) { throw "Runner request helper failed" }
     return ($raw | ConvertFrom-Json)
 }
@@ -90,6 +97,17 @@ function Assert-Status {
     }
 }
 
+function Ensure-DindNetwork {
+    param([string]$Name)
+    try {
+        Invoke-DindDocker network inspect $Name | Out-Null
+        return $false
+    } catch {
+        Invoke-DindDocker network create --driver bridge $Name | Out-Null
+        return $true
+    }
+}
+
 if (-not (Test-Path $EnvFile)) { throw "Run staging-rehearsal.ps1 first: $EnvFile is absent" }
 if (-not (Test-Path (Join-Path $DindCertPath "ca.pem"))) { throw "dind client TLS files are absent: $DindCertPath" }
 if (-not (Test-Path $Fixture)) { throw "Acceptance fixture is absent: $Fixture" }
@@ -97,9 +115,13 @@ if (-not (Test-Path $Fixture)) { throw "Acceptance fixture is absent: $Fixture" 
 $RunnerToken = Get-EnvFileValue "PLUGIN_RUNNER_TOKEN"
 $serverName = "hfh-acceptance-http-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
 $serverStarted = $false
+$networkCreated = $false
 
 try {
+    Write-Host "[1/6] Verifying isolated Docker Engine TLS connection..."
     Invoke-DindDocker version --format '{{.Server.Version}}' | Out-Null
+    $networkCreated = Ensure-DindNetwork $NetworkName
+    Write-Host "[2/6] Building acceptance plugin in isolated Engine..."
     Invoke-DindDocker build -t $ImageTag $Fixture | Out-Null
     $digest = (Invoke-DindDocker image inspect --format '{{.Id}}' $ImageTag | Select-Object -First 1).Trim()
     if ($digest -notmatch '^sha256:[0-9a-f]{64}$') { throw "Unexpected image digest: $digest" }
@@ -113,6 +135,7 @@ try {
         return $request
     }
 
+    Write-Host "[3/6] Verifying valid digest execution..."
     $valid = Invoke-Runner -RunnerToken $RunnerToken -Body (New-ExecutionRequest @{
         tool_name = "echo_tool"; tool_input = @{ text = "isolated-engine" }; config = @{ timeout = 15 }
     })
@@ -121,6 +144,7 @@ try {
         throw "valid digest did not execute the plugin tool"
     }
 
+    Write-Host "[4/6] Verifying wrong digest and image allowlist rejection..."
     $wrong = Invoke-Runner -RunnerToken $RunnerToken -Body (New-ExecutionRequest @{
         image_digest = "sha256:" + ("0" * 64); tool_name = "echo_tool"; tool_input = @{}
     })
@@ -131,6 +155,7 @@ try {
     }
     Assert-Status $forbidden 403 "image allowlist"
 
+    Write-Host "[5/6] Verifying resource limits..."
     $limited = Invoke-Runner -RunnerToken $RunnerToken -Body (New-ExecutionRequest @{
         tool_name = "resource_report_tool"; tool_input = @{}; config = @{
             timeout = 15; memory_limit = "64m"; cpu_limit = 0.5; pids_limit = 128; read_only_rootfs = $true
@@ -144,12 +169,16 @@ try {
         throw "runner did not report the requested resource limits"
     }
 
-    Invoke-DindDocker run -d --rm --name $serverName $ImageTag python -m http.server 8080 | Out-Null
+    Write-Host "[6/6] Verifying network allow and block policies..."
+    Write-Host "  Starting an in-engine HTTP server..."
+    Invoke-DindDocker run -d --rm --name $serverName --network $NetworkName $ImageTag python -m http.server 8080 | Out-Null
     $serverStarted = $true
     Start-Sleep -Seconds 1
+    Write-Host "  Resolving the in-engine HTTP server address..."
     $serverIp = (Invoke-DindDocker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $serverName | Select-Object -First 1).Trim()
     if (-not $serverIp) { throw "acceptance HTTP server has no bridge address" }
 
+    Write-Host "  Probing the allowlisted address $serverIp..."
     $allowed = Invoke-Runner -RunnerToken $RunnerToken -Body (New-ExecutionRequest @{
         tool_name = "network_probe_tool"; tool_input = @{ url = "http://${serverIp}:8080" }
         config = @{ timeout = 15; allowed_domains = @($serverIp) }
@@ -157,6 +186,7 @@ try {
     Assert-Status $allowed 200 "allowed network"
     if (-not $allowed.body.data.ok) { throw "allowed network probe was blocked" }
 
+    Write-Host "  Probing the blocklisted address $serverIp..."
     $blocked = Invoke-Runner -RunnerToken $RunnerToken -Body (New-ExecutionRequest @{
         tool_name = "network_probe_tool"; tool_input = @{ url = "http://${serverIp}:8080" }
         config = @{ timeout = 15; blocked_domains = @($serverIp) }
@@ -166,6 +196,13 @@ try {
 
     Write-Host "Plugin isolated-engine acceptance passed: digest, allowlist, limits, and network policies."
 } finally {
-    if ($serverStarted) { Invoke-DindDocker rm -f $serverName | Out-Null }
-    if (-not $KeepImage) { Invoke-DindDocker image rm -f $ImageTag | Out-Null }
+    if ($serverStarted) {
+        try { Invoke-DindDocker rm -f $serverName | Out-Null } catch { }
+    }
+    if (-not $KeepImage) {
+        try { Invoke-DindDocker image rm -f $ImageTag | Out-Null } catch { }
+    }
+    if ($networkCreated) {
+        try { Invoke-DindDocker network rm $NetworkName | Out-Null } catch { }
+    }
 }

@@ -14,6 +14,7 @@ Security model:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import ipaddress
@@ -386,16 +387,54 @@ async def execute_tool(
             },
         )
 
+        deadline = time.monotonic() + req.config.timeout
+        while True:
+            try:
+                container.reload()
+                state = container.attrs.get("State", {})
+                if state.get("Status") in {"exited", "dead"}:
+                    break
+            except Exception as e:
+                logger.warning("Failed to inspect plugin container state: %s", e)
+                break
+
+            if time.monotonic() >= deadline:
+                try:
+                    container.kill()
+                except Exception as e:
+                    logger.warning("Failed to kill timed out plugin container: %s", e)
+                try:
+                    container.wait(timeout=5)
+                except Exception:
+                    pass
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass
+                elapsed_ms = round((time.monotonic() - start_time) * 1000, 2)
+                return ExecuteResponse(
+                    success=False,
+                    error=f"Container timeout after {req.config.timeout}s",
+                    error_code="container_timeout",
+                    duration_ms=elapsed_ms,
+                    container_id=container.short_id,
+                )
+
+            await asyncio.sleep(0.2)
+
         try:
-            result = container.wait(timeout=int(req.config.timeout))
+            result = container.wait(timeout=5)
             exit_code = result.get("StatusCode", -1)
-        except Exception:
-            container.kill()
+        except Exception as e:
+            try:
+                container.kill()
+            except Exception:
+                pass
             elapsed_ms = round((time.monotonic() - start_time) * 1000, 2)
             return ExecuteResponse(
                 success=False,
-                error=f"Container timeout after {req.config.timeout}s",
-                error_code="container_timeout",
+                error=f"Container wait failed: {e}",
+                error_code="container_wait_failed",
                 duration_ms=elapsed_ms,
                 container_id=container.short_id,
             )
