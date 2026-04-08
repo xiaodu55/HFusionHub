@@ -243,9 +243,17 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
     }
 
     private void apply(PromptTemplate template, PromptTemplateSaveDTO dto) {
-        template.setName(dto.getName().trim());
+        String name = dto.getName();
+        if (name == null || name.isBlank()) {
+            throw new BusinessException("提示词模板名称不能为空");
+        }
+        template.setName(name.trim());
         template.setDescription(clean(dto.getDescription()));
-        template.setContent(dto.getContent().trim());
+        String content = dto.getContent();
+        if (content == null || content.isBlank()) {
+            throw new BusinessException("提示词模板内容不能为空");
+        }
+        template.setContent(content.trim());
     }
 
     private String clean(String value) {

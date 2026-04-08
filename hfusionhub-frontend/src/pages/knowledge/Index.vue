@@ -56,7 +56,7 @@ const loadKnowledgeBases = async () => {
     })
     knowledgeBases.value = res.data.records
   } catch (error) {
-    console.error('加载知识库失败:', error)
+    toast.error(error instanceof Error ? error.message : '加载知识库失败')
     loadError.value = true
     toast.error('加载知识库失败，请检查网络连接后重试')
   } finally {
@@ -73,7 +73,7 @@ const handleCreate = async () => {
     createForm.value = { name: '', description: '' }
     await loadKnowledgeBases()
   } catch (error) {
-    console.error('创建知识库失败:', error)
+    toast.error(error instanceof Error ? error.message : '创建知识库失败')
     toast.error('创建知识库失败，请稍后重试')
   }
 }
@@ -96,7 +96,7 @@ const handleUpdate = async () => {
     isEditDialogOpen.value = false
     await loadKnowledgeBases()
   } catch (error) {
-    console.error('更新知识库失败:', error)
+    toast.error(error instanceof Error ? error.message : '更新知识库失败')
   }
 }
 
@@ -110,7 +110,7 @@ const handleToggleStatus = async (item: KnowledgeBase) => {
     })
     await loadKnowledgeBases()
   } catch (error) {
-    console.error('更新知识库状态失败', error)
+    toast.error(error instanceof Error ? error.message : '更新知识库状态失败')
   } finally {
     statusUpdatingId.value = null
   }
@@ -129,7 +129,7 @@ const confirmDelete = async () => {
     isDeleteDialogOpen.value = false
     await loadKnowledgeBases()
   } catch (error) {
-    console.error('删除知识库失败:', error)
+    toast.error(error instanceof Error ? error.message : '删除知识库失败')
   }
 }
 

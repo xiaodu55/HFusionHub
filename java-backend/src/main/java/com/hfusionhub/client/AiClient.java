@@ -259,7 +259,7 @@ public class AiClient {
             throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "AI service is unavailable. Please try again later.");
         } catch (Exception e) {
             log.error("Chat with AI failed: {}", e.getMessage(), e);
-            throw new BusinessException(StatusCode.INTERNAL_ERROR, "Failed to get AI response: " + e.getMessage());
+            throw new BusinessException(StatusCode.INTERNAL_ERROR, "Failed to get AI response. Please try again later.");
         }
     }
 
@@ -613,7 +613,7 @@ public class AiClient {
         } catch (Exception e) {
             log.error("Decide approval failed: {}", e.getMessage(), e);
             throw new BusinessException(StatusCode.INTERNAL_ERROR,
-                    "Failed to process approval decision: " + e.getMessage());
+                    "Failed to process approval decision. Please try again later.");
         }
     }
 

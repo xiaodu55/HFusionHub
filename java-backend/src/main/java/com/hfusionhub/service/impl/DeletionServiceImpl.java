@@ -54,7 +54,13 @@ public class DeletionServiceImpl implements DeletionService {
         task.setStepIndex(0);
         task.setMaxRetries(DEFAULT_MAX_RETRIES);
         task.setRetryCount(0);
-        deletionTaskMapper.insert(task);
+        try {
+            deletionTaskMapper.insert(task);
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            // 并发创建已被数据库唯一约束拦截，返回已存在的任务
+            log.debug("并发创建删除任务被唯一约束拦截: type={}, targetId={}", taskType, targetId);
+            return deletionTaskMapper.selectActiveTask(taskType, targetId);
+        }
         log.info("删除任务已创建: type={}, targetId={}, taskId={}", taskType, targetId, task.getId());
         return task;
     }

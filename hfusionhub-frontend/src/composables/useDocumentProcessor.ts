@@ -74,7 +74,12 @@ export function useDocumentProcessor() {
 
   const parseStatusPayload = (rawStatus: any) => {
     if (typeof rawStatus === 'string') {
-      return JSON.parse(rawStatus)
+      try {
+        return JSON.parse(rawStatus)
+      } catch {
+        console.warn('Failed to parse status payload JSON, using raw value')
+        return { status: 'UNKNOWN', message: String(rawStatus).slice(0, 200) }
+      }
     }
     return rawStatus
   }
@@ -202,7 +207,9 @@ export function useDocumentProcessor() {
       } catch (error) {
         console.error('查询状态失败:', error)
         removeProcessing(docId)
+        clearProcessingStatus(docId)
         activePollingDocs.delete(docId)
+        onStatusChange?.()
       }
     }
 
