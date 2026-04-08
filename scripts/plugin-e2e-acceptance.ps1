@@ -99,10 +99,10 @@ function Assert-Status {
 
 function Ensure-DindNetwork {
     param([string]$Name)
-    try {
-        Invoke-DindDocker network inspect $Name | Out-Null
+    $existing = Invoke-DindDocker network ls --filter "name=^$Name$" --format '{{.Name}}'
+    if (($existing | Where-Object { $_ -eq $Name })) {
         return $false
-    } catch {
+    } else {
         Invoke-DindDocker network create --driver bridge $Name | Out-Null
         return $true
     }
@@ -171,7 +171,8 @@ try {
 
     Write-Host "[6/6] Verifying network allow and block policies..."
     Write-Host "  Starting an in-engine HTTP server..."
-    Invoke-DindDocker run -d --rm --name $serverName --network $NetworkName $ImageTag python -m http.server 8080 | Out-Null
+    Invoke-DindDocker create --name $serverName --network $NetworkName $ImageTag python -m http.server 8080 | Out-Null
+    Invoke-DindDocker start $serverName | Out-Null
     $serverStarted = $true
     Start-Sleep -Seconds 1
     Write-Host "  Resolving the in-engine HTTP server address..."
