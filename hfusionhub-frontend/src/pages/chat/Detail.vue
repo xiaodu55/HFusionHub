@@ -191,11 +191,17 @@ const handleSend = async () => {
 
     console.error('发送消息失败:', error)
 
-    // 移除"思考中"的占位消息
-    if (streamingMessageId.value) {
-      const index = messages.value.findIndex(m => m.id === streamingMessageId.value)
+    // 保留已流式接收的部分内容；仅移除完全为空的占位消息
+    if (pendingId !== null) {
+      const index = messages.value.findIndex(m => m.id === pendingId)
       if (index !== -1) {
-        messages.value.splice(index, 1)
+        if (messages.value[index].content) {
+          // 有部分内容——保留并在尾部追加"回复中断"标记
+          messages.value[index].content += '\n\n⚠️ 回复中断，请重试。'
+        } else {
+          // 完全为空——移除占位
+          messages.value.splice(index, 1)
+        }
       }
       streamingMessageId.value = null
     }
@@ -207,12 +213,32 @@ const handleSend = async () => {
         content,
         requestId,
       })
-      messages.value.push(res.data)
+      // 如果占位消息还在（有部分内容），替换为新完整回复
+      if (pendingId !== null) {
+        const idx = messages.value.findIndex(m => m.id === pendingId)
+        if (idx !== -1) {
+          messages.value[idx] = res.data
+        } else {
+          messages.value.push(res.data)
+        }
+      } else {
+        messages.value.push(res.data)
+      }
       await scrollToBottom()
     } catch (fallbackError) {
       console.error('Fallback request failed:', fallbackError)
-      // 移除用户消息如果发送失败
-      messages.value.pop()
+      // 确保至少有一个错误提示在对话中
+      const errIdx = pendingId !== null ? messages.value.findIndex(m => m.id === pendingId) : -1
+      if (errIdx === -1) {
+        messages.value.push({
+          id: Date.now() + 1,
+          conversationId: Number(route.params.id),
+          role: 'assistant' as const,
+          content: '抱歉，消息发送失败，请检查网络连接后重试。',
+          model: 'error',
+          createdAt: timeStr,
+        })
+      }
     }
   } finally {
     sending.value = false

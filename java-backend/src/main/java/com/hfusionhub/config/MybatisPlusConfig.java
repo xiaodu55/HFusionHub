@@ -41,7 +41,11 @@ public class MybatisPlusConfig {
         "prompt_template_version", "prompt_test_case", "prompt_test_case_result",
         "agent_status_event", "agent_recovery_event",
         "plugin_dependency", "plugin_execution_metric", "plugin_health_log",
-        "plugin_version_history"
+        "plugin_version_history",
+        // Evaluation tables — agent_evaluation_case and agent_evaluation_run
+        // lack tenant_id; access is gated by dataset ownership (agent_evaluation_dataset
+        // has tenant_id and is checked first).
+        "agent_evaluation_case", "agent_evaluation_run"
     );
 
     /**

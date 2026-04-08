@@ -12,6 +12,9 @@ const service: AxiosInstance = axios.create({
   },
 })
 
+// 防止 401 处理重入——避免登出 API 调用自身再次触发 401 导致无限循环
+let isHandling401 = false
+
 // 请求拦截器
 service.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
@@ -33,9 +36,13 @@ service.interceptors.response.use(
     if (res.code === 200) {
       return res
     } else if (res.code === 401) {
+      if (isHandling401) return Promise.reject(new Error(res.message || '登录已过期'))
+      isHandling401 = true
       const userStore = useUserStore()
-      userStore.logout()
+      // 先同步清除 token，确保后续请求不再携带旧 token
+      userStore.clearToken()
       router.push('/login')
+      setTimeout(() => { isHandling401 = false }, 1000)
       return Promise.reject(new Error(res.message || '登录已过期'))
     } else {
       return Promise.reject(new Error(res.message || '请求失败'))
@@ -43,9 +50,15 @@ service.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
+      if (isHandling401) {
+        return Promise.reject(new Error('登录已过期'))
+      }
+      isHandling401 = true
       const userStore = useUserStore()
-      userStore.logout()
+      // 先同步清除 token，确保后续请求不再携带旧 token
+      userStore.clearToken()
       router.push('/login')
+      setTimeout(() => { isHandling401 = false }, 1000)
     }
     const data = error.response?.data
     const message =

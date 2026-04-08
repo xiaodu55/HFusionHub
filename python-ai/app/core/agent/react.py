@@ -306,7 +306,10 @@ class ReactAgent(Agent):
                     break
 
         if final_answer is None:
-            final_answer = assistant_text if 'assistant_text' in locals() else "无法生成回答"
+            try:
+                final_answer = assistant_text
+            except UnboundLocalError:
+                final_answer = "无法生成回答"
 
         return AgentResponse(
             content=final_answer,
@@ -804,9 +807,12 @@ class ReactAgent(Agent):
         sources = list(rag_sources) if rag_sources else []
         self._last_sources = list(sources)
 
-        # ReAct loop
+        # ReAct loop — track last response for token_count reporting
+        _last_response_token_count = 0
+
         for step_num in range(self.max_steps):
             response = await llm.chat(messages=messages, temperature=0.7)
+            _last_response_token_count = response.token_count
             assistant_text = response.content
 
             action_result = self._parse_action(assistant_text)
@@ -974,7 +980,7 @@ class ReactAgent(Agent):
             answer=final_answer,
             steps=steps,
             model=llm.model if hasattr(llm, 'model') else "unknown",
-            token_count=response.token_count if 'response' in locals() else 0,
+            token_count=_last_response_token_count,
             finish_reason=finish_reason,
             status=v1_status,
             sources=deduped_sources,

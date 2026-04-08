@@ -30,7 +30,7 @@ public class AiClient {
     private final RestTemplate restTemplate;
     private final WebClient webClient;
 
-    @Value("${ai-service.base-url:http://localhost:8001}")
+    @Value("${ai-service.base-url:http://localhost:9000}")
     private String baseUrl;
 
     @Value("${python-ai.internal-token:}")
@@ -311,8 +311,7 @@ public class AiClient {
                                                 "Python AI returned status " + clientResponse.statusCode().value() + ": " + body)))
                 )
                 .bodyToFlux(String.class)
-                .doOnNext(chunk -> log.info("SSE raw chunk ({}B): {}", chunk.length(),
-                    chunk.length() > 200 ? chunk.substring(0, 200) + "..." : chunk))
+                .doOnNext(chunk -> log.debug("SSE raw chunk ({}B)", chunk.length()))
                 .doOnError(ResourceAccessException.class, e -> {
                     log.error("AI service connection failed during streaming: {}", e.getMessage());
                 })
@@ -410,8 +409,7 @@ public class AiClient {
                                                 "Python AI returned status " + clientResponse.statusCode().value() + ": " + body)))
                 )
                 .bodyToFlux(String.class)
-                .doOnNext(chunk -> log.info("Agent V1 SSE raw chunk ({}B): {}", chunk.length(),
-                    chunk.length() > 200 ? chunk.substring(0, 200) + "..." : chunk))
+                .doOnNext(chunk -> log.debug("Agent V1 SSE raw chunk ({}B)", chunk.length()))
                 .doOnError(ResourceAccessException.class, e -> {
                     log.error("AI service connection failed during V1 streaming: {}", e.getMessage());
                 })

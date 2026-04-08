@@ -168,4 +168,15 @@ public class TenantServiceImpl implements TenantService {
         }
         return member;
     }
+
+    @Override
+    public boolean isMemberOfTenant(Long tenantId, Long userId) {
+        return tenantMemberMapper.selectByTenantAndUser(tenantId, userId) != null;
+    }
+
+    @Override
+    public boolean isTenantAdmin(Long tenantId, Long userId) {
+        TenantMember member = tenantMemberMapper.selectByTenantAndUser(tenantId, userId);
+        return member != null && "admin".equals(member.getRole());
+    }
 }

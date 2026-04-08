@@ -47,4 +47,10 @@ public interface TenantService {
 
     /** 检查用户是否有指定权限 */
     boolean hasPermission(Long userId, String permission);
+
+    /** 检查用户是否为指定租户的成员 */
+    boolean isMemberOfTenant(Long tenantId, Long userId);
+
+    /** 检查用户是否为指定租户的管理员 */
+    boolean isTenantAdmin(Long tenantId, Long userId);
 }

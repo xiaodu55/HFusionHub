@@ -151,12 +151,18 @@ const handleInstall = async () => {
   if (!installForm.value.name || !installForm.value.version || !installForm.value.artifactHash) return
   installing.value = true
   try {
-    await pluginsApi.installPlugin({
+    const manifest = {
       name: installForm.value.name,
       version: installForm.value.version,
       description: installForm.value.description,
       artifact_hash: installForm.value.artifactHash,
-    })
+    }
+    // 如果有选择 wheel 文件，则走 multipart 上传路径
+    if (installFile.value) {
+      await pluginsApi.installPluginWithWheel(manifest, installFile.value)
+    } else {
+      await pluginsApi.installPlugin(manifest)
+    }
     showInstallDialog.value = false
     installForm.value = { name: '', version: '', description: '', artifactHash: '' }
     installFile.value = null

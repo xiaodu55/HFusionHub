@@ -76,8 +76,8 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
     @Override
     public AgentEvaluationDataset getDataset(Long userId, Long datasetId) {
         AgentEvaluationDataset ds = datasetMapper.selectById(datasetId);
-        requireOwner(userId, ds);
         if (ds == null) throw new BusinessException("评测集不存在: " + datasetId);
+        requireOwner(userId, ds);
         return ds;
     }
 
@@ -246,7 +246,11 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
                 Map<String, Object> gate = (Map<String, Object>) pythonResponse.get("regression_gate");
                 if (gate != null) {
                     Object passed = gate.get("passed");
-                    run.setStatus(Boolean.TRUE.equals(passed) ? "completed" : "completed");
+                    boolean gatePassed = Boolean.TRUE.equals(passed);
+                    run.setStatus(gatePassed ? "completed" : "failed");
+                    if (!gatePassed) {
+                        run.setErrorDetail("回归门禁未通过");
+                    }
                 } else {
                     run.setStatus("completed");
                 }

@@ -116,13 +116,13 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 参数非法异常
+     * 参数非法异常 — 仅返回通用提示，避免泄露内部校验细节
      */
     @ExceptionHandler(IllegalArgumentException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public R<?> handleIllegalArgumentException(IllegalArgumentException e) {
         log.warn("参数非法: {}", e.getMessage());
-        return R.fail(400, e.getMessage());
+        return R.fail(400, "请求参数不合法，请检查后重试");
     }
 
     /**

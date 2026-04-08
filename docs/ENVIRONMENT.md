@@ -28,6 +28,27 @@ Copy `docker/.env.example` to `docker/.env`:
 | `MYSQL_PASSWORD` | `hfusionhub123` | MySQL app user password |
 | `REDIS_PASSWORD` | `your_redis_password` | Reserved placeholder; current compose config does not enable Redis password auth |
 | `ADMIN_PASSWORD` | `changeme` | Bootstrap admin password |
+| `MINIO_ROOT_USER` | `minioadmin` | MinIO object storage username |
+| `MINIO_ROOT_PASSWORD` | `minioadmin` | MinIO object storage password |
+| `PLUGIN_RUNNER_TOKEN` | *(random)* | Plugin sandbox runner auth token (required — compose fails without it) |
+
+### Production (`deploy/.env`)
+
+Copy `deploy/.env.example` to `deploy/.env` for production Docker Compose:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `MYSQL_ROOT_PASSWORD` | **Yes** | MySQL root password |
+| `MYSQL_PASSWORD` | **Yes** | MySQL app user password |
+| `PYTHON_AI_INTERNAL_TOKEN` | **Yes** | Java ↔ Python shared secret |
+| `CALLBACK_SECRET` | **Yes** | HMAC secret for Python → Java callbacks |
+| `ADMIN_PASSWORD` | **Yes** | Bootstrap admin account |
+| `PLUGIN_RUNNER_TOKEN` | **Yes** | Plugin sandbox runner auth |
+| `DEEPSEEK_API_KEY` | **Yes** | DeepSeek API key for chat LLM |
+| `PLUGIN_RUNNER_DOCKER_HOST` | **Yes** | TLS Docker Engine for plugin isolation |
+| `PLUGIN_RUNNER_CA_CERT_FILE` | **Yes** | Path to runner TLS CA cert |
+| `PLUGIN_RUNNER_CLIENT_CERT_FILE` | **Yes** | Path to runner TLS client cert |
+| `PLUGIN_RUNNER_CLIENT_KEY_FILE` | **Yes** | Path to runner TLS client key |
 
 ## Java Backend (`java-backend/`)
 
@@ -60,7 +81,7 @@ Copy `python-ai/.env.example` to `python-ai/.env`:
 | `DEEPSEEK_BASE_URL` | No | `https://api.deepseek.com` | DeepSeek API endpoint |
 | `DEEPSEEK_MODEL` | No | `deepseek-v4-flash` | Model name |
 | `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama URL for local LLM fallback and embeddings |
-| `OLLAMA_EMBEDDING_MODEL` | No | `qwen3-embedding:8b-fp16` | Ollama embedding model |
+| `OLLAMA_EMBEDDING_MODEL` | No | `qwen3-embedding:8b-fp16` | Ollama embedding model (**use this**, not the deprecated `OLLAMA_MODEL`) |
 | `LLM_ALLOW_MOCK` | No | `false` | Enables mock LLM for development/testing only |
 | `SERVER_HOST` | No | `0.0.0.0` | FastAPI bind address |
 | `SERVER_PORT` | No | `9000` | FastAPI port |
