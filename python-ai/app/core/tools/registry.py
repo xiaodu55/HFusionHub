@@ -532,6 +532,21 @@ class ToolRegistry:
                 or Permissions.KB_WRITE in spec.required_permissions):
             safe_input["knowledge_base_id"] = self._knowledge_base_id
 
+        # ── Content guardrails: input check on tool arguments ────────
+        # Defense in depth on top of the policy engine.  Runs for EVERY call
+        # (including scoped-grant calls — a grant authorises the call, not
+        # dangerous argument content) and rejects critical prompt injections
+        # and toxic content before the tool executes.
+        guard_verdict = self._policy_engine.guard_tool_input(
+            tool_name, safe_input, self._guardrails_context(context),
+        )
+        if guard_verdict is not None:
+            return ToolResult.failure(
+                tool_name=tool_name,
+                error_code=ErrorCode.PERMISSION_DENIED,
+                message=guard_verdict.reason,
+            )
+
         # ── Plugin tool routing ─────────────────────────────────────
         # If the tool spec carries a _plugin_id, it was registered by
         # the plugin system.  Route through the sandboxed subprocess
@@ -711,6 +726,31 @@ class ToolRegistry:
     # ── Input validation ──────────────────────────────────────────────
 
     # ── Policy context ─────────────────────────────────────────────────
+
+    def _guardrails_context(self, context: Any) -> PolicyContext:
+        """Build a minimal PolicyContext for guardrail flag scoping.
+
+        Uses the real execution context when present; falls back to registry
+        defaults otherwise (MCP / non-agent callers).  Unlike
+        ``_build_policy_context`` this does NOT resolve the four policy
+        feature flags — the guardrail flags are resolved internally by the
+        guardrails pipeline.
+        """
+        from app.core.policy.engine import PolicyContext
+        from app.utils.config import config
+        if context is not None:
+            environment = getattr(context, "environment", None) or config.SERVER_ENV
+            return PolicyContext(
+                user_id=getattr(context, "user_id", 0),
+                knowledge_base_id=getattr(context, "knowledge_base_id", self._knowledge_base_id) or 0,
+                role=getattr(context, "user_role", "user") or "user",
+                environment=environment,
+            )
+        return PolicyContext(
+            user_id=0,
+            knowledge_base_id=self._knowledge_base_id or 0,
+            environment=config.SERVER_ENV,
+        )
 
     def _build_policy_context(self, context: Any) -> PolicyContext:
         """Translate an AgentExecutionContext into a PolicyContext, resolving flags."""

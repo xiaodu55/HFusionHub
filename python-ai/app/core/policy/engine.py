@@ -16,10 +16,14 @@ tool spec — it performs no I/O; callers resolve feature flags and pass them in
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, Optional
+from typing import Any, Dict, FrozenSet, Optional
 
 from app.core.tools.spec import RiskLevel
+
+logger = logging.getLogger(__name__)
 
 
 class PolicyAction:
@@ -142,6 +146,88 @@ class PolicyEngine:
             rule="mode:" + ctx.mode,
             risk_level=risk_level,
         )
+
+    # ── Content guardrails (defense in depth on top of the tri-state gate) ──
+
+    def guard_tool_input(
+        self,
+        tool_name: str,
+        tool_input: Dict[str, Any],
+        ctx: PolicyContext,
+    ) -> Optional[PolicyVerdict]:
+        """Run content guardrails on tool arguments before execution.
+
+        Returns a DENY verdict when the input is blocked (critical prompt
+        injection or toxic content); returns None when it passes or the
+        guardrails are disabled.  Callers (e.g. ToolRegistry) refuse tool
+        execution on a DENY verdict.
+        """
+        if not tool_input:
+            return None
+        from app.core.policy.guardrails import guardrails_pipeline
+        try:
+            serialized = json.dumps(tool_input, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            serialized = str(tool_input)
+        result = guardrails_pipeline.check_input(
+            serialized,
+            context={
+                "channel": "tool",
+                "tool_name": tool_name,
+                "user_id": ctx.user_id,
+                "knowledge_base_id": ctx.knowledge_base_id,
+                "environment": ctx.environment,
+            },
+        )
+        if not result.allowed:
+            logger.warning(
+                "Guardrails denied tool '%s': %s (flags=%s)",
+                tool_name, result.blocked_reason, result.flags,
+            )
+            return PolicyVerdict(
+                PolicyAction.DENY,
+                f"工具 '{tool_name}' 的参数未通过内容安全校验（{result.blocked_reason}）",
+                rule=f"guardrails:input:{result.blocked_reason}",
+                risk_level=None,
+            )
+        return None
+
+    def guard_model_output(
+        self,
+        content: str,
+        ctx: Optional[PolicyContext] = None,
+    ) -> tuple[str, Optional[PolicyVerdict]]:
+        """Run content guardrails on the model response before returning it.
+
+        Returns ``(sanitized_content, verdict)``.  The verdict is None when
+        the response passes; when blocked, the sanitized content is returned
+        alongside a DENY verdict so the caller can decide how to present it
+        (e.g. substitute a refusal message).
+        """
+        if not content:
+            return content, None
+        from app.core.policy.guardrails import guardrails_pipeline
+        result = guardrails_pipeline.check_output(
+            content,
+            context={
+                "channel": "output",
+                "user_id": ctx.user_id if ctx else None,
+                "knowledge_base_id": ctx.knowledge_base_id if ctx else None,
+                "environment": ctx.environment if ctx else None,
+            },
+        )
+        if not result.allowed:
+            logger.warning(
+                "Guardrails denied model output: %s (flags=%s)",
+                result.blocked_reason, result.flags,
+            )
+            return result.sanitized_content, PolicyVerdict(
+                PolicyAction.DENY,
+                f"AI 回答未通过内容安全校验（{result.blocked_reason}）",
+                rule=f"guardrails:output:{result.blocked_reason}",
+                risk_level=None,
+            )
+        return result.sanitized_content, None
 
 
 def _base_reason(action: str, tool_name: str, risk_level: str, mode: str) -> str:

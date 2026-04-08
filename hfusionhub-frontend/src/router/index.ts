@@ -101,6 +101,21 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/builder/TestSet.vue'),
       },
       {
+        path: 'builder/workflow',
+        name: 'WorkflowBuilder',
+        component: () => import('@/pages/builder/Workflow.vue'),
+      },
+      {
+        path: 'cost',
+        name: 'CostDashboard',
+        component: () => import('@/pages/cost/Index.vue'),
+      },
+      {
+        path: 'settings/safety',
+        name: 'SafetySettings',
+        component: () => import('@/pages/settings/Safety.vue'),
+      },
+      {
         path: 'memory',
         name: 'Memory',
         component: () => import('@/pages/memory/Index.vue'),

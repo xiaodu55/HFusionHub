@@ -159,5 +159,20 @@ class Config:
         os.getenv("RAG_MULTI_AGENT_TIMEOUT_SECONDS", "60")
     )
 
+    # Content safety guardrails.  These env vars are the deployment
+    # kill-switches; the effective behaviour is additionally gated by the
+    # Java-managed feature flags (guardrails.*) evaluated in
+    # app.core.policy.guardrails.  Both must be on for a component to run.
+    GUARDRAILS_ENABLED = os.getenv("GUARDRAILS_ENABLED", "true").lower() == "true"
+    GUARDRAILS_PROMPT_INJECTION_ENABLED = os.getenv(
+        "GUARDRAILS_PROMPT_INJECTION_ENABLED", "true"
+    ).lower() == "true"
+    GUARDRAILS_CONTENT_MODERATION_ENABLED = os.getenv(
+        "GUARDRAILS_CONTENT_MODERATION_ENABLED", "true"
+    ).lower() == "true"
+    GUARDRAILS_PII_MASKING_ENABLED = os.getenv(
+        "GUARDRAILS_PII_MASKING_ENABLED", "true"
+    ).lower() == "true"
+
 
 config = Config()

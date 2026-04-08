@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hfusionhub.mapper.WebhookSubscriptionMapper">
+
+    <!-- events 列为 JSON 数组文本，需显式指定 typeHandler 才能映射到 List<String> -->
+    <resultMap id="BaseResultMap" type="com.hfusionhub.entity.WebhookSubscription">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="tenant_id" property="tenantId"/>
+        <result column="name" property="name"/>
+        <result column="url" property="url"/>
+        <result column="secret" property="secret"/>
+        <result column="events" property="events"
+                typeHandler="com.hfusionhub.handler.JsonListTypeHandler"/>
+        <result column="is_active" property="isActive"/>
+        <result column="last_triggered_at" property="lastTriggeredAt"/>
+        <result column="failure_count" property="failureCount"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+        <result column="deleted" property="deleted"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, user_id, tenant_id, name, url, secret, events, is_active,
+        last_triggered_at, failure_count, created_at, updated_at, deleted
+    </sql>
+
+    <!-- 自定义 SQL 不走 @TableLogic，需显式过滤逻辑删除 -->
+    <select id="selectActiveByEvent" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM webhook_subscription
+        WHERE deleted = 0
+          AND is_active = 1
+          AND events LIKE CONCAT('%', '"', #{eventType}, '"', '%')
+        ORDER BY id ASC
+    </select>
+
+</mapper>

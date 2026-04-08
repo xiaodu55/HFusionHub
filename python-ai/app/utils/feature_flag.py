@@ -30,6 +30,12 @@ SECURITY_FLAGS = frozenset({
     "agent.write_tools.enabled",
     "agent.web_search.enabled",
     "approval.required_for_write",
+    # Content safety guardrails — must be OFF (disabled) when the backend is
+    # unreachable: a guardrail that silently disappears is worse than none.
+    "guardrails.enabled",
+    "guardrails.prompt_injection.enabled",
+    "guardrails.content_moderation.enabled",
+    "guardrails.pii_masking.enabled",
 })
 
 AVAILABILITY_FLAGS = frozenset({

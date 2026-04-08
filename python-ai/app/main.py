@@ -51,6 +51,21 @@ from app.api.deps import require_tenant
 from app.api.trace_middleware import TraceMiddleware
 from app.api.tenant_middleware import TenantMiddleware
 
+# Optional feature modules
+try:
+    from app.api.guardrails import router as guardrails_router
+    _has_guardrails = True
+except ImportError:
+    _has_guardrails = False
+    guardrails_router = None  # type: ignore
+
+try:
+    from app.api.gateway import router as gateway_router
+    _has_gateway = True
+except ImportError:
+    _has_gateway = False
+    gateway_router = None  # type: ignore
+
 
 def create_app() -> FastAPI:
     """Create FastAPI application"""
@@ -103,6 +118,12 @@ def create_app() -> FastAPI:
     app.include_router(tools_router, dependencies=tenant_dependencies)
     app.include_router(plugin_admin_router, dependencies=tenant_dependencies)
 
+    # Optional feature modules
+    if _has_gateway:
+        app.include_router(gateway_router, dependencies=internal_dependencies)
+    if _has_guardrails:
+        app.include_router(guardrails_router, dependencies=internal_dependencies)
+
     @app.get("/")
     async def root():
         return {
@@ -131,6 +152,46 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    """Initialise subsystems that need async initialisation."""
+    import os as _os
+
+    # ── OpenTelemetry ─────────────────────────────────────────────────
+    from app.utils.telemetry import init_telemetry
+    init_telemetry(
+        service_name="hfusionhub-python-ai",
+        otlp_endpoint=_os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"),
+        enabled=_os.environ.get("OTEL_ENABLED", "").lower() in ("1", "true", "yes"),
+    )
+
+    # ── MCP Client ────────────────────────────────────────────────────
+    try:
+        from app.core.tools.mcp_client import get_mcp_client_manager
+        await get_mcp_client_manager().startup()
+    except Exception:
+        pass  # MCP is best-effort on startup
+
+    # ── Model Gateway ─────────────────────────────────────────────────
+    try:
+        from app.core.llm.model_gateway import get_model_gateway
+        gw = get_model_gateway()
+        if gw.enabled:
+            await gw.warmup()
+    except Exception:
+        pass
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    """Gracefully tear down background subsystems."""
+    try:
+        from app.core.tools.mcp_client import get_mcp_client_manager
+        await get_mcp_client_manager().shutdown()
+    except Exception:
+        pass
 
 
 def main():

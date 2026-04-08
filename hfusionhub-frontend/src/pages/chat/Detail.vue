@@ -64,11 +64,13 @@ const handleSend = async () => {
   const requestId = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
   let pendingId: number | null = null
 
+  // 北京时间字符串 — 定义在 try 外以便 catch 块中错误消息使用
+  const now = new Date()
+  const beijingTime = new Date(now.getTime() + (now.getTimezoneOffset() + 480) * 60000)
+  const timeStr = `${beijingTime.getFullYear()}-${String(beijingTime.getMonth() + 1).padStart(2, '0')}-${String(beijingTime.getDate()).padStart(2, '0')} ${String(beijingTime.getHours()).padStart(2, '0')}:${String(beijingTime.getMinutes()).padStart(2, '0')}:${String(beijingTime.getSeconds()).padStart(2, '0')}`
+
   try {
-    // 1. 立即添加用户消息到列表（使用北京时间，格式与后端一致）
-    const now = new Date()
-    const beijingTime = new Date(now.getTime() + (now.getTimezoneOffset() + 480) * 60000)
-    const timeStr = `${beijingTime.getFullYear()}-${String(beijingTime.getMonth() + 1).padStart(2, '0')}-${String(beijingTime.getDate()).padStart(2, '0')} ${String(beijingTime.getHours()).padStart(2, '0')}:${String(beijingTime.getMinutes()).padStart(2, '0')}:${String(beijingTime.getSeconds()).padStart(2, '0')}`
+    // 1. 立即添加用户消息到列表
     const userMessage: Message = {
       id: Date.now(),
       conversationId: Number(route.params.id),

@@ -64,7 +64,9 @@ from app.core.agent import get_agent, get_agent_run_store
 from app.core.agent.agent import AgentResponse
 from app.core.agent.execution_context import AgentExecutionContext
 from app.core.tenant.context import get_tenant_id
+from app.core.policy.engine import PolicyContext, PolicyEngine
 from app.core.policy.masking import build_arguments_summary
+from app.utils.config import config
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -81,6 +83,14 @@ _INPUT_SUMMARY_MAX_LENGTH = 2000
 _OUTPUT_SUMMARY_MAX_LENGTH = 2000
 
 _VALID_STYLES = {"concise", "detailed", "report"}
+
+# ── Content guardrails (output check) ─────────────────────────────────────
+# The policy engine is stateless (pure decision function), so a single
+# module-level instance is safe to share.  When the guardrails block an AI
+# response, the content field is replaced with this refusal so the user is
+# never served unsafe model output.
+_GUARD_POLICY_ENGINE = PolicyEngine()
+_GUARDED_RESPONSE = "抱歉，我无法提供该内容（内容安全校验未通过）。"
 
 
 def _truncate(text: Optional[str], max_len: int) -> Optional[str]:
@@ -307,6 +317,23 @@ def _build_chat_response(response, style: str, extra_step_events: Optional[List[
     When *extra_step_events* is provided (e.g. from the decide/resume flow),
     those events are used directly instead of deriving them from response.steps.
     """
+    # ── Content guardrails: output check before returning the response ──
+    # Blocks critical injection echoes / inappropriate content and masks PII
+    # in the final answer.  Streamed responses (SSE) are not guarded here —
+    # the non-streaming path is the single choke point for the Java contract.
+    final_text = response.content or response.answer or ""
+    safe_text, guard_verdict = _GUARD_POLICY_ENGINE.guard_model_output(
+        final_text,
+        PolicyContext(
+            user_id=0,
+            knowledge_base_id=getattr(response, "knowledge_base_id", 0) or 0,
+            environment=config.SERVER_ENV,
+        ),
+    )
+    if guard_verdict is not None:
+        logger.warning("AI response blocked by guardrails: %s", guard_verdict.reason)
+        safe_text = _GUARDED_RESPONSE
+
     # Build step_events from AgentResponse.steps for Java persistence.
     if extra_step_events is not None:
         step_events = list(extra_step_events)
@@ -329,7 +356,7 @@ def _build_chat_response(response, style: str, extra_step_events: Optional[List[
 
     return ChatResponse(
         # Java-compat
-        content=response.content or response.answer or "",
+        content=safe_text,
         model=response.model or "",
         token_count=response.token_count,
         sources=response.sources,
@@ -341,7 +368,7 @@ def _build_chat_response(response, style: str, extra_step_events: Optional[List[
         } for s in (response.steps or [])],
         auto_detected_kb_id=response.auto_detected_kb_id,
         # V1
-        answer=response.answer or response.content or "",
+        answer=safe_text,
         status=response.status or "completed",
         agent_run_id=response.agent_run_id,
         token_usage=response.token_usage or {

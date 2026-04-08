@@ -45,7 +45,13 @@ public class MybatisPlusConfig {
         // Evaluation tables — agent_evaluation_case and agent_evaluation_run
         // lack tenant_id; access is gated by dataset ownership (agent_evaluation_dataset
         // has tenant_id and is checked first).
-        "agent_evaluation_case", "agent_evaluation_run"
+        "agent_evaluation_case", "agent_evaluation_run",
+        // Webhook delivery log — no tenant_id column; ownership resolved via
+        // webhook_subscription (which has tenant_id and is tenant-filtered).
+        "webhook_delivery",
+        // Evaluation gate results — no tenant_id column; access is gated by
+        // dataset ownership, same pattern as agent_evaluation_run.
+        "evaluation_gate_result"
     );
 
     /**

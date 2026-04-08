@@ -864,3 +864,119 @@ CREATE TABLE IF NOT EXISTS tenant_quota (
     updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_tenant_meter UNIQUE (tenant_id, meter)
 );
+
+-- =====================================================
+-- V36: cost tracking
+-- =====================================================
+CREATE TABLE IF NOT EXISTS model_usage_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    tenant_id BIGINT,
+    conversation_id BIGINT,
+    agent_task_id BIGINT,
+    model VARCHAR(100) NOT NULL,
+    provider VARCHAR(50) NOT NULL,
+    prompt_tokens INT NOT NULL DEFAULT 0,
+    completion_tokens INT NOT NULL DEFAULT 0,
+    total_tokens INT NOT NULL DEFAULT 0,
+    cost_usd DECIMAL(12,6) NOT NULL DEFAULT 0.000000,
+    latency_ms INT NOT NULL DEFAULT 0,
+    request_type VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_mur_user ON model_usage_record (user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_mur_tenant ON model_usage_record (tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_mur_model ON model_usage_record (model, created_at);
+CREATE INDEX IF NOT EXISTS idx_mur_request_type ON model_usage_record (request_type, created_at);
+
+-- =====================================================
+-- V37: webhook system
+-- =====================================================
+CREATE TABLE IF NOT EXISTS webhook_subscription (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    tenant_id BIGINT,
+    name VARCHAR(200) NOT NULL,
+    url VARCHAR(1000) NOT NULL,
+    secret VARCHAR(200),
+    events TEXT NOT NULL,
+    is_active TINYINT NOT NULL DEFAULT 1,
+    last_triggered_at TIMESTAMP,
+    failure_count INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS webhook_delivery (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    subscription_id BIGINT NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    payload TEXT NOT NULL,
+    response_status INT,
+    response_body TEXT,
+    duration_ms INT,
+    success TINYINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_wd_subscription ON webhook_delivery (subscription_id, created_at);
+
+-- =====================================================
+-- V38: evaluation gate results
+-- =====================================================
+CREATE TABLE IF NOT EXISTS evaluation_gate_result (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    dataset_id BIGINT NOT NULL,
+    run_id BIGINT NOT NULL,
+    run_uuid VARCHAR(64) NOT NULL,
+    passed TINYINT NOT NULL DEFAULT 0,
+    accuracy DECIMAL(6,4),
+    latency_p95 INT,
+    token_cost DECIMAL(12,6),
+    baseline_run_uuid VARCHAR(64),
+    baseline_token_cost DECIMAL(12,6),
+    criteria_json TEXT,
+    details TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_egr_dataset ON evaluation_gate_result (dataset_id, created_at);
+
+-- =====================================================
+-- V12: agent evaluation (missing from H2 schema — added for gate tests)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS agent_evaluation_dataset (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    description TEXT,
+    knowledge_base_id BIGINT,
+    user_id BIGINT NOT NULL,
+    dimensions TEXT,
+    case_count INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS agent_evaluation_case (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    dataset_id BIGINT NOT NULL,
+    query TEXT NOT NULL,
+    expected_answer TEXT,
+    expected_sources TEXT,
+    privilege_test TEXT,
+    metadata TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS agent_evaluation_run (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    dataset_id BIGINT NOT NULL,
+    run_uuid VARCHAR(36) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'running',
+    overall_score DECIMAL(6,4),
+    dimension_scores TEXT,
+    case_results TEXT,
+    failed_case_ids TEXT,
+    error_detail TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_eval_run_uuid ON agent_evaluation_run (run_uuid);
