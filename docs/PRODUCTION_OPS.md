@@ -218,7 +218,7 @@ curl -fsS http://127.0.0.1:9100/health         # Runner（503=Engine 不可达�
 - `V35__usage_ledger.sql`、`V31__plugin_image_digest.sql`、`V29__tool_plugin_sandbox.sql`
 - `.github/workflows/ci.yml`（Helm 渲染 / compose 校验门禁）
 
-## 7. Isolated Engine Rehearsal
+## 8. Isolated Engine Rehearsal
 
 Run the full local rehearsal only with a disposable `docker:dind` Engine. The
 runner receives TLS client files as Compose secrets; it never receives the host

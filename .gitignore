@@ -72,6 +72,8 @@ uploads/
 
 # --- Claude ---
 .claude/
+CLAUDE_MEMORY.md
+CLAUDE_SESSIONS_MEMORY.md
 
 # --- Project documentation (committed) ---
 # docs/ directory is tracked; keep local-only notes in .claude/ or outside the repo

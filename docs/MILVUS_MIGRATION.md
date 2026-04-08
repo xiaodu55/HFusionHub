@@ -1,10 +1,10 @@
 # Milvus Migration Guide
 
-> Moving from Milvus Lite (file-based) to Milvus Standalone (production).
+> Moving from Milvus Lite (file-based, dev) to Milvus Standalone (production).
 
 ## Current State
 
-HFusionHub uses **Milvus Lite** — a file-based, embedded vector database.
+HFusionHub uses **Milvus Lite** for development — a file-based, embedded vector database.
 - Storage: `python-ai/milvus_data.db` (local file)
 - Index: `IVF_FLAT`, 1024-dim `FLOAT_VECTOR`, `COSINE` metric
 - Suitable for: development, single-user, <100K vectors
@@ -19,93 +19,70 @@ HFusionHub uses **Milvus Lite** — a file-based, embedded vector database.
 | No auth / TLS | RBAC, TLS encryption |
 | <1M vectors practical limit | 10M+ vectors with partitioning |
 
-**Recommended threshold**: Migrate when your total vectors exceed 500K or you need multi-instance access.
+**Recommended threshold**: Migrate when total vectors exceed 500K or you need multi-instance access.
+
+## Production Setup (Already Configured)
+
+The production Docker Compose (`deploy/docker-compose.prod.yml`) already includes:
+
+```yaml
+milvus:
+  image: milvusdb/milvus:v2.4.0
+  command: ["milvus", "run", "standalone"]
+  environment:
+    ETCD_USE_EMBED: "true"
+    COMMON_STORAGETYPE: local
+  ports:
+    - "127.0.0.1:19530:19530"
+    - "127.0.0.1:9091:9091"
+```
 
 ## Migration Steps
 
-### 1. Start Milvus Standalone
+### 1. Switch Vector Store Mode
+
+In `python-ai/.env` (or `deploy/.env` for production):
 
 ```bash
-# docker-compose.milvus.yml
-services:
-  etcd:
-    image: quay.io/coreos/etcd:v3.5.5
-    environment:
-      - ETCD_AUTO_COMPACTION_MODE=revision
-      - ETCD_AUTO_COMPACTION_RETENTION=1000
-    volumes:
-      - etcd-data:/etcd
+# Enable cluster mode
+VECTOR_STORE_MODE=cluster
+SERVER_ENV=production
 
-  minio:
-    image: minio/minio:latest
-    command: minio server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    volumes:
-      - minio-data:/data
-
-  milvus-standalone:
-    image: milvusdb/milvus:v2.6.0
-    command: milvus run standalone
-    environment:
-      ETCD_ENDPOINTS: etcd:2379
-      MINIO_ADDRESS: minio:9000
-    ports:
-      - "19530:19530"
-    depends_on:
-      - etcd
-      - minio
-```
-
-### 2. Update Python Configuration
-
-In `python-ai/.env`:
-
-```bash
-# Comment out Milvus Lite
-# MILVUS_LITE_PATH=./milvus_data.db
-
-# Add Milvus Standalone connection
-MILVUS_HOST=localhost
+# Point to Milvus standalone
+MILVUS_HOST=milvus        # service name in docker-compose
 MILVUS_PORT=19530
 MILVUS_COLLECTION=hfusionhub_chunks
+
+# Comment out Milvus Lite
+# MILVUS_LITE_PATH=./milvus_data.db
 ```
 
-### 3. Update Vector Store Code
-
-In `python-ai/app/core/vectorstore/milvus_store.py`, add a connection mode switch:
-
-```python
-from pymilvus import connections, Collection, utility
-
-def get_milvus_client():
-    if config.MILVUS_HOST:
-        # Standalone mode
-        connections.connect(
-            alias="default",
-            host=config.MILVUS_HOST,
-            port=config.MILVUS_PORT,
-        )
-        return MilvusStandaloneStore()
-    else:
-        # Lite mode (current)
-        return MilvusLiteStore(config.MILVUS_LITE_PATH)
-```
-
-### 4. Re-index Existing Documents
-
-After switching to standalone, existing documents must be re-indexed:
+### 2. Start Production Stack
 
 ```bash
-# Via the Java backend API
-curl -X POST http://localhost:8080/api/document/reindex-all \
+docker compose -f deploy/docker-compose.prod.yml up -d
+```
+
+This starts Milvus standalone alongside all other services with the correct `VECTOR_STORE_MODE=cluster` already configured.
+
+### 3. Re-index Existing Documents
+
+After switching, existing documents must be re-indexed via the vectorization API:
+
+```bash
+# Re-index a specific document
+curl -X POST http://localhost:8080/api/vectorize/{documentId} \
+  -H "satoken: <your-token>" \
+  -H "Content-Type: application/json"
+
+# Or sync all documents in a knowledge base
+curl -X POST http://localhost:8080/api/vectorize/sync-all \
   -H "satoken: <your-token>" \
   -H "Content-Type: application/json" \
   -d '{"knowledge_base_id": 1}'
 ```
 
-### 5. Verify Migration
+### 4. Verify Migration
 
 ```python
 from pymilvus import Collection
@@ -118,18 +95,17 @@ print(f"Index: {col.index().params}")
 ## Rollback
 
 To roll back to Milvus Lite:
-1. Stop the Milvus standalone containers
+1. Set `VECTOR_STORE_MODE=lite` (or unset it)
 2. Restore `MILVUS_LITE_PATH` in `.env`
 3. Restart Python AI service
-4. Documents indexed to standalone are not automatically available in Lite — re-index
+4. Documents indexed to standalone are not automatically available in Lite — re-index needed
 
 ## Production Checklist
 
 - [ ] Milvus standalone runs on dedicated host/VM (not shared with app)
-- [ ] MinIO uses persistent volumes (not tmpfs)
-- [ ] etcd cluster has 3+ nodes for HA
+- [ ] Persistent volumes for Milvus data
 - [ ] Network policy restricts Milvus port to Python AI service only
 - [ ] TLS enabled for Milvus client connections
 - [ ] Authentication enabled (`milvus.auth.enabled: true`)
-- [ ] Regular backups of MinIO data and etcd snapshots
+- [ ] Regular backups of Milvus data
 - [ ] Monitoring: Milvus metrics → Prometheus → Grafana

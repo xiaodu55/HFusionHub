@@ -11,7 +11,7 @@
 - **Memory**: Persistent entity facts, summaries, user preferences (V8)
 - **Notifications**: System notice table + read tracking (V9)
 - **Production**: Docker Compose prod, Helm chart, Grafana dashboard
-- **Tests**: Python 655+ ✅ | Java 79 ✅ | Frontend 32 ✅
+- **Tests**: Python 1220+ ✅ | Java 397 ✅ | Frontend 32 ✅
 - **Frontend**: P0-P4 completed — dashboard cleanup, RAG trend chart, notification stub
 
 ## Phase 0 — Startup Stability ✅
@@ -24,7 +24,7 @@
 ## Phase 1 — Core Experience & Visibility ✅
 
 - [x] SSE streaming — WebClient Flux with line-buffered parsing
-- [x] Java tests — 79 cases covering AiClient, Memory, Conversation, Document, Vectorization, and Auth boundaries
+- [x] Java tests — 397 cases covering AiClient, Memory, Conversation, Document, Vectorization, and Auth boundaries
 - [x] Frontend tests — 32 cases covering shared states, chat SSE parsing, document upload, and login flows
 - [x] Dashboard cleanup — removed fake trends and static progress
 - [x] Feature flags — documented in FEATURE_FLAGS.md

@@ -76,7 +76,7 @@ Health check: `curl http://localhost:9000/health` → `{"status":"healthy"}`
 ## Running Tests
 
 ```bash
-pytest -q tests                    # All tests (655+)
+pytest -q tests                    # All tests (1220+)
 pytest -q tests/test_retriever.py  # Specific module
 ```
 
@@ -94,7 +94,7 @@ pytest -q tests/test_retriever.py  # Specific module
 
 - `DEEPSEEK_API_KEY` is used for chat LLM calls.
 - DeepSeek does not currently provide the embedding API expected by this project; the DeepSeek embedding client raises an error unless test fallback is explicitly enabled.
-- For document indexing outside tests, run a real embedding provider such as Ollama and configure `OLLAMA_BASE_URL` plus `OLLAMA_EMBEDDING_MODEL`.
+- For document indexing outside tests, run a real embedding provider such as Ollama and configure `OLLAMA_BASE_URL` plus `OLLAMA_EMBEDDING_MODEL` (note: the `.env.example` variable is `OLLAMA_EMBEDDING_MODEL`, **not** the deprecated `OLLAMA_MODEL`).
 - `LLM_ALLOW_MOCK=true` and `EMBEDDING_ALLOW_FALLBACK=true` are development/test switches. Keep both disabled in production.
 
 ## SSE Output Format

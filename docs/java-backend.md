@@ -62,12 +62,12 @@ java-backend/src/main/java/com/hfusionhub/
 
 ## Flyway Migrations
 
-Current migrations: **V1–V8**
+Current migrations: **V1–V35**
 
 Rules:
-- **Historical migrations (V1–V8) must NOT be modified** — any schema changes go into new `V9+` scripts.
+- **Historical migrations (V1–V35) must NOT be modified** — any schema changes go into new `V36+` scripts.
 - In production, **never** manually edit `flyway_schema_history`.
-- For local dev reset: `docker compose down -v && docker compose up -d` (see [启动重启1.md](启动重启1.md#9-本地重置数据库)).
+- For local dev reset: `docker compose down -v && docker compose up -d` (see [启动重启1.md](启动重启1.md#4-本地重置数据库)).
 
 ## Running Tests
 

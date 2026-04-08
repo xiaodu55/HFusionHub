@@ -9,7 +9,7 @@ HFusionHub 是一个企业级 AI Agent 平台，结合 Java 后端的稳定性�
 ### 核心特性
 
 - **Java 后端**：Spring Boot 3.x + MyBatis Plus + MySQL + Redis
-- **Python AI 层**：FastAPI + Milvus Lite
+- **Python AI 层**：FastAPI + Milvus Lite（开发）/ Milvus Standalone（生产）
 - **Agent 核心**：ReAct 循环、工具调用、会话记忆
 - **RAG 引擎**：多路检索、向量召回、语义分块、知识来源持久化
 - **Web 界面**：Vue 3 + Vite + TypeScript + Tailwind CSS
@@ -77,7 +77,7 @@ HFusionHub 是一个企业级 AI Agent 平台，结合 Java 后端的稳定性�
 ├─────────────────────────────────────────────────────────┤
 │  • ReAct Agent循环        • 工具调用系统                  │
 │  • RAG检索引擎            • 会话记忆管理                  │
-│  • 向量数据库 (Milvus Lite) • 流式输出 (SSE)            │
+│  • 向量数据库 (Milvus Lite/Standalone) • 流式输出 (SSE)            │
 │  • LLM调用 (DeepSeek)     • 多模型路由                   │
 │  • 知识来源格式化                                       │
 └─────────────────────┬───────────────────────────────────┘
@@ -87,7 +87,7 @@ HFusionHub 是一个企业级 AI Agent 平台，结合 Java 后端的稳定性�
 ├─────────────────────────────────────────────────────────┤
 │  • MySQL 8.0 (用户、知识库、对话、知识来源)               │
 │  • Redis 7.x (缓存、会话、限流)                           │
-│  • Milvus Lite (向量存储，文件模式)                       │
+│  • Milvus Lite / Standalone (向量存储)                       │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -152,6 +152,9 @@ cd HFusionHub
 # 必须使用自己的随机值；请勿提交 .env 文件
 export MYSQL_ROOT_PASSWORD='replace-with-a-strong-password'
 export MYSQL_PASSWORD='replace-with-a-strong-password'
+export PLUGIN_RUNNER_TOKEN='replace-with-a-long-random-token'
+export MINIO_ROOT_USER='minioadmin'
+export MINIO_ROOT_PASSWORD='minioadmin'
 export DB_PASSWORD="$MYSQL_PASSWORD"
 export CALLBACK_SECRET='replace-with-a-long-random-secret'
 export PYTHON_AI_INTERNAL_TOKEN='replace-with-a-second-long-random-secret'
@@ -188,11 +191,15 @@ npm run dev
 **服务端口**：
 | 服务 | 端口 | 说明 |
 |------|------|------|
-| 前端 | 3000 | Vite开发服务器 |
+| 前端 (dev) | 3000 | Vite开发服务器 |
+| 前端 (prod) | 80 | Nginx静态服务 |
 | Java 后端 | 8080 | Spring Boot |
 | Python AI | 9000 | FastAPI |
 | MySQL | 3306 | Docker容器 |
 | Redis | 6379 | Docker容器 |
+| MinIO | 9001, 9002 | 对象存储（控制台, API） |
+| Plugin Runner | 9100 | 插件沙箱执行 |
+| Milvus (prod) | 19530 | 向量数据库 |
 
 **启动后访问**：
 - 前端：http://localhost:3000
@@ -217,7 +224,7 @@ npm run dev
 | KnowledgeGraph | 知识图谱 | 59 |
 | Utils | 公共工具 | 36 |
 
-**RAG 模块：333 个测试用例，100% 通过 | Python AI 总计：655+ 测试用例**
+**RAG 模块：337 个测试用例，100% 通过 | Python AI 总计：1220+ 测试用例**
 
 ## 🚀 启动指南
 
@@ -254,4 +261,4 @@ npm run dev
 
 ## 📄 许可证
 
-计划使用 Apache-2.0 许可证；正式公开发布前需要补齐根目录 `LICENSE` 文件。
+Apache-2.0 许可证。详见 [LICENSE](LICENSE) 文件。

@@ -22,8 +22,8 @@ The database `hfusionhub` is managed via Flyway migrations in `java-backend/src/
 
 ## Migration Rules
 
-1. **Historical migrations (V1–V9) are immutable.** Never modify them.
-2. **All future schema changes must use new V9+ scripts.**
+1. **Historical migrations (V1–V35) are immutable.** Never modify them.
+2. **All future schema changes must use new V36+ scripts.**
 3. **Production**: Never manually edit `flyway_schema_history`. Create new migration scripts.
 4. **Local dev reset**: `docker compose down -v && docker compose up -d` clears the database.
 
@@ -36,10 +36,9 @@ If you encounter `Migration checksum mismatch` during local development:
 cd docker
 docker compose down -v
 docker compose up -d
-
-# OR: fix checksums (keep data)
-# See docs/启动重启1.md, section 9, for exact reset commands
 ```
+
+See [docs/启动重启1.md](启动重启1.md#4-本地重置数据库) for detailed reset instructions.
 
 ## Core Tables
 
@@ -56,7 +55,6 @@ docker compose up -d
 | `memory_entry` | AI memory: entity facts, summaries, user preferences (V8) |
 | `system_notice` | Admin-published system notices (V9) |
 | `notice_recipient` | Per-user notification read tracking (V9) |
-| `memory_entry` | Persistent conversation summaries, entity facts, and user preferences |
 
 ## Entity Relationships
 
@@ -81,7 +79,7 @@ spring:
     password: ${DB_PASSWORD:}
 ```
 
-For containerized deployments, override the local default URL with `SPRING_DATASOURCE_URL`, for example `jdbc:mysql://mysql8:3306/hfusionhub?...`. Production Docker Compose already sets this; the Helm template still needs the equivalent override before production use.
+For containerized deployments, override the local default URL with `SPRING_DATASOURCE_URL`, for example `jdbc:mysql://mysql8:3306/hfusionhub?...`. Production Docker Compose and Helm chart already set this.
 
 ## ERD / Visual Schema
 
