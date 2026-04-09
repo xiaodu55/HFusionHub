@@ -10,46 +10,67 @@ HFusionHub 是一个企业级 AI Agent 平台，结合 Java 后端的稳定性�
 
 - **Java 后端**：Spring Boot 3.x + MyBatis Plus + MySQL + Redis
 - **Python AI 层**：FastAPI + Milvus Lite（开发）/ Milvus Standalone（生产）
-- **Agent 核心**：ReAct 循环、工具调用、会话记忆
-- **RAG 引擎**：多路检索、向量召回、语义分块、知识来源持久化
+- **Agent 核心**：ReAct 循环、多 Agent 协作、工具审批、Checkpoint、流式输出、结构化事件
+- **RAG 引擎**：多路检索、向量召回、语义分块、知识图谱、查询分解、上下文压缩、自我反思、证据完整性校验
 - **Web 界面**：Vue 3 + Vite + TypeScript + Tailwind CSS
+- **模型网关**：DeepSeek / Ollama / OpenAI 兼容，自动降级、熔断、速率限制、Token 计费
+- **构建中心**：Prompt 工作台（版本历史与回滚）、模型中心、工具中心、插件管理
+- **运营中心**：成本仪表板、工具审批、RAG 观测、长期记忆
+- **安全护栏**：Prompt 注入检测、内容审核、PII 脱敏（演示模式）
 
 ## 📋 功能模块
 
-### 1. 知识库管理（Java）
+### 1. 知识库管理（Java + Python）
 - 文档上传（PDF、DOCX、TXT、Markdown）
 - 文档解析（Apache Tika）
-- 知识库 CRUD
-- 权限管理
+- 知识库 CRUD + 回收站
+- 权限管理 + 多租户
 
 ### 2. Agent 核心（Python）
-- ReAct 循环实现
-- 工具注册与管理
-- 工具调用执行
-- 流式输出（SSE）
-- 知识来源持久化
+- ReAct 循环（意图识别 → 工具调用 → 审批拦截 → 自我反思）
+- 多 Agent 协作（retrieval / analysis / critic / synthesis）
+- 工具审批工作流（approve/reject + 审计追踪）
+- 流式输出（SSE + 结构化 step_completed / approval_required 事件）
+- Checkpoint 持久化（暂停/恢复/重试）
+- Agent 观测（Trace、告警、恢复调度）
+- Agent 评测（数据集、Case、Run）
 
 ### 3. RAG 引擎（Python）
-- 意图识别（IntentClassifier）
-- 查询分解（QueryDecomposer）
-- 上下文压缩（ContextCompressor）
-- 自我反思（SelfReflector）
-- 智能检索路由（QueryRouter）
-- 多轮检索策略（MultiTurnStrategy）
-- 知识图谱（KnowledgeGraph）
+- 意图分类（IntentClassifier）→ 自适应检索规划
+- 查询分解（QueryDecomposer）→ 并行子问题执行
+- 多路检索（向量 + BM25 + 图谱 + RRF 融合）
+- 上下文压缩（ContextCompressor）+ 证据完整性守卫
+- 自我反思（SelfReflector）+ 回答质量评测
+- Groundedness 回退：压缩导致证据丢失时自动用原始上下文重试
 
-### 4. 工具系统（Python）
-- 知识库检索工具
-- 计算器工具
-- 天气查询工具
-- 自定义工具扩展
+### 4. 工具系统（Python + MCP）
+- 7 个内置工具：search_knowledge_base, read_chunk, list_document_chunks, calculator, time, web_search, write_note
+- MCP JSON-RPC 2.0 协议支持
+- 工具注册表（风险等级、权限门控、超时、版本门控）
+- Tool Calling 白名单 + 执行策略引擎
 
-### 5. 对话管理（Java + Python）
-- 多轮对话
-- 会话记忆
-- 历史记录
-- 上下文管理
-- 知识来源显示
+### 5. Prompt 工作台（Java + 前端）
+- 模板 CRUD + 发布/撤回生命周期
+- 版本快照（prompt_template_version）+ 一键回滚
+- 乐观锁并发保护（版本冲突 → HTTP 409）
+- 测试台 + 测试用例集批量回归
+
+### 6. 模型网关（Python）
+- 多供应商：DeepSeek / Ollama / OpenAI 兼容
+- 自动降级链 + 熔断器 + Token 桶速率限制
+- Token 用量累加器 → Java 后端成本追踪
+- 模型别名解析（provider:model 显式路由）
+
+### 7. 对话管理（Java + Python）
+- 多轮对话 + SSE 流式
+- 会话记忆 + 长期记忆持久化
+- 上下文管理 + 知识来源引用显示
+
+### 8. 成本与运营
+- 成本仪表板（汇总、日趋势、模型分布）
+- Agent 任务执行中心（状态过滤、重试、取消）
+- RAG 观测（检索评估、质量评分）
+- 通知与告警（Agent 失败率、引用缺失率）
 
 ## 🏗️ 技术架构
 
@@ -78,7 +99,7 @@ HFusionHub 是一个企业级 AI Agent 平台，结合 Java 后端的稳定性�
 │  • ReAct Agent循环        • 工具调用系统                  │
 │  • RAG检索引擎            • 会话记忆管理                  │
 │  • 向量数据库 (Milvus Lite/Standalone) • 流式输出 (SSE)            │
-│  • LLM调用 (DeepSeek)     • 多模型路由                   │
+│  • LLM调用 (DeepSeek/Ollama/OpenAI兼容)  • 多模型路由 + 降级      │
 │  • 知识来源格式化                                       │
 └─────────────────────┬───────────────────────────────────┘
                       │
@@ -113,12 +134,14 @@ HFusionHub/
 │   ├── app/
 │   │   ├── api/                   # API 路由
 │   │   ├── core/
-│   │   │   ├── agent/             # Agent 循环
-│   │   │   ├── rag/               # RAG 引擎 (8个模块)
-│   │   │   ├── llm/               # LLM 接口
+│   │   │   ├── agent/             # Agent 系统 (ReAct、多Agent、审批、Checkpoint)
+│   │   │   ├── rag/               # RAG 引擎 (~23 模块)
+│   │   │   ├── llm/               # LLM 接口 (DeepSeek/Ollama/Mock/Failover/ModelGateway)
 │   │   │   ├── embedding/         # 向量化
-│   │   │   ├── vectorstore/       # 向量存储
-│   │   │   ├── tools/             # 工具系统
+│   │   │   ├── vectorstore/       # 向量存储 (Milvus)
+│   │   │   ├── tools/             # 工具系统 (7 工具 + MCP)
+│   │   │   ├── chunker/           # 语义分块
+│   │   │   ├── policy/            # 策略引擎 (护栏、脱敏)
 │   │   │   └── parser/            # 文档解析
 │   │   ├── models/                # 数据模型
 │   │   └── utils/                 # 工具函数
@@ -224,7 +247,7 @@ npm run dev
 | KnowledgeGraph | 知识图谱 | 59 |
 | Utils | 公共工具 | 36 |
 
-**RAG 模块：337 个测试用例，100% 通过 | Python AI 总计：1220+ 测试用例**
+**RAG 模块：337 个测试用例，100% 通过 | Python AI 总计：1214+ 测试用例 | Java 后端：401 测试用例**
 
 ## 🚀 启动指南
 
