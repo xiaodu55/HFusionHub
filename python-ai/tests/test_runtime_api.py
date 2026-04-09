@@ -10,13 +10,17 @@ def test_runtime_overview_requires_the_internal_token():
     assert client.get("/api/runtime/overview").status_code == 401
 
 
+async def _fake_probe_ollama():
+    return True, {"qwen2.5:latest", "qwen3-embedding:8b-fp16"}
+
+
 def test_runtime_overview_is_safe_and_reports_runtime_state(monkeypatch):
     import app.api.runtime as runtime
 
     monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "test-key")
     monkeypatch.setattr(config, "DEEPSEEK_MODEL", "deepseek-test")
     monkeypatch.setattr(config, "EMBEDDING_ALLOW_FALLBACK", False)
-    monkeypatch.setattr(runtime, "_probe_ollama", lambda: (True, {"qwen2.5:latest", "qwen3-embedding:8b-fp16"}))
+    monkeypatch.setattr(runtime, "_probe_ollama", _fake_probe_ollama)
     monkeypatch.setattr(
         runtime,
         "vector_store_status",

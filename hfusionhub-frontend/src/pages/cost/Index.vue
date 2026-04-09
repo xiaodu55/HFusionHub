@@ -192,27 +192,43 @@ onMounted(loadData)
         </Card>
       </div>
 
-      <!-- Recent usage table -->
+      <!-- Model usage detail table -->
       <Card>
         <CardHeader>
-          <CardTitle class="text-base">最近使用记录</CardTitle>
-          <CardDescription>最近 20 条模型调用</CardDescription>
+          <CardTitle class="text-base">模型用量明细</CardTitle>
+          <CardDescription>{{ days }} 天内各模型的调用统计</CardDescription>
         </CardHeader>
         <CardContent>
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
               <thead>
                 <tr class="border-b text-left text-xs text-muted-foreground">
-                  <th class="py-2 pr-4">日期</th>
                   <th class="py-2 pr-4">模型</th>
-                  <th class="py-2 pr-4 text-right">Token</th>
-                  <th class="py-2 pr-4 text-right">费用</th>
-                  <th class="py-2">类型</th>
+                  <th class="py-2 pr-4 text-right">Token 用量</th>
+                  <th class="py-2 pr-4 text-right">费用 (USD)</th>
+                  <th class="py-2 text-right">占比</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-if="dailyCosts.length === 0">
-                  <td colspan="5" class="py-8 text-center text-muted-foreground">暂无记录</td>
+                <tr v-if="modelBreakdown.length === 0">
+                  <td colspan="4" class="py-8 text-center text-muted-foreground">暂无记录</td>
+                </tr>
+                <tr
+                  v-for="m in modelBreakdown"
+                  :key="m.model"
+                  class="border-b border-border/50 hover:bg-muted/30 transition-colors"
+                >
+                  <td class="py-2.5 pr-4 font-medium">{{ m.model }}</td>
+                  <td class="py-2.5 pr-4 text-right font-mono text-xs">{{ m.tokens.toLocaleString() }}</td>
+                  <td class="py-2.5 pr-4 text-right font-mono text-xs">${{ m.cost.toFixed(6) }}</td>
+                  <td class="py-2.5 text-right">
+                    <div class="flex items-center justify-end gap-2">
+                      <div class="h-1.5 w-16 rounded-full bg-muted overflow-hidden">
+                        <div class="h-full bg-primary rounded-full transition-all" :style="{ width: m.percentage + '%' }" />
+                      </div>
+                      <span class="text-xs text-muted-foreground w-10 text-right">{{ m.percentage.toFixed(1) }}%</span>
+                    </div>
+                  </td>
                 </tr>
               </tbody>
             </table>

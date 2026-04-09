@@ -29,23 +29,25 @@ def _environment_enabled(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _probe_ollama() -> tuple[bool, set[str]]:
+async def _probe_ollama() -> tuple[bool, set[str]]:
     """Probe the local provider once with a short timeout.
 
     This keeps the UI honest about local model availability while ensuring an
     unreachable optional Ollama installation cannot delay the page for long.
+    Uses httpx.AsyncClient to avoid blocking the FastAPI event loop.
     """
     base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
     try:
-        response = httpx.get(f"{base_url}/api/tags", timeout=1.5)
-        if response.status_code != 200:
-            return False, set()
-        models = response.json().get("models", [])
-        return True, {
-            str(item.get("name", ""))
-            for item in models
-            if isinstance(item, dict) and item.get("name")
-        }
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            response = await client.get(f"{base_url}/api/tags")
+            if response.status_code != 200:
+                return False, set()
+            models = response.json().get("models", [])
+            return True, {
+                str(item.get("name", ""))
+                for item in models
+                if isinstance(item, dict) and item.get("name")
+            }
     except Exception:
         return False, set()
 
@@ -57,8 +59,8 @@ def _model_available(configured: str, models: set[str]) -> bool:
     return any(model.split(":", 1)[0] == configured.split(":", 1)[0] for model in models)
 
 
-def _status_payload() -> dict[str, Any]:
-    ollama_reachable, ollama_models = _probe_ollama()
+async def _status_payload() -> dict[str, Any]:
+    ollama_reachable, ollama_models = await _probe_ollama()
     ollama_chat_model = os.getenv("OLLAMA_MODEL", "qwen2.5:latest")
     ollama_embedding_model = os.getenv("OLLAMA_EMBEDDING_MODEL", "qwen3-embedding:8b-fp16")
     deepseek_configured = bool(config.DEEPSEEK_API_KEY)
@@ -194,4 +196,4 @@ def _status_payload() -> dict[str, Any]:
 @router.get("/api/runtime/overview")
 async def runtime_overview() -> dict[str, Any]:
     """Return the current safe AI runtime snapshot for authenticated operators."""
-    return _status_payload()
+    return await _status_payload()

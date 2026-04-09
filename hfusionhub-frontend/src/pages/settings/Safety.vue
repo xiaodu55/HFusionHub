@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Shield, ShieldAlert, ShieldCheck, Eye, EyeOff, RefreshCw } from 'lucide-vue-next'
+import { Shield, ShieldAlert, ShieldCheck, Eye, EyeOff, RefreshCw, TriangleAlert } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -59,9 +59,14 @@ async function previewMask() {
   try {
     // Simulate PII masking
     let masked = previewInput.value
-    masked = masked.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[EMAIL]')
+    // Chinese mainland mobile: 13x, 14x, 15x, 16x, 17x, 18x, 19x
     masked = masked.replace(/\b1[3-9]\d{9}\b/g, '[PHONE]')
+    // Email addresses
+    masked = masked.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[EMAIL]')
+    // Chinese ID card number (18 digits, last may be X)
     masked = masked.replace(/\b\d{17}[\dXx]\b/g, '[ID_NUM]')
+    // IPv4 addresses
+    masked = masked.replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[IP_ADDR]')
     previewOutput.value = masked
   } catch {
     previewOutput.value = '脱敏预览失败'
@@ -89,6 +94,15 @@ onMounted(loadStatus)
       <p class="text-sm text-muted-foreground mt-1">管理 AI 安全策略：注入检测、内容审核、敏感信息脱敏</p>
     </div>
 
+    <!-- Demo mode banner -->
+    <div class="flex items-start gap-3 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-4 text-sm leading-6 text-amber-100/90">
+      <TriangleAlert class="mt-0.5 h-4 w-4 shrink-0" />
+      <div>
+        <p class="font-medium">演示模式</p>
+        <p class="mt-1">此页面当前展示的是模拟数据，安全策略开关仅反映本地状态，不会持久化到服务端。正式环境需接入 <code class="rounded bg-amber-400/10 px-1.5 py-0.5 text-xs">/api/guardrails/status</code> 端点。</p>
+      </div>
+    </div>
+
     <div v-if="loading" class="text-center py-16 text-muted-foreground">加载中...</div>
 
     <template v-else>
@@ -102,6 +116,7 @@ onMounted(loadStatus)
           </CardHeader>
           <CardContent>
             <p class="text-2xl font-bold">{{ stats.totalChecks.toLocaleString() }}</p>
+            <p class="text-[10px] text-amber-400/70 mt-0.5">模拟数据 · 非实时</p>
           </CardContent>
         </Card>
         <Card>
@@ -125,7 +140,7 @@ onMounted(loadStatus)
           </CardHeader>
           <CardContent>
             <p class="text-2xl font-bold">{{ stats.piiMasked.toLocaleString() }}</p>
-            <p class="text-xs text-muted-foreground mt-1">最近检查: {{ stats.lastCheck ? formatDateTime(stats.lastCheck) : '-' }}</p>
+            <p class="text-[10px] text-amber-400/70 mt-0.5">模拟数据 · 非实时</p>
           </CardContent>
         </Card>
       </div>

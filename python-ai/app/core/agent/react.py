@@ -269,6 +269,8 @@ class ReactAgent(Agent):
 
         steps = []
         final_answer = None
+        assistant_text = None
+        response = None
 
         for step_num in range(self.max_steps):
             response = await llm.chat(messages=messages, temperature=0.7)
@@ -306,17 +308,14 @@ class ReactAgent(Agent):
                     break
 
         if final_answer is None:
-            try:
-                final_answer = assistant_text
-            except UnboundLocalError:
-                final_answer = "无法生成回答"
+            final_answer = assistant_text if assistant_text is not None else "无法生成回答"
 
         return AgentResponse(
             content=final_answer,
             answer=final_answer,
             steps=steps,
             model=llm.model if hasattr(llm, 'model') else "unknown",
-            token_count=response.token_count if 'response' in locals() else 0,
+            token_count=response.token_count if response is not None else 0,
             finish_reason="stop",
             status="completed",
             sources=[],
@@ -809,6 +808,8 @@ class ReactAgent(Agent):
 
         # ReAct loop — track last response for token_count reporting
         _last_response_token_count = 0
+        assistant_text = None
+        response = None
 
         for step_num in range(self.max_steps):
             response = await llm.chat(messages=messages, temperature=0.7)
@@ -896,7 +897,7 @@ class ReactAgent(Agent):
                     break
 
         if final_answer is None:
-            final_answer = assistant_text if 'assistant_text' in locals() else "无法生成回答"
+            final_answer = assistant_text if assistant_text is not None else "无法生成回答"
 
         # Deduplicate sources by chunk_id.
         unique_sources: Dict[str, Dict[str, Any]] = {}

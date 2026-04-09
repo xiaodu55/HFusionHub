@@ -1,5 +1,7 @@
 """LLM provider selection with runtime failover for configured providers."""
 
+import asyncio
+import concurrent.futures
 import logging
 import os
 import time
@@ -26,9 +28,31 @@ _OLLAMA_PROBE_TIMEOUT_SECONDS = 0.5
 _OLLAMA_PROBE_TTL_SECONDS = 30.0
 _ollama_probe_cache: Dict[str, Tuple[float, bool]] = {}
 
+# Shared thread-pool for non-blocking HTTP probes — avoids blocking the
+# FastAPI event loop when get_llm() is called from an async context.
+_probe_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="llm-probe")
+
+
+def _probe_ollama_sync(base_url: str) -> bool:
+    """Perform a single synchronous HTTP probe (runs in a thread-pool)."""
+    try:
+        import httpx
+
+        return httpx.get(
+            f"{base_url}/api/tags", timeout=_OLLAMA_PROBE_TIMEOUT_SECONDS
+        ).status_code == 200
+    except Exception as exc:
+        logger.debug("Ollama probe failed for %s: %s", base_url, exc)
+        return False
+
 
 def _is_ollama_available(base_url: str) -> bool:
-    """Return cached Ollama availability, refreshing at a bounded interval."""
+    """Return cached Ollama availability, refreshing at a bounded interval.
+
+    When called from an async context (the common case in FastAPI handlers),
+    the probe runs in a thread-pool to avoid blocking the event loop.
+    When called from a synchronous context, it runs inline.
+    """
     normalized_url = base_url.rstrip("/")
     now = time.monotonic()
     cached = _ollama_probe_cache.get(normalized_url)
@@ -36,14 +60,15 @@ def _is_ollama_available(base_url: str) -> bool:
         return cached[1]
 
     try:
-        import httpx
-
-        available = httpx.get(
-            f"{normalized_url}/api/tags", timeout=_OLLAMA_PROBE_TIMEOUT_SECONDS
-        ).status_code == 200
-    except Exception as exc:
-        logger.debug("Ollama probe failed for %s: %s", normalized_url, exc)
-        available = False
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No running event loop — synchronous context; probe inline.
+        available = _probe_ollama_sync(normalized_url)
+    else:
+        # Async context — offload to thread pool so the event loop stays free.
+        available = loop.run_in_executor(
+            _probe_executor, _probe_ollama_sync, normalized_url
+        ).result(timeout=_OLLAMA_PROBE_TIMEOUT_SECONDS + 0.5)
 
     _ollama_probe_cache[normalized_url] = (now, available)
     return available
