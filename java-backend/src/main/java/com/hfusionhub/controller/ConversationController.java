@@ -3,6 +3,7 @@ package com.hfusionhub.controller;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.common.utils.JwtUtils;
+import com.hfusionhub.tenant.TenantContext;
 import com.hfusionhub.dto.ConversationCreateDTO;
 import com.hfusionhub.dto.ConversationInfoDTO;
 import com.hfusionhub.dto.ConversationQueryDTO;
@@ -108,8 +109,9 @@ public class ConversationController {
         response.setHeader("Cache-Control", "no-cache");
         response.setHeader("Connection", "keep-alive");
 
-        // 在请求线程中提取用户ID
+        // 在请求线程中提取用户ID和租户上下文（线程池切换后 ThreadLocal 会丢失）
         Long currentUserId = JwtUtils.getCurrentUserId();
+        Long currentTenantId = TenantContext.getTenantId();
 
         // ── V13: 队列模式 — 入队后通过 SSE 订阅状态变更 ──
         if (agentQueueEnabled) {
@@ -151,13 +153,15 @@ public class ConversationController {
         // 立即发送一个空事件，强制 Spring 刷新响应头，让前端 fetch() 能快速返回
         emitter.send(SseEmitter.event().data(""));
 
-        // 使用线程池执行异步任务
+        // 使用线程池执行异步任务，通过 runAs 保留租户上下文
         sseTaskExecutor.execute(() -> {
+            TenantContext.runAs(currentTenantId, () -> {
             try {
                 conversationService.sendMessageStream(dto, emitter, currentUserId, cancelled);
             } catch (Exception e) {
                 emitter.completeWithError(e);
             }
+            });
         });
 
         return emitter;

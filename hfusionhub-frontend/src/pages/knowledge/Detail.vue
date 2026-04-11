@@ -173,11 +173,30 @@ const confirmStartVectorization = async () => {
   }
 }
 
+const reparseLoading = ref<Set<number>>(new Set())
+
 const handleResetDocument = async (doc: Document) => {
+  const s = new Set(reparseLoading.value)
+  s.add(doc.id)
+  reparseLoading.value = s
   try {
+    // 1. 重置文档状态
     await resetDocument(doc)
+    // 2. 直接启动向量化（跳过模型对话框，使用默认模型）
+    await startVectorization(doc, {
+      onSuccess: () => {
+        loadDocuments()
+        const s2 = new Set(reparseLoading.value)
+        s2.delete(doc.id)
+        reparseLoading.value = s2
+      },
+    })
+    toast.success('已开始重新解析')
   } catch (error) {
-    toast.error('重置文档失败')
+    const s2 = new Set(reparseLoading.value)
+    s2.delete(doc.id)
+    reparseLoading.value = s2
+    toast.error('重新解析失败')
   }
 }
 
@@ -302,7 +321,7 @@ onMounted(() => {
 
               <!-- 开始解析按钮 -->
               <Button
-                v-if="doc.status === 0"
+                v-if="doc.status === 0 && !reparseLoading.has(doc.id)"
                 variant="outline"
                 size="sm"
                 :disabled="knowledgeBase?.status !== 0 || processingDocs.has(doc.id)"
@@ -313,16 +332,17 @@ onMounted(() => {
                 {{ processingDocs.has(doc.id) ? '处理中...' : '开始解析' }}
               </Button>
 
-              <!-- 重新解析按钮（处理中或失败时显示） -->
+              <!-- 重新解析按钮（处理中或失败时显示，以及正在重新解析时显示） -->
               <Button
-                v-if="doc.status === 1 || doc.status === 3"
+                v-if="doc.status === 1 || doc.status === 3 || reparseLoading.has(doc.id)"
                 variant="outline"
                 size="sm"
-                :disabled="knowledgeBase?.status !== 0"
+                :disabled="knowledgeBase?.status !== 0 || reparseLoading.has(doc.id)"
                 @click="handleResetDocument(doc)"
               >
-                <RefreshCw class="mr-2 h-4 w-4" />
-                重新解析
+                <Loader2 v-if="reparseLoading.has(doc.id)" class="mr-2 h-4 w-4 animate-spin" />
+                <RefreshCw v-else class="mr-2 h-4 w-4" />
+                {{ reparseLoading.has(doc.id) ? '重新解析中...' : '重新解析' }}
               </Button>
 
               <!-- 查看分块按钮 -->

@@ -10,11 +10,15 @@ import logging
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Configure logging — include trace_id from contextvars via LoggerAdapter
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [%(trace_id)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
+class SafeFormatter(logging.Formatter):
+    def format(self, record):
+        if not hasattr(record, 'trace_id'):
+            record.trace_id = '-'
+        return super().format(record)
+
+_handler = logging.StreamHandler(sys.stdout)
+_handler.setFormatter(SafeFormatter("%(asctime)s [%(levelname)s] [%(trace_id)s] %(name)s: %(message)s"))
+logging.basicConfig(level=logging.INFO, handlers=[_handler], force=True)
 
 # Inject trace_id into every log record via a filter
 class TraceFilter(logging.Filter):

@@ -296,11 +296,16 @@ public class AiClient {
         String url = baseUrl + "/api/chat/stream";
         log.info("Starting streaming request to Python AI: {}, requestId: {}", url, requestId);
 
+        // Capture headers at call time — TenantContext is ThreadLocal-based
+        // and may be null when the WebClient request executes on a Netty
+        // event-loop thread during reactive subscription.
+        final HttpHeaders capturedHeaders = internalHeaders();
+
         return webClient.post()
                 .uri(url)
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.TEXT_EVENT_STREAM)
-                .headers(this::addInternalToken)
+                .headers(h -> h.addAll(capturedHeaders))
                 .bodyValue(request)
                 .retrieve()
                 .onStatus(
@@ -394,11 +399,16 @@ public class AiClient {
         log.info("Starting Agent V1 streaming request to Python AI: {}, requestId: {}, userId: {}",
                 url, requestId, userId);
 
+        // Capture headers at call time — TenantContext is ThreadLocal-based
+        // and may be null when the WebClient request executes on a Netty
+        // event-loop thread during reactive subscription.
+        final HttpHeaders capturedV1Headers = internalHeaders();
+
         return webClient.post()
                 .uri(url)
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.TEXT_EVENT_STREAM)
-                .headers(this::addInternalToken)
+                .headers(h -> h.addAll(capturedV1Headers))
                 .bodyValue(request)
                 .retrieve()
                 .onStatus(

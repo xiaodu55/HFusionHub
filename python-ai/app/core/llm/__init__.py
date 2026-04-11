@@ -66,9 +66,8 @@ def _is_ollama_available(base_url: str) -> bool:
         available = _probe_ollama_sync(normalized_url)
     else:
         # Async context — offload to thread pool so the event loop stays free.
-        available = loop.run_in_executor(
-            _probe_executor, _probe_ollama_sync, normalized_url
-        ).result(timeout=_OLLAMA_PROBE_TIMEOUT_SECONDS + 0.5)
+        future = _probe_executor.submit(_probe_ollama_sync, normalized_url)
+        available = future.result(timeout=_OLLAMA_PROBE_TIMEOUT_SECONDS + 0.5)
 
     _ollama_probe_cache[normalized_url] = (now, available)
     return available
