@@ -9,6 +9,7 @@ import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.TenantMapper;
 import com.hfusionhub.mapper.TenantMemberMapper;
 import com.hfusionhub.mapper.UserMapper;
+import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -40,44 +41,49 @@ public class AdminInitializer implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        // Ensure default tenant exists (for backward compat)
-        ensureDefaultTenant();
+        // Run as system scope to bypass tenant-line interceptor during bootstrapping.
+        // The tenant and user tables are cross-tenant resources that must be
+        // accessible before any tenant context exists.
+        TenantContext.runAsSystem(() -> {
+            // Ensure default tenant exists (for backward compat)
+            ensureDefaultTenant();
 
-        // Create/update admin user
-        if (adminPassword == null || adminPassword.isBlank()) {
-            log.warn("ADMIN_PASSWORD is not set. Admin user will NOT be created. "
-                    + "Set the ADMIN_PASSWORD environment variable to bootstrap the admin account.");
-            return;
-        }
-
-        User admin = userMapper.selectOne(
-                new LambdaQueryWrapper<User>().eq(User::getUsername, adminUsername));
-
-        if (admin == null) {
-            admin = new User();
-            admin.setUsername(adminUsername);
-            admin.setPassword(BCrypt.hashpw(adminPassword));
-            admin.setNickname("Administrator");
-            admin.setRole(CommonConstants.ROLE_ADMIN);
-            admin.setStatus(0);
-            admin.setTenantId(1L);
-            admin.setPlatformAdmin(true);
-            userMapper.insert(admin);
-            log.info("Admin user '{}' created (platform admin, tenant=1).", adminUsername);
-        } else {
-            // Ensure existing admin has platform_admin flag
-            if (!Boolean.TRUE.equals(admin.getPlatformAdmin())) {
-                admin.setPlatformAdmin(true);
-                userMapper.updateById(admin);
+            // Create/update admin user
+            if (adminPassword == null || adminPassword.isBlank()) {
+                log.warn("ADMIN_PASSWORD is not set. Admin user will NOT be created. "
+                        + "Set the ADMIN_PASSWORD environment variable to bootstrap the admin account.");
+                return;
             }
-            if (!BCrypt.checkpw(adminPassword, admin.getPassword())) {
+
+            User admin = userMapper.selectOne(
+                    new LambdaQueryWrapper<User>().eq(User::getUsername, adminUsername));
+
+            if (admin == null) {
+                admin = new User();
+                admin.setUsername(adminUsername);
                 admin.setPassword(BCrypt.hashpw(adminPassword));
-                userMapper.updateById(admin);
-                log.info("Admin user '{}' password updated from ADMIN_PASSWORD.", adminUsername);
+                admin.setNickname("Administrator");
+                admin.setRole(CommonConstants.ROLE_ADMIN);
+                admin.setStatus(0);
+                admin.setTenantId(1L);
+                admin.setPlatformAdmin(true);
+                userMapper.insert(admin);
+                log.info("Admin user '{}' created (platform admin, tenant=1).", adminUsername);
             } else {
-                log.info("Admin user '{}' already configured correctly.", adminUsername);
+                // Ensure existing admin has platform_admin flag
+                if (!Boolean.TRUE.equals(admin.getPlatformAdmin())) {
+                    admin.setPlatformAdmin(true);
+                    userMapper.updateById(admin);
+                }
+                if (!BCrypt.checkpw(adminPassword, admin.getPassword())) {
+                    admin.setPassword(BCrypt.hashpw(adminPassword));
+                    userMapper.updateById(admin);
+                    log.info("Admin user '{}' password updated from ADMIN_PASSWORD.", adminUsername);
+                } else {
+                    log.info("Admin user '{}' already configured correctly.", adminUsername);
+                }
             }
-        }
+        });
     }
 
     private void ensureDefaultTenant() {

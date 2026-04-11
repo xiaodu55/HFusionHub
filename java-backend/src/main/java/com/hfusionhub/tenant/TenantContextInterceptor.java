@@ -86,7 +86,10 @@ public class TenantContextInterceptor implements HandlerInterceptor {
                 }
 
                 // 1b. User's own tenant, validated against tenant_member membership.
-                if (!isActiveMember(user.getTenantId(), userId)) {
+                // Platform admins bypass membership check — they are cross-tenant
+                // and bootstrapped without a tenant_member record.
+                if (!Boolean.TRUE.equals(user.getPlatformAdmin())
+                        && !isActiveMember(user.getTenantId(), userId)) {
                     log.warn("User {} is not an active member of tenant {}", userId, user.getTenantId());
                     return rejectNoTenant(request, response);
                 }

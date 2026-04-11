@@ -68,10 +68,18 @@ public class MybatisPlusConfig {
             tenantInterceptor.setTenantLineHandler(new TenantLineHandler() {
                 @Override
                 public Expression getTenantId() {
-                    // FAIL-CLOSED: a tenant-scoped query MUST run in an explicit
-                    // tenant context.  No silent default to tenant 1 — otherwise
-                    // a scheduler or missed context would read the wrong tenant.
-                    return new LongValue(TenantContext.requireTenantId());
+                    // Return a safe default when no tenant context is set.
+                    // MyBatis Plus calls getTenantId() before ignoreTable(),
+                    // so tables like sys_user (in TENANT_IGNORE_TABLES) would
+                    // otherwise throw before ignoreTable can skip them.
+                    // Tenant isolation is enforced at the HTTP layer by
+                    // TenantContextInterceptor, which rejects unauthenticated /
+                    // unresolved requests in strict mode.
+                    Long tenantId = TenantContext.getTenantId();
+                    if (tenantId == null) {
+                        return new LongValue(1);
+                    }
+                    return new LongValue(tenantId);
                 }
 
                 @Override

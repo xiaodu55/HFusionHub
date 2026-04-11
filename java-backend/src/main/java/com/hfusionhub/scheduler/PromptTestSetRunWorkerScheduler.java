@@ -230,7 +230,7 @@ public class PromptTestSetRunWorkerScheduler implements ApplicationListener<Appl
 
     private void recoverStaleRuns() {
         try {
-            promptTestSetService.markStaleRunsFailed(staleRunningMinutes);
+            TenantContext.runAsSystem(() -> promptTestSetService.markStaleRunsFailed(staleRunningMinutes));
         } catch (Exception e) {
             log.error("Prompt test set run recovery error", e);
         }
