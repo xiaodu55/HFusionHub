@@ -63,11 +63,19 @@ def _is_ollama_available(base_url: str) -> bool:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         # No running event loop — synchronous context; probe inline.
-        available = _probe_ollama_sync(normalized_url)
+        try:
+            available = _probe_ollama_sync(normalized_url)
+        except Exception as exc:
+            logger.debug("Ollama sync probe failed: %s", exc)
+            available = False
     else:
         # Async context — offload to thread pool so the event loop stays free.
-        future = _probe_executor.submit(_probe_ollama_sync, normalized_url)
-        available = future.result(timeout=_OLLAMA_PROBE_TIMEOUT_SECONDS + 0.5)
+        try:
+            future = _probe_executor.submit(_probe_ollama_sync, normalized_url)
+            available = future.result(timeout=_OLLAMA_PROBE_TIMEOUT_SECONDS + 0.5)
+        except Exception as exc:
+            logger.debug("Ollama async probe failed: %s", exc)
+            available = False
 
     _ollama_probe_cache[normalized_url] = (now, available)
     return available

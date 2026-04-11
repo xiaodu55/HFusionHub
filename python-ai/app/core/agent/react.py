@@ -1303,9 +1303,7 @@ class ReactAgent(Agent):
                 "failed_tool": None,
                 "timestamp": _err_time.strftime("%Y-%m-%dT%H:%M:%S", _err_time.gmtime()),
             }, ensure_ascii=False)
-            if self._has_selected_knowledge_base():
-                yield NO_SUFFICIENT_EVIDENCE_REPLY
-                return
+            # ── Fallback: try answering without RAG context before giving up ──
             try:
                 llm = get_llm()
                 messages = [
@@ -1314,9 +1312,13 @@ class ReactAgent(Agent):
                 ]
                 async for chunk in llm.chat_stream(messages=messages, temperature=0.7, max_tokens=2048):
                     yield chunk
+                return
             except Exception as fallback_error:
                 logger.error(f"[RAG] Fallback LLM also failed: {fallback_error}", exc_info=True)
-                yield f"抱歉，AI服务出现异常，请稍后重试。错误信息：{str(e)}"
+            if self._has_selected_knowledge_base():
+                yield NO_SUFFICIENT_EVIDENCE_REPLY
+                return
+            yield f"抱歉，AI服务出现异常，请稍后重试。错误信息：{str(e)}"
 
     async def _run_stream_react(
         self,

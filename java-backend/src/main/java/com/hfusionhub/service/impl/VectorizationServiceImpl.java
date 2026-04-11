@@ -833,6 +833,11 @@ public class VectorizationServiceImpl implements VectorizationService {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("X-Internal-Token", internalApiToken);
+        // Propagate tenant context to Python AI service
+        Long tenantId = com.hfusionhub.tenant.TenantContext.getTenantId();
+        if (tenantId != null) {
+            headers.set("X-Tenant-Id", tenantId.toString());
+        }
         return headers;
     }
 

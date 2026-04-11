@@ -161,7 +161,7 @@ class FeatureFlagClient:
             resp = httpx.get(self._fetch_url, headers=headers, timeout=5.0)
             resp.raise_for_status()
             data = resp.json()
-            flags = data.get("data", [])
+            flags = data.get("data") or []
             new_cache = {}
             for f in flags:
                 key = f.get("flagKey")

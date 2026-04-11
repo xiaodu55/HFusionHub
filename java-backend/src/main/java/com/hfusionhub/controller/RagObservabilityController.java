@@ -217,5 +217,10 @@ public class RagObservabilityController {
             throw new BusinessException(StatusCode.INTERNAL_ERROR, "PYTHON_AI_INTERNAL_TOKEN 未配置");
         }
         headers.set("X-Internal-Token", internalApiToken);
+        // Propagate tenant context to Python AI service
+        Long tenantId = com.hfusionhub.tenant.TenantContext.getTenantId();
+        if (tenantId != null) {
+            headers.set("X-Tenant-Id", tenantId.toString());
+        }
     }
 }
