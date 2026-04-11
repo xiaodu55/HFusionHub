@@ -789,10 +789,17 @@ public class VectorizationServiceImpl implements VectorizationService {
 
         HttpHeaders headers = internalHeaders();
 
+        // Propagate the document tenant to Python so the hard tenant boundary
+        // (TenantMiddleware + require_tenant) can validate the request.
+        Long tenantId = resolveDocumentTenant(document);
+        if (tenantId != null) {
+            headers.set("X-Tenant-Id", String.valueOf(tenantId));
+        }
+
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
 
-        log.info("调用Python引擎: {}, 回调URL: {}, 模型: {}, 索引版本: {}", url, callbackUrl,
-                job.getEmbeddingModel(), job.getIndexVersion());
+        log.info("调用Python引擎: {}, 回调URL: {}, 模型: {}, 索引版本: {}, tenantId: {}", url, callbackUrl,
+                job.getEmbeddingModel(), job.getIndexVersion(), tenantId);
         ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
         log.info("Python引擎响应: {}", response.getBody());
     }

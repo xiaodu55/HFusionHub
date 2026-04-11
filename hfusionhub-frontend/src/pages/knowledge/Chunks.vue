@@ -61,9 +61,9 @@ const loadChunks = async () => {
     if (typeof chunksData === 'string') {
       chunksData = JSON.parse(chunksData)
     }
-    if (chunksData && chunksData.success) {
+    if (chunksData && chunksData.chunks) {
       chunks.value = chunksData.chunks || []
-      totalChunks.value = chunksData.total_chunks || 0
+      totalChunks.value = chunksData.totalChunks || 0
     }
   } catch (error) {
     console.error('加载分块失败:', error)
