@@ -11,6 +11,7 @@ import com.hfusionhub.dto.UserLoginDTO;
 import com.hfusionhub.dto.UserRegisterDTO;
 import com.hfusionhub.dto.UserUpdateDTO;
 import com.hfusionhub.entity.User;
+import com.hfusionhub.mapper.TenantMemberMapper;
 import com.hfusionhub.mapper.UserMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,6 +41,9 @@ class UserServiceImplTest {
     private UserMapper userMapper;
 
     @Mock
+    private TenantMemberMapper tenantMemberMapper;
+
+    @Mock
     private JwtUtils jwtUtils;
 
     @Mock
@@ -50,7 +54,7 @@ class UserServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        userService = new UserServiceImpl(userMapper, jwtUtils, rateLimiter);
+        userService = new UserServiceImpl(userMapper, tenantMemberMapper, jwtUtils, rateLimiter);
         jwtUtilsMock = org.mockito.Mockito.mockStatic(JwtUtils.class);
     }
 
@@ -157,7 +161,9 @@ class UserServiceImplTest {
         assertTrue(BCrypt.checkpw("secret-123", inserted.getPassword()));
         assertEquals("user", inserted.getRole());
         assertEquals(0, inserted.getStatus());
+        assertEquals(1L, inserted.getTenantId());
         assertEquals("alice", result.getUsername());
+        verify(tenantMemberMapper).insert(any());
     }
 
     @Test

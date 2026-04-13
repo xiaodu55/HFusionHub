@@ -7,6 +7,9 @@ package com.hfusionhub.common.constant;
  */
 public interface CommonConstants {
 
+    /** Default tenant used for self-service registration and single-tenant deployments. */
+    long DEFAULT_TENANT_ID = 1L;
+
     /**
      * 默认当前页
      */

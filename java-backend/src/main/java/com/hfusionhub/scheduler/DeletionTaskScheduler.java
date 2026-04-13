@@ -20,6 +20,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class DeletionTaskScheduler {
 
+    private static final int MAX_STEPS_PER_TASK = 10;
+
     private final DeletionService deletionService;
 
     @Scheduled(fixedDelay = 30_000)
@@ -34,7 +36,12 @@ public class DeletionTaskScheduler {
         log.debug("处理 {} 个待处理删除任务", tasks.size());
         for (DeletionTask task : tasks) {
             try {
-                deletionService.executeStep(task);
+                for (int step = 0; step < MAX_STEPS_PER_TASK; step++) {
+                    deletionService.executeStep(task);
+                    if (!"PENDING".equals(task.getStatus())) {
+                        break;
+                    }
+                }
             } catch (Exception e) {
                 log.error("删除任务执行异常: taskId={}, step={}", task.getId(), task.getStepIndex(), e);
                 deletionService.markFailed(task, e.getMessage());

@@ -17,6 +17,7 @@ const loading = ref(false)
 const summary = ref<CostSummary | null>(null)
 const dailyCosts = ref<DailyCost[]>([])
 const modelBreakdown = ref<ModelBreakdown[]>([])
+const totalModelTokens = computed(() => modelBreakdown.value.reduce((sum, model) => sum + model.totalTokens, 0))
 
 const timeRanges = [
   { label: '7 天', value: 7 },
@@ -26,12 +27,22 @@ const timeRanges = [
 
 const maxDailyCost = computed(() => {
   if (!dailyCosts.value.length) return 1
-  return Math.max(...dailyCosts.value.map(d => d.cost), 0.01)
+  return Math.max(...dailyCosts.value.map(d => d.totalCost), 0.01)
 })
+
+function modelPercentage(tokens: number) {
+  if (!totalModelTokens.value) return 0
+  return tokens / totalModelTokens.value * 100
+}
 
 const totalCostDisplay = computed(() => {
   if (!summary.value) return '$0.00'
   return '$' + summary.value.totalCost.toFixed(4)
+})
+
+const avgCostPerRequest = computed(() => {
+  if (!summary.value?.totalRequests) return 0
+  return summary.value.totalCost / summary.value.totalRequests
 })
 
 async function loadData() {
@@ -107,7 +118,7 @@ onMounted(loadData)
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <p class="text-2xl font-bold">${{ summary.projectedMonthlyCost.toFixed(4) }}</p>
+            <p class="text-2xl font-bold">${{ summary.estimatedMonthCost.toFixed(4) }}</p>
           </CardContent>
         </Card>
 
@@ -131,7 +142,7 @@ onMounted(loadData)
           <CardContent>
             <p class="text-2xl font-bold">{{ summary.totalRequests.toLocaleString() }}</p>
             <p class="text-xs text-muted-foreground mt-1">
-              均 ${{ summary.avgCostPerRequest.toFixed(6) }}/请求
+              均 ${{ avgCostPerRequest.toFixed(6) }}/请求
             </p>
           </CardContent>
         </Card>
@@ -151,15 +162,15 @@ onMounted(loadData)
             </div>
             <div v-else class="flex items-end gap-[2px] h-40">
               <div
-                v-for="d in dailyCosts" :key="d.date"
+                v-for="d in dailyCosts" :key="d.statDate"
                 class="flex-1 bg-primary/60 hover:bg-primary rounded-t-sm transition-colors min-w-[6px]"
-                :style="{ height: (d.cost / maxDailyCost * 100) + '%' }"
-                :title="`${d.date}: $${d.cost.toFixed(4)}`"
+                :style="{ height: (d.totalCost / maxDailyCost * 100) + '%' }"
+                :title="`${d.statDate}: $${d.totalCost.toFixed(4)}`"
               />
             </div>
             <div class="flex justify-between mt-2 text-[10px] text-muted-foreground">
-              <span>{{ dailyCosts[0]?.date || '' }}</span>
-              <span>{{ dailyCosts[dailyCosts.length - 1]?.date || '' }}</span>
+              <span>{{ dailyCosts[0]?.statDate || '' }}</span>
+              <span>{{ dailyCosts[dailyCosts.length - 1]?.statDate || '' }}</span>
             </div>
           </CardContent>
         </Card>
@@ -178,12 +189,12 @@ onMounted(loadData)
               <div v-for="m in modelBreakdown" :key="m.model" class="space-y-1">
                 <div class="flex items-center justify-between text-sm">
                   <span class="font-medium">{{ m.model }}</span>
-                  <span class="text-muted-foreground text-xs">${{ m.cost.toFixed(4) }} ({{ m.percentage.toFixed(0) }}%)</span>
+                  <span class="text-muted-foreground text-xs">${{ m.totalCost.toFixed(4) }} ({{ modelPercentage(m.totalTokens).toFixed(0) }}%)</span>
                 </div>
                 <div class="h-2 bg-muted rounded-full overflow-hidden">
                   <div
                     class="h-full bg-primary rounded-full transition-all"
-                    :style="{ width: m.percentage + '%' }"
+                    :style="{ width: modelPercentage(m.totalTokens) + '%' }"
                   />
                 </div>
               </div>
@@ -219,14 +230,14 @@ onMounted(loadData)
                   class="border-b border-border/50 hover:bg-muted/30 transition-colors"
                 >
                   <td class="py-2.5 pr-4 font-medium">{{ m.model }}</td>
-                  <td class="py-2.5 pr-4 text-right font-mono text-xs">{{ m.tokens.toLocaleString() }}</td>
-                  <td class="py-2.5 pr-4 text-right font-mono text-xs">${{ m.cost.toFixed(6) }}</td>
+                  <td class="py-2.5 pr-4 text-right font-mono text-xs">{{ m.totalTokens.toLocaleString() }}</td>
+                  <td class="py-2.5 pr-4 text-right font-mono text-xs">${{ m.totalCost.toFixed(6) }}</td>
                   <td class="py-2.5 text-right">
                     <div class="flex items-center justify-end gap-2">
                       <div class="h-1.5 w-16 rounded-full bg-muted overflow-hidden">
-                        <div class="h-full bg-primary rounded-full transition-all" :style="{ width: m.percentage + '%' }" />
+                        <div class="h-full bg-primary rounded-full transition-all" :style="{ width: modelPercentage(m.totalTokens) + '%' }" />
                       </div>
-                      <span class="text-xs text-muted-foreground w-10 text-right">{{ m.percentage.toFixed(1) }}%</span>
+                      <span class="text-xs text-muted-foreground w-10 text-right">{{ modelPercentage(m.totalTokens).toFixed(1) }}%</span>
                     </div>
                   </td>
                 </tr>

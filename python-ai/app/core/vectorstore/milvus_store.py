@@ -66,7 +66,7 @@ def vector_store_status() -> Dict[str, Any]:
     # we only force the migration path for the file-backed lite store.)
     store = _get_store()
     if config.VECTOR_STORE_MODE != "cluster":
-        ensure_collection()
+        store.ensure_collection()
     status = store.status()
     # A migration failure recorded on the store must flip readiness off.
     last_error = getattr(store, "_last_error", None)

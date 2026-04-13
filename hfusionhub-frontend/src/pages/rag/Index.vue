@@ -169,7 +169,7 @@ const clearFilters = async () => {
 
 const loadKnowledgeBases = async () => {
   const response = await knowledgeBaseApi.getMyKnowledgeBaseList({ page: 1, pageSize: 100 })
-  knowledgeBases.value = response.data.records
+  knowledgeBases.value = response.data.records.filter(item => item.status === 0)
   selectedKnowledgeBaseId.value = knowledgeBases.value[0]?.id
 }
 

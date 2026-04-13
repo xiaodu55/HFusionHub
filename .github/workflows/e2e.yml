@@ -89,9 +89,12 @@ jobs:
           SPRING_DATASOURCE_URL: jdbc:mysql://localhost:3306/hfusionhub
           SPRING_DATASOURCE_USERNAME: e2e
           SPRING_DATASOURCE_PASSWORD: e2e-pass
+          DB_USERNAME: e2e
+          DB_PASSWORD: e2e-pass
           SPRING_DATA_REDIS_HOST: localhost
           SPRING_DATA_REDIS_PORT: 6379
-          ADMIN_PASSWORD: "Admin1234"
+          ADMIN_PASSWORD: "admin123"
+          CALLBACK_SECRET: "e2e-callback-secret"
           PYTHON_AI_BASE_URL: "http://localhost:9000"
           PYTHON_AI_INTERNAL_TOKEN: "e2e-internal-token"
           SA_TOKEN_NAME: "satoken"
@@ -225,9 +228,12 @@ jobs:
           SPRING_DATASOURCE_URL: jdbc:mysql://localhost:3306/hfusionhub
           SPRING_DATASOURCE_USERNAME: e2e
           SPRING_DATASOURCE_PASSWORD: e2e-pass
+          DB_USERNAME: e2e
+          DB_PASSWORD: e2e-pass
           SPRING_DATA_REDIS_HOST: localhost
           SPRING_DATA_REDIS_PORT: 6379
-          ADMIN_PASSWORD: "Admin1234"
+          ADMIN_PASSWORD: "admin123"
+          CALLBACK_SECRET: "e2e-callback-secret"
           PYTHON_AI_BASE_URL: "http://localhost:9000"
           PYTHON_AI_INTERNAL_TOKEN: "e2e-internal-token"
           SA_TOKEN_NAME: "satoken"

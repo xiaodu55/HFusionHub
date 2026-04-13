@@ -5,6 +5,7 @@ import com.hfusionhub.common.result.R;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.dto.CostSummaryDTO;
 import com.hfusionhub.dto.DailyCostDTO;
+import com.hfusionhub.dto.ModelCostDTO;
 import com.hfusionhub.dto.TenantCostSummaryDTO;
 import com.hfusionhub.service.CostTrackingService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -36,9 +37,9 @@ public class CostController {
 
     @GetMapping("/summary")
     @Operation(summary = "当前用户成本汇总（近30天 + 本月预估 + 按模型分组）")
-    public R<CostSummaryDTO> summary() {
+    public R<CostSummaryDTO> summary(@RequestParam(defaultValue = "30") int days) {
         Long userId = JwtUtils.getCurrentUserId();
-        return R.ok(costTrackingService.getCostSummary(userId));
+        return R.ok(costTrackingService.getCostSummary(userId, days));
     }
 
     @GetMapping("/tenant/{tenantId}")
@@ -57,6 +58,13 @@ public class CostController {
     public R<List<DailyCostDTO>> daily(@RequestParam(defaultValue = "30") int days) {
         Long userId = JwtUtils.getCurrentUserId();
         return R.ok(costTrackingService.getUserDailyCost(userId, days));
+    }
+
+    @GetMapping("/models")
+    @Operation(summary = "当前用户按模型汇总成本")
+    public R<List<ModelCostDTO>> models(@RequestParam(defaultValue = "30") int days) {
+        Long userId = JwtUtils.getCurrentUserId();
+        return R.ok(costTrackingService.getUserModelCost(userId, days));
     }
 
     /**

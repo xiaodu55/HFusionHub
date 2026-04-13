@@ -108,10 +108,16 @@ public class CostTrackingServiceImpl implements CostTrackingService {
 
     @Override
     public CostSummaryDTO getCostSummary(Long userId) {
+        return getCostSummary(userId, DEFAULT_DAYS);
+    }
+
+    @Override
+    public CostSummaryDTO getCostSummary(Long userId, int days) {
         User user = userMapper.selectById(userId);
         Long tenantId = user != null ? user.getTenantId() : null;
 
-        LocalDateTime startDate = LocalDate.now().minusDays(DEFAULT_DAYS).atStartOfDay();
+        int effectiveDays = Math.max(1, Math.min(days, MAX_DAYS));
+        LocalDateTime startDate = LocalDate.now().minusDays(effectiveDays).atStartOfDay();
         LocalDateTime endDate = LocalDateTime.now();
 
         Map<String, Object> total = modelUsageRecordMapper.selectTotalCostByUser(userId, startDate, endDate);
@@ -135,6 +141,16 @@ public class CostTrackingServiceImpl implements CostTrackingService {
         dto.setCurrentMonthCost(BigDecimal.valueOf(currentMonthCost(userId)));
         dto.setEstimatedMonthCost(BigDecimal.valueOf(getCurrentMonthEstimate(userId)));
         return dto;
+    }
+
+    @Override
+    public List<ModelCostDTO> getUserModelCost(Long userId, int days) {
+        User user = userMapper.selectById(userId);
+        Long tenantId = user != null ? user.getTenantId() : null;
+        int effectiveDays = Math.max(1, Math.min(days, MAX_DAYS));
+        LocalDateTime startDate = LocalDate.now().minusDays(effectiveDays).atStartOfDay();
+        return toModelCostList(modelUsageRecordMapper.selectCostBreakdown(
+                tenantId, userId, startDate, LocalDateTime.now()));
     }
 
     @Override

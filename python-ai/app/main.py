@@ -145,8 +145,13 @@ def create_app() -> FastAPI:
     @app.get("/ready")
     async def ready():
         """Readiness endpoint used by the orchestrator and load balancers."""
-        from app.core.vectorstore.milvus_store import vector_store_status
-        vector_store = vector_store_status()
+        try:
+            from app.core.vectorstore.milvus_store import vector_store_status
+            vector_store = vector_store_status()
+        except Exception as exc:
+            # Readiness must report a dependency outage as degraded instead of
+            # turning it into an unhandled 500 response.
+            vector_store = {"ready": False, "error": str(exc)}
         payload = {"status": "ready" if vector_store["ready"] else "degraded",
                    "vector_store": vector_store}
         return JSONResponse(status_code=200 if vector_store["ready"] else 503,

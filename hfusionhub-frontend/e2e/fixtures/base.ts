@@ -39,7 +39,7 @@ export const test = base.extend<TestFixtures>({
 
   admin: async ({ javaApi }, use) => {
     const { token, headers } = await ensureAdmin(javaApi)
-    await use({ username: 'admin', password: 'Admin1234', token, headers })
+    await use({ username: process.env.ADMIN_USERNAME || 'admin', password: process.env.ADMIN_PASSWORD || 'admin123', token, headers })
   },
 
   testKB: async ({ userA, javaApi }, use) => {

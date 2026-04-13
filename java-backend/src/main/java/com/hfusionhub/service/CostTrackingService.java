@@ -2,6 +2,7 @@ package com.hfusionhub.service;
 
 import com.hfusionhub.dto.CostSummaryDTO;
 import com.hfusionhub.dto.DailyCostDTO;
+import com.hfusionhub.dto.ModelCostDTO;
 import com.hfusionhub.dto.TenantCostSummaryDTO;
 import com.hfusionhub.entity.ModelUsageRecord;
 
@@ -48,6 +49,12 @@ public interface CostTrackingService {
      * @return 成本汇总
      */
     CostSummaryDTO getCostSummary(Long userId);
+
+    /** Return the current user's summary for a bounded number of days. */
+    CostSummaryDTO getCostSummary(Long userId, int days);
+
+    /** Return the current user's model breakdown for a bounded number of days. */
+    List<ModelCostDTO> getUserModelCost(Long userId, int days);
 
     /**
      * 预估用户本月最终成本（按本月已发生成本 / 已过天数 * 当月天数外推）

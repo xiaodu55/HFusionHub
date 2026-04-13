@@ -173,7 +173,15 @@ const subscribe = () => {
     onSnapshot: (snapshot) => {
       connected.value = true
       reconnectAttempts.value = 0
-      approvals.value = snapshot
+      if (taskFilter.value == null) {
+        approvals.value = snapshot
+        return
+      }
+      // The user-scoped SSE snapshot must not replace the task audit query,
+      // which includes terminal approvals for the requested task.
+      snapshot
+        .filter((approval) => approval.taskId === taskFilter.value)
+        .forEach(upsertApproval)
     },
     onApproval: (approval) => {
       connected.value = true
@@ -379,7 +387,7 @@ onUnmounted(() => {
           <p class="mt-2 truncate font-mono text-xs text-muted-foreground">{{ approval.argumentsSummary || '—' }}</p>
           <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
             <span class="flex items-center gap-1"><Clock3 class="h-3 w-3" />{{ formatDate(approval.createdAt) }}</span>
-            <span v-if="approval.traceId" class="flex items-center gap-1"><Fingerprint class="h-3 w-3" />trace {{ approval.traceId.slice(0, 12) }}</span>
+            <span v-if="approval.traceId" class="flex min-w-0 items-center gap-1 break-all"><Fingerprint class="h-3 w-3 shrink-0" />trace {{ approval.traceId }}</span>
             <span v-if="isExpiredRow(approval)" class="text-rose-400">已超时，等待过期回收</span>
           </div>
         </button>

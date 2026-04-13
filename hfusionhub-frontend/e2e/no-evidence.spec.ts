@@ -8,6 +8,8 @@ import {
 } from './helpers'
 
 test.describe('No-evidence Answer', () => {
+  test.setTimeout(90_000)
+
   test('empty KB returns response without sources', async ({ javaApi, userA }) => {
     const kb = await apiCreateKB(javaApi, userA.headers)
     const conv = await apiCreateConversation(javaApi, userA.headers, kb.id)

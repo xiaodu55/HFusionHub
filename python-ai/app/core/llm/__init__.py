@@ -85,6 +85,11 @@ def get_llm(model: str = None) -> BaseLLM:
     """Select configured providers; runtime failures use a bounded failover."""
     from app.utils.config import config
 
+    # Explicit test/development mock mode must not call configured providers.
+    if os.getenv("LLM_ALLOW_MOCK", "false").lower() in ("true", "1", "yes"):
+        logger.info("Using Mock LLM because LLM_ALLOW_MOCK=true")
+        return MockLLM()
+
     providers = []
     if config.DEEPSEEK_API_KEY:
         providers.append(DeepSeekLLM(
@@ -102,9 +107,6 @@ def get_llm(model: str = None) -> BaseLLM:
     if providers:
         return providers[0]
 
-    if os.getenv("LLM_ALLOW_MOCK", "false").lower() in ("true", "1", "yes"):
-        print("[LLM] Using Mock LLM (LLM_ALLOW_MOCK=true)")
-        return MockLLM()
     raise RuntimeError(
         "No LLM provider available. Set DEEPSEEK_API_KEY or start Ollama, "
         "or set LLM_ALLOW_MOCK=true for development."

@@ -13,6 +13,8 @@ import com.hfusionhub.dto.UserLoginDTO;
 import com.hfusionhub.dto.UserRegisterDTO;
 import com.hfusionhub.dto.UserUpdateDTO;
 import com.hfusionhub.entity.User;
+import com.hfusionhub.entity.TenantMember;
+import com.hfusionhub.mapper.TenantMemberMapper;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -37,6 +40,7 @@ import java.util.Locale;
 public class UserServiceImpl implements UserService {
 
     private final UserMapper userMapper;
+    private final TenantMemberMapper tenantMemberMapper;
     private final JwtUtils jwtUtils;
     private final LoginRateLimiter rateLimiter;
 
@@ -99,6 +103,7 @@ public class UserServiceImpl implements UserService {
      * @return 用户信息
      */
     @Override
+    @Transactional
     public UserInfoDTO register(UserRegisterDTO registerDTO) {
         String username = trimToNull(registerDTO.getUsername());
         String email = normaliseEmail(registerDTO.getEmail());
@@ -130,11 +135,17 @@ public class UserServiceImpl implements UserService {
         user.setNickname(nickname != null ? nickname : username);
         user.setEmail(email);
         user.setPhone(phone);
-        user.setRole("user");
-        user.setStatus(0);
+        user.setRole(CommonConstants.ROLE_USER);
+        user.setStatus(CommonConstants.USER_STATUS_NORMAL);
+        user.setTenantId(CommonConstants.DEFAULT_TENANT_ID);
 
         try {
             userMapper.insert(user);
+            TenantMember member = new TenantMember();
+            member.setTenantId(CommonConstants.DEFAULT_TENANT_ID);
+            member.setUserId(user.getId());
+            member.setRole("member");
+            tenantMemberMapper.insert(member);
         } catch (DuplicateKeyException e) {
             // The pre-check improves feedback, while the database unique index
             // remains the authoritative guard against concurrent registration.

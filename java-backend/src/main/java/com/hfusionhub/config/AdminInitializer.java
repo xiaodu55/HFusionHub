@@ -83,7 +83,22 @@ public class AdminInitializer implements ApplicationRunner {
                     log.info("Admin user '{}' already configured correctly.", adminUsername);
                 }
             }
+            ensureAdminMembership(admin);
         });
+    }
+
+    private void ensureAdminMembership(User admin) {
+        TenantMember member = tenantMemberMapper.selectByTenantAndUser(CommonConstants.DEFAULT_TENANT_ID, admin.getId());
+        if (member == null) {
+            member = new TenantMember();
+            member.setTenantId(CommonConstants.DEFAULT_TENANT_ID);
+            member.setUserId(admin.getId());
+            member.setRole(CommonConstants.ROLE_ADMIN);
+            tenantMemberMapper.insert(member);
+        } else if (!CommonConstants.ROLE_ADMIN.equals(member.getRole())) {
+            member.setRole(CommonConstants.ROLE_ADMIN);
+            tenantMemberMapper.updateById(member);
+        }
     }
 
     private void ensureDefaultTenant() {

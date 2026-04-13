@@ -4,22 +4,23 @@ export interface CostSummary {
   totalCost: number
   totalTokens: number
   totalRequests: number
-  avgCostPerRequest: number
-  projectedMonthlyCost: number
+  currentMonthCost: number
+  estimatedMonthCost: number
 }
 
 export interface DailyCost {
-  date: string
-  cost: number
-  tokens: number
-  requests: number
+  statDate: string
+  requestCount: number
+  totalTokens: number
+  totalCost: number
+  avgLatencyMs: number
 }
 
 export interface ModelBreakdown {
   model: string
-  cost: number
-  tokens: number
-  percentage: number
+  requestCount: number
+  totalTokens: number
+  totalCost: number
 }
 
 export interface TenantCostSummary {

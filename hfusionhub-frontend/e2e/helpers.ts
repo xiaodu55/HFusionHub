@@ -305,7 +305,7 @@ export async function pollDocIndexing(
 
 export async function ensureAdmin(request: APIRequestContext) {
   const adminUser = process.env.ADMIN_USERNAME || 'admin'
-  const adminPass = process.env.ADMIN_PASSWORD || 'Admin1234'
+  const adminPass = process.env.ADMIN_PASSWORD || 'admin123'
   try {
     return await apiLoginAs(request, adminUser, adminPass)
   } catch {
