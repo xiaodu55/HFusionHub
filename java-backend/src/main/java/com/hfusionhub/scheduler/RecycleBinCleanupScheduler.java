@@ -1,7 +1,9 @@
 package com.hfusionhub.scheduler;
 
 import com.hfusionhub.entity.Document;
+import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.mapper.DocumentMapper;
+import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.service.DeletionService;
 import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +23,7 @@ import java.util.List;
 public class RecycleBinCleanupScheduler {
 
     private final DocumentMapper documentMapper;
+    private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final DeletionService deletionService;
 
     @Scheduled(fixedDelayString = "${document.recycle.cleanup-delay-ms:3600000}")
@@ -32,6 +35,14 @@ public class RecycleBinCleanupScheduler {
                     deletionService.createTask("DOCUMENT_PURGE", document.getId());
                 } catch (Exception e) {
                     log.warn("创建回收站过期清理任务失败: documentId={}", document.getId(), e);
+                }
+            }
+            List<KnowledgeBase> expiredKnowledgeBases = knowledgeBaseMapper.selectExpiredRecycled(100);
+            for (KnowledgeBase knowledgeBase : expiredKnowledgeBases) {
+                try {
+                    deletionService.createTask("KB_PURGE", knowledgeBase.getId());
+                } catch (Exception e) {
+                    log.warn("创建知识库回收站过期清理任务失败: knowledgeBaseId={}", knowledgeBase.getId(), e);
                 }
             }
         });

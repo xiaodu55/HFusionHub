@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS knowledge_base (
     status SMALLINT NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    recycled_at TIMESTAMP DEFAULT NULL,
+    recycle_expires_at TIMESTAMP DEFAULT NULL,
     deleted SMALLINT NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     FOREIGN KEY (user_id) REFERENCES sys_user (id)
@@ -50,6 +52,7 @@ CREATE TABLE IF NOT EXISTS knowledge_base (
 CREATE INDEX IF NOT EXISTS idx_kb_user_id ON knowledge_base (user_id);
 CREATE INDEX IF NOT EXISTS idx_kb_status ON knowledge_base (status);
 CREATE INDEX IF NOT EXISTS idx_kb_created_at ON knowledge_base (created_at);
+CREATE INDEX IF NOT EXISTS idx_knowledge_base_recycle_expires ON knowledge_base (deleted, recycle_expires_at);
 
 -- =====================================================
 -- 文档�?(document)

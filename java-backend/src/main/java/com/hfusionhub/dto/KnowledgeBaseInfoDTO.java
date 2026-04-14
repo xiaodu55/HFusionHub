@@ -38,6 +38,12 @@ public class KnowledgeBaseInfoDTO {
     @Schema(description = "状态")
     private Integer status;
 
+    @Schema(description = "移入回收站时间")
+    private LocalDateTime recycledAt;
+
+    @Schema(description = "回收站保留截止时间")
+    private LocalDateTime recycleExpiresAt;
+
     @Schema(description = "文档数量")
     private Integer documentCount;
 

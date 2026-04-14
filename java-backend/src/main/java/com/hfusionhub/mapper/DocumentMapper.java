@@ -28,6 +28,9 @@ public interface DocumentMapper extends BaseMapper<Document> {
     @Select("SELECT COUNT(*) FROM document WHERE knowledge_base_id = #{knowledgeBaseId} AND deleted = 0")
     int countByKnowledgeBaseId(@Param("knowledgeBaseId") Long knowledgeBaseId);
 
+    @Select("SELECT COUNT(*) FROM document WHERE knowledge_base_id = #{knowledgeBaseId}")
+    int countByKnowledgeBaseIncludingDeleted(@Param("knowledgeBaseId") Long knowledgeBaseId);
+
     @Select("SELECT * FROM document WHERE id = #{id}")
     Document selectIncludingDeleted(@Param("id") Long id);
 

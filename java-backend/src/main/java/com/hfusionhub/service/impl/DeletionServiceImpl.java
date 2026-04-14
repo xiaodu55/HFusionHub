@@ -102,6 +102,8 @@ public class DeletionServiceImpl implements DeletionService {
         try {
             if ("KB_DELETE".equals(task.getTaskType())) {
                 executeKbDeleteStep(task);
+            } else if ("KB_PURGE".equals(task.getTaskType())) {
+                executeKbPurgeStep(task);
             } else if ("KB_DISABLE".equals(task.getTaskType())) {
                 executeKbDisableStep(task);
             } else if ("DOCUMENT_DELETE".equals(task.getTaskType())) {
@@ -137,6 +139,72 @@ public class DeletionServiceImpl implements DeletionService {
             case 7 -> logicalDeleteKnowledgeBase(kb, task);
             case 8 -> completeTask(task);
             default -> throw new BusinessException("未知删除步骤: " + task.getStepIndex());
+        }
+    }
+
+    /** Permanently removes a knowledge base that is already in the recycle bin. */
+    private void executeKbPurgeStep(DeletionTask task) {
+        KnowledgeBase kb = knowledgeBaseMapper.selectIncludingDeleted(task.getTargetId());
+        if (kb == null) {
+            completeTask(task);
+            return;
+        }
+
+        switch (task.getStepIndex()) {
+            case 0 -> {
+                for (Document doc : getKbDocuments(kb.getId())) {
+                    try {
+                        vectorizationService.deleteDocumentIndex(doc.getId());
+                    } catch (Exception e) {
+                        log.warn("永久删除知识库时删除向量失败: documentId={}", doc.getId(), e);
+                    }
+                }
+                advanceStep(task, "KB_PURGE_VECTORS_DELETED");
+            }
+            case 1 -> {
+                for (Document doc : getKbDocuments(kb.getId())) {
+                    documentChunkMapper.deleteByDocumentId(doc.getId());
+                }
+                advanceStep(task, "KB_PURGE_CHUNKS_DELETED");
+            }
+            case 2 -> {
+                for (Document doc : getKbDocuments(kb.getId())) {
+                    documentIndexJobMapper.purgeByDocumentId(doc.getId());
+                }
+                advanceStep(task, "KB_PURGE_INDEX_JOBS_DELETED");
+            }
+            case 3 -> {
+                for (Document doc : getKbDocuments(kb.getId())) {
+                    if (doc.getFilePath() != null) {
+                        File file = new File(doc.getFilePath());
+                        if (file.exists() && !file.delete()) {
+                            throw new BusinessException("磁盘文件删除失败: " + doc.getFilePath());
+                        }
+                    }
+                }
+                advanceStep(task, "KB_PURGE_FILES_DELETED");
+            }
+            case 4 -> {
+                for (Document doc : getKbDocuments(kb.getId())) {
+                    documentMapper.purgeById(doc.getId());
+                }
+                advanceStep(task, "KB_PURGE_DOCUMENTS_DELETED");
+            }
+            case 5 -> {
+                List<Conversation> conversations = conversationMapper.selectByKnowledgeBaseIncludingDeleted(kb.getId());
+                for (Conversation conversation : conversations) {
+                    messageMapper.delete(new LambdaQueryWrapper<Message>()
+                            .eq(Message::getConversationId, conversation.getId()));
+                    conversationMapper.purgeById(conversation.getId());
+                }
+                advanceStep(task, "KB_PURGE_CONVERSATIONS_DELETED");
+            }
+            case 6 -> {
+                knowledgeBaseMapper.purgeById(kb.getId());
+                advanceStep(task, "KB_PURGED");
+            }
+            case 7 -> completeTask(task);
+            default -> throw new BusinessException("未知永久删除步骤: " + task.getStepIndex());
         }
     }
 

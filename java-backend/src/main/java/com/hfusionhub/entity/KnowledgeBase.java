@@ -8,6 +8,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.time.LocalDateTime;
+
 /**
  * 知识库实体
  *
@@ -49,6 +51,12 @@ public class KnowledgeBase extends BaseEntity {
      */
     @Schema(description = "状态：0-正常，1-禁用")
     private Integer status;
+
+    /** 移入回收站时间 */
+    private LocalDateTime recycledAt;
+
+    /** 回收站保留截止时间 */
+    private LocalDateTime recycleExpiresAt;
 
     /**
      * 文档数量（非数据库字段）

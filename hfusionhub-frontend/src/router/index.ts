@@ -31,6 +31,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/knowledge/Index.vue'),
       },
       {
+        path: 'knowledge-base/recycle-bin',
+        name: 'KnowledgeBaseRecycleBin',
+        component: () => import('@/pages/knowledge/RecycleBin.vue'),
+      },
+      {
         path: 'knowledge-base/:id',
         name: 'KnowledgeBaseDetail',
         component: () => import('@/pages/knowledge/Detail.vue'),

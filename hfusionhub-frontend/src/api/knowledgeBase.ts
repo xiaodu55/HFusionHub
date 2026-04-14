@@ -43,3 +43,22 @@ export const getMyKnowledgeBaseList = (params?: {
 }): Promise<ApiResponse<PageResult<KnowledgeBase>>> => {
   return get('/knowledge-base/my', params)
 }
+
+// 获取知识库回收站
+export const getRecycleBin = (params?: {
+  page?: number
+  pageSize?: number
+  name?: string
+}): Promise<ApiResponse<PageResult<KnowledgeBase>>> => {
+  return get('/knowledge-base/recycle-bin', params)
+}
+
+// 恢复知识库
+export const restoreKnowledgeBase = (id: number): Promise<ApiResponse<void>> => {
+  return post(`/knowledge-base/${id}/restore`)
+}
+
+// 永久删除知识库
+export const purgeKnowledgeBase = (id: number): Promise<ApiResponse<void>> => {
+  return del(`/knowledge-base/${id}/purge`)
+}

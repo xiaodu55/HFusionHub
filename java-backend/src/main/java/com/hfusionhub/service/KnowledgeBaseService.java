@@ -37,6 +37,15 @@ public interface KnowledgeBaseService {
      */
     void delete(Long id);
 
+    /** 查询当前用户的知识库回收站 */
+    PageResult<KnowledgeBaseInfoDTO> listRecycleBin(KnowledgeBaseQueryDTO queryDTO);
+
+    /** 从回收站恢复知识库 */
+    void restore(Long id);
+
+    /** 永久删除回收站中的知识库 */
+    void purge(Long id);
+
     /**
      * 根据ID获取知识库信息
      *

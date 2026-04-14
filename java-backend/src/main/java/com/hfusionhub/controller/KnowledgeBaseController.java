@@ -61,9 +61,29 @@ public class KnowledgeBaseController {
      * @return 结果
      */
     @DeleteMapping("/{id}")
-    @Operation(summary = "删除知识库", description = "删除指定知识库")
+    @Operation(summary = "移入回收站", description = "将知识库及其资料移入回收站，保留七天后自动清理")
     public R<Void> delete(@PathVariable Long id) {
         knowledgeBaseService.delete(id);
+        return R.ok();
+    }
+
+    @GetMapping("/recycle-bin")
+    @Operation(summary = "知识库回收站", description = "查询当前用户已移入回收站的知识库")
+    public R<PageResult<KnowledgeBaseInfoDTO>> listRecycleBin(KnowledgeBaseQueryDTO queryDTO) {
+        return R.ok(knowledgeBaseService.listRecycleBin(queryDTO));
+    }
+
+    @PostMapping("/{id}/restore")
+    @Operation(summary = "恢复知识库", description = "将回收站中的知识库恢复为可用状态")
+    public R<Void> restore(@PathVariable Long id) {
+        knowledgeBaseService.restore(id);
+        return R.ok();
+    }
+
+    @DeleteMapping("/{id}/purge")
+    @Operation(summary = "永久删除知识库", description = "彻底删除知识库及其文档、索引和对话，无法恢复")
+    public R<Void> purge(@PathVariable Long id) {
+        knowledgeBaseService.purge(id);
         return R.ok();
     }
 

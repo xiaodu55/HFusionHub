@@ -58,6 +58,8 @@ export interface KnowledgeBase {
   documentCount?: number
   createdAt: string
   updatedAt: string
+  recycledAt?: string | null
+  recycleExpiresAt?: string | null
 }
 
 export interface KnowledgeBaseCreateDTO {

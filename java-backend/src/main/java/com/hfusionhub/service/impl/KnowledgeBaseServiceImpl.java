@@ -28,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
+import java.time.LocalDateTime;
 import java.util.stream.Collectors;
 
 /**
@@ -173,18 +174,83 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
             throw new BusinessException(StatusCode.FORBIDDEN, "无权操作此知识库");
         }
 
-        if (knowledgeBase.getStatus() != null && knowledgeBase.getStatus() != CommonConstants.KB_STATUS_NORMAL) {
-            throw new BusinessException("知识库状态不允许删除");
+        if (knowledgeBase.getDeleted() != null && knowledgeBase.getDeleted() == 1) {
+            throw new BusinessException("知识库已在回收站中");
         }
 
-        // 标记KB为DELETING状态，阻止新操作
-        knowledgeBase.setStatus(CommonConstants.KB_STATUS_DELETING);
-        knowledgeBaseMapper.updateById(knowledgeBase);
+        // 知识库删除先进入回收站，保留文档、原文件和索引，确保可以完整恢复。
+        LocalDateTime recycledAt = LocalDateTime.now();
+        int updated = knowledgeBaseMapper.markRecycled(
+                id,
+                recycledAt,
+                recycledAt.plusDays(7),
+                knowledgeBase.getStatus());
+        if (updated != 1) {
+            throw new BusinessException("知识库移入回收站失败");
+        }
 
-        // 创建异步删除任务（Outbox）
-        deletionService.createTask("KB_DELETE", id);
+        log.info("知识库已移入回收站，id: {}", id);
+    }
 
-        log.info("知识库删除任务已创建，id: {}", id);
+    @Override
+    public PageResult<KnowledgeBaseInfoDTO> listRecycleBin(KnowledgeBaseQueryDTO queryDTO) {
+        queryDTO.validate();
+        Long currentUserId = jwtUtils.getCurrentUserId();
+        String name = StringUtils.hasText(queryDTO.getName()) ? queryDTO.getName().trim() : null;
+        long total = knowledgeBaseMapper.countRecycle(currentUserId, name);
+        if (total == 0) {
+            return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), 0, List.of());
+        }
+        List<KnowledgeBase> records = knowledgeBaseMapper.selectRecyclePage(
+                currentUserId,
+                name,
+                (queryDTO.getPage() - 1) * queryDTO.getPageSize(),
+                queryDTO.getPageSize());
+        List<KnowledgeBaseInfoDTO> result = records.stream()
+                .map(this::convertToInfoDTO)
+                .collect(Collectors.toList());
+        return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), total, result);
+    }
+
+    @Override
+    @Transactional
+    public void restore(Long id) {
+        KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectIncludingDeleted(id);
+        assertOwnedRecycleBinItem(knowledgeBase);
+        if (knowledgeBase.getRecycleExpiresAt() != null
+                && knowledgeBase.getRecycleExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new BusinessException("该知识库已超过回收站保留期限");
+        }
+
+        LambdaQueryWrapper<KnowledgeBase> duplicate = new LambdaQueryWrapper<>();
+        duplicate.eq(KnowledgeBase::getUserId, jwtUtils.getCurrentUserId())
+                .eq(KnowledgeBase::getName, knowledgeBase.getName());
+        if (knowledgeBaseMapper.selectCount(duplicate) > 0) {
+            throw new BusinessException("已有同名知识库，请先修改现有知识库名称");
+        }
+        int restoreStatus = knowledgeBase.getStatus() != null
+                && knowledgeBase.getStatus() == CommonConstants.KB_STATUS_DISABLED
+                ? CommonConstants.KB_STATUS_DISABLED
+                : CommonConstants.KB_STATUS_NORMAL;
+        if (knowledgeBaseMapper.restoreFromRecycle(id, restoreStatus) != 1) {
+            throw new BusinessException("恢复知识库失败");
+        }
+    }
+
+    @Override
+    public void purge(Long id) {
+        KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectIncludingDeleted(id);
+        assertOwnedRecycleBinItem(knowledgeBase);
+        deletionService.createTask("KB_PURGE", id);
+    }
+
+    private void assertOwnedRecycleBinItem(KnowledgeBase knowledgeBase) {
+        if (knowledgeBase == null || knowledgeBase.getDeleted() == null || knowledgeBase.getDeleted() != 1) {
+            throw new BusinessException("回收站中不存在该知识库");
+        }
+        if (!knowledgeBase.getUserId().equals(jwtUtils.getCurrentUserId())) {
+            throw new BusinessException("无权操作此知识库");
+        }
     }
 
     /**
@@ -306,6 +372,8 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                         .userId(kb.getUserId())
                         .username(finalUsernameMap.getOrDefault(kb.getUserId(), "unknown"))
                         .status(kb.getStatus())
+                        .recycledAt(kb.getRecycledAt())
+                        .recycleExpiresAt(kb.getRecycleExpiresAt())
                         .documentCount(finalDocCountMap.getOrDefault(kb.getId(), 0L).intValue())
                         .createdAt(kb.getCreatedAt())
                         .updatedAt(kb.getUpdatedAt())
@@ -329,7 +397,9 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         // 查询文档数量
         LambdaQueryWrapper<com.hfusionhub.entity.Document> docWrapper = new LambdaQueryWrapper<>();
         docWrapper.eq(com.hfusionhub.entity.Document::getKnowledgeBaseId, knowledgeBase.getId());
-        Long documentCount = documentMapper.selectCount(docWrapper);
+        Long documentCount = knowledgeBase.getDeleted() != null && knowledgeBase.getDeleted() == 1
+                ? (long) documentMapper.countByKnowledgeBaseIncludingDeleted(knowledgeBase.getId())
+                : documentMapper.selectCount(docWrapper);
 
         return KnowledgeBaseInfoDTO.builder()
                 .id(knowledgeBase.getId())
@@ -338,6 +408,8 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                 .userId(knowledgeBase.getUserId())
                 .username(username)
                 .status(knowledgeBase.getStatus())
+                .recycledAt(knowledgeBase.getRecycledAt())
+                .recycleExpiresAt(knowledgeBase.getRecycleExpiresAt())
                 .documentCount(documentCount.intValue())
                 .createdAt(knowledgeBase.getCreatedAt())
                 .updatedAt(knowledgeBase.getUpdatedAt())

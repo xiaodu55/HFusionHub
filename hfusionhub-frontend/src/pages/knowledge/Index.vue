@@ -16,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Plus, Search, Edit, Trash2, BookOpen, Power, PowerOff, Loader2, ArrowRight, FileText, FolderOpen } from 'lucide-vue-next'
+import { Plus, Search, Edit, Trash2, BookOpen, Power, PowerOff, Loader2, ArrowRight, FileText, FolderOpen, Archive } from 'lucide-vue-next'
 import { formatDateTime } from '@/utils/date'
 import { useToast } from '@/composables/useToast'
 import EmptyState from '@/components/EmptyState.vue'
@@ -157,7 +157,10 @@ onMounted(() => {
       <div class="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-primary/10 blur-3xl" />
       <div class="relative flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div class="flex gap-4"><div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><BookOpen class="h-5 w-5" /></div><div><p class="text-xs font-medium tracking-[0.16em] text-primary/90">KNOWLEDGE SPACES</p><h2 class="mt-1 text-2xl font-semibold tracking-tight">知识库</h2><p class="mt-1 text-sm leading-6 text-muted-foreground">为 AI 组织可靠的业务资料；文档完成解析后即可在对话中被引用。</p></div></div>
-        <Button class="shrink-0 gap-2" @click="isCreateDialogOpen = true"><Plus class="h-4 w-4" />创建知识库</Button>
+        <div class="flex shrink-0 flex-wrap gap-2">
+          <Button variant="outline" class="gap-2" @click="router.push('/knowledge-base/recycle-bin')"><Archive class="h-4 w-4" />回收站</Button>
+          <Button class="gap-2" @click="isCreateDialogOpen = true"><Plus class="h-4 w-4" />创建知识库</Button>
+        </div>
       </div>
     </section>
 
@@ -194,8 +197,8 @@ onMounted(() => {
 
     <Dialog v-model:open="isDeleteDialogOpen">
       <DialogContent>
-        <DialogHeader><DialogTitle>删除知识库？</DialogTitle><DialogDescription>确定删除「{{ currentItem?.name }}」吗？其中的文档和索引将无法继续在对话中使用。</DialogDescription></DialogHeader>
-        <DialogFooter><Button variant="outline" @click="isDeleteDialogOpen = false">取消</Button><Button variant="destructive" @click="confirmDelete">确认删除</Button></DialogFooter>
+        <DialogHeader><DialogTitle>移入回收站？</DialogTitle><DialogDescription>确定将「{{ currentItem?.name }}」移入回收站吗？知识库、文档和索引会保留 7 天，期间可以恢复。</DialogDescription></DialogHeader>
+        <DialogFooter><Button variant="outline" @click="isDeleteDialogOpen = false">取消</Button><Button variant="destructive" @click="confirmDelete">移入回收站</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   </div>
