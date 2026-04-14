@@ -6,19 +6,16 @@ import { useUserStore } from '@/stores/user'
 import { Button } from '@/components/ui/button'
 import {
   Activity,
-  ArrowRight,
   BookOpen,
+  Check,
   CheckCircle2,
-  Clock3,
   Database,
   FileText,
   MessageSquare,
   Plus,
   Search,
-  ShieldCheck,
   Sparkles,
   UploadCloud,
-  Zap,
 } from 'lucide-vue-next'
 import * as knowledgeBaseApi from '@/api/knowledgeBase'
 import * as documentApi from '@/api/document'
@@ -36,32 +33,16 @@ type StatCard = {
   progressClass: string
 }
 
-type WorkTask = {
-  id: string
-  code: string
-  title: string
-  caption: string
-  status: string
-  schedule: string
-  owner: string
-  progress: number
-  route: string
-  icon: Component
-  tone: 'green' | 'cyan' | 'amber' | 'violet'
-}
-
 const router = useRouter()
 const userStore = useUserStore()
-
 const loading = ref(false)
 const loadError = ref(false)
-const selectedTaskId = ref('document-index')
 
 const stats = ref<StatCard[]>([
   {
     title: '知识库',
     value: 0,
-    caption: '已接入知识空间',
+    caption: '已连接知识空间',
     trend: '--',
     path: '/knowledge-base',
     icon: BookOpen,
@@ -72,7 +53,7 @@ const stats = ref<StatCard[]>([
   {
     title: '文档',
     value: 0,
-    caption: '解析与索引对象',
+    caption: '已解析与可检索',
     trend: '--',
     path: '/document',
     icon: FileText,
@@ -92,10 +73,10 @@ const stats = ref<StatCard[]>([
     progressClass: 'bg-violet-400',
   },
   {
-    title: 'RAG',
+    title: '检索能力',
     value: 3,
-    caption: '检索链路能力',
-    trend: '稳定',
+    caption: '向量、关键词与图谱',
+    trend: '可用',
     path: '/rag',
     icon: Activity,
     dotClass: 'bg-amber-400',
@@ -105,87 +86,12 @@ const stats = ref<StatCard[]>([
 ])
 
 const clamp = (value: number, min = 8, max = 98) => Math.min(max, Math.max(min, value))
-
 const userName = computed(() => userStore.nickname || userStore.username || 'HFusionHub 用户')
-
-const todayLabel = computed(() =>
-  new Date().toLocaleDateString('zh-CN', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-  })
-)
-
-const workflowProgress = computed(() => {
-  const [kb, docs, conversations] = stats.value
-  return clamp(46 + kb.value * 5 + docs.value * 2 + conversations.value)
-})
-
-const taskCards = computed<WorkTask[]>(() => {
-  const [kb, docs, conversations] = stats.value
-  return [
-    {
-      id: 'knowledge-governance',
-      code: 'KB-2026-001',
-      title: '知识库治理',
-      caption: `${kb.value} 个知识空间待持续维护`,
-      status: kb.value > 0 ? '进行中' : '待创建',
-      schedule: kb.value > 0 ? `${kb.value} 个知识库` : '暂无',
-      owner: 'Knowledge',
-      progress: kb.value > 0 ? 100 : 0,
-      route: '/knowledge-base',
-      icon: BookOpen,
-      tone: 'green',
-    },
-    {
-      id: 'document-index',
-      code: 'DOC-2026-024',
-      title: '文档解析与索引',
-      caption: `${docs.value} 份文档进入检索资产池`,
-      status: docs.value > 0 ? '解析中' : '待上传',
-      schedule: docs.value > 0 ? `${docs.value} 份文档` : '暂无',
-      owner: 'Index',
-      progress: docs.value > 0 ? 100 : 0,
-      route: '/document',
-      icon: FileText,
-      tone: 'cyan',
-    },
-    {
-      id: 'rag-evaluation',
-      code: 'RAG-2026-030',
-      title: '检索质量评估',
-      caption: '观察召回、重排与回答质量',
-      status: '待验证',
-      schedule: '明天 09:30',
-      owner: 'RAG',
-      progress: 64,
-      route: '/rag',
-      icon: Search,
-      tone: 'amber',
-    },
-    {
-      id: 'assistant-chat',
-      code: 'CHAT-2026-056',
-      title: '智能问答体验',
-      caption: `${conversations.value} 个会话沉淀用户反馈`,
-      status: conversations.value > 0 ? '已完成' : '待启动',
-      schedule: '持续运行',
-      owner: 'Agent',
-      progress: clamp(58 + conversations.value * 3),
-      route: '/chat',
-      icon: MessageSquare,
-      tone: 'violet',
-    },
-  ]
-})
-
-const activeTask = computed(() =>
-  taskCards.value.find((task) => task.id === selectedTaskId.value) || taskCards.value[0]
-)
-
-// 任务时间线 — 后续由 document_index_job / deletion_task 真实数据驱动
-interface TimelineItem { time: string; label: string; description: string; tone: string }
-const timeline = computed<TimelineItem[]>(() => [])
+const todayLabel = computed(() => new Date().toLocaleDateString('zh-CN', {
+  weekday: 'long',
+  month: 'long',
+  day: 'numeric',
+}))
 
 const healthItems = computed(() => [
   {
@@ -202,11 +108,40 @@ const healthItems = computed(() => [
   },
   {
     label: '问答通道',
-    value: stats.value[2].value > 0 ? '有会话' : '待启动',
+    value: stats.value[2].value > 0 ? '有会话' : '待开始',
     icon: MessageSquare,
     tone: 'text-violet-300',
   },
 ])
+
+const onboardingSteps = computed(() => [
+  {
+    number: '01',
+    title: '创建知识库',
+    description: stats.value[0].value > 0 ? `已创建 ${stats.value[0].value} 个知识库` : '先创建一个用于组织资料的知识库',
+    path: '/knowledge-base',
+    icon: BookOpen,
+    done: stats.value[0].value > 0,
+  },
+  {
+    number: '02',
+    title: '上传文档',
+    description: stats.value[1].value > 0 ? `已接入 ${stats.value[1].value} 份文档` : '上传 PDF、Word 或 Markdown 文档',
+    path: '/document',
+    icon: UploadCloud,
+    done: stats.value[1].value > 0,
+  },
+  {
+    number: '03',
+    title: '开始提问',
+    description: stats.value[2].value > 0 ? `已开始 ${stats.value[2].value} 次对话` : '让 AI 基于你的资料回答问题',
+    path: '/chat',
+    icon: MessageSquare,
+    done: stats.value[2].value > 0,
+  },
+])
+
+const nextStep = computed(() => onboardingSteps.value.find((step) => !step.done) || onboardingSteps.value[2])
 
 const quickActions = [
   { label: '新建知识库', path: '/knowledge-base', icon: Plus },
@@ -227,7 +162,7 @@ const loadStats = async () => {
     stats.value[1].value = docRes.data.total || 0
     stats.value[2].value = convRes.data.total || 0
   } catch (error) {
-    console.error('加载工作台统计失败:', error)
+    console.error('加载工作台统计失败', error)
     loadError.value = true
   } finally {
     loading.value = false
@@ -238,7 +173,7 @@ onMounted(async () => {
   try {
     await userStore.getUserInfo()
   } catch (error) {
-    console.error('加载用户信息失败:', error)
+    console.error('加载用户信息失败', error)
   }
   await loadStats()
 })
@@ -252,9 +187,9 @@ onMounted(async () => {
           <Sparkles class="h-3.5 w-3.5" />
           AI 工作台
         </div>
-        <h2 class="text-3xl font-semibold text-zinc-50 sm:text-4xl">任务管理</h2>
+        <h2 class="text-3xl font-semibold text-zinc-50 sm:text-4xl">欢迎回来，{{ userName }}</h2>
         <p class="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">
-          {{ userName }}，{{ todayLabel }}。集中查看知识库、文档索引、智能对话与 RAG 质量状态。
+          {{ todayLabel }}。从资料管理开始，让 AI 更准确地理解和回答你的问题。
         </p>
       </div>
 
@@ -302,128 +237,56 @@ onMounted(async () => {
       </button>
     </section>
 
-    <section
-      v-if="loadError"
-      class="glass-panel flex items-center justify-between gap-4 p-4 text-sm text-amber-200"
-    >
-      <span>统计数据加载失败，当前展示为本地占位状态。</span>
-      <Button
-        class="rounded-lg border border-amber-300/20 bg-amber-300/10 text-amber-100 hover:bg-amber-300/20"
-        @click="loadStats"
-      >
+    <section v-if="loadError" class="glass-panel flex items-center justify-between gap-4 p-4 text-sm text-amber-200">
+      <span>统计数据加载失败，当前展示为占位状态。</span>
+      <Button class="rounded-lg border border-amber-300/20 bg-amber-300/10 text-amber-100 hover:bg-amber-300/20" @click="loadStats">
         重试
       </Button>
     </section>
 
     <section class="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_23rem]">
-      <div class="glass-panel overflow-hidden p-4 sm:p-5">
-        <div class="flex flex-col gap-4 border-b border-white/10 pb-4 sm:flex-row sm:items-center sm:justify-between">
+      <div class="glass-panel p-5 sm:p-6">
+        <div class="flex flex-col gap-2 border-b border-white/10 pb-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p class="text-xs text-zinc-500">当前任务链路</p>
-            <h3 class="mt-1 text-xl font-semibold text-zinc-50">知识到回答的工作流</h3>
+            <p class="text-xs font-medium uppercase tracking-[0.16em] text-emerald-300/80">Getting started</p>
+            <h3 class="mt-1 text-xl font-semibold text-zinc-50">三步开始使用</h3>
           </div>
-          <div class="flex rounded-lg border border-white/10 bg-black/20 p-1">
-            <button type="button" class="rounded-md bg-emerald-400 px-3 py-1.5 text-xs font-medium text-black">
-              全部任务
-            </button>
-            <button type="button" class="rounded-md px-3 py-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-200">
-              索引中
-            </button>
-            <button type="button" class="rounded-md px-3 py-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-200">
-              已完成
-            </button>
-          </div>
+          <p class="text-sm text-zinc-500">把资料接入后，就可以开始问答。</p>
         </div>
 
-        <div class="grid gap-6 py-5 lg:grid-cols-[minmax(0,1fr)_19rem] lg:items-center">
-          <div class="task-stage">
-            <button
-              v-for="(task, index) in taskCards"
-              :key="task.id"
-              type="button"
-              :class="[
-                'task-stack-card',
-                `tone-${task.tone}`,
-                selectedTaskId === task.id && 'is-active',
-              ]"
-              :style="{
-                '--stack-index': `${index}`,
-                '--stack-progress': `${task.progress}%`,
-              }"
-              @click="selectedTaskId = task.id"
-            >
-              <span class="flex items-center justify-between gap-3">
-                <span class="task-stack-icon">
-                  <component :is="task.icon" class="h-4 w-4" />
-                </span>
-                <span class="text-xs text-zinc-500">{{ task.code }}</span>
-              </span>
-              <span class="mt-5 block text-left text-base font-semibold text-zinc-50">
-                {{ task.title }}
-              </span>
-              <span class="mt-2 block text-left text-xs leading-5 text-zinc-500">
-                {{ task.caption }}
-              </span>
-              <span class="mt-5 block h-1.5 overflow-hidden rounded-full bg-white/10">
-                <span class="task-stack-progress" />
-              </span>
-            </button>
-          </div>
-
-          <div class="selected-task-panel">
-            <div class="flex items-center justify-between">
-              <span class="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-1 text-xs text-zinc-400">
-                {{ activeTask.code }}
-              </span>
-              <span class="rounded-lg bg-emerald-400/10 px-3 py-1 text-xs text-emerald-300">
-                {{ activeTask.status }}
-              </span>
-            </div>
-            <h4 class="mt-5 text-xl font-semibold text-zinc-50">{{ activeTask.title }}</h4>
-            <p class="mt-2 text-sm leading-6 text-zinc-500">{{ activeTask.caption }}</p>
-            <div class="mt-5 grid grid-cols-2 gap-3 text-sm">
-              <div class="rounded-lg border border-white/10 bg-black/20 p-3">
-                <p class="text-xs text-zinc-600">负责人</p>
-                <p class="mt-1 text-zinc-200">{{ activeTask.owner }}</p>
-              </div>
-              <div class="rounded-lg border border-white/10 bg-black/20 p-3">
-                <p class="text-xs text-zinc-600">计划时间</p>
-                <p class="mt-1 text-zinc-200">{{ activeTask.schedule }}</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              class="mt-5 inline-flex w-full items-center justify-between rounded-lg bg-emerald-400 px-4 py-3 text-sm font-semibold text-black transition hover:bg-emerald-300"
-              @click="router.push(activeTask.route)"
-            >
-              进入处理
-              <ArrowRight class="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        <div class="grid gap-3 md:grid-cols-2">
+        <div class="grid gap-3 py-5 md:grid-cols-3">
           <button
-            v-for="task in taskCards"
-            :key="`${task.id}-row`"
+            v-for="step in onboardingSteps"
+            :key="step.number"
             type="button"
-            :class="[
-              'task-row',
-              selectedTaskId === task.id && 'is-selected',
-            ]"
-            @click="selectedTaskId = task.id"
+            :class="['onboarding-step', step.done && 'is-done']"
+            @click="router.push(step.path)"
           >
-            <span class="flex items-start gap-3">
-              <span :class="['task-row-icon', `tone-${task.tone}`]">
-                <component :is="task.icon" class="h-4 w-4" />
-              </span>
-              <span class="min-w-0 text-left">
-                <span class="block truncate text-sm font-medium text-zinc-100">{{ task.title }}</span>
-                <span class="mt-1 block truncate text-xs text-zinc-600">{{ task.schedule }} · {{ task.owner }}</span>
-              </span>
+            <span class="flex items-center justify-between">
+              <span class="onboarding-icon"><component :is="step.icon" class="h-5 w-5" /></span>
+              <span v-if="step.done" class="onboarding-check"><Check class="h-3.5 w-3.5" /></span>
+              <span v-else class="text-xs font-semibold tracking-widest text-zinc-600">{{ step.number }}</span>
             </span>
-            <span class="text-sm font-semibold text-zinc-300">{{ task.progress }}%</span>
+            <span class="mt-6 block text-left text-base font-semibold text-zinc-100">{{ step.title }}</span>
+            <span class="mt-2 block text-left text-xs leading-5 text-zinc-500">{{ step.description }}</span>
+            <span class="mt-5 block text-left text-xs font-medium" :class="step.done ? 'text-emerald-300' : 'text-zinc-400'">
+              {{ step.done ? '已完成 · 查看' : '开始设置' }}
+            </span>
           </button>
+        </div>
+
+        <div class="next-step-panel flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div class="flex items-start gap-3">
+            <span class="next-step-icon"><Search class="h-5 w-5" /></span>
+            <div>
+              <p class="text-xs text-zinc-500">推荐下一步</p>
+              <p class="mt-1 text-sm font-semibold text-zinc-100">{{ nextStep.title }}</p>
+              <p class="mt-1 text-xs text-zinc-500">{{ nextStep.description }}</p>
+            </div>
+          </div>
+          <Button class="shrink-0 rounded-lg bg-emerald-400 text-black hover:bg-emerald-300" @click="router.push(nextStep.path)">
+            继续
+          </Button>
         </div>
       </div>
 
@@ -431,43 +294,13 @@ onMounted(async () => {
         <section class="glass-panel p-5">
           <div class="flex items-center justify-between">
             <div>
-              <p class="text-xs text-zinc-500">AI 任务建议</p>
-              <h3 class="mt-1 text-lg font-semibold text-zinc-50">下一步动作</h3>
-            </div>
-            <span class="rounded-lg bg-emerald-400/10 p-2 text-emerald-300">
-              <Zap class="h-5 w-5" />
-            </span>
-          </div>
-          <div class="mt-5 space-y-3">
-            <div class="rounded-lg border border-white/10 bg-white/[0.04] p-4">
-              <p class="text-sm font-medium text-zinc-100">优先补齐可检索资产</p>
-              <p class="mt-2 text-xs leading-5 text-zinc-500">
-                当前文档与知识库规模决定回答覆盖率，建议先维护高频知识源。
-              </p>
-            </div>
-            <div class="rounded-lg border border-white/10 bg-white/[0.04] p-4">
-              <p class="text-sm font-medium text-zinc-100">建立 RAG 评估节奏</p>
-              <p class="mt-2 text-xs leading-5 text-zinc-500">
-                每次批量上传后执行检索观测，关注召回、重排与答案一致性。
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section class="glass-panel p-5">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-xs text-zinc-500">系统健康</p>
-              <h3 class="mt-1 text-lg font-semibold text-zinc-50">运行状态</h3>
+              <p class="text-xs text-zinc-500">资料准备情况</p>
+              <h3 class="mt-1 text-lg font-semibold text-zinc-50">当前概况</h3>
             </div>
             <CheckCircle2 class="h-5 w-5 text-emerald-300" />
           </div>
-          <div class="mt-5 space-y-3">
-            <div
-              v-for="item in healthItems"
-              :key="item.label"
-              class="flex items-center justify-between rounded-lg border border-white/10 bg-black/20 p-3"
-            >
+          <div class="mt-5 space-y-2">
+            <div v-for="item in healthItems" :key="item.label" class="health-row">
               <span class="flex items-center gap-3 text-sm text-zinc-400">
                 <component :is="item.icon" :class="['h-4 w-4', item.tone]" />
                 {{ item.label }}
@@ -476,56 +309,16 @@ onMounted(async () => {
             </div>
           </div>
         </section>
+
+        <section class="glass-panel p-5">
+          <p class="text-xs text-zinc-500">你可以做什么</p>
+          <h3 class="mt-1 text-lg font-semibold text-zinc-50">从资料到答案</h3>
+          <p class="mt-3 text-sm leading-6 text-zinc-500">上传资料后，系统会自动解析并建立索引。你可以在对话中追问，并查看答案引用来源。</p>
+          <button type="button" class="mt-4 inline-flex items-center text-sm font-medium text-emerald-300 hover:text-emerald-200" @click="router.push('/chat')">
+            去提问 <span class="ml-1" aria-hidden="true">→</span>
+          </button>
+        </section>
       </aside>
-    </section>
-
-    <section class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_23rem]">
-      <div class="glass-panel p-5">
-        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p class="text-xs text-zinc-500">项目时间线</p>
-            <h3 class="mt-1 text-lg font-semibold text-zinc-50">今日处理窗口</h3>
-          </div>
-          <span class="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-zinc-400">
-            <Clock3 class="h-4 w-4 text-emerald-300" />
-            任务状态
-          </span>
-        </div>
-        <div class="mt-6 py-8 text-center" v-if="timeline.length === 0">
-          <p class="text-sm text-zinc-500">暂无任务数据</p>
-          <p class="mt-1 text-xs text-zinc-600">上传文档并开始解析后，任务时间线将显示在这里</p>
-        </div>
-        <div class="timeline-track mt-6" v-else>
-          <div
-            v-for="item in timeline"
-            :key="item.time"
-            :class="['timeline-item', `tone-${item.tone}`]"
-          >
-            <span class="timeline-dot" />
-            <div>
-              <p class="text-sm font-medium text-zinc-100">{{ item.time }} · {{ item.label }}</p>
-              <p class="mt-1 text-xs text-zinc-500">{{ item.description }}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="glass-panel p-5">
-        <p class="text-xs text-zinc-500">整体进度</p>
-        <div class="mt-4 flex items-end justify-between">
-          <span class="text-4xl font-semibold text-zinc-50">{{ workflowProgress }}%</span>
-          <span class="text-xs text-emerald-300">工作流可用</span>
-        </div>
-        <div class="mt-5 h-2 overflow-hidden rounded-full bg-white/10">
-          <div
-            class="h-full rounded-full bg-gradient-to-r from-emerald-400 via-cyan-300 to-amber-300 transition-all duration-700"
-            :style="{ width: `${workflowProgress}%` }"
-          />
-        </div>
-        <p class="mt-4 text-xs leading-5 text-zinc-500">
-          从知识导入、文档索引、检索评估到问答反馈形成闭环，适合作为下一阶段工程验收入口。
-        </p>
-      </div>
     </section>
   </div>
 </template>
