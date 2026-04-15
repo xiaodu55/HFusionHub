@@ -278,6 +278,60 @@ class TestKeywordChannel:
         assert all(result.metadata["knowledge_base_id"] == 7 for result in results)
         assert results[0].metadata["bm25_score"] > results[1].metadata["bm25_score"]
 
+    @pytest.mark.asyncio
+    async def test_keyword_heading_expands_adjacent_body_chunks(self):
+        config = ChannelConfig(channel_type=ChannelType.KEYWORD)
+        channel = KeywordChannel(config)
+
+        mock_milvus = MagicMock()
+        mock_milvus._load_chunks_store.return_value = {
+            "2": [
+                {
+                    "chunk_id": "2_chunk_0001",
+                    "document_id": "2",
+                    "knowledge_base_id": 1,
+                    "block_type": "HEADING",
+                    "content": "一、什么是虚拟线程",
+                },
+                {
+                    "chunk_id": "2_chunk_0002",
+                    "document_id": "2",
+                    "knowledge_base_id": 1,
+                    "block_type": "PARAGRAPH",
+                    "content": "虚拟线程是由 JVM 管理的轻量级线程。",
+                },
+                {
+                    "chunk_id": "2_chunk_0003",
+                    "document_id": "2",
+                    "knowledge_base_id": 1,
+                    "block_type": "PARAGRAPH",
+                    "content": "它适合高并发的 I/O 密集型任务。",
+                },
+                {
+                    "chunk_id": "2_chunk_0004",
+                    "document_id": "2",
+                    "knowledge_base_id": 1,
+                    "block_type": "HEADING",
+                    "content": "二、使用方式",
+                },
+            ]
+        }
+        with patch.dict("sys.modules", {"app.core.vectorstore.milvus_store": mock_milvus}):
+            results = await channel.search(
+                query="什么是虚拟线程",
+                knowledge_base_id=1,
+                top_k=5,
+            )
+
+        assert "JVM 管理" in results[0].content
+        assert "I/O 密集型" in results[0].content
+        assert "二、使用方式" not in results[0].content
+        assert results[0].metadata["expanded_from_heading"] is True
+        assert results[0].metadata["neighbor_chunk_ids"] == [
+            "2_chunk_0002",
+            "2_chunk_0003",
+        ]
+
 
 class TestGraphChannel:
     """GraphChannel 测试"""
@@ -553,6 +607,76 @@ class TestQueryRouterSearch:
         )
 
         assert result.total_count == 1
+
+    @pytest.mark.asyncio
+    async def test_cascading_continues_after_heading_only_keyword_hit(self):
+        """A full keyword candidate window of headings must not suppress vectors."""
+        mock_keyword = AsyncMock(spec=KeywordChannel)
+        mock_keyword.search.return_value = [
+            SearchResult(
+                content="一、什么是虚拟线程",
+                score=1.0,
+                source=ChannelType.KEYWORD,
+                document_id=2,
+                metadata={"chunk_id": "2_chunk_0001"},
+            )
+        ]
+        mock_vector = AsyncMock(spec=VectorChannel)
+        mock_vector.search.return_value = [
+            SearchResult(
+                content=(
+                    "虚拟线程是由 JVM 调度的轻量级线程，适合高并发的 I/O 密集型任务，"
+                    "并在 Java 21 中正式发布。"
+                ),
+                score=0.91,
+                source=ChannelType.VECTOR,
+                document_id=2,
+                metadata={"chunk_id": "2_chunk_0002"},
+            )
+        ]
+        self.router.channels[ChannelType.KEYWORD] = mock_keyword
+        self.router.channels[ChannelType.VECTOR] = mock_vector
+
+        result = await self.router.search(
+            query="什么是虚拟线程",
+            knowledge_base_id=1,
+            query_type=QueryType.ENTITY,
+            strategy=RouteStrategy.CASCADING,
+            top_k=5,
+        )
+
+        mock_vector.search.assert_awaited_once()
+        assert ChannelType.KEYWORD in result.channels_used
+        assert ChannelType.VECTOR in result.channels_used
+        assert any("JVM" in item.content for item in result.results)
+
+    @pytest.mark.asyncio
+    async def test_cascading_stops_after_substantive_keyword_evidence(self):
+        mock_keyword = AsyncMock(spec=KeywordChannel)
+        mock_keyword.search.return_value = [
+            SearchResult(
+                content=(
+                    "虚拟线程是由 JVM 管理的轻量级线程，不会为每个任务绑定一个操作系统线程，"
+                    "因此能够以较低资源开销支持大量并发任务。"
+                ),
+                score=0.9,
+                source=ChannelType.KEYWORD,
+            )
+        ]
+        mock_vector = AsyncMock(spec=VectorChannel)
+        mock_vector.search.return_value = []
+        self.router.channels[ChannelType.KEYWORD] = mock_keyword
+        self.router.channels[ChannelType.VECTOR] = mock_vector
+
+        await self.router.search(
+            query="什么是虚拟线程",
+            knowledge_base_id=1,
+            query_type=QueryType.ENTITY,
+            strategy=RouteStrategy.CASCADING,
+            top_k=5,
+        )
+
+        mock_vector.search.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_search_empty_results(self):

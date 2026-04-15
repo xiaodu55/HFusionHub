@@ -80,6 +80,24 @@ async def test_general_chat_never_calls_retriever_without_a_selected_kb(monkeypa
     assert retriever.knowledge_base_ids == []
 
 
+@pytest.mark.asyncio
+async def test_general_chat_bypasses_retrieval_with_a_selected_kb(monkeypatch):
+    """Selecting a KB narrows retrieval but does not turn greetings into RAG queries."""
+    import app.core.agent.react as react_module
+    import app.core.rag as rag_module
+
+    retriever = _EmptyRetriever()
+    monkeypatch.setattr(react_module, "get_retriever", lambda: retriever)
+    monkeypatch.setattr(rag_module, "get_intent_classifier", lambda: _ChitchatClassifier())
+    monkeypatch.setattr(react_module, "get_llm", lambda *args, **kwargs: _StreamingLlm())
+
+    agent = ReactAgent(knowledge_base_id=7)
+    chunks = [chunk async for chunk in agent.run_stream("你好")]
+
+    assert chunks == ["普通对话"]
+    assert retriever.knowledge_base_ids == []
+
+
 def test_postprocessor_rejects_low_confidence_context():
     processor = Postprocessor(min_score=0.35)
 

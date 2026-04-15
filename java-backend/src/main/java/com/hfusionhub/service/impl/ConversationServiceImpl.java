@@ -626,7 +626,7 @@ public class ConversationServiceImpl implements ConversationService {
         java.util.Collections.reverse(messages); // return in chronological order
 
         return messages.stream()
-                .filter(m -> m.getContent() != null && !m.getContent().isBlank())
+                .filter(ConversationServiceImpl::shouldIncludeInChatHistory)
                 .map(m -> {
                     Map<String, String> map = new HashMap<>();
                     map.put("role", m.getRole());
@@ -634,6 +634,17 @@ public class ConversationServiceImpl implements ConversationService {
                     return map;
                 })
                 .collect(Collectors.toList());
+    }
+
+    static boolean shouldIncludeInChatHistory(Message message) {
+        if (message == null || message.getContent() == null || message.getContent().isBlank()) {
+            return false;
+        }
+        // Replies produced by the old development fallback can contain the
+        // fully assembled prompt. Keep them visible for audit, but never send
+        // them back to a real model as conversation context.
+        return !("assistant".equals(message.getRole())
+                && "mock-model".equals(message.getModel()));
     }
 
     @Override

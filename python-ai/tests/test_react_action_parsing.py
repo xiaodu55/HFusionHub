@@ -43,6 +43,35 @@ def test_parse_action_keeps_legacy_react_protocol_compatible(agent):
     assert agent._parse_action(response) == ("search_knowledge_base", {"query": "refund"})
 
 
+def test_final_answer_wins_over_model_simulated_action(agent):
+    response = (
+        'Thought: search first\n'
+        'Action: search_knowledge_base\n'
+        'Action Input: {"query": "virtual threads"}\n'
+        'Observation: simulated result\n'
+        'Final Answer: Virtual threads are lightweight Java threads.'
+    )
+
+    assert agent._parse_action(response) is None
+    assert agent._public_answer_or_fallback(response) == (
+        "Virtual threads are lightweight Java threads."
+    )
+
+
+def test_react_trace_without_final_answer_is_not_exposed(agent):
+    response = 'Thought: keep searching\nAction: search_knowledge_base'
+
+    assert agent._public_answer_or_fallback(response) == (
+        "当前任务未能在限定步骤内完成，请缩小问题范围后重试。"
+    )
+
+
+def test_parse_final_answer_accepts_chinese_marker(agent):
+    assert agent._parse_final_answer("思考过程\n最终答案：这是用户可见内容") == (
+        "这是用户可见内容"
+    )
+
+
 @pytest.mark.parametrize(
     "response",
     [

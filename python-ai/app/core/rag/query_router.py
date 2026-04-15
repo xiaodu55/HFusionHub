@@ -227,6 +227,11 @@ class KeywordChannel(BaseChannel):
             if not documents:
                 return []
 
+            chunks_by_document = {
+                str(document_id): sorted(chunks, key=self._chunk_order)
+                for document_id, chunks in store.items()
+            }
+
             document_frequency = {
                 term: sum(1 for _, _, tokens in documents if term in set(tokens))
                 for term in terms
@@ -251,6 +256,11 @@ class KeywordChannel(BaseChannel):
             results: List[SearchResult] = []
             for raw_score, document_id, chunk in sorted(scored, reverse=True, key=lambda item: item[0])[:top_k]:
                 content = chunk.get("content", "")
+                content, neighbor_chunk_ids = self._expand_heading_context(
+                    chunk,
+                    chunks_by_document.get(str(document_id), []),
+                    knowledge_base_id,
+                )
                 content_tokens = self._tokenize(content)
                 matched_terms = [term for term in terms if term in content_tokens]
                 # BM25 is only comparable within this one corpus. Combine its
@@ -273,6 +283,8 @@ class KeywordChannel(BaseChannel):
                         "match_terms": matched_terms,
                         "keyword_coverage": len(matched_terms) / len(terms),
                         "bm25_score": raw_score,
+                        "expanded_from_heading": bool(neighbor_chunk_ids),
+                        "neighbor_chunk_ids": neighbor_chunk_ids,
                     },
                 ))
             return results
@@ -335,6 +347,66 @@ class KeywordChannel(BaseChannel):
             except (TypeError, ValueError):
                 return []
         return []
+
+    @staticmethod
+    def _chunk_order(chunk: Dict[str, Any]) -> int:
+        """Return a stable document-local order for JSON and cluster stores."""
+        explicit_index = chunk.get("chunk_index")
+        if isinstance(explicit_index, int):
+            return explicit_index
+
+        match = re.search(r"(?:_|-)(\d+)$", str(chunk.get("chunk_id", "")))
+        return int(match.group(1)) if match else 2**31 - 1
+
+    @classmethod
+    def _expand_heading_context(
+        cls,
+        heading: Dict[str, Any],
+        document_chunks: List[Dict[str, Any]],
+        knowledge_base_id: Optional[int],
+        max_neighbors: int = 2,
+        max_chars: int = 1200,
+    ) -> Tuple[str, List[str]]:
+        """Attach the paragraph/list/code blocks immediately under a heading."""
+        content = heading.get("content", "") or ""
+        if str(heading.get("block_type", "")).upper() != "HEADING":
+            return content, []
+
+        heading_id = str(heading.get("chunk_id", ""))
+        heading_position = next(
+            (
+                index
+                for index, chunk in enumerate(document_chunks)
+                if str(chunk.get("chunk_id", "")) == heading_id
+            ),
+            None,
+        )
+        if heading_position is None:
+            return content, []
+
+        parts = [content]
+        neighbor_ids: List[str] = []
+        for neighbor in document_chunks[heading_position + 1:]:
+            if (
+                knowledge_base_id is not None
+                and neighbor.get("knowledge_base_id") != knowledge_base_id
+            ):
+                continue
+            if str(neighbor.get("block_type", "")).upper() == "HEADING":
+                break
+
+            neighbor_content = (neighbor.get("content", "") or "").strip()
+            if not neighbor_content:
+                continue
+            if len("\n\n".join(parts)) + len(neighbor_content) > max_chars:
+                break
+
+            parts.append(neighbor_content)
+            neighbor_ids.append(str(neighbor.get("chunk_id", "")))
+            if len(neighbor_ids) >= max_neighbors:
+                break
+
+        return "\n\n".join(parts), neighbor_ids
 
 
 class GraphChannel(BaseChannel):
@@ -664,7 +736,8 @@ class QueryRouter:
         channel_latencies_ms: Dict[str, float] = {}
 
         if route_result.strategy == RouteStrategy.CASCADING:
-            # 级联检索：第一个通道结果足够则不查第二个
+            # 级联检索：只有第一个通道返回了实质证据才停止。标题块常会
+            # 精确命中关键词，但它本身不足以回答问题，必须继续语义通道。
             for channel_type in route_result.selected_channels:
                 channel = self.channels.get(channel_type)
                 if channel:
@@ -680,8 +753,7 @@ class QueryRouter:
                         (time.perf_counter() - channel_started_at) * 1000, 2
                     )
 
-                    # 如果结果足够，停止检索
-                    if len(results) >= candidate_top_k:
+                    if self._has_sufficient_cascading_evidence(results):
                         break
         else:
             # 并行检索
@@ -720,6 +792,24 @@ class QueryRouter:
         })
 
         return merged
+
+    @staticmethod
+    def _has_sufficient_cascading_evidence(results: List[SearchResult]) -> bool:
+        """Return whether a cascade stage has answer-bearing evidence.
+
+        Candidate count alone is not a quality signal: BM25 can fill the whole
+        candidate window with headings and weak lexical matches.  Requiring a
+        minimum evidence score plus substantive content lets exact short-title
+        hits fall through to vector retrieval and RRF corroboration.
+        """
+        for result in results:
+            compact_content = re.sub(r"\s+", "", result.content or "")
+            if (
+                result.score >= app_config.RAG_MIN_EVIDENCE_SCORE
+                and len(compact_content) >= 40
+            ):
+                return True
+        return False
 
     @staticmethod
     async def _search_channel(

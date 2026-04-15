@@ -303,12 +303,24 @@ class ChatResponse(BaseModel):
 def _build_history_with_system_prompt(
     history: List[Dict[str, str]],
     system_prompt: Optional[str],
+    current_message: Optional[str] = None,
 ) -> List[Dict[str, str]]:
     """Prepend system_prompt to history if provided, bypassing the 4000-char
     ChatMessage limit (system prompts can be up to SYSTEM_PROMPT_MAX_LENGTH)."""
+    normalized_history = list(history)
+    # Java persists the current user turn before calling this API. The agent
+    # appends ``current_message`` itself, so forwarding that final history turn
+    # duplicates the request and can destabilize local providers.
+    if (
+        current_message
+        and normalized_history
+        and normalized_history[-1].get("role") == "user"
+        and normalized_history[-1].get("content") == current_message
+    ):
+        normalized_history.pop()
     if system_prompt and system_prompt.strip():
-        return [{"role": "system", "content": system_prompt}] + list(history)
-    return list(history)
+        return [{"role": "system", "content": system_prompt}] + normalized_history
+    return normalized_history
 
 
 def _build_chat_response(response, style: str, extra_step_events: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
@@ -403,6 +415,7 @@ async def chat(request: ChatRequest):
         history = _build_history_with_system_prompt(
             [{"role": msg.role, "content": msg.content} for msg in request.history],
             request.system_prompt,
+            request.message,
         )
 
         # Build execution context when user_id and KB are both present.
@@ -482,6 +495,7 @@ async def agent_v1_chat(request: AgentV1Request):
         history = _build_history_with_system_prompt(
             [{"role": msg.role, "content": msg.content} for msg in request.history],
             request.system_prompt,
+            request.message,
         )
 
         # Agent V1 Step 3: build immutable execution context.
@@ -561,6 +575,7 @@ async def agent_v1_chat_stream(request: AgentV1Request):
         history = _build_history_with_system_prompt(
             [{"role": msg.role, "content": msg.content} for msg in request.history],
             request.system_prompt,
+            request.message,
         )
 
         execution_context = AgentExecutionContext(
@@ -683,6 +698,7 @@ async def chat_stream(request: ChatRequest):
         history = _build_history_with_system_prompt(
             [{"role": msg.role, "content": msg.content} for msg in request.history],
             request.system_prompt,
+            request.message,
         )
 
         agent = get_agent(

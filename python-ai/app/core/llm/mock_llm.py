@@ -23,23 +23,13 @@ class MockLLM(BaseLLM):
         **kwargs
     ) -> LLMResponse:
         """Return a mock response"""
-        # Get the last user message
-        last_user_msg = ""
-        for msg in reversed(messages):
-            if msg.role == "user":
-                last_user_msg = msg.content
-                break
-
-        # Generate mock response
-        mock_response = f"""您好！我是AI助手。
-
-您刚才说的是："{last_user_msg}"
-
-这是一个模拟回复。要使用真实的AI模型，请确保：
-1. DeepSeek API Key 已配置
-2. 或者 Ollama 服务正在运行
-
-当前处于降级模式，无法提供真实的AI对话能力。"""
+        # Mock mode must never echo the assembled user prompt. In RAG flows it
+        # can contain retrieved text and system instructions rather than a
+        # user-facing answer.
+        mock_response = (
+            "AI 对话服务当前处于开发测试模式，不能生成真实回答。"
+            "请配置 DeepSeek API Key，或启动并配置 Ollama 后重试。"
+        )
 
         await asyncio.sleep(0.1)  # Simulate processing time
 

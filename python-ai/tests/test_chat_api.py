@@ -9,6 +9,7 @@ from app.api.chat import (
     CHAT_MESSAGE_MAX_LENGTH,
     SYSTEM_PROMPT_MAX_LENGTH,
     _agent_chunk_to_sse,
+    _build_history_with_system_prompt,
     active_requests,
 )
 from app.main import create_app
@@ -79,6 +80,29 @@ def test_chat_rejects_oversized_history():
     response = client.post("/api/chat", json={"message": "hello", "history": history})
 
     assert response.status_code == 422
+
+
+def test_history_drops_only_the_duplicate_current_user_turn():
+    history = [
+        {"role": "user", "content": "first question"},
+        {"role": "assistant", "content": "first answer"},
+        {"role": "user", "content": "current question"},
+    ]
+
+    result = _build_history_with_system_prompt(history, None, "current question")
+
+    assert result == history[:-1]
+
+
+def test_history_keeps_a_previous_matching_question():
+    history = [
+        {"role": "user", "content": "repeat question"},
+        {"role": "assistant", "content": "previous answer"},
+    ]
+
+    result = _build_history_with_system_prompt(history, None, "repeat question")
+
+    assert result == history
 
 
 # ── system_prompt contract (max 8000, bypasses 4000-char ChatMessage limit) ──

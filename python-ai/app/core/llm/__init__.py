@@ -99,7 +99,12 @@ def get_llm(model: str = None) -> BaseLLM:
         ))
 
     ollama_url = config.OLLAMA_BASE_URL
-    if _is_ollama_available(ollama_url):
+    ollama_available = _is_ollama_available(ollama_url)
+    # A cold local Ollama probe can narrowly miss the bounded timeout even
+    # though the service is starting successfully.  When a cloud provider is
+    # already configured, retain Ollama as a runtime fallback candidate; the
+    # FailoverLLM will handle a genuinely unavailable local service safely.
+    if ollama_available or providers:
         providers.append(OllamaLLM(base_url=ollama_url, model=model or config.OLLAMA_MODEL))
 
     if len(providers) > 1:

@@ -1,8 +1,10 @@
 package com.hfusionhub.service.impl;
 
+import com.hfusionhub.entity.Message;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -67,6 +69,26 @@ class ConversationServiceImplTest {
     void nullInputsReturnNullForBothMethods() {
         assertNull(ConversationServiceImpl.normalizeRequestId(null));
         assertNull(ConversationServiceImpl.assistantRequestId(null));
+    }
+
+    @Test
+    void mockAssistantRepliesAreExcludedFromFutureModelContext() {
+        Message message = new Message();
+        message.setRole("assistant");
+        message.setModel("mock-model");
+        message.setContent("旧版模拟回复包含了内部提示词");
+
+        assertFalse(ConversationServiceImpl.shouldIncludeInChatHistory(message));
+    }
+
+    @Test
+    void normalAssistantRepliesRemainInConversationContext() {
+        Message message = new Message();
+        message.setRole("assistant");
+        message.setModel("qwen2.5:3b");
+        message.setContent("这是正常回答");
+
+        assertTrue(ConversationServiceImpl.shouldIncludeInChatHistory(message));
     }
 
     @Test

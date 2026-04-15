@@ -23,7 +23,6 @@ from ..llm import get_llm, ChatMessage, BaseLLM
 from ..tools import execute_tool, ToolExecutionPolicy, ToolRegistry, create_v1_registry
 from ..rag import (
     get_retriever,
-    get_intent_classifier,
     get_query_decomposer,
     get_compressor,
     get_reflector,
@@ -247,6 +246,44 @@ class ReactAgent(Agent):
             style_used=self.style,
         )
 
+    async def _classify_intent_safely(
+        self,
+        query: str,
+        history: Optional[List[Dict[str, str]]],
+    ) -> Optional[IntentResult]:
+        """Classify before routing without making classification a hard dependency.
+
+        A selected knowledge base narrows retrieval scope; it must not force
+        greetings and other direct-chat intents through retrieval.  If the
+        classifier is unavailable, callers conservatively keep the existing
+        knowledge-retrieval path for selected-KB conversations.
+        """
+        try:
+            # Resolve at call time so the configured classifier can be swapped
+            # or reset without rebuilding the agent instance.
+            from ..rag import get_intent_classifier as resolve_intent_classifier
+
+            result = await resolve_intent_classifier().classify(query, history)
+            intent = getattr(result.intent, "value", result.intent)
+            complexity = getattr(
+                getattr(result, "complexity", None),
+                "value",
+                getattr(result, "complexity", "unknown"),
+            )
+            logger.info(
+                "Query intent: %s, complexity: %s, strategy: %s",
+                intent,
+                complexity,
+                getattr(result, "processing_strategy", "unknown"),
+            )
+            return result
+        except Exception as exc:
+            logger.warning(
+                "Intent classification failed; using conservative routing: %s",
+                exc,
+            )
+            return None
+
     async def _handle_operation(
         self,
         query: str,
@@ -308,7 +345,7 @@ class ReactAgent(Agent):
                     break
 
         if final_answer is None:
-            final_answer = assistant_text if assistant_text is not None else "无法生成回答"
+            final_answer = self._public_answer_or_fallback(assistant_text)
 
         return AgentResponse(
             content=final_answer,
@@ -539,6 +576,12 @@ class ReactAgent(Agent):
 
     def _parse_action(self, text: str) -> Optional[tuple]:
         """Parse a structured tool call first, then the legacy ReAct format."""
+        # Some smaller models emit a complete ReAct transcript in one turn,
+        # including both an Action and a Final Answer.  Once a final answer is
+        # present, do not execute the earlier, model-simulated action.
+        if self._parse_final_answer(text) is not None:
+            return None
+
         structured_action = self._parse_structured_action(text)
         if structured_action is not None:
             return structured_action
@@ -562,10 +605,32 @@ class ReactAgent(Agent):
 
     def _parse_final_answer(self, text: str) -> Optional[str]:
         """Parse final answer from text"""
-        match = re.search(r'Final Answer:\s*(.+)', text, re.DOTALL)
+        match = re.search(
+            r'(?:Final\s+Answer|最终答案)\s*[:：]\s*(.+)',
+            text,
+            re.DOTALL | re.IGNORECASE,
+        )
         if match:
             return match.group(1).strip()
         return None
+
+    def _public_answer_or_fallback(self, text: Optional[str]) -> str:
+        """Return user-facing answer text without exposing ReAct internals."""
+        if not text or not text.strip():
+            return "无法生成回答"
+
+        final_answer = self._parse_final_answer(text)
+        if final_answer:
+            return final_answer
+
+        if re.search(
+            r'(?im)^\s*(?:Thought|Action|Action\s+Input|Observation)\s*:',
+            text,
+        ):
+            logger.warning("ReAct step limit reached without a final answer")
+            return "当前任务未能在限定步骤内完成，请缩小问题范围后重试。"
+
+        return text.strip()
 
     async def _decompose_and_handle(
         self,
@@ -721,22 +786,15 @@ class ReactAgent(Agent):
 
         has_selected_kb = self._has_selected_knowledge_base()
         auto_detected_kb_id = None
-        intent_result = None
-        if not has_selected_kb:
-            intent_classifier = get_intent_classifier()
-            intent_result = await intent_classifier.classify(query, history)
-
-            logger.info(
-                f"Query intent: {intent_result.intent.value}, "
-                f"complexity: {intent_result.complexity.value}, "
-                f"strategy: {intent_result.processing_strategy}"
-            )
+        intent_result = await self._classify_intent_safely(query, history)
 
         if intent_result is not None:
             if intent_result.is_direct_llm():
                 return await self._handle_chitchat(query, history, llm)
 
-            if intent_result.needs_tool():
+            # Selected-KB operations stay in the ReAct/tool path so capability
+            # checks and approval gates cannot be bypassed by intent routing.
+            if intent_result.needs_tool() and not has_selected_kb:
                 return await self._handle_operation(query, history, llm, tools)
 
             if not has_selected_kb:
@@ -897,7 +955,7 @@ class ReactAgent(Agent):
                     break
 
         if final_answer is None:
-            final_answer = assistant_text if assistant_text is not None else "无法生成回答"
+            final_answer = self._public_answer_or_fallback(assistant_text)
 
         # Deduplicate sources by chunk_id.
         unique_sources: Dict[str, Dict[str, Any]] = {}
@@ -1020,7 +1078,7 @@ class ReactAgent(Agent):
         if "style" in kwargs:
             self.style = kwargs["style"] if kwargs["style"] in _STYLE_PROMPTS else self.style
 
-        from ..rag import get_intent_classifier, get_query_decomposer, get_compressor, get_reflector
+        from ..rag import get_query_decomposer, get_compressor, get_reflector
 
         # Track step sequence counter for structured events.
         _step_seq = 0
@@ -1028,23 +1086,28 @@ class ReactAgent(Agent):
         try:
             has_selected_kb = self._has_selected_knowledge_base()
             auto_detected_kb_id = None
-            intent_result = None
-            if not has_selected_kb:
-                intent_classifier = get_intent_classifier()
-                intent_result = await intent_classifier.classify(query, history)
+            intent_result = await self._classify_intent_safely(query, history)
+            intent_value = getattr(
+                getattr(intent_result, "intent", None),
+                "value",
+                getattr(intent_result, "intent", None),
+            )
 
-            if not has_selected_kb and intent_result and intent_result.intent == "chitchat":
-                llm = get_llm()
+            if intent_value == "chitchat":
+                llm = self._get_llm()
                 messages = [
                     ChatMessage(role="system", content="你是一个友好的AI助手，可以进行日常闲聊。"),
-                    ChatMessage(role="user", content=query)
                 ]
+                if history:
+                    for msg in history[-5:]:
+                        messages.append(ChatMessage(role=msg["role"], content=msg["content"]))
+                messages.append(ChatMessage(role="user", content=query))
                 async for chunk in llm.chat_stream(messages=messages, temperature=0.7, max_tokens=2048):
                     yield chunk
                 return
 
-            if not has_selected_kb and intent_result and intent_result.intent == "operation":
-                llm = get_llm()
+            if not has_selected_kb and intent_value == "operation":
+                llm = self._get_llm()
                 messages = [
                     ChatMessage(role="system", content="你是一个智能助手，请回答用户的问题。"),
                     ChatMessage(role="user", content=query)
@@ -1187,7 +1250,7 @@ class ReactAgent(Agent):
 
             prompt = self._build_rag_prompt(context, query, self.style) if context else query
 
-            llm = get_llm()
+            llm = self._get_llm()
             messages = [
                 ChatMessage(role="system", content="你是一个智能助手，请回答用户的问题。"),
                 ChatMessage(role="user", content=prompt)
@@ -1305,7 +1368,7 @@ class ReactAgent(Agent):
             }, ensure_ascii=False)
             # ── Fallback: try answering without RAG context before giving up ──
             try:
-                llm = get_llm()
+                llm = self._get_llm()
                 messages = [
                     ChatMessage(role="system", content="你是一个智能助手，请回答用户的问题。"),
                     ChatMessage(role="user", content=query)
@@ -1484,9 +1547,8 @@ class ReactAgent(Agent):
                     break
 
             if final_answer is None:
-                final_answer = (
-                    assistant_text if 'assistant_text' in locals()
-                    else "无法基于当前工具和资料回答该问题。"
+                final_answer = self._public_answer_or_fallback(
+                    assistant_text if 'assistant_text' in locals() else None
                 )
 
             # ── Phase 4: Emit generation step + content + sources ───────
