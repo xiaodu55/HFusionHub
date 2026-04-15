@@ -10,6 +10,7 @@ from app.core.rag.evaluation_runs import get_evaluation_run_store
 from app.core.rag.observability import get_trace_store
 from app.core.rag.retriever import get_retriever
 from app.core.rag.scoped_graph import get_scoped_graph_store
+from app.core.rag.intent_tree_router import resolve_intent_route
 from app.utils.config import config
 
 router = APIRouter(prefix="/api/rag", tags=["RAG Observability"])
@@ -36,6 +37,17 @@ class RetrievalDebugRequest(BaseModel):
     knowledge_base_id: int = Field(ge=1)
     top_k: int = Field(default=5, ge=1, le=20)
     conversation_history: Optional[List[Dict[str, Any]]] = Field(default=None, max_length=50)
+    enable_rewrite: bool = True
+
+
+class ProductionEvaluationRequest(BaseModel):
+    """One production-equivalent retrieval run with all intermediate output."""
+
+    query: str = Field(min_length=1, max_length=4000)
+    knowledge_base_id: Optional[int] = Field(default=None, ge=1)
+    top_k: Optional[int] = Field(default=None, ge=1, le=20)
+    conversation_history: Optional[List[Dict[str, Any]]] = Field(default=None, max_length=50)
+    intent_context: List[Dict[str, Any]] = Field(default_factory=list, max_length=500)
     enable_rewrite: bool = True
 
 
@@ -124,6 +136,61 @@ async def debug_search(request: RetrievalDebugRequest):
     if trace is None:
         raise HTTPException(status_code=500, detail="Retrieval debug trace was not recorded")
     return trace
+
+
+@router.post("/eval")
+async def evaluate_production_path(request: ProductionEvaluationRequest):
+    """Run the exact production router/retriever chain without answer generation."""
+    route = resolve_intent_route(
+        request.query,
+        request.intent_context,
+        explicit_knowledge_base_id=request.knowledge_base_id,
+    )
+    if route.get("status") == "ambiguous":
+        return {
+            "status": "clarification_required",
+            "route": route,
+            "retrieval": None,
+        }
+    knowledge_base_id = request.knowledge_base_id or route.get("knowledge_base_id")
+    if not knowledge_base_id:
+        return {
+            "status": "no_knowledge_route",
+            "route": route,
+            "retrieval": None,
+        }
+    top_k = request.top_k or route.get("top_k") or 5
+    retrieval = await get_retriever().retrieve(
+        query=request.query,
+        knowledge_base_id=knowledge_base_id,
+        conversation_history=request.conversation_history,
+        top_k=top_k,
+        enable_rewrite=request.enable_rewrite,
+    )
+    trace_id = retrieval.metadata.get("trace_id")
+    trace = get_trace_store().get(trace_id) if trace_id else None
+    return {
+        "status": "completed",
+        "route": route,
+        "knowledge_base_id": knowledge_base_id,
+        "top_k": top_k,
+        "query_rewrite": retrieval.metadata.get("rewritten_queries", [request.query]),
+        "retrieval": {
+            "trace_id": trace_id,
+            "results": [
+                {
+                    "document_id": item.document_id,
+                    "content": item.content,
+                    "score": item.score,
+                    "source": item.source,
+                    "outline_path": item.outline_path,
+                }
+                for item in retrieval.results
+            ],
+            "reranker": retrieval.metadata.get("reranker"),
+            "trace": trace,
+        },
+    }
 
 
 @router.get("/graph/status")

@@ -75,6 +75,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final UsageLedgerService usageLedgerService;
     private final QuotaProperties quotaProperties;
     private final com.hfusionhub.service.AgentStreamEventProcessor streamEventProcessor;
+    private final com.hfusionhub.service.RagIntentNodeService ragIntentNodeService;
 
     private static final int REQUEST_ID_MAX_LENGTH = 64;
     public static final String ASSISTANT_REQUEST_SUFFIX = ":assistant";
@@ -210,6 +211,7 @@ public class ConversationServiceImpl implements ConversationService {
         // business rules before passing it to Python.  Regular chat is always null.
         String effectiveCapability = resolveCapabilityProfile(
                 dto.getCapabilityProfile(), conversation, currentUserId);
+        List<Map<String, Object>> intentContext = ragIntentNodeService.routeCandidates();
         // 用量账本：预占上界 = 输入估算 + 服务端最大输出（幂等键为 chat:<requestId>）
         final String usageKey = "chat:" + requestId;
         final long inputEstimate = estimateChatTokens(dto.getContent());
@@ -231,11 +233,12 @@ public class ConversationServiceImpl implements ConversationService {
                         conversation.getKnowledgeBaseId(), history,
                         "detailed", 5, requestId, currentUserId,
                         effectiveCapability,
-                        JwtUtils.hasRole(CommonConstants.ROLE_ADMIN) ? "admin" : "user");
+                        JwtUtils.hasRole(CommonConstants.ROLE_ADMIN) ? "admin" : "user",
+                        intentContext);
             } else {
                 aiResponse = aiClient.chat(
                         dto.getContent(), dto.getConversationId(),
-                        conversation.getKnowledgeBaseId(), history);
+                        conversation.getKnowledgeBaseId(), history, currentUserId, intentContext);
             }
         } catch (BusinessException e) {
             // Re-throw BusinessExceptions directly — they represent explicit
@@ -895,6 +898,7 @@ public class ConversationServiceImpl implements ConversationService {
         // 5. 获取对话历史
         List<Map<String, String>> history = getChatHistory(conversation.getId());
         history = withConversationInstructions(history, conversation, currentUserId, dto.getContent());
+        List<Map<String, Object>> intentContext = ragIntentNodeService.routeCandidates();
 
         // 5.5. Agent V1 Step 4: 创建持久化 agent_task 和 agent_run
         final AgentTask agentTask = agentTaskService.createTask(
@@ -941,11 +945,12 @@ public class ConversationServiceImpl implements ConversationService {
             sseFlux = aiClient.agentV1ChatStream(
                     dto.getContent(), dto.getConversationId(),
                     conversation.getKnowledgeBaseId(), history, requestId, currentUserId,
-                    streamingCapability);
+                    streamingCapability, intentContext);
         } else {
             sseFlux = aiClient.streamChat(
                     dto.getContent(), dto.getConversationId(),
-                    conversation.getKnowledgeBaseId(), history, requestId);
+                    conversation.getKnowledgeBaseId(), history, requestId,
+                    currentUserId, intentContext);
         }
 
         sseFlux = sseFlux.doFinally(signalType -> {

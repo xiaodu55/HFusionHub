@@ -53,6 +53,18 @@ const stateLabel = (state?: string) => {
   return map[state || 'unavailable'] || state || '未知'
 }
 
+const circuitLabel = (state?: string) => ({
+  closed: '正常',
+  open: '熔断中',
+  half_open: '半开探测',
+}[state || ''] || '未知')
+
+const circuitClass = (state?: string) => ({
+  closed: 'text-emerald-300',
+  open: 'text-rose-300',
+  half_open: 'text-amber-300',
+}[state || ''] || 'text-muted-foreground')
+
 const loadProviders = async () => {
   providerLoading.value = true
   providerError.value = ''
@@ -168,6 +180,30 @@ onMounted(() => {
                 <div class="flex items-center gap-1.5 text-xs text-muted-foreground"><Database class="h-3 w-3" />向量库</div>
                 <p class="mt-1 text-sm font-medium truncate">{{ runtime.vector_store?.collection || '未检测到' }}</p>
                 <Badge variant="outline" class="mt-1.5 text-[10px]" :class="runtime.vector_store?.ready ? stateBadgeClass('ready') : stateBadgeClass('unavailable')">{{ runtime.vector_store?.ready ? '已就绪' : '不可用' }}</Badge>
+              </div>
+            </div>
+
+            <div v-if="runtime.model_gateway" class="mt-4 rounded-xl border border-border bg-muted/15 p-4">
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-sm font-medium">模型网关</p>
+                  <p class="mt-1 text-xs text-muted-foreground">故障自动切换与熔断恢复状态</p>
+                </div>
+                <Badge variant="outline" :class="runtime.model_gateway.gateway_enabled ? stateBadgeClass('ready') : stateBadgeClass('unavailable')">
+                  {{ runtime.model_gateway.gateway_enabled ? '已启用' : '未启用' }}
+                </Badge>
+              </div>
+              <div v-if="runtime.model_gateway.providers?.length" class="mt-3 grid gap-2 sm:grid-cols-3">
+                <div v-for="provider in runtime.model_gateway.providers" :key="provider.provider" class="rounded-lg border border-border bg-background/30 px-3 py-2 text-xs">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="font-medium">{{ provider.provider }}</span>
+                    <span :class="circuitClass(provider.circuit)">{{ circuitLabel(provider.circuit) }}</span>
+                  </div>
+                  <div class="mt-1 flex justify-between text-muted-foreground">
+                    <span>{{ provider.available ? '可用' : '不可用' }}</span>
+                    <span>失败 {{ provider.failure_count }}</span>
+                  </div>
+                </div>
               </div>
             </div>
 

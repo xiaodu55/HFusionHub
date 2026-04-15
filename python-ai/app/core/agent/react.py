@@ -140,6 +140,7 @@ class ReactAgent(Agent):
         style: str = "detailed",
         tool_registry: Optional[ToolRegistry] = None,
         execution_context: Optional[Any] = None,  # AgentExecutionContext
+        retrieval_top_k: Optional[int] = None,
         **kwargs
     ):
         self.knowledge_base_id = knowledge_base_id
@@ -158,6 +159,7 @@ class ReactAgent(Agent):
         # permissions, mode, …).  Passed to the Registry at tool-execution
         # time for permission / mode / KB-scope enforcement.
         self._context: Optional[Any] = execution_context
+        self.retrieval_top_k = max(1, min(int(retrieval_top_k), 20)) if retrieval_top_k else None
 
         # Agent V1: track tool calls and sources for partial-result reporting.
         self._tool_calls_count: int = 0
@@ -390,7 +392,7 @@ class ReactAgent(Agent):
                 query=plan.query,
                 knowledge_base_id=self.knowledge_base_id,
                 conversation_history=history,
-                top_k=plan.top_k,
+                top_k=self.retrieval_top_k or plan.top_k,
             )
             logger.info(f"[RAG] Retriever returned {len(result.results)} results")
 

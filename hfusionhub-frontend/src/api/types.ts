@@ -73,6 +73,55 @@ export interface KnowledgeBaseUpdateDTO {
   status?: number
 }
 
+export type RagIntentLevel = 'DOMAIN' | 'CATEGORY' | 'TOPIC'
+export type RagIntentKind = 'KB' | 'SYSTEM' | 'MCP'
+
+export interface RagIntentNode {
+  id: number
+  userId: number
+  parentId?: number | null
+  intentCode: string
+  name: string
+  description?: string | null
+  level: RagIntentLevel
+  kind: RagIntentKind
+  knowledgeBaseId?: number | null
+  knowledgeBaseName?: string | null
+  mcpToolId?: number | null
+  topK: number
+  routeConfig?: string | null
+  enabled: number
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+  children?: RagIntentNode[]
+}
+
+export interface RagIntentNodeCreateDTO {
+  parentId?: number | null
+  intentCode: string
+  name: string
+  description?: string
+  level: RagIntentLevel
+  kind: RagIntentKind
+  knowledgeBaseId?: number | null
+  mcpToolId?: number | null
+  topK?: number
+  routeConfig?: string
+  enabled?: number
+  sortOrder?: number
+}
+
+export interface RagIntentNodeUpdateDTO extends Partial<RagIntentNodeCreateDTO> {}
+
+export interface RagIntentNodeQuery extends PageQuery {
+  parentId?: number
+  keyword?: string
+  level?: RagIntentLevel
+  kind?: RagIntentKind
+  enabled?: number
+}
+
 // 文档相关类型
 export interface Document {
   id: number

@@ -145,6 +145,11 @@ const routes: RouteRecordRaw[] = [
         name: 'FeatureFlags',
         component: () => import('@/pages/admin/Flags.vue'),
       },
+      {
+        path: 'admin/intent-tree',
+        name: 'IntentTree',
+        component: () => import('@/pages/admin/IntentTree.vue'),
+      },
     ],
   },
 ]

@@ -107,6 +107,7 @@ def get_agent(
         tool_policy=tool_policy,
         tool_registry=tool_registry,
         execution_context=execution_context,
+        retrieval_top_k=kwargs.pop("retrieval_top_k", None),
         **kwargs
     )
     if not _ff_workflow:

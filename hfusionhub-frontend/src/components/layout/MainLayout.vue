@@ -16,6 +16,7 @@ import {
   Cpu,
   DollarSign,
   FileText,
+  GitBranch,
   FlaskConical,
   Fingerprint,
   Home,
@@ -78,12 +79,16 @@ const menuItems: Array<{
   { path: '/settings/safety', label: '安全护栏', description: '注入检测与脱敏', icon: ShieldCheck },
 ]
 
+menuItems.push({ path: '/admin/intent-tree', label: '意图树', description: 'RAG 路由配置', icon: GitBranch })
+
 const menuGroups = [
   { label: '工作区', items: menuItems.filter((item) => ['/', '/knowledge-base', '/document', '/chat'].includes(item.path)) },
   { label: '构建', items: menuItems.filter((item) => ['/builder/prompts', '/builder/test-bench', '/builder/test-sets', '/builder/models', '/builder/tools', '/builder/plugins', '/builder/workflow', '/agent'].includes(item.path)) },
   { label: '运营', items: menuItems.filter((item) => ['/cost', '/approvals', '/rag', '/memory'].includes(item.path)) },
   { label: '管理', items: menuItems.filter((item) => ['/admin/flags', '/settings/safety'].includes(item.path)) },
 ]
+
+menuGroups.push({ label: 'RAG', items: menuItems.filter((item) => item.path === '/admin/intent-tree') })
 
 const commandRoutes = [
   { keywords: ['model', '模型', 'llm', 'embedding', '向量'], path: '/builder/models' },
@@ -99,6 +104,8 @@ const commandRoutes = [
   { keywords: ['开关', 'flag', '灰度'], path: '/admin/flags' },
   { keywords: ['设置', '主题', '账户'], path: '/settings' },
 ]
+
+commandRoutes.push({ keywords: ['意图树', 'intent tree', '路由', 'taxonomy'], path: '/admin/intent-tree' })
 
 const isActive = (path: string) => {
   if (path === '/') {

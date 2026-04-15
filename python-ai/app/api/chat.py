@@ -66,6 +66,7 @@ from app.core.agent.execution_context import AgentExecutionContext
 from app.core.tenant.context import get_tenant_id
 from app.core.policy.engine import PolicyContext, PolicyEngine
 from app.core.policy.masking import build_arguments_summary
+from app.core.rag.intent_tree_router import resolve_intent_route
 from app.utils.config import config
 
 router = APIRouter()
@@ -232,6 +233,7 @@ class ChatRequest(BaseModel):
     style: Optional[str] = Field("detailed")
     max_tool_steps: Optional[int] = Field(5, ge=1, le=10)
     temperature: Optional[float] = Field(0.3, ge=0.0, le=2.0)
+    intent_context: List[Dict[str, Any]] = Field(default_factory=list, max_length=500)
 
 
 class AgentV1Request(BaseModel):
@@ -266,6 +268,7 @@ class AgentV1Request(BaseModel):
                                      description="Authenticated user role from Java (user|admin)")
     environment: Optional[str] = Field(None, max_length=32,
                                        description="Deployment environment override")
+    intent_context: List[Dict[str, Any]] = Field(default_factory=list, max_length=500)
 
 
 class ChatResponse(BaseModel):
@@ -321,6 +324,27 @@ def _build_history_with_system_prompt(
     if system_prompt and system_prompt.strip():
         return [{"role": "system", "content": system_prompt}] + normalized_history
     return normalized_history
+
+
+def _resolve_chat_route(request: ChatRequest) -> tuple[Dict[str, Any], Optional[int], Optional[int]]:
+    route = resolve_intent_route(
+        request.message,
+        request.intent_context,
+        explicit_knowledge_base_id=request.knowledge_base_id,
+    )
+    knowledge_base_id = request.knowledge_base_id or route.get("knowledge_base_id")
+    return route, knowledge_base_id, route.get("top_k")
+
+
+def _clarification_response(route: Dict[str, Any], style: str) -> ChatResponse:
+    message = route.get("message") or "请先选择一个知识库作为回答范围。"
+    return ChatResponse(
+        content=message,
+        answer=message,
+        status="clarification",
+        style_used=style,
+        auto_detected_kb_id=None,
+    )
 
 
 def _build_chat_response(response, style: str, extra_step_events: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
@@ -411,6 +435,9 @@ async def chat(request: ChatRequest):
     _is_error = False
     try:
         style = request.style if request.style in _VALID_STYLES else "detailed"
+        route, routed_knowledge_base_id, route_top_k = _resolve_chat_route(request)
+        if route.get("status") == "ambiguous":
+            return _clarification_response(route, style)
 
         history = _build_history_with_system_prompt(
             [{"role": msg.role, "content": msg.content} for msg in request.history],
@@ -420,10 +447,10 @@ async def chat(request: ChatRequest):
 
         # Build execution context when user_id and KB are both present.
         execution_context = None
-        if request.user_id and request.knowledge_base_id:
+        if request.user_id and routed_knowledge_base_id:
             execution_context = AgentExecutionContext(
                 user_id=request.user_id,
-                knowledge_base_id=request.knowledge_base_id,
+                knowledge_base_id=routed_knowledge_base_id,
                 tenant_id=get_tenant_id(),
                 permissions=frozenset({"knowledge_base:read"}),
                 agent_run_id=request.request_id or str(uuid4()),
@@ -431,9 +458,10 @@ async def chat(request: ChatRequest):
             )
 
         agent = get_agent(
-            knowledge_base_id=request.knowledge_base_id,
+            knowledge_base_id=routed_knowledge_base_id,
             model=request.model,
             execution_context=execution_context,
+            retrieval_top_k=route_top_k,
         )
 
         if request.stream:
@@ -694,6 +722,16 @@ async def chat_stream(request: ChatRequest):
     """Chat with AI agent (streaming only)."""
     try:
         style = request.style if request.style in _VALID_STYLES else "detailed"
+        route, routed_knowledge_base_id, route_top_k = _resolve_chat_route(request)
+        request_id = request.request_id or str(uuid4())
+        if route.get("status") == "ambiguous":
+            async def clarification_stream():
+                yield f"data: {json.dumps({'content': route.get('message'), 'route': route}, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+            return StreamingResponse(
+                clarification_stream(), media_type="text/event-stream",
+                headers={"X-Request-ID": request_id},
+            )
 
         history = _build_history_with_system_prompt(
             [{"role": msg.role, "content": msg.content} for msg in request.history],
@@ -702,11 +740,10 @@ async def chat_stream(request: ChatRequest):
         )
 
         agent = get_agent(
-            knowledge_base_id=request.knowledge_base_id,
+            knowledge_base_id=routed_knowledge_base_id,
             model=request.model,
+            retrieval_top_k=route_top_k,
         )
-
-        request_id = request.request_id or str(uuid4())
 
         async def event_generator():
             serving_task = _track_active_request(request_id)

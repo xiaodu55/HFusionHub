@@ -14,6 +14,7 @@ import httpx
 from fastapi import APIRouter
 
 from app.core.vectorstore.milvus_store import vector_store_status
+from app.core.llm.model_gateway import get_model_gateway
 from app.utils.config import config
 from app.utils.feature_flag import feature_flags
 
@@ -135,6 +136,16 @@ async def _status_payload() -> dict[str, Any]:
     except Exception:
         vector_store = {"ready": False, "collection": None, "error": "向量库状态检查失败"}
 
+    try:
+        model_gateway = await get_model_gateway().health()
+    except Exception as exc:
+        model_gateway = {
+            "gateway_enabled": False,
+            "failover_enabled": False,
+            "providers": [],
+            "error": str(exc),
+        }
+
     llm_ready = llm["state"] in {"configured", "ready"}
     status = "ready" if llm_ready and embedding["state"] == "ready" and vector_store.get("ready") else "degraded"
 
@@ -151,6 +162,7 @@ async def _status_payload() -> dict[str, Any]:
                 "向量库已就绪" if vector_store.get("ready") else "向量库不可用"
             ),
         },
+        "model_gateway": model_gateway,
         "providers": [
             {
                 "id": "deepseek",

@@ -57,7 +57,19 @@ public class AiClient {
             List<Map<String, String>> history
     ) {
         return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                "detailed", 5, null, null, null, null, null);
+                "detailed", 5, null, null, null, null, null, null);
+    }
+
+    public ChatResponse chat(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            Long userId,
+            List<Map<String, Object>> intentContext
+    ) {
+        return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
+                "detailed", 5, null, userId, null, null, null, intentContext);
     }
 
     /**
@@ -72,7 +84,7 @@ public class AiClient {
             int maxToolSteps
     ) {
         return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                style, maxToolSteps, null, null, null, null, null);
+                style, maxToolSteps, null, null, null, null, null, null);
     }
 
     /**
@@ -89,7 +101,7 @@ public class AiClient {
             String systemPrompt
     ) {
         return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                "detailed", 5, null, null, null, systemPrompt, null);
+                "detailed", 5, null, null, null, systemPrompt, null, null);
     }
 
     /**
@@ -142,6 +154,23 @@ public class AiClient {
             String capabilityProfile,
             String userRole
     ) {
+        return agentV1Chat(message, conversationId, knowledgeBaseId, history, style,
+                maxToolSteps, requestId, userId, capabilityProfile, userRole, null);
+    }
+
+    public ChatResponse agentV1Chat(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String style,
+            int maxToolSteps,
+            String requestId,
+            Long userId,
+            String capabilityProfile,
+            String userRole,
+            List<Map<String, Object>> intentContext
+    ) {
         if (knowledgeBaseId == null || knowledgeBaseId <= 0) {
             throw new BusinessException(StatusCode.BAD_REQUEST,
                     "Agent V1 requires a non-null knowledge_base_id");
@@ -151,7 +180,7 @@ public class AiClient {
                     "Agent V1 requires a non-null user_id — Java session must provide authenticated user ID");
         }
         return doChat("/api/agent/v1/chat", message, conversationId, knowledgeBaseId,
-                history, style, maxToolSteps, requestId, userId, capabilityProfile, null, userRole);
+                history, style, maxToolSteps, requestId, userId, capabilityProfile, null, userRole, intentContext);
     }
 
     /**
@@ -180,7 +209,7 @@ public class AiClient {
                     "Agent V1 requires a non-null user_id — Java session must provide authenticated user ID");
         }
         return doChat("/api/agent/v1/chat", message, conversationId, knowledgeBaseId,
-                history, style, maxToolSteps, requestId, userId, null, systemPrompt, null);
+                history, style, maxToolSteps, requestId, userId, null, systemPrompt, null, null);
     }
 
     private ChatResponse doChat(
@@ -195,7 +224,8 @@ public class AiClient {
             Long userId,
             String capabilityProfile,
             String systemPrompt,
-            String userRole
+            String userRole,
+            List<Map<String, Object>> intentContext
     ) {
         try {
             Map<String, Object> request = new HashMap<>();
@@ -228,6 +258,9 @@ public class AiClient {
             }
             if (systemPrompt != null && !systemPrompt.isEmpty()) {
                 request.put("system_prompt", systemPrompt);
+            }
+            if (intentContext != null && !intentContext.isEmpty()) {
+                request.put("intent_context", intentContext);
             }
 
             HttpHeaders headers = new HttpHeaders();
@@ -284,6 +317,18 @@ public class AiClient {
             List<Map<String, String>> history,
             String requestId
     ) {
+        return streamChat(message, conversationId, knowledgeBaseId, history, requestId, null, null);
+    }
+
+    public reactor.core.publisher.Flux<String> streamChat(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String requestId,
+            Long userId,
+            List<Map<String, Object>> intentContext
+    ) {
         // Build request body
         Map<String, Object> request = new HashMap<>();
         request.put("message", message);
@@ -292,6 +337,12 @@ public class AiClient {
         request.put("history", history != null ? history : List.of());
         request.put("stream", true);
         request.put("request_id", requestId);
+        if (userId != null && userId > 0) {
+            request.put("user_id", userId);
+        }
+        if (intentContext != null && !intentContext.isEmpty()) {
+            request.put("intent_context", intentContext);
+        }
 
         String url = baseUrl + "/api/chat/stream";
         log.info("Starting streaming request to Python AI: {}, requestId: {}", url, requestId);
@@ -372,6 +423,20 @@ public class AiClient {
             Long userId,
             String capabilityProfile
     ) {
+        return agentV1ChatStream(message, conversationId, knowledgeBaseId, history,
+                requestId, userId, capabilityProfile, null);
+    }
+
+    public reactor.core.publisher.Flux<String> agentV1ChatStream(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String requestId,
+            Long userId,
+            String capabilityProfile,
+            List<Map<String, Object>> intentContext
+    ) {
         if (knowledgeBaseId == null || knowledgeBaseId <= 0) {
             throw new BusinessException(StatusCode.BAD_REQUEST,
                     "Agent V1 streaming requires a non-null knowledge_base_id");
@@ -393,6 +458,9 @@ public class AiClient {
         // Agent V1 Step 5: capability_profile explicitly chosen by Java.
         if (capabilityProfile != null && !capabilityProfile.isEmpty()) {
             request.put("capability_profile", capabilityProfile);
+        }
+        if (intentContext != null && !intentContext.isEmpty()) {
+            request.put("intent_context", intentContext);
         }
 
         String url = baseUrl + "/api/agent/v1/chat/stream";

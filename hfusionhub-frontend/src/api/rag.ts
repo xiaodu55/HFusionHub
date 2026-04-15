@@ -115,6 +115,16 @@ export interface EvaluationRun {
   failed_case_ids: string[]
 }
 
+export interface AnswerFeedback {
+  id: number
+  conversationId: number
+  messageId: number
+  rating: 'UP' | 'DOWN'
+  reason?: string
+  expectedAnswer?: string
+  evaluationCaseId?: number
+}
+
 const toJavaQueryParams = (params: TraceFilters) => {
   const { knowledge_base_id, ...rest } = params
   return {
@@ -151,3 +161,20 @@ export const getEvaluationRuns = (params: { limit?: number, knowledge_base_id: n
     limit: params.limit,
     knowledgeBaseId: params.knowledge_base_id,
   })
+
+export const saveAnswerFeedback = (data: {
+  messageId: number
+  rating: 'UP' | 'DOWN'
+  reason?: string
+  expectedAnswer?: string
+}): Promise<ApiResponse<AnswerFeedback>> => post('/rag/feedback', data)
+
+export const getAnswerFeedback = (conversationId: number): Promise<ApiResponse<AnswerFeedback[]>> =>
+  get('/rag/feedback', { conversationId })
+
+export const evaluateProductionPath = (data: {
+  query: string
+  knowledge_base_id?: number
+  top_k?: number
+  conversation_history?: Array<Record<string, unknown>>
+}): Promise<ApiResponse<Record<string, unknown>>> => post('/rag/eval', data)

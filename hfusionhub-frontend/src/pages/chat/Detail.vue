@@ -2,12 +2,15 @@
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import * as conversationApi from '@/api/conversation'
+import { getAnswerFeedback, saveAnswerFeedback } from '@/api/rag'
 import type { Conversation, Message } from '@/api/types'
 import { useUserStore } from '@/stores/user'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
-import { ArrowLeft, Send, User, Bot, Loader2, RotateCcw, Square, RefreshCw } from 'lucide-vue-next'
+import { ArrowLeft, Send, User, Bot, Loader2, RotateCcw, Square, RefreshCw, ThumbsUp, ThumbsDown } from 'lucide-vue-next'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useToast } from '@/composables/useToast'
 import { formatDateTime, formatTime } from '@/utils/date'
 import { SseDataParser, type SseDataEvent } from '@/utils/sse'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
@@ -15,9 +18,16 @@ import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const toast = useToast()
 
 const conversation = ref<Conversation | null>(null)
 const messages = ref<Message[]>([])
+const feedbackByMessage = ref<Record<number, 'UP' | 'DOWN'>>({})
+const feedbackDialogOpen = ref(false)
+const feedbackMessage = ref<Message | null>(null)
+const feedbackReason = ref('')
+const expectedAnswer = ref('')
+const feedbackSaving = ref(false)
 const loading = ref(false)
 const sending = ref(false)
 const inputMessage = ref('')
@@ -44,6 +54,14 @@ const loadMessages = async () => {
   try {
     const res = await conversationApi.getConversationMessages(id)
     messages.value = res.data
+    try {
+      const feedback = await getAnswerFeedback(id)
+      feedbackByMessage.value = Object.fromEntries(
+        feedback.data.map(item => [item.messageId, item.rating]),
+      )
+    } catch {
+      feedbackByMessage.value = {}
+    }
     await scrollToBottom()
   } catch (error) {
     console.error('加载消息失败:', error)
@@ -179,6 +197,8 @@ const handleSend = async () => {
     }
 
     streamingMessageId.value = null
+    // SSE uses a temporary client ID; reload once so feedback targets the persisted assistant message.
+    await loadMessages()
 
   } catch (error: any) {
     // 如果是用户取消，不显示错误
@@ -307,6 +327,43 @@ const handleRetryMessage = async (message: Message) => {
   // 移除用户消息（因为 handleSend 会重新添加）
   messages.value.splice(messageIndex - 1, 1)
   await handleSend()
+}
+
+const submitPositiveFeedback = async (message: Message) => {
+  try {
+    await saveAnswerFeedback({ messageId: message.id, rating: 'UP' })
+    feedbackByMessage.value[message.id] = 'UP'
+    toast.success('已记录，这会帮助持续改进回答质量')
+  } catch {
+    toast.error('反馈提交失败')
+  }
+}
+
+const openNegativeFeedback = (message: Message) => {
+  feedbackMessage.value = message
+  feedbackReason.value = ''
+  expectedAnswer.value = ''
+  feedbackDialogOpen.value = true
+}
+
+const submitNegativeFeedback = async () => {
+  if (!feedbackMessage.value) return
+  feedbackSaving.value = true
+  try {
+    await saveAnswerFeedback({
+      messageId: feedbackMessage.value.id,
+      rating: 'DOWN',
+      reason: feedbackReason.value.trim() || undefined,
+      expectedAnswer: expectedAnswer.value.trim() || undefined,
+    })
+    feedbackByMessage.value[feedbackMessage.value.id] = 'DOWN'
+    feedbackDialogOpen.value = false
+    toast.success(expectedAnswer.value.trim() ? '已加入回归评测集' : '已记录问题反馈')
+  } catch {
+    toast.error('反馈提交失败')
+  } finally {
+    feedbackSaving.value = false
+  }
 }
 
 // 判断消息是否为错误消息
@@ -465,6 +522,28 @@ onMounted(() => {
                   <p class="text-xs opacity-70">
                     {{ formatTime(message.createdAt) }}
                   </p>
+                  <div v-if="message.role === 'assistant' && message.id > 0 && !isErrorMessage(message)" class="flex items-center gap-0.5">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="h-7 w-7"
+                      :class="feedbackByMessage[message.id] === 'UP' ? 'text-emerald-400' : 'text-muted-foreground'"
+                      title="回答有帮助"
+                      @click="submitPositiveFeedback(message)"
+                    >
+                      <ThumbsUp class="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="h-7 w-7"
+                      :class="feedbackByMessage[message.id] === 'DOWN' ? 'text-rose-400' : 'text-muted-foreground'"
+                      title="回答需要改进"
+                      @click="openNegativeFeedback(message)"
+                    >
+                      <ThumbsDown class="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                   <!-- 重试按钮（仅在错误消息和助手消息上显示） -->
                   <Button
                       v-if="isErrorMessage(message) && !streamingMessageId"
@@ -508,5 +587,44 @@ onMounted(() => {
         </Button>
       </div>
     </div>
+
+    <Dialog v-model:open="feedbackDialogOpen">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>告诉我们哪里需要改进</DialogTitle>
+          <DialogDescription>填写期望答案后，这条问题会自动进入回归评测集。</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-4">
+          <div class="space-y-2">
+            <label class="text-sm font-medium" for="feedback-reason">问题原因</label>
+            <textarea
+              id="feedback-reason"
+              v-model="feedbackReason"
+              rows="3"
+              maxlength="500"
+              class="block w-full resize-y rounded-lg border border-input bg-background/60 px-3 py-2 text-sm outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20"
+              placeholder="例如：没有回答问题重点、引用不准确"
+            />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium" for="expected-answer">期望答案（可选）</label>
+            <textarea
+              id="expected-answer"
+              v-model="expectedAnswer"
+              rows="5"
+              maxlength="10000"
+              class="block w-full resize-y rounded-lg border border-input bg-background/60 px-3 py-2 text-sm outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20"
+              placeholder="输入可作为回归测试基准的答案"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="feedbackDialogOpen = false">取消</Button>
+          <Button :disabled="feedbackSaving" @click="submitNegativeFeedback">
+            {{ feedbackSaving ? '提交中...' : '提交反馈' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

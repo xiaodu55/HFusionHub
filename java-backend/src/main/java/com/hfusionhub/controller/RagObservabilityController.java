@@ -6,8 +6,9 @@ import com.hfusionhub.common.result.R;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
-import lombok.RequiredArgsConstructor;
+import com.hfusionhub.service.RagIntentNodeService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -23,6 +24,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.util.Map;
+import java.util.HashMap;
 
 /**
  * RAG 调试与评测 API 网关。
@@ -33,17 +35,30 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequestMapping("/rag")
-@RequiredArgsConstructor
 public class RagObservabilityController {
 
     private final RestTemplate restTemplate;
     private final KnowledgeBaseMapper knowledgeBaseMapper;
+    private final RagIntentNodeService ragIntentNodeService;
 
     @Value("${ai-service.base-url:http://localhost:9000}")
     private String aiServiceBaseUrl;
 
     @Value("${python-ai.internal-token:}")
     private String internalApiToken;
+
+    public RagObservabilityController(RestTemplate restTemplate, KnowledgeBaseMapper knowledgeBaseMapper) {
+        this(restTemplate, knowledgeBaseMapper, null);
+    }
+
+    @Autowired
+    public RagObservabilityController(RestTemplate restTemplate,
+                                      KnowledgeBaseMapper knowledgeBaseMapper,
+                                      RagIntentNodeService ragIntentNodeService) {
+        this.restTemplate = restTemplate;
+        this.knowledgeBaseMapper = knowledgeBaseMapper;
+        this.ragIntentNodeService = ragIntentNodeService;
+    }
 
     @GetMapping("/traces")
     public R<Map> listTraces(
@@ -139,6 +154,36 @@ public class RagObservabilityController {
             }
             log.error("RAG evaluation request failed", exception);
             throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "RAG 评测服务不可用");
+        }
+    }
+
+    @PostMapping("/eval")
+    public R<Map> evaluateProductionPath(@RequestBody Map<String, Object> request) {
+        Map<String, Object> trustedRequest = new HashMap<>(request);
+        Object requestedKnowledgeBaseId = trustedRequest.get("knowledge_base_id");
+        if (requestedKnowledgeBaseId != null) {
+            requireOwnedKnowledgeBase(requiredKnowledgeBaseId(requestedKnowledgeBaseId));
+        }
+        trustedRequest.put("intent_context",
+                ragIntentNodeService == null ? java.util.List.of() : ragIntentNodeService.routeCandidates());
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            addInternalToken(headers);
+            Map response = restTemplate.postForObject(
+                    aiServiceBaseUrl + "/api/rag/eval",
+                    new HttpEntity<>(trustedRequest, headers),
+                    Map.class
+            );
+            if (response == null) {
+                throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "RAG evaluation returned an empty response");
+            }
+            return R.ok(response);
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            log.error("Production-path RAG evaluation failed", exception);
+            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "RAG production-path evaluation is unavailable");
         }
     }
 

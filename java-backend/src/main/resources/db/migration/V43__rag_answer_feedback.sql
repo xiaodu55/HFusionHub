@@ -1,0 +1,23 @@
+CREATE TABLE `rag_answer_feedback` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `tenant_id` BIGINT NOT NULL,
+    `user_id` BIGINT NOT NULL,
+    `conversation_id` BIGINT NOT NULL,
+    `message_id` BIGINT NOT NULL,
+    `knowledge_base_id` BIGINT DEFAULT NULL,
+    `rating` VARCHAR(8) NOT NULL COMMENT 'UP or DOWN',
+    `reason` VARCHAR(500) DEFAULT NULL,
+    `expected_answer` TEXT DEFAULT NULL,
+    `evaluation_case_id` BIGINT DEFAULT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `deleted` TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_rag_feedback_user_message` (`user_id`, `message_id`),
+    KEY `idx_rag_feedback_tenant_created` (`tenant_id`, `created_at`),
+    KEY `idx_rag_feedback_conversation` (`conversation_id`),
+    KEY `idx_rag_feedback_rating` (`rating`, `created_at`),
+    CONSTRAINT `fk_rag_feedback_user` FOREIGN KEY (`user_id`) REFERENCES `sys_user` (`id`),
+    CONSTRAINT `fk_rag_feedback_conversation` FOREIGN KEY (`conversation_id`) REFERENCES `conversation` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_rag_feedback_message` FOREIGN KEY (`message_id`) REFERENCES `message` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG answer feedback loop';

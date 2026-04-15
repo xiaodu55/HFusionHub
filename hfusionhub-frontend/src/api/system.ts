@@ -23,6 +23,28 @@ export interface RuntimeProvider {
   state: RuntimeState
 }
 
+export interface ModelGatewayProvider {
+  provider: string
+  type: string
+  enabled: boolean
+  available: boolean
+  circuit: 'closed' | 'open' | 'half_open'
+  failure_count: number
+  total_failures: number
+  total_successes: number
+  cooldown_remaining_seconds?: number | null
+  rate_limit_tokens_remaining?: number | null
+  model_count: number
+}
+
+export interface ModelGatewayHealth {
+  gateway_enabled: boolean
+  failover_enabled: boolean
+  cost_tracking_enabled?: boolean
+  providers: ModelGatewayProvider[]
+  error?: string
+}
+
 export interface AiRuntimeOverview {
   status: 'ready' | 'degraded' | 'unavailable'
   generated_at?: string
@@ -37,6 +59,7 @@ export interface AiRuntimeOverview {
     detail: string
   }
   providers?: RuntimeProvider[]
+  model_gateway?: ModelGatewayHealth
   features?: {
     hybrid_retrieval: boolean
     graph_retrieval: boolean
