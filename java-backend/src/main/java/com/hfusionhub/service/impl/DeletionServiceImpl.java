@@ -390,7 +390,11 @@ public class DeletionServiceImpl implements DeletionService {
 
         switch (task.getStepIndex()) {
             case 0 -> {
-                vectorizationService.deleteDocumentIndex(doc.getId());
+                try {
+                    vectorizationService.deleteDocumentIndex(doc.getId());
+                } catch (Exception e) {
+                    log.warn("永久删除文档时删除向量失败，将继续清理: documentId={}", doc.getId(), e);
+                }
                 advanceStep(task, "VECTORS_DELETED");
             }
             case 1 -> {

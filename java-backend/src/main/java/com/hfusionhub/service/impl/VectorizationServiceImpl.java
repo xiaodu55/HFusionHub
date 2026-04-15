@@ -322,13 +322,18 @@ public class VectorizationServiceImpl implements VectorizationService {
     }
 
     @Override
-    @Transactional
+    @Transactional(noRollbackFor = BusinessException.class)
     public void deleteDocumentIndex(Long documentId) {
         try {
+            HttpHeaders headers = internalHeaders();
+            Long tenantId = resolveDeletedDocumentTenantById(documentId);
+            if (tenantId != null) {
+                headers.set("X-Tenant-Id", String.valueOf(tenantId));
+            }
             ResponseEntity<String> response = restTemplate.exchange(
                     pythonEngineUrl + "/api/documents/" + documentId + "/chunks",
                     HttpMethod.DELETE,
-                    new HttpEntity<>(internalHeaders()),
+                    new HttpEntity<>(headers),
                     String.class);
             if (!response.getStatusCode().is2xxSuccessful()) {
                 throw new BusinessException("向量索引删除失败");
@@ -1025,6 +1030,21 @@ public class VectorizationServiceImpl implements VectorizationService {
         return TenantContext.runAsSystem(() -> {
             Document document = documentMapper.selectById(documentId);
             return document == null ? null : resolveDocumentTenant(document);
+        });
+    }
+
+    private Long resolveDeletedDocumentTenantById(Long documentId) {
+        return TenantContext.runAsSystem(() -> {
+            Document document = documentMapper.selectIncludingDeleted(documentId);
+            if (document == null) {
+                return null;
+            }
+            KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectIncludingDeleted(document.getKnowledgeBaseId());
+            if (knowledgeBase == null || knowledgeBase.getUserId() == null) {
+                return null;
+            }
+            User owner = userMapper.selectById(knowledgeBase.getUserId());
+            return owner == null ? null : owner.getTenantId();
         });
     }
 

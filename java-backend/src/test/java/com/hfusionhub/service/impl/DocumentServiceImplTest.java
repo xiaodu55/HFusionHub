@@ -232,9 +232,23 @@ class DocumentServiceImplTest {
         Document document = document(10L, 20L, DocumentStatus.DELETING);
         document.setDeleted(1);
         when(documentMapper.selectIncludingDeleted(10L)).thenReturn(document);
-        when(knowledgeBaseMapper.selectById(20L)).thenReturn(knowledgeBase(20L, 1L));
+        when(knowledgeBaseMapper.selectIncludingDeleted(20L)).thenReturn(knowledgeBase(20L, 1L));
 
         documentService.purge(10L);
+
+        verify(deletionService).createTask("DOCUMENT_PURGE", 10L);
+    }
+
+    @Test
+    void purgeAllowsDocumentUnderDeletedKnowledgeBase() {
+        Document document = document(10L, 20L, DocumentStatus.DELETING);
+        document.setDeleted(1);
+        KnowledgeBase knowledgeBase = knowledgeBase(20L, 1L);
+        knowledgeBase.setDeleted(1);
+        when(documentMapper.selectIncludingDeleted(10L)).thenReturn(document);
+        when(knowledgeBaseMapper.selectIncludingDeleted(20L)).thenReturn(knowledgeBase);
+
+        assertDoesNotThrow(() -> documentService.purge(10L));
 
         verify(deletionService).createTask("DOCUMENT_PURGE", 10L);
     }

@@ -152,6 +152,50 @@ class DeletionServiceImplTest {
     }
 
     @Test
+    void documentPurgeContinuesWhenVectorDeletionFails() {
+        DeletionTaskMapper deletionTaskMapper = mock(DeletionTaskMapper.class);
+        KnowledgeBaseMapper knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentChunkMapper documentChunkMapper = mock(DocumentChunkMapper.class);
+        DocumentIndexJobMapper documentIndexJobMapper = mock(DocumentIndexJobMapper.class);
+        ConversationMapper conversationMapper = mock(ConversationMapper.class);
+        MessageMapper messageMapper = mock(MessageMapper.class);
+        VectorizationService vectorizationService = mock(VectorizationService.class);
+
+        DeletionServiceImpl service = new DeletionServiceImpl(
+                deletionTaskMapper,
+                knowledgeBaseMapper,
+                documentMapper,
+                documentChunkMapper,
+                documentIndexJobMapper,
+                conversationMapper,
+                messageMapper,
+                vectorizationService);
+
+        Document document = new Document();
+        document.setId(7L);
+        document.setDeleted(1);
+        when(documentMapper.selectIncludingDeleted(7L)).thenReturn(document);
+        doThrow(new RuntimeException("vector store unavailable"))
+                .when(vectorizationService).deleteDocumentIndex(7L);
+
+        DeletionTask task = new DeletionTask();
+        task.setTaskType("DOCUMENT_PURGE");
+        task.setTargetId(7L);
+        task.setStatus("PENDING");
+        task.setStepIndex(0);
+        task.setRetryCount(0);
+        task.setMaxRetries(5);
+
+        service.executeStep(task);
+
+        verify(vectorizationService).deleteDocumentIndex(7L);
+        assertEquals("PENDING", task.getStatus());
+        assertEquals("VECTORS_DELETED", task.getStep());
+        assertEquals(1, task.getStepIndex());
+    }
+
+    @Test
     void documentDeleteMarksDocumentAsRecycledWithoutDeletingTheFile() {
         DeletionTaskMapper deletionTaskMapper = mock(DeletionTaskMapper.class);
         KnowledgeBaseMapper knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);

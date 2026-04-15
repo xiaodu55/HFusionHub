@@ -79,7 +79,7 @@ const purge = async (document: Document) => {
   actionId.value = document.id
   try {
     await documentApi.purgeDocument(document.id)
-    toast.success('文档已永久删除')
+    toast.success('已提交永久删除，系统正在清理文档和索引')
     await loadDocuments()
   } catch (error) {
     console.error('永久删除文档失败:', error)

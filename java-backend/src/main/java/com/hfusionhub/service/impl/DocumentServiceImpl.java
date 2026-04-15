@@ -259,7 +259,9 @@ public class DocumentServiceImpl implements DocumentService {
         if (document == null || document.getDeleted() == null || document.getDeleted() != 1) {
             throw new BusinessException("回收站中不存在该文档");
         }
-        KnowledgeBase kb = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
+        // A document may remain in the recycle bin after its knowledge base was deleted.
+        // Permanent cleanup must still verify ownership against that logically deleted KB.
+        KnowledgeBase kb = knowledgeBaseMapper.selectIncludingDeleted(document.getKnowledgeBaseId());
         assertOwnedKnowledgeBase(kb);
         deletionService.createTask("DOCUMENT_PURGE", id);
     }
