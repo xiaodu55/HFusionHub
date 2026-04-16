@@ -547,7 +547,7 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
                         rendered, "detailed", 5, null, userId);
             } else {
                 aiResponse = aiClient.chat(
-                        tc.getQuestion(), null, null, List.of(), rendered);
+                        tc.getQuestion(), null, null, List.of(), rendered, userId);
             }
             PromptTestCaseResult result = PromptTestCaseResult.builder()
                     .caseId(tc.getId())

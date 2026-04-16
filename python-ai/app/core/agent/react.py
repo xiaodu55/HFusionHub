@@ -141,6 +141,7 @@ class ReactAgent(Agent):
         tool_registry: Optional[ToolRegistry] = None,
         execution_context: Optional[Any] = None,  # AgentExecutionContext
         retrieval_top_k: Optional[int] = None,
+        llm: Optional[BaseLLM] = None,
         **kwargs
     ):
         self.knowledge_base_id = knowledge_base_id
@@ -148,7 +149,7 @@ class ReactAgent(Agent):
         self.max_steps = max_steps
         self.tool_policy = tool_policy
         self.style = style if style in _STYLE_PROMPTS else "detailed"
-        self.llm: BaseLLM = None
+        self.llm: Optional[BaseLLM] = llm
         self.tools: List[Dict[str, Any]] = []
 
         # Agent V1: Tool Registry is the SINGLE source of truth for tools.

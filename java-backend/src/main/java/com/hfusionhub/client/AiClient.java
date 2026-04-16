@@ -10,6 +10,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
+import com.hfusionhub.service.UserModelConfigService;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -29,6 +30,7 @@ public class AiClient {
 
     private final RestTemplate restTemplate;
     private final WebClient webClient;
+    private final UserModelConfigService userModelConfigService;
 
     @Value("${ai-service.base-url:http://localhost:9000}")
     private String baseUrl;
@@ -36,9 +38,11 @@ public class AiClient {
     @Value("${python-ai.internal-token:}")
     private String internalApiToken;
 
-    public AiClient(RestTemplate restTemplate, WebClient webClient) {
+    public AiClient(RestTemplate restTemplate, WebClient webClient,
+                    UserModelConfigService userModelConfigService) {
         this.restTemplate = restTemplate;
         this.webClient = webClient;
+        this.userModelConfigService = userModelConfigService;
     }
 
     /**
@@ -102,6 +106,18 @@ public class AiClient {
     ) {
         return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
                 "detailed", 5, null, null, null, systemPrompt, null, null);
+    }
+
+    public ChatResponse chat(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String systemPrompt,
+            Long userId
+    ) {
+        return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
+                "detailed", 5, null, userId, null, systemPrompt, null, null);
     }
 
     /**
@@ -262,6 +278,7 @@ public class AiClient {
             if (intentContext != null && !intentContext.isEmpty()) {
                 request.put("intent_context", intentContext);
             }
+            addUserProviderConfig(request, userId);
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -343,6 +360,7 @@ public class AiClient {
         if (intentContext != null && !intentContext.isEmpty()) {
             request.put("intent_context", intentContext);
         }
+        addUserProviderConfig(request, userId);
 
         String url = baseUrl + "/api/chat/stream";
         log.info("Starting streaming request to Python AI: {}, requestId: {}", url, requestId);
@@ -462,6 +480,7 @@ public class AiClient {
         if (intentContext != null && !intentContext.isEmpty()) {
             request.put("intent_context", intentContext);
         }
+        addUserProviderConfig(request, userId);
 
         String url = baseUrl + "/api/agent/v1/chat/stream";
         log.info("Starting Agent V1 streaming request to Python AI: {}, requestId: {}, userId: {}",
@@ -600,6 +619,25 @@ public class AiClient {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> testUserProvider(Map<String, Object> providerConfig) {
+        try {
+            String url = baseUrl + "/api/runtime/provider/test";
+            Map<String, Object> request = Map.of("provider_config", providerConfig);
+            HttpHeaders headers = internalHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(request, headers), Map.class);
+            if (response.getBody() == null) {
+                return Map.of("success", false, "message", "AI 服务没有返回测试结果");
+            }
+            return new HashMap<>(response.getBody());
+        } catch (Exception e) {
+            log.warn("User model provider test failed: {}", e.getMessage());
+            return Map.of("success", false, "message", "连接失败，请检查 Base URL、模型名称和 API Key");
+        }
+    }
+
     /**
      * Notify Python AI of an approval decision — Agent V1 Step 5.
      *
@@ -662,6 +700,7 @@ public class AiClient {
             // a replayed approve/resume is rejected without side effects.
             if (executionToken != null) request.put("execution_token", executionToken);
             if (userRole != null) request.put("user_role", userRole);
+            addUserProviderConfig(request, userId);
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -722,6 +761,12 @@ public class AiClient {
         HttpHeaders headers = new HttpHeaders();
         addInternalToken(headers);
         return headers;
+    }
+
+    private void addUserProviderConfig(Map<String, Object> request, Long userId) {
+        if (userId == null || userId <= 0) return;
+        Map<String, Object> providerConfig = userModelConfigService.getRuntimeConfig(userId);
+        if (!providerConfig.isEmpty()) request.put("provider_config", providerConfig);
     }
 
     private void addInternalToken(HttpHeaders headers) {

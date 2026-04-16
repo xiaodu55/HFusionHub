@@ -1,6 +1,7 @@
 package com.hfusionhub.client;
 
 import com.hfusionhub.common.exception.BusinessException;
+import com.hfusionhub.service.UserModelConfigService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,6 +38,9 @@ class AiClientTest {
     private WebClient webClient;
 
     @Mock
+    private UserModelConfigService userModelConfigService;
+
+    @Mock
     private RequestBodyUriSpec requestBodyUriSpec;
 
     @Mock
@@ -52,7 +56,7 @@ class AiClientTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        aiClient = new AiClient(restTemplate, webClient);
+        aiClient = new AiClient(restTemplate, webClient, userModelConfigService);
 
         // Inject field values via reflection since they're @Value-injected
         java.lang.reflect.Field baseUrlField = AiClient.class.getDeclaredField("baseUrl");

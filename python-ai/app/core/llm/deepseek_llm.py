@@ -24,6 +24,13 @@ class DeepSeekLLM(BaseLLM):
         self.model = model
         self._available = True
 
+    def _chat_completions_url(self) -> str:
+        # Accept the two common Base URL forms users encounter in provider docs:
+        # https://host and https://host/v1.
+        if self.base_url.endswith("/v1"):
+            return f"{self.base_url}/chat/completions"
+        return f"{self.base_url}/v1/chat/completions"
+
     @staticmethod
     def _raise_api_error(response: httpx.Response) -> NoReturn:
         try:
@@ -70,7 +77,7 @@ class DeepSeekLLM(BaseLLM):
 
         async with httpx.AsyncClient(timeout=120) as client:
             response = await client.post(
-                f"{self.base_url}/v1/chat/completions",
+                self._chat_completions_url(),
                 headers=headers,
                 json=payload
             )
@@ -120,7 +127,7 @@ class DeepSeekLLM(BaseLLM):
         async with httpx.AsyncClient(timeout=120) as client:
             async with client.stream(
                 "POST",
-                f"{self.base_url}/v1/chat/completions",
+                self._chat_completions_url(),
                 headers=headers,
                 json=payload
             ) as response:

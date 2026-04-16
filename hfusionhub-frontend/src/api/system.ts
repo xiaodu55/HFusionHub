@@ -1,4 +1,4 @@
-import { get } from './request'
+import { del, get, post, put } from './request'
 import type { ApiResponse } from './types'
 
 export type RuntimeState = 'ready' | 'configured' | 'development' | 'reachable' | 'unavailable' | 'not_configured'
@@ -71,3 +71,41 @@ export interface AiRuntimeOverview {
 
 export const getAiRuntimeOverview = (): Promise<ApiResponse<AiRuntimeOverview>> =>
   get('/system/ai-runtime')
+
+export type UserProviderType = 'openai_compatible' | 'ollama'
+
+export interface UserModelConfig {
+  configured: boolean
+  providerType: UserProviderType | 'system'
+  providerName: string
+  baseUrl?: string
+  modelName?: string
+  apiKeyConfigured: boolean
+  enabled: boolean
+  lastTestStatus?: 'success' | 'failed' | null
+  lastTestMessage?: string | null
+  lastTestedAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface UserModelConfigSave {
+  providerType: UserProviderType
+  providerName: string
+  baseUrl: string
+  modelName: string
+  apiKey?: string
+  enabled: boolean
+}
+
+export interface ProviderTestResult {
+  success: boolean
+  message: string
+  model?: string
+}
+
+export const getUserModelConfig = (): Promise<ApiResponse<UserModelConfig>> => get('/model-config')
+export const saveUserModelConfig = (data: UserModelConfigSave): Promise<ApiResponse<UserModelConfig>> =>
+  put('/model-config', data)
+export const testUserModelConfig = (data: UserModelConfigSave): Promise<ApiResponse<ProviderTestResult>> =>
+  post('/model-config/test', data, { timeout: 120000 })
+export const resetUserModelConfig = (): Promise<ApiResponse<void>> => del('/model-config')

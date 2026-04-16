@@ -75,7 +75,8 @@ public class PromptTestController {
                         null,  // conversationId: null
                         null,  // knowledgeBaseId: null
                         List.of(),  // history: 测试台无历史
-                        request.getTemplateContent()  // systemPrompt: 支持 8000 字符
+                        request.getTemplateContent(),  // systemPrompt: 支持 8000 字符
+                        currentUserId
                 );
             }
         } catch (Exception e) {

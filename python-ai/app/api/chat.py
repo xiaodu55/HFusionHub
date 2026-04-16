@@ -63,6 +63,7 @@ from pydantic import BaseModel, Field
 from app.core.agent import get_agent, get_agent_run_store
 from app.core.agent.agent import AgentResponse
 from app.core.agent.execution_context import AgentExecutionContext
+from app.core.llm.custom_provider import build_user_llm
 from app.core.tenant.context import get_tenant_id
 from app.core.policy.engine import PolicyContext, PolicyEngine
 from app.core.policy.masking import build_arguments_summary
@@ -234,6 +235,9 @@ class ChatRequest(BaseModel):
     max_tool_steps: Optional[int] = Field(5, ge=1, le=10)
     temperature: Optional[float] = Field(0.3, ge=0.0, le=2.0)
     intent_context: List[Dict[str, Any]] = Field(default_factory=list, max_length=500)
+    provider_config: Optional[Dict[str, Any]] = Field(
+        None, description="Request-scoped provider credentials from the Java backend"
+    )
 
 
 class AgentV1Request(BaseModel):
@@ -269,6 +273,9 @@ class AgentV1Request(BaseModel):
     environment: Optional[str] = Field(None, max_length=32,
                                        description="Deployment environment override")
     intent_context: List[Dict[str, Any]] = Field(default_factory=list, max_length=500)
+    provider_config: Optional[Dict[str, Any]] = Field(
+        None, description="Request-scoped provider credentials from the Java backend"
+    )
 
 
 class ChatResponse(BaseModel):
@@ -462,6 +469,7 @@ async def chat(request: ChatRequest):
             model=request.model,
             execution_context=execution_context,
             retrieval_top_k=route_top_k,
+            llm=build_user_llm(request.provider_config),
         )
 
         if request.stream:
@@ -546,6 +554,7 @@ async def agent_v1_chat(request: AgentV1Request):
             knowledge_base_id=request.knowledge_base_id,
             model=request.model,
             execution_context=execution_context,
+            llm=build_user_llm(request.provider_config),
         )
 
         if request.stream:

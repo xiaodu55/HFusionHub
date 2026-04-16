@@ -250,7 +250,9 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
                         task.getConversationId(),
                         task.getKnowledgeBaseId(),
                         history,
-                        run.getRunUuid()   // run_uuid as request_id
+                        run.getRunUuid(),  // run_uuid as request_id
+                        task.getUserId(),
+                        null
                 );
             }
 

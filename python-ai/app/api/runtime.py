@@ -12,7 +12,10 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
+from app.core.llm.base import ChatMessage
+from app.core.llm.custom_provider import build_user_llm
 from app.core.vectorstore.milvus_store import vector_store_status
 from app.core.llm.model_gateway import get_model_gateway
 from app.utils.config import config
@@ -20,6 +23,28 @@ from app.utils.feature_flag import feature_flags
 
 
 router = APIRouter(tags=["runtime"])
+
+
+class ProviderTestRequest(BaseModel):
+    provider_config: dict[str, Any] = Field(...)
+
+
+def _friendly_provider_error(raw: str) -> str:
+    message = raw or "连接失败"
+    lowered = message.lower()
+    if "(401)" in lowered or "authentication fails" in lowered or "unauthorized" in lowered:
+        return "API Key 无效或已失效，请从供应商控制台重新复制完整密钥。"
+    if "(402)" in lowered or "insufficient balance" in lowered:
+        return "供应商账户余额不足，请充值后重试。"
+    if "(404)" in lowered or "model_not_found" in lowered or "model not found" in lowered:
+        return "没有找到该模型，请检查模型名称和 Base URL。"
+    if "(429)" in lowered or "rate limit" in lowered:
+        return "请求过于频繁或已达到供应商限额，请稍后重试。"
+    if "all connection attempts failed" in lowered or "connecterror" in lowered:
+        return "无法连接供应商，请检查 Base URL、网络或代理设置。"
+    if "(400)" in lowered or "(422)" in lowered:
+        return "供应商拒绝了请求，请检查模型名称和 Base URL。"
+    return message[:500]
 
 
 def _environment_enabled(name: str, default: bool = False) -> bool:
@@ -209,3 +234,33 @@ async def _status_payload() -> dict[str, Any]:
 async def runtime_overview() -> dict[str, Any]:
     """Return the current safe AI runtime snapshot for authenticated operators."""
     return await _status_payload()
+
+
+@router.post("/api/runtime/provider/test")
+async def test_provider(request: ProviderTestRequest) -> dict[str, Any]:
+    """Verify a request-scoped provider without retaining its credentials."""
+    try:
+        llm = build_user_llm(request.provider_config)
+        if llm is None:
+            return {"success": False, "message": "未提供模型配置"}
+        response = await llm.chat(
+            [ChatMessage(role="user", content="请只回复：连接成功")],
+            temperature=0.0,
+            max_tokens=32,
+        )
+        return {
+            "success": bool(response.content),
+            "message": "模型已成功返回回答",
+            "model": response.model,
+        }
+    except Exception as exc:
+        message = str(exc)
+        # Upstream errors can be useful (401/model not found), but cap the
+        # response and redact common credential forms.
+        import re
+        message = re.sub(r"(?i)(bearer\s+)[^\s]+", r"\1***", message)
+        message = re.sub(r"sk-[A-Za-z0-9_-]+", "sk-***", message)
+        return {
+            "success": False,
+            "message": _friendly_provider_error(message),
+        }

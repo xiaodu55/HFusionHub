@@ -983,3 +983,24 @@ CREATE TABLE IF NOT EXISTS agent_evaluation_run (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_eval_run_uuid ON agent_evaluation_run (run_uuid);
+
+-- =====================================================
+-- V46: per-user conversation model provider
+-- =====================================================
+CREATE TABLE IF NOT EXISTS user_model_config (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    tenant_id BIGINT NOT NULL DEFAULT 1,
+    provider_type VARCHAR(32) NOT NULL,
+    provider_name VARCHAR(100) NOT NULL,
+    base_url VARCHAR(500) NOT NULL,
+    model_name VARCHAR(160) NOT NULL,
+    api_key_ciphertext CLOB,
+    enabled TINYINT NOT NULL DEFAULT 1,
+    last_test_status VARCHAR(20),
+    last_test_message VARCHAR(500),
+    last_tested_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_user_model_config_tenant_user UNIQUE (tenant_id, user_id)
+);

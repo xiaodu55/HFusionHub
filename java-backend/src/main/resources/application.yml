@@ -123,6 +123,10 @@ plugin-runner:
 # 未设置时跳过创建，已设置时创建/更新 admin 账户的密码
 app:
   trusted-proxy-headers: ${TRUSTED_PROXY_HEADERS:false}
+  model-credentials:
+    # Production should set a long random value. Development falls back to the
+    # existing internal token so the feature works without another local secret.
+    encryption-key: ${MODEL_CREDENTIAL_ENCRYPTION_KEY:${PYTHON_AI_INTERNAL_TOKEN:}}
   admin:
     username: ${ADMIN_USERNAME:admin}
     password: ${ADMIN_PASSWORD:}
