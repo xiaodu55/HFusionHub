@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -38,6 +39,14 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
     }
 
     @Override
+    public List<PromptTemplateInfoDTO> listRecycleBin(String keyword) {
+        Long userId = JwtUtils.getCurrentUserId();
+        String normalized = StringUtils.hasText(keyword) ? keyword.trim() : null;
+        return promptTemplateMapper.selectRecycle(userId, normalized)
+                .stream().map(this::toInfo).toList();
+    }
+
+    @Override
     @Transactional
     public PromptTemplateInfoDTO create(PromptTemplateSaveDTO dto) {
         Long userId = JwtUtils.getCurrentUserId();
@@ -47,6 +56,7 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
         apply(template, dto);
         template.setStatus(PromptTemplate.STATUS_DRAFT);
         template.setVersion(1);
+        template.setDeleted(0);
         promptTemplateMapper.insert(template);
 
         // Snapshot the new v1 state AFTER insert (operation = CREATE)
@@ -149,7 +159,41 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
     @Override
     @Transactional
     public void delete(Long id) {
-        promptTemplateMapper.deleteById(requireOwned(id, JwtUtils.getCurrentUserId()).getId());
+        PromptTemplate template = requireOwned(id, JwtUtils.getCurrentUserId());
+        LocalDateTime recycledAt = LocalDateTime.now();
+        if (promptTemplateMapper.markRecycled(template.getId(), recycledAt, recycledAt.plusDays(7)) != 1) {
+            throw new BusinessException("移入回答方案回收站失败，请刷新后重试");
+        }
+    }
+
+    @Override
+    @Transactional
+    public void restore(Long id) {
+        Long userId = JwtUtils.getCurrentUserId();
+        PromptTemplate template = requireOwnedIncludingDeleted(id, userId);
+        if (template.getDeleted() == null || template.getDeleted() != 1) {
+            throw new BusinessException("回收站中不存在该回答方案");
+        }
+        if (template.getRecycleExpiresAt() != null
+                && template.getRecycleExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new BusinessException("该回答方案已超过回收站保留期限");
+        }
+        ensureNameAvailable(template.getName(), userId, template.getId());
+        if (promptTemplateMapper.restoreFromRecycle(id) != 1) {
+            throw new BusinessException("恢复回答方案失败，请刷新后重试");
+        }
+    }
+
+    @Override
+    @Transactional
+    public void purge(Long id) {
+        PromptTemplate template = requireOwnedIncludingDeleted(id, JwtUtils.getCurrentUserId());
+        if (template.getDeleted() == null || template.getDeleted() != 1) {
+            throw new BusinessException("请先将回答方案移入回收站");
+        }
+        if (promptTemplateMapper.purgeById(id) != 1) {
+            throw new BusinessException("永久删除回答方案失败，请刷新后重试");
+        }
     }
 
     @Override
@@ -231,6 +275,13 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
         return template;
     }
 
+    private PromptTemplate requireOwnedIncludingDeleted(Long id, Long userId) {
+        PromptTemplate template = promptTemplateMapper.selectIncludingDeleted(id);
+        if (template == null) throw new BusinessException("回答方案不存在或已永久删除");
+        if (!template.getUserId().equals(userId)) throw new BusinessException("无权操作该回答方案");
+        return template;
+    }
+
     private void ensureNameAvailable(String rawName, Long userId, Long ignoredId) {
         String name = rawName == null ? "" : rawName.trim();
         LambdaQueryWrapper<PromptTemplate> query = new LambdaQueryWrapper<PromptTemplate>()
@@ -287,6 +338,8 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
                 .version(template.getVersion())
                 .createdAt(template.getCreatedAt())
                 .updatedAt(template.getUpdatedAt())
+                .recycledAt(template.getRecycledAt())
+                .recycleExpiresAt(template.getRecycleExpiresAt())
                 .build();
     }
 

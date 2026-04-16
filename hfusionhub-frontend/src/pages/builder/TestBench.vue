@@ -179,12 +179,12 @@ onMounted(() => {
           </div>
           <div>
             <p class="text-xs font-medium tracking-[0.16em] text-amber-200/90">PROMPT TEST BENCH</p>
-            <h1 class="mt-1 text-2xl font-semibold tracking-tight">提示词测试台</h1>
-            <p class="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">选择模板、输入问题，即时评测回答效果。不会创建对话记录，专注模板调优。</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-tight">回答方案测试</h1>
+            <p class="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">选择回答方案，输入一个真实问题，检查 AI 的回答方式是否符合预期。测试不会创建对话记录。</p>
           </div>
         </div>
         <Badge variant="outline" class="border-amber-400/25 bg-amber-400/10 text-amber-200 shrink-0">
-          {{ templates.length }} 个模板可用
+          {{ templates.length }} 个方案可测试
         </Badge>
       </div>
     </section>
@@ -198,20 +198,20 @@ onMounted(() => {
             <Beaker class="h-4 w-4 text-primary" />
             <div>
               <CardTitle class="text-base">测试配置</CardTitle>
-              <CardDescription class="mt-1">选择提示词模板并输入测试问题。</CardDescription>
+              <CardDescription class="mt-1">选择回答方案，可按需关联知识库。</CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent class="space-y-5 p-5">
           <!-- Template selector -->
           <div class="space-y-2">
-            <Label for="template-select">提示词模板</Label>
+            <Label for="template-select">回答方案</Label>
             <select
               id="template-select"
               v-model="selectedTemplateId"
               class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
-              <option :value="null" disabled>请选择模板</option>
+              <option :value="null" disabled>请选择回答方案</option>
               <optgroup v-if="publishedTemplates.length" label="已发布">
                 <option v-for="t in publishedTemplates" :key="t.id" :value="t.id">
                   {{ t.name }} (v{{ t.version }})
@@ -223,7 +223,7 @@ onMounted(() => {
                 </option>
               </optgroup>
             </select>
-            <p class="text-xs leading-5 text-muted-foreground">所有模板均可测试，无需发布。草稿修改后可立即在此验证效果。</p>
+            <p class="text-xs leading-5 text-muted-foreground">草稿和已发布方案都能测试。满意后回到“回答方案”页面点击发布。</p>
           </div>
 
           <!-- KB selector -->
@@ -253,7 +253,7 @@ onMounted(() => {
               rows="5"
               maxlength="4000"
               class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 text-sm leading-6 outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20"
-              placeholder="输入要测试的问题，例如：请用简洁的语言解释什么是 RAG，并说明它的优势。"
+              placeholder="输入真实问题，例如：会员到期后还能导出数据吗？"
               @keydown.ctrl.enter="runTest"
             />
           </div>
@@ -277,7 +277,7 @@ onMounted(() => {
             <Separator />
             <div class="space-y-2">
               <div class="flex items-center justify-between">
-                <Label class="text-xs">模板预览 — {{ selectedTemplate.name }}</Label>
+                <Label class="text-xs">回答规则预览 — {{ selectedTemplate.name }}</Label>
                 <Badge variant="outline" :class="selectedTemplate.status === 'PUBLISHED' ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' : 'border-violet-400/25 bg-violet-400/10 text-violet-200'">
                   {{ selectedTemplate.status === 'PUBLISHED' ? '已发布' : '草稿' }}
                 </Badge>
@@ -310,11 +310,11 @@ onMounted(() => {
             <BrainCircuit class="h-6 w-6" />
           </div>
           <h2 class="mt-5 text-lg font-semibold">准备就绪</h2>
-          <p class="mt-2 max-w-md text-sm leading-6 text-muted-foreground">选择一个模板并输入测试问题，点击「运行测试」查看 AI 回答、来源引用、耗时与 Token 消耗。</p>
+          <p class="mt-2 max-w-md text-sm leading-6 text-muted-foreground">选择一套回答方案并输入真实问题，点击“运行测试”查看回答效果、引用来源和耗时。</p>
           <div class="mt-6 grid gap-3 text-left">
             <div class="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
               <FileText class="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-              <span><strong>模板</strong>会被包装为 system 指令，控制 AI 的回答风格与边界。</span>
+              <span><strong>回答方案</strong>控制 AI 的语气、结构和回答边界。</span>
             </div>
             <div class="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
               <BookOpen class="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />

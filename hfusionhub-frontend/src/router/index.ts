@@ -81,6 +81,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/builder/Prompts.vue'),
       },
       {
+        path: 'builder/prompts/recycle-bin',
+        name: 'PromptRecycleBin',
+        component: () => import('@/pages/builder/PromptRecycleBin.vue'),
+      },
+      {
         path: 'builder/models',
         name: 'ModelCenter',
         component: () => import('@/pages/builder/Models.vue'),

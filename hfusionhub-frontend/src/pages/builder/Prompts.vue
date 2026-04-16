@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   ArrowLeftRight,
+  Archive,
   BookOpenText,
   Check,
   CirclePlus,
@@ -33,6 +35,7 @@ import { formatDateTime } from '@/utils/date'
 type Filter = 'ALL' | promptTemplateApi.PromptTemplateStatus
 
 const toast = useToast()
+const router = useRouter()
 const templates = ref<PromptTemplate[]>([])
 const selectedId = ref<number | null>(null)
 const filter = ref<Filter>('ALL')
@@ -43,6 +46,57 @@ const actionLoading = ref(false)
 const showCreateDialog = ref(false)
 const createForm = ref<PromptTemplateSaveDTO>({ name: '', description: '', content: '' })
 const editForm = ref<PromptTemplateSaveDTO>({ name: '', description: '', content: '' })
+
+type PromptExample = PromptTemplateSaveDTO & {
+  id: string
+  scenario: string
+  question: string
+}
+
+const promptExamples: PromptExample[] = [
+  {
+    id: 'customer-support',
+    name: '客服答疑',
+    description: '适合售前、售后和制度咨询，统一先给结论再给处理步骤。',
+    scenario: '客服、售后、制度咨询',
+    question: '会员到期后还能导出数据吗？',
+    content: `你是企业客服助手，请使用简洁、友好的中文回答。
+回答顺序：
+1. 先直接给出结论；
+2. 再列出最多 5 个处理步骤；
+3. 使用知识库资料时标明来源；
+4. 资料不足时明确说明“现有资料不足”，不要猜测；
+5. 涉及退款、权限或人工审批时，提醒用户联系人工客服。`,
+  },
+  {
+    id: 'document-summary',
+    name: '文档总结',
+    description: '把长文整理成重点、风险和下一步行动，适合内部资料阅读。',
+    scenario: '会议纪要、制度、方案总结',
+    question: '请总结这份产品发布方案，并列出上线前必须确认的事项。',
+    content: `你是文档整理助手，请严格依据用户提供的资料回答，不补充资料中没有的信息。
+请按以下结构输出：
+1. 一句话结论；
+2. 关键要点（3 到 6 条）；
+3. 风险或待确认事项；
+4. 下一步行动。
+内容较长时优先使用分组标题和项目符号，保持表达清晰。`,
+  },
+  {
+    id: 'code-review',
+    name: '代码审查',
+    description: '统一代码评审格式，优先发现安全、正确性和维护性问题。',
+    scenario: '代码评审、缺陷排查、重构建议',
+    question: '请审查这段代码，重点关注并发安全和异常处理。',
+    content: `你是资深代码审查助手，请先指出影响正确性或安全性的高风险问题。
+请按以下结构输出：
+1. 问题等级：严重、高、中、低；
+2. 问题位置和原因；
+3. 修改建议，必要时给出简短代码示例；
+4. 没有发现问题的方面也要明确说明。
+不要为了凑数量而提出无关紧要的建议。`,
+  },
+]
 
 // ── Version history ──────────────────────────────────────────────────
 
@@ -71,6 +125,13 @@ const hasChanges = computed(() => selected.value !== null && (
   || (selected.value.description || '') !== (editForm.value.description?.trim() || '')
   || selected.value.content !== editForm.value.content.trim()
 ))
+
+const openCreateDialog = (example?: PromptExample) => {
+  createForm.value = example
+    ? { name: example.name, description: example.description, content: example.content }
+    : { name: '', description: '', content: '' }
+  showCreateDialog.value = true
+}
 
 // ── Version display helpers ──────────────────────────────────────────
 
@@ -137,7 +198,7 @@ const createTemplate = async () => {
     selectTemplate(response.data)
     showCreateDialog.value = false
     createForm.value = { name: '', description: '', content: '' }
-    toast.success('草稿已创建。发布后可在新建对话中使用。')
+    toast.success('回答方案草稿已创建。测试并发布后可在新建对话中使用。')
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '创建提示词模板失败')
   } finally {
@@ -153,7 +214,7 @@ const saveTemplate = async () => {
     const response = await promptTemplateApi.updatePromptTemplate(selected.value.id, payload)
     replaceTemplate(response.data)
     selectTemplate(response.data)
-    toast.success(`模板已保存为草稿，当前为版本 ${response.data.version}`)
+    toast.success(`回答方案已保存为草稿，当前为版本 ${response.data.version}`)
   } catch (error) {
     handleVersionConflict(error, '保存提示词模板失败')
   } finally {
@@ -172,8 +233,8 @@ const togglePublished = async () => {
     replaceTemplate(response.data)
     selectTemplate(response.data)
     toast.success(response.data.status === 'PUBLISHED'
-      ? '模板已发布，可在新建对话时选择。'
-      : '模板已撤回，已有对话将不再使用它。')
+      ? '回答方案已发布，可在新建对话时选择。'
+      : '回答方案已撤回，之后的回答将不再加载它。')
   } catch (error) {
     handleVersionConflict(error, '更新发布状态失败')
   } finally {
@@ -183,7 +244,7 @@ const togglePublished = async () => {
 
 const deleteTemplate = async () => {
   if (!selected.value || actionLoading.value) return
-  if (!confirm(`确定要删除「${selected.value.name}」吗？关联此模板的对话将不再加载它。`)) return
+  if (!confirm(`确定要删除回答方案「${selected.value.name}」吗？关联对话之后将使用系统默认回答方式。`)) return
   actionLoading.value = true
   try {
     await promptTemplateApi.deletePromptTemplate(selected.value.id)
@@ -191,7 +252,7 @@ const deleteTemplate = async () => {
     const next = templates.value[0]
     if (next) selectTemplate(next)
     else selectedId.value = null
-    toast.success('提示词模板已删除')
+    toast.success('回答方案已移入回收站，可在回收站恢复或永久删除')
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '删除提示词模板失败')
   } finally {
@@ -287,16 +348,58 @@ onMounted(loadTemplates)
           <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-violet-400/25 bg-violet-400/10 text-violet-200"><PenLine class="h-5 w-5" /></div>
           <div>
             <p class="text-xs font-medium tracking-[0.16em] text-violet-200/90">PROMPT STUDIO</p>
-            <h1 class="mt-1 text-2xl font-semibold tracking-tight">提示词工作台</h1>
-            <p class="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">把常用的回答规则保存为模板；只有已发布模板才能被新建对话使用。</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-tight">回答方案</h1>
+            <p class="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">提前设置 AI 怎样回答，例如语气、结构和边界。发布后，新建对话时选择一次，整个对话都会遵循。</p>
           </div>
         </div>
-        <Button class="shrink-0 gap-2" @click="showCreateDialog = true"><CirclePlus class="h-4 w-4" />新建模板</Button>
+        <div class="flex shrink-0 flex-wrap gap-2">
+          <Button variant="outline" class="gap-2" @click="router.push('/builder/prompts/recycle-bin')"><Archive class="h-4 w-4" />回收站</Button>
+          <Button class="gap-2" @click="openCreateDialog()"><CirclePlus class="h-4 w-4" />新建回答方案</Button>
+        </div>
+      </div>
+    </section>
+
+    <section class="border-y border-border/70 bg-muted/[0.12] px-5 py-5 sm:px-6">
+      <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p class="text-sm font-semibold">这页有什么用？</p>
+          <p class="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">当多个对话需要用同一种方式回答时，把规则保存成回答方案。它不保存知识库资料，资料仍然来自新建对话时选择的知识库。</p>
+        </div>
+        <span class="shrink-0 text-xs text-muted-foreground">草稿只供编辑和测试，发布后才可使用</span>
+      </div>
+      <div class="mt-5 grid gap-3 md:grid-cols-3">
+        <div class="flex items-start gap-3 rounded-lg border border-border bg-card/60 p-3.5">
+          <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">1</span>
+          <div><p class="text-sm font-medium">写回答规则</p><p class="mt-1 text-xs leading-5 text-muted-foreground">说明角色、语气、格式和不能做什么。</p></div>
+        </div>
+        <div class="flex items-start gap-3 rounded-lg border border-border bg-card/60 p-3.5">
+          <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">2</span>
+          <div><p class="text-sm font-medium">测试真实问题</p><p class="mt-1 text-xs leading-5 text-muted-foreground">到“提示词测试台”查看回答和引用来源。</p></div>
+        </div>
+        <div class="flex items-start gap-3 rounded-lg border border-border bg-card/60 p-3.5">
+          <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">3</span>
+          <div><p class="text-sm font-medium">发布并选用</p><p class="mt-1 text-xs leading-5 text-muted-foreground">新建对话时选择它，之后的回答就会按规则执行。</p></div>
+        </div>
+      </div>
+      <div class="mt-5 border-t border-border/70 pt-4">
+        <div class="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div><p class="text-sm font-semibold">不知道怎么写？从示例开始</p><p class="mt-1 text-xs text-muted-foreground">点击“套用示例”会自动填好名称、用途和回答规则，你只需要按业务修改。</p></div>
+          <span class="text-xs text-muted-foreground">每个示例都附有可用于测试的真实问题</span>
+        </div>
+        <div class="mt-3 grid gap-3 lg:grid-cols-3">
+          <div v-for="example in promptExamples" :key="example.id" class="rounded-lg border border-border bg-card/60 p-3.5">
+            <p class="font-medium">{{ example.name }}</p>
+            <p class="mt-1 text-xs text-primary/90">适用：{{ example.scenario }}</p>
+            <p class="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{{ example.description }}</p>
+            <p class="mt-3 line-clamp-2 border-t border-border/60 pt-3 text-xs text-muted-foreground">例如：{{ example.question }}</p>
+            <Button variant="outline" size="sm" class="mt-3 w-full" @click="openCreateDialog(example)">套用示例</Button>
+          </div>
+        </div>
       </div>
     </section>
 
     <section class="grid gap-3 sm:grid-cols-3">
-      <div class="rounded-xl border border-border bg-card/70 p-4"><p class="text-sm text-muted-foreground">全部模板</p><p class="mt-2 text-2xl font-semibold">{{ templates.length }}</p></div>
+      <div class="rounded-xl border border-border bg-card/70 p-4"><p class="text-sm text-muted-foreground">全部方案</p><p class="mt-2 text-2xl font-semibold">{{ templates.length }}</p></div>
       <div class="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] p-4"><p class="text-sm text-muted-foreground">已发布</p><p class="mt-2 text-2xl font-semibold text-emerald-200">{{ publishedCount }}</p></div>
       <div class="rounded-xl border border-violet-400/15 bg-violet-400/[0.04] p-4"><p class="text-sm text-muted-foreground">草稿</p><p class="mt-2 text-2xl font-semibold text-violet-200">{{ draftCount }}</p></div>
     </section>
@@ -304,28 +407,53 @@ onMounted(loadTemplates)
     <div class="grid items-start gap-6 xl:grid-cols-[minmax(19rem,0.78fr)_minmax(0,1.55fr)]">
       <Card class="overflow-hidden border-border bg-card/80">
         <CardHeader class="border-b border-border/70 p-5">
-          <div class="flex items-center justify-between gap-3"><div><CardTitle class="text-base">模板库</CardTitle><CardDescription class="mt-1">按名称、说明或指令内容查找。</CardDescription></div><span class="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">{{ filteredTemplates.length }}</span></div>
-          <div class="relative mt-4"><Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input v-model="query" class="pl-10" placeholder="搜索模板" /></div>
+          <div class="flex items-center justify-between gap-3"><div><CardTitle class="text-base">我的回答方案</CardTitle><CardDescription class="mt-1">按名称、用途或回答规则查找。</CardDescription></div><span class="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">{{ filteredTemplates.length }}</span></div>
+          <div class="relative mt-4"><Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input v-model="query" class="pl-10" placeholder="搜索回答方案" /></div>
           <div class="mt-4 flex gap-1 overflow-x-auto rounded-lg bg-muted/45 p-1"><button v-for="item in [{ value: 'ALL', label: '全部' }, { value: 'PUBLISHED', label: '已发布' }, { value: 'DRAFT', label: '草稿' }]" :key="item.value" class="shrink-0 rounded-md px-2.5 py-1.5 text-xs transition-colors" :class="filter === item.value ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'" @click="filter = item.value as Filter">{{ item.label }}</button></div>
         </CardHeader>
         <CardContent class="max-h-[42rem] space-y-2 overflow-y-auto p-3">
           <div v-if="loading" class="flex min-h-64 items-center justify-center"><LoaderCircle class="h-6 w-6 animate-spin text-primary" /></div>
-          <div v-else-if="!filteredTemplates.length" class="flex min-h-64 flex-col items-center justify-center px-6 text-center"><BookOpenText class="h-9 w-9 text-muted-foreground/60" /><p class="mt-4 font-medium">{{ templates.length ? '没有匹配的模板' : '还没有提示词模板' }}</p><p class="mt-1 text-sm leading-6 text-muted-foreground">{{ templates.length ? '调整搜索或状态筛选后再试。' : '保存常用的回答规则，减少每次重复说明。' }}</p><Button v-if="!templates.length" variant="outline" class="mt-4" @click="showCreateDialog = true">创建第一个模板</Button></div>
+          <div v-else-if="!filteredTemplates.length" class="flex min-h-64 flex-col items-center justify-center px-6 text-center"><BookOpenText class="h-9 w-9 text-muted-foreground/60" /><p class="mt-4 font-medium">{{ templates.length ? '没有匹配的回答方案' : '还没有回答方案' }}</p><p class="mt-1 text-sm leading-6 text-muted-foreground">{{ templates.length ? '调整搜索或状态筛选后再试。' : '先套用上面的示例，或创建一套自己的回答规则。' }}</p><Button v-if="!templates.length" variant="outline" class="mt-4" @click="openCreateDialog()">创建第一套回答方案</Button></div>
           <button v-for="template in filteredTemplates" :key="template.id" class="w-full rounded-xl border p-3.5 text-left transition-colors" :class="selectedId === template.id ? 'border-primary/45 bg-primary/[0.07]' : 'border-transparent hover:border-border hover:bg-muted/40'" @click="selectTemplate(template)"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><p class="truncate text-sm font-medium">{{ template.name }}</p><p class="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{{ template.description || '暂未填写模板用途。' }}</p></div><Badge variant="outline" :class="template.status === 'PUBLISHED' ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' : 'border-violet-400/25 bg-violet-400/10 text-violet-200'">{{ template.status === 'PUBLISHED' ? '已发布' : '草稿' }}</Badge></div><div class="mt-3 flex items-center justify-between text-xs text-muted-foreground"><span>v{{ template.version }}</span><span>{{ formatDateTime(template.updatedAt) }}</span></div></button>
         </CardContent>
       </Card>
 
       <Card class="min-h-[38rem] overflow-hidden border-border bg-card/80">
-        <div v-if="!selected" class="flex min-h-[38rem] flex-col items-center justify-center px-6 text-center"><div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-violet-400/25 bg-violet-400/10 text-violet-200"><Layers3 class="h-6 w-6" /></div><h2 class="mt-5 text-lg font-semibold">选择或新建一个模板</h2><p class="mt-2 max-w-md text-sm leading-6 text-muted-foreground">发布后的模板会作为对话的回答规则，由服务端在每次请求时安全加载。</p></div>
+        <div v-if="!selected" class="flex min-h-[38rem] flex-col items-center justify-center px-6 text-center"><div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-violet-400/25 bg-violet-400/10 text-violet-200"><Layers3 class="h-6 w-6" /></div><h2 class="mt-5 text-lg font-semibold">选择或新建一套回答方案</h2><p class="mt-2 max-w-md text-sm leading-6 text-muted-foreground">回答方案只控制 AI 怎样表达，不会替代知识库。新建对话时可以同时选择知识库和回答方案。</p></div>
         <template v-else>
-          <CardHeader class="border-b border-border/70 p-5 sm:p-6"><div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><div class="flex flex-wrap items-center gap-2"><Badge variant="outline" :class="selected.status === 'PUBLISHED' ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' : 'border-violet-400/25 bg-violet-400/10 text-violet-200'">{{ selected.status === 'PUBLISHED' ? '已发布' : '草稿' }}</Badge><span class="text-xs text-muted-foreground">版本 {{ selected.version }}</span></div><CardTitle class="mt-3 text-xl">{{ selected.name }}</CardTitle><CardDescription class="mt-2">上次修改：{{ formatDateTime(selected.updatedAt) }}</CardDescription></div><div class="flex shrink-0 flex-wrap gap-2"><Button variant="outline" size="sm" class="gap-1.5" @click="openVersionHistory"><History class="h-3.5 w-3.5" />版本历史</Button><Button variant="outline" size="sm" class="gap-1.5" @click="duplicateTemplate"><Copy class="h-3.5 w-3.5" />复制</Button><Button variant="outline" size="sm" :disabled="actionLoading" class="gap-1.5" @click="togglePublished"><LoaderCircle v-if="actionLoading" class="h-3.5 w-3.5 animate-spin" /><Rocket v-else class="h-3.5 w-3.5" />{{ selected.status === 'PUBLISHED' ? '撤回' : '发布' }}</Button><Button variant="ghost" size="icon" :disabled="actionLoading" title="删除模板" class="h-9 w-9 hover:bg-rose-400/10" @click="deleteTemplate"><Trash2 class="h-4 w-4 text-destructive" /></Button></div></div></CardHeader>
-          <CardContent class="space-y-5 p-5 sm:p-6"><div class="grid gap-4 sm:grid-cols-2"><div class="space-y-2"><Label for="prompt-name">模板名称</Label><Input id="prompt-name" v-model="editForm.name" maxlength="100" /></div><div class="space-y-2"><Label for="prompt-description">用途说明</Label><Input id="prompt-description" v-model="editForm.description" maxlength="500" placeholder="例如：客服知识库回答" /></div></div><div class="space-y-2"><div class="flex items-center justify-between"><Label for="prompt-content">系统指令</Label><span class="text-xs text-muted-foreground">{{ editForm.content.length }} / 8000</span></div><textarea id="prompt-content" v-model="editForm.content" rows="15" maxlength="8000" class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 font-mono text-sm leading-6 outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="例如：请使用简洁、清晰的中文回答；优先给出结论，并在引用资料时说明来源。" /></div><div class="flex flex-col gap-3 rounded-xl border border-primary/15 bg-primary/[0.04] p-4 text-sm leading-6 text-muted-foreground sm:flex-row sm:items-start"><Send class="mt-0.5 h-4 w-4 shrink-0 text-primary" /><p>发布后，在"新建对话"中选择此模板。编辑已发布模板会生成新草稿；需要再次发布后才会影响之后的回答。</p></div><div class="flex items-center justify-between gap-3 border-t border-border/70 pt-5"><span class="text-xs text-muted-foreground">保存内容变更会自动递增版本号，并转为草稿。</span><Button :disabled="!hasChanges || saving" class="gap-2" @click="saveTemplate"><LoaderCircle v-if="saving" class="h-4 w-4 animate-spin" /><Check v-else class="h-4 w-4" />保存版本</Button></div></CardContent>
+          <CardHeader class="border-b border-border/70 p-5 sm:p-6"><div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><div class="flex flex-wrap items-center gap-2"><Badge variant="outline" :class="selected.status === 'PUBLISHED' ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' : 'border-violet-400/25 bg-violet-400/10 text-violet-200'">{{ selected.status === 'PUBLISHED' ? '已发布' : '草稿' }}</Badge><span class="text-xs text-muted-foreground">版本 {{ selected.version }}</span></div><CardTitle class="mt-3 text-xl">{{ selected.name }}</CardTitle><CardDescription class="mt-2">上次修改：{{ formatDateTime(selected.updatedAt) }}</CardDescription></div><div class="flex shrink-0 flex-wrap gap-2"><Button variant="outline" size="sm" class="gap-1.5" @click="openVersionHistory"><History class="h-3.5 w-3.5" />版本历史</Button><Button variant="outline" size="sm" class="gap-1.5" @click="duplicateTemplate"><Copy class="h-3.5 w-3.5" />复制</Button><Button variant="outline" size="sm" :disabled="actionLoading" class="gap-1.5" @click="togglePublished"><LoaderCircle v-if="actionLoading" class="h-3.5 w-3.5 animate-spin" /><Rocket v-else class="h-3.5 w-3.5" />{{ selected.status === 'PUBLISHED' ? '撤回' : '发布' }}</Button><Button variant="ghost" size="icon" :disabled="actionLoading" title="删除回答方案" class="h-9 w-9 hover:bg-rose-400/10" @click="deleteTemplate"><Trash2 class="h-4 w-4 text-destructive" /></Button></div></div></CardHeader>
+          <CardContent class="space-y-5 p-5 sm:p-6"><div class="grid gap-4 sm:grid-cols-2"><div class="space-y-2"><Label for="prompt-name">方案名称</Label><Input id="prompt-name" v-model="editForm.name" maxlength="100" placeholder="例如：客服答疑" /><p class="text-xs text-muted-foreground">新建对话时会看到这个名称。</p></div><div class="space-y-2"><Label for="prompt-description">适用场景</Label><Input id="prompt-description" v-model="editForm.description" maxlength="500" placeholder="例如：售前、售后和制度咨询" /><p class="text-xs text-muted-foreground">说明什么时候应该选择这套方案。</p></div></div><div class="space-y-2"><div class="flex items-center justify-between"><div><Label for="prompt-content">回答规则</Label><p class="mt-1 text-xs text-muted-foreground">写清楚回答顺序、语气、格式和边界。用户问题会自动传入，不需要填写变量占位符。</p></div><span class="text-xs text-muted-foreground">{{ editForm.content.length }} / 8000</span></div><textarea id="prompt-content" v-model="editForm.content" rows="15" maxlength="8000" class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 font-mono text-sm leading-6 outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="例如：你是企业客服助手。先直接给出结论，再列出处理步骤；引用知识库资料时标明来源；资料不足时不要猜测。" /></div><div class="flex flex-col gap-3 rounded-xl border border-primary/15 bg-primary/[0.04] p-4 text-sm leading-6 text-muted-foreground sm:flex-row sm:items-start"><Send class="mt-0.5 h-4 w-4 shrink-0 text-primary" /><p><strong class="font-medium text-foreground">怎么生效：</strong>先保存，到“回答方案测试”用真实问题验证，再点击“发布”。之后在“新建对话 → 回答方案”中选择它。</p></div><div class="flex items-center justify-between gap-3 border-t border-border/70 pt-5"><span class="text-xs text-muted-foreground">保存后是草稿，不会立即影响用户；发布后才会出现在新建对话中。</span><Button :disabled="!hasChanges || saving" class="gap-2" @click="saveTemplate"><LoaderCircle v-if="saving" class="h-4 w-4 animate-spin" /><Check v-else class="h-4 w-4" />保存草稿</Button></div></CardContent>
         </template>
       </Card>
     </div>
 
     <!-- Create Dialog -->
-    <Dialog v-model:open="showCreateDialog"><DialogContent><DialogHeader><DialogTitle>新建提示词模板</DialogTitle><DialogDescription>先保存为草稿；确认效果后再发布给新建对话使用。</DialogDescription></DialogHeader><div class="space-y-4"><div class="space-y-2"><Label for="new-prompt-name">模板名称 *</Label><Input id="new-prompt-name" v-model="createForm.name" placeholder="例如：严谨的知识库助手" maxlength="100" /></div><div class="space-y-2"><Label for="new-prompt-description">用途说明</Label><Input id="new-prompt-description" v-model="createForm.description" placeholder="说明适用的场景（可选）" maxlength="500" /></div><div class="space-y-2"><Label for="new-prompt-content">系统指令 *</Label><textarea id="new-prompt-content" v-model="createForm.content" rows="8" maxlength="8000" class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 text-sm leading-6 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="请说明 AI 的角色、回答风格、边界与引用要求。" /></div></div><DialogFooter><Button variant="outline" @click="showCreateDialog = false">取消</Button><Button :disabled="!createForm.name.trim() || !createForm.content.trim() || saving" @click="createTemplate">{{ saving ? '创建中…' : '创建草稿' }}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog v-model:open="showCreateDialog">
+      <DialogContent class="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>新建回答方案</DialogTitle>
+          <DialogDescription>先保存为草稿，用真实问题测试满意后再发布。发布前不会影响任何对话。</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-5">
+          <div class="space-y-2">
+            <Label>快速套用示例</Label>
+            <div class="grid gap-2 sm:grid-cols-3">
+              <Button v-for="example in promptExamples" :key="example.id" type="button" variant="outline" size="sm" @click="openCreateDialog(example)">{{ example.name }}</Button>
+            </div>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="space-y-2"><Label for="new-prompt-name">方案名称 *</Label><Input id="new-prompt-name" v-model="createForm.name" placeholder="例如：客服答疑" maxlength="100" /><p class="text-xs text-muted-foreground">用户新建对话时看到的名称。</p></div>
+            <div class="space-y-2"><Label for="new-prompt-description">适用场景</Label><Input id="new-prompt-description" v-model="createForm.description" placeholder="例如：售前、售后和制度咨询" maxlength="500" /><p class="text-xs text-muted-foreground">帮助用户判断什么时候选择它。</p></div>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center justify-between"><Label for="new-prompt-content">回答规则 *</Label><span class="text-xs text-muted-foreground">{{ createForm.content.length }} / 8000</span></div>
+            <textarea id="new-prompt-content" v-model="createForm.content" rows="10" maxlength="8000" class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 text-sm leading-6 outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="例如：你是企业客服助手。先给结论，再列处理步骤；资料不足时明确说明，不要猜测。" />
+            <p class="text-xs leading-5 text-muted-foreground">只写通用规则，不要把某一个具体问题写在这里。用户每次发送的问题会自动交给 AI。</p>
+          </div>
+        </div>
+        <DialogFooter><Button variant="outline" @click="showCreateDialog = false">取消</Button><Button :disabled="!createForm.name.trim() || !createForm.content.trim() || saving" @click="createTemplate">{{ saving ? '创建中…' : '保存为草稿' }}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- Version History Dialog -->
     <Dialog v-model:open="showVersionHistory">

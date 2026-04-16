@@ -16,4 +16,6 @@ public class PromptTemplateInfoDTO {
     private Integer version;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private LocalDateTime recycledAt;
+    private LocalDateTime recycleExpiresAt;
 }

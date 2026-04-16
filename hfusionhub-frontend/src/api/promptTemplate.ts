@@ -12,6 +12,8 @@ export interface PromptTemplate {
   version: number
   createdAt: string
   updatedAt: string
+  recycledAt?: string | null
+  recycleExpiresAt?: string | null
 }
 
 export interface PromptTemplateSaveDTO {
@@ -46,6 +48,10 @@ export const updatePromptTemplate = (id: number, data: PromptTemplateSaveDTO): P
 export const publishPromptTemplate = (id: number, expectedVersion: number): Promise<ApiResponse<PromptTemplate>> => post(`/prompt-templates/${id}/publish`, null, { params: { expectedVersion } })
 export const unpublishPromptTemplate = (id: number, expectedVersion: number): Promise<ApiResponse<PromptTemplate>> => post(`/prompt-templates/${id}/unpublish`, null, { params: { expectedVersion } })
 export const deletePromptTemplate = (id: number): Promise<ApiResponse<void>> => del(`/prompt-templates/${id}`)
+export const getPromptTemplateRecycleBin = (keyword?: string): Promise<ApiResponse<PromptTemplate[]>> =>
+  get('/prompt-templates/recycle-bin', keyword ? { keyword } : undefined)
+export const restorePromptTemplate = (id: number): Promise<ApiResponse<void>> => post(`/prompt-templates/${id}/restore`)
+export const purgePromptTemplate = (id: number): Promise<ApiResponse<void>> => del(`/prompt-templates/${id}/purge`)
 
 /** List all version snapshots for a template, newest first. */
 export const listPromptTemplateVersions = (id: number): Promise<ApiResponse<PromptTemplateVersion[]>> =>

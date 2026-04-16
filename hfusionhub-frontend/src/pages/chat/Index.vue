@@ -289,12 +289,13 @@ onMounted(() => {
             <p class="text-xs leading-5 text-muted-foreground">只显示当前可用的知识库。资料需完成解析后才会被 AI 检索。</p>
           </div>
           <div class="space-y-2">
-            <Label for="prompt-template-select">回答规则（可选）</Label>
+            <Label for="prompt-template-select">回答方案（可选）</Label>
             <select id="prompt-template-select" v-model="createForm.promptTemplateId" class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-              <option :value="undefined">使用系统默认回答方式</option>
+              <option :value="undefined">默认回答方式</option>
               <option v-for="template in promptTemplates" :key="template.id" :value="template.id">{{ template.name }}</option>
             </select>
-            <p class="text-xs leading-5 text-muted-foreground">仅显示已发布模板。可在 Prompt 工作台中创建和发布新的回答规则。</p>
+            <p class="text-xs leading-5 text-muted-foreground">回答方案控制 AI 的语气、结构和回答边界；知识内容仍来自上方选择的知识库。这里只显示已发布方案。</p>
+            <p v-if="!promptTemplates.length" class="rounded-md border border-amber-400/20 bg-amber-400/[0.06] px-3 py-2 text-xs leading-5 text-amber-100/85">当前没有已发布的回答方案。请先在“回答方案”页面创建、测试并发布。</p>
           </div>
         </div>
         <DialogFooter>

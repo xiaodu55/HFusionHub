@@ -59,8 +59,8 @@ const menuItems: Array<{
   description: string
   icon: Component
 }> = [
-  { path: '/builder/prompts', label: 'Prompt 工作台', description: '模板与发布', icon: PenLine },
-  { path: '/builder/test-bench', label: '提示词测试台', description: '模板效果评测', icon: FlaskConical },
+  { path: '/builder/prompts', label: '回答方案', description: '设置 AI 回答方式', icon: PenLine },
+  { path: '/builder/test-bench', label: '回答方案测试', description: '验证回答效果', icon: FlaskConical },
   { path: '/builder/test-sets', label: '测试用例集', description: '批量回归评测', icon: FlaskConical },
   { path: '/builder/models', label: '模型中心', description: '模型与运行状态', icon: Cpu },
   { path: '/builder/tools', label: '工具中心', description: '能力与调用记录', icon: Wrench },

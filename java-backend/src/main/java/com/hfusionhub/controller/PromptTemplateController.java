@@ -23,6 +23,12 @@ public class PromptTemplateController {
         return R.ok(promptTemplateService.listMine());
     }
 
+    @GetMapping("/recycle-bin")
+    public R<List<PromptTemplateInfoDTO>> listRecycleBin(
+            @RequestParam(required = false) String keyword) {
+        return R.ok(promptTemplateService.listRecycleBin(keyword));
+    }
+
     @PostMapping
     public R<PromptTemplateInfoDTO> create(@Valid @RequestBody PromptTemplateSaveDTO dto) {
         return R.ok("提示词模板已创建", promptTemplateService.create(dto));
@@ -48,7 +54,19 @@ public class PromptTemplateController {
     @DeleteMapping("/{id}")
     public R<Void> delete(@PathVariable Long id) {
         promptTemplateService.delete(id);
-        return R.ok();
+        return R.ok("回答方案已移入回收站", null);
+    }
+
+    @PostMapping("/{id}/restore")
+    public R<Void> restore(@PathVariable Long id) {
+        promptTemplateService.restore(id);
+        return R.ok("回答方案已恢复", null);
+    }
+
+    @DeleteMapping("/{id}/purge")
+    public R<Void> purge(@PathVariable Long id) {
+        promptTemplateService.purge(id);
+        return R.ok("回答方案已永久删除", null);
     }
 
     // ── Version history ───────────────────────────────────────────────
