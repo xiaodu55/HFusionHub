@@ -9,6 +9,7 @@ import app.core.llm as llm_module
 class _FakeLLM(BaseLLM):
     def __init__(self, *, response=None, error=None, stream=None):
         self.response = response or LLMResponse(content="ok", model="fake")
+        self.model = self.response.model
         self.error = error
         self.stream = stream if stream is not None else ["ok"]
         self.chat_calls = 0
@@ -41,6 +42,15 @@ async def test_fails_over_before_any_response_content_is_emitted():
     assert result.content == "fallback"
     assert primary.chat_calls == 1
     assert fallback.chat_calls == 1
+
+
+def test_failover_exposes_configured_models_without_hiding_the_candidates():
+    primary = _FakeLLM(response=LLMResponse(content="primary", model="deepseek-test"))
+    fallback = _FakeLLM(response=LLMResponse(content="fallback", model="ollama-test"))
+
+    llm = FailoverLLM([primary, fallback])
+
+    assert llm.model == "deepseek-test / ollama-test"
 
 
 @pytest.mark.asyncio

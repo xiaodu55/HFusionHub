@@ -116,8 +116,17 @@ class Postprocessor:
         results: List[Dict],
         top_k: int = 5,
         query: Optional[str] = None,
+        allow_scoped_summary: bool = False,
     ) -> tuple[List[ProcessedResult], List[Dict]]:
-        """Process results and retain an auditable decision for every input."""
+        """Process results and retain an auditable decision for every input.
+
+        A whole-KB summary is different from a fact lookup: generic words
+        such as "总结" and "资料" cannot achieve normal lexical coverage,
+        even when the selected KB has valid candidate chunks.  When the
+        caller has already supplied an explicit KB scope, a bounded fallback
+        may keep substantive candidates for that summary only.  It never
+        applies to an unscoped chat or a normal factual question.
+        """
         processed = [self._to_processed(r) for r in results]
         query_terms = self._query_terms(query)
 
@@ -182,6 +191,21 @@ class Postprocessor:
                 continue
 
             decisions[index]["decision"] = "filtered_query_mismatch"
+
+        # A scoped summary is allowed to use the best substantive candidates
+        # when normal query matching rejected everything.  This keeps the
+        # answer grounded in the selected KB while supporting requests such as
+        # "总结当前知识库最重要的内容" when vector search is unavailable.
+        if allow_scoped_summary and not evidence_accepted:
+            summary_min_score = max(0.1, min(self.min_score, 0.15))
+            for index, result in enumerate(processed):
+                evidence_score = result.metadata.get("evidence_score", result.score)
+                compact_content = re.sub(r"\s+", "", result.content or "")
+                if evidence_score < summary_min_score or len(compact_content) < 40:
+                    continue
+                decisions[index]["decision"] = "accepted_scoped_summary"
+                decisions[index]["bypass_reason"] = "explicit_knowledge_base_summary"
+                evidence_accepted.append((result, index))
 
         # 3. 去重
         deduplicated: List[tuple[ProcessedResult, int]] = []

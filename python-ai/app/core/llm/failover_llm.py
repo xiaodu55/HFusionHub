@@ -29,6 +29,20 @@ class FailoverLLM(BaseLLM):
         self._failure_threshold = max(1, failure_threshold)
         self._cooldown_seconds = max(0.0, cooldown_seconds)
 
+    @property
+    def model(self) -> str:
+        """Expose configured models for health and pre-generation responses.
+
+        The actual model used for a completed request still comes from
+        ``LLMResponse.model`` because a fallback provider may win the request.
+        """
+        models = []
+        for state in self._providers:
+            model = getattr(state.provider, "model", None)
+            if model and model not in models:
+                models.append(model)
+        return " / ".join(models) or "unknown"
+
     async def chat(self, messages: List[ChatMessage], temperature: float = 0.7,
                    max_tokens: int = 2048, **kwargs) -> LLMResponse:
         last_error = None
