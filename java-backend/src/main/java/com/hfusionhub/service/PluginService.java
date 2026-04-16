@@ -20,6 +20,11 @@ public interface PluginService {
     Plugin install(Map<String, Object> manifest);
 
     /**
+     * 创建低代码插件及其声明式 HTTP GET 工具。
+     */
+    Plugin createDeclarative(Map<String, Object> manifest);
+
+    /**
      * 上传 wheel 文件并安装插件
      */
     Plugin installWithWheel(Map<String, Object> manifest, byte[] wheelData, String wheelFilename);

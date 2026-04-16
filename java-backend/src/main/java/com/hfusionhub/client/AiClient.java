@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.util.UriComponentsBuilder;
 import reactor.core.publisher.Flux;
 import com.hfusionhub.service.UserModelConfigService;
 
@@ -568,9 +569,11 @@ public class AiClient {
      * base — only metadata, no execution.</p>
      */
     @SuppressWarnings("unchecked")
-    public Map<String, Object> getToolRegistry() {
+    public Map<String, Object> getToolRegistry(Long tenantId) {
         try {
-            String url = baseUrl + "/api/tools/registry";
+            String url = UriComponentsBuilder.fromHttpUrl(baseUrl + "/api/tools/registry")
+                    .queryParam("tenant_id", tenantId)
+                    .toUriString();
             ResponseEntity<Map> response = restTemplate.exchange(
                     url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), Map.class);
             if (response.getBody() == null) {

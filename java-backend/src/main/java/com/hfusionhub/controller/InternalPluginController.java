@@ -18,6 +18,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.hfusionhub.tenant.TenantContext;
+
 /**
  * Internal-only endpoint for Python AI to query plugin ToolSpecs,
  * receive audit logs, and query sandbox config.
@@ -39,11 +41,16 @@ public class InternalPluginController {
     private String expectedToken;
 
     @GetMapping("/tool-specs")
-    public R<List<Map<String, Object>>> getPluginToolSpecs(HttpServletRequest request) {
+    public R<List<Map<String, Object>>> getPluginToolSpecs(
+            @RequestParam Long tenantId,
+            HttpServletRequest request) {
         if (!constantTimeEquals(expectedToken, request.getHeader("X-Internal-Token"))) {
             return R.fail(403, "Forbidden: invalid or missing X-Internal-Token");
         }
-        return R.ok(pluginService.getPluginToolSpecs());
+        if (tenantId == null || tenantId < 1) {
+            return R.fail(400, "tenantId is required");
+        }
+        return R.ok(TenantContext.runAs(tenantId, pluginService::getPluginToolSpecs));
     }
 
     @GetMapping("/{pluginId}/versions")

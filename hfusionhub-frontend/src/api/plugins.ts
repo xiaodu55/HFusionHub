@@ -16,7 +16,9 @@ export interface PluginEntry {
   minHfusionhubVersion: string | null
   maxHfusionhubVersion: string | null
   iconUrl: string | null
-  source: 'local' | 'git' | 'wheel'
+  source: 'local' | 'git' | 'wheel' | 'builder'
+  pluginKind: 'package' | 'declarative' | null
+  toolSpecsJson: string | null
   status: 'active' | 'disabled' | 'failed' | 'pending' | 'circuit_open'
   manifestHash: string | null
   artifactPath: string | null
@@ -58,6 +60,29 @@ export interface PluginListResponse {
   pageSize: number
 }
 
+export interface DeclarativeToolInput {
+  name: string
+  display_name: string
+  description: string
+  example: string
+  endpoint_url: string
+  method: 'GET'
+  timeout_seconds: number
+  input_schema: {
+    type: 'object'
+    properties: Record<string, { type: 'string'; description: string }>
+    required: string[]
+  }
+}
+
+export interface DeclarativePluginInput {
+  name: string
+  display_name: string
+  version: string
+  description: string
+  tools: DeclarativeToolInput[]
+}
+
 // ── API ────────────────────────────────────────────────────────────────
 
 /** 分页查询已安装插件 */
@@ -75,6 +100,10 @@ export const listEnabledPlugins = (): Promise<ApiResponse<PluginEntry[]>> =>
 /** 安装插件（JSON manifest） */
 export const installPlugin = (manifest: Record<string, unknown>): Promise<ApiResponse<PluginEntry>> =>
   post('/plugin/install', manifest)
+
+/** 在网页中创建低代码插件和只读 HTTP GET 工具 */
+export const createDeclarativePlugin = (manifest: DeclarativePluginInput): Promise<ApiResponse<PluginEntry>> =>
+  post('/plugin/create', manifest)
 
 /** 上传 wheel 文件并安装插件 */
 export const installPluginWithWheel = (manifest: Record<string, unknown>, wheelFile: File): Promise<ApiResponse<PluginEntry>> => {

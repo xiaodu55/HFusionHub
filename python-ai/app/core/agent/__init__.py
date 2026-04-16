@@ -76,7 +76,11 @@ def get_agent(
             knowledge_base_id=knowledge_base_id,
         )
         registry_version = "1.1" if (_want_1_1 and _ff_write) else "1.0"
-        tool_registry = create_v1_registry(knowledge_base_id, agent_version=registry_version)
+        tool_registry = create_v1_registry(
+            knowledge_base_id,
+            agent_version=registry_version,
+            tenant_id=getattr(execution_context, 'tenant_id', None) if execution_context else None,
+        )
 
     # Runtime feature flag override: if agent.enabled is OFF via Java feature
     # flag, force agent workflow and multi-agent off regardless of env config.

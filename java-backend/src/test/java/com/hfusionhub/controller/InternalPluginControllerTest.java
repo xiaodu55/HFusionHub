@@ -57,7 +57,7 @@ class InternalPluginControllerTest {
         );
         when(pluginService.getPluginToolSpecs()).thenReturn(specs);
 
-        R<List<Map<String, Object>>> r = controller.getPluginToolSpecs(req(VALID_TOKEN));
+        R<List<Map<String, Object>>> r = controller.getPluginToolSpecs(1L, req(VALID_TOKEN));
 
         assertEquals(200, r.getCode());
         assertEquals(1, r.getData().size());
@@ -66,14 +66,14 @@ class InternalPluginControllerTest {
 
     @Test
     void toolSpecsReturns403WithWrongToken() {
-        R<List<Map<String, Object>>> r = controller.getPluginToolSpecs(req("wrong-token"));
+        R<List<Map<String, Object>>> r = controller.getPluginToolSpecs(1L, req("wrong-token"));
         assertEquals(403, r.getCode());
         verifyNoInteractions(pluginService);
     }
 
     @Test
     void toolSpecsReturns403WithNullToken() {
-        R<List<Map<String, Object>>> r = controller.getPluginToolSpecs(req(null));
+        R<List<Map<String, Object>>> r = controller.getPluginToolSpecs(1L, req(null));
         assertEquals(403, r.getCode());
         verifyNoInteractions(pluginService);
     }
@@ -129,7 +129,7 @@ class InternalPluginControllerTest {
         );
         when(pluginService.getPluginToolSpecs()).thenReturn(specs);
 
-        R<List<Map<String, Object>>> r = controller.getPluginToolSpecs(req(VALID_TOKEN));
+        R<List<Map<String, Object>>> r = controller.getPluginToolSpecs(1L, req(VALID_TOKEN));
         String wire = objectMapper.writeValueAsString(r);
 
         JsonNode envelope = objectMapper.readTree(wire);

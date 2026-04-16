@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.api.internal_auth import require_internal_token
 from app.core.tools.registry import create_full_registry
@@ -54,11 +54,15 @@ def _build_tool_entry(spec, instance) -> Dict[str, Any]:
             "properties": spec.input_schema.get("properties", {}),
             "required": spec.input_schema.get("required", []),
         },
+        "display_name": getattr(spec, "_display_name", None),
+        "example": getattr(spec, "_example", None),
+        "plugin_name": getattr(spec, "_plugin_name", None),
+        "category": getattr(spec, "_category", None),
     }
 
 
 @router.get("/registry", dependencies=[Depends(require_internal_token)])
-async def tool_registry() -> Dict[str, Any]:
+async def tool_registry(tenant_id: int | None = Query(default=None, ge=1)) -> Dict[str, Any]:
     """返回 Tool Registry 中所有已注册工具的元数据。
 
     不依赖 knowledge_base_id——仅列出工具的声明式元数据（名称、用途、
@@ -67,7 +71,7 @@ async def tool_registry() -> Dict[str, Any]:
     前端通过 Java 的 ``/api/tools`` 透传访问此端点。
     """
     try:
-        registry = create_full_registry(knowledge_base_id=None)
+        registry = create_full_registry(knowledge_base_id=None, tenant_id=tenant_id)
     except Exception as exc:
         logger.exception("Failed to create tool registry for listing")
         return {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -11,6 +12,7 @@ import {
   GitBranch,
   LoaderCircle,
   Package,
+  Plus,
   RefreshCw,
   ShieldCheck,
   ShieldOff,
@@ -24,6 +26,10 @@ import type { PluginEntry, PluginAuditLog } from '@/api/plugins'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { useToast } from '@/composables/useToast'
+
+const toast = useToast()
+const route = useRoute()
 
 const plugins = ref<PluginEntry[]>([])
 const loading = ref(false)
@@ -46,6 +52,42 @@ const confirmingAction = ref<string | null>(null)
 const actionReason = ref('')
 const showReasonDialog = ref(false)
 const pendingActionPluginId = ref<string | null>(null)
+const showCreateDialog = ref(false)
+const creating = ref(false)
+
+interface BuilderParameter {
+  name: string
+  description: string
+  required: boolean
+}
+
+interface BuilderTool {
+  name: string
+  displayName: string
+  description: string
+  example: string
+  endpointUrl: string
+  timeoutSeconds: number
+  parameters: BuilderParameter[]
+}
+
+const emptyBuilderTool = (): BuilderTool => ({
+  name: 'custom_',
+  displayName: '',
+  description: '',
+  example: '',
+  endpointUrl: '',
+  timeoutSeconds: 10,
+  parameters: [{ name: 'query', description: '查询内容', required: true }],
+})
+
+const createForm = ref({
+  name: '',
+  displayName: '',
+  version: '1.0.0',
+  description: '',
+  tools: [emptyBuilderTool()],
+})
 
 // ── Canary state ───────────────────────────────────────────────────
 const showCanaryDialog = ref(false)
@@ -76,7 +118,7 @@ const vulnStatusMeta = (status: string | null) => {
 }
 
 const sourceLabel = (source: string) => {
-  const map: Record<string, string> = { local: '本地', git: 'Git', wheel: 'Wheel' }
+  const map: Record<string, string> = { local: '本地', git: 'Git', wheel: 'Wheel', builder: '网页创建' }
   return map[source] || source
 }
 
@@ -171,6 +213,98 @@ const handleInstall = async () => {
     error.value = e instanceof Error ? e.message : '安装失败'
   } finally {
     installing.value = false
+  }
+}
+
+const addBuilderTool = () => {
+  if (createForm.value.tools.length < 10) createForm.value.tools.push(emptyBuilderTool())
+}
+
+const removeBuilderTool = (index: number) => {
+  if (createForm.value.tools.length > 1) createForm.value.tools.splice(index, 1)
+}
+
+const addBuilderParameter = (tool: BuilderTool) => {
+  if (tool.parameters.length < 12) tool.parameters.push({ name: '', description: '', required: false })
+}
+
+const removeBuilderParameter = (tool: BuilderTool, index: number) => {
+  tool.parameters.splice(index, 1)
+}
+
+const applyWeatherExample = () => {
+  createForm.value = {
+    name: 'weather_helper',
+    displayName: '天气查询助手',
+    version: '1.0.0',
+    description: '让 AI 根据经纬度查询实时天气。',
+    tools: [{
+      name: 'custom_weather',
+      displayName: '查询实时天气',
+      description: '根据经纬度获取当前位置的实时天气数据。',
+      example: '查询北京当前位置的实时天气。',
+      endpointUrl: 'https://api.open-meteo.com/v1/forecast',
+      timeoutSeconds: 10,
+      parameters: [
+        { name: 'latitude', description: '纬度，例如 39.9042', required: true },
+        { name: 'longitude', description: '经度，例如 116.4074', required: true },
+        { name: 'current', description: '要返回的天气字段，例如 temperature_2m', required: true },
+      ],
+    }],
+  }
+}
+
+const handleCreate = async () => {
+  if (!createForm.value.name || !createForm.value.displayName || !createForm.value.description) {
+    toast.warning('请先填写插件名称、标识和用途')
+    return
+  }
+  creating.value = true
+  try {
+    await pluginsApi.createDeclarativePlugin({
+      name: createForm.value.name.trim(),
+      display_name: createForm.value.displayName.trim(),
+      version: createForm.value.version.trim(),
+      description: createForm.value.description.trim(),
+      tools: createForm.value.tools.map(tool => {
+        const properties: Record<string, { type: 'string'; description: string }> = {}
+        const required: string[] = []
+        for (const parameter of tool.parameters) {
+          const name = parameter.name.trim()
+          if (!name) continue
+          properties[name] = { type: 'string', description: parameter.description.trim() }
+          if (parameter.required) required.push(name)
+        }
+        return {
+          name: tool.name.trim(),
+          display_name: tool.displayName.trim(),
+          description: tool.description.trim(),
+          example: tool.example.trim(),
+          endpoint_url: tool.endpointUrl.trim(),
+          method: 'GET' as const,
+          timeout_seconds: tool.timeoutSeconds,
+          input_schema: { type: 'object' as const, properties, required },
+        }
+      }),
+    })
+    showCreateDialog.value = false
+    createForm.value = { name: '', displayName: '', version: '1.0.0', description: '', tools: [emptyBuilderTool()] }
+    toast.success('插件已创建并启用，工具会自动出现在 AI 能力中心')
+    await loadPlugins()
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : '创建插件失败')
+  } finally {
+    creating.value = false
+  }
+}
+
+const pluginToolCount = (plugin: PluginEntry) => {
+  if (!plugin.toolSpecsJson) return 0
+  try {
+    const tools = JSON.parse(plugin.toolSpecsJson)
+    return Array.isArray(tools) ? tools.length : 0
+  } catch {
+    return 0
   }
 }
 
@@ -287,22 +421,45 @@ const statusCounts = computed(() => {
 
 // ── Init ──────────────────────────────────────────────────────────────
 
-onMounted(loadPlugins)
+onMounted(async () => {
+  await loadPlugins()
+  if (route.query.create === 'tool') showCreateDialog.value = true
+})
 </script>
 
 <template>
   <div class="space-y-6">
-    <!-- Header -->
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-2xl font-bold tracking-tight">插件管理</h1>
-        <p class="text-sm text-muted-foreground">安装、启用、禁用工具插件，管理沙箱约束</p>
+    <section class="rounded-lg border border-border bg-card/75 p-5 sm:p-6">
+      <div class="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex gap-4">
+          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary/10 text-primary">
+            <Package class="h-5 w-5" />
+          </div>
+          <div>
+            <p class="text-xs font-medium text-primary">AI 扩展</p>
+            <h1 class="mt-1 text-2xl font-semibold">插件与工具</h1>
+            <p class="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+              把外部 API 变成 AI 可以自动使用的工具。一个插件可以包含多个工具，并统一启用、禁用和审计。
+            </p>
+          </div>
+        </div>
+        <div class="flex shrink-0 flex-wrap gap-2">
+          <Button variant="outline" class="gap-2" @click="showInstallDialog = true">
+            <Download class="h-4 w-4" />
+            上传插件包
+          </Button>
+          <Button class="gap-2" @click="showCreateDialog = true">
+            <Plus class="h-4 w-4" />
+            新建插件
+          </Button>
+        </div>
       </div>
-      <Button @click="showInstallDialog = true" class="gap-2">
-        <Download class="h-4 w-4" />
-        安装插件
-      </Button>
-    </div>
+      <div class="mt-5 grid gap-3 border-t border-border pt-5 sm:grid-cols-3">
+        <div><p class="text-sm font-medium">1. 创建插件</p><p class="mt-1 text-xs text-muted-foreground">填写插件名称和用途。</p></div>
+        <div><p class="text-sm font-medium">2. 添加工具</p><p class="mt-1 text-xs text-muted-foreground">配置 HTTPS GET 接口和输入参数。</p></div>
+        <div><p class="text-sm font-medium">3. 在对话中使用</p><p class="mt-1 text-xs text-muted-foreground">启用后 AI 会根据问题自动调用。</p></div>
+      </div>
+    </section>
 
     <!-- Status filter tabs -->
     <div class="flex gap-2">
@@ -335,7 +492,7 @@ onMounted(loadPlugins)
     <div v-else-if="filteredPlugins.length === 0" class="flex flex-col items-center justify-center py-12 text-muted-foreground">
       <Package class="h-12 w-12 mb-4 opacity-50" />
       <p class="text-lg font-medium">暂无插件</p>
-      <p class="text-sm">点击"安装插件"按钮添加新插件</p>
+      <p class="text-sm">点击“新建插件”从示例开始，或上传开发者制作的插件包。</p>
     </div>
 
     <!-- Plugin list -->
@@ -365,6 +522,9 @@ onMounted(loadPlugins)
           </div>
           <div v-if="plugin.author" class="text-xs text-muted-foreground">
             作者: {{ plugin.author }}
+          </div>
+          <div v-if="plugin.pluginKind === 'declarative'" class="text-xs text-muted-foreground">
+            包含 {{ pluginToolCount(plugin) }} 个自建工具
           </div>
           <div v-if="plugin.vulnerabilityStatus" class="text-xs">
             <Badge :class="vulnStatusMeta(plugin.vulnerabilityStatus).class">
@@ -442,12 +602,127 @@ onMounted(loadPlugins)
       </Card>
     </div>
 
+    <!-- Low-code create dialog -->
+    <div v-if="showCreateDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div class="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl">
+        <div class="flex items-start justify-between border-b border-border p-5">
+          <div>
+            <h2 class="text-lg font-semibold">新建插件</h2>
+            <p class="mt-1 text-sm text-muted-foreground">无需写代码，把公开 HTTPS GET 接口配置成 AI 工具。</p>
+          </div>
+          <Button variant="ghost" size="sm" title="关闭" @click="showCreateDialog = false">
+            <XCircle class="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div class="flex-1 space-y-6 overflow-y-auto p-5">
+          <div class="flex items-center justify-between gap-3 rounded-md border border-primary/20 bg-primary/[0.04] p-4">
+            <div>
+              <p class="text-sm font-medium">第一次创建？</p>
+              <p class="mt-1 text-xs text-muted-foreground">载入天气查询示例，修改后即可创建。</p>
+            </div>
+            <Button variant="outline" size="sm" @click="applyWeatherExample">使用示例</Button>
+          </div>
+
+          <section>
+            <h3 class="text-sm font-semibold">插件信息</h3>
+            <div class="mt-3 grid gap-4 sm:grid-cols-2">
+              <label class="text-sm">显示名称 *
+                <input v-model="createForm.displayName" placeholder="例如：天气查询助手" class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2" />
+              </label>
+              <label class="text-sm">插件标识 *
+                <input v-model="createForm.name" placeholder="例如：weather_helper" class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 font-mono" />
+                <span class="mt-1 block text-xs text-muted-foreground">小写字母、数字、下划线，以字母开头。</span>
+              </label>
+              <label class="text-sm">版本 *
+                <input v-model="createForm.version" placeholder="1.0.0" class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2" />
+              </label>
+              <label class="text-sm sm:col-span-2">用途说明 *
+                <input v-model="createForm.description" placeholder="说明这个插件为用户解决什么问题" class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2" />
+              </label>
+            </div>
+          </section>
+
+          <section>
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h3 class="text-sm font-semibold">插件工具</h3>
+                <p class="mt-1 text-xs text-muted-foreground">每个工具对应一个接口，AI 会根据名称、说明和示例判断何时调用。</p>
+              </div>
+              <Button variant="outline" size="sm" class="gap-1" :disabled="createForm.tools.length >= 10" @click="addBuilderTool">
+                <Plus class="h-3.5 w-3.5" />添加工具
+              </Button>
+            </div>
+
+            <div class="mt-3 space-y-4">
+              <article v-for="(tool, toolIndex) in createForm.tools" :key="toolIndex" class="rounded-lg border border-border p-4">
+                <div class="flex items-center justify-between">
+                  <h4 class="text-sm font-medium">工具 {{ toolIndex + 1 }}</h4>
+                  <Button v-if="createForm.tools.length > 1" variant="ghost" size="sm" title="删除工具" @click="removeBuilderTool(toolIndex)">
+                    <Trash2 class="h-4 w-4 text-rose-300" />
+                  </Button>
+                </div>
+                <div class="mt-3 grid gap-4 sm:grid-cols-2">
+                  <label class="text-sm">工具名称 *
+                    <input v-model="tool.displayName" placeholder="例如：查询实时天气" class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2" />
+                  </label>
+                  <label class="text-sm">工具标识 *
+                    <input v-model="tool.name" placeholder="custom_weather" class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 font-mono" />
+                    <span class="mt-1 block text-xs text-muted-foreground">必须以 custom_ 开头。</span>
+                  </label>
+                  <label class="text-sm sm:col-span-2">接口地址 *
+                    <input v-model="tool.endpointUrl" placeholder="https://api.example.com/search" class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 font-mono" />
+                    <span class="mt-1 block text-xs text-muted-foreground">仅支持公开 HTTPS GET，不允许本机、内网地址或跳转。</span>
+                  </label>
+                  <label class="text-sm sm:col-span-2">AI 何时使用 *
+                    <input v-model="tool.description" placeholder="例如：用户询问天气时，根据经纬度查询实时天气" class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2" />
+                  </label>
+                  <label class="text-sm">示例问法
+                    <input v-model="tool.example" placeholder="例如：查询北京现在的天气" class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2" />
+                  </label>
+                  <label class="text-sm">最长等待（秒）
+                    <input v-model.number="tool.timeoutSeconds" type="number" min="2" max="30" class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2" />
+                  </label>
+                </div>
+
+                <div class="mt-4 border-t border-border pt-4">
+                  <div class="flex items-center justify-between">
+                    <p class="text-xs font-medium text-muted-foreground">接口参数</p>
+                    <Button variant="ghost" size="sm" class="gap-1" :disabled="tool.parameters.length >= 12" @click="addBuilderParameter(tool)">
+                      <Plus class="h-3.5 w-3.5" />添加参数
+                    </Button>
+                  </div>
+                  <div v-if="tool.parameters.length" class="mt-2 space-y-2">
+                    <div v-for="(parameter, parameterIndex) in tool.parameters" :key="parameterIndex" class="grid gap-2 sm:grid-cols-[10rem_1fr_auto_auto] sm:items-center">
+                      <input v-model="parameter.name" placeholder="参数标识" class="rounded-md border border-input bg-background px-3 py-2 text-sm font-mono" />
+                      <input v-model="parameter.description" placeholder="告诉 AI 这个参数怎么填写" class="rounded-md border border-input bg-background px-3 py-2 text-sm" />
+                      <label class="flex items-center gap-2 whitespace-nowrap text-xs text-muted-foreground"><input v-model="parameter.required" type="checkbox" />必填</label>
+                      <button type="button" title="删除参数" class="p-2 text-muted-foreground hover:text-rose-300" @click="removeBuilderParameter(tool, parameterIndex)"><Trash2 class="h-4 w-4" /></button>
+                    </div>
+                  </div>
+                  <p v-else class="mt-2 text-xs text-muted-foreground">这个接口不需要参数。</p>
+                </div>
+              </article>
+            </div>
+          </section>
+        </div>
+
+        <div class="flex justify-end gap-2 border-t border-border p-4">
+          <Button variant="outline" @click="showCreateDialog = false">取消</Button>
+          <Button :disabled="creating" class="gap-2" @click="handleCreate">
+            <LoaderCircle v-if="creating" class="h-4 w-4 animate-spin" />
+            创建并启用
+          </Button>
+        </div>
+      </div>
+    </div>
+
     <!-- Install dialog -->
     <div v-if="showInstallDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <Card class="w-full max-w-md">
         <CardHeader>
-          <CardTitle>安装插件</CardTitle>
-          <CardDescription>输入插件 manifest 信息</CardDescription>
+          <CardTitle>上传插件包</CardTitle>
+          <CardDescription>供开发者安装经过构建和校验的 Wheel 插件。</CardDescription>
         </CardHeader>
         <CardContent class="space-y-4">
           <div>

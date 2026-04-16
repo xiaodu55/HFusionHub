@@ -897,6 +897,7 @@ async def agent_v1_decide(request: AgentResumeRequest):
     registry = create_v1_registry(
         knowledge_base_id=request.knowledge_base_id,
         agent_version="1.1",
+        tenant_id=get_tenant_id(),
     )
     grant_token = register_scoped_grant(
         tool_name=request.tool_name,

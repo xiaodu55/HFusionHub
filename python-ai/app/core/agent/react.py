@@ -183,7 +183,10 @@ class ReactAgent(Agent):
             if self._registry is not None:
                 raw = self._registry.get_tools(v1_only=True)
             elif self._has_selected_knowledge_base():
-                self._registry = create_v1_registry(self.knowledge_base_id)
+                self._registry = create_v1_registry(
+                    self.knowledge_base_id,
+                    tenant_id=getattr(self._context, "tenant_id", None) if self._context else None,
+                )
                 raw = self._registry.get_tools(v1_only=True)
             else:
                 # No KB → no KB-scoped tools.  Return empty list.

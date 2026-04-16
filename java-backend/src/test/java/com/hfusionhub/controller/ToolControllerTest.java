@@ -10,6 +10,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.mapper.AgentStepMapper;
+import com.hfusionhub.tenant.TenantContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,11 +47,13 @@ class ToolControllerTest {
         aiClient = mock(AiClient.class);
         agentStepMapper = mock(AgentStepMapper.class);
         controller = new ToolController(aiClient, agentStepMapper);
+        TenantContext.setTenantId(1L);
     }
 
     @AfterEach
     void tearDown() {
         StpUtil.logout();
+        TenantContext.clear();
     }
 
     // ── Tool registry (no user isolation needed — metadata is shared) ──
@@ -63,7 +66,7 @@ class ToolControllerTest {
                 Map.of("name", "write_note", "risk_level", "read_write")
         ));
         pythonResponse.put("total", 2);
-        when(aiClient.getToolRegistry()).thenReturn(pythonResponse);
+        when(aiClient.getToolRegistry(1L)).thenReturn(pythonResponse);
 
         R<Map<String, Object>> result = controller.listTools();
 
@@ -84,7 +87,7 @@ class ToolControllerTest {
         errorResponse.put("tools", List.of());
         errorResponse.put("total", 0);
         errorResponse.put("error", "AI 服务不可达");
-        when(aiClient.getToolRegistry()).thenReturn(errorResponse);
+        when(aiClient.getToolRegistry(1L)).thenReturn(errorResponse);
 
         R<Map<String, Object>> result = controller.listTools();
 

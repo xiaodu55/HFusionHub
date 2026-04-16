@@ -59,6 +59,9 @@ public class Plugin extends BaseEntity {
     @Schema(description = "来源: local|git|wheel")
     private String source;
 
+    @Schema(description = "插件类型: package|declarative")
+    private String pluginKind;
+
     @Schema(description = "状态: active|disabled|failed|pending|circuit_open")
     private String status;
 
@@ -79,11 +82,18 @@ public class Plugin extends BaseEntity {
     @Schema(description = "权限列表 JSON")
     private String permissions;
 
+    @TableField(value = "tool_specs_json")
+    @Schema(description = "低代码插件工具声明 JSON")
+    private String toolSpecsJson;
+
     @Schema(description = "是否启用")
     private Boolean enabled;
 
     @Schema(description = "安装人用户ID")
     private Long installedBy;
+
+    @Schema(description = "所属租户ID")
+    private Long tenantId;
 
     @Schema(description = "安装时间")
     private LocalDateTime installedAt;

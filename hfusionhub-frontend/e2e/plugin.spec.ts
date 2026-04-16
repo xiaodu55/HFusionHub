@@ -8,7 +8,7 @@ test.describe('Plugin Management', () => {
 
   const runLive = process.env.HFUSIONHUB_RUN_PLUGIN_LIVE === 'true'
 
-  test('plugin list endpoint exists and returns empty list', async ({ javaApi, userA }) => {
+  test('plugin list endpoint exists and returns a paged list', async ({ javaApi, userA }) => {
     const res = await javaApi.get('plugin/list', {
       headers: userA.headers,
       params: { page: 1, pageSize: 20 },
@@ -16,10 +16,11 @@ test.describe('Plugin Management', () => {
     const body = await assertJson(res)
     expect(body.code).toBe(200)
     expect(body.data).toBeTruthy()
-    expect(body.data.records).toEqual([])
+    expect(Array.isArray(body.data.records)).toBe(true)
+    expect(typeof body.data.total).toBe('number')
   })
 
-  test('plugin list is scoped per user (no cross-user leak)', async ({ javaApi, userA, userB }) => {
+  test('plugin list is shared consistently inside the same tenant', async ({ javaApi, userA, userB }) => {
     const [a, b] = await Promise.all([
       javaApi.get('plugin/list', { headers: userA.headers, params: { page: 1, pageSize: 20 } }),
       javaApi.get('plugin/list', { headers: userB.headers, params: { page: 1, pageSize: 20 } }),
@@ -27,9 +28,9 @@ test.describe('Plugin Management', () => {
     const [bodyA, bodyB] = await Promise.all([assertJson(a), assertJson(b)])
     expect(bodyA.code).toBe(200)
     expect(bodyB.code).toBe(200)
-    // Both should return empty lists (no plugins installed yet)
-    expect(bodyA.data.records).toEqual([])
-    expect(bodyB.data.records).toEqual([])
+    const idsA = bodyA.data.records.map((plugin: any) => plugin.pluginId).sort()
+    const idsB = bodyB.data.records.map((plugin: any) => plugin.pluginId).sort()
+    expect(idsA).toEqual(idsB)
   })
 
   test('install then uninstall a plugin', async ({ javaApi, userA }) => {
@@ -175,7 +176,7 @@ test.describe('Plugin Management', () => {
 
   // ── UI rendering tests (mocked route) ───────────────────────────────
 
-  test('plugins page renders header and install button', async ({ page, userA }) => {
+  test('plugins page explains creation and package upload', async ({ page, userA }) => {
     await page.goto('/')
     await page.evaluate((token) => localStorage.setItem('satoken', token), userA.token)
     await page.route('**/api/plugin/list**', (route) =>
@@ -186,8 +187,9 @@ test.describe('Plugin Management', () => {
       }),
     )
     await page.goto('/builder/plugins')
-    await expect(page.getByRole('main').getByRole('heading', { name: '插件管理' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '安装插件' })).toBeVisible()
+    await expect(page.getByRole('main').getByRole('heading', { name: '插件与工具' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '新建插件' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '上传插件包' })).toBeVisible()
   })
 
   test('plugins page shows empty state when no plugins', async ({ page, userA }) => {
@@ -272,7 +274,7 @@ test.describe('Plugin Management', () => {
     await page.goto('/builder/plugins')
 
     // Open install dialog via the header button
-    await page.getByRole('button', { name: '安装插件' }).click()
+    await page.getByRole('button', { name: '上传插件包' }).click()
     await expect(page.getByText('插件名称 *')).toBeVisible()
 
     // Install button should be disabled when fields are empty
@@ -299,5 +301,27 @@ test.describe('Plugin Management', () => {
     await expect(page.getByText('SHA-256:')).toBeVisible()
     // Now the install button should be enabled
     await expect(installBtn).toBeEnabled()
+  })
+
+  test('low-code creator loads a complete weather example', async ({ page, userA }) => {
+    await page.goto('/')
+    await page.evaluate((token) => localStorage.setItem('satoken', token), userA.token)
+    await page.route('**/api/plugin/list**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 200, data: { records: [], total: 0 } }),
+      }),
+    )
+    await page.goto('/builder/plugins')
+
+    await page.getByRole('button', { name: '新建插件' }).click()
+    await expect(page.getByRole('heading', { name: '新建插件' })).toBeVisible()
+    await page.getByRole('button', { name: '使用示例' }).click()
+
+    await expect(page.getByPlaceholder('例如：天气查询助手')).toHaveValue('天气查询助手')
+    await expect(page.getByPlaceholder('例如：weather_helper')).toHaveValue('weather_helper')
+    await expect(page.getByPlaceholder('https://api.example.com/search')).toHaveValue('https://api.open-meteo.com/v1/forecast')
+    await expect(page.getByRole('button', { name: '创建并启用' })).toBeEnabled()
   })
 })

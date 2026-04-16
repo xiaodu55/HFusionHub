@@ -89,6 +89,24 @@ class PluginControllerTest {
     }
 
     @Test
+    void createDeclarativePluginReturnsCreatedPlugin() {
+        Plugin plugin = samplePlugin("pid-builder", "weather_helper", "1.0.0");
+        plugin.setPluginKind("declarative");
+        when(pluginService.createDeclarative(any())).thenReturn(plugin);
+
+        R<Plugin> result = controller.create(Map.of(
+                "name", "weather_helper",
+                "version", "1.0.0",
+                "description", "查询天气",
+                "tools", List.of(Map.of("name", "custom_weather"))
+        ));
+
+        assertEquals(200, result.getCode());
+        assertEquals("declarative", result.getData().getPluginKind());
+        verify(pluginService).createDeclarative(any());
+    }
+
+    @Test
     void installMissingArtifactHashReturns400() {
         Map<String, Object> bad = new LinkedHashMap<>();
         bad.put("name", "test");

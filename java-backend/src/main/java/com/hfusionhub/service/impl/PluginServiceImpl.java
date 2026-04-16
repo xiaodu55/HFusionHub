@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
+import java.net.URI;
 import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -48,6 +49,78 @@ public class PluginServiceImpl implements PluginService {
     @Transactional
     public Plugin install(Map<String, Object> manifest) {
         return doInstall(manifest, null, null);
+    }
+
+    @Override
+    @Transactional
+    @SuppressWarnings("unchecked")
+    public Plugin createDeclarative(Map<String, Object> manifest) {
+        String name = requireText(manifest, "name", 64);
+        if (!name.matches("[a-z][a-z0-9_]{2,63}")) {
+            throw new IllegalArgumentException("插件标识只能使用小写字母、数字和下划线，并以字母开头");
+        }
+        String version = requireText(manifest, "version", 32);
+        if (!version.matches("[0-9]+[.][0-9]+[.][0-9]+(?:-[0-9A-Za-z.-]+)?")) {
+            throw new IllegalArgumentException("版本号格式应为 1.0.0");
+        }
+        requireText(manifest, "description", 500);
+
+        Object rawTools = manifest.get("tools");
+        if (!(rawTools instanceof List<?> tools) || tools.isEmpty() || tools.size() > 10) {
+            throw new IllegalArgumentException("每个插件需要包含 1 到 10 个工具");
+        }
+
+        List<Map<String, Object>> normalizedTools = new ArrayList<>();
+        Set<String> names = new HashSet<>();
+        for (Object rawTool : tools) {
+            if (!(rawTool instanceof Map<?, ?> rawMap)) {
+                throw new IllegalArgumentException("工具配置格式不正确");
+            }
+            Map<String, Object> tool = new LinkedHashMap<>();
+            rawMap.forEach((key, value) -> tool.put(String.valueOf(key), value));
+
+            String toolName = requireText(tool, "name", 64);
+            if (!toolName.matches("custom_[a-z0-9_]{2,56}")) {
+                throw new IllegalArgumentException("工具标识必须以 custom_ 开头，且只能使用小写字母、数字和下划线");
+            }
+            if (!names.add(toolName)) {
+                throw new IllegalArgumentException("工具标识重复: " + toolName);
+            }
+
+            String endpoint = requireText(tool, "endpoint_url", 1000);
+            validateDeclarativeEndpoint(endpoint);
+            String method = String.valueOf(tool.getOrDefault("method", "GET")).toUpperCase(Locale.ROOT);
+            if (!"GET".equals(method)) {
+                throw new IllegalArgumentException("低代码工具目前只允许 GET 请求");
+            }
+
+            int timeout = parseBoundedInt(tool.get("timeout_seconds"), 10, 2, 30, "超时时间");
+            Map<String, Object> inputSchema = tool.get("input_schema") instanceof Map<?, ?> schema
+                    ? normalizeInputSchema(schema) : Map.of("type", "object", "properties", Map.of());
+
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            normalized.put("name", toolName);
+            normalized.put("display_name", requireText(tool, "display_name", 100));
+            normalized.put("description", requireText(tool, "description", 500));
+            normalized.put("example", String.valueOf(tool.getOrDefault("example", "")).trim());
+            normalized.put("input_schema", inputSchema);
+            normalized.put("output_schema", Map.of("type", "object"));
+            normalized.put("risk_level", "read_only");
+            normalized.put("required_permissions", List.of());
+            normalized.put("timeout_seconds", timeout);
+            normalized.put("agent_version", "1.0");
+            normalized.put("category", "external");
+            normalized.put("execution", Map.of("type", "http_get", "url", endpoint));
+            normalizedTools.add(normalized);
+        }
+
+        Map<String, Object> safeManifest = new LinkedHashMap<>(manifest);
+        safeManifest.put("source", "builder");
+        safeManifest.put("plugin_kind", "declarative");
+        safeManifest.put("tool_specs", normalizedTools);
+        safeManifest.put("permissions", List.of("external:http:get"));
+        safeManifest.put("artifact_hash", computeManifestHash(safeManifest));
+        return doInstall(safeManifest, null, null);
     }
 
     @Override
@@ -110,9 +183,11 @@ public class PluginServiceImpl implements PluginService {
         plugin.setMaxHfusionhubVersion((String) manifest.get("max_hfusionhub_version"));
         plugin.setIconUrl((String) manifest.get("icon_url"));
         plugin.setSource((String) manifest.getOrDefault("source", "local"));
+        plugin.setPluginKind((String) manifest.getOrDefault("plugin_kind", "package"));
         plugin.setStatus("active");
         plugin.setEnabled(true);
         plugin.setInstalledBy(JwtUtils.getCurrentUserId());
+        plugin.setTenantId(com.hfusionhub.tenant.TenantContext.requireTenantId());
         plugin.setInstalledAt(java.time.LocalDateTime.now());
         plugin.setManifestHash(computeManifestHash(manifest));
         plugin.setArtifactHash(hash);
@@ -130,6 +205,11 @@ public class PluginServiceImpl implements PluginService {
         List<String> perms = (List<String>) manifest.get("permissions");
         if (perms != null) {
             plugin.setPermissions(toJson(perms));
+        }
+
+        Object toolSpecs = manifest.get("tool_specs");
+        if (toolSpecs != null) {
+            plugin.setToolSpecsJson(toJson(toolSpecs));
         }
 
         pluginMapper.insert(plugin);
@@ -358,6 +438,18 @@ public class PluginServiceImpl implements PluginService {
         List<Plugin> enabled = pluginMapper.selectEnabledPlugins();
         List<Map<String, Object>> specs = new ArrayList<>();
         for (Plugin p : enabled) {
+            if ("declarative".equals(p.getPluginKind()) && p.getToolSpecsJson() != null) {
+                for (Map<String, Object> tool : parseJsonMapList(p.getToolSpecsJson())) {
+                    Map<String, Object> enriched = new LinkedHashMap<>(tool);
+                    enriched.put("_plugin_id", p.getPluginId());
+                    enriched.put("_plugin_name", p.getDisplayName() != null ? p.getDisplayName() : p.getName());
+                    enriched.put("_plugin_version", p.getVersion());
+                    enriched.put("_plugin_kind", "declarative");
+                    enriched.put("_tenant_id", p.getTenantId());
+                    specs.add(enriched);
+                }
+                continue;
+            }
             Map<String, Object> spec = new LinkedHashMap<>();
             spec.put("plugin_id", p.getPluginId());
             spec.put("name", p.getName());
@@ -373,6 +465,80 @@ public class PluginServiceImpl implements PluginService {
     }
 
     // ── helpers ──
+
+    private String requireText(Map<String, Object> source, String field, int maxLength) {
+        String value = String.valueOf(source.getOrDefault(field, "")).trim();
+        if (value.isEmpty()) {
+            throw new IllegalArgumentException("缺少必填字段: " + field);
+        }
+        if (value.length() > maxLength) {
+            throw new IllegalArgumentException(field + " 长度不能超过 " + maxLength + " 个字符");
+        }
+        return value;
+    }
+
+    private int parseBoundedInt(Object raw, int defaultValue, int min, int max, String label) {
+        int value = defaultValue;
+        if (raw != null) {
+            try {
+                value = Integer.parseInt(String.valueOf(raw));
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException(label + "格式不正确");
+            }
+        }
+        if (value < min || value > max) {
+            throw new IllegalArgumentException(label + "必须在 " + min + " 到 " + max + " 之间");
+        }
+        return value;
+    }
+
+    private void validateDeclarativeEndpoint(String endpoint) {
+        try {
+            URI uri = URI.create(endpoint);
+            String host = uri.getHost();
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || host == null || host.isBlank()
+                    || uri.getUserInfo() != null || host.equalsIgnoreCase("localhost")
+                    || host.endsWith(".local")) {
+                throw new IllegalArgumentException("接口地址必须是可公开访问的 HTTPS 地址");
+            }
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("接口地址必须是可公开访问的 HTTPS 地址");
+        }
+    }
+
+    private Map<String, Object> normalizeInputSchema(Map<?, ?> rawSchema) {
+        Object rawProperties = rawSchema.get("properties");
+        Map<String, Object> properties = new LinkedHashMap<>();
+        if (rawProperties instanceof Map<?, ?> props) {
+            if (props.size() > 12) {
+                throw new IllegalArgumentException("每个工具最多配置 12 个输入参数");
+            }
+            for (Map.Entry<?, ?> entry : props.entrySet()) {
+                String name = String.valueOf(entry.getKey());
+                if (!name.matches("[a-z][a-z0-9_]{0,31}")) {
+                    throw new IllegalArgumentException("参数标识格式不正确: " + name);
+                }
+                Map<String, Object> definition = new LinkedHashMap<>();
+                definition.put("type", "string");
+                if (entry.getValue() instanceof Map<?, ?> valueMap && valueMap.get("description") != null) {
+                    definition.put("description", String.valueOf(valueMap.get("description")));
+                }
+                properties.put(name, definition);
+            }
+        }
+        List<String> required = new ArrayList<>();
+        if (rawSchema.get("required") instanceof List<?> requiredItems) {
+            for (Object item : requiredItems) {
+                String name = String.valueOf(item);
+                if (properties.containsKey(name)) required.add(name);
+            }
+        }
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("properties", properties);
+        schema.put("required", required);
+        return schema;
+    }
 
     private Plugin requirePlugin(String pluginId) {
         Plugin plugin = pluginMapper.selectByPluginId(pluginId);
@@ -431,6 +597,17 @@ public class PluginServiceImpl implements PluginService {
             com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
             return mapper.readValue(json, mapper.getTypeFactory().constructCollectionType(List.class, String.class));
         } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    private List<Map<String, Object>> parseJsonMapList(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            return mapper.readValue(json, mapper.getTypeFactory().constructCollectionType(List.class, Map.class));
+        } catch (Exception e) {
+            log.warn("无法解析插件工具配置: {}", e.getMessage());
             return List.of();
         }
     }

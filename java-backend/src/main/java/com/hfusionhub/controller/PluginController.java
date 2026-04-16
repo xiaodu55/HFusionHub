@@ -51,6 +51,19 @@ public class PluginController {
     }
 
     @SaCheckRole("admin")
+    @Operation(summary = "创建低代码插件和 HTTP GET 工具 — 管理员")
+    @PostMapping("/create")
+    public R<Plugin> create(@RequestBody Map<String, Object> manifest) {
+        try {
+            return R.ok(pluginService.createDeclarative(manifest));
+        } catch (IllegalArgumentException e) {
+            return R.fail(400, e.getMessage());
+        } catch (IllegalStateException e) {
+            return R.fail(409, e.getMessage());
+        }
+    }
+
+    @SaCheckRole("admin")
     @Operation(summary = "上传 wheel 文件并安装插件 — 管理员")
     @PostMapping("/install/upload")
     public R<Plugin> installWithWheel(

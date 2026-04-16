@@ -4,6 +4,7 @@ import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.mapper.AgentStepMapper;
+import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -37,7 +38,7 @@ public class ToolController {
      */
     @GetMapping
     public R<Map<String, Object>> listTools() {
-        Map<String, Object> registry = aiClient.getToolRegistry();
+        Map<String, Object> registry = aiClient.getToolRegistry(TenantContext.requireTenantId());
 
         // If the Python side returned an error, still serve it gracefully
         if (registry.containsKey("error") && registry.get("tools") instanceof List<?> tools && tools.isEmpty()) {

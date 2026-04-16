@@ -12,6 +12,10 @@ export interface ToolEntry {
   required_permissions: string[]
   agent_version: string
   status: 'active' | 'beta' | 'experimental' | 'unknown'
+  display_name?: string | null
+  example?: string | null
+  plugin_name?: string | null
+  category?: 'knowledge' | 'utility' | 'external' | null
   input_schema: {
     properties: Record<string, { type: string; description?: string }>
     required: string[]

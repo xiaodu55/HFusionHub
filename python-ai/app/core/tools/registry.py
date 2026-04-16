@@ -39,8 +39,48 @@ from .list_document_chunks_tool import ListDocumentChunksTool
 from .calculator_tool import CalculatorTool
 from .time_tool import TimeTool
 from .web_search_tool import WebSearchTool
+from .declarative_http_tool import DeclarativeHttpTool
 
 logger = logging.getLogger(__name__)
+
+_remote_tool_cache: Dict[int, Dict[str, Any]] = {}
+_remote_tool_cache_lock = threading.Lock()
+_REMOTE_TOOL_CACHE_TTL = 10.0
+
+
+def _fetch_remote_plugin_specs(tenant_id: Optional[int]) -> List[Dict[str, Any]]:
+    """Fetch tenant-scoped declarative specs from Java with a short cache."""
+    if not tenant_id or tenant_id < 1:
+        return []
+    now = time.monotonic()
+    with _remote_tool_cache_lock:
+        cached = _remote_tool_cache.get(tenant_id)
+        if cached and now - cached["time"] < _REMOTE_TOOL_CACHE_TTL:
+            return [dict(item) for item in cached["specs"]]
+    try:
+        import httpx
+        from app.utils.config import config
+
+        if not config.INTERNAL_API_TOKEN:
+            return []
+        response = httpx.get(
+            f"{config.JAVA_BACKEND_URL}/api/internal/plugin/tool-specs",
+            params={"tenantId": tenant_id},
+            headers={"X-Internal-Token": config.INTERNAL_API_TOKEN},
+            timeout=3.0,
+        )
+        response.raise_for_status()
+        envelope = response.json()
+        specs = envelope.get("data", []) if envelope.get("code") == 200 else []
+        if not isinstance(specs, list):
+            specs = []
+        safe_specs = [dict(item) for item in specs if isinstance(item, dict)]
+        with _remote_tool_cache_lock:
+            _remote_tool_cache[tenant_id] = {"time": now, "specs": safe_specs}
+        return safe_specs
+    except Exception as exc:
+        logger.warning("无法同步租户 %s 的低代码工具: %s", tenant_id, exc)
+        return []
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -199,9 +239,11 @@ class ToolRegistry:
         self,
         knowledge_base_id: Optional[int] = None,
         agent_version: str = "1.0",
+        tenant_id: Optional[int] = None,
     ):
         self._knowledge_base_id = knowledge_base_id
         self._agent_version = agent_version
+        self._tenant_id = tenant_id
         # spec name → (ToolSpec, BaseTool instance)
         self._specs: Dict[str, ToolSpec] = {}
         self._instances: Dict[str, BaseTool] = {}
@@ -320,6 +362,7 @@ class ToolRegistry:
             return 0
 
         plugin_specs = list_all_tool_specs(enabled_only=True)
+        plugin_specs.extend(_fetch_remote_plugin_specs(self._tenant_id))
         count = 0
         for pspec in plugin_specs:
             name = pspec.get("name")
@@ -342,8 +385,14 @@ class ToolRegistry:
                 agent_version=pspec.get("agent_version", self._agent_version),
             )
             # Attach plugin metadata for routing
-            spec._plugin_id = plugin_id  # type: ignore
-            spec._plugin_name = plugin_name  # type: ignore
+            object.__setattr__(spec, "_plugin_id", plugin_id)
+            object.__setattr__(spec, "_plugin_name", plugin_name)
+            if pspec.get("_plugin_kind") == "declarative":
+                object.__setattr__(spec, "_declarative_http", pspec.get("execution", {}))
+                object.__setattr__(spec, "_tenant_id", pspec.get("_tenant_id"))
+                object.__setattr__(spec, "_display_name", pspec.get("display_name"))
+                object.__setattr__(spec, "_example", pspec.get("example"))
+                object.__setattr__(spec, "_category", pspec.get("category", "external"))
 
             self._specs[name] = spec
             # No local instance — execution goes through sandbox runner
@@ -551,6 +600,15 @@ class ToolRegistry:
         # If the tool spec carries a _plugin_id, it was registered by
         # the plugin system.  Route through the sandboxed subprocess
         # runner instead of the local instance path.
+        declarative_config = getattr(spec, "_declarative_http", None)
+        if declarative_config:
+            return await self._execute_declarative_http(
+                spec=spec,
+                config=declarative_config,
+                safe_input=safe_input,
+                context=context,
+            )
+
         plugin_id = getattr(spec, '_plugin_id', None) or (
             spec.__dict__.get('_plugin_id') if hasattr(spec, '__dict__') else None
         )
@@ -723,6 +781,39 @@ class ToolRegistry:
                 duration_ms=elapsed,
             )
 
+    async def _execute_declarative_http(
+        self,
+        *,
+        spec: ToolSpec,
+        config: Dict[str, Any],
+        safe_input: Dict[str, Any],
+        context: Optional[Any],
+    ) -> ToolResult:
+        """Execute a tenant-scoped low-code GET tool."""
+        expected_tenant = getattr(spec, "_tenant_id", None)
+        actual_tenant = getattr(context, "tenant_id", None) if context is not None else self._tenant_id
+        if not isinstance(actual_tenant, int) or actual_tenant < 1 or expected_tenant != actual_tenant:
+            return ToolResult.failure(spec.name, ErrorCode.PERMISSION_DENIED, "工具不属于当前租户")
+        endpoint = str(config.get("url", ""))
+        if config.get("type") != "http_get" or not endpoint:
+            return ToolResult.failure(spec.name, ErrorCode.INVALID_INPUT, "低代码工具配置无效")
+        started = time.monotonic()
+        try:
+            data = await asyncio.wait_for(
+                DeclarativeHttpTool(endpoint, spec.timeout_seconds).execute(**safe_input),
+                timeout=spec.timeout_seconds,
+            )
+            return ToolResult.success(
+                spec.name,
+                data,
+                round((time.monotonic() - started) * 1000, 2),
+            )
+        except asyncio.TimeoutError:
+            return ToolResult.failure(spec.name, ErrorCode.TIMEOUT, "接口请求超时")
+        except Exception as exc:
+            logger.warning("低代码工具 %s 执行失败: %s", spec.name, exc)
+            return ToolResult.failure(spec.name, ErrorCode.INTERNAL, f"接口请求失败: {exc}")
+
     # ── Input validation ──────────────────────────────────────────────
 
     # ── Policy context ─────────────────────────────────────────────────
@@ -837,7 +928,11 @@ class ToolRegistry:
 
 # Singleton pattern — one registry per knowledge_base_id.
 # The Agent creates a fresh registry for each conversation context.
-def create_v1_registry(knowledge_base_id: int, agent_version: str = "1.0") -> ToolRegistry:
+def create_v1_registry(
+    knowledge_base_id: int,
+    agent_version: str = "1.0",
+    tenant_id: Optional[int] = None,
+) -> ToolRegistry:
     """Create a ToolRegistry for Agent V1 with the given KB scope.
 
     ``agent_version="1.0"`` → read-only KB tools only.
@@ -845,9 +940,16 @@ def create_v1_registry(knowledge_base_id: int, agent_version: str = "1.0") -> To
     """
     if not knowledge_base_id or knowledge_base_id <= 0:
         raise RegistryError("Agent V1 registry requires a non-null knowledge_base_id")
-    return ToolRegistry(knowledge_base_id=knowledge_base_id, agent_version=agent_version)
+    return ToolRegistry(
+        knowledge_base_id=knowledge_base_id,
+        agent_version=agent_version,
+        tenant_id=tenant_id,
+    )
 
 
-def create_full_registry(knowledge_base_id: Optional[int] = None) -> ToolRegistry:
+def create_full_registry(
+    knowledge_base_id: Optional[int] = None,
+    tenant_id: Optional[int] = None,
+) -> ToolRegistry:
     """Create a ToolRegistry with all tools (for MCP / non-agent use)."""
-    return ToolRegistry(knowledge_base_id=knowledge_base_id, agent_version="1.0")
+    return ToolRegistry(knowledge_base_id=knowledge_base_id, agent_version="1.0", tenant_id=tenant_id)
