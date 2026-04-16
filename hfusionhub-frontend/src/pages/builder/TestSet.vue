@@ -57,6 +57,7 @@ const knowledgeBases = ref<KnowledgeBase[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const running = ref(false)
+const creatingExample = ref(false)
 
 // new / edit set form
 const setForm = ref({ name: '', description: '' })
@@ -89,6 +90,27 @@ const comparing = ref(false)
 // expanded case ids in the run report
 const expandedResults = ref<Set<number>>(new Set())
 const expandedCompare = ref<Set<number>>(new Set())
+
+const caseExamples = [
+  {
+    name: '普通问候',
+    description: '检查回答是否自然、简洁',
+    question: '你好，请用一句话介绍你能提供什么帮助。',
+    expectedKeywords: '帮助',
+  },
+  {
+    name: '业务咨询',
+    description: '检查回答是否覆盖核心主题',
+    question: '我想申请退款，需要提前准备什么信息？',
+    expectedKeywords: '退款',
+  },
+  {
+    name: '分步说明',
+    description: '检查复杂问题是否讲清楚',
+    question: '请把申请退款的处理流程分成 3 步说明。',
+    expectedKeywords: '退款',
+  },
+]
 
 // ── Computed ───────────────────────────────────────────────────────
 
@@ -221,6 +243,40 @@ const openCreateSet = () => {
   showSetEditor.value = true
 }
 
+const createExampleSet = async () => {
+  const exampleName = '客服回答检查示例'
+  const existing = sets.value.find((item) => item.name === exampleName)
+  if (existing) {
+    await selectSet(existing.id)
+    toast.success('已打开示例问题组')
+    return
+  }
+
+  creatingExample.value = true
+  try {
+    const created = await promptTestSetApi.createPromptTestSet({
+      name: exampleName,
+      description: '用 3 个常见问题检查回答是否自然、准确，并包含必要信息。',
+    })
+    const setId = created.data.id
+    for (const [index, example] of caseExamples.entries()) {
+      await promptTestSetApi.addPromptTestCase(setId, {
+        question: example.question,
+        expectedKeywords: [example.expectedKeywords],
+        sortOrder: index + 1,
+      })
+    }
+    await loadSets()
+    await selectSet(setId)
+    runTemplateContent.value = '你是专业、耐心的客服助手。请直接回答用户问题，信息不确定时明确说明，不要编造。'
+    toast.success('示例已创建，可以直接开始检查')
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '创建示例失败，请稍后重试')
+  } finally {
+    creatingExample.value = false
+  }
+}
+
 const openEditSet = () => {
   if (!detail.value) return
   editingSetId.value = detail.value.id
@@ -271,6 +327,15 @@ const openAddCase = () => {
   editingCaseId.value = null
   caseForm.value = { question: '', variables: '', expectedKeywords: '', requiredDocumentIds: '' }
   showCaseEditor.value = true
+}
+
+const applyCaseExample = (example: (typeof caseExamples)[number]) => {
+  caseForm.value = {
+    question: example.question,
+    variables: '',
+    expectedKeywords: example.expectedKeywords,
+    requiredDocumentIds: '',
+  }
 }
 
 const openEditCase = (tc: PromptTestCase) => {
@@ -583,23 +648,27 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="space-y-6 pb-4">
-    <!-- ── Hero banner ──────────────────────────────────────────── -->
-    <section class="relative overflow-hidden rounded-2xl border border-border bg-card/80 shadow-[0_18px_45px_rgba(0,0,0,0.18)]">
-      <div class="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-violet-400/10 blur-3xl" />
-      <div class="relative flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+    <!-- ── Page header ──────────────────────────────────────────── -->
+    <section class="rounded-xl border border-border bg-card/80 shadow-[0_18px_45px_rgba(0,0,0,0.18)]">
+      <div class="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div class="flex gap-4">
-          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-violet-400/25 bg-violet-400/10 text-violet-200">
+          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-emerald-400/25 bg-emerald-400/10 text-emerald-300">
             <Layers class="h-5 w-5" />
           </div>
           <div>
-            <p class="text-xs font-medium tracking-[0.16em] text-violet-200/90">PROMPT TEST SUITES</p>
-            <h1 class="mt-1 text-2xl font-semibold tracking-tight">提示词测试用例集</h1>
-            <p class="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">保存固定问题与变量值，批量运行同一组问题，为不同模板/版本的结果对比打基础。</p>
+            <p class="text-xs font-medium text-emerald-300">批量检查</p>
+            <h1 class="mt-1 text-2xl font-semibold">批量回答检查</h1>
+            <p class="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">把常用问题保存成一组，一次检查回答是否成功、是否包含必要信息，并比较不同回答方案。</p>
           </div>
         </div>
-        <Badge variant="outline" class="border-violet-400/25 bg-violet-400/10 text-violet-200 shrink-0">
-          {{ sets.length }} 个用例集
-        </Badge>
+        <div class="flex flex-wrap items-center gap-2">
+          <Button variant="outline" class="gap-2" :disabled="creatingExample" @click="createExampleSet">
+            <LoaderCircle v-if="creatingExample" class="h-4 w-4 animate-spin" />
+            <FlaskConical v-else class="h-4 w-4" />
+            {{ creatingExample ? '正在创建…' : '使用示例' }}
+          </Button>
+          <Button class="gap-2" @click="openCreateSet"><Plus class="h-4 w-4" />新建问题组</Button>
+        </div>
       </div>
     </section>
 
@@ -607,7 +676,7 @@ onBeforeUnmount(() => {
       <!-- ── Left: set list ─────────────────────────────────────── -->
       <Card class="border-border/60 bg-card/50">
         <CardHeader class="flex-row items-center justify-between space-y-0 pb-3">
-          <CardTitle class="text-base">用例集</CardTitle>
+          <CardTitle class="text-base">问题组</CardTitle>
           <Button size="sm" variant="outline" @click="openCreateSet">
             <Plus class="mr-1 h-4 w-4" /> 新建
           </Button>
@@ -622,14 +691,18 @@ onBeforeUnmount(() => {
           >
             <div class="flex items-center justify-between">
               <span class="font-medium">{{ s.name }}</span>
-              <Badge variant="secondary">{{ s.caseCount }} 用例</Badge>
+              <Badge variant="secondary">{{ s.caseCount }} 个问题</Badge>
             </div>
             <p v-if="s.description" class="mt-1 line-clamp-1 text-xs text-muted-foreground">{{ s.description }}</p>
             <p class="mt-1 text-[11px] text-muted-foreground">{{ s.updatedAt?.slice(0, 10) }}</p>
           </button>
 
-          <div v-if="!loading && sets.length === 0" class="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-            暂无用例集，点击右上角新建。
+          <div v-if="!loading && sets.length === 0" class="rounded-lg border border-dashed p-5 text-center">
+            <p class="text-sm font-medium text-foreground">还没有问题组</p>
+            <p class="mt-1 text-xs leading-5 text-muted-foreground">使用示例可立即体验，也可以新建自己的常用问题。</p>
+            <Button size="sm" variant="outline" class="mt-3 gap-1.5" :disabled="creatingExample" @click="createExampleSet">
+              <FlaskConical class="h-3.5 w-3.5" /> 使用示例
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -640,12 +713,12 @@ onBeforeUnmount(() => {
         <Card class="border-border/60 bg-card/50">
           <CardHeader class="flex-row items-center justify-between space-y-0 pb-3">
             <div>
-              <CardTitle class="text-base">{{ detail?.name || '选择用例集' }}</CardTitle>
+              <CardTitle class="text-base">{{ detail?.name || '从示例开始，3 步看懂这个页面' }}</CardTitle>
               <CardDescription v-if="detail?.description">{{ detail.description }}</CardDescription>
             </div>
             <div v-if="detail" class="flex gap-2">
               <Button size="sm" variant="outline" @click="openEditSet">
-                <Save class="mr-1 h-4 w-4" /> 重命名
+                <Save class="mr-1 h-4 w-4" /> 编辑名称
               </Button>
               <Button size="sm" variant="outline" class="text-destructive hover:text-destructive" @click="confirmDeleteSet">
                 <Trash2 class="mr-1 h-4 w-4" /> 删除
@@ -656,9 +729,12 @@ onBeforeUnmount(() => {
           <CardContent>
             <template v-if="detail">
               <div class="mb-3 flex items-center justify-between">
-                <h3 class="text-sm font-medium">测试用例（{{ detail.cases.length }}）</h3>
+                <div>
+                  <h3 class="text-sm font-medium">1. 准备测试问题（{{ detail.cases.length }}）</h3>
+                  <p class="mt-1 text-xs text-muted-foreground">保存你希望 AI 每次都能答好的问题，并设置必要关键词。</p>
+                </div>
                 <Button size="sm" variant="outline" @click="openAddCase">
-                  <Plus class="mr-1 h-4 w-4" /> 添加用例
+                  <Plus class="mr-1 h-4 w-4" /> 添加问题
                 </Button>
               </div>
 
@@ -672,12 +748,17 @@ onBeforeUnmount(() => {
                       <p v-if="tc.variables && Object.keys(tc.variables).length" class="mt-1 text-xs text-muted-foreground">
                         变量：{{ JSON.stringify(tc.variables) }}
                       </p>
+                      <div v-if="tc.expectedKeywords?.length" class="mt-2 flex flex-wrap gap-1.5">
+                        <Badge v-for="keyword in tc.expectedKeywords" :key="keyword" variant="outline" class="border-amber-400/25 bg-amber-400/5 text-[11px] text-amber-200">
+                          回答需包含：{{ keyword }}
+                        </Badge>
+                      </div>
                     </div>
                     <div class="flex shrink-0 gap-1">
-                      <Button size="sm" variant="ghost" @click="openEditCase(tc)">
+                      <Button size="sm" variant="ghost" title="编辑问题" @click="openEditCase(tc)">
                         <Save class="h-3.5 w-3.5" />
                       </Button>
-                      <Button size="sm" variant="ghost" class="text-destructive" @click="confirmDeleteCase(tc)">
+                      <Button size="sm" variant="ghost" title="删除问题" class="text-destructive" @click="confirmDeleteCase(tc)">
                         <Trash2 class="h-3.5 w-3.5" />
                       </Button>
                     </div>
@@ -685,30 +766,55 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div v-if="detail.cases.length === 0" class="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-                  暂无用例。添加固定问题与变量值后即可批量运行。
+                  还没有测试问题。点击“添加问题”，或重新使用示例快速体验。
                 </div>
               </div>
             </template>
-            <p v-else class="text-sm text-muted-foreground">从左侧选择一个用例集，或新建一个。</p>
+            <div v-else class="space-y-5">
+              <div class="grid gap-3 sm:grid-cols-3">
+                <div class="border-l-2 border-emerald-400/60 pl-3">
+                  <p class="text-sm font-medium">1. 保存常用问题</p>
+                  <p class="mt-1 text-xs leading-5 text-muted-foreground">例如问候、退款咨询、知识库问答。</p>
+                </div>
+                <div class="border-l-2 border-cyan-400/60 pl-3">
+                  <p class="text-sm font-medium">2. 选择回答方案</p>
+                  <p class="mt-1 text-xs leading-5 text-muted-foreground">选择一套规则，也可以直接修改内容。</p>
+                </div>
+                <div class="border-l-2 border-amber-400/60 pl-3">
+                  <p class="text-sm font-medium">3. 查看是否通过</p>
+                  <p class="mt-1 text-xs leading-5 text-muted-foreground">逐条查看回答、模型、耗时和未通过原因。</p>
+                </div>
+              </div>
+              <div class="rounded-lg border border-border bg-muted/20 p-4">
+                <p class="text-sm font-medium">示例：客服回答检查</p>
+                <p class="mt-1 text-xs text-muted-foreground">问题“我想申请退款，需要准备什么信息？” → 回答中包含“退款”即通过。</p>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <Button class="gap-2" :disabled="creatingExample" @click="createExampleSet">
+                  <FlaskConical class="h-4 w-4" /> {{ creatingExample ? '正在创建…' : '创建示例并体验' }}
+                </Button>
+                <Button variant="outline" class="gap-2" @click="openCreateSet"><Plus class="h-4 w-4" />新建自己的问题组</Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
         <!-- Run config -->
-        <Card class="border-border/60 bg-card/50">
+        <Card v-if="detail" class="border-border/60 bg-card/50">
           <CardHeader class="pb-3">
-            <CardTitle class="flex items-center gap-2 text-base"><Play class="h-4 w-4 text-violet-300" /> 批量运行</CardTitle>
-            <CardDescription>选择模板（支持 <code class="text-violet-300">{{ varBraces }}</code> 替换）、知识库（可选），对全部用例逐个运行。</CardDescription>
+            <CardTitle class="flex items-center gap-2 text-base"><Play class="h-4 w-4 text-cyan-300" /> 2. 选择回答方案并开始检查</CardTitle>
+            <CardDescription>回答方案决定 AI 的身份、语气和格式；需要依据资料回答时，再选择知识库。</CardDescription>
           </CardHeader>
           <CardContent class="space-y-4">
             <div class="space-y-1.5">
-              <Label>模板（system 指令，≤8000 字符）</Label>
+              <Label>回答方案</Label>
               <div class="mb-1.5 flex gap-2">
                 <select
                   :value="selectedTemplateId"
                   @change="onTemplateSelect(Number(($event.target as HTMLSelectElement).value))"
                   class="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
                 >
-                  <option :value="0">选择模板（内容将填入下方）</option>
+                  <option :value="0">选择已保存的回答方案，或直接修改下方内容</option>
                   <optgroup v-if="publishedTemplates.length" label="已发布">
                     <option v-for="t in publishedTemplates" :key="t.id" :value="t.id">{{ t.name }} (v{{ t.version }})</option>
                   </optgroup>
@@ -718,19 +824,21 @@ onBeforeUnmount(() => {
                 </select>
                 <Button v-if="selectedTemplateId" variant="outline" size="sm" @click="clearTemplate">清除</Button>
               </div>
-              <textarea v-model="runTemplateContent" rows="5" maxlength="8000" class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 font-mono text-xs leading-6 outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" />
-              <p v-if="selectedTemplate" class="text-xs text-violet-300">已关联 {{ selectedTemplate.name }} v{{ selectedTemplate.version }}，本次运行将记录该模板版本用于对比。</p>
+              <textarea v-model="runTemplateContent" rows="5" maxlength="8000" class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 text-sm leading-6 outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="例如：你是专业、耐心的客服助手。请直接回答用户问题，不确定时明确说明。" />
+              <p v-if="selectedTemplate" class="text-xs text-cyan-300">当前使用：{{ selectedTemplate.name }} v{{ selectedTemplate.version }}，运行后可与其他版本对比。</p>
+              <p v-else class="text-xs text-muted-foreground">可以直接编辑上方规则；修改后会作为临时方案运行。</p>
             </div>
 
             <div class="space-y-1.5">
-              <Label>知识库（可选）</Label>
+              <Label>是否使用知识库</Label>
               <select
                 v-model="runKbId"
                 class="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
               >
-                <option :value="undefined">纯 LLM（无知识库）</option>
-                <option v-for="kb in knowledgeBases" :key="kb.id" :value="kb.id">{{ kb.name }}</option>
+                <option :value="undefined">不使用知识库，只检查回答方式</option>
+                <option v-for="kb in knowledgeBases" :key="kb.id" :value="kb.id">使用知识库：{{ kb.name }}</option>
               </select>
+              <p class="text-xs text-muted-foreground">普通问候、语气和格式检查无需知识库；资料问答请选择对应知识库。</p>
             </div>
 
             <!-- Running progress / cancel -->
@@ -773,10 +881,10 @@ onBeforeUnmount(() => {
               <Button :disabled="!canRun" class="flex-1" @click="runAll">
                 <LoaderCircle v-if="running" class="mr-2 h-4 w-4 animate-spin" />
                 <Play v-else class="mr-2 h-4 w-4" />
-                {{ running ? '运行中…' : `批量运行 ${detail?.cases.length ?? 0} 个用例` }}
+                {{ running ? '正在逐个检查…' : `检查全部 ${detail?.cases.length ?? 0} 个问题` }}
               </Button>
               <Button variant="outline" @click="clearRun">
-                <RefreshCw class="mr-1 h-4 w-4" /> 清除
+                <RefreshCw class="mr-1 h-4 w-4" /> 重置结果
               </Button>
             </div>
           </CardContent>
@@ -786,7 +894,7 @@ onBeforeUnmount(() => {
         <Card v-if="runResult" class="border-border/60 bg-card/50">
           <CardHeader class="pb-3">
             <CardTitle class="flex flex-wrap items-center gap-2 text-base">
-              运行报告
+              3. 本次检查结果
               <Badge variant="secondary">{{ runResult.successCount }}/{{ runResult.totalCases }} 成功</Badge>
               <Badge variant="outline" class="border-emerald-400/25 text-emerald-300">{{ runResult.passCount }}/{{ runResult.totalCases }} 通过</Badge>
               <Badge variant="outline" class="border-violet-400/25 text-violet-200">通过率 {{ runResult.passRate }}%</Badge>
@@ -806,7 +914,7 @@ onBeforeUnmount(() => {
                   <div class="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                     <span class="flex items-center gap-1"><Clock class="h-3 w-3" /> {{ formatMs(r.elapsedMs) }}</span>
                     <span v-if="r.model" class="text-cyan-300">{{ r.model }}</span>
-                    <span>{{ resultToken(r) }} tokens</span>
+                    <span>用量 {{ resultToken(r) }}</span>
                     <span v-if="r.success">来源 {{ resultSourceCount(r) }}</span>
                     <span v-if="r.success && r.passed" class="text-emerald-300">通过</span>
                     <span v-if="r.success && !r.passed" class="text-amber-300">未通过</span>
@@ -851,10 +959,10 @@ onBeforeUnmount(() => {
         </Card>
 
         <!-- Run history -->
-        <Card class="border-border/60 bg-card/50">
+        <Card v-if="detail" class="border-border/60 bg-card/50">
           <CardHeader class="pb-3">
-            <CardTitle class="flex items-center gap-2 text-base"><History class="h-4 w-4 text-violet-300" /> 运行历史</CardTitle>
-            <CardDescription>保存每次批量运行结果，选择两次运行（不同模板版本）即可对比回答、耗时、Token 与成功率。</CardDescription>
+            <CardTitle class="flex items-center gap-2 text-base"><History class="h-4 w-4 text-amber-300" /> 历史结果与方案对比</CardTitle>
+            <CardDescription>每次检查都会保存在这里。选择两次结果，可以比较回答内容、速度、用量和通过率。</CardDescription>
           </CardHeader>
           <CardContent class="space-y-4">
             <div v-if="runs.length === 0" class="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
@@ -918,7 +1026,7 @@ onBeforeUnmount(() => {
                 <span class="min-w-0 flex-1 text-sm font-medium">{{ c.question }}</span>
                 <span class="flex items-center gap-3 text-xs text-muted-foreground">
                   <span class="flex items-center gap-1"><Clock class="h-3 w-3" /> 差 {{ fmtDiff(c.resultA, c.resultB, 'elapsedMs') }}ms</span>
-                  <span class="flex items-center gap-1"><Zap class="h-3 w-3" /> 差 {{ fmtDiff(c.resultA, c.resultB, 'tokenCount') }} token</span>
+                  <span class="flex items-center gap-1"><Zap class="h-3 w-3" /> 用量差 {{ fmtDiff(c.resultA, c.resultB, 'tokenCount') }}</span>
                 </span>
                 <ChevronDown v-if="expandedCompare.has(c.caseId)" class="h-3.5 w-3.5 text-violet-300" />
                 <ChevronRight v-else class="h-3.5 w-3.5 text-violet-300" />
@@ -939,7 +1047,7 @@ onBeforeUnmount(() => {
                     <p v-for="(note, ni) in c.resultA.passNotes" :key="ni" class="rounded-md bg-amber-400/10 px-2 py-1 font-mono text-[11px] text-amber-200">{{ note }}</p>
                   </div>
                   <div class="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                    <span>{{ c.resultA ? formatMs(c.resultA.elapsedMs) : '-' }} · {{ compareToken(c.resultA) }} token</span>
+                    <span>{{ c.resultA ? formatMs(c.resultA.elapsedMs) : '-' }} · 用量 {{ compareToken(c.resultA) }}</span>
                   </div>
                 </div>
                 <div class="rounded-xl border p-3" :class="(c.resultB?.success ?? false) ? (c.resultB?.passed ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-amber-500/25 bg-amber-500/5') : 'border-red-500/25 bg-red-500/5'">
@@ -956,7 +1064,7 @@ onBeforeUnmount(() => {
                     <p v-for="(note, ni) in c.resultB.passNotes" :key="ni" class="rounded-md bg-amber-400/10 px-2 py-1 font-mono text-[11px] text-amber-200">{{ note }}</p>
                   </div>
                   <div class="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                    <span>{{ c.resultB ? formatMs(c.resultB.elapsedMs) : '-' }} · {{ compareToken(c.resultB) }} token</span>
+                    <span>{{ c.resultB ? formatMs(c.resultB.elapsedMs) : '-' }} · 用量 {{ compareToken(c.resultB) }}</span>
                   </div>
                 </div>
               </div>
@@ -970,16 +1078,16 @@ onBeforeUnmount(() => {
     <div v-if="showSetEditor" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @click.self="showSetEditor = false">
       <Card class="w-full max-w-md">
         <CardHeader>
-          <CardTitle class="text-base">{{ editingSetId ? '重命名用例集' : '新建用例集' }}</CardTitle>
+          <CardTitle class="text-base">{{ editingSetId ? '编辑问题组' : '新建问题组' }}</CardTitle>
         </CardHeader>
         <CardContent class="space-y-3">
           <div class="space-y-1.5">
             <Label>名称</Label>
-            <Input v-model="setForm.name" maxlength="100" placeholder="例如：客服话术回归" />
+            <Input v-model="setForm.name" maxlength="100" placeholder="例如：客服回答检查" />
           </div>
           <div class="space-y-1.5">
             <Label>描述（可选）</Label>
-            <textarea v-model="setForm.description" rows="2" maxlength="500" class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 text-sm leading-6 outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="描述该用例集覆盖的场景" />
+            <textarea v-model="setForm.description" rows="2" maxlength="500" class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 text-sm leading-6 outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="例如：检查问候、退款咨询和投诉回复是否符合客服规范" />
           </div>
           <div class="flex justify-end gap-2 pt-1">
             <Button variant="outline" @click="showSetEditor = false">取消</Button>
@@ -995,32 +1103,49 @@ onBeforeUnmount(() => {
     <div v-if="showCaseEditor" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @click.self="showCaseEditor = false">
       <Card class="w-full max-w-lg">
         <CardHeader>
-          <CardTitle class="text-base">{{ editingCaseId ? '编辑用例' : '添加用例' }}</CardTitle>
+          <CardTitle class="text-base">{{ editingCaseId ? '编辑测试问题' : '添加测试问题' }}</CardTitle>
+          <CardDescription v-if="!editingCaseId">可以点击示例自动填写，再按实际业务修改。</CardDescription>
         </CardHeader>
         <CardContent class="space-y-3">
-          <div class="space-y-1.5">
-            <Label>固定问题（≤4000 字符）</Label>
-            <textarea v-model="caseForm.question" rows="3" maxlength="4000" class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 text-sm leading-6 outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="例如：如何申请退款？" />
+          <div v-if="!editingCaseId" class="grid gap-2 sm:grid-cols-3">
+            <button
+              v-for="example in caseExamples"
+              :key="example.name"
+              type="button"
+              class="rounded-lg border border-border bg-muted/20 px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-primary/[0.05]"
+              @click="applyCaseExample(example)"
+            >
+              <span class="block text-xs font-medium">{{ example.name }}</span>
+              <span class="mt-0.5 block text-[11px] leading-4 text-muted-foreground">{{ example.description }}</span>
+            </button>
           </div>
           <div class="space-y-1.5">
-            <Label>变量值（可选，JSON 对象，用于替换模板中的 <span class="font-mono text-violet-300">{{ varBraces }}</span>）</Label>
-            <textarea v-model="caseForm.variables" rows="5" class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 font-mono text-xs leading-6 outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder='{"role":"客服","topic":"退款"}' />
-            <p class="text-xs text-muted-foreground" :class="caseVariablesValid ? '' : 'text-red-400'">
-              {{ caseVariablesValid ? `模板中的 ${varBraces} 会替换为变量值` : '必须是 JSON 对象，如 {"role":"客服"}（数组/数字无效）' }}
-            </p>
+            <Label>用户会问的问题</Label>
+            <textarea v-model="caseForm.question" rows="3" maxlength="4000" class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 text-sm leading-6 outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="例如：我想申请退款，需要准备什么信息？" />
           </div>
-          <div class="grid gap-3 sm:grid-cols-2">
+          <div class="space-y-1.5">
+            <Label>回答中必须出现的词（可选）</Label>
+            <input v-model="caseForm.expectedKeywords" type="text" class="block w-full rounded-xl border border-input bg-background/60 px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="例如：退款, 处理时间" />
+            <p class="text-xs text-muted-foreground">多个词用逗号分开。回答包含全部词时，这个问题才显示“通过”。</p>
+          </div>
+
+          <details class="rounded-lg border border-border bg-muted/10 p-3">
+            <summary class="cursor-pointer text-sm font-medium">高级设置（变量、指定引用文档）</summary>
+            <div class="mt-3 space-y-3 border-t border-border/60 pt-3">
+              <div class="space-y-1.5">
+                <Label>模板变量（可选）</Label>
+                <textarea v-model="caseForm.variables" rows="4" class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 font-mono text-xs leading-6 outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder='{"role":"客服","topic":"退款"}' />
+                <p class="text-xs text-muted-foreground" :class="caseVariablesValid ? '' : 'text-red-400'">
+                  {{ caseVariablesValid ? `用于替换回答方案中的 ${varBraces}` : '格式错误，请输入 JSON 对象，例如 {"role":"客服"}' }}
+                </p>
+              </div>
             <div class="space-y-1.5">
-              <Label>期望关键词（可选，逗号分隔）</Label>
-              <input v-model="caseForm.expectedKeywords" type="text" class="block w-full rounded-xl border border-input bg-background/60 px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="例如：退款, 7天" />
-              <p class="text-xs text-muted-foreground">AI 回答须包含每个关键词（不区分大小写）才判定通过</p>
-            </div>
-            <div class="space-y-1.5">
-              <Label>必须引用的文档 ID（可选，逗号分隔）</Label>
+              <Label>必须引用的文档 ID（可选）</Label>
               <input v-model="caseForm.requiredDocumentIds" type="text" class="block w-full rounded-xl border border-input bg-background/60 px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="例如：11, 22" />
-              <p class="text-xs text-muted-foreground">回答的来源中须引用这些文档才判定通过</p>
+              <p class="text-xs text-muted-foreground">仅用于严格检查知识库来源，多个 ID 用逗号分开。</p>
             </div>
-          </div>
+            </div>
+          </details>
           <div class="flex justify-end gap-2 pt-1">
             <Button variant="outline" @click="showCaseEditor = false">取消</Button>
             <Button :disabled="!canSaveCase" @click="saveCase">
