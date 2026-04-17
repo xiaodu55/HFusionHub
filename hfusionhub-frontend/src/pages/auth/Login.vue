@@ -52,7 +52,7 @@ const goToRegister = () => {
       </CardHeader>
       <CardContent class="space-y-4">
         <div v-if="registered" class="text-sm text-emerald-600 dark:text-emerald-400">
-          注册成功，请使用新账号登录
+          注册成功。登录后请联系管理员 admin 分配身份。
         </div>
         <div class="space-y-2">
           <Label for="username">用户名</Label>

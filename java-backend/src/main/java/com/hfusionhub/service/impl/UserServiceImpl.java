@@ -2,8 +2,10 @@ package com.hfusionhub.service.impl;
 
 import cn.hutool.crypto.digest.BCrypt;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.common.constant.StatusCode;
+import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.limiter.LoginRateLimiter;
 import com.hfusionhub.common.utils.IpUtils;
@@ -27,7 +29,9 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * 用户服务实现
@@ -38,6 +42,19 @@ import java.util.Locale;
 @Service
 @RequiredArgsConstructor
 public class UserServiceImpl implements UserService {
+
+    private static final Set<String> ALLOWED_PLATFORM_ROLES = Set.of(
+            CommonConstants.ROLE_PENDING,
+            CommonConstants.ROLE_USER,
+            CommonConstants.ROLE_BUILDER,
+            CommonConstants.ROLE_ADMIN
+    );
+
+    private static final Set<String> ASSIGNABLE_PLATFORM_ROLES = Set.of(
+            CommonConstants.ROLE_PENDING,
+            CommonConstants.ROLE_USER,
+            CommonConstants.ROLE_BUILDER
+    );
 
     private final UserMapper userMapper;
     private final TenantMemberMapper tenantMemberMapper;
@@ -135,7 +152,7 @@ public class UserServiceImpl implements UserService {
         user.setNickname(nickname != null ? nickname : username);
         user.setEmail(email);
         user.setPhone(phone);
-        user.setRole(CommonConstants.ROLE_USER);
+        user.setRole(CommonConstants.ROLE_PENDING);
         user.setStatus(CommonConstants.USER_STATUS_NORMAL);
         user.setTenantId(CommonConstants.DEFAULT_TENANT_ID);
 
@@ -254,6 +271,60 @@ public class UserServiceImpl implements UserService {
         if (user == null) {
             throw new BusinessException(StatusCode.NOT_FOUND, "用户不存在");
         }
+        return convertToUserInfoDTO(user);
+    }
+
+    @Override
+    public PageResult<UserInfoDTO> listUsers(long page, long pageSize, String keyword, String role) {
+        long safePage = Math.max(page, 1);
+        long safePageSize = Math.min(Math.max(pageSize, 1), 100);
+        String normalizedKeyword = trimToNull(keyword);
+        String normalizedRole = trimToNull(role);
+
+        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
+        if (normalizedKeyword != null) {
+            wrapper.and(query -> query
+                    .like(User::getUsername, normalizedKeyword)
+                    .or().like(User::getNickname, normalizedKeyword)
+                    .or().like(User::getEmail, normalizedKeyword));
+        }
+        if (normalizedRole != null) {
+            if (!ALLOWED_PLATFORM_ROLES.contains(normalizedRole)) {
+                throw new BusinessException(StatusCode.BAD_REQUEST, "无效的用户角色");
+            }
+            wrapper.eq(User::getRole, normalizedRole);
+        }
+        wrapper.orderByDesc(User::getCreatedAt);
+
+        Page<User> result = userMapper.selectPage(new Page<>(safePage, safePageSize), wrapper);
+        List<UserInfoDTO> records = result.getRecords().stream()
+                .map(this::convertToUserInfoDTO)
+                .toList();
+        return PageResult.of(result.getCurrent(), result.getSize(), result.getTotal(), records);
+    }
+
+    @Override
+    @Transactional
+    public UserInfoDTO updateUserRole(Long userId, String role) {
+        String normalizedRole = trimToNull(role);
+        if (normalizedRole == null || !ASSIGNABLE_PLATFORM_ROLES.contains(normalizedRole)) {
+            throw new BusinessException(StatusCode.BAD_REQUEST, "可分配身份只能是待分配、普通用户或 AI 配置员");
+        }
+
+        Long currentUserId = JwtUtils.getCurrentUserId();
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(StatusCode.NOT_FOUND, "用户不存在");
+        }
+        if (CommonConstants.ROLE_ADMIN.equals(user.getRole())
+                || Boolean.TRUE.equals(user.getPlatformAdmin())) {
+            throw new BusinessException(StatusCode.BAD_REQUEST, "唯一超级管理员账号不能被修改");
+        }
+
+        user.setRole(normalizedRole);
+        user.setPlatformAdmin(false);
+        userMapper.updateById(user);
+        log.info("USER_ROLE_UPDATED operatorId={} userId={} role={}", currentUserId, userId, normalizedRole);
         return convertToUserInfoDTO(user);
     }
 

@@ -1,5 +1,6 @@
 package com.hfusionhub.service;
 
+import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.dto.UserInfoDTO;
 import com.hfusionhub.dto.UserLoginDTO;
 import com.hfusionhub.dto.UserRegisterDTO;
@@ -63,4 +64,8 @@ public interface UserService {
      * @return 用户信息
      */
     UserInfoDTO getUserByUsername(String username);
+
+    PageResult<UserInfoDTO> listUsers(long page, long pageSize, String keyword, String role);
+
+    UserInfoDTO updateUserRole(Long userId, String role);
 }

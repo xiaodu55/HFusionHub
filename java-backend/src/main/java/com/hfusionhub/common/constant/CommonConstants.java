@@ -71,9 +71,19 @@ public interface CommonConstants {
     int KB_STATUS_DELETE_FAILED = 3;
 
     /**
+     * 角色：待管理员分配
+     */
+    String ROLE_PENDING = "pending";
+
+    /**
      * 角色：普通用户
      */
     String ROLE_USER = "user";
+
+    /**
+     * AI builder / knowledge administrator role.
+     */
+    String ROLE_BUILDER = "builder";
 
     /**
      * 角色：管理员

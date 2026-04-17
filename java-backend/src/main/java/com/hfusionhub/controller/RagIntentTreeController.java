@@ -1,5 +1,6 @@
 package com.hfusionhub.controller;
 
+import cn.dev33.satoken.annotation.SaCheckRole;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.dto.RagIntentNodeCreateDTO;
@@ -25,6 +26,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/rag/intent-tree")
+@SaCheckRole("admin")
 @RequiredArgsConstructor
 @Tag(name = "RAG intent tree", description = "Intent tree management for RAG routing")
 public class RagIntentTreeController {

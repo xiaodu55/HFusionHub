@@ -98,7 +98,8 @@ public class JwtUtils implements StpInterface {
         } catch (Exception e) {
             log.warn("获取用户角色失败: loginId={}", loginId, e);
         }
-        return List.of(CommonConstants.ROLE_USER);
+        // Fail closed when the account cannot be loaded. Never grant a business role by default.
+        return List.of();
     }
 
     /**

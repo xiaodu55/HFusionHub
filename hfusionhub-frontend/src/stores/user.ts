@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { RegisterForm, UserInfo } from '@/api/types'
+import type { RegisterForm, UserInfo, UserRole } from '@/api/types'
 import * as userApi from '@/api/user'
 
 export const useUserStore = defineStore('user', () => {
@@ -12,6 +12,12 @@ export const useUserStore = defineStore('user', () => {
   const isLoggedIn = computed(() => !!token.value)
   const username = computed(() => userInfo.value?.username || '')
   const nickname = computed(() => userInfo.value?.nickname || '')
+  const role = computed<UserRole>(() => userInfo.value?.role || 'pending')
+  const isPending = computed(() => role.value === 'pending')
+  const isApproved = computed(() => role.value === 'user' || role.value === 'builder' || role.value === 'admin')
+  const isAdmin = computed(() => role.value === 'admin')
+  const isBuilder = computed(() => role.value === 'builder' || role.value === 'admin')
+  const hasAnyRole = (roles: UserRole[]) => roles.includes(role.value)
 
   // Actions
   const setToken = (newToken: string) => {
@@ -64,6 +70,12 @@ export const useUserStore = defineStore('user', () => {
     isLoggedIn,
     username,
     nickname,
+    role,
+    isPending,
+    isApproved,
+    isAdmin,
+    isBuilder,
+    hasAnyRole,
     setToken,
     clearToken,
     login,

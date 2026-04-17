@@ -36,6 +36,8 @@ export interface RegisterForm {
   phone?: string
 }
 
+export type UserRole = 'pending' | 'user' | 'builder' | 'admin'
+
 export interface UserInfo {
   id: number
   username: string
@@ -43,7 +45,9 @@ export interface UserInfo {
   email: string
   phone: string
   avatar: string
+  role: UserRole
   status: number
+  lastLoginTime?: string
   createdAt: string
 }
 

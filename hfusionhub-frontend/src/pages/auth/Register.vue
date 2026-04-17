@@ -89,6 +89,9 @@ const goToLogin = () => {
         <CardDescription>创建新账号</CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
+        <div class="rounded-lg border border-primary/20 bg-primary/[0.06] p-3 text-left text-sm leading-6 text-muted-foreground">
+          注册后账号处于“等待分配”状态。请登录查看审批状态，并联系管理员 admin 分配身份；分配完成后才能使用知识库、对话等功能。
+        </div>
         <div class="space-y-2">
           <Label for="username">用户名 *</Label>
           <Input

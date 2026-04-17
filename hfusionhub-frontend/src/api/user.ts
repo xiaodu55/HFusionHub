@@ -1,5 +1,5 @@
 import { get, post, put } from './request'
-import type { ApiResponse, LoginForm, RegisterForm, UserInfo } from './types'
+import type { ApiResponse, LoginForm, PageResult, RegisterForm, UserInfo, UserRole } from './types'
 
 // 用户登录
 export const login = (data: LoginForm): Promise<ApiResponse<string>> => {
@@ -29,4 +29,17 @@ export const updateUserInfo = (data: Partial<UserInfo>): Promise<ApiResponse<voi
 // 根据ID获取用户信息
 export const getUserById = (userId: number): Promise<ApiResponse<UserInfo>> => {
   return get(`/user/${userId}`)
+}
+
+export const listUsers = (params: {
+  page?: number
+  pageSize?: number
+  keyword?: string
+  role?: UserRole | ''
+}): Promise<ApiResponse<PageResult<UserInfo>>> => {
+  return get('/user/list', params)
+}
+
+export const updateUserRole = (userId: number, role: UserRole): Promise<ApiResponse<UserInfo>> => {
+  return put(`/user/${userId}/role`, { role })
 }

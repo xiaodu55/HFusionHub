@@ -159,7 +159,7 @@ class UserServiceImplTest {
         assertEquals("alice", inserted.getUsername());
         assertFalse("secret-123".equals(inserted.getPassword()));
         assertTrue(BCrypt.checkpw("secret-123", inserted.getPassword()));
-        assertEquals("user", inserted.getRole());
+        assertEquals("pending", inserted.getRole());
         assertEquals(0, inserted.getStatus());
         assertEquals(1L, inserted.getTenantId());
         assertEquals("alice", result.getUsername());
@@ -222,6 +222,46 @@ class UserServiceImplTest {
 
         assertEquals(2L, result.getId());
         assertEquals("bob", result.getUsername());
+    }
+
+    @Test
+    void administratorCanAssignBuilderRole() {
+        User target = user(2L, "bob");
+        jwtUtilsMock.when(JwtUtils::getCurrentUserId).thenReturn(1L);
+        when(userMapper.selectById(2L)).thenReturn(target);
+
+        UserInfoDTO result = userService.updateUserRole(2L, "builder");
+
+        assertEquals("builder", result.getRole());
+        assertEquals("builder", target.getRole());
+        assertFalse(Boolean.TRUE.equals(target.getPlatformAdmin()));
+        verify(userMapper).updateById(target);
+    }
+
+    @Test
+    void administratorCannotGrantSuperAdminRole() {
+        jwtUtilsMock.when(JwtUtils::getCurrentUserId).thenReturn(1L);
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> userService.updateUserRole(2L, "admin"));
+
+        assertEquals(StatusCode.BAD_REQUEST, error.getCode());
+        verify(userMapper, never()).selectById(2L);
+    }
+
+    @Test
+    void administratorCannotDemoteOwnAccount() {
+        User current = user(1L, "admin");
+        current.setRole("admin");
+        current.setPlatformAdmin(true);
+        jwtUtilsMock.when(JwtUtils::getCurrentUserId).thenReturn(1L);
+        when(userMapper.selectById(1L)).thenReturn(current);
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> userService.updateUserRole(1L, "user"));
+
+        assertEquals(StatusCode.BAD_REQUEST, error.getCode());
+        verify(userMapper, never()).updateById(current);
     }
 
     @Test

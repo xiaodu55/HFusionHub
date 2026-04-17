@@ -4,7 +4,7 @@ import type { Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { get } from '@/api/request'
-import type { ApiResponse } from '@/api/types'
+import type { ApiResponse, UserRole } from '@/api/types'
 import * as agentApi from '@/api/agent'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -32,6 +32,7 @@ import {
   Sparkles,
   Sun,
   User,
+  Users,
   Wrench,
   X,
 } from 'lucide-vue-next'
@@ -57,53 +58,37 @@ const menuItems: Array<{
   label: string
   description: string
   icon: Component
+  roles?: UserRole[]
+  group: 'use' | 'personal' | 'build' | 'admin'
+  keywords: string[]
 }> = [
-  { path: '/builder/prompts', label: '回答方案', description: '设置 AI 回答方式', icon: PenLine },
-  { path: '/builder/test-bench', label: '回答方案测试', description: '验证回答效果', icon: FlaskConical },
-  { path: '/builder/test-sets', label: '测试用例集', description: '批量回归评测', icon: FlaskConical },
-  { path: '/builder/models', label: '模型中心', description: '模型与运行状态', icon: Cpu },
-  { path: '/builder/tools', label: '工具中心', description: '能力与调用记录', icon: Wrench },
-  { path: '/builder/plugins', label: '插件管理', description: '安装与沙箱', icon: Package },
-  { path: '/', label: '任务总览', description: '工作台', icon: Home },
-  { path: '/knowledge-base', label: '知识库', description: '知识治理', icon: BookOpen },
-  { path: '/document', label: '文档管理', description: '解析与索引', icon: FileText },
-  { path: '/chat', label: '智能对话', description: '多轮问答', icon: MessageSquare },
-  { path: '/agent', label: 'AI 任务记录', description: '失败与重试', icon: Sparkles },
-  { path: '/approvals', label: '工具审批', description: '人工确认', icon: Fingerprint },
-  { path: '/memory', label: '长期记忆', description: 'Agent 用户记忆', icon: User },
-  { path: '/rag', label: 'RAG 观测', description: '检索评估', icon: Activity },
-  { path: '/cost', label: '成本仪表板', description: '用量与费用', icon: DollarSign },
-  { path: '/admin/flags', label: '高级能力', description: '配置说明', icon: ShieldCheck },
-  { path: '/settings/safety', label: '安全护栏', description: '注入检测与脱敏', icon: ShieldCheck },
+  { path: '/', label: '首页', description: '查看当前工作', icon: Home, group: 'use', keywords: ['首页', '工作台'] },
+  { path: '/knowledge-base', label: '知识库', description: '管理知识资料', icon: BookOpen, group: 'use', keywords: ['知识', '知识库', 'kb'] },
+  { path: '/document', label: '文档', description: '上传、解析和恢复', icon: FileText, group: 'use', keywords: ['文档', '文件', '索引', 'doc'] },
+  { path: '/chat', label: '智能对话', description: '提问并引用知识', icon: MessageSquare, group: 'use', keywords: ['对话', '聊天', 'chat'] },
+  { path: '/builder/models', label: '我的模型', description: '选择供应商和模型', icon: Cpu, group: 'personal', keywords: ['model', '模型', 'llm', 'embedding', '向量'] },
+  { path: '/builder/tools', label: 'AI 能力', description: '查看和创建可用工具', icon: Wrench, group: 'personal', keywords: ['工具', 'tool', 'mcp', '能力'] },
+  { path: '/agent', label: '运行记录', description: '查看执行和失败原因', icon: Sparkles, group: 'personal', keywords: ['运行', '任务', 'agent', '失败'] },
+  { path: '/approvals', label: '待确认操作', description: '允许或阻止敏感操作', icon: Fingerprint, group: 'personal', keywords: ['确认', '审批', '允许', '拒绝'] },
+  { path: '/memory', label: '我的记忆', description: '管理 AI 记住的信息', icon: User, group: 'personal', keywords: ['记忆', 'memory'] },
+  { path: '/cost', label: '用量与费用', description: '查看模型使用量', icon: DollarSign, group: 'personal', keywords: ['用量', '费用', '成本', 'token'] },
+  { path: '/builder/prompts', label: '回答方案', description: '设置 AI 回答方式', icon: PenLine, roles: ['builder', 'admin'], group: 'build', keywords: ['prompt', '提示词', '模板', '回答方案'] },
+  { path: '/builder/test-bench', label: '方案测试', description: '验证单个回答效果', icon: FlaskConical, roles: ['builder', 'admin'], group: 'build', keywords: ['测试', 'test', 'bench', '评测'] },
+  { path: '/builder/test-sets', label: '回归用例', description: '批量比较回答结果', icon: FlaskConical, roles: ['builder', 'admin'], group: 'build', keywords: ['用例', '批量', '回归', 'suite'] },
+  { path: '/rag', label: '回答效果', description: '分析检索和引用质量', icon: Activity, roles: ['builder', 'admin'], group: 'build', keywords: ['rag', '检索', '引用', '评估'] },
+  { path: '/builder/plugins', label: '插件管理', description: '安装和隔离运行插件', icon: Package, roles: ['admin'], group: 'admin', keywords: ['插件', 'plugin', '沙箱'] },
+  { path: '/admin/flags', label: '高级能力', description: '查看系统能力和依赖', icon: ShieldCheck, roles: ['admin'], group: 'admin', keywords: ['开关', 'flag', '能力'] },
+  { path: '/admin/intent-tree', label: '意图路由', description: '配置问题分流规则', icon: GitBranch, roles: ['admin'], group: 'admin', keywords: ['意图', '路由', 'intent tree'] },
+  { path: '/admin/users', label: '用户与权限', description: '分配账号身份', icon: Users, roles: ['admin'], group: 'admin', keywords: ['用户', '权限', '身份', '角色'] },
 ]
 
-menuItems.push({ path: '/admin/intent-tree', label: '意图树', description: 'RAG 路由配置', icon: GitBranch })
-
-const menuGroups = [
-  { label: '工作区', items: menuItems.filter((item) => ['/', '/knowledge-base', '/document', '/chat'].includes(item.path)) },
-  { label: '构建', items: menuItems.filter((item) => ['/builder/prompts', '/builder/test-bench', '/builder/test-sets', '/builder/models', '/builder/tools', '/builder/plugins', '/agent'].includes(item.path)) },
-  { label: '运营', items: menuItems.filter((item) => ['/cost', '/approvals', '/rag', '/memory'].includes(item.path)) },
-  { label: '管理', items: menuItems.filter((item) => ['/admin/flags', '/settings/safety'].includes(item.path)) },
-]
-
-menuGroups.push({ label: 'RAG', items: menuItems.filter((item) => item.path === '/admin/intent-tree') })
-
-const commandRoutes = [
-  { keywords: ['model', '模型', 'llm', 'embedding', '向量'], path: '/builder/models' },
-  { keywords: ['prompt', '提示词', '模板'], path: '/builder/prompts' },
-  { keywords: ['测试', 'test', 'bench', '评测', '试验'], path: '/builder/test-bench' },
-  { keywords: ['用例', '用例集', '批量', '回归', 'test-set', 'suite'], path: '/builder/test-sets' },
-  { keywords: ['工具', 'tool', 'mcp', '调用', '权限', '审批'], path: '/builder/tools' },
-  { keywords: ['插件', 'plugin', '沙箱', 'sandbox', '安装'], path: '/builder/plugins' },
-  { keywords: ['知识', '知识库', 'kb'], path: '/knowledge-base' },
-  { keywords: ['文档', '文件', '索引', 'doc'], path: '/document' },
-  { keywords: ['对话', '聊天', 'chat'], path: '/chat' },
-  { keywords: ['rag', '观测', '调试', '评估'], path: '/rag' },
-  { keywords: ['开关', 'flag', '灰度'], path: '/admin/flags' },
-  { keywords: ['设置', '主题', '账户'], path: '/settings' },
-]
-
-commandRoutes.push({ keywords: ['意图树', 'intent tree', '路由', 'taxonomy'], path: '/admin/intent-tree' })
+const visibleMenuItems = computed(() => menuItems.filter(item => !item.roles || userStore.hasAnyRole(item.roles)))
+const menuGroups = computed(() => [
+  { label: '使用', items: visibleMenuItems.value.filter(item => item.group === 'use') },
+  { label: '我的设置', items: visibleMenuItems.value.filter(item => item.group === 'personal') },
+  { label: '构建与评测', items: visibleMenuItems.value.filter(item => item.group === 'build') },
+  { label: '系统管理', items: visibleMenuItems.value.filter(item => item.group === 'admin') },
+].filter(group => group.items.length > 0))
 
 const isActive = (path: string) => {
   if (path === '/') {
@@ -115,6 +100,7 @@ const isActive = (path: string) => {
 const currentItem = computed(() => menuItems.find((item) => isActive(item.path)))
 const userDisplayName = computed(() => userStore.nickname || userStore.username || 'HFusionHub 用户')
 const userInitial = computed(() => userDisplayName.value.trim().slice(0, 1).toUpperCase() || 'H')
+const userRoleLabel = computed(() => ({ pending: '等待分配', user: '普通用户', builder: 'AI 配置员', admin: '超级管理员' }[userStore.role]))
 const unreadNotificationCount = computed(() => notifications.value.length)
 const serviceLabel = computed(() => ({ checking: '检查中', online: '服务在线', offline: '服务异常' }[serviceState.value]))
 const serviceClass = computed(() => ({
@@ -245,7 +231,7 @@ const handleGlobalSearch = () => {
   const keyword = globalSearchQuery.value.trim().toLowerCase()
   if (!keyword) return
 
-  const target = commandRoutes.find((item) =>
+  const target = visibleMenuItems.value.find((item) =>
     item.keywords.some((word) => keyword.includes(word.toLowerCase()))
   )
   router.push(target?.path || '/knowledge-base')
@@ -329,7 +315,7 @@ onBeforeUnmount(() => {
             <span
               v-if="item.path === '/approvals' && pendingApprovals > 0"
               class="ml-auto shrink-0 rounded-full bg-amber-400/20 px-2 py-0.5 text-xs font-semibold text-amber-300"
-              :title="`${pendingApprovals} 条待审批`"
+              :title="`${pendingApprovals} 项待确认操作`"
             >
               {{ pendingApprovals }}
             </span>
@@ -349,7 +335,7 @@ onBeforeUnmount(() => {
           <span class="user-avatar">{{ userInitial }}</span>
           <span v-if="isSidebarOpen" class="min-w-0">
             <span class="block truncate text-sm font-medium text-zinc-100">{{ userDisplayName }}</span>
-            <span class="block truncate text-xs text-emerald-400">在线工作中</span>
+            <span class="block truncate text-xs text-emerald-400">{{ userRoleLabel }}</span>
           </span>
         </button>
 

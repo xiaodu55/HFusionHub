@@ -1,6 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import type { UserRole } from '@/api/types'
+
+const BUILDER_ROLES: UserRole[] = ['builder', 'admin']
+const ADMIN_ROLES: UserRole[] = ['admin']
 
 const routes: RouteRecordRaw[] = [
   {
@@ -14,6 +18,12 @@ const routes: RouteRecordRaw[] = [
     name: 'Register',
     component: () => import('@/pages/auth/Register.vue'),
     meta: { requiresAuth: false },
+  },
+  {
+    path: '/pending-approval',
+    name: 'PendingApproval',
+    component: () => import('@/pages/auth/PendingApproval.vue'),
+    meta: { requiresAuth: true },
   },
   {
     path: '/',
@@ -79,11 +89,13 @@ const routes: RouteRecordRaw[] = [
         path: 'builder/prompts',
         name: 'PromptStudio',
         component: () => import('@/pages/builder/Prompts.vue'),
+        meta: { roles: BUILDER_ROLES },
       },
       {
         path: 'builder/prompts/recycle-bin',
         name: 'PromptRecycleBin',
         component: () => import('@/pages/builder/PromptRecycleBin.vue'),
+        meta: { roles: BUILDER_ROLES },
       },
       {
         path: 'builder/models',
@@ -99,26 +111,24 @@ const routes: RouteRecordRaw[] = [
         path: 'builder/plugins',
         name: 'Plugins',
         component: () => import('@/pages/builder/Plugins.vue'),
+        meta: { roles: ADMIN_ROLES },
       },
       {
         path: 'builder/test-bench',
         name: 'PromptTestBench',
         component: () => import('@/pages/builder/TestBench.vue'),
+        meta: { roles: BUILDER_ROLES },
       },
       {
         path: 'builder/test-sets',
         name: 'PromptTestSets',
         component: () => import('@/pages/builder/TestSet.vue'),
+        meta: { roles: BUILDER_ROLES },
       },
       {
         path: 'cost',
         name: 'CostDashboard',
         component: () => import('@/pages/cost/Index.vue'),
-      },
-      {
-        path: 'settings/safety',
-        name: 'SafetySettings',
-        component: () => import('@/pages/settings/Safety.vue'),
       },
       {
         path: 'memory',
@@ -129,6 +139,7 @@ const routes: RouteRecordRaw[] = [
         path: 'rag',
         name: 'RagObservability',
         component: () => import('@/pages/rag/Index.vue'),
+        meta: { roles: BUILDER_ROLES },
       },
       {
         path: 'profile',
@@ -144,11 +155,19 @@ const routes: RouteRecordRaw[] = [
         path: 'admin/flags',
         name: 'FeatureFlags',
         component: () => import('@/pages/admin/Flags.vue'),
+        meta: { roles: ADMIN_ROLES },
       },
       {
         path: 'admin/intent-tree',
         name: 'IntentTree',
         component: () => import('@/pages/admin/IntentTree.vue'),
+        meta: { roles: ADMIN_ROLES },
+      },
+      {
+        path: 'admin/users',
+        name: 'UserAccess',
+        component: () => import('@/pages/admin/Users.vue'),
+        meta: { roles: ADMIN_ROLES },
       },
     ],
   },
@@ -160,17 +179,41 @@ const router = createRouter({
 })
 
 // 路由守卫
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to) => {
   const userStore = useUserStore()
   const requiresAuth = to.meta.requiresAuth !== false
 
   if (requiresAuth && !userStore.isLoggedIn) {
-    next('/login')
-  } else if ((to.path === '/login' || to.path === '/register') && userStore.isLoggedIn) {
-    next('/')
-  } else {
-    next()
+    return '/login'
   }
+
+  if (userStore.isLoggedIn && !userStore.userInfo) {
+    try {
+      await userStore.getUserInfo()
+    } catch {
+      userStore.clearToken()
+      return '/login'
+    }
+  }
+
+  if ((to.path === '/login' || to.path === '/register') && userStore.isLoggedIn) {
+    return userStore.isPending ? '/pending-approval' : '/'
+  }
+
+  if (userStore.isLoggedIn && userStore.isPending && to.path !== '/pending-approval') {
+    return '/pending-approval'
+  }
+
+  if (userStore.isLoggedIn && !userStore.isPending && to.path === '/pending-approval') {
+    return '/'
+  }
+
+  const allowedRoles = to.meta.roles as UserRole[] | undefined
+  if (allowedRoles?.length && !userStore.hasAnyRole(allowedRoles)) {
+    return { path: '/', query: { access: 'denied' } }
+  }
+
+  return true
 })
 
 export default router

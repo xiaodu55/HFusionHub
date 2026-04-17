@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import * as userApi from '@/api/user'
+import type { UserInfo } from '@/api/types'
 import { useUserStore } from '../user'
 
 vi.mock('@/api/user', () => ({
@@ -18,9 +19,10 @@ const userInfo = {
   email: 'alice@example.com',
   phone: '13800138000',
   avatar: '',
+  role: 'user',
   status: 0,
   createdAt: '2026-07-28 12:00:00',
-}
+} satisfies UserInfo
 
 describe('user store', () => {
   beforeEach(() => {
@@ -52,6 +54,14 @@ describe('user store', () => {
     expect(store.isLoggedIn).toBe(true)
   })
 
+  it('fails closed while user information is not loaded', () => {
+    const store = useUserStore()
+
+    expect(store.role).toBe('pending')
+    expect(store.isPending).toBe(true)
+    expect(store.isApproved).toBe(false)
+  })
+
   it('logs in, persists the token, and loads the current user', async () => {
     vi.mocked(userApi.login).mockResolvedValue({
       code: 200,
@@ -75,6 +85,8 @@ describe('user store', () => {
     expect(store.userInfo).toEqual(userInfo)
     expect(store.username).toBe('alice')
     expect(store.nickname).toBe('Alice')
+    expect(store.role).toBe('user')
+    expect(store.isAdmin).toBe(false)
   })
 
   it('clears local authentication even when remote logout fails', async () => {

@@ -70,8 +70,10 @@ public class AdminInitializer implements ApplicationRunner {
                 userMapper.insert(admin);
                 log.info("Admin user '{}' created (platform admin, tenant=1).", adminUsername);
             } else {
-                // Ensure existing admin has platform_admin flag
-                if (!Boolean.TRUE.equals(admin.getPlatformAdmin())) {
+                // The configured admin account is the only platform super admin.
+                if (!CommonConstants.ROLE_ADMIN.equals(admin.getRole())
+                        || !Boolean.TRUE.equals(admin.getPlatformAdmin())) {
+                    admin.setRole(CommonConstants.ROLE_ADMIN);
                     admin.setPlatformAdmin(true);
                     userMapper.updateById(admin);
                 }

@@ -1,10 +1,12 @@
 package com.hfusionhub.controller;
 
 import cn.dev33.satoken.annotation.SaCheckRole;
+import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.dto.UserInfoDTO;
 import com.hfusionhub.dto.UserLoginDTO;
 import com.hfusionhub.dto.UserRegisterDTO;
+import com.hfusionhub.dto.UserRoleUpdateDTO;
 import com.hfusionhub.dto.UserUpdateDTO;
 import com.hfusionhub.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -101,5 +103,24 @@ public class UserController {
     public R<UserInfoDTO> getUserById(@PathVariable Long userId) {
         UserInfoDTO userInfo = userService.getUserById(userId);
         return R.ok(userInfo);
+    }
+
+    @SaCheckRole("admin")
+    @GetMapping("/list")
+    @Operation(summary = "分页查询用户", description = "管理员查看用户并分配平台身份")
+    public R<PageResult<UserInfoDTO>> listUsers(
+            @RequestParam(defaultValue = "1") long page,
+            @RequestParam(defaultValue = "20") long pageSize,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String role) {
+        return R.ok(userService.listUsers(page, pageSize, keyword, role));
+    }
+
+    @SaCheckRole("admin")
+    @PutMapping("/{userId}/role")
+    @Operation(summary = "修改用户身份", description = "管理员分配普通用户、AI 配置员或系统管理员身份")
+    public R<UserInfoDTO> updateUserRole(@PathVariable Long userId,
+                                         @Valid @RequestBody UserRoleUpdateDTO dto) {
+        return R.ok("身份已更新", userService.updateUserRole(userId, dto.getRole()));
     }
 }

@@ -64,9 +64,9 @@ public class User extends BaseEntity {
     private String avatar;
 
     /**
-     * 角色：user-普通用户，admin-管理员
+     * 角色：pending-待分配，user-普通用户，builder-AI配置员，admin-唯一超级管理员
      */
-    @Schema(description = "角色：user-普通用户，admin-管理员")
+    @Schema(description = "角色：pending-待分配，user-普通用户，builder-AI配置员，admin-唯一超级管理员")
     private String role;
 
     /**
