@@ -503,12 +503,12 @@ class QueryRouter:
             ChannelType.KEYWORD: ChannelConfig(
                 channel_type=ChannelType.KEYWORD,
                 weight=DEFAULT_CHANNEL_WEIGHT * 0.5,
-                enabled=app_config.RAG_HYBRID_ENABLED,
+                enabled=feature_flags.is_enabled("rag.hybrid.enabled"),
             ),
             ChannelType.GRAPH: ChannelConfig(
                 channel_type=ChannelType.GRAPH,
                 weight=DEFAULT_CHANNEL_WEIGHT * 0.3,
-                enabled=app_config.RAG_GRAPH_ENABLED and feature_flags.is_enabled("rag.graph.enabled"),
+                enabled=feature_flags.is_enabled("rag.graph.enabled"),
             ),
         }
 
@@ -649,6 +649,17 @@ class QueryRouter:
         strategy: RouteStrategy
     ) -> List[ChannelType]:
         """根据策略选择通道"""
+        # Runtime switches are refreshed for every route decision. The client
+        # keeps a short local cache, so UI changes do not require a restart.
+        if ChannelType.KEYWORD in self.channel_configs:
+            self.channel_configs[ChannelType.KEYWORD].enabled = feature_flags.is_enabled(
+                "rag.hybrid.enabled"
+            )
+        if ChannelType.GRAPH in self.channel_configs:
+            self.channel_configs[ChannelType.GRAPH].enabled = feature_flags.is_enabled(
+                "rag.graph.enabled"
+            )
+
         enabled_channels = [
             (ch, w) for ch, w in weights.items()
             if w > 0 and self.channel_configs.get(ch, ChannelConfig(channel_type=ch)).enabled

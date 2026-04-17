@@ -39,6 +39,7 @@ SECURITY_FLAGS = frozenset({
 })
 
 AVAILABILITY_FLAGS = frozenset({
+    "rag.hybrid.enabled",
     "rag.graph.enabled",
     "rag.reranker.enabled",
     "agent.multi_agent.enabled",

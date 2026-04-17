@@ -89,8 +89,8 @@ def get_agent(
         user_id=getattr(execution_context, 'user_id', None) if execution_context else None,
         knowledge_base_id=knowledge_base_id,
     )
-    _ff_workflow = config.RAG_AGENT_WORKFLOW_ENABLED and _ff_agent_enabled
-    _ff_multi = config.RAG_MULTI_AGENT_ENABLED and _ff_agent_enabled and feature_flags.is_enabled(
+    _ff_workflow = _ff_agent_enabled
+    _ff_multi = _ff_agent_enabled and feature_flags.is_enabled(
         "agent.multi_agent.enabled",
         user_id=getattr(execution_context, 'user_id', None) if execution_context else None,
         knowledge_base_id=knowledge_base_id,

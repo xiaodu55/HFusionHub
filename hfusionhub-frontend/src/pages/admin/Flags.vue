@@ -1,171 +1,194 @@
 <script setup lang="ts">
-import { computed, ref, type Component } from 'vue'
+import { computed, onMounted, ref, type Component } from 'vue'
 import {
-  Activity,
   Bot,
-  Brain,
   CheckCircle2,
-  CircleHelp,
-  Cpu,
-  FileText,
   GitBranch,
-  Image,
-  Lightbulb,
+  Globe2,
+  ListFilter,
+  RefreshCw,
   Route,
-  Settings2,
   ShieldCheck,
   Sparkles,
+  Users,
+  Wrench,
 } from 'lucide-vue-next'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import * as featureApi from '@/api/featureFlag'
+import type { FeatureFlagInfo } from '@/api/featureFlag'
+import { useToast } from '@/composables/useToast'
+import { Button } from '@/components/ui/button'
 
-type FeatureStatus = 'stable' | 'beta' | 'experimental'
-type FeatureGroup = 'all' | FeatureStatus
+type CapabilityGroup = 'retrieval' | 'agent' | 'safety'
+type CapabilityStatus = 'stable' | 'beta' | 'experimental'
 
-interface FeatureFlag {
+interface CapabilityDefinition {
   key: string
   name: string
-  status: FeatureStatus
-  defaultEnabled: boolean
+  group: CapabilityGroup
+  status: CapabilityStatus
   summary: string
-  outcome: string
-  dependency: string
-  howToEnable: string
+  useCase: string
+  impact: string
   icon: Component
+  dependsOn?: string
+  confirmOnEnable?: string
 }
 
-const activeGroup = ref<FeatureGroup>('all')
-const groups: Array<{ value: FeatureGroup; label: string }> = [
-  { value: 'all', label: '全部能力' },
-  { value: 'stable', label: '稳定可用' },
-  { value: 'beta', label: '测试中' },
-  { value: 'experimental', label: '实验功能' },
+const toast = useToast()
+const loading = ref(false)
+const savingKey = ref('')
+const activeGroup = ref<'all' | CapabilityGroup>('all')
+const serverFlags = ref<Record<string, FeatureFlagInfo>>({})
+
+const capabilities: CapabilityDefinition[] = [
+  { key: 'rag.hybrid.enabled', name: '混合检索', group: 'retrieval', status: 'stable', icon: Route, summary: '同时使用语义和关键词查找资料。', useCase: '大多数知识库问答', impact: '通常能提高命中率，建议保持开启。' },
+  { key: 'rag.graph.enabled', name: '关系检索', group: 'retrieval', status: 'beta', icon: GitBranch, summary: '根据人物、系统、规则之间的关系补充资料。', useCase: '制度、组织关系或系统依赖较复杂', impact: '检索更全面，但会略微增加处理时间。' },
+  { key: 'rag.reranker.enabled', name: '结果精排', group: 'retrieval', status: 'stable', icon: ListFilter, summary: '对检索结果再次排序，把更相关的内容放前面。', useCase: '引用不够准确或资料较多', impact: '答案更精准，会增加少量计算时间。' },
+  { key: 'agent.enabled', name: '复杂任务模式', group: 'agent', status: 'beta', icon: Bot, summary: '为复杂任务增加超时、重试和执行追踪。', useCase: '需要多步骤分析的任务', impact: '成功率更高，但回答时间可能变长。' },
+  { key: 'agent.multi_agent.enabled', name: '多角色协作', group: 'agent', status: 'experimental', icon: Users, summary: '让分析和校验角色共同完成复杂问题。', useCase: '高复杂度、需要复核的任务', impact: '消耗更多模型用量，必须先开启复杂任务模式。', dependsOn: 'agent.enabled' },
+  { key: 'agent.web_search.enabled', name: '联网搜索', group: 'agent', status: 'beta', icon: Globe2, summary: '允许 AI 查询互联网上的最新信息。', useCase: '知识库外的时效性问题', impact: '会使用外部来源，需要注意内容可信度。' },
+  { key: 'agent.write_tools.enabled', name: '写入操作', group: 'safety', status: 'experimental', icon: Wrench, summary: '允许 AI 发起新增、修改等操作。', useCase: '希望 AI 协助执行实际操作', impact: '属于高风险能力，执行前仍需要人工确认。', confirmOnEnable: '开启后 AI 可以发起写入操作。确认继续开启吗？' },
+  { key: 'approval.required_for_write', name: '操作前确认', group: 'safety', status: 'stable', icon: ShieldCheck, summary: '写入操作执行前必须由当前用户确认。', useCase: '所有启用写入能力的场景', impact: '建议始终开启，避免 AI 未经确认修改数据。' },
 ]
 
-const flags: FeatureFlag[] = [
-  {
-    key: 'RAG_HYBRID_ENABLED',
-    name: '混合检索',
-    status: 'stable',
-    defaultEnabled: true,
-    summary: '同时使用语义搜索和关键词搜索，提升知识库问答的召回率。',
-    outcome: '更容易找到既“语义相近”又“关键词匹配”的资料。',
-    dependency: '无需额外依赖。',
-    howToEnable: 'RAG_HYBRID_ENABLED=true',
-    icon: Route,
-  },
-  {
-    key: 'RAG_GRAPH_ENABLED',
-    name: '图谱检索',
-    status: 'beta',
-    defaultEnabled: false,
-    summary: '从文档中的实体关系出发补充检索，适合关系复杂的业务知识。',
-    outcome: '能关联人物、系统、规则等实体，但会增加索引和维护成本。',
-    dependency: '需先完成文档索引，才能构建图谱。',
-    howToEnable: 'RAG_GRAPH_ENABLED=true',
-    icon: GitBranch,
-  },
-  {
-    key: 'RAG_RERANKER_MODE',
-    name: '结果重排',
-    status: 'beta',
-    defaultEnabled: false,
-    summary: '在初步检索后再次排序，让最相关的片段排在前面。',
-    outcome: '回答引用更精准，但会增加一次计算和少量等待时间。',
-    dependency: 'lexical 无额外依赖；cross_encoder 需要重排模型依赖。',
-    howToEnable: 'RAG_RERANKER_MODE=lexical 或 cross_encoder',
-    icon: Activity,
-  },
-  {
-    key: 'RAG_MULTIMODAL_ENABLED',
-    name: '图片识别（OCR）',
-    status: 'experimental',
-    defaultEnabled: false,
-    summary: '从文档图片中提取文字，让扫描件和图片内容也能被检索。',
-    outcome: '能覆盖图片型资料，但处理时间会明显增加。',
-    dependency: '需要安装 Tesseract OCR 与多模态依赖。',
-    howToEnable: 'RAG_MULTIMODAL_ENABLED=true，并启用 OCR',
-    icon: Image,
-  },
-  {
-    key: 'RAG_AGENT_WORKFLOW_ENABLED',
-    name: '受限 Agent 工作流',
-    status: 'beta',
-    defaultEnabled: false,
-    summary: '为复杂任务增加超时、重试和执行追踪，提升运行可控性。',
-    outcome: '复杂问题更可靠，但单次回答可能更慢。',
-    dependency: '无需额外依赖。',
-    howToEnable: 'RAG_AGENT_WORKFLOW_ENABLED=true',
-    icon: Bot,
-  },
-  {
-    key: 'RAG_MULTI_AGENT_ENABLED',
-    name: '多 Agent 协作',
-    status: 'experimental',
-    defaultEnabled: false,
-    summary: '让检索、分析、校验等多个角色协作处理复杂问题。',
-    outcome: '适合高复杂度任务，但成本、等待时间和调试难度都会上升。',
-    dependency: '需先启用受限 Agent 工作流，并明确选择知识库。',
-    howToEnable: 'RAG_MULTI_AGENT_ENABLED=true',
-    icon: Brain,
-  },
+const groups = [
+  { value: 'all' as const, label: '全部' },
+  { value: 'retrieval' as const, label: '知识检索' },
+  { value: 'agent' as const, label: 'Agent' },
+  { value: 'safety' as const, label: '安全操作' },
 ]
 
-const visibleFlags = computed(() => activeGroup.value === 'all'
-  ? flags
-  : flags.filter(flag => flag.status === activeGroup.value))
-const countByStatus = (status: FeatureStatus) => flags.filter(flag => flag.status === status).length
-const statusMeta = (status: FeatureStatus) => ({
-  stable: { label: '稳定可用', class: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' },
-  beta: { label: '测试中', class: 'border-amber-400/25 bg-amber-400/10 text-amber-200' },
-  experimental: { label: '实验功能', class: 'border-violet-400/25 bg-violet-400/10 text-violet-200' },
-}[status])
+const visibleCapabilities = computed(() => activeGroup.value === 'all'
+  ? capabilities
+  : capabilities.filter(item => item.group === activeGroup.value))
+const enabledCount = computed(() => capabilities.filter(item => serverFlags.value[item.key]?.enabled).length)
+
+const statusLabel = (status: CapabilityStatus) => ({ stable: '稳定', beta: '测试中', experimental: '实验性' }[status])
+const isEnabled = (key: string) => Boolean(serverFlags.value[key]?.enabled)
+const isAvailable = (item: CapabilityDefinition) => Boolean(serverFlags.value[item.key])
+
+async function loadFlags() {
+  loading.value = true
+  try {
+    const response = await featureApi.listFeatureFlags()
+    serverFlags.value = Object.fromEntries(response.data.map(flag => [flag.flagKey, flag]))
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '加载高级能力失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function setCapability(item: CapabilityDefinition, enabled: boolean) {
+  const flag = serverFlags.value[item.key]
+  if (!flag || savingKey.value) return
+  if (enabled && item.dependsOn && !isEnabled(item.dependsOn)) {
+    toast.error('请先开启“复杂任务模式”')
+    return
+  }
+  if (enabled && item.confirmOnEnable && !window.confirm(item.confirmOnEnable)) return
+
+  savingKey.value = item.key
+  try {
+    const response = await featureApi.updateFeatureFlag(flag.id, {
+      enabled,
+      reason: `在高级能力页面${enabled ? '开启' : '关闭'}${item.name}`,
+    })
+    serverFlags.value[item.key] = response.data
+    toast.success(`${item.name}已${enabled ? '开启' : '关闭'}，最多 30 秒内生效`)
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '开关保存失败')
+  } finally {
+    savingKey.value = ''
+  }
+}
+
+const presets = [
+  { name: '日常问答', description: '速度优先，适合一般知识库', values: { 'rag.hybrid.enabled': true, 'rag.graph.enabled': false, 'rag.reranker.enabled': false, 'agent.enabled': false, 'agent.multi_agent.enabled': false } },
+  { name: '精准检索', description: '适合资料多、关系复杂的知识库', values: { 'rag.hybrid.enabled': true, 'rag.graph.enabled': true, 'rag.reranker.enabled': true, 'agent.enabled': false, 'agent.multi_agent.enabled': false } },
+  { name: '复杂任务', description: '适合多步骤分析，耗时和用量更高', values: { 'rag.hybrid.enabled': true, 'rag.graph.enabled': true, 'rag.reranker.enabled': true, 'agent.enabled': true, 'agent.multi_agent.enabled': false } },
+]
+
+async function applyPreset(preset: typeof presets[number]) {
+  if (!window.confirm(`应用“${preset.name}”推荐组合？`)) return
+  savingKey.value = 'preset'
+  try {
+    for (const [key, enabled] of Object.entries(preset.values)) {
+      const flag = serverFlags.value[key]
+      if (!flag || flag.enabled === enabled) continue
+      const response = await featureApi.updateFeatureFlag(flag.id, {
+        enabled,
+        reason: `应用${preset.name}推荐组合`,
+      })
+      serverFlags.value[key] = response.data
+    }
+    toast.success(`已应用“${preset.name}”，最多 30 秒内生效`)
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '推荐组合应用失败')
+  } finally {
+    savingKey.value = ''
+  }
+}
+
+onMounted(loadFlags)
 </script>
 
 <template>
-  <div class="mx-auto max-w-6xl space-y-6 pb-4">
-    <section class="relative overflow-hidden rounded-2xl border border-border bg-card/80 shadow-[0_18px_45px_rgba(0,0,0,0.18)]">
-      <div class="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-primary/10 blur-3xl" />
-      <div class="relative flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-        <div class="flex gap-4">
-          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><Settings2 class="h-5 w-5" /></div>
-          <div>
-            <p class="text-xs font-medium tracking-[0.16em] text-primary/90">AI CAPABILITIES</p>
-            <h1 class="mt-1 text-2xl font-semibold tracking-tight">高级能力与实验室</h1>
-            <p class="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">这里说明 AI 能用哪些增强能力，以及它们会带来什么影响。日常使用保持默认即可；只有维护人员需要在部署配置中启用可选能力。</p>
+  <div class="mx-auto max-w-6xl space-y-5 pb-8">
+    <header class="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p class="text-sm font-medium text-primary">AI 能力开关</p>
+        <h1 class="mt-1 text-2xl font-semibold">选择 AI 的工作方式</h1>
+        <p class="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">直接开启或关闭，不需要修改配置文件。开关会保存到系统中，通常在 30 秒内应用到新请求。</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-sm text-muted-foreground">已开启 {{ enabledCount }} / {{ capabilities.length }}</span>
+        <Button variant="outline" class="gap-2" :disabled="loading" @click="loadFlags"><RefreshCw class="h-4 w-4" :class="loading && 'animate-spin'" />刷新</Button>
+      </div>
+    </header>
+
+    <section aria-label="推荐组合" class="grid gap-3 md:grid-cols-3">
+      <button v-for="preset in presets" :key="preset.name" class="flex items-start gap-3 rounded-lg border border-border bg-card/45 p-4 text-left transition-colors hover:border-primary/35 hover:bg-primary/[0.04]" :disabled="Boolean(savingKey)" @click="applyPreset(preset)">
+        <Sparkles class="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+        <span><strong class="block text-sm font-medium">{{ preset.name }}</strong><span class="mt-1 block text-xs leading-5 text-muted-foreground">{{ preset.description }}</span></span>
+      </button>
+    </section>
+
+    <div class="flex gap-1 overflow-x-auto border-b border-border pb-3">
+      <button v-for="group in groups" :key="group.value" class="shrink-0 rounded-md px-3 py-2 text-sm" :class="activeGroup === group.value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'" @click="activeGroup = group.value">{{ group.label }}</button>
+    </div>
+
+    <section class="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card/40">
+      <article v-for="item in visibleCapabilities" :key="item.key" class="grid gap-4 p-4 sm:grid-cols-[minmax(0,1fr)_13rem_auto] sm:items-center sm:p-5">
+        <div class="flex min-w-0 gap-3">
+          <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-primary"><component :is="item.icon" class="h-4 w-4" /></div>
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2"><h2 class="font-medium">{{ item.name }}</h2><span class="text-xs text-muted-foreground">{{ statusLabel(item.status) }}</span></div>
+            <p class="mt-1 text-sm leading-6 text-muted-foreground">{{ item.summary }}</p>
           </div>
         </div>
-        <div class="flex shrink-0 items-center gap-2 rounded-xl border border-border bg-background/40 px-3.5 py-2.5 text-sm text-muted-foreground"><ShieldCheck class="h-4 w-4 text-primary" /><span>配置文件驱动</span></div>
-      </div>
+        <div class="text-xs leading-5 text-muted-foreground"><p><span class="text-foreground/80">适合：</span>{{ item.useCase }}</p><p class="mt-1"><span class="text-foreground/80">影响：</span>{{ item.impact }}</p></div>
+        <div class="flex items-center justify-between gap-3 sm:justify-end">
+          <span class="text-xs" :class="isEnabled(item.key) ? 'text-emerald-400' : 'text-muted-foreground'">{{ !isAvailable(item) ? '不可用' : isEnabled(item.key) ? '已开启' : '已关闭' }}</span>
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="isEnabled(item.key)"
+            :aria-label="`${isEnabled(item.key) ? '关闭' : '开启'}${item.name}`"
+            class="relative h-7 w-12 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-45"
+            :class="isEnabled(item.key) ? 'border-primary bg-primary' : 'border-border bg-muted'"
+            :disabled="!isAvailable(item) || Boolean(savingKey)"
+            @click="setCapability(item, !isEnabled(item.key))"
+          >
+            <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform" :class="isEnabled(item.key) ? 'translate-x-5' : 'translate-x-0.5'" />
+          </button>
+        </div>
+      </article>
     </section>
 
-    <section class="grid gap-3 sm:grid-cols-3">
-      <div class="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] p-4"><p class="text-sm text-muted-foreground">稳定可用</p><p class="mt-2 text-2xl font-semibold text-emerald-200">{{ countByStatus('stable') }}</p><p class="mt-1 text-xs text-muted-foreground">推荐保持默认设置</p></div>
-      <div class="rounded-xl border border-amber-400/15 bg-amber-400/[0.04] p-4"><p class="text-sm text-muted-foreground">测试中能力</p><p class="mt-2 text-2xl font-semibold text-amber-100">{{ countByStatus('beta') }}</p><p class="mt-1 text-xs text-muted-foreground">建议先在测试数据上验证</p></div>
-      <div class="rounded-xl border border-violet-400/15 bg-violet-400/[0.04] p-4"><p class="text-sm text-muted-foreground">实验功能</p><p class="mt-2 text-2xl font-semibold text-violet-100">{{ countByStatus('experimental') }}</p><p class="mt-1 text-xs text-muted-foreground">可能增加成本或处理时长</p></div>
-    </section>
-
-    <div class="grid items-start gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.65fr)]">
-      <Card class="overflow-hidden border-border bg-card/80">
-        <CardHeader class="border-b border-border/70 p-5">
-          <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle class="text-base">能力目录</CardTitle><CardDescription class="mt-1">展示推荐默认值与启用前应了解的影响</CardDescription></div><div class="flex gap-1 overflow-x-auto rounded-lg bg-muted/45 p-1"><button v-for="group in groups" :key="group.value" class="shrink-0 rounded-md px-2.5 py-1.5 text-xs transition-colors" :class="activeGroup === group.value ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'" @click="activeGroup = group.value">{{ group.label }}</button></div></div>
-        </CardHeader>
-        <CardContent class="grid gap-3 p-4 sm:grid-cols-2">
-          <article v-for="flag in visibleFlags" :key="flag.key" class="rounded-xl border border-border bg-muted/20 p-4 transition-colors hover:border-primary/25 hover:bg-muted/40">
-            <div class="flex items-start justify-between gap-3"><div class="flex min-w-0 items-center gap-2.5"><div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><component :is="flag.icon" class="h-4 w-4" /></div><h2 class="text-sm font-semibold">{{ flag.name }}</h2></div><Badge variant="outline" class="shrink-0" :class="statusMeta(flag.status).class">{{ statusMeta(flag.status).label }}</Badge></div>
-            <p class="mt-4 text-sm leading-6 text-muted-foreground">{{ flag.summary }}</p>
-            <div class="mt-4 rounded-lg border border-border/70 bg-background/35 p-3"><p class="text-xs text-muted-foreground">开启后</p><p class="mt-1 text-xs leading-5 text-foreground/85">{{ flag.outcome }}</p></div>
-            <div class="mt-3 flex items-center justify-between gap-3"><span class="text-xs" :class="flag.defaultEnabled ? 'text-emerald-300' : 'text-muted-foreground'">{{ flag.defaultEnabled ? '推荐默认开启' : '默认不启用' }}</span><span class="font-mono text-[10px] text-muted-foreground">{{ flag.key }}</span></div>
-            <details class="mt-3 border-t border-border/70 pt-3"><summary class="cursor-pointer text-xs text-primary hover:text-primary/80">查看前置条件与配置方式</summary><div class="mt-3 space-y-2 rounded-lg bg-muted/40 p-3 text-xs leading-5 text-muted-foreground"><p><strong class="font-medium text-foreground">前置条件：</strong>{{ flag.dependency }}</p><p><strong class="font-medium text-foreground">配置项：</strong><code class="ml-1 break-all rounded bg-background/70 px-1.5 py-0.5 text-foreground">{{ flag.howToEnable }}</code></p></div></details>
-          </article>
-        </CardContent>
-      </Card>
-
-      <aside class="space-y-4 xl:sticky xl:top-6">
-        <Card class="border-primary/20 bg-primary/[0.055]"><CardHeader class="p-5 pb-3"><div class="flex items-center gap-2"><CircleHelp class="h-4 w-4 text-primary" /><CardTitle class="text-base">这个页面不是开关面板</CardTitle></div></CardHeader><CardContent class="space-y-3 p-5 pt-2 text-sm leading-6 text-muted-foreground"><p>它用于了解能力边界和部署要求；页面不会直接改动运行中的 AI 配置。</p><p>实际启用或关闭需要修改部署环境中的 Python AI 配置，然后重启 AI 服务使配置生效。</p></CardContent></Card>
-        <Card class="border-border bg-card/80"><CardHeader class="p-5 pb-3"><div class="flex items-center gap-2"><Lightbulb class="h-4 w-4 text-amber-300" /><CardTitle class="text-base">什么时候需要调整？</CardTitle></div></CardHeader><CardContent class="space-y-3 p-5 pt-2 text-sm leading-6 text-muted-foreground"><div class="flex gap-2.5"><CheckCircle2 class="mt-1 h-4 w-4 shrink-0 text-emerald-300" /><p>一般知识库问答：保持默认混合检索即可。</p></div><div class="flex gap-2.5"><GitBranch class="mt-1 h-4 w-4 shrink-0 text-amber-300" /><p>关系型知识较多：可在测试后考虑图谱检索。</p></div><div class="flex gap-2.5"><FileText class="mt-1 h-4 w-4 shrink-0 text-violet-200" /><p>大量扫描件：验证 OCR 的质量与处理时长后再启用。</p></div><div class="flex gap-2.5"><Cpu class="mt-1 h-4 w-4 shrink-0 text-rose-200" /><p>复杂 Agent：先评估延迟和模型成本，再使用协作模式。</p></div></CardContent></Card>
-        <div class="flex gap-3 rounded-xl border border-border bg-muted/20 p-4 text-sm leading-6 text-muted-foreground"><Sparkles class="mt-0.5 h-4 w-4 shrink-0 text-primary" /><p>推荐先通过“RAG 观测”的测试数据验证效果，再将可选能力用于真实业务。</p></div>
-      </aside>
+    <div class="flex gap-3 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.05] p-4 text-sm leading-6 text-muted-foreground">
+      <CheckCircle2 class="mt-1 h-4 w-4 shrink-0 text-emerald-400" />
+      <p>建议从“日常问答”开始。只有在引用不准、关系知识较多或任务确实复杂时，再逐步开启增强能力。</p>
     </div>
   </div>
 </template>

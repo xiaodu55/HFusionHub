@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Dict, List, Protocol, Tuple
 
 
@@ -94,6 +95,18 @@ class CrossEncoderReranker:
         }
 
 
+@lru_cache(maxsize=4)
+def _get_configured_reranker(mode: str, model_name: str) -> Reranker:
+    if mode == "lexical":
+        return LexicalReranker()
+    if mode == "cross_encoder":
+        try:
+            return CrossEncoderReranker(model_name)
+        except (ImportError, OSError, RuntimeError) as error:
+            return DisabledReranker(reason=f"cross_encoder_unavailable:{type(error).__name__}")
+    return DisabledReranker(reason=f"unsupported_mode:{mode}")
+
+
 def get_reranker() -> Reranker:
     from app.utils.config import config
     from app.utils.feature_flag import feature_flags
@@ -103,12 +116,5 @@ def get_reranker() -> Reranker:
 
     mode = config.RAG_RERANKER_MODE.lower().strip()
     if mode in {"", "disabled", "off", "none"}:
-        return DisabledReranker()
-    if mode == "lexical":
-        return LexicalReranker()
-    if mode == "cross_encoder":
-        try:
-            return CrossEncoderReranker(config.RAG_RERANKER_MODEL)
-        except (ImportError, OSError, RuntimeError) as error:
-            return DisabledReranker(reason=f"cross_encoder_unavailable:{type(error).__name__}")
-    return DisabledReranker(reason=f"unsupported_mode:{mode}")
+        mode = "lexical"
+    return _get_configured_reranker(mode, config.RAG_RERANKER_MODEL)

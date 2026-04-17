@@ -47,6 +47,7 @@ class MultiChannelRetriever:
         """
         self.query_rewriter = query_rewriter or get_query_rewriter()
         self.postprocessor = postprocessor or get_postprocessor()
+        self._dynamic_reranker = reranker is None
         self.reranker = reranker or get_reranker()
         self.router: QueryRouter = get_router()
 
@@ -133,7 +134,10 @@ class MultiChannelRetriever:
             # 3. Optional second-stage reranking. A disabled or unavailable
             # model leaves the first-stage order intact and records why.
             rerank_started_at = time.perf_counter()
-            all_results, rerank_debug = await self.reranker.rerank(query, all_results)
+            # Resolve the runtime switch for every retrieval. Configured
+            # implementations are cached by the factory.
+            active_reranker = get_reranker() if self._dynamic_reranker else self.reranker
+            all_results, rerank_debug = await active_reranker.rerank(query, all_results)
             stage_timings_ms["rerank"] = round(
                 (time.perf_counter() - rerank_started_at) * 1000, 2
             )

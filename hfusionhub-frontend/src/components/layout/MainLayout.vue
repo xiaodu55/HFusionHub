@@ -71,15 +71,15 @@ const menuItems: Array<{
   { path: '/agent', label: '运行记录', description: '查看执行和失败原因', icon: Sparkles, group: 'personal', keywords: ['运行', '任务', 'agent', '失败'] },
   { path: '/approvals', label: '待确认操作', description: '允许或阻止敏感操作', icon: Fingerprint, group: 'personal', keywords: ['确认', '审批', '允许', '拒绝'] },
   { path: '/memory', label: '我的记忆', description: '管理 AI 记住的信息', icon: User, group: 'personal', keywords: ['记忆', 'memory'] },
-  { path: '/cost', label: '用量与费用', description: '查看模型使用量', icon: DollarSign, group: 'personal', keywords: ['用量', '费用', '成本', 'token'] },
+  { path: '/cost', label: '模型用量', description: '查看调用次数和预估费用', icon: DollarSign, group: 'personal', keywords: ['用量', '费用', '成本', 'token'] },
   { path: '/builder/prompts', label: '回答方案', description: '设置 AI 回答方式', icon: PenLine, roles: ['builder', 'admin'], group: 'build', keywords: ['prompt', '提示词', '模板', '回答方案'] },
   { path: '/builder/test-bench', label: '方案测试', description: '验证单个回答效果', icon: FlaskConical, roles: ['builder', 'admin'], group: 'build', keywords: ['测试', 'test', 'bench', '评测'] },
   { path: '/builder/test-sets', label: '回归用例', description: '批量比较回答结果', icon: FlaskConical, roles: ['builder', 'admin'], group: 'build', keywords: ['用例', '批量', '回归', 'suite'] },
   { path: '/rag', label: '回答效果', description: '分析检索和引用质量', icon: Activity, roles: ['builder', 'admin'], group: 'build', keywords: ['rag', '检索', '引用', '评估'] },
   { path: '/builder/plugins', label: '插件管理', description: '安装和隔离运行插件', icon: Package, roles: ['admin'], group: 'admin', keywords: ['插件', 'plugin', '沙箱'] },
-  { path: '/admin/flags', label: '高级能力', description: '查看系统能力和依赖', icon: ShieldCheck, roles: ['admin'], group: 'admin', keywords: ['开关', 'flag', '能力'] },
-  { path: '/admin/intent-tree', label: '意图路由', description: '配置问题分流规则', icon: GitBranch, roles: ['admin'], group: 'admin', keywords: ['意图', '路由', 'intent tree'] },
-  { path: '/admin/users', label: '用户与权限', description: '分配账号身份', icon: Users, roles: ['admin'], group: 'admin', keywords: ['用户', '权限', '身份', '角色'] },
+  { path: '/admin/flags', label: '能力开关', description: '直接开启或关闭 AI 增强能力', icon: ShieldCheck, roles: ['admin'], group: 'admin', keywords: ['开关', 'flag', '能力'] },
+  { path: '/admin/intent-tree', label: '问题分流', description: '让不同问题使用对应知识库', icon: GitBranch, roles: ['admin'], group: 'admin', keywords: ['意图', '路由', '问题分流', 'intent tree'] },
+  { path: '/admin/users', label: '账号权限', description: '给新用户分配身份', icon: Users, roles: ['admin'], group: 'admin', keywords: ['用户', '权限', '身份', '角色'] },
 ]
 
 const visibleMenuItems = computed(() => menuItems.filter(item => !item.roles || userStore.hasAnyRole(item.roles)))
