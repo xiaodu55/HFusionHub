@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   AlertCircle,
   Bot,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   CircleDashed,
   Clock3,
@@ -12,9 +13,11 @@ import {
   Fingerprint,
   Gauge,
   LoaderCircle,
+  MessageSquare,
   RefreshCw,
   RotateCcw,
   Route,
+  Search,
   Sparkles,
   TerminalSquare,
   Wrench,
@@ -24,6 +27,7 @@ import * as agentApi from '@/api/agent'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import { useToast } from '@/composables/useToast'
 
@@ -39,13 +43,9 @@ const selected = ref<agentApi.AgentTaskDetail | null>(null)
 const events = ref<agentApi.AgentStatusEvent[]>([])
 const metrics = ref<agentApi.AgentMetrics | null>(null)
 const statusFilter = ref('ALL')
-
-const statusFilters = [
-  { value: 'ALL', label: '全部' },
-  { value: 'RUNNING', label: '执行中' },
-  { value: 'SUCCEEDED', label: '已完成' },
-  { value: 'FAILED', label: '失败' },
-]
+const searchQuery = ref('')
+const currentPage = ref(1)
+const pageSize = 8
 
 const normalizedStatus = (status?: string) => (status || 'UNKNOWN').toUpperCase()
 
@@ -69,16 +69,43 @@ const statusBadgeClass = (status?: string) => {
   }[tone]
 }
 
-const filteredTasks = computed(() => statusFilter.value === 'ALL'
-  ? tasks.value
-  : tasks.value.filter(task => normalizedStatus(task.status) === statusFilter.value))
 const completedCount = computed(() => tasks.value.filter(task => statusMeta(task.status).tone === 'success').length)
 const runningCount = computed(() => tasks.value.filter(task => ['progress', 'warning'].includes(statusMeta(task.status).tone)).length)
 const failedCount = computed(() => tasks.value.filter(task => statusMeta(task.status).tone === 'danger').length)
+const statusFilters = computed(() => [
+  { value: 'ALL', label: '全部', count: tasks.value.length },
+  { value: 'ACTIVE', label: '处理中', count: runningCount.value },
+  { value: 'DONE', label: '已完成', count: completedCount.value },
+  { value: 'NEEDS_ATTENTION', label: '需处理', count: failedCount.value },
+])
+const filteredTasks = computed(() => {
+  const keyword = searchQuery.value.trim().toLowerCase()
+  return tasks.value.filter((task) => {
+    const tone = statusMeta(task.status).tone
+    const matchesStatus = statusFilter.value === 'ALL'
+      || (statusFilter.value === 'ACTIVE' && ['progress', 'warning'].includes(tone))
+      || (statusFilter.value === 'DONE' && tone === 'success')
+      || (statusFilter.value === 'NEEDS_ATTENTION' && tone === 'danger')
+    const matchesKeyword = !keyword
+      || String(task.id).includes(keyword)
+      || (task.query || '').toLowerCase().includes(keyword)
+      || statusMeta(task.status).label.toLowerCase().includes(keyword)
+    return matchesStatus && matchesKeyword
+  })
+})
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredTasks.value.length / pageSize)))
+const paginatedTasks = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return filteredTasks.value.slice(start, start + pageSize)
+})
 const activeRun = computed(() => selected.value?.runs?.find(run => run.id === selected.value?.currentRunId) || selected.value?.runs?.[0])
 const isFailed = computed(() => statusMeta(selected.value?.status).tone === 'danger')
 const canRetry = computed(() => ['FAILED', 'TIMEOUT', 'DEAD_LETTER'].includes(normalizedStatus(selected.value?.status)))
 const canCancel = computed(() => ['RUNNING', 'QUEUED', 'PROCESSING'].includes(normalizedStatus(selected.value?.status)))
+
+watch([statusFilter, searchQuery], () => {
+  currentPage.value = 1
+})
 const failureDetail = computed(() => metrics.value?.errorDetail || activeRun.value?.errorDetail || selected.value?.deadLetterReason || '')
 const failureTitle = computed(() => {
   const detail = failureDetail.value.toLowerCase()
@@ -98,6 +125,10 @@ const load = async () => {
   loading.value = true
   try {
     tasks.value = (await agentApi.listTasks({ page: 1, pageSize: 50 })).data.records
+    if (!selected.value && tasks.value.length) {
+      const preferred = tasks.value.find(task => statusMeta(task.status).tone === 'danger') || tasks.value[0]
+      await open(preferred)
+    }
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '加载 Agent 任务失败')
   } finally {
@@ -134,7 +165,7 @@ const retry = async () => {
   actionLoading.value = true
   try {
     await agentApi.retryTask(selected.value.id)
-    toast.success('任务已重新排队，请从对话中重新发起请求')
+    toast.success('任务已重新排队，系统会再次执行')
     await refresh()
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '重试任务失败')
@@ -183,27 +214,41 @@ const openApprovals = () => {
   router.push({ path: '/approvals', query: { taskId: selected.value.id } })
 }
 
+const openConversation = () => {
+  if (selected.value?.conversationId) {
+    router.push(`/chat/${selected.value.conversationId}`)
+    return
+  }
+  router.push('/chat')
+}
+
+const openChat = () => router.push('/chat')
+const openPendingApprovals = () => router.push('/approvals')
+
 onMounted(load)
 </script>
 
 <template>
   <div class="space-y-6 pb-4">
-    <section class="overflow-hidden rounded-2xl border border-border bg-card/80 shadow-[0_18px_45px_rgba(0,0,0,0.18)]">
+    <section class="overflow-hidden rounded-lg border border-border bg-card/80">
       <div class="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div class="flex gap-4">
-          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary">
+          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary/10 text-primary">
             <Route class="h-5 w-5" />
           </div>
           <div>
-            <p class="text-xs font-medium tracking-[0.16em] text-primary/90">AGENT OPERATIONS</p>
-            <h2 class="mt-1 text-2xl font-semibold tracking-tight">任务执行中心</h2>
-            <p class="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">这里记录每次 AI 对话在后台的执行过程。平时直接在“智能对话”使用即可；遇到回答慢、失败或需要审批时，再来这里查看原因和处理。</p>
+            <p class="text-xs font-medium text-primary/90">AI 任务记录</p>
+            <h1 class="mt-1 text-2xl font-semibold">查看回答是否正常完成</h1>
+            <p class="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">平时直接使用智能对话即可。回答长时间没有结果、执行失败或等待你确认操作时，可以在这里查看原因、重新执行或回到原对话。</p>
           </div>
         </div>
-        <Button :disabled="loading || loadingDetail" class="shrink-0 gap-2" @click="refresh">
-          <RefreshCw class="h-4 w-4" :class="(loading || loadingDetail) && 'animate-spin'" />
-          刷新状态
-        </Button>
+        <div class="flex shrink-0 flex-wrap gap-2">
+          <Button variant="outline" class="gap-2" @click="openChat"><MessageSquare class="h-4 w-4" />去智能对话</Button>
+          <Button :disabled="loading || loadingDetail" class="gap-2" @click="refresh">
+            <RefreshCw class="h-4 w-4" :class="(loading || loadingDetail) && 'animate-spin'" />
+            刷新记录
+          </Button>
+        </div>
       </div>
     </section>
 
@@ -226,15 +271,43 @@ onMounted(load)
       </div>
     </section>
 
+    <section class="rounded-lg border border-border bg-card/55 p-5">
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 class="font-semibold">什么时候使用这个页面？</h2>
+          <p class="mt-1 text-sm text-muted-foreground">任务会由智能对话自动创建，你不需要在这里手动新建。</p>
+        </div>
+        <Button variant="outline" size="sm" class="gap-2" @click="openPendingApprovals"><Fingerprint class="h-4 w-4" />查看待确认操作</Button>
+      </div>
+      <div class="mt-4 grid gap-3 md:grid-cols-3">
+        <button class="rounded-md border border-border bg-background/40 p-4 text-left transition-colors hover:border-primary/35 hover:bg-primary/[0.04]" @click="statusFilter = 'ACTIVE'">
+          <p class="text-sm font-medium">回答一直没有完成</p>
+          <p class="mt-1 text-xs leading-5 text-muted-foreground">示例：对话一直显示处理中。点击后查看正在排队或执行的任务。</p>
+        </button>
+        <button class="rounded-md border border-border bg-background/40 p-4 text-left transition-colors hover:border-rose-400/30 hover:bg-rose-400/[0.04]" @click="statusFilter = 'NEEDS_ATTENTION'">
+          <p class="text-sm font-medium">回答显示失败</p>
+          <p class="mt-1 text-xs leading-5 text-muted-foreground">示例：模型超时或工具调用失败。选择任务后查看处理建议并重新执行。</p>
+        </button>
+        <button class="rounded-md border border-border bg-background/40 p-4 text-left transition-colors hover:border-amber-400/30 hover:bg-amber-400/[0.04]" @click="openPendingApprovals">
+          <p class="text-sm font-medium">AI 等待你的确认</p>
+          <p class="mt-1 text-xs leading-5 text-muted-foreground">示例：AI 要保存笔记或执行写入操作，需要你批准后才能继续。</p>
+        </button>
+      </div>
+    </section>
+
     <div class="grid items-start gap-6 xl:grid-cols-[minmax(19rem,0.82fr)_minmax(0,1.5fr)]">
       <Card class="overflow-hidden border-border bg-card/80">
         <CardHeader class="border-b border-border/70 p-5">
           <div class="flex items-center justify-between gap-3">
             <div>
               <CardTitle class="text-base">任务列表</CardTitle>
-              <CardDescription class="mt-1">选择一条记录查看执行情况</CardDescription>
+              <CardDescription class="mt-1">搜索问题，或按状态快速找到需要处理的任务</CardDescription>
             </div>
             <span class="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">{{ filteredTasks.length }}</span>
+          </div>
+          <div class="relative mt-4">
+            <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input v-model="searchQuery" class="pl-9" placeholder="搜索问题内容或任务编号" />
           </div>
           <div class="mt-4 flex gap-1 overflow-x-auto pb-1">
             <button
@@ -244,21 +317,22 @@ onMounted(load)
               :class="statusFilter === filter.value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'"
               @click="statusFilter = filter.value"
             >
-              {{ filter.label }}
+              {{ filter.label }} {{ filter.count }}
             </button>
           </div>
         </CardHeader>
-        <CardContent class="max-h-[42rem] space-y-2 overflow-y-auto p-3">
+        <CardContent class="space-y-2 p-3">
           <LoadingSkeleton v-if="loading" type="list" :count="5" />
           <div v-else-if="!filteredTasks.length" class="flex min-h-72 flex-col items-center justify-center px-6 text-center">
             <CircleDashed class="h-9 w-9 text-muted-foreground/60" />
             <p class="mt-4 font-medium">暂时没有这类任务</p>
-            <p class="mt-1 text-sm leading-6 text-muted-foreground">从智能对话发出问题后，系统会自动在这里留下运行记录。</p>
+            <p class="mt-1 text-sm leading-6 text-muted-foreground">可以清除搜索条件，或者从智能对话发送一个新问题。</p>
+            <Button variant="outline" size="sm" class="mt-4 gap-2" @click="openChat"><MessageSquare class="h-4 w-4" />去智能对话</Button>
           </div>
           <button
-            v-for="task in filteredTasks"
+            v-for="task in paginatedTasks"
             :key="task.id"
-            class="group w-full rounded-xl border p-3.5 text-left transition-all"
+            class="group w-full rounded-lg border p-3.5 text-left transition-all"
             :class="selected?.id === task.id ? 'border-primary/50 bg-primary/[0.08] shadow-[inset_0_0_0_1px_rgba(52,211,153,0.08)]' : 'border-transparent hover:border-border hover:bg-muted/50'"
             @click="open(task)"
           >
@@ -281,15 +355,23 @@ onMounted(load)
               </div>
             </div>
           </button>
+          <div v-if="filteredTasks.length > pageSize" class="flex items-center justify-between border-t border-border/70 px-1 pt-3">
+            <span class="text-xs text-muted-foreground">第 {{ currentPage }} / {{ totalPages }} 页</span>
+            <div class="flex gap-1">
+              <Button variant="outline" size="sm" title="上一页" :disabled="currentPage <= 1" @click="currentPage--"><ChevronLeft class="h-4 w-4" /></Button>
+              <Button variant="outline" size="sm" title="下一页" :disabled="currentPage >= totalPages" @click="currentPage++"><ChevronRight class="h-4 w-4" /></Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
       <Card class="min-h-[38rem] overflow-hidden border-border bg-card/80">
         <template v-if="!selected && !loadingDetail">
           <div class="flex min-h-[38rem] flex-col items-center justify-center px-6 text-center">
-            <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-primary"><Sparkles class="h-6 w-6" /></div>
-            <h3 class="mt-5 text-lg font-semibold">选择一项任务</h3>
-            <p class="mt-2 max-w-md text-sm leading-6 text-muted-foreground">查看这次对话是否完成、耗时多久、是否调用工具，以及发生失败时该如何处理。</p>
+            <div class="flex h-14 w-14 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary"><Sparkles class="h-6 w-6" /></div>
+            <h3 class="mt-5 text-lg font-semibold">还没有 AI 任务记录</h3>
+            <p class="mt-2 max-w-md text-sm leading-6 text-muted-foreground">先在智能对话中提问，例如“根据知识库总结 Java 虚拟线程的 3 个要点”，系统会自动记录执行状态。</p>
+            <Button class="mt-5 gap-2" @click="openChat"><MessageSquare class="h-4 w-4" />开始智能对话</Button>
           </div>
         </template>
         <template v-else-if="loadingDetail">
@@ -306,16 +388,17 @@ onMounted(load)
                 <CardTitle class="mt-3 break-words text-xl leading-8">{{ selected.query || '未提供问题内容' }}</CardTitle>
                 <CardDescription class="mt-2">创建于 {{ formatDate(selected.createdAt) }} · 最近更新 {{ formatDate(selected.updatedAt) }}</CardDescription>
               </div>
-              <div class="flex shrink-0 gap-2">
-                <Button v-if="canRetry" variant="outline" size="sm" :disabled="actionLoading" class="gap-1.5" @click="retry"><RotateCcw class="h-3.5 w-3.5" />重试</Button>
-                <Button v-if="canCancel" variant="outline" size="sm" :disabled="actionLoading" class="gap-1.5" @click="cancel"><XCircle class="h-3.5 w-3.5" />取消</Button>
-                <Button variant="outline" size="sm" class="gap-1.5" @click="openApprovals"><Fingerprint class="h-3.5 w-3.5" />审批记录</Button>
+              <div class="flex flex-wrap gap-2 sm:justify-end">
+                <Button variant="outline" size="sm" class="gap-1.5" @click="openConversation"><MessageSquare class="h-3.5 w-3.5" />回到对话</Button>
+                <Button v-if="canRetry" size="sm" :disabled="actionLoading" class="gap-1.5" @click="retry"><RotateCcw class="h-3.5 w-3.5" />重新执行</Button>
+                <Button v-if="canCancel" variant="outline" size="sm" :disabled="actionLoading" class="gap-1.5" @click="cancel"><XCircle class="h-3.5 w-3.5" />取消任务</Button>
+                <Button variant="outline" size="sm" class="gap-1.5" @click="openApprovals"><Fingerprint class="h-3.5 w-3.5" />确认记录</Button>
               </div>
             </div>
           </CardHeader>
 
           <CardContent class="space-y-6 p-5 sm:p-6">
-            <section v-if="isFailed" class="rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-4">
+            <section v-if="isFailed" class="rounded-lg border border-rose-400/20 bg-rose-400/[0.06] p-4">
               <div class="flex gap-3">
                 <AlertCircle class="mt-0.5 h-5 w-5 shrink-0 text-rose-300" />
                 <div class="min-w-0">
@@ -332,10 +415,10 @@ onMounted(load)
             <section>
               <div class="mb-3 flex items-center gap-2"><Gauge class="h-4 w-4 text-primary" /><h3 class="font-medium">本次执行概览</h3></div>
               <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div class="rounded-xl border border-border bg-muted/35 p-3.5"><p class="text-xs text-muted-foreground">执行耗时</p><p class="mt-2 text-lg font-semibold">{{ formatDuration(metrics?.totalDurationMs ?? activeRun?.durationMs) }}</p></div>
-                <div class="rounded-xl border border-border bg-muted/35 p-3.5"><p class="text-xs text-muted-foreground">执行步骤</p><p class="mt-2 text-lg font-semibold">{{ formatNumber(metrics?.stepCount ?? activeRun?.steps?.length) }}</p></div>
-                <div class="rounded-xl border border-border bg-muted/35 p-3.5"><p class="text-xs text-muted-foreground">工具调用</p><p class="mt-2 text-lg font-semibold">{{ formatNumber(metrics?.toolCallsCount ?? activeRun?.toolCallsCount) }}</p></div>
-                <div class="rounded-xl border border-border bg-muted/35 p-3.5"><p class="text-xs text-muted-foreground">消耗 Token</p><p class="mt-2 text-lg font-semibold">{{ formatNumber(metrics?.totalTokens) }}</p></div>
+                <div class="rounded-md border border-border bg-muted/35 p-3.5"><p class="text-xs text-muted-foreground">执行耗时</p><p class="mt-2 text-lg font-semibold">{{ formatDuration(metrics?.totalDurationMs ?? activeRun?.durationMs) }}</p></div>
+                <div class="rounded-md border border-border bg-muted/35 p-3.5"><p class="text-xs text-muted-foreground">执行步骤</p><p class="mt-2 text-lg font-semibold">{{ formatNumber(metrics?.stepCount ?? activeRun?.steps?.length) }}</p></div>
+                <div class="rounded-md border border-border bg-muted/35 p-3.5"><p class="text-xs text-muted-foreground">工具调用</p><p class="mt-2 text-lg font-semibold">{{ formatNumber(metrics?.toolCallsCount ?? activeRun?.toolCallsCount) }}</p></div>
+                <div class="rounded-md border border-border bg-muted/35 p-3.5"><p class="text-xs text-muted-foreground">消耗 Token</p><p class="mt-2 text-lg font-semibold">{{ formatNumber(metrics?.totalTokens) }}</p></div>
               </div>
               <div v-if="metrics?.model || activeRun?.model || metrics?.sourcesCount" class="mt-3 flex flex-wrap gap-2 text-xs">
                 <span v-if="metrics?.model || activeRun?.model" class="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-muted-foreground">模型：{{ metrics?.model || activeRun?.model }}</span>

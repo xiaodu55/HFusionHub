@@ -472,10 +472,6 @@ main::-webkit-scrollbar-track {
 }
 
 @media (max-width: 640px) {
-  .glass-sidebar {
-    width: 5rem !important;
-  }
-
   .metric-card {
     min-height: 9.5rem;
   }

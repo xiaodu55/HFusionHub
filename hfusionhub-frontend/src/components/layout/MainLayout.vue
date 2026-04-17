@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
@@ -42,7 +42,7 @@ const route = useRoute()
 const userStore = useUserStore()
 const { isDarkMode, initializeTheme, toggleTheme } = useTheme()
 
-const isSidebarOpen = ref(true)
+const isSidebarOpen = ref(typeof window === 'undefined' ? true : window.innerWidth >= 1024)
 const globalSearchQuery = ref('')
 const serviceDialogOpen = ref(false)
 const notificationsDialogOpen = ref(false)
@@ -70,7 +70,7 @@ const menuItems: Array<{
   { path: '/knowledge-base', label: '知识库', description: '知识治理', icon: BookOpen },
   { path: '/document', label: '文档管理', description: '解析与索引', icon: FileText },
   { path: '/chat', label: '智能对话', description: '多轮问答', icon: MessageSquare },
-  { path: '/agent', label: 'Agent 任务', description: '执行与恢复', icon: Sparkles },
+  { path: '/agent', label: 'AI 任务记录', description: '失败与重试', icon: Sparkles },
   { path: '/approvals', label: '工具审批', description: '人工确认', icon: Fingerprint },
   { path: '/memory', label: '长期记忆', description: 'Agent 用户记忆', icon: User },
   { path: '/rag', label: 'RAG 观测', description: '检索评估', icon: Activity },
@@ -134,6 +134,10 @@ const logoutButtonClass = computed(() =>
 const toggleSidebar = () => {
   isSidebarOpen.value = !isSidebarOpen.value
 }
+
+watch(() => route.path, () => {
+  if (window.innerWidth < 1024) isSidebarOpen.value = false
+})
 
 const refreshServiceHealth = async () => {
   serviceState.value = 'checking'
@@ -269,10 +273,17 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app-shell h-screen overflow-hidden bg-background text-foreground">
+    <button
+      v-if="isSidebarOpen"
+      type="button"
+      class="fixed inset-0 z-30 bg-black/65 lg:hidden"
+      aria-label="关闭导航"
+      @click="isSidebarOpen = false"
+    />
     <aside
       :class="[
-        'glass-sidebar relative z-10 flex shrink-0 flex-col transition-[width] duration-300 ease-out',
-        isSidebarOpen ? 'w-[17rem]' : 'w-[5rem]',
+        'glass-sidebar fixed inset-y-0 left-0 z-40 flex w-[17rem] shrink-0 flex-col transition-transform duration-300 ease-out lg:relative lg:inset-auto lg:z-10 lg:translate-x-0 lg:transition-[width]',
+        isSidebarOpen ? 'translate-x-0 lg:w-[17rem]' : '-translate-x-full lg:w-[5rem]',
       ]"
     >
       <div class="flex h-[72px] items-center justify-between px-4">
