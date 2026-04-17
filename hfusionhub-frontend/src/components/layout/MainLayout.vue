@@ -32,7 +32,6 @@ import {
   Sparkles,
   Sun,
   User,
-  Workflow,
   Wrench,
   X,
 } from 'lucide-vue-next'
@@ -65,7 +64,6 @@ const menuItems: Array<{
   { path: '/builder/models', label: '模型中心', description: '模型与运行状态', icon: Cpu },
   { path: '/builder/tools', label: '工具中心', description: '能力与调用记录', icon: Wrench },
   { path: '/builder/plugins', label: '插件管理', description: '安装与沙箱', icon: Package },
-  { path: '/builder/workflow', label: '工作流', description: '可视化编排', icon: Workflow },
   { path: '/', label: '任务总览', description: '工作台', icon: Home },
   { path: '/knowledge-base', label: '知识库', description: '知识治理', icon: BookOpen },
   { path: '/document', label: '文档管理', description: '解析与索引', icon: FileText },
@@ -83,7 +81,7 @@ menuItems.push({ path: '/admin/intent-tree', label: '意图树', description: 'R
 
 const menuGroups = [
   { label: '工作区', items: menuItems.filter((item) => ['/', '/knowledge-base', '/document', '/chat'].includes(item.path)) },
-  { label: '构建', items: menuItems.filter((item) => ['/builder/prompts', '/builder/test-bench', '/builder/test-sets', '/builder/models', '/builder/tools', '/builder/plugins', '/builder/workflow', '/agent'].includes(item.path)) },
+  { label: '构建', items: menuItems.filter((item) => ['/builder/prompts', '/builder/test-bench', '/builder/test-sets', '/builder/models', '/builder/tools', '/builder/plugins', '/agent'].includes(item.path)) },
   { label: '运营', items: menuItems.filter((item) => ['/cost', '/approvals', '/rag', '/memory'].includes(item.path)) },
   { label: '管理', items: menuItems.filter((item) => ['/admin/flags', '/settings/safety'].includes(item.path)) },
 ]
