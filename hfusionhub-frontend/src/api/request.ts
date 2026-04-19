@@ -2,6 +2,7 @@ import axios from 'axios'
 import type { AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig, AxiosResponse } from 'axios'
 import { useUserStore } from '@/stores/user'
 import router from '@/router'
+import { friendlyErrorMessage } from '@/utils/errorMessage'
 
 // 创建 axios 实例
 const service: AxiosInstance = axios.create({
@@ -60,14 +61,8 @@ service.interceptors.response.use(
       router.push('/login')
       setTimeout(() => { isHandling401 = false }, 1000)
     }
-    const data = error.response?.data
-    const message =
-      data?.message ||
-      data?.detail?.message ||
-      data?.error ||
-      error.message ||
-      '请求失败'
-    return Promise.reject(new Error(message))
+    // 统一的「可操作化」错误提示（网络断开 / 超时 / 服务不可用等）
+    return Promise.reject(new Error(friendlyErrorMessage(error)))
   }
 )
 

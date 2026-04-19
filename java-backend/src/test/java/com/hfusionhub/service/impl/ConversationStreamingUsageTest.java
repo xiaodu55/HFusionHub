@@ -1,5 +1,12 @@
 package com.hfusionhub.service.impl;
 
+import cn.dev33.satoken.SaManager;
+import cn.dev33.satoken.context.SaTokenContext;
+import cn.dev33.satoken.context.model.SaRequest;
+import cn.dev33.satoken.context.model.SaResponse;
+import cn.dev33.satoken.context.model.SaStorage;
+import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
+import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.dto.MessageSendDTO;
@@ -86,6 +93,12 @@ class ConversationStreamingUsageTest {
 
     @BeforeEach
     void setUp() {
+        // 无 Web 容器的 Spring 测试：安装内存 Sa-Token 上下文，使聊天链路的意图路由等
+        // JwtUtils.getCurrentUserId() 调用可用（生产环境由请求线程提供上下文）
+        SaManager.setSaTokenDao(new SaTokenDaoDefaultImpl());
+        SaManager.setSaTokenContext(new MockSaTokenContext());
+        StpUtil.login(1L);
+
         // 共享 H2 单 JVM 内持久：流式结算在 Reactor 线程单独提交，先清账本保证断言自洽
         usageEventMapper.delete(Wrappers.emptyWrapper());
         usageReservationMapper.delete(Wrappers.emptyWrapper());
@@ -111,13 +124,14 @@ class ConversationStreamingUsageTest {
 
     @AfterEach
     void tearDown() {
+        StpUtil.logout();
         TenantContext.clear();
     }
 
     @Test
     void streamingCompletionSettlesUsageOnContextlessReactorThread() {
         // 异步 Flux：在 Schedulers.single 线程上发出 [DONE]，模拟无租户上下文的回调线程
-        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString()))
+        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any()))
                 .thenReturn(Flux.just("data: [DONE]\n\n").subscribeOn(Schedulers.single()));
 
         MessageSendDTO dto = new MessageSendDTO();
@@ -142,7 +156,7 @@ class ConversationStreamingUsageTest {
     @Test
     void streamingErrorReleasesReservationOnContextlessReactorThread() {
         // Flux 立即报错：onError 在调度线程执行，必须 runAs 恢复上下文后 RELEASE
-        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString()))
+        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any()))
                 .thenReturn(Flux.<String>error(new RuntimeException("simulated stream failure"))
                         .subscribeOn(Schedulers.single()));
 
@@ -170,5 +184,35 @@ class ConversationStreamingUsageTest {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /** Minimal in-memory SaTokenContext for tests without a servlet container. */
+    private static class MockSaTokenContext implements SaTokenContext {
+        private final java.util.Map<String, Object> storage = new java.util.HashMap<>();
+
+        @Override
+        public SaRequest getRequest() {
+            return org.mockito.Mockito.mock(SaRequest.class);
+        }
+
+        @Override
+        public SaResponse getResponse() {
+            return org.mockito.Mockito.mock(SaResponse.class);
+        }
+
+        @Override
+        public SaStorage getStorage() {
+            return new SaStorage() {
+                @Override public Object getSource() { return storage; }
+                @Override public Object get(String key) { return storage.get(key); }
+                @Override public SaStorage set(String key, Object value) { storage.put(key, value); return this; }
+                @Override public SaStorage delete(String key) { storage.remove(key); return this; }
+            };
+        }
+
+        @Override
+        public boolean matchPath(String pattern, String path) { return true; }
+        @Override
+        public boolean isValid() { return true; }
     }
 }

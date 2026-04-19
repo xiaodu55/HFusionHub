@@ -200,7 +200,7 @@ class AgentTaskQueueIntegrationTest {
                 "data: {\"content\":\" World\"}",
                 "data: [DONE]"
         );
-        when(aiClient.streamChat(eq("test query"), eq(50L), isNull(), anyList(), eq(pendingRun.getRunUuid())))
+        when(aiClient.streamChat(eq("test query"), eq(50L), isNull(), anyList(), eq(pendingRun.getRunUuid()), anyLong(), any()))
                 .thenReturn(contentFlux);
 
         // Act — SyncTaskExecutor makes executeRun complete within pollAndDispatch
@@ -247,7 +247,7 @@ class AgentTaskQueueIntegrationTest {
 
         assertEquals(1, queueService.pollAndDispatch());
 
-        verify(aiClient, never()).streamChat(anyString(), any(), any(), any(), anyString());
+        verify(aiClient, never()).streamChat(anyString(), any(), any(), any(), anyString(), any(), any());
         verify(aiClient, never()).agentV1ChatStream(anyString(), any(), any(), any(), anyString(), any(), any());
         verify(runMapper).completeRunGuarded(eq(56L), eq(AgentConstants.STATUS_FAILED),
                 eq("tenant_unresolvable"), anyString(), isNull(), any());
@@ -279,7 +279,7 @@ class AgentTaskQueueIntegrationTest {
                 sourcesJson,
                 "data: [DONE]"
         );
-        when(aiClient.streamChat(anyString(), anyLong(), isNull(), anyList(), anyString())).thenReturn(flux);
+        when(aiClient.streamChat(anyString(), anyLong(), isNull(), anyList(), anyString(), anyLong(), any())).thenReturn(flux);
 
         queueService.pollAndDispatch();
 
@@ -323,7 +323,7 @@ class AgentTaskQueueIntegrationTest {
         reactor.core.publisher.Flux<String> neverEnding = reactor.core.publisher.Flux.just(
                 "data: {\"content\":\"partial\"}")
                 .concatWith(reactor.core.publisher.Flux.never());
-        when(aiClient.streamChat(eq("stuck query"), isNull(), isNull(), anyList(), eq(run.getRunUuid())))
+        when(aiClient.streamChat(eq("stuck query"), isNull(), isNull(), anyList(), eq(run.getRunUuid()), anyLong(), any()))
                 .thenReturn(neverEnding);
 
         assertEquals(1, queueService.pollAndDispatch());
@@ -406,7 +406,7 @@ class AgentTaskQueueIntegrationTest {
                 "data: {\"content\":\"Hello\"}",
                 "data: {\"content\":\" World\"}"
         );
-        when(aiClient.streamChat(anyString(), anyLong(), isNull(), anyList(), anyString())).thenReturn(flux);
+        when(aiClient.streamChat(anyString(), anyLong(), isNull(), anyList(), anyString(), anyLong(), any())).thenReturn(flux);
         when(aiClient.cancelRequest(anyString())).thenReturn(true);
 
         queueService.pollAndDispatch();

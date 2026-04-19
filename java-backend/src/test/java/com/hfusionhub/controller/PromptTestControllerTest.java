@@ -106,7 +106,7 @@ class PromptTestControllerTest {
 
         AiClient.ChatResponse mockResponse = buildMockResponse("这是回答", "deepseek-v3",
                 500, null, null);
-        when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), anyString()))
+        when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), anyString(), anyLong()))
                 .thenReturn(mockResponse);
 
         PromptTestRequest request = new PromptTestRequest();
@@ -125,7 +125,8 @@ class PromptTestControllerTest {
                 isNull(),           // conversationId = null
                 isNull(),           // knowledgeBaseId = null
                 eq(List.of()),      // history = empty (template goes via systemPrompt)
-                eq("你是一个严谨的助手，请用中文回答。")  // systemPrompt = template content
+                eq("你是一个严谨的助手，请用中文回答。"),  // systemPrompt = template content
+                eq(1L)              // userId = current user
         );
         // Verify: KB path was NOT used
         verify(aiClient, never()).agentV1Chat(anyString(), any(), any(), anyList(), anyString(), anyString(), anyInt(), anyString(), anyLong());
@@ -186,7 +187,7 @@ class PromptTestControllerTest {
         String longTemplate = "A".repeat(7999);
 
         AiClient.ChatResponse mockResponse = buildMockResponse("OK", "deepseek-v3", 100, null, null);
-        when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), eq(longTemplate)))
+        when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), eq(longTemplate), anyLong()))
                 .thenReturn(mockResponse);
 
         PromptTestRequest request = new PromptTestRequest();
@@ -198,7 +199,7 @@ class PromptTestControllerTest {
         assertEquals(200, result.getCode());
         assertEquals("OK", result.getData().getContent());
         // Verify systemPrompt was passed with the full 7999-char template
-        verify(aiClient).chat(anyString(), isNull(), isNull(), anyList(), eq(longTemplate));
+        verify(aiClient).chat(anyString(), isNull(), isNull(), anyList(), eq(longTemplate), anyLong());
     }
 
     // ── AI call failure ────────────────────────────────────────────────
@@ -207,7 +208,7 @@ class PromptTestControllerTest {
     void wrapsAiClientExceptionAsBusinessException() {
         StpUtil.login(1L);
 
-        when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), anyString()))
+        when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), anyString(), anyLong()))
                 .thenThrow(new RuntimeException("Connection refused"));
 
         PromptTestRequest request = new PromptTestRequest();
@@ -224,7 +225,7 @@ class PromptTestControllerTest {
     void rethrowsBusinessExceptionDirectly() {
         StpUtil.login(1L);
 
-        when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), anyString()))
+        when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), anyString(), anyLong()))
                 .thenThrow(new BusinessException("AI 服务暂时不可用"));
 
         PromptTestRequest request = new PromptTestRequest();
@@ -257,7 +258,7 @@ class PromptTestControllerTest {
         StpUtil.login(1L);
 
         // Simulate a slow AI call
-        when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), anyString()))
+        when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), anyString(), anyLong()))
                 .thenAnswer(invocation -> {
                     Thread.sleep(10); // small delay to get non-zero elapsed
                     return buildMockResponse("慢速回答", "deepseek-v3", 300, null, null);
@@ -284,7 +285,7 @@ class PromptTestControllerTest {
                 "total_tokens", 500
         );
         AiClient.ChatResponse mockResponse = buildMockResponse("回答", "deepseek-v3", 500, null, tokenUsage);
-        when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), anyString()))
+        when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), anyString(), anyLong()))
                 .thenReturn(mockResponse);
 
         PromptTestRequest request = new PromptTestRequest();
@@ -305,7 +306,7 @@ class PromptTestControllerTest {
         StpUtil.login(1L);
 
         AiClient.ChatResponse mockResponse = buildMockResponse("回答", "deepseek-v3", 100, null, null);
-        when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), anyString()))
+        when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), anyString(), anyLong()))
                 .thenReturn(mockResponse);
 
         PromptTestRequest request = new PromptTestRequest();

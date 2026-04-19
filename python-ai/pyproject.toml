@@ -25,3 +25,19 @@ timeout_method = "thread"
 
 [tool.pip-tools]
 generate-hashes = true
+
+# ── ruff lint（CI 门禁：ruff check）──
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [".venv", "evaluation", "tests/.tmp-*"]
+
+[tool.ruff.lint]
+# E/F/W: pycodestyle + pyflakes 基础；I: import 排序；UP: pyupgrade 现代化
+select = ["E", "F", "W", "I", "UP"]
+# E501 行长由 formatter 负责；E203 与格式化器冲突；UP035 等类型标注现代化按需忽略
+ignore = ["E501", "E203", "UP035"]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试文件允许宽松断言风格
+"tests/**" = ["UP018", "UP030"]

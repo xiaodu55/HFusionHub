@@ -1,0 +1,92 @@
+name: Release
+
+# 打 v* tag 时触发：构建并推送 4 个服务镜像到 GHCR，生成 GitHub Release。
+# 用法:  git tag v1.0.0 && git push origin v1.0.0
+# 镜像:  ghcr.io/<owner>/hfusionhub-{java,python,plugin-runner,frontend}:<tag> 与 :latest
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image tag
+        id: meta
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "image-tag=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "latest-tag=latest" >> "$GITHUB_OUTPUT"
+
+      # 4 个服务镜像：Java / Python / Plugin Runner / Frontend
+      - name: Build & push Java image
+        uses: docker/build-push-action@v6
+        with:
+          context: java-backend
+          file: deploy/Dockerfile.java
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/hfusionhub-java:${{ steps.meta.outputs.image-tag }}
+            ghcr.io/${{ github.repository_owner }}/hfusionhub-java:${{ steps.meta.outputs.latest-tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push Python AI image
+        uses: docker/build-push-action@v6
+        with:
+          context: python-ai
+          file: deploy/Dockerfile.python
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/hfusionhub-python:${{ steps.meta.outputs.image-tag }}
+            ghcr.io/${{ github.repository_owner }}/hfusionhub-python:${{ steps.meta.outputs.latest-tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push Plugin Runner image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.plugin-runner
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/hfusionhub-plugin-runner:${{ steps.meta.outputs.image-tag }}
+            ghcr.io/${{ github.repository_owner }}/hfusionhub-plugin-runner:${{ steps.meta.outputs.latest-tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push Frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.frontend
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/hfusionhub-frontend:${{ steps.meta.outputs.image-tag }}
+            ghcr.io/${{ github.repository_owner }}/hfusionhub-frontend:${{ steps.meta.outputs.latest-tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          name: HFusionHub ${{ steps.meta.outputs.version }}

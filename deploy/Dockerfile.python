@@ -1,6 +1,7 @@
 # HFusionHub Python AI Dockerfile
+# 多阶段构建：安装依赖后切换到非 root 用户运行（最小权限）
 
-FROM python:3.11-slim
+FROM python:3.11-slim AS base
 WORKDIR /app
 
 # Install system deps for document parsing + healthcheck
@@ -13,8 +14,11 @@ RUN sed 's/uvicorn\[standard\]/uvicorn/g' requirements.txt > /tmp/requirements.t
     pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY app/ app/
-RUN mkdir -p /data/uploads /data
+RUN mkdir -p /data/uploads /data \
+    && groupadd -r hfusionhub && useradd -r -g hfusionhub -d /app hfusionhub \
+    && chown -R hfusionhub:hfusionhub /app /data
 
+USER hfusionhub
 EXPOSE 9000
 HEALTHCHECK --interval=15s --timeout=5s --retries=5 \
     CMD curl -f http://localhost:9000/health || exit 1

@@ -7,6 +7,18 @@ on:
     branches: [main]
 
 jobs:
+  # ─── 密钥扫描（防硬编码密钥入库）───
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for secrets (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # ─── Docker Compose 配置校验 ───
   docker-compose-validate:
     runs-on: ubuntu-latest
@@ -88,6 +100,26 @@ jobs:
             exit 1
           fi
           echo "Rendered $docs Kubernetes resources."
+
+  # ─── Python 静态检查与依赖审计 ───
+  python-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python-ai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ruff
+        run: pip install ruff
+      - name: Lint with ruff
+        run: ruff check . --output-format=github
+      - name: Audit dependencies (pip-audit)
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --disable-pip
 
   # ─── Python AI 服务 ───
   python:

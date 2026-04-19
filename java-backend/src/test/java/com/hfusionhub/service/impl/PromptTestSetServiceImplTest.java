@@ -75,6 +75,24 @@ class PromptTestSetServiceImplTest {
         SaManager.setSaTokenDao(new SaTokenDaoDefaultImpl());
         SaManager.setSaTokenContext(new MockSaTokenContext());
 
+        // 纯 Mockito 环境无 Spring 容器，需手动初始化 LambdaWrapper 的实体缓存
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(
+                        new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""),
+                com.hfusionhub.entity.PromptTestSetRun.class);
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(
+                        new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""),
+                com.hfusionhub.entity.PromptTestCaseResultEntity.class);
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(
+                        new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""),
+                com.hfusionhub.entity.PromptTestSet.class);
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(
+                        new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""),
+                com.hfusionhub.entity.PromptTestCase.class);
+
         testSetMapper = mock(PromptTestSetMapper.class);
         testCaseMapper = mock(PromptTestCaseMapper.class);
         knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
@@ -207,7 +225,7 @@ class PromptTestSetServiceImplTest {
         resp.setContent("回答");
         resp.setModel("deepseek-v4-flash");
         resp.setTokenCount(100);
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是{{role}}，关于{{topic}}请回答");
@@ -236,7 +254,7 @@ class PromptTestSetServiceImplTest {
 
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是{{角色}}，关于{{主题}}请回答");
@@ -258,7 +276,7 @@ class PromptTestSetServiceImplTest {
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
         resp.setModel("deepseek-v4-flash");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString()))
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong()))
                 .thenReturn(resp)
                 .thenThrow(new RuntimeException("boom"));
 
@@ -421,7 +439,7 @@ class PromptTestSetServiceImplTest {
 
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是{{role}}");
@@ -494,7 +512,7 @@ class PromptTestSetServiceImplTest {
 
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         // Client-sent content differs from the real template snapshot (user edited it)
@@ -504,7 +522,7 @@ class PromptTestSetServiceImplTest {
         PromptTestSetRunResponse response = runAndExecute(10L, request);
 
         // Execution + persisted content must come from the DB snapshot, not the edited payload
-        verify(aiClient).chat(eq("如何退款？"), isNull(), isNull(), any(), eq("你是客服，来自模板"));
+        verify(aiClient).chat(eq("如何退款？"), isNull(), isNull(), any(), eq("你是客服，来自模板"), anyLong());
         verify(caseResultMapper).insert(argThat(e ->
                 "你是客服，来自模板".equals(e.getRenderedTemplate())));
         verify(runMapper).insert(argThat(r ->
@@ -521,7 +539,7 @@ class PromptTestSetServiceImplTest {
 
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("自定义模板");
@@ -562,7 +580,7 @@ class PromptTestSetServiceImplTest {
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("亲，您可以在7天内申请退款。");
         resp.setModel("deepseek-v4-flash");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunResponse response = runAndExecute(10L, request("模板"));
 
@@ -584,7 +602,7 @@ class PromptTestSetServiceImplTest {
 
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("请致电400热线（不支持refund操作）。");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunResponse response = runAndExecute(10L, request("模板"));
 
@@ -611,7 +629,7 @@ class PromptTestSetServiceImplTest {
                 Map.of("document_id", 11L, "chunk_id", "c1"),
                 Map.of("document_id", 22L, "chunk_id", "c2")
         ));
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunResponse response = runAndExecute(10L, request("模板"));
 
@@ -630,7 +648,7 @@ class PromptTestSetServiceImplTest {
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("根据政策文档……");
         resp.setSources(List.of(Map.of("document_id", 11L, "chunk_id", "c1")));
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunResponse response = runAndExecute(10L, request("模板"));
 
@@ -649,7 +667,7 @@ class PromptTestSetServiceImplTest {
 
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("请致电400。");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunResponse response = runAndExecute(10L, request("模板"));
 
@@ -666,7 +684,7 @@ class PromptTestSetServiceImplTest {
         tc.setExpectedKeywords(List.of("退款"));
         when(testCaseMapper.selectList(any())).thenReturn(List.of(tc));
 
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString()))
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong()))
                 .thenThrow(new RuntimeException("boom"));
 
         PromptTestSetRunResponse response = runAndExecute(10L, request("模板"));
@@ -701,7 +719,7 @@ class PromptTestSetServiceImplTest {
         verify(runMapper).insert(argThat(r ->
                 PromptTestSetRunStatus.PENDING.equals(r.getStatus())
                         && r.getTotalCases() == 2 && r.getSetId().equals(10L)));
-        verify(aiClient, never()).chat(anyString(), any(), any(), any(), anyString());
+        verify(aiClient, never()).chat(anyString(), any(), any(), any(), anyString(), anyLong());
     }
 
     @Test
@@ -714,7 +732,7 @@ class PromptTestSetServiceImplTest {
         ));
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunStatusDTO queued = service.run(10L, request("模板"));
         PromptTestSetRunResponse response = service.executeRun(queued.getId());
@@ -734,7 +752,7 @@ class PromptTestSetServiceImplTest {
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
         // First attempt fails transiently, retry succeeds
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString()))
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong()))
                 .thenThrow(new RuntimeException("boom"))
                 .thenReturn(resp);
 
@@ -743,7 +761,7 @@ class PromptTestSetServiceImplTest {
 
         assertEquals(1, response.getSuccessCount());
         assertTrue(response.getResults().get(0).isSuccess());
-        verify(aiClient, times(2)).chat(anyString(), isNull(), isNull(), any(), anyString());
+        verify(aiClient, times(2)).chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong());
     }
 
     @Test
@@ -759,7 +777,7 @@ class PromptTestSetServiceImplTest {
         // Worker skips already-terminal runs
         assertNull(service.executeRun(queued.getId()));
         verify(caseResultMapper, never()).insert(any());
-        verify(aiClient, never()).chat(anyString(), any(), any(), any(), anyString());
+        verify(aiClient, never()).chat(anyString(), any(), any(), any(), anyString(), anyLong());
     }
 
     @Test
@@ -769,7 +787,7 @@ class PromptTestSetServiceImplTest {
         when(testCaseMapper.selectList(any())).thenReturn(List.of(caseOf(1L, "如何退款？", null)));
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunStatusDTO queued = service.run(10L, request("模板"));
         service.executeRun(queued.getId());

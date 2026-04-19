@@ -54,6 +54,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.isNull;
@@ -216,7 +217,7 @@ class PromptTestSetIntegrationTest {
         resp.setContent("回答");
         resp.setModel("deepseek-v4-flash");
         resp.setTokenCount(10);
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是{{角色}}，关于{{主题}}（{{topic}}）请回答");
@@ -259,7 +260,7 @@ class PromptTestSetIntegrationTest {
         resp.setContent("回答内容");
         resp.setModel("deepseek-v4-flash");
         resp.setTokenCount(88);
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateId(template.getId());
@@ -300,7 +301,7 @@ class PromptTestSetIntegrationTest {
         resp.setContent("回答内容");
         resp.setModel("deepseek-v4-flash");
         resp.setTokenCount(88);
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         // Edited/payload content must be ignored when a template is bound
@@ -370,7 +371,7 @@ class PromptTestSetIntegrationTest {
         resp2.setContent("回答 v2");
         resp2.setModel("deepseek-v4-flash");
         resp2.setTokenCount(20);
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString()))
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong()))
                 .thenReturn(resp1)
                 .thenReturn(resp2);
 
@@ -418,7 +419,7 @@ class PromptTestSetIntegrationTest {
                 Map.of("document_id", 11L, "chunk_id", "c1"),
                 Map.of("document_id", 22L, "chunk_id", "c2")
         ));
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是客服助手");
@@ -445,7 +446,7 @@ class PromptTestSetIntegrationTest {
         resp.setModel("deepseek-v4-flash");
         resp.setTokenCount(30);
         resp.setSources(List.of(Map.of("document_id", 11L, "chunk_id", "c1")));
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是客服助手");
@@ -480,7 +481,7 @@ class PromptTestSetIntegrationTest {
         resp2.setContent("请联系客服。");
         resp2.setModel("deepseek-v4-flash");
         resp2.setTokenCount(20);
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString()))
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong()))
                 .thenReturn(resp1)
                 .thenReturn(resp2);
 
@@ -515,7 +516,7 @@ class PromptTestSetIntegrationTest {
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
         resp.setModel("deepseek-v4-flash");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是{{角色}}");
@@ -568,7 +569,7 @@ class PromptTestSetIntegrationTest {
     void failedRunCanBeRetriedWithNextAttempt() {
         PromptTestSetDetailDTO created = createSetWithCase(new HashMap<>(Map.of("角色", "客服")));
 
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString()))
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong()))
                 .thenThrow(new RuntimeException("boom"));
 
         PromptTestSetRunStatusDTO queued = service.run(created.getId(), request("你是{{角色}}"));
@@ -587,7 +588,7 @@ class PromptTestSetIntegrationTest {
         // Now the AI succeeds → batch completes (doReturn to avoid replaying the throwing stub)
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
-        doReturn(resp).when(aiClient).chat(anyString(), isNull(), isNull(), any(), anyString());
+        doReturn(resp).when(aiClient).chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong());
         service.executeRun(queued.getId());
 
         PromptTestSetRunStatusDTO done = service.getRunStatus(queued.getId());
@@ -667,7 +668,7 @@ class PromptTestSetIntegrationTest {
         CountDownLatch releaseWorker = new CountDownLatch(1);
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenAnswer(inv -> {
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenAnswer(inv -> {
             if (calls.incrementAndGet() == 1) {
                 workerInChat.countDown();
                 releaseWorker.await(10, TimeUnit.SECONDS);
@@ -741,7 +742,7 @@ class PromptTestSetIntegrationTest {
         CountDownLatch releaseWorker = new CountDownLatch(1);
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenAnswer(inv -> {
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenAnswer(inv -> {
             if (calls.incrementAndGet() == 1) {
                 workerInChat.countDown();
                 releaseWorker.await(10, TimeUnit.SECONDS);
@@ -807,7 +808,7 @@ class PromptTestSetIntegrationTest {
 
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
 
         PromptTestSetRunStatusDTO queued = service.run(created.getId(), request("你是{{角色}}"));
         Long runId = queued.getId();
@@ -872,7 +873,7 @@ class PromptTestSetIntegrationTest {
             assertEquals(0, fresh.getProgressCount());
             assertNotEquals(tokenBefore, fresh.getExecutionToken());
             // 旧 Worker 只发起了这一次 AI 调用（唯一用例提交后即因守卫失效而中止）。
-            verify(aiClient, times(1)).chat(anyString(), isNull(), isNull(), any(), anyString());
+            verify(aiClient, times(1)).chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong());
         } finally {
             ReflectionTestUtils.setField(caseWriter, "caseWriteHook", originalHook);
             service.delete(created.getId());

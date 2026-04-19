@@ -12,6 +12,7 @@ import { ArrowLeft, Send, User, Bot, Loader2, RotateCcw, Square, RefreshCw, Thum
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useToast } from '@/composables/useToast'
 import { formatDateTime, formatTime } from '@/utils/date'
+import { friendlyErrorMessage } from '@/utils/errorMessage'
 import { SseDataParser, type SseDataEvent } from '@/utils/sse'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 
@@ -252,11 +253,12 @@ const handleSend = async () => {
       // 确保至少有一个错误提示在对话中
       const errIdx = pendingId !== null ? messages.value.findIndex(m => m.id === pendingId) : -1
       if (errIdx === -1) {
+        const reason = friendlyErrorMessage(fallbackError, '消息发送失败，请稍后重试')
         messages.value.push({
           id: Date.now() + 1,
           conversationId: Number(route.params.id),
           role: 'assistant' as const,
-          content: '抱歉，消息发送失败，请检查网络连接后重试。',
+          content: `⚠️ ${reason}${reason.includes('AI 服务') ? '' : '\n\n若 AI 服务未就绪，可在「设置」中查看服务状态，或在「模型中心」确认模型配置。'}`,
           model: 'error',
           createdAt: timeStr,
         })

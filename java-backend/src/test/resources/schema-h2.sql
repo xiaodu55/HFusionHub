@@ -112,14 +112,19 @@ CREATE TABLE IF NOT EXISTS prompt_template (
     id BIGINT NOT NULL AUTO_INCREMENT,
     user_id BIGINT NOT NULL,
     name VARCHAR(100) NOT NULL,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    -- 与 V45 对齐：活跃记录按 (user_id, name) 唯一，回收站允许重名
+    active_name VARCHAR(100) GENERATED ALWAYS AS (CASE WHEN deleted = 0 THEN name END),
     description VARCHAR(500) DEFAULT NULL,
     content CLOB NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
     version INT NOT NULL DEFAULT 1,
+    recycled_at TIMESTAMP DEFAULT NULL,
+    recycle_expires_at TIMESTAMP DEFAULT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE (user_id, name),
+    UNIQUE (user_id, active_name),
     FOREIGN KEY (user_id) REFERENCES sys_user (id)
 );
 CREATE INDEX IF NOT EXISTS idx_prompt_template_user_status ON prompt_template (user_id, status, updated_at);
@@ -1006,3 +1011,102 @@ CREATE TABLE IF NOT EXISTS user_model_config (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_user_model_config_tenant_user UNIQUE (tenant_id, user_id)
 );
+
+-- =====================================================
+-- V40 + V41 + V42: RAG intent tree（意图路由）
+-- =====================================================
+CREATE TABLE IF NOT EXISTS rag_intent_node (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    tenant_id BIGINT NOT NULL DEFAULT 1,
+    parent_id BIGINT DEFAULT NULL,
+    intent_code VARCHAR(64) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description VARCHAR(500) DEFAULT NULL,
+    level VARCHAR(20) NOT NULL,
+    kind VARCHAR(20) NOT NULL DEFAULT 'KB',
+    knowledge_base_id BIGINT DEFAULT NULL,
+    mcp_tool_id BIGINT DEFAULT NULL,
+    top_k INT NOT NULL DEFAULT 5,
+    route_config JSON DEFAULT NULL,
+    enabled TINYINT NOT NULL DEFAULT 1,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    UNIQUE (user_id, intent_code, deleted),
+    CONSTRAINT fk_rag_intent_kb_setnull FOREIGN KEY (knowledge_base_id)
+        REFERENCES knowledge_base (id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rag_intent_user_parent ON rag_intent_node (user_id, parent_id, deleted, sort_order);
+CREATE INDEX IF NOT EXISTS idx_rag_intent_tenant_parent ON rag_intent_node (tenant_id, parent_id, deleted, sort_order);
+
+-- =====================================================
+-- V12: Agent 告警（规则 + 事件）
+-- =====================================================
+CREATE TABLE IF NOT EXISTS agent_alert_rule (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    name VARCHAR(200) NOT NULL,
+    description TEXT DEFAULT NULL,
+    user_id BIGINT DEFAULT NULL,
+    metric_name VARCHAR(50) NOT NULL,
+    comparison_operator VARCHAR(10) NOT NULL DEFAULT 'gte',
+    threshold_value DECIMAL(12,4) NOT NULL,
+    window_minutes INT NOT NULL DEFAULT 60,
+    severity VARCHAR(10) NOT NULL DEFAULT 'warning',
+    cooldown_minutes INT NOT NULL DEFAULT 60,
+    enabled TINYINT NOT NULL DEFAULT 1,
+    last_triggered_at TIMESTAMP DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_alert_rule_user ON agent_alert_rule (user_id);
+CREATE INDEX IF NOT EXISTS idx_alert_rule_metric ON agent_alert_rule (metric_name);
+
+CREATE TABLE IF NOT EXISTS agent_alert_event (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    rule_id BIGINT NOT NULL,
+    rule_name VARCHAR(200) NOT NULL,
+    user_id BIGINT DEFAULT NULL,
+    knowledge_base_id BIGINT DEFAULT NULL,
+    severity VARCHAR(10) NOT NULL,
+    metric_name VARCHAR(50) NOT NULL,
+    current_value DECIMAL(12,4) NOT NULL,
+    threshold_value DECIMAL(12,4) NOT NULL,
+    message TEXT NOT NULL,
+    context JSON DEFAULT NULL,
+    resolved TINYINT NOT NULL DEFAULT 0,
+    resolved_at TIMESTAMP DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT fk_alert_event_rule FOREIGN KEY (rule_id) REFERENCES agent_alert_rule (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_alert_event_rule ON agent_alert_event (rule_id);
+CREATE INDEX IF NOT EXISTS idx_alert_event_created ON agent_alert_event (created_at);
+
+-- =====================================================
+-- V43: RAG 回答反馈
+-- =====================================================
+CREATE TABLE IF NOT EXISTS rag_answer_feedback (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    tenant_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    conversation_id BIGINT NOT NULL,
+    message_id BIGINT NOT NULL,
+    knowledge_base_id BIGINT DEFAULT NULL,
+    rating VARCHAR(8) NOT NULL,
+    reason VARCHAR(500) DEFAULT NULL,
+    expected_answer TEXT DEFAULT NULL,
+    evaluation_case_id BIGINT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    UNIQUE (user_id, message_id),
+    CONSTRAINT fk_rag_feedback_user FOREIGN KEY (user_id) REFERENCES sys_user (id),
+    CONSTRAINT fk_rag_feedback_conversation FOREIGN KEY (conversation_id) REFERENCES conversation (id) ON DELETE CASCADE,
+    CONSTRAINT fk_rag_feedback_message FOREIGN KEY (message_id) REFERENCES message (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_rag_feedback_tenant_created ON rag_answer_feedback (tenant_id, created_at);

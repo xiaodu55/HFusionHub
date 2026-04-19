@@ -2,6 +2,14 @@
 
 > Java + Python 混合架构的 AI Agent 智能助手平台
 
+![CI](https://github.com/xiaodu55/HFusionHub1/actions/workflows/ci.yml/badge.svg)
+![E2E](https://github.com/xiaodu55/HFusionHub1/actions/workflows/e2e.yml/badge.svg)
+![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)
+![Java](https://img.shields.io/badge/Java-17%2B-orange)
+![Python](https://img.shields.io/badge/Python-3.11%2B-green)
+![Vue](https://img.shields.io/badge/Vue-3-42b883)
+![Tests](https://img.shields.io/badge/Tests-Python%201220%2B%20%7C%20Java%20400%2B%20%7C%20Frontend%2032%2B-success)
+
 ## 🚀 项目简介
 
 HFusionHub 是一个企业级 AI Agent 平台，结合 Java 后端的稳定性和 Python AI 的灵活性，提供完整的 RAG + Agent 解决方案。
@@ -158,7 +166,30 @@ HFusionHub/
 
 ## 🚀 快速开始
 
-### 环境要求
+### 方式一：一键启动（推荐，Windows / Linux / macOS）
+
+```bash
+# Windows PowerShell
+.\scripts\setup.ps1            # 基础设施 + 开发指引（三终端热重载）
+.\scripts\setup.ps1 -FullStack # 全部容器化，一条命令启动完整平台
+
+# Linux / macOS
+bash scripts/setup.sh          # 基础设施 + 开发指引
+bash scripts/setup.sh --fullstack  # 全部容器化
+```
+
+脚本会自动：
+1. 检查 Docker 等前置依赖；
+2. 生成强随机口令并写入 `docker/.env`、`python-ai/.env`、`deploy/.env`（`scripts/init-env.ps1` / `init-env.sh`）；
+3. 启动基础设施（MySQL / Redis / MinIO / Plugin Runner）并等待健康；
+4. `-FullStack` 模式继续构建/拉取 Java、Python、前端镜像并启动全平台，完成后打印访问地址。
+
+> 仍需手动填写：`DEEPSEEK_API_KEY`（模型供应商控制台获取）与 Runner TLS 证书路径（`bash scripts/generate-runner-tls.sh deploy/runner-tls`）。
+> 管理员账号：`admin` / `ADMIN_PASSWORD`（由 init-env 随机生成并打印，可在 `docker/.env` 中修改）。
+
+### 方式二：手动启动（开发热重载）
+
+#### 环境要求
 
 - Java 17+
 - Python 3.11+
@@ -166,7 +197,7 @@ HFusionHub/
 - Redis 7.x (Docker)
 - Node.js 20.19+ 或 22.12+（Vite 8 要求）
 
-### 启动步骤
+#### 启动步骤
 
 ```bash
 # 1. 克隆项目并启动 MySQL、Redis
@@ -233,6 +264,30 @@ npm run dev
 ### 默认账号
 - 用户名：admin
 - 密码：由 `ADMIN_PASSWORD` 决定
+
+## 🚢 生产部署
+
+### 从预构建镜像部署（推荐）
+
+镜像发布在 GitHub Container Registry（`ghcr.io/xiaodu55/hfusionhub-{java,python,plugin-runner,frontend}`），
+打 `v*` tag 时由 CI 自动构建推送。
+
+```bash
+cp deploy/.env.example deploy/.env   # 编辑填入密钥；或运行 scripts/init-env.ps1 自动生成
+docker compose -f deploy/docker-compose.prod.yml pull
+docker compose -f deploy/docker-compose.prod.yml up -d
+# 访问 http://localhost（前端 :80）
+```
+
+### 本地自建镜像部署
+
+```bash
+docker compose -f deploy/docker-compose.prod.yml build
+docker compose -f deploy/docker-compose.prod.yml up -d
+```
+
+> 镜像地址可用 `REGISTRY` / `HFUSIONHUB_TAG` 环境变量覆盖（如内网镜像仓库与指定版本）。
+> 生产运维手册见 [docs/PRODUCTION_OPS.md](docs/PRODUCTION_OPS.md)，监控（Prometheus/Grafana）见 `deploy/docker-compose.monitoring.yml`。
 
 ## 🧠 RAG 引擎模块
 

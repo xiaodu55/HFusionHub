@@ -1,5 +1,12 @@
 package com.hfusionhub.service.impl;
 
+import cn.dev33.satoken.SaManager;
+import cn.dev33.satoken.context.SaTokenContext;
+import cn.dev33.satoken.context.model.SaRequest;
+import cn.dev33.satoken.context.model.SaResponse;
+import cn.dev33.satoken.context.model.SaStorage;
+import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
+import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.constant.AgentConstants;
@@ -106,6 +113,12 @@ class ConversationStreamingPersistenceTest {
 
     @BeforeEach
     void setUp() {
+        // 无 Web 容器的 Spring 测试：安装内存 Sa-Token 上下文，使聊天链路的意图路由等
+        // JwtUtils.getCurrentUserId() 调用可用（生产环境由请求线程提供上下文）
+        SaManager.setSaTokenDao(new SaTokenDaoDefaultImpl());
+        SaManager.setSaTokenContext(new MockSaTokenContext());
+        StpUtil.login(1L);
+
         // 清理顺序遵循 FK：status_event → step → run → task → message → conversation
         agentStatusEventMapper.delete(Wrappers.emptyWrapper());
         agentStepMapper.delete(Wrappers.emptyWrapper());
@@ -129,6 +142,7 @@ class ConversationStreamingPersistenceTest {
 
     @AfterEach
     void tearDown() {
+        StpUtil.logout();
         TenantContext.clear();
     }
 
@@ -141,7 +155,7 @@ class ConversationStreamingPersistenceTest {
         String requestId = "persist-1";
         String assistantRequestId = "persist-1:assistant";
 
-        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString()))
+        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any()))
                 .thenReturn(Flux.just(
                         "data: {\"content\":\"Hello persistence\"}\n\n",
                         "data: {\"event\":\"step_completed\",\"sequence\":1,"
@@ -204,7 +218,7 @@ class ConversationStreamingPersistenceTest {
         String requestId = "persist-content-1";
         String assistantRequestId = "persist-content-1:assistant";
 
-        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString()))
+        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any()))
                 .thenReturn(Flux.just(
                         "data: {\"content\":\"Hello from pure content\"}\n\n",
                         "data: {\"content\":\" stream\"}\n\n",
@@ -271,5 +285,35 @@ class ConversationStreamingPersistenceTest {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /** Minimal in-memory SaTokenContext for tests without a servlet container. */
+    private static class MockSaTokenContext implements SaTokenContext {
+        private final java.util.Map<String, Object> storage = new java.util.HashMap<>();
+
+        @Override
+        public SaRequest getRequest() {
+            return org.mockito.Mockito.mock(SaRequest.class);
+        }
+
+        @Override
+        public SaResponse getResponse() {
+            return org.mockito.Mockito.mock(SaResponse.class);
+        }
+
+        @Override
+        public SaStorage getStorage() {
+            return new SaStorage() {
+                @Override public Object getSource() { return storage; }
+                @Override public Object get(String key) { return storage.get(key); }
+                @Override public SaStorage set(String key, Object value) { storage.put(key, value); return this; }
+                @Override public SaStorage delete(String key) { storage.remove(key); return this; }
+            };
+        }
+
+        @Override
+        public boolean matchPath(String pattern, String path) { return true; }
+        @Override
+        public boolean isValid() { return true; }
     }
 }

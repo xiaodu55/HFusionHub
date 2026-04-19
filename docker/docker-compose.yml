@@ -93,6 +93,109 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # -----------------------------------------------------------------------
+  # Fullstack 一键启动（--profile fullstack）
+  #   docker compose -f docker/docker-compose.yml --profile fullstack up -d --build
+  # 启动后访问 http://localhost:3000（前端 dev 端口习惯映射到容器 80）
+  # -----------------------------------------------------------------------
+  java-backend:
+    profiles: ["fullstack"]
+    image: ${REGISTRY:-ghcr.io/xiaodu55}/hfusionhub-java:${HFUSIONHUB_TAG:-latest}
+    build:
+      context: ../java-backend
+      dockerfile: ../deploy/Dockerfile.java
+    container_name: hfusionhub-java
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      DB_USERNAME: hfusionhub
+      DB_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql8:3306/hfusionhub?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      SPRING_DATA_REDIS_HOST: redis7
+      PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?PYTHON_AI_INTERNAL_TOKEN must be set}
+      CALLBACK_SECRET: ${CALLBACK_SECRET:?CALLBACK_SECRET must be set}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set}
+      AI_SERVICE_URL: http://python-ai:9000
+      PYTHON_AI_CALLBACK_BASE_URL: http://java-backend:8080/api
+      JAVA_OPTS: "-Xmx512m -Xms256m"
+    volumes:
+      - uploads-data:/app/uploads
+    depends_on:
+      mysql8:
+        condition: service_healthy
+      redis7:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8080/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - backend
+
+  python-ai:
+    profiles: ["fullstack"]
+    image: ${REGISTRY:-ghcr.io/xiaodu55}/hfusionhub-python:${HFUSIONHUB_TAG:-latest}
+    build:
+      context: ../python-ai
+      dockerfile: ../deploy/Dockerfile.python
+    container_name: hfusionhub-python
+    ports:
+      - "127.0.0.1:9000:9000"
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-sk-replace-with-your-own-key}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?PYTHON_AI_INTERNAL_TOKEN must be set}
+      CALLBACK_SECRET: ${CALLBACK_SECRET:?CALLBACK_SECRET must be set}
+      JAVA_BACKEND_URL: http://java-backend:8080
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "9000"
+      VECTOR_STORE_MODE: lite
+      MILVUS_LITE_PATH: /data/milvus_data.db
+      UPLOAD_DIR: /data/uploads
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      RAG_HYBRID_ENABLED: "true"
+      LLM_ALLOW_MOCK: "false"
+    volumes:
+      - python-data:/data
+    depends_on:
+      java-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:9000/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - backend
+
+  frontend:
+    profiles: ["fullstack"]
+    image: ${REGISTRY:-ghcr.io/xiaodu55}/hfusionhub-frontend:${HFUSIONHUB_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    container_name: hfusionhub-frontend
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      java-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - backend
+
 networks:
   backend:
     driver: bridge
@@ -105,3 +208,5 @@ volumes:
   minio-data:
   plugin-runner-certs:
   plugin-artifacts:
+  uploads-data:
+  python-data:

@@ -20,6 +20,8 @@ import {
 import * as knowledgeBaseApi from '@/api/knowledgeBase'
 import * as documentApi from '@/api/document'
 import * as conversationApi from '@/api/conversation'
+import { getAiHealth } from '@/api/system'
+import SetupChecklist from '@/components/setup/SetupChecklist.vue'
 
 type StatCard = {
   title: string
@@ -37,6 +39,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const loading = ref(false)
 const loadError = ref(false)
+const aiReady = ref<boolean | null>(null)
 
 const stats = ref<StatCard[]>([
   {
@@ -94,6 +97,12 @@ const todayLabel = computed(() => new Date().toLocaleDateString('zh-CN', {
 }))
 
 const healthItems = computed(() => [
+  {
+    label: 'AI 服务',
+    value: aiReady.value === null ? '检测中…' : aiReady.value ? '已连接' : '未连接',
+    icon: Sparkles,
+    tone: aiReady.value === true ? 'text-emerald-300' : aiReady.value === false ? 'text-amber-300' : 'text-zinc-400',
+  },
   {
     label: '知识资产',
     value: stats.value[0].value > 0 ? '已接入' : '待接入',
@@ -153,14 +162,16 @@ const loadStats = async () => {
   loading.value = true
   loadError.value = false
   try {
-    const [kbRes, docRes, convRes] = await Promise.all([
+    const [kbRes, docRes, convRes, healthRes] = await Promise.all([
       knowledgeBaseApi.getMyKnowledgeBaseList({ page: 1, pageSize: 1 }),
       documentApi.getMyDocumentsByKbId(0, { page: 1, pageSize: 1 }),
       conversationApi.getMyConversations({ page: 1, pageSize: 1 }),
+      getAiHealth().catch(() => null),
     ])
     stats.value[0].value = kbRes.data.total || 0
     stats.value[1].value = docRes.data.total || 0
     stats.value[2].value = convRes.data.total || 0
+    aiReady.value = healthRes ? !!healthRes.data.ready : false
   } catch (error) {
     console.error('加载工作台统计失败', error)
     loadError.value = true
@@ -181,6 +192,8 @@ onMounted(async () => {
 
 <template>
   <div class="dashboard-workbench space-y-5">
+    <SetupChecklist />
+
     <section class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
       <div class="min-w-0">
         <div class="mb-3 inline-flex items-center gap-2 rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-3 py-1.5 text-xs font-medium text-emerald-300">

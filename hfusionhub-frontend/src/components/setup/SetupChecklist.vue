@@ -1,0 +1,203 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { useUserStore } from '@/stores/user'
+import {
+  getAiHealth,
+  getAiRuntimeOverview,
+  getUserModelConfig,
+  type AiHealth,
+  type AiRuntimeOverview,
+  type UserModelConfig,
+} from '@/api/system'
+import { importDemoKnowledgeBase } from '@/api/demo'
+import * as knowledgeBaseApi from '@/api/knowledgeBase'
+import * as conversationApi from '@/api/conversation'
+import { useToast } from '@/composables/useToast'
+import { Button } from '@/components/ui/button'
+import { Check, CircleAlert, Loader2, MessageSquare, Rocket, X } from 'lucide-vue-next'
+
+const DISMISS_KEY = 'hfusionhub.setup.dismissed'
+
+const router = useRouter()
+const userStore = useUserStore()
+const toast = useToast()
+
+const loading = ref(true)
+const health = ref<AiHealth | null>(null)
+const runtime = ref<AiRuntimeOverview | null>(null)
+const modelConfig = ref<UserModelConfig | null>(null)
+const kbCount = ref(0)
+const convCount = ref(0)
+const importing = ref(false)
+const dismissed = ref(localStorage.getItem(DISMISS_KEY) === '1')
+
+const modelReady = computed(() => {
+  if (modelConfig.value?.configured) return true
+  const llm = runtime.value?.llm
+  if (!llm) return false
+  return ['ready', 'configured', 'reachable', 'development'].includes(llm.state)
+})
+
+const items = computed(() => {
+  const list = [
+    {
+      key: 'ai',
+      label: 'AI 服务就绪',
+      hint: health.value?.ready ? 'Java ↔ Python 链路正常' : (health.value?.summary || 'AI 服务未就绪，见「设置 → AI 服务状态」'),
+      done: !!health.value?.ready,
+      path: '/settings',
+      cta: '查看',
+    },
+    {
+      key: 'model',
+      label: '问答模型已配置',
+      hint: modelReady.value ? '已有可用模型' : '尚未配置模型（DeepSeek / Ollama，见「模型中心」）',
+      done: modelReady.value,
+      path: '/builder/models',
+      cta: '去配置',
+    },
+    {
+      key: 'kb',
+      label: '创建知识库',
+      hint: kbCount.value > 0 ? `已创建 ${kbCount.value} 个知识库` : '还没有知识库，可自行创建或一键导入演示数据',
+      done: kbCount.value > 0,
+      path: '/knowledge-base',
+      cta: '去创建',
+    },
+    {
+      key: 'chat',
+      label: '发起首次对话',
+      hint: convCount.value > 0 ? `已开始 ${convCount.value} 次对话` : '还没有对话，准备好资料后开始提问',
+      done: convCount.value > 0,
+      path: '/chat',
+      cta: '去提问',
+    },
+  ]
+  // 普通用户不能配置模型，不展示模型检查项
+  return userStore.isBuilder ? list : list.filter((item) => item.key !== 'model')
+})
+
+const doneCount = computed(() => items.value.filter((item) => item.done).length)
+const allDone = computed(() => items.value.length > 0 && items.value.every((item) => item.done))
+const show = computed(() => !dismissed.value && !allDone.value)
+
+const refresh = async () => {
+  loading.value = true
+  try {
+    const [healthRes, runtimeRes, modelRes, kbRes, convRes] = await Promise.allSettled([
+      getAiHealth(),
+      getAiRuntimeOverview(),
+      getUserModelConfig(),
+      knowledgeBaseApi.getMyKnowledgeBaseList({ page: 1, pageSize: 1 }),
+      conversationApi.getMyConversations({ page: 1, pageSize: 1 }),
+    ])
+    if (healthRes.status === 'fulfilled') health.value = healthRes.value.data
+    if (runtimeRes.status === 'fulfilled') runtime.value = runtimeRes.value.data
+    if (modelRes.status === 'fulfilled') modelConfig.value = modelRes.value.data
+    if (kbRes.status === 'fulfilled') kbCount.value = kbRes.value.data.total || 0
+    if (convRes.status === 'fulfilled') convCount.value = convRes.value.data.total || 0
+  } finally {
+    loading.value = false
+  }
+}
+
+const handleImportDemo = async () => {
+  if (!userStore.isAdmin) return
+  importing.value = true
+  try {
+    const res = await importDemoKnowledgeBase()
+    const data = res.data
+    if (data.parseFailedCount > 0) {
+      toast.warning(`${data.message}（AI 服务就绪后可到文档页重新解析）`)
+    } else {
+      toast.success(data.message)
+    }
+    await refresh()
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '导入演示知识库失败')
+  } finally {
+    importing.value = false
+  }
+}
+
+const dismiss = () => {
+  localStorage.setItem(DISMISS_KEY, '1')
+  dismissed.value = true
+}
+
+onMounted(refresh)
+</script>
+
+<template>
+  <section v-if="show" class="setup-checklist glass-panel p-4 sm:p-5">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div class="flex items-start gap-3">
+        <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-400/15 text-emerald-300">
+          <Rocket class="h-4 w-4" />
+        </span>
+        <div>
+          <p class="text-sm font-semibold text-zinc-50">完成设置，开始使用</p>
+          <p class="mt-1 text-xs text-zinc-500">
+            {{ loading ? '正在检查环境…' : `已完成 ${doneCount} / ${items.length} 项` }}
+          </p>
+        </div>
+      </div>
+      <button
+        type="button"
+        class="rounded-md p-1.5 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
+        title="稍后再说"
+        @click="dismiss"
+      >
+        <X class="h-4 w-4" />
+      </button>
+    </div>
+
+    <div class="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <button
+        v-for="item in items"
+        :key="item.key"
+        type="button"
+        class="flex items-start gap-2.5 rounded-lg border p-3 text-left transition"
+        :class="item.done
+          ? 'border-emerald-400/20 bg-emerald-400/5 hover:bg-emerald-400/10'
+          : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'"
+        @click="router.push(item.path)"
+      >
+        <span
+          class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+          :class="item.done ? 'bg-emerald-400 text-black' : 'bg-white/10 text-zinc-400'"
+        >
+          <Check v-if="item.done" class="h-3 w-3" />
+          <CircleAlert v-else class="h-3 w-3" />
+        </span>
+        <span class="min-w-0">
+          <span class="block truncate text-sm font-medium text-zinc-100">{{ item.label }}</span>
+          <span class="mt-1 block text-xs leading-5 text-zinc-500">{{ item.hint }}</span>
+          <span class="mt-1.5 block text-xs font-medium text-emerald-300">{{ item.cta }} →</span>
+        </span>
+      </button>
+    </div>
+
+    <div
+      v-if="userStore.isAdmin"
+      class="mt-4 flex flex-col gap-3 rounded-lg border border-emerald-400/15 bg-emerald-400/5 p-3 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <div class="flex items-start gap-2.5 text-sm text-zinc-300">
+        <MessageSquare class="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+        <span>
+          想快速体验？<span class="text-zinc-100">一键导入演示知识库</span>
+          （员工手册、产品目录、权限矩阵），导入后即可直接提问。
+        </span>
+      </div>
+      <Button
+        class="shrink-0 rounded-lg bg-emerald-400 text-black hover:bg-emerald-300 disabled:opacity-60"
+        :disabled="importing"
+        @click="handleImportDemo"
+      >
+        <Loader2 v-if="importing" class="mr-1.5 h-4 w-4 animate-spin" />
+        {{ importing ? '正在导入…' : '导入演示知识库' }}
+      </Button>
+    </div>
+  </section>
+</template>

@@ -1,5 +1,17 @@
 # HFusionHub — Production Docker Compose
 #
+# 两种部署方式：
+#   A) 拉取预构建镜像（推荐，无需本地构建）：
+#        cp deploy/.env.example deploy/.env   # 再编辑 deploy/.env 填入密钥
+#        docker compose -f deploy/docker-compose.prod.yml pull
+#        docker compose -f deploy/docker-compose.prod.yml up -d
+#   B) 本地构建镜像（离线 / 自研场景）：
+#        docker compose -f deploy/docker-compose.prod.yml build
+#        docker compose -f deploy/docker-compose.prod.yml up -d
+#
+# 镜像地址可通过 REGISTRY / HFUSIONHUB_TAG 环境变量覆盖，
+# 例如 REGISTRY=registry.example.com/hfusionhub HFUSIONHUB_TAG=1.0.0。
+#
 # Start:  docker compose -f deploy/docker-compose.prod.yml up -d
 # Stop:   docker compose -f deploy/docker-compose.prod.yml down
 # Logs:   docker compose -f deploy/docker-compose.prod.yml logs -f
@@ -82,6 +94,7 @@ services:
   # Application Services
   # -----------------------------------------------------------------------
   java-backend:
+    image: ${REGISTRY:-ghcr.io/xiaodu55}/hfusionhub-java:${HFUSIONHUB_TAG:-latest}
     build:
       context: ../java-backend
       dockerfile: ../deploy/Dockerfile.java
@@ -115,6 +128,7 @@ services:
     restart: unless-stopped
 
   python-ai:
+    image: ${REGISTRY:-ghcr.io/xiaodu55}/hfusionhub-python:${HFUSIONHUB_TAG:-latest}
     build:
       context: ../python-ai
       dockerfile: ../deploy/Dockerfile.python
@@ -169,6 +183,7 @@ services:
   # Container plugin execution service. It connects to a separately
   # provisioned Docker Engine over TLS; never mount docker.sock here.
   plugin-runner:
+    image: ${REGISTRY:-ghcr.io/xiaodu55}/hfusionhub-plugin-runner:${HFUSIONHUB_TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile.plugin-runner
@@ -211,6 +226,7 @@ services:
       - no-new-privileges:true
 
   frontend:
+    image: ${REGISTRY:-ghcr.io/xiaodu55}/hfusionhub-frontend:${HFUSIONHUB_TAG:-latest}
     build:
       context: ..
       dockerfile: deploy/Dockerfile.frontend

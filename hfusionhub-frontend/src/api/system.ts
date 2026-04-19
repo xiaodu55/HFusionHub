@@ -72,6 +72,24 @@ export interface AiRuntimeOverview {
 export const getAiRuntimeOverview = (): Promise<ApiResponse<AiRuntimeOverview>> =>
   get('/system/ai-runtime')
 
+/** /system/ai-health 预检结果（文档解析与问答就绪度） */
+export interface AiHealth {
+  python_ai_reachable: boolean
+  python_ai_url?: string
+  internal_token_configured: boolean
+  internal_token_hint?: string
+  callback_secret_configured: boolean
+  callback_secret_hint?: string
+  upload_dir?: string
+  upload_dir_exists?: boolean
+  upload_dir_writable?: boolean
+  ready: boolean
+  summary?: string
+}
+
+export const getAiHealth = (): Promise<ApiResponse<AiHealth>> =>
+  get('/system/ai-health')
+
 export type UserProviderType = 'openai_compatible' | 'ollama'
 
 export interface UserModelConfig {
