@@ -69,13 +69,27 @@ services:
   #     OLLAMA_KEEP_ALIVE: 24h
   #   restart: unless-stopped
 
+  # etcd — Milvus 2.6 standalone 的元数据存储（2.6 起不再支持嵌入式 etcd）
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    container_name: hfusionhub-etcd
+    command: ["etcd", "--advertise-client-urls=http://etcd:2379", "--listen-client-urls=http://0.0.0.0:2379"]
+    ports:
+      - "127.0.0.1:2379:2379"
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health", "--endpoints=http://localhost:2379"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   # Milvus standalone for production vector storage (replaces embedded Lite).
   milvus:
-    image: milvusdb/milvus:v2.4.0
+    image: milvusdb/milvus:v2.6.6
     container_name: hfusionhub-milvus
     command: ["milvus", "run", "standalone"]
     environment:
-      ETCD_USE_EMBED: "true"
+      ETCD_ENDPOINTS: http://etcd:2379
       COMMON_STORAGETYPE: local
     ports:
       - "127.0.0.1:19530:19530"
@@ -88,6 +102,23 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
+    depends_on:
+      etcd:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Attu — Milvus 网页管理控制台（浏览集合、向量、相似度搜索）
+  attu:
+    image: zilliz/attu:v2.6.3
+    container_name: hfusionhub-attu
+    ports:
+      - "127.0.0.1:8000:3000"
+    environment:
+      # 浏览器端 JS 直连 Milvus：用 IPv4 字面量，避免 localhost 解析到 ::1 导致连接被拒
+      MILVUS_URL: http://127.0.0.1:19530
+    depends_on:
+      milvus:
+        condition: service_healthy
     restart: unless-stopped
 
   # -----------------------------------------------------------------------

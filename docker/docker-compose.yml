@@ -93,6 +93,65 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # etcd — Milvus 2.6 standalone 的元数据存储（2.6 起不再支持嵌入式 etcd）
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    container_name: etcd
+    command: ["etcd", "--advertise-client-urls=http://etcd:2379", "--listen-client-urls=http://0.0.0.0:2379"]
+    ports:
+      - "127.0.0.1:2379:2379"
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health", "--endpoints=http://localhost:2379"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - backend
+
+  # Milvus Standalone — 向量数据库服务（替代嵌入式 Milvus Lite）
+  # 网页控制台：http://localhost:8000（Attu，浏览器直连 127.0.0.1:19530 查看数据）
+  milvus:
+    image: milvusdb/milvus:v2.6.6
+    container_name: milvus
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: http://etcd:2379
+      COMMON_STORAGETYPE: local
+    ports:
+      - "127.0.0.1:19530:19530"
+      - "127.0.0.1:9091:9091"
+    volumes:
+      - milvus-data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      etcd:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+
+  # Attu — Milvus 网页管理控制台（浏览集合、向量、相似度搜索）
+  attu:
+    image: zilliz/attu:v2.6.3
+    container_name: attu
+    ports:
+      - "127.0.0.1:8000:3000"
+    environment:
+      # 浏览器端 JS 直连 Milvus：用 IPv4 字面量，避免 localhost 解析到 ::1 导致连接被拒
+      MILVUS_URL: http://127.0.0.1:19530
+    depends_on:
+      milvus:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+
   # -----------------------------------------------------------------------
   # Fullstack 一键启动（--profile fullstack）
   #   docker compose -f docker/docker-compose.yml --profile fullstack up -d --build
@@ -153,8 +212,9 @@ services:
       JAVA_BACKEND_URL: http://java-backend:8080
       SERVER_HOST: "0.0.0.0"
       SERVER_PORT: "9000"
-      VECTOR_STORE_MODE: lite
-      MILVUS_LITE_PATH: /data/milvus_data.db
+      VECTOR_STORE_MODE: cluster
+      MILVUS_HOST: milvus
+      MILVUS_PORT: "19530"
       UPLOAD_DIR: /data/uploads
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       RAG_HYBRID_ENABLED: "true"
@@ -163,6 +223,8 @@ services:
       - python-data:/data
     depends_on:
       java-backend:
+        condition: service_healthy
+      milvus:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://localhost:9000/ready || exit 1"]
@@ -210,3 +272,4 @@ volumes:
   plugin-artifacts:
   uploads-data:
   python-data:
+  milvus-data:

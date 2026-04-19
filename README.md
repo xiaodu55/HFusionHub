@@ -253,7 +253,8 @@ npm run dev
 | Redis | 6379 | Docker容器 |
 | MinIO | 9001, 9002 | 对象存储（控制台, API） |
 | Plugin Runner | 9100 | 插件沙箱执行 |
-| Milvus (prod) | 19530 | 向量数据库 |
+| Milvus | 19530, 9091 | 向量数据库（Standalone + etcd） |
+| **Attu (Milvus 网页控制台)** | **8000** | **浏览器查看向量数据：http://localhost:8000** |
 
 **启动后访问**：
 - 前端：http://localhost:3000
