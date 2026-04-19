@@ -67,7 +67,7 @@ Current migrations: **V1–V35**
 Rules:
 - **Historical migrations (V1–V35) must NOT be modified** — any schema changes go into new `V36+` scripts.
 - In production, **never** manually edit `flyway_schema_history`.
-- For local dev reset: `docker compose down -v && docker compose up -d` (see [启动重启1.md](启动重启1.md#4-本地重置数据库)).
+- For local dev reset: `docker compose down -v && docker compose up -d` (see [startup-guide.md](startup-guide.md#4-本地重置数据库)).
 
 ## Running Tests
 

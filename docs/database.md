@@ -38,7 +38,7 @@ docker compose down -v
 docker compose up -d
 ```
 
-See [docs/启动重启1.md](启动重启1.md#4-本地重置数据库) for detailed reset instructions.
+See [docs/startup-guide.md](startup-guide.md#4-本地重置数据库) for detailed reset instructions.
 
 ## Core Tables
 

@@ -37,7 +37,7 @@ HFusionHub uses a **CQRS-like three-tier architecture** where Java owns the writ
 │  Read/Intelligence Path:                                │
 │  • Document parsing (PDF, DOCX, MD, TXT)               │
 │  • Semantic chunking (500 chars, 50 overlap)           │
-│  • Embedding generation → Milvus Lite vector store     │
+│  • Embedding generation → Milvus vector store          │
 │  • Multi-channel RAG retrieval                        │
 │  • ReAct Agent loop (Thought → Action → Observation)  │
 │  • LLM interaction (DeepSeek API / Ollama)             │
@@ -49,7 +49,7 @@ HFusionHub uses a **CQRS-like three-tier architecture** where Java owns the writ
 ├─────────────────────────────────────────────────────────┤
 │  • MySQL 8.0  — users, KBs, docs, conversations         │
 │  • Redis 7    — cache, sessions, rate limiting          │
-│  • Milvus Lite — 1024-dim FLOAT_VECTOR, COSINE metric   │
+│  • Milvus Standalone — 1024-dim FLOAT_VECTOR, COSINE   │
 │  • Local FS   — uploaded documents, graph index         │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -78,7 +78,7 @@ HFusionHub uses a **CQRS-like three-tier architecture** where Java owns the writ
 2. Java saves Document entity (MySQL, status=PENDING)
 3. Java creates DocumentIndexJob (MySQL, versioned)
 4. Java calls Python /api/vectorize via AiClient
-5. Python parses → chunks → embeds → stores in Milvus Lite
+5. Python parses → chunks → embeds → stores in Milvus (cluster 模式)
 6. Python HMAC-signs callback → Java /api/vectorize/*/callback
 7. Java updates Document status → COMPLETED (or FAILED)
 8. Recovery: DocumentIndexRecoveryScheduler rescues stale jobs (30-min threshold)
@@ -118,7 +118,7 @@ RAG_AGENT_WORKFLOW_ENABLED=false  # P9 Beta: Bounded single-agent
 RAG_MULTI_AGENT_ENABLED=false # P10 Experimental: Multi-agent
 ```
 
-See [FEATURE_FLAGS.md](FEATURE_FLAGS.md) for details on each flag's dependencies and limitations.
+See [ENVIRONMENT.md](ENVIRONMENT.md#feature-flags-python-ai) for details on each flag's dependencies and limitations.
 
 ## Observability
 

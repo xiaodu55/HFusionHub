@@ -1,6 +1,6 @@
 # Python AI Service Development Guide
 
-> FastAPI + Milvus Lite + DeepSeek API + ReAct Agent + Multi-Channel RAG
+> FastAPI + Milvus (Standalone 默认 / Lite 可选) + DeepSeek API + ReAct Agent + Multi-Channel RAG
 
 ## Architecture
 
@@ -17,11 +17,13 @@ app/
 │   ├── parser/       # Document parsers (PDF, DOCX, Markdown, TXT)
 │   ├── rag/          # RAG engine (~23 modules)
 │   ├── tools/        # Tool system (search, calculator, time)
-│   ├── vectorstore/  # Milvus Lite + BM25 keyword index
+│   ├── vectorstore/  # Milvus (Standalone 默认 / Lite 可选) + BM25 keyword index
 │   └── exceptions.py
 ├── models/           # Pydantic models
 └── utils/            # Configuration, validators
 ```
+
+> Agent V1 契约（只读研究型 Agent 的能力边界与输入/输出 JSON 契约）见 [agent-v1-scope.md](agent-v1-scope.md)。
 
 ## RAG Pipeline (in order)
 

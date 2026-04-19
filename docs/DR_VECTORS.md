@@ -23,12 +23,25 @@ mysql -u root -p hfusionhub < hfusionhub_mysql_YYYYMMDD_HHMMSS.sql
 ```
 
 ### Milvus (Secondary — volume snapshot)
+
+数据卷实际名为 `<project>_milvus-data`（project = compose 文件所在目录名或 `COMPOSE_PROJECT_NAME`）。开发栈为 `docker_milvus-data`，生产栈（`deploy/docker-compose.prod.yml`）为 `deploy_milvus-data`。推荐直接用 `scripts/backup_milvus.sh` / `restore_milvus.sh`：
+
+```bash
+# 备份
+./scripts/backup_milvus.sh [backup_dir]
+
+# 恢复
+./scripts/restore_milvus.sh <backup_file.tar.gz>
+```
+
+手动等价命令：
+
 ```bash
 # Stop Milvus briefly for consistent snapshot
 docker compose -f deploy/docker-compose.prod.yml stop milvus
 
 # Snapshot the data volume
-docker run --rm -v hfusionhub_milvus-data:/data -v $(pwd)/backups:/backup \
+docker run --rm -v ${COMPOSE_PROJECT_NAME:-deploy}_milvus-data:/data -v $(pwd)/backups:/backup \
   alpine tar czf /backup/milvus_$(date +%Y%m%d_%H%M%S).tar.gz -C /data .
 
 # Restart Milvus
@@ -40,13 +53,12 @@ Production / staging run in `VECTOR_STORE_MODE=cluster`. BM25 and citations
 read their scoped corpus directly from Milvus via `all_chunks()`; there is no
 per-pod `chunks_store.json`, so no separate co-store backup is required.
 
-### Lite dev mode: co-store JSON only
-The `chunks_store.json` local co-store exists only in `VECTOR_STORE_MODE=lite`
-for local development and tests. If you run Lite locally, it lives in the
-`python-data` volume and may be copied as:
+### Lite dev mode (bare-metal only): co-store JSON only
+`VECTOR_STORE_MODE=lite` 仅用于本地裸跑（无 Docker）与测试。此时 `python-ai/data/chunks_store.json`
+本地 co-store 会被读写，可作为普通文件直接拷贝备份：
+
 ```bash
-docker run --rm -v hfusionhub_python-data:/data -v $(pwd)/backups:/backup \
-  alpine cp /data/chunks_store.json /backup/chunks_store_$(date +%Y%m%d_%H%M%S).json
+cp python-ai/data/chunks_store.json backups/chunks_store_$(date +%Y%m%d_%H%M%S).json
 ```
 
 ---
@@ -126,11 +138,11 @@ curl -X DELETE -H "X-Internal-Token: $PYTHON_AI_INTERNAL_TOKEN" \
 
 | Variable | Default | Description |
 |---|---|---|
-| `VECTOR_STORE_MODE` | `lite` | `lite` (dev) or `cluster` (prod) |
+| `VECTOR_STORE_MODE` | `lite` | `lite`（代码默认，仅本地裸跑/测试）或 `cluster`（Docker/生产，推荐） |
 | `SERVER_ENV` | `development` | `production`/`staging`/`development` |
 | `MILVUS_HOST` | `localhost` | Milvus standalone host |
 | `MILVUS_PORT` | `19530` | Milvus standalone port |
-| `MILVUS_LITE_PATH` | `./milvus_data.db` | Embedded Lite file path |
+| `MILVUS_LITE_PATH` | `./milvus_data.db` | 仅 `VECTOR_STORE_MODE=lite` 时的嵌入式 Lite 文件路径 |
 | `MILVUS_ALLOW_COLLECTION_DROP` | `false` | Safety gate for destructive ops |
 | `EMBEDDING_MODEL` | `unknown` | Current embedding model name |
 | `EMBEDDING_DIMENSION` | `1024` | Vector dimension |

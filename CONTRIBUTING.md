@@ -4,7 +4,7 @@ Thank you for your interest in contributing! This document outlines the developm
 
 ## Getting Started
 
-See [docs/启动重启1.md](docs/启动重启1.md) for the complete startup guide (Chinese), or [docs/startup-guide.md](docs/startup-guide.md) for the English version.
+See [docs/startup-guide.md](docs/startup-guide.md) for the complete bilingual startup guide (中文 + English).
 
 ### Quick Start
 

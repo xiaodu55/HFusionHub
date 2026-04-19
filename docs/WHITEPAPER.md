@@ -62,7 +62,7 @@ The result is a system where:
 │  │ • Document parsing (PyMuPDF, python-docx, Tika) │ │
 │  │ • Semantic chunking (500/50)                    │ │
 │  │ • Embedding (Ollama; test fallback only)        │ │
-│  │ • Milvus Lite vector store (COSINE, IVF_FLAT)   │ │
+│  │ • Milvus Standalone vector store (COSINE, IVF_FLAT) │ │
 │  │ • Multi-channel RAG: Vector + BM25 + GraphRAG   │ │
 │  │ • ReAct Agent loop (max 5 steps)                │ │
 │  │ • Intent classification + query decomposition   │ │
@@ -107,7 +107,7 @@ P6-P10 features are gated by environment variables, not code paths. This means:
 |-----------|----------------|------------|
 | Document upload (small PDF) | 2-5s | Python parsing + embedding |
 | Chat (RAG, streaming) | 3-8s TTFT | LLM generation |
-| Vector search (10K chunks) | 50-200ms | Milvus Lite I/O |
+| Vector search (10K chunks) | 50-200ms | Milvus I/O |
 | BM25 keyword search | 10-50ms | In-memory index |
 | GraphRAG traversal | 100-500ms | Entity resolution |
 | User auth | <5ms | Redis JWT lookup |
@@ -140,7 +140,7 @@ P6-P10 features are gated by environment variables, not code paths. This means:
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — detailed architecture diagrams
 - [database.md](database.md) — database schema and migration rules
-- [FEATURE_FLAGS.md](FEATURE_FLAGS.md) — P5-P10 feature documentation
+- [ENVIRONMENT.md](ENVIRONMENT.md#feature-flags-python-ai) — P5-P10 feature documentation
 - [ROADMAP.md](ROADMAP.md) — project roadmap
 
 ---

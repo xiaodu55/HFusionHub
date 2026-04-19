@@ -13,7 +13,18 @@ set -euo pipefail
 BACKUP_DIR="${1:-$(pwd)/backups}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 COMPOSE_FILE="deploy/docker-compose.prod.yml"
-VOLUME_NAME="hfusionhub_milvus-data"
+
+# Docker Compose 默认项目名 = compose 文件所在目录名（可用 COMPOSE_PROJECT_NAME 覆盖），
+# 数据卷实际名为 "<project>_milvus-data"。按同样的规则推导，避免硬编码错卷。
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(basename "$(dirname "$COMPOSE_FILE")")}"
+VOLUME_NAME="${COMPOSE_PROJECT_NAME}_milvus-data"
+
+if ! docker volume inspect "$VOLUME_NAME" >/dev/null 2>&1; then
+  echo "[backup] ERROR: volume '$VOLUME_NAME' not found." >&2
+  echo "[backup]   Run: docker volume ls | grep milvus-data  (dev stack: docker_milvus-data)" >&2
+  echo "[backup]   Or set COMPOSE_PROJECT_NAME to match your stack." >&2
+  exit 1
+fi
 
 mkdir -p "$BACKUP_DIR"
 

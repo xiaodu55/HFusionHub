@@ -15,10 +15,21 @@ fi
 
 BACKUP_FILE="$1"
 COMPOSE_FILE="deploy/docker-compose.prod.yml"
-VOLUME_NAME="hfusionhub_milvus-data"
+
+# Docker Compose 默认项目名 = compose 文件所在目录名（可用 COMPOSE_PROJECT_NAME 覆盖），
+# 数据卷实际名为 "<project>_milvus-data"。按同样的规则推导，避免硬编码错卷。
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(basename "$(dirname "$COMPOSE_FILE")")}"
+VOLUME_NAME="${COMPOSE_PROJECT_NAME}_milvus-data"
 
 if [ ! -f "$BACKUP_FILE" ]; then
   echo "Error: Backup file not found: $BACKUP_FILE"
+  exit 1
+fi
+
+if ! docker volume inspect "$VOLUME_NAME" >/dev/null 2>&1; then
+  echo "[restore] ERROR: volume '$VOLUME_NAME' not found." >&2
+  echo "[restore]   Run: docker volume ls | grep milvus-data  (dev stack: docker_milvus-data)" >&2
+  echo "[restore]   Or set COMPOSE_PROJECT_NAME to match your stack." >&2
   exit 1
 fi
 

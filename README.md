@@ -17,7 +17,7 @@ HFusionHub 是一个企业级 AI Agent 平台，结合 Java 后端的稳定性�
 ### 核心特性
 
 - **Java 后端**：Spring Boot 3.x + MyBatis Plus + MySQL + Redis
-- **Python AI 层**：FastAPI + Milvus Lite（开发）/ Milvus Standalone（生产）
+- **Python AI 层**：FastAPI + Milvus Standalone（Docker/生产，Attu 可视化；本地裸跑可选 Lite）
 - **Agent 核心**：ReAct 循环、多 Agent 协作、工具审批、Checkpoint、流式输出、结构化事件
 - **RAG 引擎**：多路检索、向量召回、语义分块、知识图谱、查询分解、上下文压缩、自我反思、证据完整性校验
 - **Web 界面**：Vue 3 + Vite + TypeScript + Tailwind CSS
@@ -106,7 +106,7 @@ HFusionHub 是一个企业级 AI Agent 平台，结合 Java 后端的稳定性�
 ├─────────────────────────────────────────────────────────┤
 │  • ReAct Agent循环        • 工具调用系统                  │
 │  • RAG检索引擎            • 会话记忆管理                  │
-│  • 向量数据库 (Milvus Lite/Standalone) • 流式输出 (SSE)            │
+│  • 向量数据库 (Milvus Standalone + Attu) • 流式输出 (SSE)                │
 │  • LLM调用 (DeepSeek/Ollama/OpenAI兼容)  • 多模型路由 + 降级      │
 │  • 知识来源格式化                                       │
 └─────────────────────┬───────────────────────────────────┘
@@ -116,7 +116,7 @@ HFusionHub 是一个企业级 AI Agent 平台，结合 Java 后端的稳定性�
 ├─────────────────────────────────────────────────────────┤
 │  • MySQL 8.0 (用户、知识库、对话、知识来源)               │
 │  • Redis 7.x (缓存、会话、限流)                           │
-│  • Milvus Lite / Standalone (向量存储)                       │
+│  • Milvus Standalone (向量存储, Attu 可视化)                       │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -308,8 +308,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 ## 🚀 启动指南
 
 详细启动步骤请参阅：
-- [docs/启动重启1.md](docs/启动重启1.md) — 中文启动、重启和排障指南
-- [docs/startup-guide.md](docs/startup-guide.md) — English startup and restart guide
+- [docs/startup-guide.md](docs/startup-guide.md) — 中英双语启动、重启和排障指南（原 启动重启1.md 已合并）
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — 所有必需环境变量清单
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 架构全景图
 - 快速开始：按上方「启动步骤」依次启动 Docker → Java → Python → 前端
