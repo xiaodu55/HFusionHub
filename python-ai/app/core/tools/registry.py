@@ -240,10 +240,16 @@ class ToolRegistry:
         knowledge_base_id: Optional[int] = None,
         agent_version: str = "1.0",
         tenant_id: Optional[int] = None,
+        enable_web_search: bool = False,
     ):
         self._knowledge_base_id = knowledge_base_id
         self._agent_version = agent_version
         self._tenant_id = tenant_id
+        # B4: web_search is exposed to V1 agents only when the feature flag
+        # ``agent.web_search.enabled`` is on (resolved per user/KB upstream).
+        # Execution is additionally gated by the policy engine (env lockout,
+        # mode, approval) so enabling the flag alone never bypasses policy.
+        self._web_search_enabled = bool(enable_web_search)
         # spec name → (ToolSpec, BaseTool instance)
         self._specs: Dict[str, ToolSpec] = {}
         self._instances: Dict[str, BaseTool] = {}
@@ -431,13 +437,18 @@ class ToolRegistry:
         (search_knowledge_base, read_chunk, list_document_chunks).
         V1.1 agents (``agent_version="1.1"``) additionally see write_note.
         Non-V1 callers (MCP server) pass ``v1_only=False`` to see all tools.
+        When ``enable_web_search`` was set, ``web_search`` is also exposed to
+        V1/V1.1 agents (flag-gated; policy still governs execution).
         """
         version = agent_version or self._agent_version
         compatible = self._v1_compatible_versions(version) if v1_only else None
         tools: List[Dict[str, Any]] = []
         for name, spec in self._specs.items():
             if v1_only and spec.agent_version not in compatible:
-                continue
+                # B4: web_search (agent_version="0.0") is exposed only when
+                # the flag-gated registry asked for it.
+                if not (self._web_search_enabled and name == "web_search"):
+                    continue
             tools.append({
                 "name": spec.name,
                 "description": spec.description,
@@ -476,11 +487,15 @@ class ToolRegistry:
 
         # Agent-version gate (registry-level; context-based check follows)
         if spec.agent_version != self._agent_version:
-            return ToolResult.failure(
-                tool_name=tool_name,
-                error_code=ErrorCode.SCOPE_DENIED,
-                message=f"工具 '{tool_name}' 不在 Agent V{self._agent_version} 白名单中",
-            )
+            # B4: web_search is registered at agent_version="0.0" but becomes
+            # executable for V1 registries when flag-gated exposure is on.
+            # The policy engine below still enforces env/mode/approval rules.
+            if not (self._web_search_enabled and tool_name == "web_search"):
+                return ToolResult.failure(
+                    tool_name=tool_name,
+                    error_code=ErrorCode.SCOPE_DENIED,
+                    message=f"工具 '{tool_name}' 不在 Agent V{self._agent_version} 白名单中",
+                )
 
         # ── Permission & mode checks (when context is present) ────────
         if context is not None:
@@ -932,11 +947,13 @@ def create_v1_registry(
     knowledge_base_id: int,
     agent_version: str = "1.0",
     tenant_id: Optional[int] = None,
+    enable_web_search: bool = False,
 ) -> ToolRegistry:
     """Create a ToolRegistry for Agent V1 with the given KB scope.
 
     ``agent_version="1.0"`` → read-only KB tools only.
     ``agent_version="1.1"`` → also includes write_note (for approve/resume flow).
+    ``enable_web_search`` → also exposes ``web_search`` (flag-gated, B4).
     """
     if not knowledge_base_id or knowledge_base_id <= 0:
         raise RegistryError("Agent V1 registry requires a non-null knowledge_base_id")
@@ -944,6 +961,7 @@ def create_v1_registry(
         knowledge_base_id=knowledge_base_id,
         agent_version=agent_version,
         tenant_id=tenant_id,
+        enable_web_search=enable_web_search,
     )
 
 

@@ -1,4 +1,4 @@
-import { get } from './request'
+import { get, post, del } from './request'
 import type { ApiResponse } from './types'
 
 // ── Tool Registry ──────────────────────────────────────────────────────
@@ -69,3 +69,33 @@ export const getToolRegistry = (): Promise<ApiResponse<ToolRegistryResponse>> =>
 /** 获取最近工具调用记录（分页，来自 agent_step 表） */
 export const getToolCalls = (page = 1, pageSize = 20): Promise<ApiResponse<ToolCallsResponse>> =>
   get('/tools/calls', { page, pageSize })
+
+// ── MCP Client（B5）────────────────────────────────────────────────────
+
+export interface McpServerInfo {
+  id: string
+  name: string
+  url: string
+  transport: 'sse' | 'streamable-http'
+  status: 'connected' | 'disconnected' | 'error' | 'connecting'
+  tool_count: number
+  error_message?: string | null
+}
+
+export const listMcpServers = (): Promise<ApiResponse<{ servers: McpServerInfo[]; error?: string }>> =>
+  get('/tools/mcp/servers')
+
+export const addMcpServer = (input: {
+  id: string
+  name: string
+  url: string
+  transport: 'sse' | 'streamable-http'
+  api_key?: string
+}): Promise<ApiResponse<{ success: boolean; message?: string; server?: McpServerInfo }>> =>
+  post('/tools/mcp/servers', input)
+
+export const reconnectMcpServer = (serverId: string): Promise<ApiResponse<{ success: boolean; message?: string }>> =>
+  post(`/tools/mcp/servers/${serverId}/reconnect`)
+
+export const removeMcpServer = (serverId: string): Promise<ApiResponse<{ success: boolean; message?: string }>> =>
+  del(`/tools/mcp/servers/${serverId}`)

@@ -18,6 +18,15 @@ export const uploadDocument = (file: File, kbId: number, title?: string): Promis
   })
 }
 
+// 从公开网页 URL 创建文档（Python AI 抓取并暂存为 markdown，待解析）
+export const createDocumentFromUrl = (
+  url: string,
+  kbId: number,
+  title?: string,
+): Promise<ApiResponse<Document>> => {
+  return post(`/document/from-url?knowledgeBaseId=${kbId}`, { url, title })
+}
+
 // 更新文档
 export const updateDocument = (id: number, data: { title?: string; content?: string }): Promise<ApiResponse<void>> => {
   return put(`/document/${id}`, data)

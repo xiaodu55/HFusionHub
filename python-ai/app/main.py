@@ -36,6 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.utils.config import config
 from app.api.vectorization import router as vectorization_router
+from app.api.ingest import router as ingest_router
 from app.api.chat import router as chat_router
 from app.api.rag import router as rag_router
 from app.api.agent_observability_api import router as agent_obs_router
@@ -44,6 +45,7 @@ from app.api.metrics import router as metrics_router
 from app.api.runtime import router as runtime_router
 from app.api.tools import router as tools_router
 from app.api.plugin_admin import router as plugin_admin_router
+from app.api.mcp_admin import router as mcp_admin_router
 from app.api.exception_handlers import (
     hfusionhub_exception_handler,
     http_exception_handler,
@@ -109,6 +111,7 @@ def create_app() -> FastAPI:
     # verifiable tenant context (fail-closed — no default tenant).
     tenant_dependencies = [Depends(require_internal_token), Depends(require_tenant)]
     app.include_router(vectorization_router, dependencies=tenant_dependencies)
+    app.include_router(ingest_router, dependencies=tenant_dependencies)
     app.include_router(chat_router, dependencies=tenant_dependencies)
     app.include_router(rag_router, dependencies=tenant_dependencies)
     # Applies on top of the internal token on the MCP data handler.
@@ -121,6 +124,7 @@ def create_app() -> FastAPI:
     app.include_router(runtime_router, dependencies=internal_dependencies)
     app.include_router(tools_router, dependencies=tenant_dependencies)
     app.include_router(plugin_admin_router, dependencies=tenant_dependencies)
+    app.include_router(mcp_admin_router, dependencies=tenant_dependencies)
 
     # Optional feature modules
     if _has_gateway:

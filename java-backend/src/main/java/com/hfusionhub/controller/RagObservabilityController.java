@@ -157,6 +157,39 @@ public class RagObservabilityController {
         }
     }
 
+    /**
+     * 在线答案评测（C3）— LLM-as-judge 对单条回答打分，无需标准答案。
+     */
+    @PostMapping("/evaluate/judge")
+    public R<Map> judgeAnswer(@RequestBody Map<String, Object> request) {
+        String query = request.get("query") == null ? "" : String.valueOf(request.get("query"));
+        String answer = request.get("answer") == null ? "" : String.valueOf(request.get("answer"));
+        if (query.isBlank() || answer.isBlank()) {
+            throw new BusinessException("query 与 answer 不能为空");
+        }
+        try {
+            Map<String, Object> trustedRequest = new HashMap<>(request);
+            trustedRequest.put("query", query);
+            trustedRequest.put("answer", answer);
+            trustedRequest.put("context", request.get("context") == null ? "" : String.valueOf(request.get("context")));
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            addInternalToken(headers);
+            Map response = restTemplate.postForObject(
+                    aiServiceBaseUrl + "/api/rag/evaluate/answer-judge",
+                    new HttpEntity<>(trustedRequest, headers),
+                    Map.class
+            );
+            return R.ok(response);
+        } catch (Exception exception) {
+            if (exception instanceof BusinessException businessException) {
+                throw businessException;
+            }
+            log.error("Answer judge request failed", exception);
+            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "评测服务不可用，请稍后重试");
+        }
+    }
+
     @PostMapping("/eval")
     public R<Map> evaluateProductionPath(@RequestBody Map<String, Object> request) {
         Map<String, Object> trustedRequest = new HashMap<>(request);

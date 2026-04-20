@@ -25,6 +25,16 @@ public interface DocumentService {
     DocumentInfoDTO upload(MultipartFile file, String title, Long kbId);
 
     /**
+     * 从公开网页 URL 创建文档（由 Python AI 抓取并暂存为 markdown）。
+     *
+     * @param url    公开 HTTPS 网页地址
+     * @param title  可选标题（留空则取自网页 title）
+     * @param kbId   知识库ID
+     * @return 文档信息
+     */
+    DocumentInfoDTO createFromUrl(String url, String title, Long kbId);
+
+    /**
      * 更新文档
      *
      * @param id     文档ID

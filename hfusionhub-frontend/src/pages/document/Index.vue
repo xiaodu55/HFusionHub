@@ -57,7 +57,14 @@ const uploadForm = ref({
   file: null as File | null,
   title: '',
 })
+const uploadMode = ref<'file' | 'url'>('file')
+const urlForm = ref({
+  kbId: 0,
+  url: '',
+  title: '',
+})
 const uploading = ref(false)
+const urlAdding = ref(false)
 const syncing = ref(false)
 const hasEnabledKnowledgeBase = computed(() => knowledgeBases.value.some((kb) => kb.status === 0))
 const parsedDocumentCount = computed(() => documents.value.filter(doc => doc.status === 2).length)
@@ -139,6 +146,33 @@ const handleUpload = async () => {
     toast.error(errorMessage(error, '上传文档失败'))
   } finally {
     uploading.value = false
+  }
+}
+
+const handleAddFromUrl = async () => {
+  if (!urlForm.value.url.trim() || !urlForm.value.kbId) return
+  const selectedKnowledgeBase = knowledgeBases.value.find((kb) => kb.id === urlForm.value.kbId)
+  if (!selectedKnowledgeBase || selectedKnowledgeBase.status !== 0) {
+    toast.error('知识库已禁用，无法添加网页文档')
+    return
+  }
+  if (!/^https:\/\//i.test(urlForm.value.url.trim())) {
+    toast.error('仅支持公开的 HTTPS 网页地址')
+    return
+  }
+
+  urlAdding.value = true
+  try {
+    await documentApi.createDocumentFromUrl(urlForm.value.url.trim(), urlForm.value.kbId, urlForm.value.title.trim() || undefined)
+    isUploadDialogOpen.value = false
+    urlForm.value = { kbId: 0, url: '', title: '' }
+    toast.success('网页已抓取，请在列表中点击解析')
+    await loadDocuments()
+  } catch (error) {
+    console.error('添加网页失败:', error)
+    toast.error(errorMessage(error, '添加网页失败'))
+  } finally {
+    urlAdding.value = false
   }
 }
 
@@ -245,7 +279,7 @@ onMounted(() => {
 
 <template>
   <div class="space-y-6 pb-4">
-    <section class="relative overflow-hidden rounded-2xl border border-border bg-card/80 shadow-[0_18px_45px_rgba(0,0,0,0.18)]"><div class="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-primary/10 blur-3xl" /><div class="relative flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"><div class="flex gap-4"><div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><Files class="h-5 w-5" /></div><div><p class="text-xs font-medium tracking-[0.16em] text-primary/90">DOCUMENT LIBRARY</p><h2 class="mt-1 text-2xl font-semibold tracking-tight">文档</h2><p class="mt-1 text-sm leading-6 text-muted-foreground">上传、解析并维护 AI 可以检索的资料。</p></div></div><div class="flex flex-wrap gap-2"><Button variant="outline" size="sm" @click="router.push('/document/recycle-bin')"><Archive class="mr-1.5 h-3.5 w-3.5" />回收站</Button><Button variant="outline" size="sm" :disabled="syncing" @click="handleSyncAll"><RefreshCcw :class="['mr-1.5 h-3.5 w-3.5', { 'animate-spin': syncing }]" />同步状态</Button><Button class="gap-2" :disabled="!hasEnabledKnowledgeBase" @click="isUploadDialogOpen = true"><Upload class="h-4 w-4" />上传文档</Button></div></div></section>
+    <section class="relative overflow-hidden rounded-2xl border border-border bg-card/80 shadow-[0_18px_45px_rgba(0,0,0,0.18)]"><div class="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-primary/10 blur-3xl" /><div class="relative flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"><div class="flex gap-4"><div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><Files class="h-5 w-5" /></div><div><p class="text-xs font-medium tracking-[0.16em] text-primary/90">DOCUMENT LIBRARY</p><h2 class="mt-1 text-2xl font-semibold tracking-tight">文档</h2><p class="mt-1 text-sm leading-6 text-muted-foreground">上传、解析并维护 AI 可以检索的资料。</p></div></div><div class="flex flex-wrap gap-2"><Button variant="outline" size="sm" @click="router.push('/document/recycle-bin')"><Archive class="mr-1.5 h-3.5 w-3.5" />回收站</Button><Button variant="outline" size="sm" :disabled="syncing" @click="handleSyncAll"><RefreshCcw :class="['mr-1.5 h-3.5 w-3.5', { 'animate-spin': syncing }]" />同步状态</Button><Button class="gap-2" :disabled="!hasEnabledKnowledgeBase" @click="isUploadDialogOpen = true"><Upload class="h-4 w-4" />添加文档</Button></div></div></section>
 
     <Card class="border-border bg-card/80"><CardContent class="grid gap-3 p-4 md:grid-cols-[13rem_minmax(0,1fr)]"><select v-model="selectedKbId" class="h-10 rounded-md border border-input bg-background/70 px-3 text-sm outline-none focus:border-primary/50"><option :value="0">全部知识库</option><option v-for="kb in knowledgeBases" :key="kb.id" :value="kb.id">{{ kb.name }}</option></select><div class="relative"><Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input v-model="searchQuery" placeholder="搜索文档名称" class="pl-10" /></div></CardContent></Card>
 
@@ -255,14 +289,33 @@ onMounted(() => {
 
     <Dialog v-model:open="isUploadDialogOpen">
       <DialogContent>
-        <DialogHeader><DialogTitle>上传文档</DialogTitle><DialogDescription>先选择归属知识库；上传后再开始解析，资料才可用于对话检索。</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>添加文档</DialogTitle><DialogDescription>先选择归属知识库；上传或抓取后再开始解析，资料才可用于对话检索。</DialogDescription></DialogHeader>
+        <div class="flex gap-1 rounded-lg border border-border bg-muted/40 p-1">
+          <button
+            type="button"
+            class="flex-1 rounded-md px-3 py-1.5 text-sm"
+            :class="uploadMode === 'file' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'"
+            @click="uploadMode = 'file'"
+          >上传文件</button>
+          <button
+            type="button"
+            class="flex-1 rounded-md px-3 py-1.5 text-sm"
+            :class="uploadMode === 'url' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'"
+            @click="uploadMode = 'url'"
+          >网页地址</button>
+        </div>
         <div class="space-y-4">
           <div class="space-y-2">
             <Label for="kb-select">选择知识库 *</Label>
             <select
               id="kb-select"
-              v-model="uploadForm.kbId"
+              :value="uploadMode === 'file' ? uploadForm.kbId : urlForm.kbId"
               class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              @change="(e) => {
+                const v = Number((e.target as HTMLSelectElement).value)
+                if (uploadMode === 'file') uploadForm.kbId = v
+                else urlForm.kbId = v
+              }"
             >
               <option :value="0" disabled>请选择知识库</option>
               <option
@@ -275,38 +328,71 @@ onMounted(() => {
               </option>
             </select>
           </div>
-          <div class="space-y-2">
-            <Label for="doc-title">文档标题 *</Label>
-            <Input
-              id="doc-title"
-              v-model="uploadForm.title"
-              placeholder="请输入便于识别的文档标题"
-            />
-          </div>
-          <div class="space-y-2">
-            <Label>选择文件 *</Label>
-            <Input
-              type="file"
-              accept=".txt,.pdf,.docx,.md"
-              @change="handleFileSelect"
-            />
-            <p class="text-sm text-muted-foreground">
-              支持 TXT、PDF、DOCX、MD 格式，单个文件不超过 10 MB
-            </p>
-          </div>
-          <div v-if="uploadForm.file" class="rounded-lg bg-muted p-3">
-            <p class="text-sm">
-              {{ uploadForm.file.name }} ({{ formatFileSize(uploadForm.file.size) }})
-            </p>
-          </div>
+
+          <template v-if="uploadMode === 'file'">
+            <div class="space-y-2">
+              <Label for="doc-title">文档标题 *</Label>
+              <Input
+                id="doc-title"
+                v-model="uploadForm.title"
+                placeholder="请输入便于识别的文档标题"
+              />
+            </div>
+            <div class="space-y-2">
+              <Label>选择文件 *</Label>
+              <Input
+                type="file"
+                accept=".txt,.pdf,.docx,.md,.csv,.xlsx"
+                @change="handleFileSelect"
+              />
+              <p class="text-sm text-muted-foreground">
+                支持 TXT、PDF、DOCX、MD、CSV、XLSX 格式，单个文件不超过 10 MB
+              </p>
+            </div>
+            <div v-if="uploadForm.file" class="rounded-lg bg-muted p-3">
+              <p class="text-sm">
+                {{ uploadForm.file.name }} ({{ formatFileSize(uploadForm.file.size) }})
+              </p>
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="space-y-2">
+              <Label for="url-title">文档标题（可选）</Label>
+              <Input
+                id="url-title"
+                v-model="urlForm.title"
+                placeholder="留空则自动使用网页标题"
+              />
+            </div>
+            <div class="space-y-2">
+              <Label for="doc-url">网页地址 *</Label>
+              <Input
+                id="doc-url"
+                v-model="urlForm.url"
+                placeholder="https://example.com/article"
+              />
+              <p class="text-sm text-muted-foreground">
+                仅支持公开的 HTTPS 网页；抓取正文后作为文档待解析
+              </p>
+            </div>
+          </template>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="isUploadDialogOpen = false">取消</Button>
           <Button
+            v-if="uploadMode === 'file'"
             :disabled="!uploadForm.file || !uploadForm.kbId || !uploadForm.title || uploading || knowledgeBases.find((kb) => kb.id === uploadForm.kbId)?.status !== 0"
             @click="handleUpload"
           >
             {{ uploading ? '上传中...' : '上传文档' }}
+          </Button>
+          <Button
+            v-else
+            :disabled="!urlForm.url.trim() || !urlForm.kbId || urlAdding || knowledgeBases.find((kb) => kb.id === urlForm.kbId)?.status !== 0"
+            @click="handleAddFromUrl"
+          >
+            {{ urlAdding ? '抓取中...' : '抓取网页' }}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -82,6 +82,13 @@ Copy `python-ai/.env.example` to `python-ai/.env`:
 | `DEEPSEEK_MODEL` | No | `deepseek-v4-flash` | Model name |
 | `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama URL for local LLM fallback and embeddings |
 | `OLLAMA_EMBEDDING_MODEL` | No | `qwen3-embedding:8b-fp16` | Ollama embedding model (**use this**, not the deprecated `OLLAMA_MODEL`) |
+| `OPENAI_COMPATIBLE_API_KEY` | No | `` | OpenAI 兼容备用供应商（B2）：加入 FailoverLLM 链，主供应商故障时切换 |
+| `OPENAI_COMPATIBLE_BASE_URL` | No | `` | 同上，chat-completions 兼容端点（OpenAI/通义/Kimi 等） |
+| `OPENAI_COMPATIBLE_MODEL` | No | `` | 同上，模型名（空则用 DEEPSEEK_MODEL） |
+| `WEB_SEARCH_PROVIDER` | No | `duckduckgo` | 联网搜索后端：`duckduckgo`（免 Key）/ `tavily` / `serper` |
+| `WEB_SEARCH_API_KEY` | No | `` | Tavily / Serper 的 API Key |
+| `WEB_SEARCH_BASE_URL` | No | `` | 搜索 API 地址覆盖（可选） |
+| `MCP_SERVERS_CONFIG` | No | `` | MCP 客户端启动配置（JSON 数组）；运行时变更持久化到 `MCP_SERVERS_CONFIG_FILE` |
 | `LLM_ALLOW_MOCK` | No | `false` | Enables mock LLM for development/testing only |
 | `SERVER_HOST` | No | `0.0.0.0` | FastAPI bind address |
 | `SERVER_PORT` | No | `9000` | FastAPI port |
@@ -103,54 +110,46 @@ All advanced RAG features are gated via environment variables in `python-ai/.env
 | Flag | Default | Status | Dependencies |
 |------|---------|--------|--------------|
 | `RAG_HYBRID_ENABLED` | `true` | ✅ Stable | None |
-| `RAG_GRAPH_ENABLED` | `false` | 🧪 Beta | Scoped graph index built |
-| `RAG_RERANKER_MODE` | `disabled` | 🧪 Beta | `pip install -r requirements-reranker.txt` (cross_encoder only) |
-| `RAG_MULTIMODAL_ENABLED` | `false` | 🔬 Experimental | Tesseract OCR + `pip install -r requirements-multimodal.txt` |
+| `RAG_GRAPH_ENABLED` | `false` | ❄️ Frozen | Scoped graph index built |
+| `RAG_RERANKER_MODE` | `disabled` | 🧪 Beta（cross_encoder 已冻结） | `pip install -r requirements-reranker.txt` (cross_encoder only) |
+| `RAG_MULTIMODAL_ENABLED` | `false` | ❄️ Frozen | Tesseract OCR + `pip install -r requirements-multimodal.txt` |
 | `RAG_AGENT_WORKFLOW_ENABLED` | `false` | 🧪 Beta | None (pure Python) |
-| `RAG_MULTI_AGENT_ENABLED` | `false` | 🔬 Experimental | Requires P9 enabled + selected KB |
+| `RAG_MULTI_AGENT_ENABLED` | `false` | ❄️ Frozen | Requires P9 enabled + selected KB |
 
 **P5: Hybrid Retrieval (Vector + BM25) — ✅ Stable**
 
 Default: enabled. Combines Milvus vector search with BM25 keyword search via Reciprocal Rank Fusion (RRF). This is the recommended retrieval mode and is fully tested.
 
-**P7: Scoped GraphRAG — 🧪 Beta**
+**P7: Scoped GraphRAG — ❄️ 冻结（不再投入）**
 
-Default: disabled. Builds a per-knowledge-base entity co-occurrence graph. Every node and edge in the graph has source-chunk evidence. When enabled, the graph channel returns only facts whose source chunks remain in the selected knowledge base.
+默认关闭。构建每知识库的实体共现图，图通道仅返回仍存在于选定知识库中的事实。
 
-To enable:
-1. Set `RAG_GRAPH_ENABLED=true` in `python-ai/.env`
-2. Index documents into a knowledge base (graph is built incrementally)
-3. Use the RAG debug page to verify graph results appear
+> **治理状态（2026-08）**：已冻结。图索引为内存实现、重启重建，文档自述不推荐用于 >10,000 文档的知识库，收益不稳定。代码与测试保留，UI 已标注"冻结"，不再投入新功能。
 
-Limitations: the graph index is in-memory and rebuilt on restart. Not recommended for KBs with >10,000 documents.
+**P6: Second-Stage Reranking — 🧪 Beta（cross_encoder 模式已冻结）**
 
-**P6: Second-Stage Reranking — 🧪 Beta**
-
-Default: disabled. Applies a second scoring pass to retrieval candidates before they enter the LLM context.
+默认关闭。对检索候选进行二次打分后进入 LLM 上下文。
 
 Modes:
-- `disabled` — No reranking (default)
-- `lexical` — Deterministic lexical reranking (no extra deps)
-- `cross_encoder` — Neural cross-encoder reranking (`pip install -r requirements-reranker.txt`)
+- `disabled` — 不重排（默认）
+- `lexical` — 确定性词法重排（无额外依赖）✅ 建议模式
+- `cross_encoder` — 神经交叉编码器重排 ❄️ 已冻结（需 `pip install -r requirements-reranker.txt`，收益未获离线基准证明前不投入）
 
-Recommendation: keep disabled until an offline benchmark shows improvement over RRF-only retrieval.
+**P8: Multimodal Evidence — ❄️ 冻结（不再投入）**
 
-**P8: Multimodal Evidence — 🔬 Experimental**
+默认关闭。通过 OCR 从文档图片提取文本进入文本检索管线。
 
-Default: disabled. Extracts text from images in documents via OCR and feeds it into the existing text retrieval pipeline.
-
-Requirements:
-1. Install Tesseract OCR on your system
-2. `pip install -r requirements-multimodal.txt`
-3. Set `RAG_MULTIMODAL_ENABLED=true` and `RAG_MULTIMODAL_OCR_ENABLED=true`
+> **治理状态（2026-08）**：已冻结。依赖系统级 Tesseract、收益低。等 vision-LLM 路线（可选 C5）再重启。
 
 **P9: Bounded Single-Agent Workflow — 🧪 Beta**
 
-Default: disabled. Adds timeout (45s), retry (1 retry, 0.2s delay), and operational run tracking to the ReAct agent. Only whitelisted tools may be invoked.
+默认关闭。为 ReAct Agent 增加超时（45s）、重试（1 次，0.2s 延迟）与运行追踪。仅白名单工具可被调用。
 
-**P10: Multi-Agent Collaboration — 🔬 Experimental**
+**P10: Multi-Agent Collaboration — ❄️ 冻结（不再投入）**
 
-Default: disabled. Concurrent expert agents (Retrieval, Analysis, Critic, Synthesis) with a deterministic evidence critic that validates every citation against the knowledge base scope.
+默认关闭。并发专家 Agent（检索/分析/校验/综合）+ 确定性证据校验器。
+
+> **治理状态（2026-08）**：已冻结。实验性、增加延迟、critic 仅单库校验，收益不明确。保留为研究项目。
 
 ## Critical: PYTHON_AI_INTERNAL_TOKEN
 

@@ -642,6 +642,122 @@ public class AiClient {
     }
 
     /**
+     * Ask the Python AI service to fetch a public HTTPS webpage and stage it
+     * as a markdown file inside the shared document storage root.
+     *
+     * @param url   the public HTTPS URL to ingest
+     * @param title optional title override
+     * @return map with success, file_path, file_type, title, content_length, message
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> ingestUrl(String url, String title) {
+        try {
+            String requestUrl = baseUrl + "/api/ingest/url";
+            Map<String, Object> body = new HashMap<>();
+            body.put("url", url);
+            if (title != null && !title.isBlank()) {
+                body.put("title", title);
+            }
+            HttpHeaders headers = internalHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    requestUrl, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            if (response.getBody() == null) {
+                return Map.of("success", false, "message", "AI 服务没有返回抓取结果");
+            }
+            return new HashMap<>(response.getBody());
+        } catch (Exception e) {
+            log.warn("URL ingestion failed: {}", e.getMessage());
+            return Map.of("success", false, "message", "网页抓取失败，请确认 AI 服务可用且地址为公开 HTTPS 网页");
+        }
+    }
+
+    // ── MCP client admin (B5) ──────────────────────────────────────────
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> listMcpServers() {
+        try {
+            String url = baseUrl + "/api/mcp/servers";
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), Map.class);
+            return response.getBody() == null ? Map.of("servers", List.of()) : new HashMap<>(response.getBody());
+        } catch (Exception e) {
+            log.warn("MCP server list unavailable: {}", e.getMessage());
+            return Map.of("servers", List.of(), "error", "暂时无法连接 AI 服务获取 MCP 服务器列表。");
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> addMcpServer(Map<String, Object> body) {
+        try {
+            String url = baseUrl + "/api/mcp/servers";
+            HttpHeaders headers = internalHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            return response.getBody() == null ? Map.of("success", false, "message", "AI 服务没有返回结果")
+                    : new HashMap<>(response.getBody());
+        } catch (Exception e) {
+            log.warn("MCP server add failed: {}", e.getMessage());
+            return Map.of("success", false, "message", "连接 AI 服务失败，请稍后重试");
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> reconnectMcpServer(String serverId) {
+        try {
+            String url = baseUrl + "/api/mcp/servers/" + serverId + "/reconnect";
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(internalHeaders()), Map.class);
+            return response.getBody() == null ? Map.of("success", false, "message", "AI 服务没有返回结果")
+                    : new HashMap<>(response.getBody());
+        } catch (Exception e) {
+            log.warn("MCP server reconnect failed: {}", e.getMessage());
+            return Map.of("success", false, "message", "连接 AI 服务失败，请稍后重试");
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> removeMcpServer(String serverId) {
+        try {
+            String url = baseUrl + "/api/mcp/servers/" + serverId;
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.DELETE, new HttpEntity<>(internalHeaders()), Map.class);
+            return response.getBody() == null ? Map.of("success", true, "message", "已移除")
+                    : new HashMap<>(response.getBody());
+        } catch (Exception e) {
+            log.warn("MCP server remove failed: {}", e.getMessage());
+            return Map.of("success", false, "message", "连接 AI 服务失败，请稍后重试");
+        }
+    }
+
+    /**
+     * 在线答案评测（C3）— LLM-as-judge 对回答打分，无需标准答案。
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> judgeAnswer(String query, String answer, String context, String model) {
+        try {
+            String url = baseUrl + "/api/rag/evaluate/answer-judge";
+            Map<String, Object> body = new HashMap<>();
+            body.put("query", query);
+            body.put("answer", answer);
+            body.put("context", context == null ? "" : context);
+            if (model != null && !model.isBlank()) {
+                body.put("model", model);
+            }
+            HttpHeaders headers = internalHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            return response.getBody() == null ? Map.of("status", "error", "message", "AI 服务没有返回评测结果")
+                    : new HashMap<>(response.getBody());
+        } catch (Exception e) {
+            log.warn("Answer judge failed: {}", e.getMessage());
+            return Map.of("status", "error", "message", "评测服务不可用，请稍后重试");
+        }
+    }
+
+    /**
      * Notify Python AI of an approval decision — Agent V1 Step 5.
      *
      * Called by AgentTaskServiceImpl after updating MySQL agent_approval.

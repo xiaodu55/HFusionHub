@@ -143,6 +143,33 @@ class MCPClientManager:
 
     # ── Server management ────────────────────────────────────────────
 
+    def _config_file_path(self) -> str:
+        import os
+        return os.environ.get("MCP_SERVERS_CONFIG_FILE", "mcp_servers.json")
+
+    def _persist_config(self) -> None:
+        """Persist the current server list to the config file (B5).
+
+        The env-provided ``MCP_SERVERS_CONFIG`` remains the bootstrap source;
+        runtime changes are written back so they survive a restart.
+        """
+        try:
+            payload = [
+                {
+                    "id": conn.server_id,
+                    "name": conn.name,
+                    "url": conn.url,
+                    "transport": conn.transport.value,
+                    **({"api_key": conn.api_key} if conn.api_key else {}),
+                }
+                for conn in self._servers.values()
+            ]
+            path = self._config_file_path()
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            logger.warning("MCP config persistence failed: %s", exc)
+
     def add_server(self, cfg: Dict[str, Any]) -> MCPServerConnection:
         sid = cfg["id"]
         conn = MCPServerConnection(
@@ -153,11 +180,13 @@ class MCPClientManager:
             api_key=cfg.get("api_key"),
         )
         self._servers[sid] = conn
+        self._persist_config()
         return conn
 
     def remove_server(self, server_id: str) -> bool:
         if server_id in self._servers:
             del self._servers[server_id]
+            self._persist_config()
             return True
         return False
 

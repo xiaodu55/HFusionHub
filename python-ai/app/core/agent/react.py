@@ -183,9 +183,20 @@ class ReactAgent(Agent):
             if self._registry is not None:
                 raw = self._registry.get_tools(v1_only=True)
             elif self._has_selected_knowledge_base():
+                # B4: web_search is exposed only when agent.web_search.enabled
+                # is on for this user/KB (execution still gated by policy).
+                from app.utils.feature_flag import feature_flags
+                web_search_enabled = False
+                if self._context is not None:
+                    web_search_enabled = feature_flags.is_enabled(
+                        "agent.web_search.enabled",
+                        user_id=getattr(self._context, "user_id", None),
+                        knowledge_base_id=self.knowledge_base_id,
+                    )
                 self._registry = create_v1_registry(
                     self.knowledge_base_id,
                     tenant_id=getattr(self._context, "tenant_id", None) if self._context else None,
+                    enable_web_search=web_search_enabled,
                 )
                 raw = self._registry.get_tools(v1_only=True)
             else:

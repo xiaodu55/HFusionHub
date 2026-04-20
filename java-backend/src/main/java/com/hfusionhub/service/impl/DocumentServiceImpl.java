@@ -58,19 +58,23 @@ public class DocumentServiceImpl implements DocumentService {
     private final UserMapper userMapper;
     private final VectorizationService vectorizationService;
     private final DeletionService deletionService;
+    private final com.hfusionhub.client.AiClient aiClient;
 
     private static final String UPLOAD_DIR = "uploads/documents";
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
     // 允许的文件扩展名（优先使用扩展名检查，比MIME类型更可靠）
     private static final List<String> ALLOWED_EXTENSIONS = List.of(
-            ".pdf", ".docx", ".txt", ".md"
+            ".pdf", ".docx", ".txt", ".md", ".csv", ".xlsx"
     );
     // 允许的MIME类型（作为辅助验证）
     private static final List<String> ALLOWED_TYPES = List.of(
             "application/pdf",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             "text/plain",
             "text/markdown",
+            "text/csv",
+            "application/vnd.ms-excel",
             "application/octet-stream"  // 允许通用二进制流（由扩展名验证）
     );
 
@@ -143,6 +147,57 @@ public class DocumentServiceImpl implements DocumentService {
         registerFileCommit(document.getId(), tempPath);
 
         // 6. 转换为 DTO
+        return convertToInfoDTO(document, kb.getName());
+    }
+
+    @Override
+    @Transactional
+    public DocumentInfoDTO createFromUrl(String url, String title, Long kbId) {
+        // 1. 验证知识库存在且属于当前用户
+        Long currentUserId = JwtUtils.getCurrentUserId();
+        KnowledgeBase kb = knowledgeBaseMapper.selectById(kbId);
+        if (kb == null) {
+            throw new BusinessException("知识库不存在");
+        }
+        if (!kb.getUserId().equals(currentUserId)) {
+            throw new BusinessException("无权访问该知识库");
+        }
+        if (kb.getStatus() == null || kb.getStatus() != CommonConstants.KB_STATUS_NORMAL) {
+            throw new BusinessException("知识库已禁用，无法添加网页文档");
+        }
+
+        // 2. 校验 URL 基本格式
+        if (url == null || url.isBlank()) {
+            throw new BusinessException("网页地址不能为空");
+        }
+        String trimmedUrl = url.trim();
+
+        // 3. 请求 Python AI 抓取网页并暂存为 markdown
+        Map<String, Object> ingest = aiClient.ingestUrl(trimmedUrl, title);
+        Object success = ingest.get("success");
+        if (!Boolean.TRUE.equals(success)) {
+            Object message = ingest.get("message");
+            throw new BusinessException(message == null ? "网页抓取失败" : message.toString());
+        }
+        String filePath = String.valueOf(ingest.getOrDefault("file_path", ""));
+        String effectiveTitle = String.valueOf(ingest.getOrDefault("title", trimmedUrl));
+        if (filePath.isBlank()) {
+            throw new BusinessException("网页抓取失败：AI 服务未返回文件路径");
+        }
+
+        // 4. 创建文档记录（待解析，与上传一致，用户可点击解析）
+        Document document = new Document();
+        document.setKnowledgeBaseId(kbId);
+        document.setTitle(effectiveTitle);
+        document.setFilePath(filePath);
+        document.setFileType("md");
+        Object contentLength = ingest.get("content_length");
+        document.setFileSize(contentLength instanceof Number
+                ? ((Number) contentLength).longValue() : 0L);
+        document.setStatus(DocumentStatus.PENDING.getCode());
+        documentMapper.insert(document);
+
+        log.info("网页文档已创建: docId={}, url={}, title={}", document.getId(), trimmedUrl, effectiveTitle);
         return convertToInfoDTO(document, kb.getName());
     }
 

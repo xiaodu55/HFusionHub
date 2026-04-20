@@ -1110,3 +1110,83 @@ CREATE TABLE IF NOT EXISTS rag_answer_feedback (
     CONSTRAINT fk_rag_feedback_message FOREIGN KEY (message_id) REFERENCES message (id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_rag_feedback_tenant_created ON rag_answer_feedback (tenant_id, created_at);
+
+-- =====================================================
+-- 应用发布与 API Key (V52)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS app (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    description VARCHAR(500) DEFAULT NULL,
+    user_id BIGINT NOT NULL,
+    tenant_id BIGINT NOT NULL DEFAULT 1,
+    knowledge_base_id BIGINT DEFAULT NULL,
+    prompt_template_id BIGINT DEFAULT NULL,
+    model VARCHAR(200) DEFAULT NULL,
+    style VARCHAR(20) NOT NULL DEFAULT 'detailed',
+    status TINYINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_app_user ON app (user_id);
+CREATE INDEX IF NOT EXISTS idx_app_tenant ON app (tenant_id);
+
+CREATE TABLE IF NOT EXISTS app_api_key (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    app_id BIGINT NOT NULL,
+    name VARCHAR(100) DEFAULT NULL,
+    key_hash VARCHAR(64) NOT NULL,
+    key_prefix VARCHAR(12) NOT NULL,
+    enabled TINYINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_apikey_app ON app_api_key (app_id);
+CREATE INDEX IF NOT EXISTS idx_apikey_hash ON app_api_key (key_hash);
+
+CREATE TABLE IF NOT EXISTS app_call_log (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    app_id BIGINT NOT NULL,
+    api_key_id BIGINT DEFAULT NULL,
+    user_id BIGINT DEFAULT NULL,
+    tenant_id BIGINT NOT NULL DEFAULT 1,
+    status VARCHAR(20) NOT NULL DEFAULT 'ok',
+    prompt_tokens INT NOT NULL DEFAULT 0,
+    completion_tokens INT NOT NULL DEFAULT 0,
+    total_tokens INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_call_app ON app_call_log (app_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_call_key ON app_call_log (api_key_id);
+
+-- =====================================================
+-- 知识库共享 (V53)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS kb_share (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    knowledge_base_id BIGINT NOT NULL,
+    owner_user_id BIGINT NOT NULL,
+    shared_user_id BIGINT NOT NULL,
+    permission VARCHAR(20) NOT NULL DEFAULT 'read',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_share_user ON kb_share (shared_user_id);
+
+-- =====================================================
+-- 操作审计日志 (V54)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS audit_log (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    operator_id BIGINT NOT NULL,
+    tenant_id BIGINT NOT NULL DEFAULT 1,
+    action VARCHAR(50) NOT NULL,
+    target_type VARCHAR(50) NOT NULL,
+    target_id VARCHAR(64) DEFAULT NULL,
+    detail VARCHAR(500) DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_audit_operator ON audit_log (operator_id, created_at);

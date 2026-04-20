@@ -38,6 +38,15 @@ public class DocumentController {
         return R.ok("上传成功", info);
     }
 
+    @Operation(summary = "从网页 URL 创建文档", description = "抓取公开 HTTPS 网页并暂存为 markdown 文档（待解析）")
+    @PostMapping("/from-url")
+    public R<DocumentInfoDTO> createFromUrl(
+            @Parameter(description = "知识库ID") @RequestParam("knowledgeBaseId") Long knowledgeBaseId,
+            @Valid @RequestBody com.hfusionhub.dto.DocumentFromUrlDTO dto) {
+        DocumentInfoDTO info = documentService.createFromUrl(dto.getUrl(), dto.getTitle(), knowledgeBaseId);
+        return R.ok("网页已抓取，等待解析", info);
+    }
+
     @Operation(summary = "更新文档", description = "更新文档信息")
     @PutMapping("/{id}")
     public R<DocumentInfoDTO> update(

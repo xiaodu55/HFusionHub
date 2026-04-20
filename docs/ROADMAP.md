@@ -50,7 +50,16 @@
 
 - [x] **Java tests** — 39→79 cases covering Document, Vectorization, and Auth boundaries
 - [x] **Frontend tests** — 12→32 covering chat SSE, document upload, and login flows
-- [ ] **Dynamic feature flags** — DB-driven `feature_flag` table, per-user/KB scoping
+- [x] **Notification bell** — Frontend unread badge + popup list（真实 AgentAlertEvent 数据）；Admin 公告发布页（公告管理）
+- [x] **实验特性三档治理** — 能力开关页新增"稳定 / 实验 / 冻结"三档标注；GraphRAG / 多模态 OCR / Multi-Agent / cross_encoder 重排标记为冻结
+- [x] **表格/网页知识摄入** — CSV/XLSX 解析器（纯标准库）+ 网页 URL 抓取（SSRF 防护）纳入文档管线
+- [x] **应用发布与开放 API** — app 模型 + 发布 + API Key（哈希存储）+ `/openapi/chat`（限流 + 按 Key 计费）
+- [x] **联网搜索** — web_search 支持 DuckDuckGo/Tavily/Serper，`agent.web_search.enabled` flag 门控 + 策略审批
+- [x] **MCP Client 管理** — 运行时注册/重连/移除外部 MCP 服务器，持久化配置
+- [x] **知识库共享** — kb_share 只读协作，共享用户可创建对话
+- [x] **操作审计** — audit_log 表记录应用/API Key/共享/公告等敏感操作
+- [x] **在线答案评测** — `/api/rag/evaluate/answer-judge` LLM-as-judge 打分（无标准答案模式）
+- [ ] **Dynamic feature flags** — DB-driven `feature_flag` table, per-user/KB scoping（表已建，规则层完善中）
 - [ ] **Theme system** — light/dark/system tri-state, server-side preference sync
-- [ ] **Notification bell** — Frontend unread badge, popup list, admin publish UI
 - [ ] **E2E tests** — Playwright or Cypress for critical user journeys
+- [ ] **SSO/OIDC** — 需要外部 IdP 与 sa-token OAuth2 集成，暂缓（会话体系已具备扩展点）

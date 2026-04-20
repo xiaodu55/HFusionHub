@@ -70,6 +70,10 @@ def _estimate_processing_seconds(file_path: str, file_type: str) -> int:
         ".txt": 15,
         "md": 15,
         ".md": 15,
+        "csv": 20,
+        ".csv": 20,
+        "xlsx": 30,
+        ".xlsx": 30,
     }.get((file_type or "").lower(), 30)
     estimate = base_seconds + int(size_mb * 25)
     return max(15, min(900, estimate))

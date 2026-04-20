@@ -107,6 +107,16 @@ def get_llm(model: str = None) -> BaseLLM:
     if ollama_available or providers:
         providers.append(OllamaLLM(base_url=ollama_url, model=model or config.OLLAMA_MODEL))
 
+    # Optional OpenAI-compatible backup provider (B2): any chat-completions
+    # compatible endpoint (OpenAI, 通义, Kimi, …) joins the chain after
+    # DeepSeek/Ollama so a configured primary failure can fail over.
+    if config.OPENAI_COMPATIBLE_API_KEY and config.OPENAI_COMPATIBLE_BASE_URL:
+        providers.append(DeepSeekLLM(
+            api_key=config.OPENAI_COMPATIBLE_API_KEY,
+            base_url=config.OPENAI_COMPATIBLE_BASE_URL,
+            model=model or config.OPENAI_COMPATIBLE_MODEL or config.DEEPSEEK_MODEL,
+        ))
+
     if len(providers) > 1:
         return FailoverLLM(providers)
     if providers:

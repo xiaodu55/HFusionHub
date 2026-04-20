@@ -243,3 +243,47 @@ async def list_evaluation_runs(
             knowledge_base_id=knowledge_base_id,
         )
     }
+
+
+class AnswerJudgeRequest(BaseModel):
+    """在线答案评测（LLM-as-judge，无需标准答案）。"""
+    query: str = Field(..., min_length=1, max_length=4000)
+    answer: str = Field(..., min_length=1, max_length=8000)
+    context: str = Field("", max_length=20000, description="检索到的参考上下文（可空）")
+    model: Optional[str] = Field(None, max_length=160, description="评测模型（空=系统默认）")
+
+
+@router.post("/evaluate/answer-judge")
+async def judge_answer(request: AnswerJudgeRequest):
+    """在线评测回答质量：使用 LLM 作为裁判对回答打分（C3）。
+
+    返回各维度得分（completeness/accuracy/clarity）与综合分，以及
+    是否建议改进（verdict）。上下文与答案中不含密钥等敏感信息。
+    """
+    from app.core.rag.answer_quality_evaluator import (
+        EvaluationSample,
+        EvaluationStatus,
+        EvaluationStrategyType,
+        get_evaluator,
+    )
+
+    evaluator = get_evaluator(strategy_type=EvaluationStrategyType.LLM_BASED, model=request.model)
+    sample = EvaluationSample(
+        query_id="online-judge",
+        query=request.query,
+        response=request.answer,
+        context=request.context,
+        ground_truth=None,  # 无标准答案模式
+    )
+    result = await evaluator.evaluate(sample)
+    if result.status != EvaluationStatus.COMPLETED:
+        raise HTTPException(status_code=502, detail=result.error_message or "评测失败")
+    overall = result.overall_score
+    verdict = "good" if overall >= 0.7 else ("medium" if overall >= 0.4 else "poor")
+    return {
+        "status": "completed",
+        "overall_score": round(overall, 3),
+        "scores": {k: round(v, 3) for k, v in result.scores.items()},
+        "verdict": verdict,
+        "strategy": result.strategy_used,
+    }

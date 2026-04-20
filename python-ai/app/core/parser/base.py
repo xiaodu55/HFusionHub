@@ -62,6 +62,8 @@ class BaseParser(ABC):
         from app.core.parser.text_parser import TextParser
         from app.core.parser.pdf_parser import PDFParser
         from app.core.parser.docx_parser import DocxParser
+        from app.core.parser.csv_parser import CsvParser
+        from app.core.parser.xlsx_parser import XlsxParser
 
         parsers = {
             "md": MarkdownParser,
@@ -70,6 +72,8 @@ class BaseParser(ABC):
             "text": TextParser,
             "pdf": PDFParser,
             "docx": DocxParser,
+            "csv": CsvParser,
+            "xlsx": XlsxParser,
         }
 
         parser_class = parsers.get(file_type.lower())

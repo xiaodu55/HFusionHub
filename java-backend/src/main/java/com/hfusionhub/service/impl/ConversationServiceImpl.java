@@ -76,10 +76,25 @@ public class ConversationServiceImpl implements ConversationService {
     private final QuotaProperties quotaProperties;
     private final com.hfusionhub.service.AgentStreamEventProcessor streamEventProcessor;
     private final com.hfusionhub.service.RagIntentNodeService ragIntentNodeService;
+    private final com.hfusionhub.service.KbShareService kbShareService;
 
     private static final int REQUEST_ID_MAX_LENGTH = 64;
     public static final String ASSISTANT_REQUEST_SUFFIX = ":assistant";
     private final ConcurrentMap<String, StreamCancellation> activeStreamRequests = new ConcurrentHashMap<>();
+
+    /**
+     * C2: 知识库可读校验 — 所有者或已被共享（只读协作）。
+     */
+    private void assertCanReadKnowledgeBase(KnowledgeBase kb, Long userId) {
+        if (kb == null) {
+            throw new BusinessException("知识库不存在");
+        }
+        boolean owned = kb.getUserId().equals(userId);
+        boolean shared = !owned && kbShareService.canRead(userId, kb.getId());
+        if (!owned && !shared) {
+            throw new BusinessException("无权访问该知识库");
+        }
+    }
 
     @Override
     @Transactional
@@ -87,15 +102,10 @@ public class ConversationServiceImpl implements ConversationService {
         // 1. 获取当前用户
         Long currentUserId = JwtUtils.getCurrentUserId();
 
-        // 2. 如果指定了知识库，验证知识库存在且属于当前用户
+        // 2. 如果指定了知识库，验证知识库存在且可读（所有者或已被共享）
         if (dto.getKnowledgeBaseId() != null) {
             KnowledgeBase kb = knowledgeBaseMapper.selectById(dto.getKnowledgeBaseId());
-            if (kb == null) {
-                throw new BusinessException("知识库不存在");
-            }
-            if (!kb.getUserId().equals(currentUserId)) {
-                throw new BusinessException("无权访问该知识库");
-            }
+            assertCanReadKnowledgeBase(kb, currentUserId);
         }
 
         // 3. 创建对话
@@ -282,7 +292,7 @@ public class ConversationServiceImpl implements ConversationService {
             KnowledgeBase kb = knowledgeBaseMapper.selectById(conversation.getKnowledgeBaseId());
             if (kb == null || kb.getDeleted() == 1 || kb.getStatus() != 0)
                 throw new BusinessException("关联的知识库已被删除或禁用");
-            if (!kb.getUserId().equals(currentUserId))
+            if (!kb.getUserId().equals(currentUserId) && !kbShareService.canRead(currentUserId, kb.getId()))
                 throw new BusinessException("无权访问关联的知识库");
         }
         Message existingUser = findUserByRequestId(requestId);
@@ -766,7 +776,7 @@ public class ConversationServiceImpl implements ConversationService {
             if (kb == null || kb.getDeleted() == 1 || kb.getStatus() != 0) {
                 throw new BusinessException("关联的知识库已被删除或禁用");
             }
-            if (!kb.getUserId().equals(currentUserId)) {
+            if (!kb.getUserId().equals(currentUserId) && !kbShareService.canRead(currentUserId, kb.getId())) {
                 throw new BusinessException("无权访问关联的知识库");
             }
         }
@@ -848,7 +858,7 @@ public class ConversationServiceImpl implements ConversationService {
                 emitter.completeWithError(new BusinessException("关联的知识库已被删除或禁用"));
                 return;
             }
-            if (!kb.getUserId().equals(currentUserId)) {
+            if (!kb.getUserId().equals(currentUserId) && !kbShareService.canRead(currentUserId, kb.getId())) {
                 emitter.completeWithError(new BusinessException("无权访问关联的知识库"));
                 return;
             }

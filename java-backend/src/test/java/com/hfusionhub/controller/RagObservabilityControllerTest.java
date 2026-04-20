@@ -121,6 +121,47 @@ class RagObservabilityControllerTest {
         }
     }
 
+    @Test
+    void judgeAnswerForwardsToAiServiceAndReturnsScores() {
+        when(restTemplate.postForObject(
+                eq("http://ai-service:9000/api/rag/evaluate/answer-judge"),
+                any(HttpEntity.class),
+                eq(Map.class)))
+                .thenReturn(Map.of(
+                        "status", "completed",
+                        "overall_score", 0.85,
+                        "verdict", "good",
+                        "scores", Map.of("accuracy", 0.8)
+                ));
+
+        Map<String, Object> request = new HashMap<>();
+        request.put("query", "什么是虚拟线程？");
+        request.put("answer", "虚拟线程是 Java 的轻量级线程。");
+        request.put("context", "JEP 444");
+
+        R<Map> response = controller.judgeAnswer(request);
+
+        assertEquals(200, response.getCode());
+        assertEquals("good", response.getData().get("verdict"));
+        verify(restTemplate).postForObject(
+                eq("http://ai-service:9000/api/rag/evaluate/answer-judge"),
+                any(HttpEntity.class),
+                eq(Map.class));
+    }
+
+    @Test
+    void judgeAnswerRejectsBlankQuery() {
+        Map<String, Object> request = new HashMap<>();
+        request.put("query", "  ");
+        request.put("answer", "x");
+
+        try {
+            controller.judgeAnswer(request);
+        } catch (com.hfusionhub.common.exception.BusinessException e) {
+            assertEquals(StatusCode.BAD_REQUEST, e.getCode());
+        }
+    }
+
     /**
      * Minimal in-memory SaTokenContext for unit tests without a servlet container.
      * Uses Mockito mocks for protocol-level objects so we don't have to

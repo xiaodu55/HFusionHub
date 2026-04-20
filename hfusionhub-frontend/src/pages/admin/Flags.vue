@@ -19,7 +19,7 @@ import { useToast } from '@/composables/useToast'
 import { Button } from '@/components/ui/button'
 
 type CapabilityGroup = 'retrieval' | 'agent' | 'safety'
-type CapabilityStatus = 'stable' | 'beta' | 'experimental'
+type CapabilityStatus = 'stable' | 'experimental' | 'frozen'
 
 interface CapabilityDefinition {
   key: string
@@ -42,11 +42,11 @@ const serverFlags = ref<Record<string, FeatureFlagInfo>>({})
 
 const capabilities: CapabilityDefinition[] = [
   { key: 'rag.hybrid.enabled', name: '混合检索', group: 'retrieval', status: 'stable', icon: Route, summary: '同时使用语义和关键词查找资料。', useCase: '大多数知识库问答', impact: '通常能提高命中率，建议保持开启。' },
-  { key: 'rag.graph.enabled', name: '关系检索', group: 'retrieval', status: 'beta', icon: GitBranch, summary: '根据人物、系统、规则之间的关系补充资料。', useCase: '制度、组织关系或系统依赖较复杂', impact: '检索更全面，但会略微增加处理时间。' },
-  { key: 'rag.reranker.enabled', name: '结果精排', group: 'retrieval', status: 'stable', icon: ListFilter, summary: '对检索结果再次排序，把更相关的内容放前面。', useCase: '引用不够准确或资料较多', impact: '答案更精准，会增加少量计算时间。' },
-  { key: 'agent.enabled', name: '复杂任务模式', group: 'agent', status: 'beta', icon: Bot, summary: '为复杂任务增加超时、重试和执行追踪。', useCase: '需要多步骤分析的任务', impact: '成功率更高，但回答时间可能变长。' },
-  { key: 'agent.multi_agent.enabled', name: '多角色协作', group: 'agent', status: 'experimental', icon: Users, summary: '让分析和校验角色共同完成复杂问题。', useCase: '高复杂度、需要复核的任务', impact: '消耗更多模型用量，必须先开启复杂任务模式。', dependsOn: 'agent.enabled' },
-  { key: 'agent.web_search.enabled', name: '联网搜索', group: 'agent', status: 'beta', icon: Globe2, summary: '允许 AI 查询互联网上的最新信息。', useCase: '知识库外的时效性问题', impact: '会使用外部来源，需要注意内容可信度。' },
+  { key: 'rag.graph.enabled', name: '关系检索', group: 'retrieval', status: 'frozen', icon: GitBranch, summary: '根据人物、系统、规则之间的关系补充资料（已冻结：内存图、大数据集下收益不稳定）。', useCase: '制度、组织关系或系统依赖较复杂', impact: '检索更全面，但会略微增加处理时间。' },
+  { key: 'rag.reranker.enabled', name: '结果精排', group: 'retrieval', status: 'experimental', icon: ListFilter, summary: '对检索结果再次排序，把更相关的内容放前面（建议仅使用内置 lexical 模式，cross_encoder 模式已冻结）。', useCase: '引用不够准确或资料较多', impact: '答案更精准，会增加少量计算时间。' },
+  { key: 'agent.enabled', name: '复杂任务模式', group: 'agent', status: 'experimental', icon: Bot, summary: '为复杂任务增加超时、重试和执行追踪。', useCase: '需要多步骤分析的任务', impact: '成功率更高，但回答时间可能变长。' },
+  { key: 'agent.multi_agent.enabled', name: '多角色协作', group: 'agent', status: 'frozen', icon: Users, summary: '让分析和校验角色共同完成复杂问题（已冻结：延迟收益不明确，暂不投入）。', useCase: '高复杂度、需要复核的任务', impact: '消耗更多模型用量，必须先开启复杂任务模式。', dependsOn: 'agent.enabled' },
+  { key: 'agent.web_search.enabled', name: '联网搜索', group: 'agent', status: 'experimental', icon: Globe2, summary: '允许 AI 查询互联网上的最新信息（需在服务端配置搜索源）。', useCase: '知识库外的时效性问题', impact: '会使用外部来源，需要注意内容可信度。' },
   { key: 'agent.write_tools.enabled', name: '写入操作', group: 'safety', status: 'experimental', icon: Wrench, summary: '允许 AI 发起新增、修改等操作。', useCase: '希望 AI 协助执行实际操作', impact: '属于高风险能力，执行前仍需要人工确认。', confirmOnEnable: '开启后 AI 可以发起写入操作。确认继续开启吗？' },
   { key: 'approval.required_for_write', name: '操作前确认', group: 'safety', status: 'stable', icon: ShieldCheck, summary: '写入操作执行前必须由当前用户确认。', useCase: '所有启用写入能力的场景', impact: '建议始终开启，避免 AI 未经确认修改数据。' },
 ]
@@ -63,7 +63,12 @@ const visibleCapabilities = computed(() => activeGroup.value === 'all'
   : capabilities.filter(item => item.group === activeGroup.value))
 const enabledCount = computed(() => capabilities.filter(item => serverFlags.value[item.key]?.enabled).length)
 
-const statusLabel = (status: CapabilityStatus) => ({ stable: '稳定', beta: '测试中', experimental: '实验性' }[status])
+const statusLabel = (status: CapabilityStatus) => ({ stable: '稳定', experimental: '实验', frozen: '冻结' }[status])
+const statusClass = (status: CapabilityStatus) => ({
+  stable: 'border-emerald-400/30 bg-emerald-400/[0.06] text-emerald-300',
+  experimental: 'border-amber-400/30 bg-amber-400/[0.06] text-amber-300',
+  frozen: 'border-zinc-500/40 bg-zinc-500/[0.08] text-zinc-400',
+}[status])
 const isEnabled = (key: string) => Boolean(serverFlags.value[key]?.enabled)
 const isAvailable = (item: CapabilityDefinition) => Boolean(serverFlags.value[item.key])
 
@@ -158,12 +163,18 @@ onMounted(loadFlags)
       <button v-for="group in groups" :key="group.value" class="shrink-0 rounded-md px-3 py-2 text-sm" :class="activeGroup === group.value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'" @click="activeGroup = group.value">{{ group.label }}</button>
     </div>
 
+    <div class="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card/40 px-4 py-3 text-xs text-muted-foreground">
+      <span class="flex items-center gap-1.5"><span class="rounded-full border border-emerald-400/30 bg-emerald-400/[0.06] px-2 py-0.5 text-emerald-300">稳定</span>已验证、默认推荐</span>
+      <span class="flex items-center gap-1.5"><span class="rounded-full border border-amber-400/30 bg-amber-400/[0.06] px-2 py-0.5 text-amber-300">实验</span>可用，效果需实测</span>
+      <span class="flex items-center gap-1.5"><span class="rounded-full border border-zinc-500/40 bg-zinc-500/[0.08] px-2 py-0.5 text-zinc-400">冻结</span>已停止投入，仅兼容保留</span>
+    </div>
+
     <section class="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card/40">
       <article v-for="item in visibleCapabilities" :key="item.key" class="grid gap-4 p-4 sm:grid-cols-[minmax(0,1fr)_13rem_auto] sm:items-center sm:p-5">
         <div class="flex min-w-0 gap-3">
           <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-primary"><component :is="item.icon" class="h-4 w-4" /></div>
           <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-2"><h2 class="font-medium">{{ item.name }}</h2><span class="text-xs text-muted-foreground">{{ statusLabel(item.status) }}</span></div>
+            <div class="flex flex-wrap items-center gap-2"><h2 class="font-medium">{{ item.name }}</h2><span class="rounded-full border px-2 py-0.5 text-[11px]" :class="statusClass(item.status)">{{ statusLabel(item.status) }}</span></div>
             <p class="mt-1 text-sm leading-6 text-muted-foreground">{{ item.summary }}</p>
           </div>
         </div>

@@ -13,7 +13,9 @@ SUPPORTED_FILE_TYPES = {
     "md": "text/markdown",
     "txt": "text/plain",
     "pdf": "application/pdf",
-    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "csv": "text/csv",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
 
 # File size limits (in bytes)

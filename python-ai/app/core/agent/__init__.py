@@ -76,10 +76,17 @@ def get_agent(
             knowledge_base_id=knowledge_base_id,
         )
         registry_version = "1.1" if (_want_1_1 and _ff_write) else "1.0"
+        # B4: expose web_search to the agent only when the feature flag is on.
+        _ff_web_search = feature_flags.is_enabled(
+            "agent.web_search.enabled",
+            user_id=getattr(execution_context, 'user_id', None) if execution_context else None,
+            knowledge_base_id=knowledge_base_id,
+        )
         tool_registry = create_v1_registry(
             knowledge_base_id,
             agent_version=registry_version,
             tenant_id=getattr(execution_context, 'tenant_id', None) if execution_context else None,
+            enable_web_search=_ff_web_search,
         )
 
     # Runtime feature flag override: if agent.enabled is OFF via Java feature

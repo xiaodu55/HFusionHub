@@ -126,6 +126,18 @@ const routes: RouteRecordRaw[] = [
         meta: { roles: BUILDER_ROLES },
       },
       {
+        path: 'builder/apps',
+        name: 'Apps',
+        component: () => import('@/pages/builder/Apps.vue'),
+        meta: { roles: BUILDER_ROLES },
+      },
+      {
+        path: 'builder/mcp',
+        name: 'McpServers',
+        component: () => import('@/pages/builder/McpServers.vue'),
+        meta: { roles: BUILDER_ROLES },
+      },
+      {
         path: 'cost',
         name: 'CostDashboard',
         component: () => import('@/pages/cost/Index.vue'),
@@ -167,6 +179,12 @@ const routes: RouteRecordRaw[] = [
         path: 'admin/users',
         name: 'UserAccess',
         component: () => import('@/pages/admin/Users.vue'),
+        meta: { roles: ADMIN_ROLES },
+      },
+      {
+        path: 'admin/notices',
+        name: 'AdminNotices',
+        component: () => import('@/pages/admin/Notices.vue'),
         meta: { roles: ADMIN_ROLES },
       },
     ],

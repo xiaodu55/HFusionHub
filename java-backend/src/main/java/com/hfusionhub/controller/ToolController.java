@@ -7,7 +7,11 @@ import com.hfusionhub.mapper.AgentStepMapper;
 import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -130,5 +134,36 @@ public class ToolController {
         result.put("has_more", offset + limit < total);
 
         return R.ok(result);
+    }
+
+    // ── MCP Client 管理（B5）───────────────────────────────────────────
+
+    @GetMapping("/mcp/servers")
+    public R<Map<String, Object>> listMcpServers() {
+        return R.ok(aiClient.listMcpServers());
+    }
+
+    @PostMapping("/mcp/servers")
+    public R<Map<String, Object>> addMcpServer(@RequestBody Map<String, Object> body) {
+        Map<String, Object> result = aiClient.addMcpServer(body);
+        boolean success = Boolean.TRUE.equals(result.get("success"));
+        return success ? R.ok(String.valueOf(result.getOrDefault("message", "已添加")), result)
+                : R.fail(String.valueOf(result.getOrDefault("message", "添加失败")));
+    }
+
+    @PostMapping("/mcp/servers/{serverId}/reconnect")
+    public R<Map<String, Object>> reconnectMcpServer(@PathVariable String serverId) {
+        Map<String, Object> result = aiClient.reconnectMcpServer(serverId);
+        boolean success = Boolean.TRUE.equals(result.get("success"));
+        return success ? R.ok(String.valueOf(result.getOrDefault("message", "已重连")), result)
+                : R.fail(String.valueOf(result.getOrDefault("message", "重连失败")));
+    }
+
+    @DeleteMapping("/mcp/servers/{serverId}")
+    public R<Map<String, Object>> removeMcpServer(@PathVariable String serverId) {
+        Map<String, Object> result = aiClient.removeMcpServer(serverId);
+        boolean success = Boolean.TRUE.equals(result.get("success"));
+        return success ? R.ok(String.valueOf(result.getOrDefault("message", "已移除")), result)
+                : R.fail(String.valueOf(result.getOrDefault("message", "移除失败")));
     }
 }
