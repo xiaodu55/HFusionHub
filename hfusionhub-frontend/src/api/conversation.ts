@@ -31,10 +31,12 @@ export const getConversationList = (params: {
   return get('/conversation/list', params)
 }
 
-// 获取当前用户的对话列表
+// 获取当前用户的对话列表（支持后端模糊搜索标题与按知识库筛选）
 export const getMyConversations = (params?: {
   page?: number
   pageSize?: number
+  title?: string
+  knowledgeBaseId?: number
 }): Promise<ApiResponse<PageResult<Conversation>>> => {
   return get('/conversation/my', params)
 }

@@ -43,3 +43,15 @@ export const listUsers = (params: {
 export const updateUserRole = (userId: number, role: UserRole): Promise<ApiResponse<UserInfo>> => {
   return put(`/user/${userId}/role`, { role })
 }
+
+/** 轻量用户搜索结果（用于共享知识库等场景） */
+export interface UserSearchResult {
+  id: number
+  username: string
+  nickname?: string
+}
+
+/** 按用户名/昵称搜索用户（登录用户可用） */
+export const searchUsers = (keyword: string): Promise<ApiResponse<UserSearchResult[]>> => {
+  return get('/user/search', { keyword })
+}

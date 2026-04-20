@@ -56,6 +56,7 @@ const createForm = ref({
 const currentPage = ref(1)
 const pageSize = ref(12)
 const total = ref(0)
+const selectedKbId = ref<number>(0) // 0 = 全部知识库
 
 const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
 const filteredConversations = computed(() => {
@@ -76,6 +77,8 @@ const loadConversations = async () => {
     const res = await conversationApi.getMyConversations({
       page: currentPage.value,
       pageSize: pageSize.value,
+      title: searchQuery.value.trim() || undefined,
+      knowledgeBaseId: selectedKbId.value > 0 ? selectedKbId.value : undefined,
     })
     conversations.value = res.data.records
     total.value = res.data.total
@@ -86,6 +89,11 @@ const loadConversations = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const handleFilterChange = () => {
+  currentPage.value = 1
+  loadConversations()
 }
 
 const loadKnowledgeBases = async () => {
@@ -193,11 +201,25 @@ onMounted(() => {
       <CardContent class="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:p-5">
         <div class="relative flex-1">
           <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input v-model="searchQuery" placeholder="搜索对话名称、知识库或内容" class="pl-10" />
+          <Input
+            v-model="searchQuery"
+            placeholder="搜索对话名称、知识库或内容"
+            class="pl-10"
+            @keyup.enter="handleFilterChange"
+          />
         </div>
+        <select
+          v-model="selectedKbId"
+          aria-label="按知识库筛选对话"
+          class="h-10 rounded-md border border-input bg-background/70 px-3 text-sm outline-none focus:border-primary/50"
+          @change="handleFilterChange"
+        >
+          <option :value="0">全部知识库</option>
+          <option v-for="kb in knowledgeBases" :key="kb.id" :value="kb.id">{{ kb.name }}</option>
+        </select>
         <div class="flex items-center gap-2 text-sm text-muted-foreground">
           <span class="rounded-full bg-muted px-3 py-1.5">共 {{ total }} 个对话</span>
-          <span v-if="searchQuery" class="rounded-full bg-primary/10 px-3 py-1.5 text-primary">当前页 {{ filteredConversations.length }} 个匹配</span>
+          <span v-if="searchQuery || selectedKbId > 0" class="rounded-full bg-primary/10 px-3 py-1.5 text-primary">当前页 {{ filteredConversations.length }} 个匹配</span>
         </div>
       </CardContent>
     </Card>

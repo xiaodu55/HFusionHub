@@ -33,8 +33,25 @@ const handleUpdate = async () => {
   successMessage.value = ''
   errorMessage.value = ''
 
+  const email = form.value.email.trim()
+  const phone = form.value.phone.trim()
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errorMessage.value = '邮箱格式不正确，请检查后重试'
+    loading.value = false
+    return
+  }
+  if (phone && !/^[0-9+\-\s]{6,20}$/.test(phone)) {
+    errorMessage.value = '手机号格式不正确，请检查后重试'
+    loading.value = false
+    return
+  }
+
   try {
-    await userStore.updateUserInfo(form.value)
+    await userStore.updateUserInfo({
+      nickname: form.value.nickname.trim(),
+      email: email || undefined,
+      phone: phone || undefined,
+    })
     successMessage.value = '更新成功'
   } catch (e: any) {
     errorMessage.value = e.message || '更新失败'

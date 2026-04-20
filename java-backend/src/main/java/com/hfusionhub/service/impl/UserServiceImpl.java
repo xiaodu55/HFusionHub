@@ -13,6 +13,7 @@ import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.dto.UserInfoDTO;
 import com.hfusionhub.dto.UserLoginDTO;
 import com.hfusionhub.dto.UserRegisterDTO;
+import com.hfusionhub.dto.UserSearchDTO;
 import com.hfusionhub.dto.UserUpdateDTO;
 import com.hfusionhub.entity.User;
 import com.hfusionhub.entity.TenantMember;
@@ -301,6 +302,27 @@ public class UserServiceImpl implements UserService {
                 .map(this::convertToUserInfoDTO)
                 .toList();
         return PageResult.of(result.getCurrent(), result.getSize(), result.getTotal(), records);
+    }
+
+    @Override
+    public List<UserSearchDTO> searchUsers(String keyword) {
+        String normalizedKeyword = trimToNull(keyword);
+        if (normalizedKeyword == null) {
+            return List.of();
+        }
+        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
+        wrapper.and(query -> query
+                        .like(User::getUsername, normalizedKeyword)
+                        .or().like(User::getNickname, normalizedKeyword))
+                .orderByDesc(User::getCreatedAt)
+                .last("LIMIT 10");
+        return userMapper.selectList(wrapper).stream()
+                .map(user -> UserSearchDTO.builder()
+                        .id(user.getId())
+                        .username(user.getUsername())
+                        .nickname(user.getNickname())
+                        .build())
+                .toList();
     }
 
     @Override

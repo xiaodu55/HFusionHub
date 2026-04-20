@@ -6,6 +6,7 @@ import { useUserStore } from '@/stores/user'
 import { get } from '@/api/request'
 import type { ApiResponse, UserRole } from '@/api/types'
 import * as agentApi from '@/api/agent'
+import * as notificationApi from '@/api/notification'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useTheme } from '@/composables/useTheme'
@@ -55,6 +56,13 @@ const serviceMessage = ref('正在检查应用服务…')
 const notificationsLoading = ref(false)
 const notificationsError = ref('')
 const notifications = ref<agentApi.AgentAlertEvent[]>([])
+
+// ── 系统公告（用户侧） ──
+const unreadNotices = ref<notificationApi.SystemNotice[]>([])
+const noticesLoading = ref(false)
+const noticesError = ref('')
+const unreadNoticeCount = ref(0)
+const readNoticeIds = ref<Set<number>>(new Set())
 
 const menuItems: Array<{
   path: string
@@ -107,7 +115,7 @@ const currentItem = computed(() => menuItems.find((item) => isActive(item.path))
 const userDisplayName = computed(() => userStore.nickname || userStore.username || 'HFusionHub 用户')
 const userInitial = computed(() => userDisplayName.value.trim().slice(0, 1).toUpperCase() || 'H')
 const userRoleLabel = computed(() => ({ pending: '等待分配', user: '普通用户', builder: 'AI 配置员', admin: '超级管理员' }[userStore.role]))
-const unreadNotificationCount = computed(() => notifications.value.length)
+const unreadNotificationCount = computed(() => notifications.value.length + unreadNoticeCount.value)
 const serviceLabel = computed(() => ({ checking: '检查中', online: '服务在线', offline: '服务异常' }[serviceState.value]))
 const serviceClass = computed(() => ({
   checking: 'border-amber-400/20 bg-amber-400/10 text-amber-200',
@@ -158,8 +166,42 @@ const loadNotifications = async () => {
 
 const openNotifications = async () => {
   notificationsDialogOpen.value = true
-  await loadNotifications()
+  await Promise.all([loadNotifications(), loadNotices()])
 }
+
+const loadNotices = async () => {
+  noticesLoading.value = true
+  noticesError.value = ''
+  try {
+    const [listRes, countRes] = await Promise.all([
+      notificationApi.listMyNotices(),
+      notificationApi.getUnreadNoticeCount().catch(() => null),
+    ])
+    unreadNotices.value = listRes.data
+    unreadNoticeCount.value = countRes?.data?.count ?? 0
+  } catch (error) {
+    noticesError.value = error instanceof Error ? error.message : '暂时无法加载公告'
+  } finally {
+    noticesLoading.value = false
+  }
+}
+
+const markNoticeRead = async (noticeId: number) => {
+  try {
+    await notificationApi.markNoticeRead(noticeId)
+    readNoticeIds.value.add(noticeId)
+    unreadNoticeCount.value = Math.max(0, unreadNoticeCount.value - 1)
+  } catch (error) {
+    noticesError.value = error instanceof Error ? error.message : '标记已读失败'
+  }
+}
+
+const noticeLevelLabel = (level?: string) => ({ info: '提示', warning: '重要', error: '紧急' }[level || ''] || '提示')
+const noticeLevelClass = (level?: string) => ({
+  error: 'border-rose-400/25 bg-rose-400/10 text-rose-200',
+  warning: 'border-amber-400/25 bg-amber-400/10 text-amber-200',
+  info: 'border-cyan-400/25 bg-cyan-400/10 text-cyan-200',
+}[level || ''] || 'border-border bg-muted text-muted-foreground')
 
 const resolveNotification = async (alertId: number) => {
   try {
@@ -172,6 +214,7 @@ const resolveNotification = async (alertId: number) => {
 
 const pendingApprovals = ref(0)
 let approvalPollTimer: ReturnType<typeof setInterval> | null = null
+let noticePollTimer: ReturnType<typeof setInterval> | null = null
 const loadPendingApprovals = async () => {
   try {
     const res = (await get('/agent-task/approvals/pending')) as ApiResponse<unknown[]>
@@ -253,11 +296,18 @@ onMounted(() => {
   initializeTheme()
   void refreshServiceHealth()
   void loadNotifications()
+  void loadNotices()
   pollPendingApprovals()
+  noticePollTimer = setInterval(() => {
+    notificationApi.getUnreadNoticeCount().then(res => {
+      unreadNoticeCount.value = res.data?.count ?? unreadNoticeCount.value
+    }).catch(() => {})
+  }, 60000)
 })
 
 onBeforeUnmount(() => {
   if (approvalPollTimer) clearInterval(approvalPollTimer)
+  if (noticePollTimer) clearInterval(noticePollTimer)
 })
 </script>
 
@@ -468,14 +518,52 @@ onBeforeUnmount(() => {
     <Dialog v-model:open="notificationsDialogOpen">
       <DialogContent class="max-w-lg">
         <DialogHeader>
-          <DialogTitle>需要处理的事项</DialogTitle>
-          <DialogDescription>这里会提示可能影响 AI 回答或任务执行的问题。</DialogDescription>
+          <DialogTitle>通知中心</DialogTitle>
+          <DialogDescription>系统公告与需要关注的事项都会在这里提醒你。</DialogDescription>
         </DialogHeader>
-        <div class="mt-4 max-h-[26rem] space-y-2 overflow-y-auto">
-          <div v-if="notificationsLoading" class="py-10 text-center text-sm text-muted-foreground">正在加载通知…</div>
-          <div v-else-if="notificationsError" class="rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-4 text-sm text-rose-100/85">{{ notificationsError }}</div>
-          <div v-else-if="!notifications.length" class="flex flex-col items-center justify-center py-10 text-center"><Bell class="h-7 w-7 text-emerald-300" /><p class="mt-3 text-sm font-medium">暂时没有需要处理的事项</p><p class="mt-1 text-xs text-muted-foreground">系统发现异常时会在这里用易懂的方式提醒你。</p></div>
-          <article v-for="alert in notifications" :key="alert.id" class="rounded-xl border border-border bg-muted/30 p-3.5"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><span class="text-sm font-medium">{{ alertContent(alert).title }}</span><span class="rounded-full border px-2 py-0.5 text-[11px]" :class="severityClass(alert.severity)">{{ severityLabel(alert.severity) }}</span></div><p class="mt-2 break-words text-sm leading-5 text-muted-foreground">{{ alertContent(alert).description }}</p><p class="mt-2 rounded-lg bg-background/60 p-2.5 text-xs leading-5 text-foreground/80"><strong>建议：</strong>{{ alertContent(alert).advice }}</p><div class="mt-2 flex items-center justify-between gap-3"><span class="text-xs text-muted-foreground">{{ formatDateTime(alert.createdAt) }}</span><details class="text-xs text-muted-foreground"><summary class="cursor-pointer hover:text-foreground">技术详情</summary><p class="mt-1 max-w-56 break-all font-mono">{{ alert.metricName }} · 当前值 {{ alert.currentValue }} · 阈值 {{ alert.thresholdValue }}</p></details></div></div><Button variant="outline" size="sm" class="shrink-0" @click="resolveNotification(alert.id)">标记已处理</Button></div></article>
+        <div class="mt-4 max-h-[26rem] space-y-4 overflow-y-auto">
+          <!-- 系统公告 -->
+          <section v-if="noticesLoading || unreadNotices.length || noticesError" class="space-y-2">
+            <p class="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">系统公告</p>
+            <div v-if="noticesLoading" class="py-6 text-center text-sm text-muted-foreground">正在加载公告…</div>
+            <div v-else-if="noticesError" class="rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-4 text-sm text-rose-100/85">{{ noticesError }}</div>
+            <template v-else>
+              <article
+                v-for="notice in unreadNotices"
+                :key="notice.id"
+                class="rounded-xl border p-3.5"
+                :class="readNoticeIds.has(notice.id) ? 'border-border bg-muted/20 opacity-70' : 'border-amber-400/20 bg-amber-400/[0.04]'"
+              >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-sm font-medium">{{ notice.title }}</span>
+                    <span class="rounded-full border px-2 py-0.5 text-[11px]" :class="noticeLevelClass(notice.level)">{{ noticeLevelLabel(notice.level) }}</span>
+                    <span v-if="!readNoticeIds.has(notice.id)" class="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] text-primary">未读</span>
+                  </div>
+                  <p class="mt-2 whitespace-pre-wrap break-words text-sm leading-5 text-muted-foreground">{{ notice.content }}</p>
+                  <p class="mt-2 text-xs text-muted-foreground">{{ formatDateTime(notice.createdAt) }} · {{ notice.publisher || '系统' }}</p>
+                </div>
+                <Button
+                  v-if="!readNoticeIds.has(notice.id)"
+                  variant="outline"
+                  size="sm"
+                  class="shrink-0"
+                  @click="markNoticeRead(notice.id)"
+                >标记已读</Button>
+              </div>
+            </article>
+            </template>
+          </section>
+
+          <!-- 需要处理的事项（Agent 告警） -->
+          <section class="space-y-2">
+            <p class="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">需要处理的事项</p>
+            <div v-if="notificationsLoading" class="py-6 text-center text-sm text-muted-foreground">正在加载通知…</div>
+            <div v-else-if="notificationsError" class="rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-4 text-sm text-rose-100/85">{{ notificationsError }}</div>
+            <div v-else-if="!notifications.length" class="flex flex-col items-center justify-center py-6 text-center"><Bell class="h-6 w-6 text-emerald-300" /><p class="mt-2 text-sm font-medium">暂时没有需要处理的事项</p><p class="mt-1 text-xs text-muted-foreground">系统发现异常时会在这里用易懂的方式提醒你。</p></div>
+            <article v-for="alert in notifications" :key="alert.id" class="rounded-xl border border-border bg-muted/30 p-3.5"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><span class="text-sm font-medium">{{ alertContent(alert).title }}</span><span class="rounded-full border px-2 py-0.5 text-[11px]" :class="severityClass(alert.severity)">{{ severityLabel(alert.severity) }}</span></div><p class="mt-2 break-words text-sm leading-5 text-muted-foreground">{{ alertContent(alert).description }}</p><p class="mt-2 rounded-lg bg-background/60 p-2.5 text-xs leading-5 text-foreground/80"><strong>建议：</strong>{{ alertContent(alert).advice }}</p><div class="mt-2 flex items-center justify-between gap-3"><span class="text-xs text-muted-foreground">{{ formatDateTime(alert.createdAt) }}</span><details class="text-xs text-muted-foreground"><summary class="cursor-pointer hover:text-foreground">技术详情</summary><p class="mt-1 max-w-56 break-all font-mono">{{ alert.metricName }} · 当前值 {{ alert.currentValue }} · 阈值 {{ alert.thresholdValue }}</p></details></div></div><Button variant="outline" size="sm" class="shrink-0" @click="resolveNotification(alert.id)">标记已处理</Button></div></article>
+          </section>
         </div>
       </DialogContent>
     </Dialog>

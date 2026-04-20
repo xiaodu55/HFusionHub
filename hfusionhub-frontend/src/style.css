@@ -450,6 +450,47 @@ html:not(.dark) .dashboard-workbench .hover\:text-zinc-200:hover {
   color: #1c2924 !important;
 }
 
+/* 浅色主题下，把状态横幅/徽章上的近白文字映射为可读的深色（深色主题保持原样） */
+html:not(.dark) .text-rose-100,
+html:not(.dark) .text-rose-200 {
+  color: #be123c !important;
+}
+
+html:not(.dark) .text-amber-100,
+html:not(.dark) .text-amber-200 {
+  color: #b45309 !important;
+}
+
+html:not(.dark) .text-emerald-100,
+html:not(.dark) .text-emerald-200 {
+  color: #047857 !important;
+}
+
+html:not(.dark) .text-cyan-100,
+html:not(.dark) .text-cyan-200 {
+  color: #0e7490 !important;
+}
+
+html:not(.dark) .text-red-100,
+html:not(.dark) .text-red-200 {
+  color: #be123c !important;
+}
+
+html:not(.dark) .text-blue-100,
+html:not(.dark) .text-blue-200 {
+  color: #1d4ed8 !important;
+}
+
+html:not(.dark) .text-violet-100,
+html:not(.dark) .text-violet-200 {
+  color: #6d28d9 !important;
+}
+
+html:not(.dark) .text-orange-100,
+html:not(.dark) .text-orange-200 {
+  color: #c2410c !important;
+}
+
 main::-webkit-scrollbar {
   width: 0.65rem;
 }

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { Button } from '@/components/ui/button'
+import { useToast } from '@/composables/useToast'
 import {
   Activity,
   BookOpen,
@@ -36,7 +37,9 @@ type StatCard = {
 }
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
+const toast = useToast()
 const loading = ref(false)
 const loadError = ref(false)
 const aiReady = ref<boolean | null>(null)
@@ -78,8 +81,8 @@ const stats = ref<StatCard[]>([
   {
     title: '检索能力',
     value: 3,
-    caption: '向量、关键词与图谱',
-    trend: '可用',
+    caption: '向量、关键词与图谱通道（默认开启）',
+    trend: '—',
     path: '/rag',
     icon: Activity,
     dotClass: 'bg-amber-400',
@@ -181,6 +184,9 @@ const loadStats = async () => {
 }
 
 onMounted(async () => {
+  if (route.query.access === 'denied') {
+    toast.error('当前账号没有访问该页面的权限')
+  }
   try {
     await userStore.getUserInfo()
   } catch (error) {

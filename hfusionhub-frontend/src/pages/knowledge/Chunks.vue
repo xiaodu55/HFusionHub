@@ -6,9 +6,13 @@ import * as documentApi from '@/api/document'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, FileText, Code, Table, List, Heading, AlignLeft } from 'lucide-vue-next'
+import { useToast } from '@/composables/useToast'
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import ErrorState from '@/components/ErrorState.vue'
 
 const route = useRoute()
 const router = useRouter()
+const toast = useToast()
 
 interface Chunk {
   chunk_id: string
@@ -26,6 +30,7 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const selectedBlockType = ref('all')
 const loading = ref(false)
+const loadError = ref(false)
 
 const blockTypes = [
   { value: 'all', label: '全部' },
@@ -47,6 +52,7 @@ const loadDocumentInfo = async () => {
 
 const loadChunks = async () => {
   loading.value = true
+  loadError.value = false
   try {
     const params: any = {
       page: currentPage.value,
@@ -67,6 +73,8 @@ const loadChunks = async () => {
     }
   } catch (error) {
     console.error('加载分块失败:', error)
+    loadError.value = true
+    toast.error('加载分块数据失败，请稍后重试')
   } finally {
     loading.value = false
   }
@@ -150,6 +158,7 @@ onMounted(() => {
           <span class="text-sm font-medium">筛选：</span>
           <select
             :value="selectedBlockType"
+            aria-label="按分块类型筛选"
             @change="handleBlockTypeChange"
             class="rounded-md border border-input bg-background px-3 py-2 text-sm"
           >
@@ -168,9 +177,8 @@ onMounted(() => {
         <CardDescription>查看文档的分块内容和类型</CardDescription>
       </CardHeader>
       <CardContent>
-        <div v-if="loading" class="text-center text-muted-foreground py-8">
-          加载中...
-        </div>
+        <LoadingSkeleton v-if="loading" type="card" :count="3" />
+        <ErrorState v-else-if="loadError" message="加载分块数据失败" @retry="loadChunks" />
         <div v-else-if="chunks.length === 0" class="text-center py-8">
           <FileText class="mx-auto h-12 w-12 text-muted-foreground" />
           <p class="mt-4 text-muted-foreground">暂无分块数据</p>

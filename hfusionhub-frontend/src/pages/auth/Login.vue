@@ -5,7 +5,7 @@ import { useUserStore } from '@/stores/user'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { BookOpen, Eye, EyeOff, MessageSquare, Sparkles } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
@@ -15,6 +15,7 @@ const form = ref({
   username: '',
   password: '',
 })
+const showPassword = ref(false)
 const loading = ref(false)
 const error = ref('')
 const registered = computed(() => route.query.registered === '1')
@@ -44,51 +45,117 @@ const goToRegister = () => {
 </script>
 
 <template>
-  <div class="flex min-h-screen items-center justify-center bg-background p-4">
-    <Card class="w-full max-w-md">
-      <CardHeader class="space-y-1 text-center">
-        <CardTitle class="text-2xl font-bold">HFusionHub</CardTitle>
-        <CardDescription>AI Agent 智能平台</CardDescription>
-      </CardHeader>
-      <CardContent class="space-y-4">
-        <div v-if="registered" class="text-sm text-emerald-600 dark:text-emerald-400">
+  <div class="app-shell flex min-h-screen items-stretch">
+    <!-- 左侧品牌区（移动端隐藏） -->
+    <div class="relative hidden w-[46%] flex-col justify-between overflow-hidden p-10 lg:flex xl:p-14">
+      <div class="relative z-10">
+        <div class="flex items-center gap-3">
+          <span class="brand-mark">HF</span>
+          <span class="text-left">
+            <span class="block text-base font-semibold text-white">HFusionHub</span>
+            <span class="block text-xs text-zinc-500">AI Knowledge OS</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="relative z-10 max-w-md">
+        <h1 class="text-3xl font-semibold leading-tight tracking-tight text-white xl:text-4xl">
+          让 AI 基于<span class="text-emerald-400">你的资料</span>回答问题
+        </h1>
+        <p class="mt-4 text-sm leading-6 text-zinc-400">
+          上传文档、建立知识库，即可获得带来源引用的智能问答；支持 Agent 任务、工具调用与多模型接入。
+        </p>
+        <ul class="mt-8 space-y-4 text-sm text-zinc-300">
+          <li class="flex items-center gap-3">
+            <span class="next-step-icon"><BookOpen class="h-4 w-4" /></span>
+            知识库驱动的 RAG 问答，回答附带可追溯来源
+          </li>
+          <li class="flex items-center gap-3">
+            <span class="next-step-icon"><MessageSquare class="h-4 w-4" /></span>
+            多轮流式对话，支持停止、重试与反馈优化
+          </li>
+          <li class="flex items-center gap-3">
+            <span class="next-step-icon"><Sparkles class="h-4 w-4" /></span>
+            DeepSeek / Ollama 多模型，成本用量一目了然
+          </li>
+        </ul>
+      </div>
+
+      <p class="relative z-10 text-xs text-zinc-600">HFusionHub · Java + Python + Vue 企业级 AI Agent 平台</p>
+    </div>
+
+    <!-- 右侧登录表单区 -->
+    <div class="flex flex-1 items-center justify-center p-4 sm:p-8">
+      <div class="w-full max-w-md">
+        <div class="mb-8 flex items-center gap-3 lg:hidden">
+          <span class="brand-mark">HF</span>
+          <span class="text-left">
+            <span class="block text-base font-semibold text-foreground">HFusionHub</span>
+            <span class="block text-xs text-muted-foreground">AI Knowledge OS</span>
+          </span>
+        </div>
+
+        <h2 class="text-2xl font-semibold tracking-tight">欢迎回来</h2>
+        <p class="mt-1 text-sm text-muted-foreground">登录以继续使用你的知识库与智能助手</p>
+
+        <div v-if="registered" class="mt-5 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.08] px-4 py-3 text-sm text-emerald-600 dark:text-emerald-400">
           注册成功。登录后请联系管理员 admin 分配身份。
         </div>
-        <div class="space-y-2">
-          <Label for="username">用户名</Label>
-          <Input
-            id="username"
-            v-model="form.username"
-            placeholder="请输入用户名"
-            :disabled="loading"
-          />
-        </div>
-        <div class="space-y-2">
-          <Label for="password">密码</Label>
-          <Input
-            id="password"
-            v-model="form.password"
-            type="password"
-            placeholder="请输入密码"
-            :disabled="loading"
-            @keyup.enter="handleLogin"
-          />
-        </div>
-        <div v-if="error" class="text-sm text-destructive">
-          {{ error }}
-        </div>
-      </CardContent>
-      <CardFooter class="flex flex-col gap-4">
-        <Button class="w-full" :disabled="loading" @click="handleLogin">
-          {{ loading ? '登录中...' : '登录' }}
-        </Button>
-        <div class="text-center text-sm text-muted-foreground">
+
+        <form class="mt-6 space-y-4" @submit.prevent="handleLogin">
+          <div class="space-y-2">
+            <Label for="username">用户名</Label>
+            <Input
+              id="username"
+              v-model="form.username"
+              placeholder="请输入用户名"
+              autocomplete="username"
+              :disabled="loading"
+              @keyup.enter="handleLogin"
+            />
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <Label for="password">密码</Label>
+            </div>
+            <div class="relative">
+              <Input
+                id="password"
+                v-model="form.password"
+                :type="showPassword ? 'text' : 'password'"
+                placeholder="请输入密码"
+                autocomplete="current-password"
+                :disabled="loading"
+                class="pr-10"
+                @keyup.enter="handleLogin"
+              />
+              <button
+                type="button"
+                class="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+                :aria-label="showPassword ? '隐藏密码' : '显示密码'"
+                :title="showPassword ? '隐藏密码' : '显示密码'"
+                @click="showPassword = !showPassword"
+              >
+                <EyeOff v-if="showPassword" class="h-4 w-4" />
+                <Eye v-else class="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          <div v-if="error" class="rounded-xl border border-destructive/25 bg-destructive/[0.08] px-4 py-3 text-sm text-destructive">
+            {{ error }}
+          </div>
+          <Button class="w-full" type="submit" :disabled="loading">
+            {{ loading ? '登录中...' : '登录' }}
+          </Button>
+        </form>
+
+        <div class="mt-6 text-center text-sm text-muted-foreground">
           还没有账号？
-          <Button variant="link" class="p-0" @click="goToRegister">
+          <Button variant="link" class="p-0" :disabled="loading" @click="goToRegister">
             立即注册
           </Button>
         </div>
-      </CardFooter>
-    </Card>
+      </div>
+    </div>
   </div>
 </template>

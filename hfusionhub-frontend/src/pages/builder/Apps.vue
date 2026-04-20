@@ -311,7 +311,7 @@ onMounted(() => {
     </Dialog>
 
     <!-- API Key 管理 -->
-    <Dialog v-model:open="keyDialogApp != null" @update:model-value="(v: boolean) => !v && (keyDialogApp = null)">
+    <Dialog :open="keyDialogApp != null" @update:open="(v: boolean) => { if (!v) keyDialogApp = null }">
       <DialogContent class="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>API Key — {{ keyDialogApp?.name }}</DialogTitle>

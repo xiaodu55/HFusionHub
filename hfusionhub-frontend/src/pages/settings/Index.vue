@@ -19,9 +19,11 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useTheme } from '@/composables/useTheme'
+import { useUserStore } from '@/stores/user'
 import * as systemApi from '@/api/system'
 
 const router = useRouter()
+const userStore = useUserStore()
 const { isDarkMode, initializeTheme, setTheme } = useTheme()
 
 // ── Provider status ──
@@ -103,7 +105,7 @@ onMounted(() => {
 
       <Card class="border-border bg-card/80"><CardHeader><div class="flex items-center gap-2"><UserRound class="h-4 w-4 text-primary" /><CardTitle class="text-base">账户</CardTitle></div><CardDescription>更新昵称、邮箱和手机号。</CardDescription></CardHeader><CardContent><Button variant="outline" class="w-full justify-between" @click="router.push('/profile')"><span>打开个人中心</span><ArrowRight class="h-4 w-4" /></Button></CardContent></Card>
 
-      <Card class="border-border bg-card/80 lg:col-span-2"><CardHeader><div class="flex items-center gap-2"><ShieldCheck class="h-4 w-4 text-primary" /><CardTitle class="text-base">AI 高级能力</CardTitle></div><CardDescription>查看混合检索、OCR、图谱和多 Agent 等可选能力的影响与部署要求。</CardDescription></CardHeader><CardContent><Button variant="outline" class="w-full justify-between" @click="router.push('/admin/flags')"><span>打开高级能力说明</span><ArrowRight class="h-4 w-4" /></Button></CardContent></Card>
+      <Card v-if="userStore.hasAnyRole(['admin'])" class="border-border bg-card/80 lg:col-span-2"><CardHeader><div class="flex items-center gap-2"><ShieldCheck class="h-4 w-4 text-primary" /><CardTitle class="text-base">AI 高级能力</CardTitle></div><CardDescription>查看混合检索、OCR、图谱和多 Agent 等可选能力的影响与部署要求。</CardDescription></CardHeader><CardContent><Button variant="outline" class="w-full justify-between" @click="router.push('/admin/flags')"><span>打开高级能力说明</span><ArrowRight class="h-4 w-4" /></Button></CardContent></Card>
 
       <!-- Provider status card (Phase 1: read-only from runtime API) -->
       <Card class="border-border bg-card/80 lg:col-span-2">

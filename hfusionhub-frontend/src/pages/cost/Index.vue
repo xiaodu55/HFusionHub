@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { useToast } from '@/composables/useToast'
 import * as costApi from '@/api/cost'
 import type { CostSummary, DailyCost, ModelBreakdown } from '@/api/cost'
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 
 const router = useRouter()
 const toast = useToast()
@@ -22,6 +23,15 @@ const maxDailyCost = computed(() => Math.max(...dailyCosts.value.map(item => ite
 const avgCostPerRequest = computed(() => summary.value?.totalRequests
   ? summary.value.totalCost / summary.value.totalRequests
   : 0)
+
+/** 金额展示：避免超长小数；按大小自适应精度并去掉多余的 0 */
+function formatCost(value: number) {
+  if (!Number.isFinite(value)) return '$0'
+  if (value === 0) return '$0'
+  if (value >= 1) return `$${value.toFixed(2)}`
+  if (value >= 0.01) return `$${value.toFixed(3)}`
+  return `$${value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}`
+}
 
 function modelPercentage(tokens: number) {
   return totalModelTokens.value ? tokens / totalModelTokens.value * 100 : 0
@@ -69,14 +79,14 @@ onMounted(loadData)
       </div>
     </header>
 
-    <div v-if="loading && !summary" class="py-20 text-center text-sm text-muted-foreground">正在统计用量...</div>
+    <LoadingSkeleton v-if="loading && !summary" type="card" :count="4" />
 
     <template v-else-if="summary">
       <section class="grid overflow-hidden rounded-lg border border-border bg-card/40 sm:grid-cols-2 xl:grid-cols-4">
-        <div class="border-b border-border p-4 sm:border-r xl:border-b-0"><p class="flex items-center gap-2 text-sm text-muted-foreground"><CircleDollarSign class="h-4 w-4" />当前费用</p><p class="mt-2 text-2xl font-semibold">${{ summary.totalCost.toFixed(4) }}</p><p class="mt-1 text-xs text-muted-foreground">最近 {{ days }} 天</p></div>
-        <div class="border-b border-border p-4 xl:border-b-0 xl:border-r"><p class="flex items-center gap-2 text-sm text-muted-foreground"><BarChart3 class="h-4 w-4" />预估月费</p><p class="mt-2 text-2xl font-semibold">${{ summary.estimatedMonthCost.toFixed(4) }}</p><p class="mt-1 text-xs text-muted-foreground">按当前使用速度估算</p></div>
+        <div class="border-b border-border p-4 sm:border-r xl:border-b-0"><p class="flex items-center gap-2 text-sm text-muted-foreground"><CircleDollarSign class="h-4 w-4" />当前费用</p><p class="mt-2 text-2xl font-semibold">{{ formatCost(summary.totalCost) }}</p><p class="mt-1 text-xs text-muted-foreground">最近 {{ days }} 天</p></div>
+        <div class="border-b border-border p-4 xl:border-b-0 xl:border-r"><p class="flex items-center gap-2 text-sm text-muted-foreground"><BarChart3 class="h-4 w-4" />预估月费</p><p class="mt-2 text-2xl font-semibold">{{ formatCost(summary.estimatedMonthCost) }}</p><p class="mt-1 text-xs text-muted-foreground">按当前使用速度估算</p></div>
         <div class="border-b border-border p-4 sm:border-b-0 sm:border-r"><p class="flex items-center gap-2 text-sm text-muted-foreground"><Zap class="h-4 w-4" />Token 用量</p><p class="mt-2 text-2xl font-semibold">{{ summary.totalTokens.toLocaleString() }}</p><p class="mt-1 text-xs text-muted-foreground">模型处理的文本单位</p></div>
-        <div class="p-4"><p class="flex items-center gap-2 text-sm text-muted-foreground"><Bot class="h-4 w-4" />AI 请求</p><p class="mt-2 text-2xl font-semibold">{{ summary.totalRequests.toLocaleString() }}</p><p class="mt-1 text-xs text-muted-foreground">平均 ${{ avgCostPerRequest.toFixed(6) }} / 次</p></div>
+        <div class="p-4"><p class="flex items-center gap-2 text-sm text-muted-foreground"><Bot class="h-4 w-4" />AI 请求</p><p class="mt-2 text-2xl font-semibold">{{ summary.totalRequests.toLocaleString() }}</p><p class="mt-1 text-xs text-muted-foreground">平均 {{ formatCost(avgCostPerRequest) }} / 次</p></div>
       </section>
 
       <section v-if="!hasUsage" class="grid overflow-hidden rounded-lg border border-border bg-card/35 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -104,7 +114,7 @@ onMounted(loadData)
           <div class="rounded-lg border border-border bg-card/35 p-5">
             <h2 class="font-medium">每日费用</h2><p class="mt-1 text-sm text-muted-foreground">观察哪几天的模型调用较多</p>
             <div class="mt-6 flex h-44 items-end gap-1">
-              <div v-for="item in dailyCosts" :key="item.statDate" class="min-w-[5px] flex-1 rounded-t bg-primary/60 hover:bg-primary" :style="{ height: `${Math.max(item.totalCost / maxDailyCost * 100, 2)}%` }" :title="`${item.statDate}: $${item.totalCost.toFixed(4)}`" />
+              <div v-for="item in dailyCosts" :key="item.statDate" class="min-w-[5px] flex-1 rounded-t bg-primary/60 hover:bg-primary" :style="{ height: `${Math.max(item.totalCost / maxDailyCost * 100, 2)}%` }" :title="`${item.statDate}: ${formatCost(item.totalCost)}`" />
             </div>
             <div class="mt-2 flex justify-between text-xs text-muted-foreground"><span>{{ dailyCosts[0]?.statDate }}</span><span>{{ dailyCosts[dailyCosts.length - 1]?.statDate }}</span></div>
           </div>
@@ -121,7 +131,7 @@ onMounted(loadData)
 
         <section class="overflow-hidden rounded-lg border border-border bg-card/35">
           <div class="border-b border-border p-5"><h2 class="font-medium">模型用量明细</h2><p class="mt-1 text-sm text-muted-foreground">用于核对具体模型的 Token 和费用</p></div>
-          <div class="overflow-x-auto"><table class="w-full min-w-[620px] text-sm"><thead class="bg-muted/20 text-left text-xs text-muted-foreground"><tr><th class="px-5 py-3">模型</th><th class="px-5 py-3 text-right">Token</th><th class="px-5 py-3 text-right">费用</th><th class="px-5 py-3 text-right">占比</th></tr></thead><tbody><tr v-for="model in modelBreakdown" :key="model.model" class="border-t border-border/70"><td class="px-5 py-4 font-medium">{{ model.model }}</td><td class="px-5 py-4 text-right">{{ model.totalTokens.toLocaleString() }}</td><td class="px-5 py-4 text-right">${{ model.totalCost.toFixed(6) }}</td><td class="px-5 py-4 text-right">{{ modelPercentage(model.totalTokens).toFixed(1) }}%</td></tr></tbody></table></div>
+          <div class="overflow-x-auto"><table class="w-full min-w-[620px] text-sm"><thead class="bg-muted/20 text-left text-xs text-muted-foreground"><tr><th class="px-5 py-3">模型</th><th class="px-5 py-3 text-right">Token</th><th class="px-5 py-3 text-right">费用</th><th class="px-5 py-3 text-right">占比</th></tr></thead><tbody><tr v-for="model in modelBreakdown" :key="model.model" class="border-t border-border/70"><td class="px-5 py-4 font-medium">{{ model.model }}</td><td class="px-5 py-4 text-right">{{ model.totalTokens.toLocaleString() }}</td><td class="px-5 py-4 text-right">{{ formatCost(model.totalCost) }}</td><td class="px-5 py-4 text-right">{{ modelPercentage(model.totalTokens).toFixed(1) }}%</td></tr></tbody></table></div>
         </section>
       </template>
     </template>

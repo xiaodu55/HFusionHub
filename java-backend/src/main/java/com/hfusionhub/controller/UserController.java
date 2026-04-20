@@ -7,6 +7,7 @@ import com.hfusionhub.dto.UserInfoDTO;
 import com.hfusionhub.dto.UserLoginDTO;
 import com.hfusionhub.dto.UserRegisterDTO;
 import com.hfusionhub.dto.UserRoleUpdateDTO;
+import com.hfusionhub.dto.UserSearchDTO;
 import com.hfusionhub.dto.UserUpdateDTO;
 import com.hfusionhub.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -14,6 +15,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 /**
  * 用户控制器
@@ -114,6 +117,12 @@ public class UserController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String role) {
         return R.ok(userService.listUsers(page, pageSize, keyword, role));
+    }
+
+    @GetMapping("/search")
+    @Operation(summary = "搜索用户", description = "按用户名/昵称模糊搜索用户（登录用户可用，用于共享知识库等场景；仅返回 id、用户名、昵称）")
+    public R<List<UserSearchDTO>> searchUsers(@RequestParam String keyword) {
+        return R.ok(userService.searchUsers(keyword));
     }
 
     @SaCheckRole("admin")

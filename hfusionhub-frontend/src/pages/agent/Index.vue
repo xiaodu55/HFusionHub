@@ -29,6 +29,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import ErrorState from '@/components/ErrorState.vue'
 import { useToast } from '@/composables/useToast'
 
 type StatusTone = 'success' | 'danger' | 'warning' | 'progress' | 'neutral'
@@ -36,6 +37,7 @@ type StatusTone = 'success' | 'danger' | 'warning' | 'progress' | 'neutral'
 const router = useRouter()
 const toast = useToast()
 const loading = ref(false)
+const loadError = ref(false)
 const loadingDetail = ref(false)
 const actionLoading = ref(false)
 const tasks = ref<agentApi.AgentTaskSummary[]>([])
@@ -123,6 +125,7 @@ const failureHint = computed(() => {
 
 const load = async () => {
   loading.value = true
+  loadError.value = false
   try {
     tasks.value = (await agentApi.listTasks({ page: 1, pageSize: 50 })).data.records
     if (!selected.value && tasks.value.length) {
@@ -130,6 +133,7 @@ const load = async () => {
       await open(preferred)
     }
   } catch (error) {
+    loadError.value = true
     toast.error(error instanceof Error ? error.message : '加载 Agent 任务失败')
   } finally {
     loading.value = false
@@ -323,6 +327,7 @@ onMounted(load)
         </CardHeader>
         <CardContent class="space-y-2 p-3">
           <LoadingSkeleton v-if="loading" type="list" :count="5" />
+          <ErrorState v-else-if="loadError" message="加载运行记录失败" @retry="load" />
           <div v-else-if="!filteredTasks.length" class="flex min-h-72 flex-col items-center justify-center px-6 text-center">
             <CircleDashed class="h-9 w-9 text-muted-foreground/60" />
             <p class="mt-4 font-medium">暂时没有这类任务</p>

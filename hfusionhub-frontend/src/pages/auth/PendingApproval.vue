@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Clock3, LogOut, RefreshCw, ShieldCheck } from 'lucide-vue-next'
 import { useUserStore } from '@/stores/user'
@@ -10,6 +10,8 @@ const router = useRouter()
 const userStore = useUserStore()
 const refreshing = ref(false)
 const message = ref('')
+const lastChecked = ref('')
+let pollTimer: ReturnType<typeof setInterval> | null = null
 
 async function refreshStatus() {
   refreshing.value = true
@@ -17,10 +19,12 @@ async function refreshStatus() {
   try {
     await userStore.getUserInfo()
     if (userStore.isApproved) {
+      if (pollTimer) clearInterval(pollTimer)
       await router.replace('/')
       return
     }
-    message.value = '管理员尚未分配身份，请稍后再试。'
+    lastChecked.value = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    message.value = '管理员尚未分配身份，系统每 30 秒自动检查一次。'
   } catch (error) {
     message.value = error instanceof Error ? error.message : '状态刷新失败'
   } finally {
@@ -29,9 +33,26 @@ async function refreshStatus() {
 }
 
 async function logout() {
+  if (pollTimer) clearInterval(pollTimer)
   await userStore.logout()
   await router.replace('/login')
 }
+
+onMounted(() => {
+  pollTimer = setInterval(() => {
+    // 静默轮询，避免打断页面
+    userStore.getUserInfo().then(() => {
+      if (userStore.isApproved) {
+        if (pollTimer) clearInterval(pollTimer)
+        void router.replace('/')
+      }
+    }).catch(() => {})
+  }, 30000)
+})
+
+onBeforeUnmount(() => {
+  if (pollTimer) clearInterval(pollTimer)
+})
 </script>
 
 <template>
@@ -58,7 +79,7 @@ async function logout() {
             <p class="text-muted-foreground">联系管理员 <strong class="text-foreground">admin</strong>，提供您的用户名。管理员在“用户与权限”中选择普通用户或 AI 配置员并保存。</p>
           </div>
         </div>
-        <p v-if="message" class="text-center text-sm text-muted-foreground">{{ message }}</p>
+        <p v-if="message" class="text-center text-sm text-muted-foreground">{{ message }}<span v-if="lastChecked" class="block text-xs opacity-80">上次检查：{{ lastChecked }}</span></p>
       </CardContent>
       <CardFooter class="flex flex-col gap-3 sm:flex-row">
         <Button class="w-full gap-2" :disabled="refreshing" @click="refreshStatus">

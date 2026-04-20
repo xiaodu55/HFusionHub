@@ -4,7 +4,10 @@ import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.dto.UserInfoDTO;
 import com.hfusionhub.dto.UserLoginDTO;
 import com.hfusionhub.dto.UserRegisterDTO;
+import com.hfusionhub.dto.UserSearchDTO;
 import com.hfusionhub.dto.UserUpdateDTO;
+
+import java.util.List;
 
 /**
  * 用户服务接口
@@ -66,6 +69,14 @@ public interface UserService {
     UserInfoDTO getUserByUsername(String username);
 
     PageResult<UserInfoDTO> listUsers(long page, long pageSize, String keyword, String role);
+
+    /**
+     * 轻量搜索用户（按用户名/昵称模糊匹配，供共享知识库等场景使用）
+     *
+     * @param keyword 搜索关键字
+     * @return 轻量用户信息列表（不含敏感字段）
+     */
+    List<UserSearchDTO> searchUsers(String keyword);
 
     UserInfoDTO updateUserRole(Long userId, String role);
 }

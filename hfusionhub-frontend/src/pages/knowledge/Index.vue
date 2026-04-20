@@ -56,25 +56,35 @@ const loadKnowledgeBases = async () => {
     })
     knowledgeBases.value = res.data.records
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : '加载知识库失败')
     loadError.value = true
-    toast.error('加载知识库失败，请检查网络连接后重试')
+    toast.error(error instanceof Error ? error.message : '加载知识库失败，请检查网络连接后重试')
   } finally {
     loading.value = false
   }
 }
 
-const handleCreate = async () => {
-  if (!createForm.value.name) return
+const creating = ref(false)
+const updating = ref(false)
 
+const handleCreate = async () => {
+  if (!createForm.value.name.trim()) {
+    toast.error('请输入知识库名称')
+    return
+  }
+
+  creating.value = true
   try {
-    await knowledgeBaseApi.createKnowledgeBase(createForm.value)
+    await knowledgeBaseApi.createKnowledgeBase({
+      name: createForm.value.name.trim(),
+      description: createForm.value.description.trim(),
+    })
     isCreateDialogOpen.value = false
     createForm.value = { name: '', description: '' }
     await loadKnowledgeBases()
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : '创建知识库失败')
-    toast.error('创建知识库失败，请稍后重试')
+    toast.error(error instanceof Error ? error.message : '创建知识库失败，请稍后重试')
+  } finally {
+    creating.value = false
   }
 }
 
@@ -89,14 +99,23 @@ const handleEdit = (item: KnowledgeBase) => {
 }
 
 const handleUpdate = async () => {
-  if (!currentItem.value || !editForm.value.name) return
+  if (!currentItem.value || !editForm.value.name.trim()) {
+    toast.error('请输入知识库名称')
+    return
+  }
 
+  updating.value = true
   try {
-    await knowledgeBaseApi.updateKnowledgeBase(currentItem.value.id, editForm.value)
+    await knowledgeBaseApi.updateKnowledgeBase(currentItem.value.id, {
+      name: editForm.value.name.trim(),
+      description: editForm.value.description.trim(),
+    })
     isEditDialogOpen.value = false
     await loadKnowledgeBases()
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '更新知识库失败')
+  } finally {
+    updating.value = false
   }
 }
 
@@ -183,7 +202,7 @@ onMounted(() => {
       <DialogContent>
         <DialogHeader><DialogTitle>创建知识库</DialogTitle><DialogDescription>创建一个新的知识空间，用于集中管理 AI 可检索的资料。</DialogDescription></DialogHeader>
         <div class="space-y-4"><div class="space-y-2"><Label for="name">名称 *</Label><Input id="name" v-model="createForm.name" placeholder="例如：产品帮助中心" /></div><div class="space-y-2"><Label for="description">描述</Label><Input id="description" v-model="createForm.description" placeholder="说明这套资料适用于哪些问题（可选）" /></div></div>
-        <DialogFooter><Button variant="outline" @click="isCreateDialogOpen = false">取消</Button><Button @click="handleCreate">创建知识库</Button></DialogFooter>
+        <DialogFooter><Button variant="outline" :disabled="creating" @click="isCreateDialogOpen = false">取消</Button><Button :disabled="creating" @click="handleCreate">{{ creating ? '创建中...' : '创建知识库' }}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
 
@@ -191,7 +210,7 @@ onMounted(() => {
       <DialogContent>
         <DialogHeader><DialogTitle>编辑知识库</DialogTitle><DialogDescription>修改知识库名称和用途说明。</DialogDescription></DialogHeader>
         <div class="space-y-4"><div class="space-y-2"><Label for="edit-name">名称 *</Label><Input id="edit-name" v-model="editForm.name" placeholder="请输入知识库名称" /></div><div class="space-y-2"><Label for="edit-description">描述</Label><Input id="edit-description" v-model="editForm.description" placeholder="请输入知识库描述（可选）" /></div></div>
-        <DialogFooter><Button variant="outline" @click="isEditDialogOpen = false">取消</Button><Button @click="handleUpdate">保存修改</Button></DialogFooter>
+        <DialogFooter><Button variant="outline" :disabled="updating" @click="isEditDialogOpen = false">取消</Button><Button :disabled="updating" @click="handleUpdate">{{ updating ? '保存中...' : '保存修改' }}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
 
