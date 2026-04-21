@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 
 const toast = useToast()
 const loading = ref(false)
@@ -177,7 +178,7 @@ onMounted(load)
         <CardDescription>共 {{ servers.length }} 个。配置保存在 AI 服务端，重启后保留。</CardDescription>
       </CardHeader>
       <CardContent class="space-y-3">
-        <div v-if="loading" class="py-10 text-center text-sm text-muted-foreground">正在加载…</div>
+        <LoadingSkeleton v-if="loading" type="card" :count="3" />
         <div v-else-if="!servers.length" class="py-10 text-center text-sm text-muted-foreground">
           还没有 MCP 服务。可通过环境变量 <code class="rounded bg-muted px-1">MCP_SERVERS_CONFIG</code> 或在此添加。
         </div>

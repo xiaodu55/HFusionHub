@@ -344,8 +344,9 @@ onMounted(() => {
               />
             </div>
             <div class="space-y-2">
-              <Label>选择文件 *</Label>
+              <Label for="doc-file">选择文件 *</Label>
               <Input
+                id="doc-file"
                 type="file"
                 accept=".txt,.pdf,.docx,.md,.csv,.xlsx"
                 @change="handleFileSelect"

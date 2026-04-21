@@ -10,6 +10,7 @@ import * as notificationApi from '@/api/notification'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useTheme } from '@/composables/useTheme'
+import { useToast } from '@/composables/useToast'
 import {
   Activity,
   Bell,
@@ -45,6 +46,7 @@ const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 const { isDarkMode, initializeTheme, toggleTheme } = useTheme()
+const toast = useToast()
 
 const isSidebarOpen = ref(typeof window === 'undefined' ? true : window.innerWidth >= 1024)
 const globalSearchQuery = ref('')
@@ -283,7 +285,11 @@ const handleGlobalSearch = () => {
   const target = visibleMenuItems.value.find((item) =>
     item.keywords.some((word) => keyword.includes(word.toLowerCase()))
   )
-  router.push(target?.path || '/knowledge-base')
+  if (target) {
+    router.push(target.path)
+  } else {
+    toast.error(`没有找到与「${globalSearchQuery.value.trim()}」相关的功能页面`)
+  }
   globalSearchQuery.value = ''
 }
 

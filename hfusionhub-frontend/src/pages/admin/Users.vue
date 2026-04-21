@@ -8,6 +8,7 @@ import { useToast } from '@/composables/useToast'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 
 const userStore = useUserStore()
 const toast = useToast()
@@ -186,7 +187,7 @@ onMounted(() => load(1))
           </thead>
           <tbody>
             <tr v-if="loading && !result.records.length">
-              <td colspan="5" class="px-4 py-16 text-center text-muted-foreground">正在加载用户...</td>
+              <td colspan="5" class="px-4 py-10"><LoadingSkeleton type="list" :count="4" /></td>
             </tr>
             <tr v-else-if="!result.records.length">
               <td colspan="5" class="px-4 py-16 text-center">

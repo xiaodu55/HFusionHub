@@ -15,6 +15,7 @@ import { formatDateTime, formatTime } from '@/utils/date'
 import { friendlyErrorMessage } from '@/utils/errorMessage'
 import { SseDataParser, type SseDataEvent } from '@/utils/sse'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -556,8 +557,8 @@ onMounted(() => {
       ref="messagesContainer"
       class="flex-1 overflow-auto p-4 space-y-4"
     >
-      <div v-if="loading" class="text-center text-muted-foreground py-8">
-        加载中...
+      <div v-if="loading" class="flex justify-center py-8">
+        <LoadingSkeleton type="card" :count="3" class="w-full" />
       </div>
       <div v-else-if="messages.length === 0" class="flex flex-col items-center justify-center py-10 text-center">
         <Bot class="mx-auto h-12 w-12 text-muted-foreground" />

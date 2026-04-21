@@ -3,6 +3,8 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ArrowRight,
+  CheckCircle2,
+  Circle,
   Cloud,
   Cpu,
   Database,
@@ -14,6 +16,7 @@ import {
   ShieldCheck,
   Sun,
   UserRound,
+  XCircle,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -153,14 +156,18 @@ onMounted(() => {
                   </div>
                   <Badge variant="outline" :class="stateBadgeClass(provider.state)">{{ stateLabel(provider.state) }}</Badge>
                 </div>
-                <div class="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
-                  <span v-if="provider.configured">✅ 已配置</span>
-                  <span v-else>⚪ 未配置</span>
-                  <span v-if="provider.reachable !== undefined">
-                    {{ provider.reachable ? '✅ 可达' : '❌ 不可达' }}
+                <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <span v-if="provider.configured" class="inline-flex items-center gap-1"><CheckCircle2 class="h-3.5 w-3.5 text-emerald-400" />已配置</span>
+                  <span v-else class="inline-flex items-center gap-1"><Circle class="h-3.5 w-3.5 text-muted-foreground/60" />未配置</span>
+                  <span v-if="provider.reachable !== undefined" class="inline-flex items-center gap-1">
+                    <CheckCircle2 v-if="provider.reachable" class="h-3.5 w-3.5 text-emerald-400" />
+                    <XCircle v-else class="h-3.5 w-3.5 text-rose-400" />
+                    {{ provider.reachable ? '可达' : '不可达' }}
                   </span>
-                  <span v-if="provider.model_available !== undefined">
-                    {{ provider.model_available ? '✅ 模型可用' : '❌ 模型未检测到' }}
+                  <span v-if="provider.model_available !== undefined" class="inline-flex items-center gap-1">
+                    <CheckCircle2 v-if="provider.model_available" class="h-3.5 w-3.5 text-emerald-400" />
+                    <XCircle v-else class="h-3.5 w-3.5 text-rose-400" />
+                    {{ provider.model_available ? '模型可用' : '模型未检测到' }}
                   </span>
                 </div>
               </article>

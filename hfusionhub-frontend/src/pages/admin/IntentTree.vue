@@ -15,6 +15,7 @@ import {
 } from 'lucide-vue-next'
 import * as intentApi from '@/api/intentTree'
 import { getMyKnowledgeBaseList } from '@/api/knowledgeBase'
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import type {
   KnowledgeBase,
   RagIntentKind,
@@ -294,7 +295,7 @@ onMounted(() => {
           </label>
         </div>
 
-        <div v-if="loading" class="p-12 text-center text-sm text-muted-foreground">正在加载规则...</div>
+        <LoadingSkeleton v-if="loading" type="card" :count="3" />
         <div v-else-if="visibleNodes.length === 0" class="flex min-h-72 flex-col items-center justify-center px-6 py-12 text-center">
           <GitBranch class="h-9 w-9 text-muted-foreground/45" />
           <h3 class="mt-4 font-medium">还没有问题分流规则</h3>

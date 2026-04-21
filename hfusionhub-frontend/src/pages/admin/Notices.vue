@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 
 const toast = useToast()
 const loading = ref(false)
@@ -41,6 +42,8 @@ const levelClass = (level: string) => ({
   warning: 'border-amber-400/30 bg-amber-400/[0.06] text-amber-200',
   error: 'border-rose-400/30 bg-rose-400/[0.06] text-rose-200',
 })[level] ?? ''
+
+const levelLabel = (level: string) => ({ info: '提示', warning: '重要', error: '紧急' })[level] ?? level
 
 const scopeLabel = (scope: string) => ({ all: '全体', admin: '管理员', user: '普通用户' })[scope] ?? scope
 
@@ -171,7 +174,7 @@ onMounted(load)
         <CardDescription>共 {{ notices.length }} 条，按发布时间倒序。</CardDescription>
       </CardHeader>
       <CardContent class="space-y-3">
-        <div v-if="loading" class="py-10 text-center text-sm text-muted-foreground">正在加载…</div>
+        <LoadingSkeleton v-if="loading" type="card" :count="3" />
         <div v-else-if="!notices.length" class="py-10 text-center text-sm text-muted-foreground">还没有发布过公告。</div>
         <article
           v-for="notice in notices"
@@ -182,8 +185,8 @@ onMounted(load)
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="text-sm font-medium">{{ notice.title }}</span>
-                <span class="rounded-full border px-2 py-0.5 text-[11px] capitalize" :class="levelClass(notice.level)">
-                  {{ notice.level }}
+                <span class="rounded-full border px-2 py-0.5 text-[11px]" :class="levelClass(notice.level)">
+                  {{ levelLabel(notice.level) }}
                 </span>
                 <span class="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground">
                   {{ scopeLabel(notice.scope) }}

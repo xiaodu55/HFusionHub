@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 
 const toast = useToast()
 const loading = ref(false)
@@ -36,6 +37,8 @@ const styleOptions = [
 ]
 
 const statusLabel = (status: number) => ({ 0: '草稿', 1: '已发布', 2: '已停用' })[status] ?? '未知'
+const styleLabel = (style?: string) =>
+  ({ detailed: '详细', concise: '简洁', report: '报告' })[style || ''] || style || '默认'
 const statusClass = (status: number) => ({
   0: 'border-zinc-500/40 bg-zinc-500/[0.08] text-zinc-300',
   1: 'border-emerald-400/30 bg-emerald-400/[0.06] text-emerald-300',
@@ -229,7 +232,7 @@ onMounted(() => {
         <CardDescription>共 {{ apps.length }} 个应用。</CardDescription>
       </CardHeader>
       <CardContent class="space-y-3">
-        <div v-if="loading" class="py-10 text-center text-sm text-muted-foreground">正在加载…</div>
+        <LoadingSkeleton v-if="loading" type="card" :count="3" />
         <div v-else-if="!apps.length" class="py-10 text-center text-sm text-muted-foreground">
           还没有应用。创建一个应用并绑定知识库，即可发布为对外 API。
         </div>
@@ -243,7 +246,7 @@ onMounted(() => {
               <p v-if="app.description" class="mt-1 text-sm text-muted-foreground">{{ app.description }}</p>
               <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                 <span>知识库：{{ app.knowledgeBaseName || '未绑定' }}</span>
-                <span>风格：{{ app.style }}</span>
+                <span>风格：{{ styleLabel(app.style) }}</span>
                 <span>API Key：{{ app.apiKeyCount }} 个</span>
               </div>
             </div>

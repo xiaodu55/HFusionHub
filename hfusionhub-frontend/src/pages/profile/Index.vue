@@ -137,7 +137,7 @@ onMounted(() => {
         </CardHeader>
         <CardContent class="space-y-4">
           <div class="space-y-2">
-            <Label>用户ID</Label>
+            <Label>账号编号</Label>
             <p class="text-sm text-muted-foreground">{{ userStore.userInfo?.id }}</p>
           </div>
           <div class="space-y-2">

@@ -484,6 +484,7 @@ onMounted(() => {
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="删除文档"
                 :disabled="doc.status === 4"
                 @click="handleDeleteDocument(doc)"
               >
