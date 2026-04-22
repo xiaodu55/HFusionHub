@@ -18,6 +18,7 @@ import * as featureApi from '@/api/featureFlag'
 import type { FeatureFlagInfo } from '@/api/featureFlag'
 import { useToast } from '@/composables/useToast'
 import { Button } from '@/components/ui/button'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 type CapabilityGroup = 'retrieval' | 'agent' | 'safety'
 type CapabilityStatus = 'stable' | 'experimental' | 'frozen'
@@ -38,6 +39,9 @@ interface CapabilityDefinition {
 const toast = useToast()
 const loading = ref(false)
 const savingKey = ref('')
+const enableTarget = ref<CapabilityDefinition | null>(null)
+const enableConfirmOpen = ref(false)
+const enableConfirmLoading = ref(false)
 const activeGroup = ref<'all' | CapabilityGroup>('all')
 const serverFlags = ref<Record<string, FeatureFlagInfo>>({})
 
@@ -95,8 +99,17 @@ async function setCapability(item: CapabilityDefinition, enabled: boolean) {
     toast.error('请先开启“复杂任务模式”')
     return
   }
-  if (enabled && item.confirmOnEnable && !window.confirm(item.confirmOnEnable)) return
+  if (enabled && item.confirmOnEnable) {
+    enableTarget.value = item
+    enableConfirmOpen.value = true
+    return
+  }
+  await applyCapability(item, enabled)
+}
 
+async function applyCapability(item: CapabilityDefinition, enabled: boolean) {
+  const flag = serverFlags.value[item.key]
+  if (!flag || savingKey.value) return
   savingKey.value = item.key
   try {
     const response = await featureApi.updateFeatureFlag(flag.id, {
@@ -112,16 +125,39 @@ async function setCapability(item: CapabilityDefinition, enabled: boolean) {
   }
 }
 
+async function confirmEnableCapability() {
+  const item = enableTarget.value
+  if (!item || savingKey.value) return
+  enableConfirmLoading.value = true
+  try {
+    await applyCapability(item, true)
+  } finally {
+    enableConfirmLoading.value = false
+    enableConfirmOpen.value = false
+    enableTarget.value = null
+  }
+}
+
 const presets = [
   { name: '日常问答', description: '速度优先，适合一般知识库', values: { 'rag.hybrid.enabled': true, 'rag.graph.enabled': false, 'rag.reranker.enabled': false, 'agent.enabled': false, 'agent.multi_agent.enabled': false } },
   { name: '精准检索', description: '适合资料多、关系复杂的知识库', values: { 'rag.hybrid.enabled': true, 'rag.graph.enabled': true, 'rag.reranker.enabled': true, 'agent.enabled': false, 'agent.multi_agent.enabled': false } },
   { name: '复杂任务', description: '适合多步骤分析，耗时和用量更高', values: { 'rag.hybrid.enabled': true, 'rag.graph.enabled': true, 'rag.reranker.enabled': true, 'agent.enabled': true, 'agent.multi_agent.enabled': false } },
 ]
+const presetTarget = ref<(typeof presets)[number] | null>(null)
+const presetConfirmOpen = ref(false)
+const presetConfirmLoading = ref(false)
 
-async function applyPreset(preset: typeof presets[number]) {
-  if (!window.confirm(`应用“${preset.name}”推荐组合？`)) return
-  savingKey.value = 'preset'
+function applyPreset(preset: typeof presets[number]) {
+  presetTarget.value = preset
+  presetConfirmOpen.value = true
+}
+
+async function confirmApplyPreset() {
+  const preset = presetTarget.value
+  if (!preset || savingKey.value) return
+  presetConfirmLoading.value = true
   try {
+    savingKey.value = 'preset'
     for (const [key, enabled] of Object.entries(preset.values)) {
       const flag = serverFlags.value[key]
       if (!flag || flag.enabled === enabled) continue
@@ -136,6 +172,9 @@ async function applyPreset(preset: typeof presets[number]) {
     toast.error(error instanceof Error ? error.message : '推荐组合应用失败')
   } finally {
     savingKey.value = ''
+    presetConfirmLoading.value = false
+    presetConfirmOpen.value = false
+    presetTarget.value = null
   }
 }
 
@@ -225,5 +264,22 @@ onMounted(loadFlags)
       <CheckCircle2 class="mt-1 h-4 w-4 shrink-0 text-emerald-400" />
       <p>建议从“日常问答”开始。只有在引用不准、关系知识较多或任务确实复杂时，再逐步开启增强能力。</p>
     </div>
+
+    <ConfirmDialog
+      v-model:open="enableConfirmOpen"
+      title="开启确认"
+      :description="enableTarget?.confirmOnEnable"
+      confirm-text="开启"
+      :loading="enableConfirmLoading"
+      @confirm="confirmEnableCapability"
+    />
+    <ConfirmDialog
+      v-model:open="presetConfirmOpen"
+      title="应用推荐组合"
+      :description="`应用“${presetTarget?.name}”推荐组合？`"
+      confirm-text="应用"
+      :loading="presetConfirmLoading"
+      @confirm="confirmApplyPreset"
+    />
   </div>
 </template>

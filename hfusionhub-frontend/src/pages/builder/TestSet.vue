@@ -43,6 +43,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { useToast } from '@/composables/useToast'
 
 // ── State ──────────────────────────────────────────────────────────
@@ -58,6 +59,12 @@ const loading = ref(false)
 const saving = ref(false)
 const running = ref(false)
 const creatingExample = ref(false)
+const deleteSetTarget = ref<PromptTestSet | null>(null)
+const confirmDeleteSetOpen = ref(false)
+const confirmDeleteSetLoading = ref(false)
+const deleteCaseTarget = ref<PromptTestCase | null>(null)
+const confirmDeleteCaseOpen = ref(false)
+const confirmDeleteCaseLoading = ref(false)
 
 // new / edit set form
 const setForm = ref({ name: '', description: '' })
@@ -306,11 +313,18 @@ const saveSet = async () => {
   }
 }
 
-const confirmDeleteSet = async () => {
+const confirmDeleteSet = () => {
   if (!selectedSet.value) return
-  if (!confirm(`确定删除用例集「${selectedSet.value.name}」及其全部用例？`)) return
+  deleteSetTarget.value = selectedSet.value
+  confirmDeleteSetOpen.value = true
+}
+
+const handleConfirmDeleteSet = async () => {
+  const target = deleteSetTarget.value
+  if (!target) return
+  confirmDeleteSetLoading.value = true
   try {
-    await promptTestSetApi.deletePromptTestSet(selectedSet.value.id)
+    await promptTestSetApi.deletePromptTestSet(target.id)
     toast.success('用例集已删除')
     selectedId.value = null
     detail.value = null
@@ -318,6 +332,10 @@ const confirmDeleteSet = async () => {
     await loadSets()
   } catch (err) {
     toast.error(err instanceof Error ? err.message : '删除用例集失败')
+  } finally {
+    confirmDeleteSetLoading.value = false
+    confirmDeleteSetOpen.value = false
+    deleteSetTarget.value = null
   }
 }
 
@@ -387,9 +405,15 @@ const saveCase = async () => {
   }
 }
 
-const confirmDeleteCase = async (tc: PromptTestCase) => {
-  if (!selectedId.value) return
-  if (!confirm(`确定删除用例「${tc.question.slice(0, 30)}」？`)) return
+const confirmDeleteCase = (tc: PromptTestCase) => {
+  deleteCaseTarget.value = tc
+  confirmDeleteCaseOpen.value = true
+}
+
+const handleConfirmDeleteCase = async () => {
+  const tc = deleteCaseTarget.value
+  if (!selectedId.value || !tc) return
+  confirmDeleteCaseLoading.value = true
   try {
     await promptTestSetApi.deletePromptTestCase(selectedId.value, tc.id)
     toast.success('用例已删除')
@@ -397,6 +421,10 @@ const confirmDeleteCase = async (tc: PromptTestCase) => {
     await loadSets()
   } catch (err) {
     toast.error(err instanceof Error ? err.message : '删除用例失败')
+  } finally {
+    confirmDeleteCaseLoading.value = false
+    confirmDeleteCaseOpen.value = false
+    deleteCaseTarget.value = null
   }
 }
 
@@ -639,11 +667,20 @@ const formatMs = (ms: number): string => (ms >= 1000 ? `${(ms / 1000).toFixed(2)
 onMounted(() => {
   loadSets()
   loadTemplatesAndKbs()
+  document.addEventListener('keydown', closeDialogOnEscape)
 })
 
 onBeforeUnmount(() => {
   stopPolling()
+  document.removeEventListener('keydown', closeDialogOnEscape)
 })
+
+// ESC 关闭当前打开的弹窗（a11y）
+const closeDialogOnEscape = (event: KeyboardEvent) => {
+  if (event.key !== 'Escape') return
+  if (showSetEditor.value) showSetEditor.value = false
+  else if (showCaseEditor.value) showCaseEditor.value = false
+}
 </script>
 
 <template>
@@ -1075,7 +1112,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- ── Set editor dialog ────────────────────────────────────── -->
-    <div v-if="showSetEditor" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @click.self="showSetEditor = false">
+    <div v-if="showSetEditor" role="dialog" aria-modal="true" aria-label="编辑问题组" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @click.self="showSetEditor = false">
       <Card class="w-full max-w-md">
         <CardHeader>
           <CardTitle class="text-base">{{ editingSetId ? '编辑问题组' : '新建问题组' }}</CardTitle>
@@ -1100,7 +1137,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- ── Case editor dialog ───────────────────────────────────── -->
-    <div v-if="showCaseEditor" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @click.self="showCaseEditor = false">
+    <div v-if="showCaseEditor" role="dialog" aria-modal="true" aria-label="编辑用例" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @click.self="showCaseEditor = false">
       <Card class="w-full max-w-lg">
         <CardHeader>
           <CardTitle class="text-base">{{ editingCaseId ? '编辑测试问题' : '添加测试问题' }}</CardTitle>
@@ -1155,5 +1192,24 @@ onBeforeUnmount(() => {
         </CardContent>
       </Card>
     </div>
+
+    <ConfirmDialog
+      v-model:open="confirmDeleteSetOpen"
+      title="删除确认"
+      :description="`确定删除用例集「${deleteSetTarget?.name}」及其全部用例？`"
+      confirm-text="删除"
+      destructive
+      :loading="confirmDeleteSetLoading"
+      @confirm="handleConfirmDeleteSet"
+    />
+    <ConfirmDialog
+      v-model:open="confirmDeleteCaseOpen"
+      title="删除确认"
+      :description="`确定删除用例「${deleteCaseTarget?.question.slice(0, 30)}」？`"
+      confirm-text="删除"
+      destructive
+      :loading="confirmDeleteCaseLoading"
+      @confirm="handleConfirmDeleteCase"
+    />
   </div>
 </template>

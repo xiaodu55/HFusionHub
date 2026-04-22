@@ -26,6 +26,7 @@ import {
   ChevronRight,
   Clock3,
   MessageSquare,
+  Pencil,
   Plus,
   Search,
   Sparkles,
@@ -145,11 +146,43 @@ const handleCreate = async () => {
   }
 }
 
-const handleDelete = async (conversation: Conversation) => {
-  if (!confirm(`确定要删除对话「${conversation.title}」吗？`)) return
+const renameDialogOpen = ref(false)
+const renameForm = ref({ id: 0, title: '' })
+const deleteDialogOpen = ref(false)
+const deleteTarget = ref<Conversation | null>(null)
 
+const openRename = (conversation: Conversation) => {
+  renameForm.value = { id: conversation.id, title: conversation.title }
+  renameDialogOpen.value = true
+}
+
+const submitRename = async () => {
+  const title = renameForm.value.title.trim()
+  if (!title) {
+    toast.error('对话名称不能为空')
+    return
+  }
   try {
-    await conversationApi.deleteConversation(conversation.id)
+    await conversationApi.renameConversation(renameForm.value.id, title)
+    renameDialogOpen.value = false
+    toast.success('对话已重命名')
+    await loadConversations()
+  } catch (error) {
+    console.error('重命名对话失败:', error)
+    toast.error('重命名失败，请稍后重试')
+  }
+}
+
+const openDelete = (conversation: Conversation) => {
+  deleteTarget.value = conversation
+  deleteDialogOpen.value = true
+}
+
+const confirmDelete = async () => {
+  if (!deleteTarget.value) return
+  try {
+    await conversationApi.deleteConversation(deleteTarget.value.id)
+    deleteDialogOpen.value = false
     toast.success('对话已删除')
     await loadConversations()
   } catch (error) {
@@ -269,8 +302,11 @@ onMounted(() => {
           <span class="ml-3 flex shrink-0 items-center gap-1"><Clock3 class="h-3.5 w-3.5" />{{ formatDateTime(getLastActivity(conversation)) }}</span>
         </div>
 
-        <div class="absolute right-4 top-4 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-          <Button variant="ghost" size="icon" class="h-8 w-8 hover:bg-rose-400/10" title="删除对话" @click.stop="handleDelete(conversation)">
+        <div class="absolute right-4 top-4 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <Button variant="ghost" size="icon" class="h-8 w-8" aria-label="重命名对话" title="重命名对话" @click.stop="openRename(conversation)">
+            <Pencil class="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" class="h-8 w-8 hover:bg-rose-400/10" aria-label="删除对话" title="删除对话" @click.stop="openDelete(conversation)">
             <Trash2 class="h-4 w-4 text-destructive" />
           </Button>
         </div>
@@ -320,6 +356,36 @@ onMounted(() => {
         <DialogFooter>
           <Button variant="outline" @click="isCreateDialogOpen = false">取消</Button>
           <Button @click="handleCreate">创建并开始对话</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="renameDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>重命名对话</DialogTitle>
+          <DialogDescription>修改后列表会立即更新。</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-2">
+          <Label for="rename-title">对话名称</Label>
+          <Input id="rename-title" v-model="renameForm.title" maxlength="100" placeholder="请输入新的对话名称" @keydown.enter="submitRename" />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="renameDialogOpen = false">取消</Button>
+          <Button @click="submitRename">保存</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="deleteDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>删除对话？</DialogTitle>
+          <DialogDescription>确定要删除「{{ deleteTarget?.title }}」吗？删除后不可恢复。</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" @click="deleteDialogOpen = false">取消</Button>
+          <Button variant="destructive" @click="confirmDelete">删除对话</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

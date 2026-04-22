@@ -14,12 +14,19 @@ import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 const toast = useToast()
 const loading = ref(false)
 const apps = ref<AppInfo[]>([])
 const knowledgeBases = ref<KnowledgeBase[]>([])
 const saving = ref(false)
+const deleteAppTarget = ref<AppInfo | null>(null)
+const confirmDeleteAppOpen = ref(false)
+const confirmDeleteAppLoading = ref(false)
+const deleteKeyId = ref<number | null>(null)
+const confirmDeleteKeyOpen = ref(false)
+const confirmDeleteKeyLoading = ref(false)
 
 const form = ref<AppInput & { id?: number }>({
   name: '',
@@ -130,14 +137,25 @@ async function unpublish(app: AppInfo) {
   }
 }
 
-async function remove(app: AppInfo) {
-  if (!window.confirm(`确定删除应用「${app.name}」？其 API Key 将一并失效。`)) return
+function remove(app: AppInfo) {
+  deleteAppTarget.value = app
+  confirmDeleteAppOpen.value = true
+}
+
+async function confirmDeleteApp() {
+  const app = deleteAppTarget.value
+  if (!app) return
+  confirmDeleteAppLoading.value = true
   try {
     await appApi.deleteApp(app.id)
     toast.success('应用已删除')
     await load()
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '删除失败')
+  } finally {
+    confirmDeleteAppLoading.value = false
+    confirmDeleteAppOpen.value = false
+    deleteAppTarget.value = null
   }
 }
 
@@ -184,15 +202,24 @@ async function createKey() {
   }
 }
 
-async function removeKey(keyId: number) {
-  if (!keyDialogApp.value) return
-  if (!window.confirm('确定删除该 API Key？使用它的调用将立即失败。')) return
+function removeKey(keyId: number) {
+  deleteKeyId.value = keyId
+  confirmDeleteKeyOpen.value = true
+}
+
+async function confirmDeleteKey() {
+  if (!keyDialogApp.value || deleteKeyId.value === null) return
+  confirmDeleteKeyLoading.value = true
   try {
-    await appApi.deleteApiKey(keyDialogApp.value.id, keyId)
+    await appApi.deleteApiKey(keyDialogApp.value.id, deleteKeyId.value)
     toast.success('API Key 已删除')
     await loadKeys()
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '删除失败')
+  } finally {
+    confirmDeleteKeyLoading.value = false
+    confirmDeleteKeyOpen.value = false
+    deleteKeyId.value = null
   }
 }
 
@@ -352,5 +379,24 @@ onMounted(() => {
         </div>
       </DialogContent>
     </Dialog>
+
+    <ConfirmDialog
+      v-model:open="confirmDeleteAppOpen"
+      title="删除确认"
+      :description="`确定删除应用「${deleteAppTarget?.name}」？其 API Key 将一并失效。`"
+      confirm-text="删除"
+      destructive
+      :loading="confirmDeleteAppLoading"
+      @confirm="confirmDeleteApp"
+    />
+    <ConfirmDialog
+      v-model:open="confirmDeleteKeyOpen"
+      title="删除确认"
+      description="确定删除该 API Key？使用它的调用将立即失败。"
+      confirm-text="删除"
+      destructive
+      :loading="confirmDeleteKeyLoading"
+      @confirm="confirmDeleteKey"
+    />
   </div>
 </template>

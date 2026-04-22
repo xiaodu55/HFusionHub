@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import {
   AlertTriangle,
   Archive,
@@ -34,6 +35,9 @@ const searchTitle = ref('')
 const loading = ref(false)
 const loadError = ref(false)
 const actionId = ref<number | null>(null)
+const purgeTarget = ref<Document | null>(null)
+const confirmPurgeOpen = ref(false)
+const confirmPurgeLoading = ref(false)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
 const isSearching = computed(() => Boolean(searchTitle.value.trim()))
@@ -73,9 +77,15 @@ const restore = async (document: Document) => {
   }
 }
 
-const purge = async (document: Document) => {
-  if (!confirm(`确定要永久删除「${document.title}」吗？此操作无法恢复。`)) return
+const purge = (document: Document) => {
+  purgeTarget.value = document
+  confirmPurgeOpen.value = true
+}
 
+const confirmPurge = async () => {
+  const document = purgeTarget.value
+  if (!document) return
+  confirmPurgeLoading.value = true
   actionId.value = document.id
   try {
     await documentApi.purgeDocument(document.id)
@@ -86,6 +96,9 @@ const purge = async (document: Document) => {
     toast.error('永久删除失败，请稍后重试')
   } finally {
     actionId.value = null
+    confirmPurgeLoading.value = false
+    confirmPurgeOpen.value = false
+    purgeTarget.value = null
   }
 }
 
@@ -217,5 +230,15 @@ onMounted(() => loadDocuments(1))
         </div>
       </CardContent>
     </Card>
+
+    <ConfirmDialog
+      v-model:open="confirmPurgeOpen"
+      title="永久删除确认"
+      :description="`确定要永久删除「${purgeTarget?.title}」吗？此操作无法恢复。`"
+      confirm-text="永久删除"
+      destructive
+      :loading="confirmPurgeLoading"
+      @confirm="confirmPurge"
+    />
   </div>
 </template>

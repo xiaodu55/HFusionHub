@@ -153,6 +153,56 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     @Override
+    public void rename(Long id, String title) {
+        Conversation conversation = conversationMapper.selectById(id);
+        if (conversation == null) {
+            throw new BusinessException("对话不存在");
+        }
+        if (!conversation.getUserId().equals(JwtUtils.getCurrentUserId())) {
+            throw new BusinessException("无权修改该对话");
+        }
+        String normalized = title == null ? "" : title.trim();
+        if (normalized.isBlank()) {
+            throw new BusinessException("对话名称不能为空");
+        }
+        if (normalized.length() > 100) {
+            throw new BusinessException("对话名称不能超过 100 个字符");
+        }
+        conversation.setTitle(normalized);
+        conversationMapper.updateById(conversation);
+    }
+
+    @Override
+    public void clearMessages(Long id) {
+        Conversation conversation = conversationMapper.selectById(id);
+        if (conversation == null) {
+            throw new BusinessException("对话不存在");
+        }
+        if (!conversation.getUserId().equals(JwtUtils.getCurrentUserId())) {
+            throw new BusinessException("无权清空该对话");
+        }
+        LambdaQueryWrapper<Message> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Message::getConversationId, id);
+        messageMapper.delete(wrapper);
+    }
+
+    @Override
+    public void deleteMessage(Long conversationId, Long messageId) {
+        Conversation conversation = conversationMapper.selectById(conversationId);
+        if (conversation == null) {
+            throw new BusinessException("对话不存在");
+        }
+        if (!conversation.getUserId().equals(JwtUtils.getCurrentUserId())) {
+            throw new BusinessException("无权操作该对话");
+        }
+        Message message = messageMapper.selectById(messageId);
+        if (message == null || !conversationId.equals(message.getConversationId())) {
+            throw new BusinessException("消息不存在");
+        }
+        messageMapper.deleteById(messageId);
+    }
+
+    @Override
     public ConversationInfoDTO getById(Long id) {
         // 1. 查询对话
         Conversation conversation = conversationMapper.selectById(id);

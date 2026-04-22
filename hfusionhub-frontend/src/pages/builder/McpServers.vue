@@ -11,11 +11,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 const toast = useToast()
 const loading = ref(false)
 const servers = ref<McpServerInfo[]>([])
 const adding = ref(false)
+const deleteTarget = ref<McpServerInfo | null>(null)
+const confirmDeleteOpen = ref(false)
+const confirmDeleteLoading = ref(false)
 
 const form = ref({
   id: '',
@@ -101,14 +105,25 @@ async function reconnect(server: McpServerInfo) {
   }
 }
 
-async function remove(server: McpServerInfo) {
-  if (!window.confirm(`确定移除 MCP 服务「${server.name}」？`)) return
+function remove(server: McpServerInfo) {
+  deleteTarget.value = server
+  confirmDeleteOpen.value = true
+}
+
+async function confirmDelete() {
+  const server = deleteTarget.value
+  if (!server) return
+  confirmDeleteLoading.value = true
   try {
     await toolsApi.removeMcpServer(server.id)
     toast.success('已移除')
     await load()
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '移除失败')
+  } finally {
+    confirmDeleteLoading.value = false
+    confirmDeleteOpen.value = false
+    deleteTarget.value = null
   }
 }
 
@@ -206,5 +221,15 @@ onMounted(load)
         </article>
       </CardContent>
     </Card>
+
+    <ConfirmDialog
+      v-model:open="confirmDeleteOpen"
+      title="移除确认"
+      :description="`确定移除 MCP 服务「${deleteTarget?.name}」？`"
+      confirm-text="移除"
+      destructive
+      :loading="confirmDeleteLoading"
+      @confirm="confirmDelete"
+    />
   </div>
 </template>

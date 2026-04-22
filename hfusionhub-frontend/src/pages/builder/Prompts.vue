@@ -31,6 +31,7 @@ import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useToast } from '@/composables/useToast'
 import { formatDateTime } from '@/utils/date'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 type Filter = 'ALL' | promptTemplateApi.PromptTemplateStatus
 
@@ -106,6 +107,12 @@ const versionsLoading = ref(false)
 const versionsError = ref('')
 const selectedVersion = ref<PromptTemplateVersion | null>(null)
 const rollbackLoading = ref(false)
+const deleteTarget = ref<PromptTemplate | null>(null)
+const confirmDeleteOpen = ref(false)
+const confirmDeleteLoading = ref(false)
+const rollbackTarget = ref<PromptTemplateVersion | null>(null)
+const confirmRollbackOpen = ref(false)
+const confirmRollbackLoading = ref(false)
 
 const selected = computed(() => templates.value.find((template) => template.id === selectedId.value) || null)
 const filteredTemplates = computed(() => {
@@ -242,13 +249,20 @@ const togglePublished = async () => {
   }
 }
 
-const deleteTemplate = async () => {
-  if (!selected.value || actionLoading.value) return
-  if (!confirm(`确定要删除回答方案「${selected.value.name}」吗？关联对话之后将使用系统默认回答方式。`)) return
+const deleteTemplate = () => {
+  if (!selected.value) return
+  deleteTarget.value = selected.value
+  confirmDeleteOpen.value = true
+}
+
+const confirmDelete = async () => {
+  const target = deleteTarget.value
+  if (!target || actionLoading.value) return
   actionLoading.value = true
+  confirmDeleteLoading.value = true
   try {
-    await promptTemplateApi.deletePromptTemplate(selected.value.id)
-    templates.value = templates.value.filter((template) => template.id !== selected.value?.id)
+    await promptTemplateApi.deletePromptTemplate(target.id)
+    templates.value = templates.value.filter((template) => template.id !== target.id)
     const next = templates.value[0]
     if (next) selectTemplate(next)
     else selectedId.value = null
@@ -257,6 +271,9 @@ const deleteTemplate = async () => {
     toast.error(error instanceof Error ? error.message : '删除提示词模板失败')
   } finally {
     actionLoading.value = false
+    confirmDeleteLoading.value = false
+    confirmDeleteOpen.value = false
+    deleteTarget.value = null
   }
 }
 
@@ -288,12 +305,18 @@ const openVersionHistory = async () => {
   }
 }
 
-const rollbackToVersion = async () => {
-  if (!selected.value || !selectedVersion.value || rollbackLoading.value) return
-  const targetVersion = selectedVersion.value.version
-  const versionId = selectedVersion.value.id
-  if (!confirm(`确定要回滚到 v${targetVersion} 吗？当前内容将被保存为历史版本，恢复后的内容为草稿，需重新发布。`)) return
+const rollbackToVersion = () => {
+  if (!selected.value || !selectedVersion.value) return
+  rollbackTarget.value = selectedVersion.value
+  confirmRollbackOpen.value = true
+}
+
+const confirmRollback = async () => {
+  if (!selected.value || !rollbackTarget.value || rollbackLoading.value) return
+  const targetVersion = rollbackTarget.value.version
+  const versionId = rollbackTarget.value.id
   rollbackLoading.value = true
+  confirmRollbackLoading.value = true
   try {
     const response = await promptTemplateApi.rollbackPromptTemplate(selected.value.id, versionId, selected.value.version)
     replaceTemplate(response.data)
@@ -304,6 +327,9 @@ const rollbackToVersion = async () => {
     handleVersionConflict(error, '回滚失败')
   } finally {
     rollbackLoading.value = false
+    confirmRollbackLoading.value = false
+    confirmRollbackOpen.value = false
+    rollbackTarget.value = null
   }
 }
 
@@ -562,5 +588,23 @@ onMounted(loadTemplates)
         </div>
       </DialogContent>
     </Dialog>
+
+    <ConfirmDialog
+      v-model:open="confirmDeleteOpen"
+      title="删除确认"
+      :description="`确定要删除回答方案「${deleteTarget?.name}」吗？关联对话之后将使用系统默认回答方式。`"
+      confirm-text="删除"
+      destructive
+      :loading="confirmDeleteLoading"
+      @confirm="confirmDelete"
+    />
+    <ConfirmDialog
+      v-model:open="confirmRollbackOpen"
+      title="回滚确认"
+      :description="`确定要回滚到 v${rollbackTarget?.version} 吗？当前内容将被保存为历史版本，恢复后的内容为草稿，需重新发布。`"
+      confirm-text="回滚"
+      :loading="confirmRollbackLoading"
+      @confirm="confirmRollback"
+    />
   </div>
 </template>

@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 
 /**
@@ -16,10 +17,16 @@ import java.util.concurrent.ThreadPoolExecutor;
 public class ThreadPoolConfig {
 
     /**
-     * SSE 流式响应线程池
+     * SSE 流式响应线程池。
+     * <p>每个 SSE 连接会占用一个线程长达数分钟：JDK 21+ 优先使用虚拟线程
+     * （每连接一个虚拟线程，不再受 20 线程上限约束），JDK 17 回退平台线程池。</p>
      */
     @Bean("sseTaskExecutor")
     public Executor sseTaskExecutor() {
+        ExecutorService virtual = ExecutorSupport.newVirtualThreadPerTaskExecutor("sse");
+        if (virtual != null) {
+            return virtual;
+        }
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(5);
         executor.setMaxPoolSize(20);

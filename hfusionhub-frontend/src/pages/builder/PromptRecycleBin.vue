@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import {
   AlertTriangle,
   Archive,
@@ -28,6 +29,9 @@ const keyword = ref('')
 const loading = ref(false)
 const loadError = ref(false)
 const actionId = ref<number | null>(null)
+const purgeTarget = ref<PromptTemplate | null>(null)
+const confirmPurgeOpen = ref(false)
+const confirmPurgeLoading = ref(false)
 
 const total = computed(() => templates.value.length)
 const isSearching = computed(() => Boolean(keyword.value.trim()))
@@ -59,8 +63,15 @@ const restore = async (template: PromptTemplate) => {
   }
 }
 
-const purge = async (template: PromptTemplate) => {
-  if (!confirm(`确定永久删除「${template.name}」吗？版本历史也会一并删除，无法恢复。`)) return
+const purge = (template: PromptTemplate) => {
+  purgeTarget.value = template
+  confirmPurgeOpen.value = true
+}
+
+const confirmPurge = async () => {
+  const template = purgeTarget.value
+  if (!template) return
+  confirmPurgeLoading.value = true
   actionId.value = template.id
   try {
     await promptTemplateApi.purgePromptTemplate(template.id)
@@ -70,6 +81,9 @@ const purge = async (template: PromptTemplate) => {
     toast.error(error instanceof Error ? error.message : '永久删除回答方案失败')
   } finally {
     actionId.value = null
+    confirmPurgeLoading.value = false
+    confirmPurgeOpen.value = false
+    purgeTarget.value = null
   }
 }
 
@@ -166,5 +180,15 @@ onMounted(loadTemplates)
         </div>
       </CardContent>
     </Card>
+
+    <ConfirmDialog
+      v-model:open="confirmPurgeOpen"
+      title="永久删除确认"
+      :description="`确定永久删除「${purgeTarget?.name}」吗？版本历史也会一并删除，无法恢复。`"
+      confirm-text="永久删除"
+      destructive
+      :loading="confirmPurgeLoading"
+      @confirm="confirmPurge"
+    />
   </div>
 </template>

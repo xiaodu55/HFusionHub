@@ -16,6 +16,7 @@ import {
 import * as intentApi from '@/api/intentTree'
 import { getMyKnowledgeBaseList } from '@/api/knowledgeBase'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import type {
   KnowledgeBase,
   RagIntentKind,
@@ -37,6 +38,9 @@ const error = ref('')
 const keyword = ref('')
 const editingId = ref<number | null>(null)
 const advancedOpen = ref(false)
+const deleteTarget = ref<RagIntentNode | null>(null)
+const confirmDeleteOpen = ref(false)
+const confirmDeleteLoading = ref(false)
 
 const form = reactive<RagIntentNodeCreateDTO>({
   parentId: null,
@@ -222,8 +226,15 @@ const saveNode = async () => {
   }
 }
 
-const removeNode = async (node: RagIntentNode) => {
-  if (!window.confirm(`确定删除“${node.name}”及其下级规则吗？`)) return
+const removeNode = (node: RagIntentNode) => {
+  deleteTarget.value = node
+  confirmDeleteOpen.value = true
+}
+
+const confirmDelete = async () => {
+  const node = deleteTarget.value
+  if (!node) return
+  confirmDeleteLoading.value = true
   error.value = ''
   try {
     await intentApi.deleteIntentNode(node.id)
@@ -231,6 +242,10 @@ const removeNode = async (node: RagIntentNode) => {
     await loadTree()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '删除失败，请稍后重试'
+  } finally {
+    confirmDeleteLoading.value = false
+    confirmDeleteOpen.value = false
+    deleteTarget.value = null
   }
 }
 
@@ -428,5 +443,15 @@ onMounted(() => {
         </form>
       </aside>
     </div>
+
+    <ConfirmDialog
+      v-model:open="confirmDeleteOpen"
+      title="删除确认"
+      :description="`确定删除“${deleteTarget?.name}”及其下级规则吗？`"
+      confirm-text="删除"
+      destructive
+      :loading="confirmDeleteLoading"
+      @confirm="confirmDelete"
+    />
   </div>
 </template>

@@ -1,4 +1,4 @@
-import { get, post, del } from './request'
+import { get, post, put, del } from './request'
 import type {
   ApiResponse,
   PageResult,
@@ -16,6 +16,21 @@ export const createConversation = (data: ConversationCreateDTO): Promise<ApiResp
 // 删除对话
 export const deleteConversation = (id: number): Promise<ApiResponse<void>> => {
   return del(`/conversation/${id}`)
+}
+
+// 重命名对话
+export const renameConversation = (id: number, title: string): Promise<ApiResponse<void>> => {
+  return put(`/conversation/${id}`, { title })
+}
+
+// 清空对话消息（保留对话）
+export const clearConversationMessages = (id: number): Promise<ApiResponse<void>> => {
+  return del(`/conversation/${id}/messages`)
+}
+
+// 删除单条消息（重新生成/重试去重用）
+export const deleteConversationMessage = (conversationId: number, messageId: number): Promise<ApiResponse<void>> => {
+  return del(`/conversation/${conversationId}/messages/${messageId}`)
 }
 
 // 获取对话详情

@@ -11,11 +11,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 const toast = useToast()
 const loading = ref(false)
 const notices = ref<SystemNotice[]>([])
 const saving = ref(false)
+const deleteTarget = ref<SystemNotice | null>(null)
+const confirmDeleteOpen = ref(false)
+const confirmDeleteLoading = ref(false)
 
 const levelOptions = [
   { label: '信息', value: 'info' },
@@ -83,14 +87,25 @@ async function publish() {
   }
 }
 
-async function remove(notice: SystemNotice) {
-  if (!window.confirm(`确定删除公告「${notice.title}」？`)) return
+function remove(notice: SystemNotice) {
+  deleteTarget.value = notice
+  confirmDeleteOpen.value = true
+}
+
+async function confirmDelete() {
+  const notice = deleteTarget.value
+  if (!notice) return
+  confirmDeleteLoading.value = true
   try {
     await notificationApi.adminDeleteNotice(notice.id)
     toast.success('公告已删除')
     notices.value = notices.value.filter(item => item.id !== notice.id)
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '删除失败')
+  } finally {
+    confirmDeleteLoading.value = false
+    confirmDeleteOpen.value = false
+    deleteTarget.value = null
   }
 }
 
@@ -205,5 +220,15 @@ onMounted(load)
         </article>
       </CardContent>
     </Card>
+
+    <ConfirmDialog
+      v-model:open="confirmDeleteOpen"
+      title="删除确认"
+      :description="`确定删除公告「${deleteTarget?.title}」？`"
+      confirm-text="删除"
+      destructive
+      :loading="confirmDeleteLoading"
+      @confirm="confirmDelete"
+    />
   </div>
 </template>

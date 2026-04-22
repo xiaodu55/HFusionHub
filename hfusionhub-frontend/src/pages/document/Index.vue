@@ -25,6 +25,7 @@ import { Search, FileText, Trash2, Upload, Play, Eye, Loader2, RefreshCw, Refres
 import { formatDateTime } from '@/utils/date'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import ErrorState from '@/components/ErrorState.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 const router = useRouter()
 const toast = useToast()
@@ -69,6 +70,9 @@ const urlForm = ref({
 const uploading = ref(false)
 const urlAdding = ref(false)
 const syncing = ref(false)
+const deleteTarget = ref<Document | null>(null)
+const confirmDeleteOpen = ref(false)
+const confirmDeleteLoading = ref(false)
 const hasEnabledKnowledgeBase = computed(() => knowledgeBases.value.some((kb) => kb.status === 0))
 const parsedDocumentCount = computed(() => documents.value.filter(doc => doc.status === 2).length)
 const processingDocumentCount = computed(() => documents.value.filter(doc => doc.status === 1 || processingDocs.value.has(doc.id)).length)
@@ -181,9 +185,15 @@ const handleAddFromUrl = async () => {
   }
 }
 
-const handleDelete = async (doc: Document) => {
-  if (!confirm(`确定要删除文档「${doc.title}」吗？`)) return
+const handleDelete = (doc: Document) => {
+  deleteTarget.value = doc
+  confirmDeleteOpen.value = true
+}
 
+const confirmDelete = async () => {
+  const doc = deleteTarget.value
+  if (!doc) return
+  confirmDeleteLoading.value = true
   try {
     await documentApi.deleteDocument(doc.id)
     toast.success('已提交移入回收站任务')
@@ -191,6 +201,10 @@ const handleDelete = async (doc: Document) => {
   } catch (error) {
     console.error('删除文档失败:', error)
     toast.error('删除文档失败')
+  } finally {
+    confirmDeleteLoading.value = false
+    confirmDeleteOpen.value = false
+    deleteTarget.value = null
   }
 }
 
@@ -446,5 +460,15 @@ onMounted(() => {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <ConfirmDialog
+      v-model:open="confirmDeleteOpen"
+      title="删除确认"
+      :description="`确定要删除文档「${deleteTarget?.title}」吗？`"
+      confirm-text="删除"
+      destructive
+      :loading="confirmDeleteLoading"
+      @confirm="confirmDelete"
+    />
   </div>
 </template>

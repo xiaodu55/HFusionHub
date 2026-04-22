@@ -24,6 +24,15 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/hfusionhub?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
     username: ${DB_USERNAME:hfusionhub}
     password: ${DB_PASSWORD:}
+    # 虚拟线程下平台线程不再是瓶颈，数据库连接池成为并发上限——
+    # 适当调大池子（40），并按负载收缩到 10；连接等待 30s、单连接最长 30min。
+    hikari:
+      pool-name: HFusionHubPool
+      maximum-pool-size: ${DB_POOL_MAX:40}
+      minimum-idle: ${DB_POOL_MIN:10}
+      connection-timeout: ${DB_POOL_CONN_TIMEOUT:30000}
+      max-lifetime: 1800000
+      idle-timeout: 600000
 
   # Flyway 数据库版本管理
   flyway:

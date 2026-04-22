@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   AlertTriangle,
@@ -421,9 +421,24 @@ const statusCounts = computed(() => {
 
 // ── Init ──────────────────────────────────────────────────────────────
 
+// ESC 关闭当前打开的弹窗（a11y）
+const closeDialogOnEscape = (event: KeyboardEvent) => {
+  if (event.key !== 'Escape') return
+  if (showCreateDialog.value) showCreateDialog.value = false
+  else if (showInstallDialog.value) showInstallDialog.value = false
+  else if (showReasonDialog.value) showReasonDialog.value = false
+  else if (showCanaryDialog.value) showCanaryDialog.value = false
+  else if (showAuditDialog.value) showAuditDialog.value = false
+}
+
 onMounted(async () => {
   await loadPlugins()
   if (route.query.create === 'tool') showCreateDialog.value = true
+  document.addEventListener('keydown', closeDialogOnEscape)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', closeDialogOnEscape)
 })
 </script>
 
@@ -603,7 +618,7 @@ onMounted(async () => {
     </div>
 
     <!-- Low-code create dialog -->
-    <div v-if="showCreateDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div v-if="showCreateDialog" role="dialog" aria-modal="true" aria-label="新建插件" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
       <div class="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl">
         <div class="flex items-start justify-between border-b border-border p-5">
           <div>
@@ -718,7 +733,7 @@ onMounted(async () => {
     </div>
 
     <!-- Install dialog -->
-    <div v-if="showInstallDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div v-if="showInstallDialog" role="dialog" aria-modal="true" aria-label="安装插件" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <Card class="w-full max-w-md">
         <CardHeader>
           <CardTitle>上传插件包</CardTitle>
@@ -773,7 +788,7 @@ onMounted(async () => {
     </div>
 
     <!-- Reason dialog (disable / uninstall) -->
-    <div v-if="showReasonDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div v-if="showReasonDialog" role="dialog" aria-modal="true" aria-label="审批原因" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <Card class="w-full max-w-md">
         <CardHeader>
           <CardTitle>{{ confirmingAction === 'uninstall' ? '确认卸载' : '确认禁用' }}</CardTitle>
@@ -804,7 +819,7 @@ onMounted(async () => {
     </div>
 
     <!-- Canary dialog -->
-    <div v-if="showCanaryDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div v-if="showCanaryDialog" role="dialog" aria-modal="true" aria-label="灰度发布" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <Card class="w-full max-w-md">
         <CardHeader>
           <CardTitle>设置金丝雀流量</CardTitle>
@@ -832,7 +847,7 @@ onMounted(async () => {
     </div>
 
     <!-- Audit log dialog -->
-    <div v-if="showAuditDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div v-if="showAuditDialog" role="dialog" aria-modal="true" aria-label="审计日志" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <Card class="w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
         <CardHeader>
           <div class="flex items-center justify-between">

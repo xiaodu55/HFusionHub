@@ -8,7 +8,7 @@ import { useUserStore } from '@/stores/user'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
-import { ArrowLeft, BookOpen, Copy, Download, Send, User, Bot, Loader2, RotateCcw, Square, RefreshCw, ThumbsUp, ThumbsDown } from 'lucide-vue-next'
+import { ArrowLeft, BookOpen, Copy, Download, Eraser, Pencil, Send, User, Bot, Loader2, RotateCcw, Square, RefreshCw, ThumbsUp, ThumbsDown } from 'lucide-vue-next'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useToast } from '@/composables/useToast'
 import { formatDateTime, formatTime } from '@/utils/date'
@@ -322,7 +322,7 @@ const handleStopGeneration = async () => {
   sending.value = false
 }
 
-// 重试消息
+// 重试消息（先在服务端删除失败轮次，避免重复）
 const handleRetryMessage = async (message: Message) => {
   if (sending.value) return
 
@@ -332,6 +332,15 @@ const handleRetryMessage = async (message: Message) => {
 
   const userMessage = messages.value[messageIndex - 1]
   if (!userMessage || userMessage.role !== 'user') return
+
+  // 服务端删除旧轮次（失败回答 + 对应提问），防止重试后重复
+  const conversationId = Number(route.params.id)
+  if (message.id > 0) {
+    try { await conversationApi.deleteConversationMessage(conversationId, message.id) } catch { /* 忽略删除失败 */ }
+  }
+  if (userMessage.id > 0) {
+    try { await conversationApi.deleteConversationMessage(conversationId, userMessage.id) } catch { /* 忽略删除失败 */ }
+  }
 
   // 移除这条失败的消息
   messages.value.splice(messageIndex, 1)
@@ -343,7 +352,7 @@ const handleRetryMessage = async (message: Message) => {
   await handleSend()
 }
 
-// 重新生成：移除该回答及其提问，重新发送提问
+// 重新生成：服务端删除旧问答对后重新发送提问（不产生重复轮次）
 const regenerateMessage = async (message: Message) => {
   if (sending.value) return
 
@@ -352,6 +361,14 @@ const regenerateMessage = async (message: Message) => {
 
   const userMessage = messages.value[messageIndex - 1]
   if (!userMessage || userMessage.role !== 'user') return
+
+  const conversationId = Number(route.params.id)
+  if (message.id > 0) {
+    try { await conversationApi.deleteConversationMessage(conversationId, message.id) } catch { /* 忽略删除失败 */ }
+  }
+  if (userMessage.id > 0) {
+    try { await conversationApi.deleteConversationMessage(conversationId, userMessage.id) } catch { /* 忽略删除失败 */ }
+  }
 
   messages.value.splice(messageIndex, 1)
   messages.value.splice(messageIndex - 1, 1)
@@ -405,6 +422,45 @@ const examplePrompts = computed(() =>
 const fillExamplePrompt = (prompt: string) => {
   inputMessage.value = prompt
   document.querySelector<HTMLInputElement>('#chat-input')?.focus()
+}
+
+// ── 会话重命名 / 清空 ──
+const renameDialogOpen = ref(false)
+const renameTitle = ref('')
+const clearDialogOpen = ref(false)
+
+const openRenameDialog = () => {
+  renameTitle.value = conversation.value?.title || ''
+  renameDialogOpen.value = true
+}
+
+const submitRename = async () => {
+  const title = renameTitle.value.trim()
+  if (!title || !conversation.value) {
+    toast.error('对话名称不能为空')
+    return
+  }
+  try {
+    await conversationApi.renameConversation(conversation.value.id, title)
+    conversation.value.title = title
+    renameDialogOpen.value = false
+    toast.success('对话已重命名')
+  } catch (error) {
+    toast.error(friendlyErrorMessage(error, '重命名失败'))
+  }
+}
+
+const submitClear = async () => {
+  if (!conversation.value) return
+  try {
+    await conversationApi.clearConversationMessages(conversation.value.id)
+    messages.value = []
+    feedbackByMessage.value = {}
+    clearDialogOpen.value = false
+    toast.success('对话已清空')
+  } catch (error) {
+    toast.error(friendlyErrorMessage(error, '清空失败'))
+  }
 }
 
 // 导出对话为 Markdown（纯前端）
@@ -548,6 +604,28 @@ onMounted(() => {
           </span>
         </p>
       </div>
+      <Button
+        variant="ghost"
+        size="icon"
+        class="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+        :disabled="!conversation"
+        title="重命名对话"
+        aria-label="重命名对话"
+        @click="openRenameDialog"
+      >
+        <Pencil class="h-4 w-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        class="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+        :disabled="!conversation || !messages.length"
+        title="清空对话消息"
+        aria-label="清空对话消息"
+        @click="clearDialogOpen = true"
+      >
+        <Eraser class="h-4 w-4" />
+      </Button>
       <Button
         variant="outline"
         size="sm"
@@ -794,6 +872,42 @@ onMounted(() => {
         </Button>
       </div>
     </div>
+
+    <Dialog v-model:open="renameDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>重命名对话</DialogTitle>
+          <DialogDescription>修改后列表与头部会立即更新。</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-2">
+          <Label for="rename-title">对话名称</Label>
+          <Input
+            id="rename-title"
+            v-model="renameTitle"
+            maxlength="100"
+            placeholder="请输入新的对话名称"
+            @keydown.enter="submitRename"
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="renameDialogOpen = false">取消</Button>
+          <Button @click="submitRename">保存</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="clearDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>清空对话？</DialogTitle>
+          <DialogDescription>将删除「{{ conversation?.title }}」中的全部消息，对话本身会保留。此操作不可恢复。</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" @click="clearDialogOpen = false">取消</Button>
+          <Button variant="destructive" @click="submitClear">清空消息</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <Dialog v-model:open="feedbackDialogOpen">
       <DialogContent class="sm:max-w-lg">

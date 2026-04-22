@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import {
   AlertTriangle,
   Archive,
@@ -33,6 +34,9 @@ const searchName = ref('')
 const loading = ref(false)
 const loadError = ref(false)
 const actionId = ref<number | null>(null)
+const purgeTarget = ref<KnowledgeBase | null>(null)
+const confirmPurgeOpen = ref(false)
+const confirmPurgeLoading = ref(false)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
 const isSearching = computed(() => Boolean(searchName.value.trim()))
@@ -71,9 +75,15 @@ const restore = async (knowledgeBase: KnowledgeBase) => {
   }
 }
 
-const purge = async (knowledgeBase: KnowledgeBase) => {
-  if (!confirm(`确定永久删除「${knowledgeBase.name}」吗？其中的文档、索引和对话都将无法恢复。`)) return
+const purge = (knowledgeBase: KnowledgeBase) => {
+  purgeTarget.value = knowledgeBase
+  confirmPurgeOpen.value = true
+}
 
+const confirmPurge = async () => {
+  const knowledgeBase = purgeTarget.value
+  if (!knowledgeBase) return
+  confirmPurgeLoading.value = true
   actionId.value = knowledgeBase.id
   try {
     await knowledgeBaseApi.purgeKnowledgeBase(knowledgeBase.id)
@@ -83,6 +93,9 @@ const purge = async (knowledgeBase: KnowledgeBase) => {
     toast.error(error instanceof Error ? error.message : '永久删除失败')
   } finally {
     actionId.value = null
+    confirmPurgeLoading.value = false
+    confirmPurgeOpen.value = false
+    purgeTarget.value = null
   }
 }
 
@@ -215,5 +228,15 @@ onMounted(() => loadKnowledgeBases(1))
         </div>
       </CardContent>
     </Card>
+
+    <ConfirmDialog
+      v-model:open="confirmPurgeOpen"
+      title="永久删除确认"
+      :description="`确定永久删除「${purgeTarget?.name}」吗？其中的文档、索引和对话都将无法恢复。`"
+      confirm-text="永久删除"
+      destructive
+      :loading="confirmPurgeLoading"
+      @confirm="confirmPurge"
+    />
   </div>
 </template>

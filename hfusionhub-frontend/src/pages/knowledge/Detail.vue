@@ -28,6 +28,7 @@ import { ArrowLeft, Plus, FileText, Trash2, Upload, Play, Eye, Loader2, RefreshC
 import { formatDateTime } from '@/utils/date'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import ErrorState from '@/components/ErrorState.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 const route = useRoute()
 const toast = useToast()
@@ -61,6 +62,9 @@ const uploadFile = ref<File | null>(null)
 const uploading = ref(false)
 const syncing = ref(false)
 const statusUpdating = ref(false)
+const deleteTarget = ref<Document | null>(null)
+const confirmDeleteOpen = ref(false)
+const confirmDeleteLoading = ref(false)
 
 // ── 知识库共享 ──
 const isShareDialogOpen = ref(false)
@@ -241,9 +245,15 @@ const handleUpload = async () => {
   }
 }
 
-const handleDeleteDocument = async (doc: Document) => {
-  if (!confirm(`确定要删除文档「${doc.title}」吗？`)) return
+const handleDeleteDocument = (doc: Document) => {
+  deleteTarget.value = doc
+  confirmDeleteOpen.value = true
+}
 
+const confirmDeleteDocument = async () => {
+  const doc = deleteTarget.value
+  if (!doc) return
+  confirmDeleteLoading.value = true
   try {
     await documentApi.deleteDocument(doc.id)
     toast.success('已提交删除任务')
@@ -251,6 +261,10 @@ const handleDeleteDocument = async (doc: Document) => {
   } catch (error) {
     console.error('删除文档失败:', error)
     toast.error('删除文档失败')
+  } finally {
+    confirmDeleteLoading.value = false
+    confirmDeleteOpen.value = false
+    deleteTarget.value = null
   }
 }
 
@@ -672,5 +686,15 @@ onMounted(() => {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <ConfirmDialog
+      v-model:open="confirmDeleteOpen"
+      title="删除确认"
+      :description="`确定要删除文档「${deleteTarget?.title}」吗？`"
+      confirm-text="删除"
+      destructive
+      :loading="confirmDeleteLoading"
+      @confirm="confirmDeleteDocument"
+    />
   </div>
 </template>

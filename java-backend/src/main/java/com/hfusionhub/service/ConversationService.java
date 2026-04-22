@@ -35,6 +35,29 @@ public interface ConversationService {
     void delete(Long id);
 
     /**
+     * 重命名对话
+     *
+     * @param id    对话ID
+     * @param title 新名称（非空，最长 100 字符）
+     */
+    void rename(Long id, String title);
+
+    /**
+     * 清空对话的全部消息（保留对话本身）
+     *
+     * @param id 对话ID
+     */
+    void clearMessages(Long id);
+
+    /**
+     * 删除对话中的单条消息（用于重新生成/重试去重）
+     *
+     * @param conversationId 对话ID
+     * @param messageId      消息ID
+     */
+    void deleteMessage(Long conversationId, Long messageId);
+
+    /**
      * 获取对话详情
      *
      * @param id 对话ID

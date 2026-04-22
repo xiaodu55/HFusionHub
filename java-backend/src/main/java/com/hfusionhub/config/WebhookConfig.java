@@ -8,6 +8,8 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Duration;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -24,12 +26,15 @@ import java.util.concurrent.ScheduledExecutorService;
 public class WebhookConfig {
 
     /**
-     * Webhook 事件监听线程池。
-     * 线程设为守护线程：投递属于尽力而为的旁路动作，不阻塞 JVM 退出
-     * （与重试调度器一致），也避免测试套件因非守护线程滞留 30 秒。
+     * Webhook 事件监听线程池（{@code @Async} 用）。
+     * <p>JDK 21+ 优先虚拟线程（虚拟线程默认守护、不阻塞 JVM 退出）；JDK 17 回退平台池。</p>
      */
     @Bean("webhookExecutor")
-    public ThreadPoolTaskExecutor webhookExecutor() {
+    public Executor webhookExecutor() {
+        ExecutorService virtual = ExecutorSupport.newVirtualThreadPerTaskExecutor("webhook");
+        if (virtual != null) {
+            return virtual;
+        }
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(2);
         executor.setMaxPoolSize(8);

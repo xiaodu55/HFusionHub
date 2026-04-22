@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { useToast } from '@/composables/useToast'
 
 const toast = useToast()
@@ -38,6 +39,8 @@ const resetting = ref(false)
 const showApiKey = ref(false)
 const error = ref('')
 const testResult = ref<systemApi.ProviderTestResult | null>(null)
+const confirmResetOpen = ref(false)
+const confirmResetLoading = ref(false)
 
 const form = ref<systemApi.UserModelConfigSave>({
   providerType: 'openai_compatible',
@@ -185,8 +188,12 @@ const saveConfig = async () => {
   }
 }
 
-const resetToSystem = async () => {
-  if (!confirm('确定恢复系统默认模型？已保存的个人 API Key 将被删除。')) return
+const resetToSystem = () => {
+  confirmResetOpen.value = true
+}
+
+const confirmResetToSystem = async () => {
+  confirmResetLoading.value = true
   resetting.value = true
   try {
     await systemApi.resetUserModelConfig()
@@ -198,6 +205,8 @@ const resetToSystem = async () => {
     toast.error(requestError instanceof Error ? requestError.message : '恢复系统默认失败')
   } finally {
     resetting.value = false
+    confirmResetLoading.value = false
+    confirmResetOpen.value = false
   }
 }
 
@@ -301,5 +310,14 @@ onMounted(loadPage)
     </template>
 
     <div v-if="loading && !runtime" class="flex min-h-72 items-center justify-center rounded-xl border border-border bg-card/60"><LoaderCircle class="h-6 w-6 animate-spin text-primary" /></div>
+
+    <ConfirmDialog
+      v-model:open="confirmResetOpen"
+      title="恢复系统默认"
+      description="确定恢复系统默认模型？已保存的个人 API Key 将被删除。"
+      confirm-text="恢复默认"
+      :loading="confirmResetLoading"
+      @confirm="confirmResetToSystem"
+    />
   </div>
 </template>

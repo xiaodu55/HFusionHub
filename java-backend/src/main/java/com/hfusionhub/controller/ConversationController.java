@@ -62,6 +62,33 @@ public class ConversationController {
         return R.ok();
     }
 
+    @Operation(summary = "重命名对话", description = "修改对话名称")
+    @PutMapping("/{id}")
+    public R<Void> rename(
+            @Parameter(description = "对话ID") @PathVariable Long id,
+            @RequestBody Map<String, String> body) {
+        String title = body == null ? null : body.get("title");
+        conversationService.rename(id, title);
+        return R.ok("重命名成功", null);
+    }
+
+    @Operation(summary = "清空对话消息", description = "删除对话下的全部消息，保留对话本身")
+    @DeleteMapping("/{id}/messages")
+    public R<Void> clearMessages(
+            @Parameter(description = "对话ID") @PathVariable Long id) {
+        conversationService.clearMessages(id);
+        return R.ok("已清空", null);
+    }
+
+    @Operation(summary = "删除单条消息", description = "删除对话中的一条消息（用于重新生成/重试去重）")
+    @DeleteMapping("/{id}/messages/{messageId}")
+    public R<Void> deleteMessage(
+            @Parameter(description = "对话ID") @PathVariable Long id,
+            @Parameter(description = "消息ID") @PathVariable Long messageId) {
+        conversationService.deleteMessage(id, messageId);
+        return R.ok("已删除", null);
+    }
+
     @Operation(summary = "获取对话详情", description = "获取指定对话的详细信息")
     @GetMapping("/{id}")
     public R<ConversationInfoDTO> getById(

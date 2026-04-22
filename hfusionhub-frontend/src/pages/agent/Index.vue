@@ -464,11 +464,14 @@ onMounted(load)
               <div v-else class="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">暂时没有记录到状态事件。</div>
             </section>
 
-            <div v-if="metrics?.errorCode || metrics?.failedTool" class="flex flex-wrap gap-2 border-t border-border/70 pt-4 text-xs text-muted-foreground">
-              <span v-if="metrics.errorCode" class="rounded-md bg-muted px-2 py-1">错误代码：{{ metrics.errorCode }}</span>
-              <span v-if="metrics.failedTool" class="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1"><Wrench class="h-3 w-3" />失败工具：{{ metrics.failedTool }}</span>
-              <span v-if="metrics.maxStepLatencyMs" class="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1"><TerminalSquare class="h-3 w-3" />最慢步骤：{{ formatDuration(metrics.maxStepLatencyMs) }}</span>
-            </div>
+            <details v-if="metrics?.errorCode || metrics?.failedTool" class="border-t border-border/70 pt-4 text-xs text-muted-foreground">
+              <summary class="cursor-pointer select-none hover:text-foreground">技术信息</summary>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <span v-if="metrics.errorCode" class="rounded-md bg-muted px-2 py-1">错误代码：{{ metrics.errorCode }}</span>
+                <span v-if="metrics.failedTool" class="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1"><Wrench class="h-3 w-3" />失败工具：{{ metrics.failedTool }}</span>
+                <span v-if="metrics.maxStepLatencyMs" class="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1"><TerminalSquare class="h-3 w-3" />最慢步骤：{{ formatDuration(metrics.maxStepLatencyMs) }}</span>
+              </div>
+            </details>
           </CardContent>
         </template>
       </Card>
