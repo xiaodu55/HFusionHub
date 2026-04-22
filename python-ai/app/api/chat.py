@@ -1064,9 +1064,11 @@ async def chat_health():
     from app.core.llm import get_llm
     from app.core.tools import AGENT_V1_TOOL_NAMES
     llm = get_llm()
+    # is_available() 内部是同步 httpx 探测（最坏 5s×供应商数）：放入线程池，避免阻塞事件循环
+    llm_available = await asyncio.to_thread(llm.is_available)
     return {
         "status": "healthy",
-        "llm_available": llm.is_available(),
+        "llm_available": llm_available,
         "llm_model": llm.model if hasattr(llm, "model") else "unknown",
         "agent_v1": {
             "route": "/api/agent/v1/chat",

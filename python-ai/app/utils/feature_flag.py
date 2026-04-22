@@ -130,11 +130,10 @@ class FeatureFlagClient:
                 # Expired but still present → use as stale, trigger background refresh
                 self._trigger_background_refresh()
                 return entry, True
-        # No cache entry → try synchronous fetch
-        self._fetch_all()
-        with self._lock:
-            entry = self._cache.get(flag_key)
-            return entry, False if entry else None
+        # No cache entry → 不在请求路径上做同步网络调用（避免阻塞事件循环）：
+        # 触发后台刷新，立即返回 None 由调用方按降级策略处理（保留环境变量配置）。
+        self._trigger_background_refresh()
+        return None, False
 
     def _trigger_background_refresh(self):
         """Fire-and-forget background refresh if not already running."""

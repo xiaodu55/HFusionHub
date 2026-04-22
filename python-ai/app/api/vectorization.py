@@ -3,6 +3,7 @@ Vectorization API Routes - FastAPI Version
 Handles document parsing, chunking, and vectorization
 """
 
+import asyncio
 import os
 import time
 import logging
@@ -331,7 +332,8 @@ async def _process_document_background(
             raise FileNotFoundError(f"File not found: {file_path}")
 
         parser = BaseParser.get_parser(file_type)
-        blocks = parser.parse(file_path)
+        # 解析是 CPU 密集操作：放入线程池，避免阻塞事件循环
+        blocks = await asyncio.to_thread(parser.parse, file_path)
         extractor = MultimodalEvidenceExtractor(
             enabled=config.RAG_MULTIMODAL_ENABLED,
             ocr_enabled=config.RAG_MULTIMODAL_OCR_ENABLED,
@@ -342,7 +344,7 @@ async def _process_document_background(
             max_ocr_characters=config.RAG_MULTIMODAL_MAX_OCR_CHARACTERS,
             ocr_timeout_seconds=config.RAG_MULTIMODAL_OCR_TIMEOUT_SECONDS,
         )
-        blocks, multimodal_report = extractor.enrich(file_path, file_type, blocks)
+        blocks, multimodal_report = await asyncio.to_thread(extractor.enrich, file_path, file_type, blocks)
         multimodal = multimodal_report.to_dict()
         if not blocks:
             raise ParsingException("未提取到可索引文本，请确认文档包含可复制文字；扫描件或图片型 PDF 需要先 OCR。")
@@ -355,11 +357,11 @@ async def _process_document_background(
             progress=25,
         )
 
-        # Step 2: Chunk blocks
-        chunks = chunk_blocks(blocks, document_id)
+        # Step 2: Chunk blocks（CPU 密集，放入线程池）
+        chunks = await asyncio.to_thread(chunk_blocks, blocks, document_id)
         if not chunks:
             raise ParsingException("文档解析后没有生成可索引分块，请检查文档文本内容是否为空或格式异常。")
-        quality = assess_chunk_quality(blocks, chunks).to_dict()
+        quality = (await asyncio.to_thread(assess_chunk_quality, blocks, chunks)).to_dict()
         # Preserve a stable human-readable document title with every chunk so
         # chat citations do not depend on a separate Java HTTP request.
         for chunk in chunks:
@@ -380,7 +382,7 @@ async def _process_document_background(
         # destructive replacement when the vector store is unavailable; the
         # old index must remain intact and the callback must contain a useful
         # failure reason.
-        if create_collection() is None:
+        if await asyncio.to_thread(create_collection) is None:
             raise MilvusException("Vector store is unavailable; cannot initialise the document index")
 
         # Step 4: Generate embeddings and store
@@ -416,13 +418,13 @@ async def _process_document_background(
         # performed immediately before insertion, rather than at task start.
         # Stage the new version first.  A failed embedding/insert must not
         # erase the last known-good index.
-        old_result = get_document_chunks(document_id=str(document_id), page=1, size=100000)
+        old_result = await asyncio.to_thread(get_document_chunks, str(document_id), 1, 100000)
         old_records = old_result.get("data", {}).get("records", []) if old_result.get("code") == 200 else []
         old_ids = {str(record.get("chunk_id")) for record in old_records if record.get("chunk_id")}
-        if not insert_chunks(chunks, embeddings, document_id, knowledge_base_id):
+        if not await asyncio.to_thread(insert_chunks, chunks, embeddings, document_id, knowledge_base_id):
             raise MilvusException(f"Failed to insert chunks for document {document_id}")
         new_ids = {str(chunk.chunk_id) for chunk in chunks if chunk.chunk_id}
-        if not delete_chunk_ids(sorted(old_ids - new_ids)):
+        if not await asyncio.to_thread(delete_chunk_ids, sorted(old_ids - new_ids)):
             raise MilvusException(f"Failed to remove stale chunks for document {document_id}")
 
         # Build a bounded, source-backed graph only after the new chunks are
@@ -430,7 +432,9 @@ async def _process_document_background(
         # cannot turn a successful vector index into a failed document job.
         try:
             from app.core.rag.scoped_graph import get_scoped_graph_store
-            get_scoped_graph_store(config.RAG_GRAPH_INDEX_PATH).replace_document(
+            store = get_scoped_graph_store(config.RAG_GRAPH_INDEX_PATH)
+            await asyncio.to_thread(
+                store.replace_document,
                 knowledge_base_id=knowledge_base_id,
                 document_id=document_id,
                 chunks=chunks,
@@ -519,7 +523,7 @@ async def get_chunks(document_id: str, page: int = 1, size: int = 20, block_type
     try:
         validate_document_id(document_id)
 
-        result = get_document_chunks(document_id, page, size, block_type)
+        result = await asyncio.to_thread(get_document_chunks, document_id, page, size, block_type)
 
         if result.get("code") != 200:
             raise MilvusException(result.get("message", "获取分块失败"))
@@ -565,7 +569,7 @@ async def get_chunk_detail(chunk_id: str, document_id: str):
     try:
         validate_document_id(document_id)
 
-        result = get_document_chunks(document_id)
+        result = await asyncio.to_thread(get_document_chunks, document_id)
         records = result.get("data", {}).get("records", []) if isinstance(result, dict) else []
 
         for chunk in records:
@@ -585,12 +589,13 @@ async def get_chunk_detail(chunk_id: str, document_id: str):
 async def search_chunks(request: SearchRequest):
     """Search for similar chunks"""
     try:
-        # Search in Milvus
+        # Search in Milvus（pymilvus 为同步客户端，放入线程池避免阻塞事件循环）
         try:
-            results = search_similar(
+            results = await asyncio.to_thread(
+                search_similar,
                 query_text=request.query,
                 top_k=request.top_k,
-                knowledge_base_id=request.knowledge_base_id
+                knowledge_base_id=request.knowledge_base_id,
             )
         except Exception as e:
             raise MilvusException(f"搜索失败: {e}")
@@ -609,14 +614,16 @@ async def search_chunks(request: SearchRequest):
 async def remove_document_chunks(document_id: str):
     """Remove a document's vector entries and local metadata before deletion."""
     validate_document_id(document_id)
-    if not delete_document_chunks(document_id):
+    if not await asyncio.to_thread(delete_document_chunks, document_id):
         raise MilvusException(f"删除文档 {document_id} 的分块失败")
     try:
         from app.core.rag.scoped_graph import get_scoped_graph_store
         from app.core.tenant.context import require_tenant_id
         # Tenant-scoped graph cleanup: a cross-tenant request must never be
         # able to purge another tenant's graph content.
-        get_scoped_graph_store(config.RAG_GRAPH_INDEX_PATH).remove_document_from_tenant_scopes(
+        store = get_scoped_graph_store(config.RAG_GRAPH_INDEX_PATH)
+        await asyncio.to_thread(
+            store.remove_document_from_tenant_scopes,
             require_tenant_id(), document_id,
         )
     except Exception as graph_error:

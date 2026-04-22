@@ -9,6 +9,13 @@ spring:
   application:
     name: hfusionhub-backend
 
+  # JDK 21+ 虚拟线程：每个请求一个虚拟线程（毫秒级创建、内存极小），
+  # 阻塞式 DB/HTTP 调用不再占满 Tomcat 平台线程，显著提升并发与响应速度。
+  # 仅在本机 JVM 为 21+ 时生效；JDK 17 下该属性被忽略，无副作用。
+  threads:
+    virtual:
+      enabled: ${SPRING_THREADS_VIRTUAL_ENABLED:true}
+
   # 数据源配置 — 生产环境通过环境变量覆盖:
   #   SPRING_DATASOURCE_URL=jdbc:mysql://mysql8:3306/hfusionhub?...
   #   SPRING_DATA_REDIS_HOST=redis7
