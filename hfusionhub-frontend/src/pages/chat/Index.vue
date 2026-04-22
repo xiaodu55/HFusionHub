@@ -126,14 +126,11 @@ const openCreateDialog = () => {
 
 const handleCreate = async () => {
   const title = createForm.value.title.trim()
-  if (!title) {
-    toast.error('请先填写对话名称')
-    return
-  }
 
   try {
     const res = await conversationApi.createConversation({
-      title,
+      // 留空时后端自动命名为"新对话"，并在第一条消息后用问题自动命名
+      title: title || '',
       knowledgeBaseId: createForm.value.knowledgeBaseId,
       promptTemplateId: createForm.value.promptTemplateId,
     })
@@ -299,8 +296,8 @@ onMounted(() => {
         </DialogHeader>
         <div class="space-y-4">
           <div class="space-y-2">
-            <Label for="title">对话名称 *</Label>
-            <Input id="title" v-model="createForm.title" placeholder="例如：整理产品常见问题" @keydown.enter="handleCreate" />
+            <Label for="title">对话名称（可选，留空自动命名）</Label>
+            <Input id="title" v-model="createForm.title" placeholder="例如：整理产品常见问题（留空将自动命名）" @keydown.enter="handleCreate" />
           </div>
           <div class="space-y-2">
             <Label for="kb-select">关联知识库（可选）</Label>

@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
 const props = defineProps<{
   content: string
 }>()
+
+const rootEl = ref<HTMLElement | null>(null)
 
 // 配置 marked
 marked.setOptions({
@@ -18,12 +20,19 @@ const renderedContent = computed(() => {
 
   try {
     // 渲染 Markdown
-    const html = marked.parse(props.content) as string
+    let html = marked.parse(props.content) as string
     // 清理 HTML（防止 XSS）
-    return DOMPurify.sanitize(html, {
+    html = DOMPurify.sanitize(html, {
       ADD_TAGS: ['code', 'pre', 'span'],
       ADD_ATTR: ['class'],
     })
+    // 为每个代码块包装复制按钮（在 sanitize 之后注入，避免被过滤）
+    html = html.replace(
+      /<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g,
+      (_, attrs, code) =>
+        `<div class="code-block"><div class="code-block-header"><button type="button" class="code-copy-btn" data-copy-code="true">复制</button></div><pre><code${attrs}>${code}</code></pre></div>`,
+    )
+    return html
   } catch (e) {
     // 如果渲染失败，返回纯文本
     return props.content
@@ -33,10 +42,54 @@ const renderedContent = computed(() => {
       .replace(/\n/g, '<br>')
   }
 })
+
+const handleContainerClick = (event: MouseEvent) => {
+  const button = (event.target as HTMLElement).closest<HTMLElement>('[data-copy-code]')
+  if (!button) return
+  const block = button.closest<HTMLElement>('.code-block')
+  const codeElement = block?.querySelector('pre code')
+  if (!codeElement) return
+  const text = codeElement.textContent || ''
+
+  const copy = () => {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text)
+    }
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return Promise.resolve()
+  }
+
+  copy().then(() => {
+    button.textContent = '已复制'
+    setTimeout(() => {
+      button.textContent = '复制'
+    }, 1500)
+  }).catch(() => {
+    button.textContent = '复制失败'
+    setTimeout(() => {
+      button.textContent = '复制'
+    }, 1500)
+  })
+}
+
+onMounted(() => {
+  rootEl.value?.addEventListener('click', handleContainerClick)
+})
+
+onBeforeUnmount(() => {
+  rootEl.value?.removeEventListener('click', handleContainerClick)
+})
 </script>
 
 <template>
-  <div class="markdown-body prose prose-sm dark:prose-invert max-w-none" v-html="renderedContent" />
+  <div ref="rootEl" class="markdown-body prose prose-sm dark:prose-invert max-w-none" v-html="renderedContent" />
 </template>
 
 <style scoped>
@@ -58,6 +111,39 @@ const renderedContent = computed(() => {
 .markdown-body :deep(pre code) {
   background-color: transparent;
   padding: 0;
+}
+
+.markdown-body :deep(.code-block) {
+  position: relative;
+  margin: 0.5rem 0;
+}
+
+.markdown-body :deep(.code-block-header) {
+  display: flex;
+  justify-content: flex-end;
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  z-index: 1;
+}
+
+.markdown-body :deep(.code-copy-btn) {
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--muted-foreground));
+  border-radius: 0.375rem;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity 150ms ease;
+}
+
+.markdown-body :deep(.code-copy-btn:hover) {
+  opacity: 1;
+  color: hsl(var(--primary));
+  border-color: hsl(var(--primary) / 0.4);
 }
 
 .markdown-body :deep(p) {
@@ -95,6 +181,9 @@ const renderedContent = computed(() => {
   border-collapse: collapse;
   width: 100%;
   margin: 0.5rem 0;
+  display: block;
+  overflow-x: auto;
+  white-space: nowrap;
 }
 
 .markdown-body :deep(th),
@@ -102,6 +191,8 @@ const renderedContent = computed(() => {
   border: 1px solid hsl(var(--border));
   padding: 0.5rem;
   text-align: left;
+  white-space: normal;
+  min-width: 8rem;
 }
 
 .markdown-body :deep(th) {

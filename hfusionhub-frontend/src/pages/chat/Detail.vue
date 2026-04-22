@@ -51,8 +51,9 @@ const loadConversation = async () => {
   }
 }
 
-const loadMessages = async () => {
-  loading.value = true
+const loadMessages = async (silent = false) => {
+  // silent：流式结束后的增量刷新——不显示骨架屏、保持滚动位置，避免整表闪烁
+  if (!silent) loading.value = true
   const id = Number(route.params.id)
   try {
     const res = await conversationApi.getConversationMessages(id)
@@ -65,11 +66,19 @@ const loadMessages = async () => {
     } catch {
       feedbackByMessage.value = {}
     }
-    await scrollToBottom()
+    if (silent) {
+      await nextTick()
+      await nextTick()
+      if (messagesContainer.value) {
+        messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+      }
+    } else {
+      await scrollToBottom()
+    }
   } catch (error) {
     console.error('加载消息失败:', error)
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -202,7 +211,7 @@ const handleSend = async () => {
 
     streamingMessageId.value = null
     // SSE uses a temporary client ID; reload once so feedback targets the persisted assistant message.
-    await loadMessages()
+    await loadMessages(true)
 
   } catch (error: any) {
     // 如果是用户取消，不显示错误
@@ -514,7 +523,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex h-[calc(100vh-8rem)] flex-col">
+  <div class="chat-height flex flex-col">
     <!-- 头部 -->
     <div class="flex items-center gap-4 border-b pb-4">
       <Button variant="ghost" size="icon" @click="goBack">
@@ -630,58 +639,6 @@ onMounted(() => {
               <template v-else>
                 <template v-if="message.role === 'assistant'">
                   <MarkdownRenderer :content="message.content" class="text-sm" />
-                  <!-- 显示知识来源 -->
-                  <div v-if="message.sources && message.sources.length > 0" class="mt-3 pt-3 border-t border-secondary-foreground/20">
-                    <p class="text-xs font-medium mb-2 flex items-center gap-1">
-                      <span>📚</span>
-                      <span>知识来源</span>
-                      <span class="opacity-60">({{ message.sources.length }}条)</span>
-                    </p>
-                    <div class="space-y-1.5">
-                      <template v-for="(source, index) in message.sources" :key="index">
-                        <router-link
-                          v-if="conversation?.knowledgeBaseId && source.document_id"
-                          :to="`/knowledge-base/${conversation.knowledgeBaseId}/chunks/${source.document_id}`"
-                          class="block text-xs bg-secondary-foreground/5 rounded px-2 py-1.5 transition-colors hover:bg-primary/10"
-                          :title="'查看分块：' + (source.document_name || source.title || `文档 #${source.document_id ?? '未知'}`)"
-                        >
-                          <div class="flex items-center justify-between gap-2">
-                            <span class="font-medium truncate flex-1" :title="source.document_name || source.title">
-                              {{ source.document_name || source.title || `文档 #${source.document_id ?? '未知'}` }}
-                            </span>
-                            <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                              {{ formatScore(source.score) }}
-                            </span>
-                          </div>
-                          <p v-if="source.outline_path && source.outline_path.length" class="mt-1 text-[10px] opacity-60 truncate">
-                            {{ source.outline_path.join(' > ') }}
-                          </p>
-                          <p v-if="source.content" class="mt-1 text-[11px] opacity-60 line-clamp-2">
-                            {{ source.content }}
-                          </p>
-                        </router-link>
-                        <div
-                          v-else
-                          class="text-xs bg-secondary-foreground/5 rounded px-2 py-1.5"
-                        >
-                          <div class="flex items-center justify-between gap-2">
-                            <span class="font-medium truncate flex-1" :title="source.document_name || source.title">
-                              {{ source.document_name || source.title || `文档 #${source.document_id ?? '未知'}` }}
-                            </span>
-                            <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                              {{ formatScore(source.score) }}
-                            </span>
-                          </div>
-                          <p v-if="source.outline_path && source.outline_path.length" class="mt-1 text-[10px] opacity-60 truncate">
-                            {{ source.outline_path.join(' > ') }}
-                          </p>
-                          <p v-if="source.content" class="mt-1 text-[11px] opacity-60 line-clamp-2">
-                            {{ source.content }}
-                          </p>
-                        </div>
-                      </template>
-                    </div>
-                  </div>
                 </template>
                 <template v-else>
                   <p class="whitespace-pre-wrap text-sm">{{ message.content }}</p>
@@ -751,6 +708,59 @@ onMounted(() => {
                   </div>
                 </div>
               </template>
+
+              <!-- 知识来源（流式输出期间与完成后都会显示） -->
+              <div v-if="message.role === 'assistant' && message.sources && message.sources.length > 0" class="mt-3 pt-3 border-t border-secondary-foreground/20">
+                <p class="text-xs font-medium mb-2 flex items-center gap-1">
+                  <span>📚</span>
+                  <span>知识来源</span>
+                  <span class="opacity-60">({{ message.sources.length }}条)</span>
+                </p>
+                <div class="space-y-1.5">
+                  <template v-for="(source, index) in message.sources" :key="index">
+                    <router-link
+                      v-if="conversation?.knowledgeBaseId && source.document_id"
+                      :to="`/knowledge-base/${conversation.knowledgeBaseId}/chunks/${source.document_id}`"
+                      class="block text-xs bg-secondary-foreground/5 rounded px-2 py-1.5 transition-colors hover:bg-primary/10"
+                      :title="'查看分块：' + (source.document_name || source.title || `文档 #${source.document_id ?? '未知'}`)"
+                    >
+                      <div class="flex items-center justify-between gap-2">
+                        <span class="font-medium truncate flex-1" :title="source.document_name || source.title">
+                          {{ source.document_name || source.title || `文档 #${source.document_id ?? '未知'}` }}
+                        </span>
+                        <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                          {{ formatScore(source.score) }}
+                        </span>
+                      </div>
+                      <p v-if="source.outline_path && source.outline_path.length" class="mt-1 text-[10px] opacity-60 truncate">
+                        {{ source.outline_path.join(' > ') }}
+                      </p>
+                      <p v-if="source.content" class="mt-1 text-[11px] opacity-60 line-clamp-2">
+                        {{ source.content }}
+                      </p>
+                    </router-link>
+                    <div
+                      v-else
+                      class="text-xs bg-secondary-foreground/5 rounded px-2 py-1.5"
+                    >
+                      <div class="flex items-center justify-between gap-2">
+                        <span class="font-medium truncate flex-1" :title="source.document_name || source.title">
+                          {{ source.document_name || source.title || `文档 #${source.document_id ?? '未知'}` }}
+                        </span>
+                        <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                          {{ formatScore(source.score) }}
+                        </span>
+                      </div>
+                      <p v-if="source.outline_path && source.outline_path.length" class="mt-1 text-[10px] opacity-60 truncate">
+                        {{ source.outline_path.join(' > ') }}
+                      </p>
+                      <p v-if="source.content" class="mt-1 text-[11px] opacity-60 line-clamp-2">
+                        {{ source.content }}
+                      </p>
+                    </div>
+                  </template>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -825,3 +835,15 @@ onMounted(() => {
     </Dialog>
   </div>
 </template>
+
+<style scoped>
+/* 移动端软键盘弹出时，dvh 能跟随可视高度收缩，避免输入框被遮挡 */
+.chat-height {
+  height: calc(100vh - 8rem);
+}
+@supports (height: 100dvh) {
+  .chat-height {
+    height: calc(100dvh - 8rem);
+  }
+}
+</style>
