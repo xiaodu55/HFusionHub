@@ -6,6 +6,7 @@ import {
   GitBranch,
   Globe2,
   ListFilter,
+  Loader2,
   RefreshCw,
   Route,
   ShieldCheck,
@@ -71,6 +72,9 @@ const statusClass = (status: CapabilityStatus) => ({
 }[status])
 const isEnabled = (key: string) => Boolean(serverFlags.value[key]?.enabled)
 const isAvailable = (item: CapabilityDefinition) => Boolean(serverFlags.value[item.key])
+const dependsLabel = (key: string) => capabilities.find(item => item.key === key)?.name || key
+const isBlockedByDependency = (item: CapabilityDefinition) =>
+  Boolean(item.dependsOn && !isEnabled(item.dependsOn) && !isEnabled(item.key))
 
 async function loadFlags() {
   loading.value = true
@@ -179,20 +183,40 @@ onMounted(loadFlags)
           </div>
         </div>
         <div class="text-xs leading-5 text-muted-foreground"><p><span class="text-foreground/80">适合：</span>{{ item.useCase }}</p><p class="mt-1"><span class="text-foreground/80">影响：</span>{{ item.impact }}</p></div>
-        <div class="flex items-center justify-between gap-3 sm:justify-end">
-          <span class="text-xs" :class="isEnabled(item.key) ? 'text-emerald-400' : 'text-muted-foreground'">{{ !isAvailable(item) ? '不可用' : isEnabled(item.key) ? '已开启' : '已关闭' }}</span>
+        <div class="flex items-center justify-between gap-3 sm:flex-col sm:items-end sm:gap-2">
+          <span class="flex items-center gap-1.5 text-xs" :class="isEnabled(item.key) ? 'text-emerald-400' : 'text-muted-foreground'">
+            <span class="h-1.5 w-1.5 rounded-full" :class="isEnabled(item.key) ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]' : 'bg-muted-foreground/40'" />
+            {{ !isAvailable(item) ? '不可用' : isEnabled(item.key) ? '已开启' : '已关闭' }}
+          </span>
           <button
             type="button"
             role="switch"
             :aria-checked="isEnabled(item.key)"
             :aria-label="`${isEnabled(item.key) ? '关闭' : '开启'}${item.name}`"
-            class="relative h-7 w-12 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-45"
-            :class="isEnabled(item.key) ? 'border-primary bg-primary' : 'border-border bg-muted'"
+            class="group relative inline-flex h-8 w-14 shrink-0 cursor-pointer items-center rounded-full border p-1 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+            :class="isEnabled(item.key)
+              ? 'border-emerald-400/60 bg-gradient-to-r from-emerald-500 to-teal-500 shadow-[0_0_16px_rgba(16,185,129,0.35)]'
+              : 'border-border bg-muted/80 shadow-inner'"
             :disabled="!isAvailable(item) || Boolean(savingKey)"
             @click="setCapability(item, !isEnabled(item.key))"
           >
-            <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform" :class="isEnabled(item.key) ? 'translate-x-5' : 'translate-x-0.5'" />
+            <span
+              class="pointer-events-none block h-6 w-6 rounded-full bg-white shadow-md transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:scale-105 group-active:scale-95"
+              :class="isEnabled(item.key) ? 'translate-x-6' : 'translate-x-0'"
+            />
+            <span
+              v-if="savingKey === item.key"
+              class="absolute inset-0 flex items-center justify-center rounded-full bg-black/25"
+            >
+              <Loader2 class="h-4 w-4 animate-spin text-white" />
+            </span>
           </button>
+          <span
+            v-if="isBlockedByDependency(item)"
+            class="rounded-full border border-amber-400/25 bg-amber-400/[0.06] px-2 py-0.5 text-[11px] text-amber-300"
+          >
+            需先开启“{{ dependsLabel(item.dependsOn!) }}”
+          </span>
         </div>
       </article>
     </section>
