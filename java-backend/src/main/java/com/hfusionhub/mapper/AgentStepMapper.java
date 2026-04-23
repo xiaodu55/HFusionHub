@@ -2,11 +2,10 @@ package com.hfusionhub.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.hfusionhub.entity.AgentStep;
-import org.apache.ibatis.annotations.Mapper;
-import org.apache.ibatis.annotations.Param;
-
 import java.util.List;
 import java.util.Map;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 
 /**
  * Agent 步骤记录 Mapper
@@ -46,9 +45,8 @@ public interface AgentStepMapper extends BaseMapper<AgentStep> {
      * @param offset 偏移量
      * @return 工具调用记录列表
      */
-    List<Map<String, Object>> selectRecentToolCalls(@Param("userId") Long userId,
-                                                     @Param("limit") int limit,
-                                                     @Param("offset") int offset);
+    List<Map<String, Object>> selectRecentToolCalls(
+            @Param("userId") Long userId, @Param("limit") int limit, @Param("offset") int offset);
 
     /**
      * 统计当前用户的工具调用总条数（step_type = 'tool_call'）。

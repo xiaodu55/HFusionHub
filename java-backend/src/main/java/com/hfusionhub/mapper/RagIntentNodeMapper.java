@@ -5,5 +5,4 @@ import com.hfusionhub.entity.RagIntentNode;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
-public interface RagIntentNodeMapper extends BaseMapper<RagIntentNode> {
-}
+public interface RagIntentNodeMapper extends BaseMapper<RagIntentNode> {}

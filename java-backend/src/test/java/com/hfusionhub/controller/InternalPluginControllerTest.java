@@ -1,21 +1,20 @@
 package com.hfusionhub.controller;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.mapper.PluginAuditLogMapper;
 import com.hfusionhub.service.PluginService;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
-
-import java.util.List;
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
 /**
  * Contract tests for {@link InternalPluginController}.
@@ -52,9 +51,8 @@ class InternalPluginControllerTest {
 
     @Test
     void toolSpecsReturns200WithValidToken() {
-        List<Map<String, Object>> specs = List.of(
-                Map.of("plugin_id", "pid-1", "name", "web_search", "version", "1.0.0")
-        );
+        List<Map<String, Object>> specs =
+                List.of(Map.of("plugin_id", "pid-1", "name", "web_search", "version", "1.0.0"));
         when(pluginService.getPluginToolSpecs()).thenReturn(specs);
 
         R<List<Map<String, Object>>> r = controller.getPluginToolSpecs(1L, req(VALID_TOKEN));
@@ -124,9 +122,7 @@ class InternalPluginControllerTest {
 
     @Test
     void wireFormatMatchesPythonClient() throws Exception {
-        List<Map<String, Object>> specs = List.of(
-                Map.of("plugin_id", "pid-1", "name", "web_search")
-        );
+        List<Map<String, Object>> specs = List.of(Map.of("plugin_id", "pid-1", "name", "web_search"));
         when(pluginService.getPluginToolSpecs()).thenReturn(specs);
 
         R<List<Map<String, Object>>> r = controller.getPluginToolSpecs(1L, req(VALID_TOKEN));
@@ -147,9 +143,8 @@ class InternalPluginControllerTest {
         plugin.setId(100L);
         when(pluginService.getByPluginId("pid-1")).thenReturn(plugin);
 
-        List<Map<String, Object>> entries = List.of(
-                Map.of("pluginName", "web_search", "action", "install", "pluginId", "pid-1")
-        );
+        List<Map<String, Object>> entries =
+                List.of(Map.of("pluginName", "web_search", "action", "install", "pluginId", "pid-1"));
 
         R<Map<String, Object>> r = controller.receiveAuditLogs(entries, req(VALID_TOKEN));
 
@@ -161,9 +156,7 @@ class InternalPluginControllerTest {
 
     @Test
     void auditLogsReturns403WithWrongToken() {
-        List<Map<String, Object>> entries = List.of(
-                Map.of("pluginName", "web_search", "action", "install")
-        );
+        List<Map<String, Object>> entries = List.of(Map.of("pluginName", "web_search", "action", "install"));
 
         R<Map<String, Object>> r = controller.receiveAuditLogs(entries, req("wrong"));
 
@@ -173,9 +166,7 @@ class InternalPluginControllerTest {
 
     @Test
     void auditLogsReturns403WithNullToken() {
-        List<Map<String, Object>> entries = List.of(
-                Map.of("pluginName", "web_search", "action", "install")
-        );
+        List<Map<String, Object>> entries = List.of(Map.of("pluginName", "web_search", "action", "install"));
 
         R<Map<String, Object>> r = controller.receiveAuditLogs(entries, req(null));
 
@@ -190,8 +181,7 @@ class InternalPluginControllerTest {
         List<Map<String, Object>> entries = List.of(
                 Map.of("pluginName", "web_search", "action", "install", "pluginId", "pid-1"),
                 Map.of("pluginName", "web_search", "action", "enable", "pluginId", "pid-1"),
-                Map.of("pluginName", "calc", "action", "install", "pluginId", "pid-2")
-        );
+                Map.of("pluginName", "calc", "action", "install", "pluginId", "pid-2"));
 
         R<Map<String, Object>> r = controller.receiveAuditLogs(entries, req(VALID_TOKEN));
 
@@ -209,8 +199,7 @@ class InternalPluginControllerTest {
 
         List<Map<String, Object>> entries = List.of(
                 Map.of("pluginName", "web_search", "action", "install"),
-                Map.of("pluginName", "calc", "action", "install")
-        );
+                Map.of("pluginName", "calc", "action", "install"));
 
         R<Map<String, Object>> r = controller.receiveAuditLogs(entries, req(VALID_TOKEN));
 
@@ -227,9 +216,8 @@ class InternalPluginControllerTest {
         existingLog.setEventId("evt-1");
         when(pluginAuditLogMapper.selectByEventId("evt-1")).thenReturn(existingLog);
 
-        List<Map<String, Object>> entries = List.of(
-                Map.of("pluginName", "web_search", "action", "install", "eventId", "evt-1")
-        );
+        List<Map<String, Object>> entries =
+                List.of(Map.of("pluginName", "web_search", "action", "install", "eventId", "evt-1"));
 
         R<Map<String, Object>> r = controller.receiveAuditLogs(entries, req(VALID_TOKEN));
 
@@ -243,9 +231,8 @@ class InternalPluginControllerTest {
     void auditLogsInsertsNewEventId() {
         when(pluginAuditLogMapper.selectByEventId("evt-new")).thenReturn(null);
 
-        List<Map<String, Object>> entries = List.of(
-                Map.of("pluginName", "web_search", "action", "install", "eventId", "evt-new")
-        );
+        List<Map<String, Object>> entries =
+                List.of(Map.of("pluginName", "web_search", "action", "install", "eventId", "evt-new"));
 
         R<Map<String, Object>> r = controller.receiveAuditLogs(entries, req(VALID_TOKEN));
 

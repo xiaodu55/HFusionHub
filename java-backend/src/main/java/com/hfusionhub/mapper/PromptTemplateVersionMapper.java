@@ -5,5 +5,4 @@ import com.hfusionhub.entity.PromptTemplateVersion;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
-public interface PromptTemplateVersionMapper extends BaseMapper<PromptTemplateVersion> {
-}
+public interface PromptTemplateVersionMapper extends BaseMapper<PromptTemplateVersion> {}

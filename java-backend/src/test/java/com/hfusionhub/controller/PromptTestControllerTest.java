@@ -1,5 +1,9 @@
 package com.hfusionhub.controller;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
 import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.context.SaTokenContext;
 import cn.dev33.satoken.context.model.SaRequest;
@@ -14,15 +18,10 @@ import com.hfusionhub.dto.PromptTestRequest;
 import com.hfusionhub.dto.PromptTestResponse;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
+import java.util.*;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-
-import java.util.*;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for {@link PromptTestController} — prompt template test bench.
@@ -77,8 +76,7 @@ class PromptTestControllerTest {
         request.setQuestion("测试问题");
         request.setKnowledgeBaseId(99L);
 
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> controller.test(request));
+        BusinessException ex = assertThrows(BusinessException.class, () -> controller.test(request));
         assertTrue(ex.getMessage().contains("无权访问"));
     }
 
@@ -93,8 +91,7 @@ class PromptTestControllerTest {
         request.setQuestion("测试问题");
         request.setKnowledgeBaseId(999L);
 
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> controller.test(request));
+        BusinessException ex = assertThrows(BusinessException.class, () -> controller.test(request));
         assertTrue(ex.getMessage().contains("知识库不存在"));
     }
 
@@ -104,8 +101,7 @@ class PromptTestControllerTest {
     void passesTemplateAsSystemPromptToChat() {
         StpUtil.login(1L);
 
-        AiClient.ChatResponse mockResponse = buildMockResponse("这是回答", "deepseek-v3",
-                500, null, null);
+        AiClient.ChatResponse mockResponse = buildMockResponse("这是回答", "deepseek-v3", 500, null, null);
         when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), anyString(), anyLong()))
                 .thenReturn(mockResponse);
 
@@ -120,16 +116,27 @@ class PromptTestControllerTest {
         assertEquals("这是回答", result.getData().getContent());
 
         // Verify: template content passed as systemPrompt (5th arg), history is empty
-        verify(aiClient).chat(
-                eq("什么是RAG？"),
-                isNull(),           // conversationId = null
-                isNull(),           // knowledgeBaseId = null
-                eq(List.of()),      // history = empty (template goes via systemPrompt)
-                eq("你是一个严谨的助手，请用中文回答。"),  // systemPrompt = template content
-                eq(1L)              // userId = current user
-        );
+        verify(aiClient)
+                .chat(
+                        eq("什么是RAG？"),
+                        isNull(), // conversationId = null
+                        isNull(), // knowledgeBaseId = null
+                        eq(List.of()), // history = empty (template goes via systemPrompt)
+                        eq("你是一个严谨的助手，请用中文回答。"), // systemPrompt = template content
+                        eq(1L) // userId = current user
+                        );
         // Verify: KB path was NOT used
-        verify(aiClient, never()).agentV1Chat(anyString(), any(), any(), anyList(), anyString(), anyString(), anyInt(), anyString(), anyLong());
+        verify(aiClient, never())
+                .agentV1Chat(
+                        anyString(),
+                        any(),
+                        any(),
+                        anyList(),
+                        anyString(),
+                        anyString(),
+                        anyInt(),
+                        anyString(),
+                        anyLong());
     }
 
     @Test
@@ -143,10 +150,22 @@ class PromptTestControllerTest {
         kb.setStatus(0);
         when(knowledgeBaseMapper.selectById(42L)).thenReturn(kb);
 
-        AiClient.ChatResponse mockResponse = buildMockResponse("根据资料，RAG是...", "deepseek-v3",
-                800, List.of(Map.of("document_id", 1, "score", 0.95, "content", "...")), null);
-        when(aiClient.agentV1Chat(anyString(), isNull(), anyLong(), anyList(), anyString(),
-                anyString(), anyInt(), isNull(), anyLong()))
+        AiClient.ChatResponse mockResponse = buildMockResponse(
+                "根据资料，RAG是...",
+                "deepseek-v3",
+                800,
+                List.of(Map.of("document_id", 1, "score", 0.95, "content", "...")),
+                null);
+        when(aiClient.agentV1Chat(
+                        anyString(),
+                        isNull(),
+                        anyLong(),
+                        anyList(),
+                        anyString(),
+                        anyString(),
+                        anyInt(),
+                        isNull(),
+                        anyLong()))
                 .thenReturn(mockResponse);
 
         PromptTestRequest request = new PromptTestRequest();
@@ -163,19 +182,30 @@ class PromptTestControllerTest {
         assertEquals(1, result.getData().getSources().size());
 
         // Verify: KB-bound path with systemPrompt, history empty
-        verify(aiClient).agentV1Chat(
-                eq("什么是RAG？"),
-                isNull(),
-                eq(42L),
-                eq(List.of()),                      // history = empty
-                eq(request.getTemplateContent()),   // systemPrompt
-                eq("detailed"),
-                eq(5),
-                isNull(),                           // requestId = null
-                eq(1L)                              // userId
-        );
+        verify(aiClient)
+                .agentV1Chat(
+                        eq("什么是RAG？"),
+                        isNull(),
+                        eq(42L),
+                        eq(List.of()), // history = empty
+                        eq(request.getTemplateContent()), // systemPrompt
+                        eq("detailed"),
+                        eq(5),
+                        isNull(), // requestId = null
+                        eq(1L) // userId
+                        );
         // Verify: non-KB path was NOT used
-        verify(aiClient, never()).agentV1Chat(anyString(), isNull(), isNull(), anyList(), anyString(), anyString(), anyInt(), anyString(), anyLong());
+        verify(aiClient, never())
+                .agentV1Chat(
+                        anyString(),
+                        isNull(),
+                        isNull(),
+                        anyList(),
+                        anyString(),
+                        anyString(),
+                        anyInt(),
+                        anyString(),
+                        anyLong());
     }
 
     @Test
@@ -215,8 +245,7 @@ class PromptTestControllerTest {
         request.setTemplateContent("测试模板");
         request.setQuestion("测试问题");
 
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> controller.test(request));
+        BusinessException ex = assertThrows(BusinessException.class, () -> controller.test(request));
         assertTrue(ex.getMessage().contains("AI 服务调用失败"));
         assertTrue(ex.getMessage().contains("Connection refused"));
     }
@@ -232,8 +261,7 @@ class PromptTestControllerTest {
         request.setTemplateContent("测试模板");
         request.setQuestion("测试问题");
 
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> controller.test(request));
+        BusinessException ex = assertThrows(BusinessException.class, () -> controller.test(request));
         // Our controller wraps ALL exceptions in a BusinessException with
         // "AI 服务调用失败:" prefix — this is by design for consistent UX.
         assertTrue(ex.getMessage().contains("AI 服务调用失败"));
@@ -271,7 +299,8 @@ class PromptTestControllerTest {
         R<PromptTestResponse> result = controller.test(request);
 
         assertNotNull(result.getData());
-        assertTrue(result.getData().getElapsedMs() > 0,
+        assertTrue(
+                result.getData().getElapsedMs() > 0,
                 "elapsedMs should be positive, got " + result.getData().getElapsedMs());
     }
 
@@ -282,8 +311,7 @@ class PromptTestControllerTest {
         Map<String, Object> tokenUsage = Map.of(
                 "prompt_tokens", 150,
                 "completion_tokens", 350,
-                "total_tokens", 500
-        );
+                "total_tokens", 500);
         AiClient.ChatResponse mockResponse = buildMockResponse("回答", "deepseek-v3", 500, null, tokenUsage);
         when(aiClient.chat(anyString(), isNull(), isNull(), anyList(), anyString(), anyLong()))
                 .thenReturn(mockResponse);
@@ -325,8 +353,7 @@ class PromptTestControllerTest {
             String model,
             int tokenCount,
             List<Map<String, Object>> sources,
-            Map<String, Object> tokenUsage
-    ) {
+            Map<String, Object> tokenUsage) {
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent(content);
         resp.setModel(model);
@@ -355,17 +382,38 @@ class PromptTestControllerTest {
         @Override
         public SaStorage getStorage() {
             return new SaStorage() {
-                @Override public Object getSource() { return storage; }
-                @Override public Object get(String key) { return storage.get(key); }
-                @Override public SaStorage set(String key, Object value) { storage.put(key, value); return this; }
-                @Override public SaStorage delete(String key) { storage.remove(key); return this; }
+                @Override
+                public Object getSource() {
+                    return storage;
+                }
+
+                @Override
+                public Object get(String key) {
+                    return storage.get(key);
+                }
+
+                @Override
+                public SaStorage set(String key, Object value) {
+                    storage.put(key, value);
+                    return this;
+                }
+
+                @Override
+                public SaStorage delete(String key) {
+                    storage.remove(key);
+                    return this;
+                }
             };
         }
 
         @Override
-        public boolean matchPath(String pattern, String path) { return true; }
+        public boolean matchPath(String pattern, String path) {
+            return true;
+        }
 
         @Override
-        public boolean isValid() { return true; }
+        public boolean isValid() {
+            return true;
+        }
     }
 }

@@ -1,8 +1,7 @@
 package com.hfusionhub.dto;
 
-import lombok.Data;
-
 import java.util.List;
+import lombok.Data;
 
 /** Callback contract between the Python indexing worker and Java API. */
 @Data

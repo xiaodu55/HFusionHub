@@ -2,11 +2,10 @@ package com.hfusionhub.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.hfusionhub.entity.Message;
-import org.apache.ibatis.annotations.Mapper;
-import org.apache.ibatis.annotations.Param;
-
 import java.util.List;
 import java.util.Map;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 
 /**
  * 消息 Mapper 接口

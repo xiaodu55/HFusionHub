@@ -12,18 +12,17 @@ import com.hfusionhub.mapper.WebhookSubscriptionMapper;
 import com.hfusionhub.service.WebhookSubscriptionService;
 import com.hfusionhub.webhook.WebhookDispatcher;
 import com.hfusionhub.webhook.WebhookEventTypes;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
-
 import java.security.SecureRandom;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 /**
  * Webhook 订阅管理服务实现
@@ -48,8 +47,7 @@ public class WebhookSubscriptionServiceImpl implements WebhookSubscriptionServic
             WebhookEventTypes.AGENT_TASK_FAILED,
             WebhookEventTypes.AGENT_APPROVAL_REQUIRED,
             WebhookEventTypes.DOCUMENT_INDEXED,
-            WebhookEventTypes.EVALUATION_COMPLETED
-    );
+            WebhookEventTypes.EVALUATION_COMPLETED);
 
     @Override
     @Transactional
@@ -71,8 +69,7 @@ public class WebhookSubscriptionServiceImpl implements WebhookSubscriptionServic
         entity.setFailureCount(0);
         subscriptionMapper.insert(entity);
 
-        log.info("Webhook 订阅创建成功: id={} user={} events={}",
-                entity.getId(), userId, entity.getEvents());
+        log.info("Webhook 订阅创建成功: id={} user={} events={}", entity.getId(), userId, entity.getEvents());
         return entity;
     }
 
@@ -122,8 +119,7 @@ public class WebhookSubscriptionServiceImpl implements WebhookSubscriptionServic
     @Override
     public List<WebhookSubscription> listByUser(Long userId) {
         LambdaQueryWrapper<WebhookSubscription> query = new LambdaQueryWrapper<>();
-        query.eq(WebhookSubscription::getUserId, userId)
-             .orderByDesc(WebhookSubscription::getCreatedAt);
+        query.eq(WebhookSubscription::getUserId, userId).orderByDesc(WebhookSubscription::getCreatedAt);
         return subscriptionMapper.selectList(query);
     }
 
@@ -149,8 +145,7 @@ public class WebhookSubscriptionServiceImpl implements WebhookSubscriptionServic
     }
 
     @Override
-    public PageResult<WebhookDelivery> deliveryHistory(Long userId, Long subscriptionId,
-                                                       int page, int pageSize) {
+    public PageResult<WebhookDelivery> deliveryHistory(Long userId, Long subscriptionId, int page, int pageSize) {
         get(userId, subscriptionId);
         page = Math.max(1, page);
         pageSize = Math.max(1, Math.min(pageSize, 100));
@@ -158,14 +153,13 @@ public class WebhookSubscriptionServiceImpl implements WebhookSubscriptionServic
 
         LambdaQueryWrapper<WebhookDelivery> query = new LambdaQueryWrapper<>();
         query.eq(WebhookDelivery::getSubscriptionId, subscriptionId)
-             .orderByDesc(WebhookDelivery::getCreatedAt)
-             .orderByDesc(WebhookDelivery::getId)
-             .last("LIMIT " + offset + "," + pageSize);
+                .orderByDesc(WebhookDelivery::getCreatedAt)
+                .orderByDesc(WebhookDelivery::getId)
+                .last("LIMIT " + offset + "," + pageSize);
         List<WebhookDelivery> records = deliveryMapper.selectList(query);
 
         long total = deliveryMapper.selectCount(
-                new LambdaQueryWrapper<WebhookDelivery>()
-                        .eq(WebhookDelivery::getSubscriptionId, subscriptionId));
+                new LambdaQueryWrapper<WebhookDelivery>().eq(WebhookDelivery::getSubscriptionId, subscriptionId));
         return PageResult.of(page, pageSize, total, records);
     }
 
@@ -198,8 +192,7 @@ public class WebhookSubscriptionServiceImpl implements WebhookSubscriptionServic
         Set<String> eventSet = new HashSet<>(events);
         for (String event : eventSet) {
             if (!KNOWN_EVENTS.contains(event)) {
-                throw new BusinessException("不支持的事件类型: " + event
-                        + "（支持: " + String.join(", ", KNOWN_EVENTS) + "）");
+                throw new BusinessException("不支持的事件类型: " + event + "（支持: " + String.join(", ", KNOWN_EVENTS) + "）");
             }
         }
     }

@@ -1,5 +1,8 @@
 package com.hfusionhub.mapper;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+
 import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.context.SaTokenContext;
 import cn.dev33.satoken.context.model.SaRequest;
@@ -10,6 +13,10 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.hfusionhub.entity.Document;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.entity.User;
+import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,14 +27,6 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.mock;
 
 /**
  * Verify DocumentMapper.selectExpiredRecycled against H2 —
@@ -136,17 +135,52 @@ class DocumentMapperRecycleTest {
 
     private static class MockSaTokenContext implements SaTokenContext {
         private final Map<String, Object> store = new HashMap<>();
-        @Override public SaRequest getRequest() { return mock(SaRequest.class); }
-        @Override public SaResponse getResponse() { return mock(SaResponse.class); }
-        @Override public SaStorage getStorage() {
+
+        @Override
+        public SaRequest getRequest() {
+            return mock(SaRequest.class);
+        }
+
+        @Override
+        public SaResponse getResponse() {
+            return mock(SaResponse.class);
+        }
+
+        @Override
+        public SaStorage getStorage() {
             return new SaStorage() {
-                @Override public Object getSource() { return store; }
-                @Override public Object get(String k) { return store.get(k); }
-                @Override public SaStorage set(String k, Object v) { store.put(k, v); return this; }
-                @Override public SaStorage delete(String k) { store.remove(k); return this; }
+                @Override
+                public Object getSource() {
+                    return store;
+                }
+
+                @Override
+                public Object get(String k) {
+                    return store.get(k);
+                }
+
+                @Override
+                public SaStorage set(String k, Object v) {
+                    store.put(k, v);
+                    return this;
+                }
+
+                @Override
+                public SaStorage delete(String k) {
+                    store.remove(k);
+                    return this;
+                }
             };
         }
-        @Override public boolean matchPath(String p, String path) { return true; }
-        @Override public boolean isValid() { return true; }
+
+        @Override
+        public boolean matchPath(String p, String path) {
+            return true;
+        }
+
+        @Override
+        public boolean isValid() {
+            return true;
+        }
     }
 }

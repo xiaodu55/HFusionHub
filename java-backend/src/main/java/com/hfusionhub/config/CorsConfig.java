@@ -18,44 +18,38 @@ public class CorsConfig {
      * 允许跨域请求的来源
      */
     private static final String[] ALLOWED_ORIGINS = {
-            "http://localhost:5173",  // Vite 开发服务器
-            "http://localhost:3000",  // 前端端口
-            "http://localhost:3001",  // 前端端口（端口占用时 Vite 自动递增）
-            "http://localhost:8080",  // 前端部署端口
-            "http://127.0.0.1:5173",
-            "http://127.0.0.1:3000",
-            "http://127.0.0.1:3001"
+        "http://localhost:5173", // Vite 开发服务器
+        "http://localhost:3000", // 前端端口
+        "http://localhost:3001", // 前端端口（端口占用时 Vite 自动递增）
+        "http://localhost:8080", // 前端部署端口
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001"
     };
 
     /**
      * 允许的请求方法
      */
-    private static final String[] ALLOWED_METHODS = {
-            "GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"
-    };
+    private static final String[] ALLOWED_METHODS = {"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"};
 
     /**
      * 允许的请求头
      */
     private static final String[] ALLOWED_HEADERS = {
-            "Authorization",
-            "Content-Type",
-            "X-Requested-With",
-            "Accept",
-            "Origin",
-            "Access-Control-Request-Method",
-            "Access-Control-Request-Headers",
-            "satoken"
+        "Authorization",
+        "Content-Type",
+        "X-Requested-With",
+        "Accept",
+        "Origin",
+        "Access-Control-Request-Method",
+        "Access-Control-Request-Headers",
+        "satoken"
     };
 
     /**
      * 暴露的响应头
      */
-    private static final String[] EXPOSED_HEADERS = {
-            "Authorization",
-            "Content-Type",
-            "satoken"
-    };
+    private static final String[] EXPOSED_HEADERS = {"Authorization", "Content-Type", "satoken"};
 
     /**
      * CORS 过滤器

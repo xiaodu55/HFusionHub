@@ -4,6 +4,7 @@ import cn.dev33.satoken.exception.NotLoginException;
 import cn.dev33.satoken.exception.NotPermissionException;
 import cn.dev33.satoken.exception.NotRoleException;
 import com.hfusionhub.common.result.R;
+import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -13,8 +14,6 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-
-import java.util.stream.Collectors;
 
 /**
  * 全局异常处理器
@@ -31,9 +30,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<R<?>> handleBusinessException(BusinessException e) {
         log.warn("业务异常: {}", e.getMessage());
-        return ResponseEntity
-                .status(resolveBusinessHttpStatus(e.getCode()))
-                .body(R.fail(e.getCode(), e.getMessage()));
+        return ResponseEntity.status(resolveBusinessHttpStatus(e.getCode())).body(R.fail(e.getCode(), e.getMessage()));
     }
 
     private HttpStatus resolveBusinessHttpStatus(int code) {
@@ -108,9 +105,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BindException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public R<?> handleBindException(BindException e) {
-        String message = e.getFieldErrors().stream()
-                .map(FieldError::getDefaultMessage)
-                .collect(Collectors.joining(", "));
+        String message =
+                e.getFieldErrors().stream().map(FieldError::getDefaultMessage).collect(Collectors.joining(", "));
         log.warn("参数绑定失败: {}", message);
         return R.fail(400, message);
     }

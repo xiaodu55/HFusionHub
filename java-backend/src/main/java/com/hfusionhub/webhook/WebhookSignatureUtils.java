@@ -1,11 +1,11 @@
 package com.hfusionhub.webhook;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 /**
  * Webhook 请求签名工具
@@ -26,8 +26,7 @@ public final class WebhookSignatureUtils {
 
     private static final String HMAC_ALGORITHM = "HmacSHA256";
 
-    private WebhookSignatureUtils() {
-    }
+    private WebhookSignatureUtils() {}
 
     /**
      * 计算 HMAC-SHA256 签名

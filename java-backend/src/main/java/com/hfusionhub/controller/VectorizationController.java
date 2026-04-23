@@ -9,13 +9,6 @@ import com.hfusionhub.service.VectorizationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.web.bind.annotation.*;
-
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -23,6 +16,12 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.bind.annotation.*;
 
 /**
  * 向量化控制器
@@ -85,8 +84,7 @@ public class VectorizationController {
 
     @Operation(summary = "获取单个分块详情")
     @GetMapping("/chunks/{chunkId}")
-    public R<ChunkDTO> getChunkDetail(
-            @Parameter(description = "分块ID") @PathVariable String chunkId) {
+    public R<ChunkDTO> getChunkDetail(@Parameter(description = "分块ID") @PathVariable String chunkId) {
         ChunkDTO result = vectorizationService.getChunkDetail(chunkId);
         return R.ok(result);
     }
@@ -99,11 +97,11 @@ public class VectorizationController {
             @RequestHeader(value = "X-Callback-Secret", required = false) String secret,
             @RequestHeader(value = "X-Callback-Signature", required = false) String signature) {
         // 1. 验证回调密钥（常量时间比较）
-        if (callbackSecret == null || callbackSecret.isBlank()
+        if (callbackSecret == null
+                || callbackSecret.isBlank()
                 || secret == null
                 || !MessageDigest.isEqual(
-                       callbackSecret.getBytes(StandardCharsets.UTF_8),
-                       secret.getBytes(StandardCharsets.UTF_8))) {
+                        callbackSecret.getBytes(StandardCharsets.UTF_8), secret.getBytes(StandardCharsets.UTF_8))) {
             log.warn("回调密钥验证失败: documentId={}", documentId);
             return R.fail("回调密钥无效");
         }
@@ -139,8 +137,7 @@ public class VectorizationController {
             byte[] computed = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
             String expected = Base64.getEncoder().encodeToString(computed);
             return MessageDigest.isEqual(
-                    expected.getBytes(StandardCharsets.UTF_8),
-                    signature.getBytes(StandardCharsets.UTF_8));
+                    expected.getBytes(StandardCharsets.UTF_8), signature.getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             log.error("HMAC 签名验证失败", e);
             return false;
@@ -149,8 +146,7 @@ public class VectorizationController {
 
     @Operation(summary = "同步文档状态 - 从Python引擎查询实际分块数更新状态")
     @PostMapping("/{documentId}/sync-status")
-    public R<String> syncDocumentStatus(
-            @Parameter(description = "文档ID") @PathVariable Long documentId) {
+    public R<String> syncDocumentStatus(@Parameter(description = "文档ID") @PathVariable Long documentId) {
         vectorizationService.syncDocumentStatus(documentId);
         return R.ok("状态已同步");
     }
@@ -164,16 +160,14 @@ public class VectorizationController {
 
     @Operation(summary = "重置文档状态为待解析")
     @PostMapping("/{documentId}/reset")
-    public R<String> resetDocument(
-            @Parameter(description = "文档ID") @PathVariable Long documentId) {
+    public R<String> resetDocument(@Parameter(description = "文档ID") @PathVariable Long documentId) {
         vectorizationService.resetDocument(documentId);
         return R.ok("已重置为待解析状态");
     }
 
     @Operation(summary = "查询文档处理任务状态")
     @GetMapping("/{documentId}/status")
-    public R<String> getTaskStatus(
-            @Parameter(description = "文档ID") @PathVariable Long documentId) {
+    public R<String> getTaskStatus(@Parameter(description = "文档ID") @PathVariable Long documentId) {
         String status = vectorizationService.getTaskStatus(documentId);
         return R.ok(status);
     }

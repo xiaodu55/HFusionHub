@@ -3,10 +3,9 @@ package com.hfusionhub.entity;
 import com.baomidou.mybatisplus.annotation.*;
 import com.hfusionhub.handler.JsonMapTypeHandler;
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.Data;
-
 import java.time.LocalDateTime;
 import java.util.Map;
+import lombok.Data;
 
 /**
  * Agent 状态事件实体 — SSE 推送与审计

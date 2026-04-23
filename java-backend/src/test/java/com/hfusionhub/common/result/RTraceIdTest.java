@@ -1,11 +1,10 @@
 package com.hfusionhub.common.result;
 
+import static org.junit.jupiter.api.Assertions.*;
+
 import com.hfusionhub.config.TraceContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.slf4j.MDC;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for {@link R} — verifying that {@code traceId} is auto-populated

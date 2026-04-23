@@ -4,21 +4,19 @@ import com.hfusionhub.common.result.R;
 import com.hfusionhub.entity.PluginAuditLog;
 import com.hfusionhub.mapper.PluginAuditLogMapper;
 import com.hfusionhub.service.PluginService;
+import com.hfusionhub.tenant.TenantContext;
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
-
-import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-
-import com.hfusionhub.tenant.TenantContext;
 
 /**
  * Internal-only endpoint for Python AI to query plugin ToolSpecs,
@@ -41,9 +39,7 @@ public class InternalPluginController {
     private String expectedToken;
 
     @GetMapping("/tool-specs")
-    public R<List<Map<String, Object>>> getPluginToolSpecs(
-            @RequestParam Long tenantId,
-            HttpServletRequest request) {
+    public R<List<Map<String, Object>>> getPluginToolSpecs(@RequestParam Long tenantId, HttpServletRequest request) {
         if (!constantTimeEquals(expectedToken, request.getHeader("X-Internal-Token"))) {
             return R.fail(403, "Forbidden: invalid or missing X-Internal-Token");
         }
@@ -54,9 +50,7 @@ public class InternalPluginController {
     }
 
     @GetMapping("/{pluginId}/versions")
-    public R<List<Map<String, Object>>> getPluginVersions(
-            @PathVariable String pluginId,
-            HttpServletRequest request) {
+    public R<List<Map<String, Object>>> getPluginVersions(@PathVariable String pluginId, HttpServletRequest request) {
         if (!constantTimeEquals(expectedToken, request.getHeader("X-Internal-Token"))) {
             return R.fail(403, "Forbidden: invalid or missing X-Internal-Token");
         }
@@ -72,8 +66,7 @@ public class InternalPluginController {
     }
 
     @GetMapping("/sandbox-config")
-    public R<Map<String, Object>> getSandboxConfig(@RequestParam String pluginId,
-                                                   HttpServletRequest request) {
+    public R<Map<String, Object>> getSandboxConfig(@RequestParam String pluginId, HttpServletRequest request) {
         if (!constantTimeEquals(expectedToken, request.getHeader("X-Internal-Token"))) {
             return R.fail(403, "Forbidden: invalid or missing X-Internal-Token");
         }
@@ -100,8 +93,7 @@ public class InternalPluginController {
     @PostMapping("/audit-logs")
     @Transactional
     public R<Map<String, Object>> receiveAuditLogs(
-            @RequestBody List<Map<String, Object>> entries,
-            HttpServletRequest request) {
+            @RequestBody List<Map<String, Object>> entries, HttpServletRequest request) {
         if (!constantTimeEquals(expectedToken, request.getHeader("X-Internal-Token"))) {
             return R.fail(403, "Forbidden: invalid or missing X-Internal-Token");
         }
@@ -167,8 +159,12 @@ public class InternalPluginController {
         byte[] b = provided.getBytes(StandardCharsets.UTF_8);
         if (a.length != b.length) {
             int diff = 0;
-            for (byte ignored : a) { diff |= ignored; }
-            for (byte ignored : b) { diff |= ignored; }
+            for (byte ignored : a) {
+                diff |= ignored;
+            }
+            for (byte ignored : b) {
+                diff |= ignored;
+            }
             return false;
         }
         int diff = 0;

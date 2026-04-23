@@ -12,11 +12,6 @@ import com.hfusionhub.mapper.FeatureFlagAuditLogMapper;
 import com.hfusionhub.mapper.FeatureFlagMapper;
 import com.hfusionhub.mapper.FeatureFlagRuleMapper;
 import com.hfusionhub.service.FeatureFlagService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
@@ -25,6 +20,10 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Service
@@ -37,17 +36,14 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
     private final ObjectMapper objectMapper;
 
     private static final int SCOPE_PRIORITY_ENVIRONMENT = 5;
-    private static final int SCOPE_PRIORITY_KB          = 4;
-    private static final int SCOPE_PRIORITY_USER         = 3;
-    private static final int SCOPE_PRIORITY_TENANT       = 2;
-    private static final int SCOPE_PRIORITY_GLOBAL       = 1;
+    private static final int SCOPE_PRIORITY_KB = 4;
+    private static final int SCOPE_PRIORITY_USER = 3;
+    private static final int SCOPE_PRIORITY_TENANT = 2;
+    private static final int SCOPE_PRIORITY_GLOBAL = 1;
 
     // High-risk flags that require a reason for modification
-    private static final java.util.Set<String> HIGH_RISK_FLAGS = java.util.Set.of(
-            "agent.write_tools.enabled",
-            "agent.web_search.enabled",
-            "approval.required_for_write"
-    );
+    private static final java.util.Set<String> HIGH_RISK_FLAGS =
+            java.util.Set.of("agent.write_tools.enabled", "agent.web_search.enabled", "approval.required_for_write");
 
     // ──────────── Helper: current user ID ────────────
 
@@ -79,8 +75,7 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
         flag.setEndTime(dto.getEndTime());
         flagMapper.insert(flag);
 
-        audit(flag.getId(), flag.getFlagKey(), "create", null, toJson(flag),
-                dto.getReason(), currentUserId(), "api");
+        audit(flag.getId(), flag.getFlagKey(), "create", null, toJson(flag), dto.getReason(), currentUserId(), "api");
         return toInfoDTO(flag, List.of());
     }
 
@@ -97,18 +92,25 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
 
         String oldJson = toJson(flag);
 
-        if (dto.getFlagType()     != null) flag.setFlagType(dto.getFlagType());
-        if (dto.getDescription()  != null) flag.setDescription(dto.getDescription());
-        if (dto.getEnabled()      != null) flag.setEnabled(dto.getEnabled());
-        if (dto.getPercentage()   != null) flag.setPercentage(dto.getPercentage());
-        if (dto.getWhitelist()    != null) flag.setWhitelist(dto.getWhitelist());
-        if (dto.getBlacklist()    != null) flag.setBlacklist(dto.getBlacklist());
-        if (dto.getStartTime()    != null) flag.setStartTime(dto.getStartTime());
-        if (dto.getEndTime()      != null) flag.setEndTime(dto.getEndTime());
+        if (dto.getFlagType() != null) flag.setFlagType(dto.getFlagType());
+        if (dto.getDescription() != null) flag.setDescription(dto.getDescription());
+        if (dto.getEnabled() != null) flag.setEnabled(dto.getEnabled());
+        if (dto.getPercentage() != null) flag.setPercentage(dto.getPercentage());
+        if (dto.getWhitelist() != null) flag.setWhitelist(dto.getWhitelist());
+        if (dto.getBlacklist() != null) flag.setBlacklist(dto.getBlacklist());
+        if (dto.getStartTime() != null) flag.setStartTime(dto.getStartTime());
+        if (dto.getEndTime() != null) flag.setEndTime(dto.getEndTime());
         flagMapper.updateById(flag);
 
-        audit(flag.getId(), flag.getFlagKey(), "update", oldJson, toJson(flag),
-                dto.getReason(), currentUserId(), "api");
+        audit(
+                flag.getId(),
+                flag.getFlagKey(),
+                "update",
+                oldJson,
+                toJson(flag),
+                dto.getReason(),
+                currentUserId(),
+                "api");
         return toInfoDTO(flag, loadRules(id));
     }
 
@@ -154,11 +156,13 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
 
     @Override
     public List<FeatureFlagInfoDTO> listAll() {
-        List<FeatureFlag> flags = flagMapper.selectList(
-                new LambdaQueryWrapper<FeatureFlag>().orderByAsc(FeatureFlag::getFlagKey));
-        Map<Long, List<FeatureFlagRule>> rulesByFlag = ruleMapper.selectList(
-                new LambdaQueryWrapper<FeatureFlagRule>().orderByAsc(FeatureFlagRule::getScope))
-                .stream().collect(Collectors.groupingBy(FeatureFlagRule::getFlagId));
+        List<FeatureFlag> flags =
+                flagMapper.selectList(new LambdaQueryWrapper<FeatureFlag>().orderByAsc(FeatureFlag::getFlagKey));
+        Map<Long, List<FeatureFlagRule>> rulesByFlag =
+                ruleMapper
+                        .selectList(new LambdaQueryWrapper<FeatureFlagRule>().orderByAsc(FeatureFlagRule::getScope))
+                        .stream()
+                        .collect(Collectors.groupingBy(FeatureFlagRule::getFlagId));
         return flags.stream()
                 .map(f -> toInfoDTO(f, rulesByFlag.getOrDefault(f.getId(), List.of())))
                 .collect(Collectors.toList());
@@ -182,8 +186,7 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
         rule.setBlacklist(dto.getBlacklist());
         ruleMapper.insert(rule);
 
-        auditRule(rule.getId(), flag.getFlagKey(), "rule_create", null, toJson(rule),
-                currentUserId(), "api");
+        auditRule(rule.getId(), flag.getFlagKey(), "rule_create", null, toJson(rule), currentUserId(), "api");
         return toRuleInfoDTO(rule);
     }
 
@@ -195,17 +198,23 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
 
         String oldJson = toJson(rule);
 
-        if (dto.getScope()       != null) rule.setScope(dto.getScope());
-        if (dto.getScopeValue()  != null) rule.setScopeValue(dto.getScopeValue());
-        if (dto.getEnabled()     != null) rule.setEnabled(dto.getEnabled());
-        if (dto.getPercentage()  != null) rule.setPercentage(dto.getPercentage());
-        if (dto.getWhitelist()   != null) rule.setWhitelist(dto.getWhitelist());
-        if (dto.getBlacklist()   != null) rule.setBlacklist(dto.getBlacklist());
+        if (dto.getScope() != null) rule.setScope(dto.getScope());
+        if (dto.getScopeValue() != null) rule.setScopeValue(dto.getScopeValue());
+        if (dto.getEnabled() != null) rule.setEnabled(dto.getEnabled());
+        if (dto.getPercentage() != null) rule.setPercentage(dto.getPercentage());
+        if (dto.getWhitelist() != null) rule.setWhitelist(dto.getWhitelist());
+        if (dto.getBlacklist() != null) rule.setBlacklist(dto.getBlacklist());
         ruleMapper.updateById(rule);
 
         FeatureFlag flag = flagMapper.selectById(rule.getFlagId());
-        auditRule(rule.getId(), flag != null ? flag.getFlagKey() : "unknown", "rule_update",
-                oldJson, toJson(rule), currentUserId(), "api");
+        auditRule(
+                rule.getId(),
+                flag != null ? flag.getFlagKey() : "unknown",
+                "rule_update",
+                oldJson,
+                toJson(rule),
+                currentUserId(),
+                "api");
         return toRuleInfoDTO(rule);
     }
 
@@ -219,18 +228,26 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
         ruleMapper.deleteById(ruleId);
 
         FeatureFlag flag = flagMapper.selectById(rule.getFlagId());
-        auditRule(ruleId, flag != null ? flag.getFlagKey() : "unknown", "rule_delete",
-                oldJson, null, currentUserId(), "api");
+        auditRule(
+                ruleId,
+                flag != null ? flag.getFlagKey() : "unknown",
+                "rule_delete",
+                oldJson,
+                null,
+                currentUserId(),
+                "api");
     }
 
     // ──────────── Internal snapshot (for Python sync, token-protected) ────────────
 
     public List<FeatureFlagSnapshotDTO> getSnapshot() {
-        List<FeatureFlag> flags = flagMapper.selectList(
-                new LambdaQueryWrapper<FeatureFlag>().orderByAsc(FeatureFlag::getFlagKey));
-        Map<Long, List<FeatureFlagRule>> rulesByFlag = ruleMapper.selectList(
-                new LambdaQueryWrapper<FeatureFlagRule>().orderByAsc(FeatureFlagRule::getScope))
-                .stream().collect(Collectors.groupingBy(FeatureFlagRule::getFlagId));
+        List<FeatureFlag> flags =
+                flagMapper.selectList(new LambdaQueryWrapper<FeatureFlag>().orderByAsc(FeatureFlag::getFlagKey));
+        Map<Long, List<FeatureFlagRule>> rulesByFlag =
+                ruleMapper
+                        .selectList(new LambdaQueryWrapper<FeatureFlagRule>().orderByAsc(FeatureFlagRule::getScope))
+                        .stream()
+                        .collect(Collectors.groupingBy(FeatureFlagRule::getFlagId));
         return flags.stream()
                 .map(f -> toSnapshotDTO(f, rulesByFlag.getOrDefault(f.getId(), List.of())))
                 .collect(Collectors.toList());
@@ -242,21 +259,20 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
     public FeatureFlagEvaluateResultDTO evaluate(FeatureFlagEvaluateDTO dto) {
         FeatureFlag flag = selectByKey(dto.getFlagKey());
         if (flag == null)
-            return new FeatureFlagEvaluateResultDTO(dto.getFlagKey(), false, "not_found", null,
-                    "Flag does not exist");
+            return new FeatureFlagEvaluateResultDTO(dto.getFlagKey(), false, "not_found", null, "Flag does not exist");
 
         // 1. Time window check
         LocalDateTime now = LocalDateTime.now();
         if (flag.getStartTime() != null && now.isBefore(flag.getStartTime()))
-            return new FeatureFlagEvaluateResultDTO(dto.getFlagKey(), false, "time_window", null,
-                    "Flag not yet active");
+            return new FeatureFlagEvaluateResultDTO(
+                    dto.getFlagKey(), false, "time_window", null, "Flag not yet active");
         if (flag.getEndTime() != null && now.isAfter(flag.getEndTime()))
-            return new FeatureFlagEvaluateResultDTO(dto.getFlagKey(), false, "time_window", null,
-                    "Flag expired");
+            return new FeatureFlagEvaluateResultDTO(dto.getFlagKey(), false, "time_window", null, "Flag expired");
 
         // 2. Load rules, sort by priority descending
         List<FeatureFlagRule> rules = loadRules(flag.getId()).stream()
-                .sorted(Comparator.comparingInt((FeatureFlagRule r) -> scopePriority(r.getScope())).reversed())
+                .sorted(Comparator.comparingInt((FeatureFlagRule r) -> scopePriority(r.getScope()))
+                        .reversed())
                 .collect(Collectors.toList());
 
         // 3. Try each rule in priority order
@@ -264,14 +280,14 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
             if (!scopeMatches(rule, dto)) continue;
 
             Boolean effective = resolveEnabled(flag, rule, dto.getUserId());
-            String reason = String.format("Rule [%s:%s] matched → enabled=%s",
-                    rule.getScope(), rule.getScopeValue(), effective);
+            String reason = String.format(
+                    "Rule [%s:%s] matched → enabled=%s", rule.getScope(), rule.getScopeValue(), effective);
             return new FeatureFlagEvaluateResultDTO(dto.getFlagKey(), effective, rule.getScope(), rule.getId(), reason);
         }
 
         // 4. No rule matched → global default
-        return new FeatureFlagEvaluateResultDTO(dto.getFlagKey(), flag.getEnabled(), "global", null,
-                "No matching rule; using global default");
+        return new FeatureFlagEvaluateResultDTO(
+                dto.getFlagKey(), flag.getEnabled(), "global", null, "No matching rule; using global default");
     }
 
     @Override
@@ -288,26 +304,28 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
     // ──────────── Helpers ────────────
 
     private FeatureFlag selectByKey(String flagKey) {
-        return flagMapper.selectOne(
-                new LambdaQueryWrapper<FeatureFlag>()
-                        .eq(FeatureFlag::getFlagKey, flagKey)
-                        .last("LIMIT 1"));
+        return flagMapper.selectOne(new LambdaQueryWrapper<FeatureFlag>()
+                .eq(FeatureFlag::getFlagKey, flagKey)
+                .last("LIMIT 1"));
     }
 
     private List<FeatureFlagRule> loadRules(Long flagId) {
-        return ruleMapper.selectList(
-                new LambdaQueryWrapper<FeatureFlagRule>()
-                        .eq(FeatureFlagRule::getFlagId, flagId)
-                        .orderByAsc(FeatureFlagRule::getScope));
+        return ruleMapper.selectList(new LambdaQueryWrapper<FeatureFlagRule>()
+                .eq(FeatureFlagRule::getFlagId, flagId)
+                .orderByAsc(FeatureFlagRule::getScope));
     }
 
     private boolean scopeMatches(FeatureFlagRule rule, FeatureFlagEvaluateDTO ctx) {
         return switch (rule.getScope()) {
-            case "global"      -> true;
-            case "tenant"      -> ctx.getTenantId()    != null && String.valueOf(ctx.getTenantId()).equals(rule.getScopeValue());
-            case "user"        -> ctx.getUserId()      != null && String.valueOf(ctx.getUserId()).equals(rule.getScopeValue());
-            case "kb"          -> ctx.getKnowledgeBaseId() != null && String.valueOf(ctx.getKnowledgeBaseId()).equals(rule.getScopeValue());
-            case "environment" -> ctx.getEnvironment() != null && ctx.getEnvironment().equalsIgnoreCase(rule.getScopeValue());
+            case "global" -> true;
+            case "tenant" -> ctx.getTenantId() != null
+                    && String.valueOf(ctx.getTenantId()).equals(rule.getScopeValue());
+            case "user" -> ctx.getUserId() != null
+                    && String.valueOf(ctx.getUserId()).equals(rule.getScopeValue());
+            case "kb" -> ctx.getKnowledgeBaseId() != null
+                    && String.valueOf(ctx.getKnowledgeBaseId()).equals(rule.getScopeValue());
+            case "environment" -> ctx.getEnvironment() != null
+                    && ctx.getEnvironment().equalsIgnoreCase(rule.getScopeValue());
             default -> false;
         };
     }
@@ -328,13 +346,12 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
         Boolean base = rule.getEnabled() != null ? rule.getEnabled() : flag.getEnabled();
 
         // Resolve effective overrides (rule wins over flag)
-        String bl  = rule.getBlacklist()  != null ? rule.getBlacklist()  : flag.getBlacklist();
-        String wl  = rule.getWhitelist()  != null ? rule.getWhitelist()  : flag.getWhitelist();
+        String bl = rule.getBlacklist() != null ? rule.getBlacklist() : flag.getBlacklist();
+        String wl = rule.getWhitelist() != null ? rule.getWhitelist() : flag.getWhitelist();
         Integer pct = rule.getPercentage() != null ? rule.getPercentage() : flag.getPercentage();
 
         // 1. Blacklist (highest priority — always deny)
-        if (bl != null && userId != null && jsonArrayContains(bl, String.valueOf(userId)))
-            return false;
+        if (bl != null && userId != null && jsonArrayContains(bl, String.valueOf(userId))) return false;
 
         // 2. Whitelist (if present, user must be in it)
         if (wl != null && userId != null) {
@@ -364,11 +381,11 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
     private static int scopePriority(String scope) {
         return switch (scope) {
             case "environment" -> SCOPE_PRIORITY_ENVIRONMENT;
-            case "kb"          -> SCOPE_PRIORITY_KB;
-            case "user"        -> SCOPE_PRIORITY_USER;
-            case "tenant"      -> SCOPE_PRIORITY_TENANT;
-            case "global"      -> SCOPE_PRIORITY_GLOBAL;
-            default            -> 0;
+            case "kb" -> SCOPE_PRIORITY_KB;
+            case "user" -> SCOPE_PRIORITY_USER;
+            case "tenant" -> SCOPE_PRIORITY_TENANT;
+            case "global" -> SCOPE_PRIORITY_GLOBAL;
+            default -> 0;
         };
     }
 
@@ -388,9 +405,15 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
 
     // ──────────── Audit ────────────
 
-    private void audit(Long flagId, String flagKey, String action,
-                       String oldVal, String newVal, String reason,
-                       Long operatorId, String source) {
+    private void audit(
+            Long flagId,
+            String flagKey,
+            String action,
+            String oldVal,
+            String newVal,
+            String reason,
+            Long operatorId,
+            String source) {
         FeatureFlagAuditLog logEntry = new FeatureFlagAuditLog();
         logEntry.setFlagId(flagId);
         logEntry.setFlagKey(flagKey);
@@ -401,12 +424,16 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
         logEntry.setOperatorId(operatorId);
         logEntry.setCreatedAt(LocalDateTime.now());
         auditLogMapper.insert(logEntry);
-        log.info("Feature flag audit: action={}, flagKey={}, operatorId={}, source={}",
-                action, flagKey, operatorId, source);
+        log.info(
+                "Feature flag audit: action={}, flagKey={}, operatorId={}, source={}",
+                action,
+                flagKey,
+                operatorId,
+                source);
     }
 
-    private void auditRule(Long ruleId, String flagKey, String action,
-                           String oldVal, String newVal, Long operatorId, String source) {
+    private void auditRule(
+            Long ruleId, String flagKey, String action, String oldVal, String newVal, Long operatorId, String source) {
         // Store rule audit in the same table, using the flagKey for traceability
         FeatureFlagAuditLog logEntry = new FeatureFlagAuditLog();
         logEntry.setFlagId(ruleId); // rule ID stored in flagId column for rule-level audits
@@ -417,13 +444,21 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
         logEntry.setOperatorId(operatorId);
         logEntry.setCreatedAt(LocalDateTime.now());
         auditLogMapper.insert(logEntry);
-        log.info("Feature flag rule audit: action={}, flagKey={}, ruleId={}, operatorId={}, source={}",
-                action, flagKey, ruleId, operatorId, source);
+        log.info(
+                "Feature flag rule audit: action={}, flagKey={}, ruleId={}, operatorId={}, source={}",
+                action,
+                flagKey,
+                ruleId,
+                operatorId,
+                source);
     }
 
     private String toJson(Object obj) {
-        try { return objectMapper.writeValueAsString(obj); }
-        catch (Exception e) { return "{}"; }
+        try {
+            return objectMapper.writeValueAsString(obj);
+        } catch (Exception e) {
+            return "{}";
+        }
     }
 
     private static boolean isBlank(String s) {

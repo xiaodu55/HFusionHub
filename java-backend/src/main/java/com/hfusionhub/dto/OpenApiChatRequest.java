@@ -1,10 +1,9 @@
 package com.hfusionhub.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.Data;
-
 import java.util.List;
 import java.util.Map;
+import lombok.Data;
 
 /**
  * 开放 API 对话请求（/openapi/chat）

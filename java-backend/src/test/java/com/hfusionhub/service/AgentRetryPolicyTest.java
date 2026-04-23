@@ -1,12 +1,11 @@
 package com.hfusionhub.service;
 
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.time.LocalDateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
-
-import java.time.LocalDateTime;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * AgentRetryPolicy 单元测试 — 退避公式、可重试码判断、死信边界
@@ -68,7 +67,8 @@ class AgentRetryPolicyTest {
         LocalDateTime scheduled = policy.computeNextScheduledAt(2);
         assertTrue(scheduled.isAfter(LocalDateTime.now()));
         // should be ~30s in future
-        long diffSeconds = java.time.Duration.between(LocalDateTime.now(), scheduled).getSeconds();
+        long diffSeconds =
+                java.time.Duration.between(LocalDateTime.now(), scheduled).getSeconds();
         assertTrue(diffSeconds >= 25 && diffSeconds <= 35, "Expected ~30s, got " + diffSeconds);
     }
 

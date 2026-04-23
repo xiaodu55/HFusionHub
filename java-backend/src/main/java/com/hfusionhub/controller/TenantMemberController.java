@@ -1,6 +1,5 @@
 package com.hfusionhub.controller;
 
-import cn.dev33.satoken.annotation.SaCheckRole;
 import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
@@ -10,12 +9,11 @@ import com.hfusionhub.entity.TenantMember;
 import com.hfusionhub.service.TenantService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.*;
-
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
 
 /**
  * 租户成员管理控制器
@@ -63,36 +61,31 @@ public class TenantMemberController {
 
     @PostMapping
     @Operation(summary = "添加租户成员")
-    public R<TenantMember> addMember(@PathVariable Long tenantId,
-                                     @RequestBody Map<String, Object> body) {
+    public R<TenantMember> addMember(@PathVariable Long tenantId, @RequestBody Map<String, Object> body) {
         requireTenantAdmin(tenantId);
         Long userId = Long.valueOf(body.get("userId").toString());
         String role = (String) body.getOrDefault("role", "member");
         if (!ALLOWED_ROLES.contains(role)) {
-            throw new BusinessException(StatusCode.BAD_REQUEST,
-                    "无效的角色: " + role + "，允许值: " + ALLOWED_ROLES);
+            throw new BusinessException(StatusCode.BAD_REQUEST, "无效的角色: " + role + "，允许值: " + ALLOWED_ROLES);
         }
         return R.ok(tenantService.addMember(tenantId, userId, role));
     }
 
     @PutMapping("/{userId}")
     @Operation(summary = "更新成员角色")
-    public R<TenantMember> updateRole(@PathVariable Long tenantId,
-                                      @PathVariable Long userId,
-                                      @RequestBody Map<String, String> body) {
+    public R<TenantMember> updateRole(
+            @PathVariable Long tenantId, @PathVariable Long userId, @RequestBody Map<String, String> body) {
         requireTenantAdmin(tenantId);
         String role = body.get("role");
         if (role == null || !ALLOWED_ROLES.contains(role)) {
-            throw new BusinessException(StatusCode.BAD_REQUEST,
-                    "无效的角色: " + role + "，允许值: " + ALLOWED_ROLES);
+            throw new BusinessException(StatusCode.BAD_REQUEST, "无效的角色: " + role + "，允许值: " + ALLOWED_ROLES);
         }
         return R.ok(tenantService.updateMemberRole(tenantId, userId, role));
     }
 
     @DeleteMapping("/{userId}")
     @Operation(summary = "移除成员")
-    public R<Void> removeMember(@PathVariable Long tenantId,
-                                @PathVariable Long userId) {
+    public R<Void> removeMember(@PathVariable Long tenantId, @PathVariable Long userId) {
         requireTenantAdmin(tenantId);
         tenantService.removeMember(tenantId, userId);
         return R.ok();

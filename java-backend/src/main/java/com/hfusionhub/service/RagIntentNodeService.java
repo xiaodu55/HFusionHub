@@ -5,7 +5,6 @@ import com.hfusionhub.dto.RagIntentNodeCreateDTO;
 import com.hfusionhub.dto.RagIntentNodeInfoDTO;
 import com.hfusionhub.dto.RagIntentNodeQueryDTO;
 import com.hfusionhub.dto.RagIntentNodeUpdateDTO;
-
 import java.util.List;
 import java.util.Map;
 
@@ -24,4 +23,13 @@ public interface RagIntentNodeService {
     List<RagIntentNodeInfoDTO> tree(Integer enabled);
 
     List<Map<String, Object>> routeCandidates();
+
+    /**
+     * 显式指定用户的路由候选（供异步线程使用：异步线程无 web 上下文，
+     * 不能依赖 Sa-Token/StpUtil 取当前用户）
+     *
+     * @param userId 当前用户 ID
+     * @return 路由候选
+     */
+    List<Map<String, Object>> routeCandidates(Long userId);
 }

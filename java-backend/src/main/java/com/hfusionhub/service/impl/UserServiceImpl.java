@@ -10,16 +10,21 @@ import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.limiter.LoginRateLimiter;
 import com.hfusionhub.common.utils.IpUtils;
 import com.hfusionhub.common.utils.JwtUtils;
+import com.hfusionhub.dto.PasswordChangeDTO;
 import com.hfusionhub.dto.UserInfoDTO;
 import com.hfusionhub.dto.UserLoginDTO;
 import com.hfusionhub.dto.UserRegisterDTO;
 import com.hfusionhub.dto.UserSearchDTO;
 import com.hfusionhub.dto.UserUpdateDTO;
-import com.hfusionhub.entity.User;
 import com.hfusionhub.entity.TenantMember;
+import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.TenantMemberMapper;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.UserService;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,11 +33,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
-
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Locale;
-import java.util.Set;
 
 /**
  * 用户服务实现
@@ -48,14 +48,10 @@ public class UserServiceImpl implements UserService {
             CommonConstants.ROLE_PENDING,
             CommonConstants.ROLE_USER,
             CommonConstants.ROLE_BUILDER,
-            CommonConstants.ROLE_ADMIN
-    );
+            CommonConstants.ROLE_ADMIN);
 
-    private static final Set<String> ASSIGNABLE_PLATFORM_ROLES = Set.of(
-            CommonConstants.ROLE_PENDING,
-            CommonConstants.ROLE_USER,
-            CommonConstants.ROLE_BUILDER
-    );
+    private static final Set<String> ASSIGNABLE_PLATFORM_ROLES =
+            Set.of(CommonConstants.ROLE_PENDING, CommonConstants.ROLE_USER, CommonConstants.ROLE_BUILDER);
 
     private final UserMapper userMapper;
     private final TenantMemberMapper tenantMemberMapper;
@@ -75,6 +71,9 @@ public class UserServiceImpl implements UserService {
     public String login(UserLoginDTO loginDTO) {
         String ip = getClientIp();
         String username = loginDTO.getUsername();
+
+        // 登录防爆破：IP 已达失败阈值（5 次/15 分钟）则直接拒绝（HTTP 429）
+        rateLimiter.checkBlocked(ip);
 
         // 根据用户名查询用户
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
@@ -214,6 +213,30 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
+     * 修改当前用户密码
+     *
+     * @param dto 旧密码 + 新密码
+     */
+    @Override
+    public void changePassword(PasswordChangeDTO dto) {
+        Long userId = jwtUtils.getCurrentUserId();
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(StatusCode.NOT_FOUND, "用户不存在");
+        }
+        if (user.getPassword() == null || !BCrypt.checkpw(dto.getOldPassword(), user.getPassword())) {
+            throw new BusinessException(StatusCode.BAD_REQUEST, "当前密码不正确");
+        }
+        if (dto.getOldPassword().equals(dto.getNewPassword())) {
+            throw new BusinessException(StatusCode.BAD_REQUEST, "新密码不能与当前密码相同");
+        }
+        User update = new User();
+        update.setId(userId);
+        update.setPassword(BCrypt.hashpw(dto.getNewPassword()));
+        userMapper.updateById(update);
+    }
+
+    /**
      * 更新用户信息
      *
      * @param updateDTO 更新请求
@@ -234,8 +257,7 @@ public class UserServiceImpl implements UserService {
         if (updateDTO.getEmail() != null) {
             // 检查邮箱是否已被其他用户使用
             LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(User::getEmail, updateDTO.getEmail())
-                    .ne(User::getId, userId);
+            wrapper.eq(User::getEmail, updateDTO.getEmail()).ne(User::getId, userId);
             Long count = userMapper.selectCount(wrapper);
             if (count > 0) {
                 throw new BusinessException(StatusCode.USER_EXISTS, "邮箱已被其他用户使用");
@@ -284,10 +306,11 @@ public class UserServiceImpl implements UserService {
 
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
         if (normalizedKeyword != null) {
-            wrapper.and(query -> query
-                    .like(User::getUsername, normalizedKeyword)
-                    .or().like(User::getNickname, normalizedKeyword)
-                    .or().like(User::getEmail, normalizedKeyword));
+            wrapper.and(query -> query.like(User::getUsername, normalizedKeyword)
+                    .or()
+                    .like(User::getNickname, normalizedKeyword)
+                    .or()
+                    .like(User::getEmail, normalizedKeyword));
         }
         if (normalizedRole != null) {
             if (!ALLOWED_PLATFORM_ROLES.contains(normalizedRole)) {
@@ -298,9 +321,8 @@ public class UserServiceImpl implements UserService {
         wrapper.orderByDesc(User::getCreatedAt);
 
         Page<User> result = userMapper.selectPage(new Page<>(safePage, safePageSize), wrapper);
-        List<UserInfoDTO> records = result.getRecords().stream()
-                .map(this::convertToUserInfoDTO)
-                .toList();
+        List<UserInfoDTO> records =
+                result.getRecords().stream().map(this::convertToUserInfoDTO).toList();
         return PageResult.of(result.getCurrent(), result.getSize(), result.getTotal(), records);
     }
 
@@ -311,9 +333,9 @@ public class UserServiceImpl implements UserService {
             return List.of();
         }
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
-        wrapper.and(query -> query
-                        .like(User::getUsername, normalizedKeyword)
-                        .or().like(User::getNickname, normalizedKeyword))
+        wrapper.and(query -> query.like(User::getUsername, normalizedKeyword)
+                        .or()
+                        .like(User::getNickname, normalizedKeyword))
                 .orderByDesc(User::getCreatedAt)
                 .last("LIMIT 10");
         return userMapper.selectList(wrapper).stream()
@@ -338,8 +360,7 @@ public class UserServiceImpl implements UserService {
         if (user == null) {
             throw new BusinessException(StatusCode.NOT_FOUND, "用户不存在");
         }
-        if (CommonConstants.ROLE_ADMIN.equals(user.getRole())
-                || Boolean.TRUE.equals(user.getPlatformAdmin())) {
+        if (CommonConstants.ROLE_ADMIN.equals(user.getRole()) || Boolean.TRUE.equals(user.getPlatformAdmin())) {
             throw new BusinessException(StatusCode.BAD_REQUEST, "唯一超级管理员账号不能被修改");
         }
 
@@ -372,8 +393,7 @@ public class UserServiceImpl implements UserService {
      */
     private String getClientIp() {
         try {
-            ServletRequestAttributes attrs =
-                    (ServletRequestAttributes) RequestContextHolder.currentRequestAttributes();
+            ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.currentRequestAttributes();
             return IpUtils.getClientIp(attrs.getRequest(), trustedProxyHeaders);
         } catch (IllegalStateException e) {
             return "unknown";

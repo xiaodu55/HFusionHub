@@ -13,17 +13,16 @@ import com.hfusionhub.mapper.AppApiKeyMapper;
 import com.hfusionhub.mapper.AppMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.service.AppService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
-
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.List;
 import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 /**
  * 应用服务实现
@@ -68,9 +67,8 @@ public class AppServiceImpl implements AppService {
     @Override
     public List<AppInfoDTO> listMine() {
         Long userId = JwtUtils.getCurrentUserId();
-        List<App> apps = appMapper.selectList(new LambdaQueryWrapper<App>()
-                .eq(App::getUserId, userId)
-                .orderByDesc(App::getCreatedAt));
+        List<App> apps = appMapper.selectList(
+                new LambdaQueryWrapper<App>().eq(App::getUserId, userId).orderByDesc(App::getCreatedAt));
         return apps.stream().map(this::toInfoDTO).collect(Collectors.toList());
     }
 
@@ -148,10 +146,13 @@ public class AppServiceImpl implements AppService {
     @Override
     public List<AppApiKeyInfoDTO> listApiKeys(Long appId) {
         requireOwned(appId);
-        return apiKeyMapper.selectList(new LambdaQueryWrapper<AppApiKey>()
+        return apiKeyMapper
+                .selectList(new LambdaQueryWrapper<AppApiKey>()
                         .eq(AppApiKey::getAppId, appId)
                         .orderByDesc(AppApiKey::getCreatedAt))
-                .stream().map(this::toKeyDTO).collect(Collectors.toList());
+                .stream()
+                .map(this::toKeyDTO)
+                .collect(Collectors.toList());
     }
 
     @Override

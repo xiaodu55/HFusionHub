@@ -1,10 +1,8 @@
 package com.hfusionhub.service;
 
-import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.entity.AgentEvaluationCase;
 import com.hfusionhub.entity.AgentEvaluationDataset;
 import com.hfusionhub.entity.AgentEvaluationRun;
-
 import java.util.List;
 import java.util.Map;
 
@@ -18,14 +16,19 @@ public interface AgentEvaluationService {
     // ── 评测集 CRUD ──
 
     AgentEvaluationDataset createDataset(AgentEvaluationDataset dataset);
+
     AgentEvaluationDataset getDataset(Long userId, Long datasetId);
+
     List<AgentEvaluationDataset> listDatasets(Long userId, Long kbId, int page, int pageSize);
+
     void deleteDataset(Long userId, Long datasetId);
 
     // ── 用例管理 ──
 
     AgentEvaluationCase addCase(Long userId, AgentEvaluationCase evalCase);
+
     List<AgentEvaluationCase> getCases(Long userId, Long datasetId);
+
     void deleteCase(Long userId, Long caseId);
 
     // ── 评测执行 ──

@@ -243,6 +243,8 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: maven
+      - name: Check code style (spotless)
+        run: mvn --batch-mode spotless:check
       - name: Run unit tests (H2, no external services needed)
         run: mvn --batch-mode test
       - name: Validate Flyway migrations against MySQL

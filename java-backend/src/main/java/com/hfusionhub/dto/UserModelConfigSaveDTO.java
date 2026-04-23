@@ -29,4 +29,3 @@ public class UserModelConfigSaveDTO {
 
     private Boolean enabled = true;
 }
-

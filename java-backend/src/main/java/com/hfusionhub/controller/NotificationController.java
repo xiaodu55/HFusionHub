@@ -6,13 +6,12 @@ import com.hfusionhub.common.result.R;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.entity.SystemNotice;
 import com.hfusionhub.mapper.SystemNoticeMapper;
-import lombok.RequiredArgsConstructor;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.web.bind.annotation.*;
-
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.bind.annotation.*;
 
 /**
  * Notification endpoints — user notifications and unread count.
@@ -37,7 +36,8 @@ public class NotificationController {
     public R<List<SystemNotice>> listMine() {
         Long userId = JwtUtils.getCurrentUserId();
         // Select notices that don't have a read recipient entry for this user yet
-        String sql = """
+        String sql =
+                """
             SELECT sn.* FROM system_notice sn
             WHERE (sn.scope = 'all' OR sn.scope = 'admin')
             AND (sn.expires_at IS NULL OR sn.expires_at > NOW())
@@ -60,24 +60,30 @@ public class NotificationController {
     @GetMapping("/unread-count")
     public R<Map<String, Integer>> unreadCount() {
         Long userId = JwtUtils.getCurrentUserId();
-        int count = jdbcTemplate.queryForObject("""
+        int count = jdbcTemplate.queryForObject(
+                """
             SELECT COUNT(*) FROM system_notice sn
             WHERE (sn.scope = 'all' OR sn.scope = 'admin')
             AND (sn.expires_at IS NULL OR sn.expires_at > NOW())
             AND sn.id NOT IN (
                 SELECT nr.notice_id FROM notice_recipient nr WHERE nr.user_id = ?
             )
-            """, Integer.class, userId);
+            """,
+                Integer.class,
+                userId);
         return R.ok(Map.of("count", count));
     }
 
     @PostMapping("/{noticeId}/read")
     public R<Void> markRead(@PathVariable Long noticeId) {
         Long userId = JwtUtils.getCurrentUserId();
-        jdbcTemplate.update("""
+        jdbcTemplate.update(
+                """
             INSERT IGNORE INTO notice_recipient (notice_id, user_id, is_read, read_at)
             VALUES (?, ?, 1, NOW())
-            """, noticeId, userId);
+            """,
+                noticeId,
+                userId);
         return R.ok();
     }
 
@@ -87,9 +93,7 @@ public class NotificationController {
     @SaCheckRole("admin")
     public R<List<SystemNotice>> adminList() {
         return R.ok(noticeMapper.selectList(
-            new LambdaQueryWrapper<SystemNotice>()
-                .orderByDesc(SystemNotice::getCreatedAt)
-        ));
+                new LambdaQueryWrapper<SystemNotice>().orderByDesc(SystemNotice::getCreatedAt)));
     }
 
     @PostMapping("/admin")
@@ -114,8 +118,8 @@ public class NotificationController {
             return R.fail("过期时间不能早于当前时间");
         }
         noticeMapper.insert(notice);
-        auditLogService.record("notice.create", "system_notice", String.valueOf(notice.getId()),
-                "发布公告: " + notice.getTitle());
+        auditLogService.record(
+                "notice.create", "system_notice", String.valueOf(notice.getId()), "发布公告: " + notice.getTitle());
         return R.ok("公告已发布", notice);
     }
 

@@ -16,14 +16,13 @@ import com.hfusionhub.service.AgentEvaluationService;
 import com.hfusionhub.service.AgentMetricsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
-
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
 
 /**
  * Agent 可观测性统一控制器 — 整合指标、告警 API
@@ -79,8 +78,7 @@ public class AgentObservabilityController {
     @Operation(summary = "聚合统计(按用户/知识库/时间窗口)")
     @GetMapping("/metrics/stats")
     public R<AgentAggregatedStatsDTO> getAggregatedStats(
-            @RequestParam(required = false) Long kbId,
-            @RequestParam(defaultValue = "7") int days) {
+            @RequestParam(required = false) Long kbId, @RequestParam(defaultValue = "7") int days) {
         Long userId = JwtUtils.getCurrentUserId();
         return R.ok(metricsService.getAggregatedStats(userId, kbId, days));
     }
@@ -111,8 +109,7 @@ public class AgentObservabilityController {
 
     @Operation(summary = "更新告警规则")
     @PutMapping("/alerts/rules/{ruleId}")
-    public R<AgentAlertRule> updateAlertRule(@PathVariable Long ruleId,
-                                              @RequestBody AgentAlertRule rule) {
+    public R<AgentAlertRule> updateAlertRule(@PathVariable Long ruleId, @RequestBody AgentAlertRule rule) {
         rule.setId(ruleId);
         return R.ok(alertService.updateRule(JwtUtils.getCurrentUserId(), rule));
     }
@@ -131,8 +128,7 @@ public class AgentObservabilityController {
     @Operation(summary = "查询告警事件列表")
     @GetMapping("/alerts/events")
     public R<PageResult<AgentAlertEvent>> listAlertEvents(
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int pageSize) {
+            @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int pageSize) {
         Long userId = JwtUtils.getCurrentUserId();
         return R.ok(alertService.listAlertEvents(userId, page, pageSize));
     }
@@ -196,8 +192,7 @@ public class AgentObservabilityController {
 
     @Operation(summary = "添加评测用例")
     @PostMapping("/evaluation/datasets/{datasetId}/cases")
-    public R<AgentEvaluationCase> addCase(@PathVariable Long datasetId,
-                                           @RequestBody AgentEvaluationCase evalCase) {
+    public R<AgentEvaluationCase> addCase(@PathVariable Long datasetId, @RequestBody AgentEvaluationCase evalCase) {
         evalCase.setDatasetId(datasetId);
         return R.ok(evaluationService.addCase(JwtUtils.getCurrentUserId(), evalCase));
     }

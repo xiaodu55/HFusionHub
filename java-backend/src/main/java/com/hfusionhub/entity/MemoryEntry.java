@@ -1,9 +1,8 @@
 package com.hfusionhub.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
-import lombok.Data;
 import java.time.LocalDateTime;
-import java.util.List;
+import lombok.Data;
 
 @Data
 @TableName("memory_entry")

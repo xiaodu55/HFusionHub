@@ -15,15 +15,14 @@ import com.hfusionhub.mapper.RagAnswerFeedbackMapper;
 import com.hfusionhub.service.AgentEvaluationService;
 import com.hfusionhub.service.RagAnswerFeedbackService;
 import com.hfusionhub.tenant.TenantContext;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
@@ -48,10 +47,9 @@ public class RagAnswerFeedbackServiceImpl implements RagAnswerFeedbackService {
             throw new BusinessException("无权评价该回答");
         }
 
-        RagAnswerFeedback feedback = feedbackMapper.selectOne(
-                new LambdaQueryWrapper<RagAnswerFeedback>()
-                        .eq(RagAnswerFeedback::getUserId, userId)
-                        .eq(RagAnswerFeedback::getMessageId, message.getId()));
+        RagAnswerFeedback feedback = feedbackMapper.selectOne(new LambdaQueryWrapper<RagAnswerFeedback>()
+                .eq(RagAnswerFeedback::getUserId, userId)
+                .eq(RagAnswerFeedback::getMessageId, message.getId()));
         boolean created = feedback == null;
         if (created) {
             feedback = new RagAnswerFeedback();
@@ -95,20 +93,20 @@ public class RagAnswerFeedbackServiceImpl implements RagAnswerFeedbackService {
 
     private AgentEvaluationCase promoteToEvaluationCase(
             RagAnswerFeedback feedback, Message assistant, Conversation conversation, Long userId) {
-        AgentEvaluationDataset dataset = evaluationService.listDatasets(userId, feedback.getKnowledgeBaseId(), 1, 100)
-                .stream()
-                .filter(item -> REGRESSION_DATASET_NAME.equals(item.getName()))
-                .filter(item -> Objects.equals(item.getKnowledgeBaseId(), feedback.getKnowledgeBaseId()))
-                .findFirst()
-                .orElseGet(() -> {
-                    AgentEvaluationDataset created = new AgentEvaluationDataset();
-                    created.setName(REGRESSION_DATASET_NAME);
-                    created.setDescription("由用户差评和期望答案自动沉淀，用于持续回归验证。");
-                    created.setKnowledgeBaseId(feedback.getKnowledgeBaseId());
-                    created.setUserId(userId);
-                    created.setDimensions(List.of("answer_correctness", "citation_consistency"));
-                    return evaluationService.createDataset(created);
-                });
+        AgentEvaluationDataset dataset =
+                evaluationService.listDatasets(userId, feedback.getKnowledgeBaseId(), 1, 100).stream()
+                        .filter(item -> REGRESSION_DATASET_NAME.equals(item.getName()))
+                        .filter(item -> Objects.equals(item.getKnowledgeBaseId(), feedback.getKnowledgeBaseId()))
+                        .findFirst()
+                        .orElseGet(() -> {
+                            AgentEvaluationDataset created = new AgentEvaluationDataset();
+                            created.setName(REGRESSION_DATASET_NAME);
+                            created.setDescription("由用户差评和期望答案自动沉淀，用于持续回归验证。");
+                            created.setKnowledgeBaseId(feedback.getKnowledgeBaseId());
+                            created.setUserId(userId);
+                            created.setDimensions(List.of("answer_correctness", "citation_consistency"));
+                            return evaluationService.createDataset(created);
+                        });
 
         Message queryMessage = messageMapper.selectOne(new LambdaQueryWrapper<Message>()
                 .eq(Message::getConversationId, conversation.getId())
@@ -122,10 +120,14 @@ public class RagAnswerFeedbackServiceImpl implements RagAnswerFeedbackService {
         evalCase.setExpectedAnswer(feedback.getExpectedAnswer());
         evalCase.setExpectedSources(extractDocumentIds(assistant));
         evalCase.setMetadata(Map.of(
-                "origin", "answer_feedback",
-                "feedback_id", feedback.getId(),
-                "message_id", assistant.getId(),
-                "reason", feedback.getReason() == null ? "" : feedback.getReason()));
+                "origin",
+                "answer_feedback",
+                "feedback_id",
+                feedback.getId(),
+                "message_id",
+                assistant.getId(),
+                "reason",
+                feedback.getReason() == null ? "" : feedback.getReason()));
         return evaluationService.addCase(userId, evalCase);
     }
 

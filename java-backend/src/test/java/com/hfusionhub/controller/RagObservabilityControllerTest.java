@@ -1,5 +1,14 @@
 package com.hfusionhub.controller;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.context.SaTokenContext;
 import cn.dev33.satoken.context.model.SaRequest;
@@ -11,6 +20,9 @@ import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,19 +32,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
-
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link RagObservabilityController} using manual mocks.
@@ -91,17 +90,20 @@ class RagObservabilityControllerTest {
         kb.setStatus(0);
         when(knowledgeBaseMapper.selectById(7L)).thenReturn(kb);
 
-        when(restTemplate.exchange(
-                anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
                 .thenReturn(new ResponseEntity<>(Map.of("traces", List.of()), HttpStatus.OK));
 
         R<Map> response = controller.listTraces(25, 5, 7L, true, "RAG", "vector");
 
         assertEquals(200, response.getCode());
         assertTrue(((List<?>) response.getData().get("traces")).isEmpty());
-        verify(restTemplate).exchange(
-                eq("http://ai-service:9000/api/rag/traces?limit=25&offset=5&knowledge_base_id=7&error_only=true&query=RAG&source=vector"),
-                eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class));
+        verify(restTemplate)
+                .exchange(
+                        eq(
+                                "http://ai-service:9000/api/rag/traces?limit=25&offset=5&knowledge_base_id=7&error_only=true&query=RAG&source=vector"),
+                        eq(HttpMethod.GET),
+                        any(HttpEntity.class),
+                        eq(Map.class));
     }
 
     @Test
@@ -124,15 +126,18 @@ class RagObservabilityControllerTest {
     @Test
     void judgeAnswerForwardsToAiServiceAndReturnsScores() {
         when(restTemplate.postForObject(
-                eq("http://ai-service:9000/api/rag/evaluate/answer-judge"),
-                any(HttpEntity.class),
-                eq(Map.class)))
+                        eq("http://ai-service:9000/api/rag/evaluate/answer-judge"),
+                        any(HttpEntity.class),
+                        eq(Map.class)))
                 .thenReturn(Map.of(
-                        "status", "completed",
-                        "overall_score", 0.85,
-                        "verdict", "good",
-                        "scores", Map.of("accuracy", 0.8)
-                ));
+                        "status",
+                        "completed",
+                        "overall_score",
+                        0.85,
+                        "verdict",
+                        "good",
+                        "scores",
+                        Map.of("accuracy", 0.8)));
 
         Map<String, Object> request = new HashMap<>();
         request.put("query", "什么是虚拟线程？");
@@ -143,10 +148,11 @@ class RagObservabilityControllerTest {
 
         assertEquals(200, response.getCode());
         assertEquals("good", response.getData().get("verdict"));
-        verify(restTemplate).postForObject(
-                eq("http://ai-service:9000/api/rag/evaluate/answer-judge"),
-                any(HttpEntity.class),
-                eq(Map.class));
+        verify(restTemplate)
+                .postForObject(
+                        eq("http://ai-service:9000/api/rag/evaluate/answer-judge"),
+                        any(HttpEntity.class),
+                        eq(Map.class));
     }
 
     @Test
@@ -183,17 +189,38 @@ class RagObservabilityControllerTest {
         @Override
         public SaStorage getStorage() {
             return new SaStorage() {
-                @Override public Object getSource() { return storage; }
-                @Override public Object get(String key) { return storage.get(key); }
-                @Override public SaStorage set(String key, Object value) { storage.put(key, value); return this; }
-                @Override public SaStorage delete(String key) { storage.remove(key); return this; }
+                @Override
+                public Object getSource() {
+                    return storage;
+                }
+
+                @Override
+                public Object get(String key) {
+                    return storage.get(key);
+                }
+
+                @Override
+                public SaStorage set(String key, Object value) {
+                    storage.put(key, value);
+                    return this;
+                }
+
+                @Override
+                public SaStorage delete(String key) {
+                    storage.remove(key);
+                    return this;
+                }
             };
         }
 
         @Override
-        public boolean matchPath(String pattern, String path) { return true; }
+        public boolean matchPath(String pattern, String path) {
+            return true;
+        }
 
         @Override
-        public boolean isValid() { return true; }
+        public boolean isValid() {
+            return true;
+        }
     }
 }

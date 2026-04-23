@@ -113,5 +113,4 @@ public interface DocumentService {
      * @param model 嵌入模型（可选）
      */
     void parseDocument(Long id, String model);
-
 }

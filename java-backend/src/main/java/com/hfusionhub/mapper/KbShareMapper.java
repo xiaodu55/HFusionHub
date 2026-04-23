@@ -5,5 +5,4 @@ import com.hfusionhub.entity.KbShare;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
-public interface KbShareMapper extends BaseMapper<KbShare> {
-}
+public interface KbShareMapper extends BaseMapper<KbShare> {}

@@ -5,9 +5,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { User } from 'lucide-vue-next'
+import { User, KeyRound } from 'lucide-vue-next'
+import { changePassword } from '@/api/user'
+import { useToast } from '@/composables/useToast'
 
 const userStore = useUserStore()
+const toast = useToast()
 
 const form = ref({
   nickname: '',
@@ -57,6 +60,39 @@ const handleUpdate = async () => {
     errorMessage.value = e.message || '更新失败'
   } finally {
     loading.value = false
+  }
+}
+
+// ── 修改密码 ──
+const passwordForm = ref({ oldPassword: '', newPassword: '', confirmPassword: '' })
+const passwordLoading = ref(false)
+const passwordMessage = ref('')
+
+const handleChangePassword = async () => {
+  passwordMessage.value = ''
+  const { oldPassword, newPassword, confirmPassword } = passwordForm.value
+  if (!oldPassword || !newPassword) {
+    toast.error('请填写当前密码和新密码')
+    return
+  }
+  if (newPassword.length < 6 || newPassword.length > 64) {
+    toast.error('新密码长度需在 6-64 位之间')
+    return
+  }
+  if (newPassword !== confirmPassword) {
+    toast.error('两次输入的新密码不一致')
+    return
+  }
+  passwordLoading.value = true
+  try {
+    await changePassword({ oldPassword, newPassword })
+    passwordForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
+    passwordMessage.value = '密码已更新，下次登录请使用新密码'
+    toast.success('密码已更新')
+  } catch (e: any) {
+    toast.error(e.message || '密码修改失败')
+  } finally {
+    passwordLoading.value = false
   }
 }
 
@@ -156,6 +192,34 @@ onMounted(() => {
               {{ userStore.userInfo?.status === 0 ? '正常' : '禁用' }}
             </p>
           </div>
+        </CardContent>
+      </Card>
+
+      <!-- 修改密码 -->
+      <Card class="md:col-span-2">
+        <CardHeader>
+          <CardTitle class="flex items-center gap-2"><KeyRound class="h-4 w-4 text-primary" />修改密码</CardTitle>
+          <CardDescription>定期更换密码有助于保护账户安全</CardDescription>
+        </CardHeader>
+        <CardContent class="space-y-4">
+          <div class="grid gap-4 md:grid-cols-3">
+            <div class="space-y-2">
+              <Label for="old-password">当前密码</Label>
+              <Input id="old-password" v-model="passwordForm.oldPassword" type="password" placeholder="请输入当前密码" :disabled="passwordLoading" />
+            </div>
+            <div class="space-y-2">
+              <Label for="new-password">新密码</Label>
+              <Input id="new-password" v-model="passwordForm.newPassword" type="password" placeholder="6-64 位" :disabled="passwordLoading" />
+            </div>
+            <div class="space-y-2">
+              <Label for="confirm-password">确认新密码</Label>
+              <Input id="confirm-password" v-model="passwordForm.confirmPassword" type="password" placeholder="再次输入新密码" :disabled="passwordLoading" @keyup.enter="handleChangePassword" />
+            </div>
+          </div>
+          <p v-if="passwordMessage" class="text-sm text-emerald-500">{{ passwordMessage }}</p>
+          <Button :disabled="passwordLoading" @click="handleChangePassword">
+            {{ passwordLoading ? '提交中...' : '更新密码' }}
+          </Button>
         </CardContent>
       </Card>
     </div>

@@ -1,20 +1,5 @@
 package com.hfusionhub.tenant;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hfusionhub.controller.VectorizationController;
-import com.hfusionhub.dto.DocumentIndexCallbackDTO;
-import com.hfusionhub.service.VectorizationService;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -22,6 +7,20 @@ import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hfusionhub.controller.VectorizationController;
+import com.hfusionhub.dto.DocumentIndexCallbackDTO;
+import com.hfusionhub.service.VectorizationService;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 /**
  * End-to-end test for the real callback path: {@link CallbackSignatureFilter}
@@ -47,9 +46,7 @@ class CallbackSignatureRealPathTest {
         VectorizationController controller = new VectorizationController(vectorizationService, new ObjectMapper());
         ReflectionTestUtils.setField(controller, "callbackSecret", SECRET);
 
-        mockMvc = MockMvcBuilders.standaloneSetup(controller)
-                .addFilters(filter)
-                .build();
+        mockMvc = MockMvcBuilders.standaloneSetup(controller).addFilters(filter).build();
     }
 
     @Test
@@ -79,8 +76,7 @@ class CallbackSignatureRealPathTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(500));
 
-        verify(vectorizationService, org.mockito.Mockito.never())
-                .updateDocumentStatus(any(), any());
+        verify(vectorizationService, org.mockito.Mockito.never()).updateDocumentStatus(any(), any());
     }
 
     private static String hmac(String body) {

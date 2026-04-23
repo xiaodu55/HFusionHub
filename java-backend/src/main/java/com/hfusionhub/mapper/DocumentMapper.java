@@ -2,14 +2,13 @@ package com.hfusionhub.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.hfusionhub.entity.Document;
-import org.apache.ibatis.annotations.Mapper;
+import java.time.LocalDateTime;
+import java.util.List;
 import org.apache.ibatis.annotations.Delete;
+import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
-
-import java.time.LocalDateTime;
-import java.util.List;
 
 /**
  * 文档 Mapper 接口
@@ -40,7 +39,8 @@ public interface DocumentMapper extends BaseMapper<Document> {
     @Select("SELECT * FROM document ORDER BY id")
     List<Document> selectAllIncludingDeleted();
 
-    @Select("""
+    @Select(
+            """
             SELECT d.* FROM document d
             JOIN knowledge_base kb ON kb.id = d.knowledge_base_id
             WHERE d.deleted = 1
@@ -49,12 +49,14 @@ public interface DocumentMapper extends BaseMapper<Document> {
             ORDER BY d.recycled_at DESC, d.id DESC
             LIMIT #{offset}, #{size}
             """)
-    List<Document> selectRecyclePage(@Param("userId") Long userId,
-                                     @Param("title") String title,
-                                     @Param("offset") int offset,
-                                     @Param("size") int size);
+    List<Document> selectRecyclePage(
+            @Param("userId") Long userId,
+            @Param("title") String title,
+            @Param("offset") int offset,
+            @Param("size") int size);
 
-    @Select("""
+    @Select(
+            """
             SELECT COUNT(*) FROM document d
             JOIN knowledge_base kb ON kb.id = d.knowledge_base_id
             WHERE d.deleted = 1
@@ -63,7 +65,8 @@ public interface DocumentMapper extends BaseMapper<Document> {
             """)
     long countRecycle(@Param("userId") Long userId, @Param("title") String title);
 
-    @Select("""
+    @Select(
+            """
             SELECT * FROM document
             WHERE deleted = 1
               AND recycle_expires_at IS NOT NULL
@@ -73,7 +76,8 @@ public interface DocumentMapper extends BaseMapper<Document> {
             """)
     List<Document> selectExpiredRecycled(@Param("limit") int limit);
 
-    @Update("""
+    @Update(
+            """
             UPDATE document
             SET deleted = 1,
                 recycled_at = #{recycledAt},
@@ -85,13 +89,15 @@ public interface DocumentMapper extends BaseMapper<Document> {
                 updated_at = NOW()
             WHERE id = #{id} AND deleted = 0
             """)
-    int markRecycled(@Param("id") Long id,
-                     @Param("recycledAt") LocalDateTime recycledAt,
-                     @Param("recycleExpiresAt") LocalDateTime recycleExpiresAt,
-                     @Param("status") Integer status,
-                     @Param("errorMessage") String errorMessage);
+    int markRecycled(
+            @Param("id") Long id,
+            @Param("recycledAt") LocalDateTime recycledAt,
+            @Param("recycleExpiresAt") LocalDateTime recycleExpiresAt,
+            @Param("status") Integer status,
+            @Param("errorMessage") String errorMessage);
 
-    @Update("""
+    @Update(
+            """
             UPDATE document
             SET deleted = 0,
                 recycled_at = NULL,

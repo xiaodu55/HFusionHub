@@ -5,5 +5,4 @@ import com.hfusionhub.entity.App;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
-public interface AppMapper extends BaseMapper<App> {
-}
+public interface AppMapper extends BaseMapper<App> {}

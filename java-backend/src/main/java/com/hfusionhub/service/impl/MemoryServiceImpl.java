@@ -6,24 +6,22 @@ import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.entity.MemoryEntry;
 import com.hfusionhub.mapper.MemoryEntryMapper;
 import com.hfusionhub.service.MemoryService;
+import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.time.LocalDateTime;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Locale;
-
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class MemoryServiceImpl implements MemoryService {
 
-    private static final List<String> ALLOWED_TYPES = List.of(
-            "entity_fact", "conversation_summary", "user_preference");
+    private static final List<String> ALLOWED_TYPES = List.of("entity_fact", "conversation_summary", "user_preference");
 
     private final MemoryEntryMapper memoryEntryMapper;
 
@@ -60,8 +58,7 @@ public class MemoryServiceImpl implements MemoryService {
                 .eq(MemoryEntry::getUserId, userId)
                 .eq(StringUtils.hasText(type), MemoryEntry::getType, type)
                 .eq(conversationId != null, MemoryEntry::getConversationId, conversationId)
-                .and(w -> w.isNull(MemoryEntry::getExpiresAt)
-                        .or().gt(MemoryEntry::getExpiresAt, LocalDateTime.now()))
+                .and(w -> w.isNull(MemoryEntry::getExpiresAt).or().gt(MemoryEntry::getExpiresAt, LocalDateTime.now()))
                 .orderByDesc(MemoryEntry::getImportance)
                 .orderByDesc(MemoryEntry::getCreatedAt));
     }
@@ -83,15 +80,17 @@ public class MemoryServiceImpl implements MemoryService {
         LambdaQueryWrapper<MemoryEntry> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(MemoryEntry::getUserId, userId)
                 .in(MemoryEntry::getType, ALLOWED_TYPES)
-                .and(w -> w.isNull(MemoryEntry::getExpiresAt)
-                        .or().gt(MemoryEntry::getExpiresAt, LocalDateTime.now()))
+                .and(w -> w.isNull(MemoryEntry::getExpiresAt).or().gt(MemoryEntry::getExpiresAt, LocalDateTime.now()))
                 .and(knowledgeBaseId != null, w -> w.isNull(MemoryEntry::getKnowledgeBaseId)
-                        .or().eq(MemoryEntry::getKnowledgeBaseId, knowledgeBaseId))
+                        .or()
+                        .eq(MemoryEntry::getKnowledgeBaseId, knowledgeBaseId))
                 .orderByDesc(MemoryEntry::getImportance)
                 .last("LIMIT 100");
-        List<String> terms = Arrays.stream((query == null ? "" : query).toLowerCase(Locale.ROOT)
-                        .split("[^a-z0-9\\p{IsHan}]+"))
-                .filter(term -> term.length() >= 2).distinct().toList();
+        List<String> terms = Arrays.stream(
+                        (query == null ? "" : query).toLowerCase(Locale.ROOT).split("[^a-z0-9\\p{IsHan}]+"))
+                .filter(term -> term.length() >= 2)
+                .distinct()
+                .toList();
         return memoryEntryMapper.selectList(wrapper).stream()
                 .sorted((left, right) -> Double.compare(relevance(right, terms), relevance(left, terms)))
                 .limit(Math.max(0, Math.min(limit, 20)))

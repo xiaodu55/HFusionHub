@@ -1,9 +1,9 @@
 package com.hfusionhub.common.utils;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class IpUtilsTest {
 

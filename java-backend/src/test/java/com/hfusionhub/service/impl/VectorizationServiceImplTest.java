@@ -1,5 +1,17 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hfusionhub.common.constant.StatusCode;
@@ -22,6 +34,9 @@ import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.service.UsageLedgerService;
 import com.hfusionhub.tenant.TenantContext;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,22 +52,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
-
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class VectorizationServiceImplTest {
@@ -100,10 +99,8 @@ class VectorizationServiceImplTest {
         // Signed callbacks without X-Tenant-Id derive the tenant through
         // document -> knowledge base -> owner before processing the payload.
         // Keep that durable ownership available to callback-focused tests.
-        org.mockito.Mockito.lenient().when(knowledgeBaseMapper.selectById(20L))
-                .thenReturn(ownedKnowledgeBase());
-        org.mockito.Mockito.lenient().when(userMapper.selectById(1L))
-                .thenReturn(ownerUser(7L));
+        org.mockito.Mockito.lenient().when(knowledgeBaseMapper.selectById(20L)).thenReturn(ownedKnowledgeBase());
+        org.mockito.Mockito.lenient().when(userMapper.selectById(1L)).thenReturn(ownerUser(7L));
         jwtUtilsMock = org.mockito.Mockito.mockStatic(JwtUtils.class);
         jwtUtilsMock.when(JwtUtils::isLogin).thenReturn(true);
         jwtUtilsMock.when(JwtUtils::getCurrentUserId).thenReturn(1L);
@@ -195,8 +192,7 @@ class VectorizationServiceImplTest {
         when(documentMapper.selectById(10L)).thenReturn(document);
         when(documentIndexJobMapper.selectLatestByDocumentId(10L)).thenReturn(job);
 
-        assertThrows(BusinessException.class,
-                () -> vectorizationService.updateDocumentStatus(10L, callback));
+        assertThrows(BusinessException.class, () -> vectorizationService.updateDocumentStatus(10L, callback));
     }
 
     @Test
@@ -208,8 +204,7 @@ class VectorizationServiceImplTest {
         when(documentMapper.selectById(10L)).thenReturn(document);
         when(documentIndexJobMapper.selectLatestByDocumentId(10L)).thenReturn(job);
 
-        assertThrows(BusinessException.class,
-                () -> vectorizationService.updateDocumentStatus(10L, callback));
+        assertThrows(BusinessException.class, () -> vectorizationService.updateDocumentStatus(10L, callback));
         verify(documentChunkMapper, never()).deleteByDocumentId(10L);
     }
 
@@ -329,7 +324,8 @@ class VectorizationServiceImplTest {
     @Test
     void getChunkDetailReturnsTypedDTOWhenChunkExists() {
         Document document = ownedDocument(DocumentStatus.COMPLETED);
-        DocumentChunk persistedChunk = persistedChunk("chunk-a1", 10L, 0, "text", "Key finding: the revenue grew by 42%");
+        DocumentChunk persistedChunk =
+                persistedChunk("chunk-a1", 10L, 0, "text", "Key finding: the revenue grew by 42%");
         persistedChunk.setOutlinePath("[\"Summary\"]");
         persistedChunk.setMetadata("{\"tokens\": 128}");
         when(documentChunkMapper.selectByChunkId("chunk-a1")).thenReturn(persistedChunk);
@@ -351,8 +347,8 @@ class VectorizationServiceImplTest {
     void getChunkDetailThrowsNotFoundWhenChunkMissing() {
         when(documentChunkMapper.selectByChunkId("nonexistent")).thenReturn(null);
 
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> vectorizationService.getChunkDetail("nonexistent"));
+        BusinessException ex =
+                assertThrows(BusinessException.class, () -> vectorizationService.getChunkDetail("nonexistent"));
 
         assertEquals(StatusCode.CHUNK_NOT_FOUND, ex.getCode());
         assertEquals("分块不存在", ex.getMessage());
@@ -371,8 +367,7 @@ class VectorizationServiceImplTest {
         kb.setUserId(999L);
         when(knowledgeBaseMapper.selectById(20L)).thenReturn(kb);
 
-        assertThrows(BusinessException.class,
-                () -> vectorizationService.getChunkDetail("chunk-a1"));
+        assertThrows(BusinessException.class, () -> vectorizationService.getChunkDetail("chunk-a1"));
     }
 
     @Test
@@ -381,8 +376,7 @@ class VectorizationServiceImplTest {
         when(documentChunkMapper.selectByChunkId("chunk-a1")).thenReturn(persistedChunk);
         when(documentMapper.selectById(99L)).thenReturn(null);
 
-        assertThrows(BusinessException.class,
-                () -> vectorizationService.getChunkDetail("chunk-a1"));
+        assertThrows(BusinessException.class, () -> vectorizationService.getChunkDetail("chunk-a1"));
     }
 
     @Test
@@ -415,9 +409,13 @@ class VectorizationServiceImplTest {
 
         vectorizationService.updateDocumentStatus(10L, callback);
 
-        verify(usageLedgerService).settle(
-                eq(UsageMeter.INDEX_CHUNKS), eq("INDEX_CHUNKS:version-1"),
-                eq(2L), eq("document_index"), eq("10"));
+        verify(usageLedgerService)
+                .settle(
+                        eq(UsageMeter.INDEX_CHUNKS),
+                        eq("INDEX_CHUNKS:version-1"),
+                        eq(2L),
+                        eq("document_index"),
+                        eq("10"));
         assertNull(TenantContext.getTenantId());
     }
 
@@ -435,8 +433,7 @@ class VectorizationServiceImplTest {
         vectorizationService.updateDocumentStatus(10L, callback);
 
         verify(usageLedgerService).release(eq(UsageMeter.INDEX_CHUNKS), eq("INDEX_CHUNKS:version-1"));
-        verify(usageLedgerService, never()).settle(
-                any(), any(), anyLong(), any(), any());
+        verify(usageLedgerService, never()).settle(any(), any(), anyLong(), any(), any());
     }
 
     @Test
@@ -452,8 +449,10 @@ class VectorizationServiceImplTest {
             when(userMapper.selectById(1L)).thenReturn(ownerUser(7L));
             when(documentIndexJobMapper.countByDocumentId(10L)).thenReturn(0);
             org.mockito.Mockito.doReturn(
-                    new org.springframework.http.ResponseEntity<>("ok", org.springframework.http.HttpStatus.OK))
-                    .when(restTemplate).exchange(org.mockito.ArgumentMatchers.anyString(),
+                            new org.springframework.http.ResponseEntity<>("ok", org.springframework.http.HttpStatus.OK))
+                    .when(restTemplate)
+                    .exchange(
+                            org.mockito.ArgumentMatchers.anyString(),
                             org.mockito.ArgumentMatchers.any(),
                             org.mockito.ArgumentMatchers.any(),
                             eq(String.class));
@@ -466,9 +465,13 @@ class VectorizationServiceImplTest {
             String version = jobCaptor.getValue().getIndexVersion();
             // 30000 bytes / 300 bytes-per-chunk = 100 chunks reserved
             ArgumentCaptor<Long> amountCaptor = ArgumentCaptor.forClass(Long.class);
-            verify(usageLedgerService).reserve(
-                    eq(UsageMeter.INDEX_CHUNKS), eq("INDEX_CHUNKS:" + version),
-                    amountCaptor.capture(), eq("document_index"), eq("10"));
+            verify(usageLedgerService)
+                    .reserve(
+                            eq(UsageMeter.INDEX_CHUNKS),
+                            eq("INDEX_CHUNKS:" + version),
+                            amountCaptor.capture(),
+                            eq("document_index"),
+                            eq("10"));
             assertEquals(100L, amountCaptor.getValue());
         } finally {
             java.nio.file.Files.deleteIfExists(tempFile);
@@ -490,8 +493,10 @@ class VectorizationServiceImplTest {
             when(userMapper.selectById(1L)).thenReturn(ownerUser(7L));
             when(documentIndexJobMapper.countByDocumentId(10L)).thenReturn(0);
             org.mockito.Mockito.doReturn(
-                    new org.springframework.http.ResponseEntity<>("ok", org.springframework.http.HttpStatus.OK))
-                    .when(restTemplate).exchange(org.mockito.ArgumentMatchers.anyString(),
+                            new org.springframework.http.ResponseEntity<>("ok", org.springframework.http.HttpStatus.OK))
+                    .when(restTemplate)
+                    .exchange(
+                            org.mockito.ArgumentMatchers.anyString(),
                             org.mockito.ArgumentMatchers.any(),
                             org.mockito.ArgumentMatchers.any(),
                             eq(String.class));
@@ -503,9 +508,13 @@ class VectorizationServiceImplTest {
             verify(documentIndexJobMapper).insert(jobCaptor.capture());
             String version = jobCaptor.getValue().getIndexVersion();
             ArgumentCaptor<Long> amountCaptor = ArgumentCaptor.forClass(Long.class);
-            verify(usageLedgerService).reserve(
-                    eq(UsageMeter.INDEX_CHUNKS), eq("INDEX_CHUNKS:" + version),
-                    amountCaptor.capture(), eq("document_index"), eq("10"));
+            verify(usageLedgerService)
+                    .reserve(
+                            eq(UsageMeter.INDEX_CHUNKS),
+                            eq("INDEX_CHUNKS:" + version),
+                            amountCaptor.capture(),
+                            eq("document_index"),
+                            eq("10"));
             assertEquals(2L, amountCaptor.getValue());
         } finally {
             java.nio.file.Files.deleteIfExists(tempFile);
@@ -522,7 +531,8 @@ class VectorizationServiceImplTest {
         when(knowledgeBaseMapper.selectIncludingDeleted(20L)).thenReturn(knowledgeBase);
         when(userMapper.selectById(1L)).thenReturn(ownerUser(7L));
         org.mockito.Mockito.doReturn(new ResponseEntity<>("ok", HttpStatus.OK))
-                .when(restTemplate).exchange(
+                .when(restTemplate)
+                .exchange(
                         eq("http://localhost:9000/api/documents/10/chunks"),
                         eq(HttpMethod.DELETE),
                         org.mockito.ArgumentMatchers.any(HttpEntity.class),
@@ -531,11 +541,12 @@ class VectorizationServiceImplTest {
         vectorizationService.deleteDocumentIndex(10L);
 
         ArgumentCaptor<HttpEntity> requestCaptor = ArgumentCaptor.forClass(HttpEntity.class);
-        verify(restTemplate).exchange(
-                eq("http://localhost:9000/api/documents/10/chunks"),
-                eq(HttpMethod.DELETE),
-                requestCaptor.capture(),
-                eq(String.class));
+        verify(restTemplate)
+                .exchange(
+                        eq("http://localhost:9000/api/documents/10/chunks"),
+                        eq(HttpMethod.DELETE),
+                        requestCaptor.capture(),
+                        eq(String.class));
         assertEquals("7", requestCaptor.getValue().getHeaders().getFirst("X-Tenant-Id"));
         verify(documentChunkMapper).deleteByDocumentId(10L);
     }
@@ -597,8 +608,8 @@ class VectorizationServiceImplTest {
         return chunk;
     }
 
-    private DocumentChunk persistedChunk(String chunkId, Long documentId, int index,
-                                         String blockType, String contentExcerpt) {
+    private DocumentChunk persistedChunk(
+            String chunkId, Long documentId, int index, String blockType, String contentExcerpt) {
         DocumentChunk entity = new DocumentChunk();
         entity.setChunkId(chunkId);
         entity.setDocumentId(documentId);

@@ -1,6 +1,5 @@
 package com.hfusionhub.common.constant;
 
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -39,9 +38,8 @@ public interface AgentConstants {
     String STATUS_DEAD_LETTER = "dead_letter";
 
     /** 终态集合 */
-    Set<String> TERMINAL_STATUSES = Set.of(
-            STATUS_SUCCEEDED, STATUS_FAILED, STATUS_CANCELLED, STATUS_TIMED_OUT, STATUS_DEAD_LETTER
-    );
+    Set<String> TERMINAL_STATUSES =
+            Set.of(STATUS_SUCCEEDED, STATUS_FAILED, STATUS_CANCELLED, STATUS_TIMED_OUT, STATUS_DEAD_LETTER);
 
     /** 可重试状态 */
     Set<String> RETRYABLE_STATUSES = Set.of(STATUS_FAILED, STATUS_TIMED_OUT);
@@ -54,12 +52,19 @@ public interface AgentConstants {
         // 终态不可再转移
         if (TERMINAL_STATUSES.contains(from)) return false;
         return switch (from) {
-            case STATUS_PENDING -> Set.of(STATUS_RUNNING, STATUS_CANCELLED, STATUS_DEAD_LETTER).contains(to);
-            case STATUS_RUNNING -> Set.of(STATUS_SUCCEEDED, STATUS_FAILED,
-                    STATUS_CANCELLED, STATUS_TIMED_OUT, STATUS_WAITING_APPROVAL,
-                    STATUS_DEAD_LETTER).contains(to);
-            case STATUS_WAITING_APPROVAL -> Set.of(STATUS_RUNNING, STATUS_FAILED,
-                    STATUS_CANCELLED, STATUS_TIMED_OUT, STATUS_DEAD_LETTER).contains(to);
+            case STATUS_PENDING -> Set.of(STATUS_RUNNING, STATUS_CANCELLED, STATUS_DEAD_LETTER)
+                    .contains(to);
+            case STATUS_RUNNING -> Set.of(
+                            STATUS_SUCCEEDED,
+                            STATUS_FAILED,
+                            STATUS_CANCELLED,
+                            STATUS_TIMED_OUT,
+                            STATUS_WAITING_APPROVAL,
+                            STATUS_DEAD_LETTER)
+                    .contains(to);
+            case STATUS_WAITING_APPROVAL -> Set.of(
+                            STATUS_RUNNING, STATUS_FAILED, STATUS_CANCELLED, STATUS_TIMED_OUT, STATUS_DEAD_LETTER)
+                    .contains(to);
             default -> false;
         };
     }
@@ -162,9 +167,8 @@ public interface AgentConstants {
     String EXECUTION_TOKEN_REVOKED = "revoked";
 
     /** 默认可重试错误码 */
-    Set<String> DEFAULT_RETRYABLE_ERROR_CODES = Set.of(
-            ERR_TIMEOUT, ERR_EXECUTION_TIMEOUT, ERR_CONNECTION_ERROR, ERR_TOOL_ERROR, ERR_INTERNAL_ERROR
-    );
+    Set<String> DEFAULT_RETRYABLE_ERROR_CODES =
+            Set.of(ERR_TIMEOUT, ERR_EXECUTION_TIMEOUT, ERR_CONNECTION_ERROR, ERR_TOOL_ERROR, ERR_INTERNAL_ERROR);
 
     /**
      * 判断错误码是否可重试。配置的 retryable-error-codes 集合优先；
@@ -172,8 +176,8 @@ public interface AgentConstants {
      */
     static boolean isRetryableErrorCode(String errorCode, java.util.Set<String> configured) {
         if (errorCode == null) return false;
-        java.util.Set<String> effective = (configured != null && !configured.isEmpty())
-                ? configured : DEFAULT_RETRYABLE_ERROR_CODES;
+        java.util.Set<String> effective =
+                (configured != null && !configured.isEmpty()) ? configured : DEFAULT_RETRYABLE_ERROR_CODES;
         return effective.contains(errorCode);
     }
 

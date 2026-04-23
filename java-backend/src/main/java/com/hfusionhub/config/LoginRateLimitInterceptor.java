@@ -26,8 +26,7 @@ public class LoginRateLimitInterceptor implements HandlerInterceptor {
     private boolean trustedProxyHeaders;
 
     @Override
-    public boolean preHandle(HttpServletRequest request, HttpServletResponse response,
-                             Object handler) {
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         String ip = IpUtils.getClientIp(request, trustedProxyHeaders);
         rateLimiter.checkBlocked(ip);
         return true;

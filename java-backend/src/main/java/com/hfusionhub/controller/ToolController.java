@@ -5,6 +5,7 @@ import com.hfusionhub.common.result.R;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.mapper.AgentStepMapper;
 import com.hfusionhub.tenant.TenantContext;
+import java.util.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -15,8 +16,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.*;
 
 /**
  * 工具中心 — 展示 Agent 可调用的工具注册表与最近调用记录。
@@ -91,8 +90,7 @@ public class ToolController {
      */
     @GetMapping("/calls")
     public R<Map<String, Object>> listRecentCalls(
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int pageSize) {
+            @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int pageSize) {
 
         Long userId = JwtUtils.getCurrentUserId();
 
@@ -147,7 +145,8 @@ public class ToolController {
     public R<Map<String, Object>> addMcpServer(@RequestBody Map<String, Object> body) {
         Map<String, Object> result = aiClient.addMcpServer(body);
         boolean success = Boolean.TRUE.equals(result.get("success"));
-        return success ? R.ok(String.valueOf(result.getOrDefault("message", "已添加")), result)
+        return success
+                ? R.ok(String.valueOf(result.getOrDefault("message", "已添加")), result)
                 : R.fail(String.valueOf(result.getOrDefault("message", "添加失败")));
     }
 
@@ -155,7 +154,8 @@ public class ToolController {
     public R<Map<String, Object>> reconnectMcpServer(@PathVariable String serverId) {
         Map<String, Object> result = aiClient.reconnectMcpServer(serverId);
         boolean success = Boolean.TRUE.equals(result.get("success"));
-        return success ? R.ok(String.valueOf(result.getOrDefault("message", "已重连")), result)
+        return success
+                ? R.ok(String.valueOf(result.getOrDefault("message", "已重连")), result)
                 : R.fail(String.valueOf(result.getOrDefault("message", "重连失败")));
     }
 
@@ -163,7 +163,8 @@ public class ToolController {
     public R<Map<String, Object>> removeMcpServer(@PathVariable String serverId) {
         Map<String, Object> result = aiClient.removeMcpServer(serverId);
         boolean success = Boolean.TRUE.equals(result.get("success"));
-        return success ? R.ok(String.valueOf(result.getOrDefault("message", "已移除")), result)
+        return success
+                ? R.ok(String.valueOf(result.getOrDefault("message", "已移除")), result)
                 : R.fail(String.valueOf(result.getOrDefault("message", "移除失败")));
     }
 }

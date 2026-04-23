@@ -8,6 +8,8 @@ import com.hfusionhub.entity.WebhookSubscription;
 import com.hfusionhub.service.WebhookSubscriptionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,9 +20,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
-import java.util.Map;
 
 /**
  * Webhook 订阅管理控制器
@@ -58,8 +57,7 @@ public class WebhookController {
 
     @PutMapping("/{id}")
     @Operation(summary = "更新订阅（名称/地址/密钥/事件）")
-    public R<WebhookSubscription> update(@PathVariable Long id,
-                                         @RequestBody WebhookSubscription subscription) {
+    public R<WebhookSubscription> update(@PathVariable Long id, @RequestBody WebhookSubscription subscription) {
         Long userId = JwtUtils.getCurrentUserId();
         return R.ok(subscriptionService.update(userId, id, subscription));
     }
@@ -74,8 +72,7 @@ public class WebhookController {
 
     @PutMapping("/{id}/active")
     @Operation(summary = "启停订阅")
-    public R<WebhookSubscription> setActive(@PathVariable Long id,
-                                            @RequestBody Map<String, Object> body) {
+    public R<WebhookSubscription> setActive(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         Long userId = JwtUtils.getCurrentUserId();
         boolean active = Boolean.TRUE.equals(body.get("active"));
         return R.ok(subscriptionService.setActive(userId, id, active));
@@ -90,9 +87,10 @@ public class WebhookController {
 
     @GetMapping("/{id}/deliveries")
     @Operation(summary = "投递历史（分页）")
-    public R<PageResult<WebhookDelivery>> deliveries(@PathVariable Long id,
-                                                     @RequestParam(defaultValue = "1") int page,
-                                                     @RequestParam(defaultValue = "20") int pageSize) {
+    public R<PageResult<WebhookDelivery>> deliveries(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int pageSize) {
         Long userId = JwtUtils.getCurrentUserId();
         return R.ok(subscriptionService.deliveryHistory(userId, id, page, pageSize));
     }

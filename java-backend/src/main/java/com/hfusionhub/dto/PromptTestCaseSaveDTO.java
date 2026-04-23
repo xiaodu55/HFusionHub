@@ -3,10 +3,9 @@ package com.hfusionhub.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
-import lombok.Data;
-
 import java.util.List;
 import java.util.Map;
+import lombok.Data;
 
 /** 提示词测试用例添加/更新请求 */
 @Data

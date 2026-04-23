@@ -1,5 +1,14 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.entity.DeletionTask;
 import com.hfusionhub.entity.Document;
@@ -13,19 +22,9 @@ import com.hfusionhub.mapper.DocumentMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.MessageMapper;
 import com.hfusionhub.service.VectorizationService;
-import org.junit.jupiter.api.Test;
-
 import java.time.LocalDateTime;
 import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.times;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import org.junit.jupiter.api.Test;
 
 class DeletionServiceImplTest {
 
@@ -52,18 +51,14 @@ class DeletionServiceImplTest {
 
         DeletionTask pending = new DeletionTask();
         pending.setId(99L);
-        when(deletionTaskMapper.recoverStaleProcessingTasks(
-                any(LocalDateTime.class),
-                eq("任务执行超时，已恢复为可重试状态")))
+        when(deletionTaskMapper.recoverStaleProcessingTasks(any(LocalDateTime.class), eq("任务执行超时，已恢复为可重试状态")))
                 .thenReturn(1);
         when(deletionTaskMapper.selectPendingTasks(10)).thenReturn(List.of(pending));
 
         List<DeletionTask> tasks = service.getPendingTasks();
 
         assertEquals(List.of(pending), tasks);
-        verify(deletionTaskMapper).recoverStaleProcessingTasks(
-                any(LocalDateTime.class),
-                eq("任务执行超时，已恢复为可重试状态"));
+        verify(deletionTaskMapper).recoverStaleProcessingTasks(any(LocalDateTime.class), eq("任务执行超时，已恢复为可重试状态"));
         verify(deletionTaskMapper).selectPendingTasks(10);
     }
 
@@ -133,7 +128,8 @@ class DeletionServiceImplTest {
         document.setId(7L);
         when(documentMapper.selectById(7L)).thenReturn(document);
         doThrow(new RuntimeException("vector store unavailable"))
-                .when(vectorizationService).deleteDocumentIndex(7L);
+                .when(vectorizationService)
+                .deleteDocumentIndex(7L);
 
         DeletionTask task = new DeletionTask();
         task.setTaskType("DOCUMENT_DELETE");
@@ -177,7 +173,8 @@ class DeletionServiceImplTest {
         document.setDeleted(1);
         when(documentMapper.selectIncludingDeleted(7L)).thenReturn(document);
         doThrow(new RuntimeException("vector store unavailable"))
-                .when(vectorizationService).deleteDocumentIndex(7L);
+                .when(vectorizationService)
+                .deleteDocumentIndex(7L);
 
         DeletionTask task = new DeletionTask();
         task.setTaskType("DOCUMENT_PURGE");
@@ -229,12 +226,7 @@ class DeletionServiceImplTest {
 
         service.executeStep(task);
 
-        verify(documentMapper).markRecycled(
-                any(),
-                any(),
-                any(),
-                org.mockito.ArgumentMatchers.eq(0),
-                any());
+        verify(documentMapper).markRecycled(any(), any(), any(), org.mockito.ArgumentMatchers.eq(0), any());
         assertEquals("PENDING", task.getStatus());
         assertEquals("DOCUMENT_RECYCLED", task.getStep());
         assertEquals(4, task.getStepIndex());

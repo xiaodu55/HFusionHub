@@ -1,18 +1,5 @@
 package com.hfusionhub.scheduler;
 
-import com.hfusionhub.entity.PromptTestSetRun;
-import com.hfusionhub.service.PromptTestSetService;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.core.task.AsyncTaskExecutor;
-
-import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -24,6 +11,18 @@ import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import com.hfusionhub.entity.PromptTestSetRun;
+import com.hfusionhub.service.PromptTestSetService;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.core.task.AsyncTaskExecutor;
 
 class PromptTestSetRunWorkerSchedulerTest {
 
@@ -42,8 +41,8 @@ class PromptTestSetRunWorkerSchedulerTest {
     private void buildScheduler(long shutdownTimeoutMs) {
         service = mock(PromptTestSetService.class);
         runExecutor = mock(AsyncTaskExecutor.class);
-        scheduler = new PromptTestSetRunWorkerScheduler(
-                service, runExecutor, true, 20, 5, 60_000, 30, shutdownTimeoutMs);
+        scheduler =
+                new PromptTestSetRunWorkerScheduler(service, runExecutor, true, 20, 5, 60_000, 30, shutdownTimeoutMs);
     }
 
     private PromptTestSetRun newRun(long id) {
@@ -68,7 +67,7 @@ class PromptTestSetRunWorkerSchedulerTest {
         boolean getAsBoolean();
     }
 
-@Test
+    @Test
     void stopHaltsPolling() throws Exception {
         buildScheduler(5000);
         AtomicInteger polls = new AtomicInteger();
@@ -99,16 +98,18 @@ class PromptTestSetRunWorkerSchedulerTest {
             submits.incrementAndGet();
             Runnable task = inv.getArgument(0);
             CompletableFuture<Void> done = new CompletableFuture<>();
-            Thread worker = new Thread(() -> {
-                taskStarted.countDown();
-                try {
-                    releaseTask.await(10, TimeUnit.SECONDS);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-                task.run();
-                done.complete(null);
-            }, "pts-sched-test-worker");
+            Thread worker = new Thread(
+                    () -> {
+                        taskStarted.countDown();
+                        try {
+                            releaseTask.await(10, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        task.run();
+                        done.complete(null);
+                    },
+                    "pts-sched-test-worker");
             worker.setDaemon(true);
             worker.start();
             return done;
@@ -120,21 +121,23 @@ class PromptTestSetRunWorkerSchedulerTest {
 
         CountDownLatch stopReturned = new CountDownLatch(1);
         AtomicLong stopElapsed = new AtomicLong();
-        Thread stopper = new Thread(() -> {
-            long start = System.currentTimeMillis();
-            scheduler.stopScheduling();
-            stopElapsed.set(System.currentTimeMillis() - start);
-            stopReturned.countDown();
-        }, "pts-sched-stopper");
+        Thread stopper = new Thread(
+                () -> {
+                    long start = System.currentTimeMillis();
+                    scheduler.stopScheduling();
+                    stopElapsed.set(System.currentTimeMillis() - start);
+                    stopReturned.countDown();
+                },
+                "pts-sched-stopper");
         stopper.start();
 
         Thread.sleep(200);
-        assertFalse(stopReturned.await(50, TimeUnit.MILLISECONDS),
+        assertFalse(
+                stopReturned.await(50, TimeUnit.MILLISECONDS),
                 "stop must block while an in-flight task is still running");
 
         releaseTask.countDown();
-        assertTrue(stopReturned.await(5, TimeUnit.SECONDS),
-                "stop must return once the in-flight task finishes");
+        assertTrue(stopReturned.await(5, TimeUnit.SECONDS), "stop must return once the in-flight task finishes");
         stopper.join(1000);
         assertFalse(scheduler.isRunning());
         assertTrue(stopElapsed.get() >= 150, "stop should have waited for the in-flight task");
@@ -146,8 +149,7 @@ class PromptTestSetRunWorkerSchedulerTest {
         buildScheduler(400);
         when(service.listQueuedRuns(anyInt())).thenReturn(List.of(newRun(1L)));
         when(service.claimRun(1L)).thenReturn(true, false);
-        when(runExecutor.submit(any(Runnable.class)))
-                .thenReturn(new CompletableFuture<>());
+        when(runExecutor.submit(any(Runnable.class))).thenReturn(new CompletableFuture<>());
         scheduler.startScheduling();
 
         verify(service, timeout(3000).atLeastOnce()).claimRun(1L);
@@ -163,17 +165,19 @@ class PromptTestSetRunWorkerSchedulerTest {
     }
 
     @Test
-void completedTasksDoNotAccumulateInInFlight() throws Exception {
+    void completedTasksDoNotAccumulateInInFlight() throws Exception {
         buildScheduler(400);
         when(service.listQueuedRuns(anyInt())).thenReturn(List.of(newRun(1L)));
         when(service.claimRun(1L)).thenReturn(true, false);
         when(runExecutor.submit(any(Runnable.class))).thenAnswer(inv -> {
             Runnable task = inv.getArgument(0);
             CompletableFuture<Void> done = new CompletableFuture<>();
-            Thread worker = new Thread(() -> {
-                task.run();               // 任务本身会移除自身 Future
-                done.complete(null);
-            }, "pts-sched-test-worker");
+            Thread worker = new Thread(
+                    () -> {
+                        task.run(); // 任务本身会移除自身 Future
+                        done.complete(null);
+                    },
+                    "pts-sched-test-worker");
             worker.setDaemon(true);
             worker.start();
             return done;
@@ -225,17 +229,20 @@ void completedTasksDoNotAccumulateInInFlight() throws Exception {
         when(runExecutor.submit(any(Runnable.class))).thenAnswer(inv -> {
             Runnable task = inv.getArgument(0);
             CompletableFuture<Void> done = new CompletableFuture<>();
-            Thread worker = new Thread(() -> {
-                task.run();
-                done.complete(null);
-            }, "pts-sched-test-worker");
+            Thread worker = new Thread(
+                    () -> {
+                        task.run();
+                        done.complete(null);
+                    },
+                    "pts-sched-test-worker");
             worker.setDaemon(true);
             worker.start();
             return done;
         });
         scheduler.startScheduling();
 
-        assertTrue(claimEntered.await(3, TimeUnit.SECONDS),
+        assertTrue(
+                claimEntered.await(3, TimeUnit.SECONDS),
                 "a dispatch should have started and hold the shared lock inside claimRun");
 
         Thread stopper = new Thread(() -> {
@@ -263,8 +270,7 @@ void completedTasksDoNotAccumulateInInFlight() throws Exception {
     void stopIsNoOpWhenNotStarted() {
         service = mock(PromptTestSetService.class);
         runExecutor = mock(AsyncTaskExecutor.class);
-        scheduler = new PromptTestSetRunWorkerScheduler(
-                service, runExecutor, true, 20, 5, 60_000, 30, 5000);
+        scheduler = new PromptTestSetRunWorkerScheduler(service, runExecutor, true, 20, 5, 60_000, 30, 5000);
 
         assertFalse(scheduler.isRunning());
         scheduler.stopScheduling();

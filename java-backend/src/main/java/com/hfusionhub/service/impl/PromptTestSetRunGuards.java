@@ -15,8 +15,7 @@ import com.hfusionhub.entity.PromptTestSetRun;
  */
 final class PromptTestSetRunGuards {
 
-    private PromptTestSetRunGuards() {
-    }
+    private PromptTestSetRunGuards() {}
 
     static LambdaUpdateWrapper<PromptTestSetRun> activeRunGuard(Long runId, String token) {
         LambdaUpdateWrapper<PromptTestSetRun> wrapper = new LambdaUpdateWrapper<PromptTestSetRun>()

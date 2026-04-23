@@ -1,5 +1,8 @@
 package com.hfusionhub.controller;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
 import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.context.SaTokenContext;
 import cn.dev33.satoken.context.model.SaRequest;
@@ -9,15 +12,11 @@ import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.hfusionhub.common.dto.*;
 import com.hfusionhub.service.FeatureFlagService;
-import org.junit.jupiter.api.*;
-import org.springframework.test.util.ReflectionTestUtils;
-
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import org.junit.jupiter.api.*;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class FeatureFlagSecurityTest {
@@ -43,12 +42,16 @@ class FeatureFlagSecurityTest {
     @AfterEach
     void tearDown() {
         reset(mockService);
-        try { StpUtil.logout(); } catch (Exception ignored) {}
+        try {
+            StpUtil.logout();
+        } catch (Exception ignored) {
+        }
     }
 
     // ─── Internal snapshot: token protection ─────────────────────────────
 
-    @Test @Order(1)
+    @Test
+    @Order(1)
     void snapshot_noToken_returns403() {
         var req = mock(jakarta.servlet.http.HttpServletRequest.class);
         when(req.getHeader("X-Internal-Token")).thenReturn(null);
@@ -57,7 +60,8 @@ class FeatureFlagSecurityTest {
         verifyNoInteractions(mockService);
     }
 
-    @Test @Order(2)
+    @Test
+    @Order(2)
     void snapshot_wrongToken_returns403() {
         var req = mock(jakarta.servlet.http.HttpServletRequest.class);
         when(req.getHeader("X-Internal-Token")).thenReturn("wrong");
@@ -66,7 +70,8 @@ class FeatureFlagSecurityTest {
         verifyNoInteractions(mockService);
     }
 
-    @Test @Order(3)
+    @Test
+    @Order(3)
     void snapshot_validToken_returns200() {
         var req = mock(jakarta.servlet.http.HttpServletRequest.class);
         when(req.getHeader("X-Internal-Token")).thenReturn(VALID_TOKEN);
@@ -76,7 +81,8 @@ class FeatureFlagSecurityTest {
         verify(mockService).getSnapshot();
     }
 
-    @Test @Order(4)
+    @Test
+    @Order(4)
     void snapshot_partialToken_returns403() {
         var req = mock(jakarta.servlet.http.HttpServletRequest.class);
         when(req.getHeader("X-Internal-Token")).thenReturn(VALID_TOKEN.substring(0, 5));
@@ -86,7 +92,8 @@ class FeatureFlagSecurityTest {
 
     // ─── Management: CRUD delegates to service ───────────────────────────
 
-    @Test @Order(10)
+    @Test
+    @Order(10)
     void create_callsService() {
         var dto = new FeatureFlagCreateDTO();
         dto.setFlagKey("test.flag");
@@ -97,7 +104,8 @@ class FeatureFlagSecurityTest {
         verify(mockService).create(dto);
     }
 
-    @Test @Order(11)
+    @Test
+    @Order(11)
     void update_callsService() {
         when(mockService.update(eq(1L), any())).thenReturn(null);
 
@@ -105,31 +113,36 @@ class FeatureFlagSecurityTest {
         verify(mockService).update(eq(1L), any());
     }
 
-    @Test @Order(12)
+    @Test
+    @Order(12)
     void delete_callsService() {
         mgmtController.delete(1L);
         verify(mockService).delete(1L);
     }
 
-    @Test @Order(13)
+    @Test
+    @Order(13)
     void getById_callsService() {
         mgmtController.getById(1L);
         verify(mockService).getById(1L);
     }
 
-    @Test @Order(14)
+    @Test
+    @Order(14)
     void getByKey_callsService() {
         mgmtController.getByKey("k");
         verify(mockService).getByKey("k");
     }
 
-    @Test @Order(15)
+    @Test
+    @Order(15)
     void list_callsService() {
         mgmtController.list(1, 20);
         verify(mockService).list(1, 20);
     }
 
-    @Test @Order(16)
+    @Test
+    @Order(16)
     void listAll_callsService() {
         mgmtController.listAll();
         verify(mockService).listAll();
@@ -137,7 +150,8 @@ class FeatureFlagSecurityTest {
 
     // ─── Evaluate: requires login (Sa-Token in-memory mode) ─────────────
 
-    @Test @Order(20)
+    @Test
+    @Order(20)
     void evaluate_noLogin_throwsNotLogin() {
         // In in-memory mode StpUtil.getLoginId() returns -1 when no session,
         // but Sa-Token only throws when a global config is set.
@@ -151,7 +165,8 @@ class FeatureFlagSecurityTest {
         verify(mockService).evaluate(dto);
     }
 
-    @Test @Order(21)
+    @Test
+    @Order(21)
     void evaluate_withLogin_callsService() {
         StpUtil.login(100L);
         var dto = new FeatureFlagEvaluateDTO();
@@ -162,7 +177,8 @@ class FeatureFlagSecurityTest {
         verify(mockService).evaluate(dto);
     }
 
-    @Test @Order(22)
+    @Test
+    @Order(22)
     void evaluateBatch_withLogin_callsService() {
         StpUtil.login(100L);
         var dto = new FeatureFlagEvaluateDTO();
@@ -175,47 +191,61 @@ class FeatureFlagSecurityTest {
 
     // ─── @SaCheckRole annotation verification ────────────────────────────
 
-    @Test @Order(30)
+    @Test
+    @Order(30)
     void create_hasAdminAnnotation() throws Exception {
-        var ann = FeatureFlagController.class.getMethod("create", FeatureFlagCreateDTO.class)
+        var ann = FeatureFlagController.class
+                .getMethod("create", FeatureFlagCreateDTO.class)
                 .getAnnotation(cn.dev33.satoken.annotation.SaCheckRole.class);
         assertNotNull(ann, "create() must have @SaCheckRole(\"admin\")");
         assertTrue(List.of(ann.value()).contains("admin"));
     }
 
-    @Test @Order(31)
+    @Test
+    @Order(31)
     void update_hasAdminAnnotation() throws Exception {
-        assertNotNull(FeatureFlagController.class.getMethod("update", Long.class, FeatureFlagUpdateDTO.class)
+        assertNotNull(FeatureFlagController.class
+                .getMethod("update", Long.class, FeatureFlagUpdateDTO.class)
                 .getAnnotation(cn.dev33.satoken.annotation.SaCheckRole.class));
     }
 
-    @Test @Order(32)
+    @Test
+    @Order(32)
     void delete_hasAdminAnnotation() throws Exception {
-        assertNotNull(FeatureFlagController.class.getMethod("delete", Long.class)
+        assertNotNull(FeatureFlagController.class
+                .getMethod("delete", Long.class)
                 .getAnnotation(cn.dev33.satoken.annotation.SaCheckRole.class));
     }
 
-    @Test @Order(33)
+    @Test
+    @Order(33)
     void addRule_hasAdminAnnotation() throws Exception {
-        assertNotNull(FeatureFlagController.class.getMethod("addRule", Long.class, FeatureFlagRuleCreateDTO.class)
+        assertNotNull(FeatureFlagController.class
+                .getMethod("addRule", Long.class, FeatureFlagRuleCreateDTO.class)
                 .getAnnotation(cn.dev33.satoken.annotation.SaCheckRole.class));
     }
 
-    @Test @Order(34)
+    @Test
+    @Order(34)
     void updateRule_hasAdminAnnotation() throws Exception {
-        assertNotNull(FeatureFlagController.class.getMethod("updateRule", Long.class, FeatureFlagRuleUpdateDTO.class)
+        assertNotNull(FeatureFlagController.class
+                .getMethod("updateRule", Long.class, FeatureFlagRuleUpdateDTO.class)
                 .getAnnotation(cn.dev33.satoken.annotation.SaCheckRole.class));
     }
 
-    @Test @Order(35)
+    @Test
+    @Order(35)
     void deleteRule_hasAdminAnnotation() throws Exception {
-        assertNotNull(FeatureFlagController.class.getMethod("deleteRule", Long.class)
+        assertNotNull(FeatureFlagController.class
+                .getMethod("deleteRule", Long.class)
                 .getAnnotation(cn.dev33.satoken.annotation.SaCheckRole.class));
     }
 
-    @Test @Order(36)
+    @Test
+    @Order(36)
     void evaluate_noAdminAnnotation() throws Exception {
-        assertNull(FeatureFlagController.class.getMethod("evaluate", FeatureFlagEvaluateDTO.class)
+        assertNull(FeatureFlagController.class
+                .getMethod("evaluate", FeatureFlagEvaluateDTO.class)
                 .getAnnotation(cn.dev33.satoken.annotation.SaCheckRole.class));
     }
 
@@ -224,18 +254,50 @@ class FeatureFlagSecurityTest {
     private static class MockSaTokenContext implements SaTokenContext {
         private final Map<String, Object> storage = new HashMap<>();
 
-        @Override public SaRequest getRequest()  { return mock(SaRequest.class); }
-        @Override public SaResponse getResponse() { return mock(SaResponse.class); }
-        @Override public boolean matchPath(String p, String path) { return true; }
-        @Override public boolean isValid() { return true; }
+        @Override
+        public SaRequest getRequest() {
+            return mock(SaRequest.class);
+        }
+
+        @Override
+        public SaResponse getResponse() {
+            return mock(SaResponse.class);
+        }
+
+        @Override
+        public boolean matchPath(String p, String path) {
+            return true;
+        }
+
+        @Override
+        public boolean isValid() {
+            return true;
+        }
 
         @Override
         public SaStorage getStorage() {
             return new SaStorage() {
-                @Override public Object getSource() { return storage; }
-                @Override public Object get(String key) { return storage.get(key); }
-                @Override public SaStorage set(String key, Object v) { storage.put(key, v); return this; }
-                @Override public SaStorage delete(String key) { storage.remove(key); return this; }
+                @Override
+                public Object getSource() {
+                    return storage;
+                }
+
+                @Override
+                public Object get(String key) {
+                    return storage.get(key);
+                }
+
+                @Override
+                public SaStorage set(String key, Object v) {
+                    storage.put(key, v);
+                    return this;
+                }
+
+                @Override
+                public SaStorage delete(String key) {
+                    storage.remove(key);
+                    return this;
+                }
             };
         }
     }

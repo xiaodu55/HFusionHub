@@ -6,5 +6,4 @@ import org.apache.ibatis.annotations.Mapper;
 
 /** Mapper for {@link PromptTestSet}. */
 @Mapper
-public interface PromptTestSetMapper extends BaseMapper<PromptTestSet> {
-}
+public interface PromptTestSetMapper extends BaseMapper<PromptTestSet> {}

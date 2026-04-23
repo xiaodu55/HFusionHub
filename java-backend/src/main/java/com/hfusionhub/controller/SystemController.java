@@ -2,16 +2,15 @@ package com.hfusionhub.controller;
 
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.result.R;
+import java.io.File;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.io.File;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /**
  * System diagnostics — preflight checks for document parsing readiness.

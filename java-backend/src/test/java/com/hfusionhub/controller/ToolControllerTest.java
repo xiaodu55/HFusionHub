@@ -1,5 +1,11 @@
 package com.hfusionhub.controller;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
+
 import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.context.SaTokenContext;
 import cn.dev33.satoken.context.model.SaRequest;
@@ -11,17 +17,10 @@ import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.mapper.AgentStepMapper;
 import com.hfusionhub.tenant.TenantContext;
+import java.util.*;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-
-import java.util.*;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for {@link ToolController} — tool registry and call record isolation.
@@ -61,10 +60,11 @@ class ToolControllerTest {
     @Test
     void listToolsReturnsRegistryFromAiClient() {
         Map<String, Object> pythonResponse = new LinkedHashMap<>();
-        pythonResponse.put("tools", List.of(
-                Map.of("name", "search_knowledge_base", "risk_level", "read_only"),
-                Map.of("name", "write_note", "risk_level", "read_write")
-        ));
+        pythonResponse.put(
+                "tools",
+                List.of(
+                        Map.of("name", "search_knowledge_base", "risk_level", "read_only"),
+                        Map.of("name", "write_note", "risk_level", "read_write")));
         pythonResponse.put("total", 2);
         when(aiClient.getToolRegistry(1L)).thenReturn(pythonResponse);
 
@@ -135,8 +135,7 @@ class ToolControllerTest {
         userARecord.put("task_query", "用户 A 的查询");
         userARecord.put("task_status", "succeeded");
 
-        when(agentStepMapper.selectRecentToolCalls(eq(1L), anyInt(), anyInt()))
-                .thenReturn(List.of(userARecord));
+        when(agentStepMapper.selectRecentToolCalls(eq(1L), anyInt(), anyInt())).thenReturn(List.of(userARecord));
         when(agentStepMapper.countToolCalls(eq(1L))).thenReturn(1);
 
         R<Map<String, Object>> resultA = controller.listRecentCalls(1, 20);
@@ -168,8 +167,7 @@ class ToolControllerTest {
         userBRecord.put("task_query", "用户 B 的查询");
         userBRecord.put("task_status", "succeeded");
 
-        when(agentStepMapper.selectRecentToolCalls(eq(2L), anyInt(), anyInt()))
-                .thenReturn(List.of(userBRecord));
+        when(agentStepMapper.selectRecentToolCalls(eq(2L), anyInt(), anyInt())).thenReturn(List.of(userBRecord));
         when(agentStepMapper.countToolCalls(eq(2L))).thenReturn(1);
 
         R<Map<String, Object>> resultB = controller.listRecentCalls(1, 20);
@@ -221,17 +219,38 @@ class ToolControllerTest {
         @Override
         public SaStorage getStorage() {
             return new SaStorage() {
-                @Override public Object getSource() { return storage; }
-                @Override public Object get(String key) { return storage.get(key); }
-                @Override public SaStorage set(String key, Object value) { storage.put(key, value); return this; }
-                @Override public SaStorage delete(String key) { storage.remove(key); return this; }
+                @Override
+                public Object getSource() {
+                    return storage;
+                }
+
+                @Override
+                public Object get(String key) {
+                    return storage.get(key);
+                }
+
+                @Override
+                public SaStorage set(String key, Object value) {
+                    storage.put(key, value);
+                    return this;
+                }
+
+                @Override
+                public SaStorage delete(String key) {
+                    storage.remove(key);
+                    return this;
+                }
             };
         }
 
         @Override
-        public boolean matchPath(String pattern, String path) { return true; }
+        public boolean matchPath(String pattern, String path) {
+            return true;
+        }
 
         @Override
-        public boolean isValid() { return true; }
+        public boolean isValid() {
+            return true;
+        }
     }
 }

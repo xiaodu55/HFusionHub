@@ -10,5 +10,4 @@ import org.apache.ibatis.annotations.Mapper;
  * @author HFusionHub Team
  */
 @Mapper
-public interface EvaluationGateResultMapper extends BaseMapper<EvaluationGateResult> {
-}
+public interface EvaluationGateResultMapper extends BaseMapper<EvaluationGateResult> {}

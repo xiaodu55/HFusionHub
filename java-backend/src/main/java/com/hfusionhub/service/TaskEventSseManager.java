@@ -4,18 +4,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hfusionhub.dto.AgentStatusEventDTO;
 import com.hfusionhub.dto.AgentTaskDetailDTO;
 import com.hfusionhub.dto.AgentTaskStatusDTO;
-import com.hfusionhub.entity.AgentRun;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.*;
 
 /**
  * SSE 管理中心 — 管理每个 Task 的 SSE 连接。
@@ -72,19 +70,23 @@ public class TaskEventSseManager {
 
         // Start DB poll loop
         long[] lastEventId = {0L};
-        ScheduledFuture<?> pollTask = pollScheduler.scheduleWithFixedDelay(() -> {
-            try {
-                var events = statusEventService.listEvents(taskId, lastEventId[0], 100);
-                for (AgentStatusEventDTO event : events) {
-                    emitter.send(SseEmitter.event()
-                            .name("status")
-                            .data(objectMapper.writeValueAsString(event), MediaType.APPLICATION_JSON));
-                    lastEventId[0] = Math.max(lastEventId[0], event.getId());
-                }
-            } catch (Exception e) {
-                log.debug("SSE poll error for task {}: {}", taskId, e.getMessage());
-            }
-        }, 0, pollDelayMs, TimeUnit.MILLISECONDS);
+        ScheduledFuture<?> pollTask = pollScheduler.scheduleWithFixedDelay(
+                () -> {
+                    try {
+                        var events = statusEventService.listEvents(taskId, lastEventId[0], 100);
+                        for (AgentStatusEventDTO event : events) {
+                            emitter.send(SseEmitter.event()
+                                    .name("status")
+                                    .data(objectMapper.writeValueAsString(event), MediaType.APPLICATION_JSON));
+                            lastEventId[0] = Math.max(lastEventId[0], event.getId());
+                        }
+                    } catch (Exception e) {
+                        log.debug("SSE poll error for task {}: {}", taskId, e.getMessage());
+                    }
+                },
+                0,
+                pollDelayMs,
+                TimeUnit.MILLISECONDS);
 
         // Cleanup on completion/timeout/error
         emitter.onCompletion(() -> cleanup(taskId, emitter, pollTask));
@@ -104,14 +106,13 @@ public class TaskEventSseManager {
             String payload = objectMapper.writeValueAsString(event);
             for (SseEmitter emitter : emitters) {
                 try {
-                    emitter.send(SseEmitter.event()
-                            .name("status")
-                            .data(payload, MediaType.APPLICATION_JSON));
+                    emitter.send(SseEmitter.event().name("status").data(payload, MediaType.APPLICATION_JSON));
                 } catch (Exception e) {
                     // Client disconnected — cleanup will remove on next iteration
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
     }
 
     /**
@@ -124,14 +125,13 @@ public class TaskEventSseManager {
             String payload = objectMapper.writeValueAsString(Map.of("content", content));
             for (SseEmitter emitter : emitters) {
                 try {
-                    emitter.send(SseEmitter.event()
-                            .name("content")
-                            .data(payload, MediaType.APPLICATION_JSON));
+                    emitter.send(SseEmitter.event().name("content").data(payload, MediaType.APPLICATION_JSON));
                 } catch (Exception e) {
                     // Client disconnected
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
     }
 
     /**
@@ -144,14 +144,13 @@ public class TaskEventSseManager {
             String payload = objectMapper.writeValueAsString(Map.of("sources", sources));
             for (SseEmitter emitter : emitters) {
                 try {
-                    emitter.send(SseEmitter.event()
-                            .name("content")
-                            .data(payload, MediaType.APPLICATION_JSON));
+                    emitter.send(SseEmitter.event().name("content").data(payload, MediaType.APPLICATION_JSON));
                 } catch (Exception e) {
                     // Client disconnected
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
     }
 
     /**
@@ -178,7 +177,10 @@ public class TaskEventSseManager {
                 taskEmitters.remove(taskId);
             }
         }
-        try { emitter.complete(); } catch (Exception ignored) {}
+        try {
+            emitter.complete();
+        } catch (Exception ignored) {
+        }
     }
 
     private AgentTaskStatusDTO buildStatus(AgentTaskDetailDTO detail) {

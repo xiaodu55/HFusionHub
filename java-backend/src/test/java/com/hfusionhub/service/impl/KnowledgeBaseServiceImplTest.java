@@ -1,23 +1,5 @@
 package com.hfusionhub.service.impl;
 
-import com.hfusionhub.common.exception.BusinessException;
-import com.hfusionhub.common.utils.JwtUtils;
-import com.hfusionhub.entity.KnowledgeBase;
-import com.hfusionhub.mapper.DocumentMapper;
-import com.hfusionhub.mapper.KnowledgeBaseMapper;
-import com.hfusionhub.mapper.UserMapper;
-import com.hfusionhub.service.DeletionService;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockedStatic;
-import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.time.LocalDateTime;
-
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -27,6 +9,23 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import com.hfusionhub.common.exception.BusinessException;
+import com.hfusionhub.common.utils.JwtUtils;
+import com.hfusionhub.entity.KnowledgeBase;
+import com.hfusionhub.mapper.DocumentMapper;
+import com.hfusionhub.mapper.KnowledgeBaseMapper;
+import com.hfusionhub.mapper.UserMapper;
+import com.hfusionhub.service.DeletionService;
+import java.time.LocalDateTime;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
 class KnowledgeBaseServiceImplTest {

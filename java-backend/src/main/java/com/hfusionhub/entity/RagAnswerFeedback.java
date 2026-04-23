@@ -10,6 +10,7 @@ import lombok.Data;
 public class RagAnswerFeedback extends BaseEntity {
     @TableId(type = IdType.AUTO)
     private Long id;
+
     private Long tenantId;
     private Long userId;
     private Long conversationId;

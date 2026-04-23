@@ -7,10 +7,9 @@ import com.hfusionhub.service.FeatureFlagService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/feature-flag")
@@ -32,8 +31,7 @@ public class FeatureFlagController {
     @PutMapping("/{id}")
     @SaCheckRole("admin")
     @Operation(summary = "Update feature flag (admin only)")
-    public R<FeatureFlagInfoDTO> update(@PathVariable Long id,
-                                         @Valid @RequestBody FeatureFlagUpdateDTO dto) {
+    public R<FeatureFlagInfoDTO> update(@PathVariable Long id, @Valid @RequestBody FeatureFlagUpdateDTO dto) {
         return R.ok("Updated", featureFlagService.update(id, dto));
     }
 
@@ -63,8 +61,7 @@ public class FeatureFlagController {
     @SaCheckRole("admin")
     @Operation(summary = "List all flags paginated (admin only)")
     public R<PageResult<FeatureFlagInfoDTO>> list(
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int pageSize) {
+            @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int pageSize) {
         return R.ok(featureFlagService.list(page, pageSize));
     }
 
@@ -80,16 +77,16 @@ public class FeatureFlagController {
     @PostMapping("/{flagId}/rule")
     @SaCheckRole("admin")
     @Operation(summary = "Add override rule (admin only)")
-    public R<FeatureFlagRuleInfoDTO> addRule(@PathVariable Long flagId,
-                                              @Valid @RequestBody FeatureFlagRuleCreateDTO dto) {
+    public R<FeatureFlagRuleInfoDTO> addRule(
+            @PathVariable Long flagId, @Valid @RequestBody FeatureFlagRuleCreateDTO dto) {
         return R.ok("Rule added", featureFlagService.addRule(flagId, dto));
     }
 
     @PutMapping("/rule/{ruleId}")
     @SaCheckRole("admin")
     @Operation(summary = "Update a rule (admin only)")
-    public R<FeatureFlagRuleInfoDTO> updateRule(@PathVariable Long ruleId,
-                                                 @Valid @RequestBody FeatureFlagRuleUpdateDTO dto) {
+    public R<FeatureFlagRuleInfoDTO> updateRule(
+            @PathVariable Long ruleId, @Valid @RequestBody FeatureFlagRuleUpdateDTO dto) {
         return R.ok("Rule updated", featureFlagService.updateRule(ruleId, dto));
     }
 

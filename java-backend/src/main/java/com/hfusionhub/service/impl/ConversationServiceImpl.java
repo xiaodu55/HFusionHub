@@ -2,56 +2,53 @@ package com.hfusionhub.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.hfusionhub.client.AiClient;
+import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
+import com.hfusionhub.config.QuotaProperties;
 import com.hfusionhub.dto.ConversationCreateDTO;
 import com.hfusionhub.dto.ConversationInfoDTO;
 import com.hfusionhub.dto.ConversationQueryDTO;
-import com.hfusionhub.dto.AgentTaskDetailDTO;
 import com.hfusionhub.dto.MessageInfoDTO;
 import com.hfusionhub.dto.MessageSendDTO;
-import com.hfusionhub.client.AiClient;
+import com.hfusionhub.entity.AgentRun;
+import com.hfusionhub.entity.AgentTask;
 import com.hfusionhub.entity.Conversation;
-import com.hfusionhub.entity.PromptTemplate;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.entity.Message;
+import com.hfusionhub.entity.PromptTemplate;
 import com.hfusionhub.entity.User;
-import com.hfusionhub.entity.AgentTask;
-import com.hfusionhub.entity.AgentRun;
 import com.hfusionhub.mapper.ConversationMapper;
-import com.hfusionhub.mapper.PromptTemplateMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.MessageMapper;
+import com.hfusionhub.mapper.PromptTemplateMapper;
 import com.hfusionhub.mapper.UserMapper;
-import com.hfusionhub.common.constant.CommonConstants;
-import com.hfusionhub.common.constant.AgentConstants;
-import com.hfusionhub.service.ConversationService;
+import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.service.AgentTaskService;
+import com.hfusionhub.service.ConversationService;
 import com.hfusionhub.service.MemoryService;
 import com.hfusionhub.service.UsageLedgerService;
-import com.hfusionhub.config.QuotaProperties;
-import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.tenant.TenantContext;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.MediaType;
-import org.springframework.dao.DuplicateKeyException;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
-
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
@@ -111,7 +108,8 @@ public class ConversationServiceImpl implements ConversationService {
         // 3. 创建对话
         if (dto.getPromptTemplateId() != null) {
             PromptTemplate template = promptTemplateMapper.selectById(dto.getPromptTemplateId());
-            if (template == null || !currentUserId.equals(template.getUserId())
+            if (template == null
+                    || !currentUserId.equals(template.getUserId())
                     || !PromptTemplate.STATUS_PUBLISHED.equals(template.getStatus())) {
                 throw new BusinessException("请选择属于你的已发布提示词模板");
             }
@@ -230,7 +228,10 @@ public class ConversationServiceImpl implements ConversationService {
         // 2. 构建查询条件
         LambdaQueryWrapper<Conversation> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Conversation::getUserId, currentUserId)
-                .eq(queryDTO.getKnowledgeBaseId() != null, Conversation::getKnowledgeBaseId, queryDTO.getKnowledgeBaseId())
+                .eq(
+                        queryDTO.getKnowledgeBaseId() != null,
+                        Conversation::getKnowledgeBaseId,
+                        queryDTO.getKnowledgeBaseId())
                 .like(StringUtils.hasText(queryDTO.getTitle()), Conversation::getTitle, queryDTO.getTitle())
                 .orderByDesc(Conversation::getCreatedAt);
 
@@ -269,8 +270,7 @@ public class ConversationServiceImpl implements ConversationService {
         // Agent V1 Step 5: server-side capability gate — the DTO may carry
         // capabilityProfile="approval_write", but the server validates it against
         // business rules before passing it to Python.  Regular chat is always null.
-        String effectiveCapability = resolveCapabilityProfile(
-                dto.getCapabilityProfile(), conversation, currentUserId);
+        String effectiveCapability = resolveCapabilityProfile(dto.getCapabilityProfile(), conversation, currentUserId);
         List<Map<String, Object>> intentContext = ragIntentNodeService.routeCandidates();
         // 用量账本：预占上界 = 输入估算 + 服务端最大输出（幂等键为 chat:<requestId>）
         final String usageKey = "chat:" + requestId;
@@ -285,20 +285,28 @@ public class ConversationServiceImpl implements ConversationService {
                 // fallback answer that would mask the security gap.
                 if (currentUserId == null || currentUserId <= 0) {
                     throw new BusinessException(
-                            "Agent V1 配置错误：知识库会话需要已认证的用户上下文，但当前会话无法解析用户 ID。"
-                            + "请确认 JWT 令牌有效且包含 subject 声明。");
+                            "Agent V1 配置错误：知识库会话需要已认证的用户上下文，但当前会话无法解析用户 ID。" + "请确认 JWT 令牌有效且包含 subject 声明。");
                 }
                 aiResponse = aiClient.agentV1Chat(
-                        dto.getContent(), dto.getConversationId(),
-                        conversation.getKnowledgeBaseId(), history,
-                        "detailed", 5, requestId, currentUserId,
+                        dto.getContent(),
+                        dto.getConversationId(),
+                        conversation.getKnowledgeBaseId(),
+                        history,
+                        "detailed",
+                        5,
+                        requestId,
+                        currentUserId,
                         effectiveCapability,
                         JwtUtils.hasRole(CommonConstants.ROLE_ADMIN) ? "admin" : "user",
                         intentContext);
             } else {
                 aiResponse = aiClient.chat(
-                        dto.getContent(), dto.getConversationId(),
-                        conversation.getKnowledgeBaseId(), history, currentUserId, intentContext);
+                        dto.getContent(),
+                        dto.getConversationId(),
+                        conversation.getKnowledgeBaseId(),
+                        history,
+                        currentUserId,
+                        intentContext);
             }
         } catch (BusinessException e) {
             // Re-throw BusinessExceptions directly — they represent explicit
@@ -309,19 +317,24 @@ public class ConversationServiceImpl implements ConversationService {
         } catch (Exception e) {
             log.error("Failed to get AI response: {}", e.getMessage(), e);
             usageLedgerService.release(UsageMeter.CHAT_TOKENS, usageKey);
-            return saveAssistantMessage(dto.getConversationId(),
-                    aiUnavailableMessage(e), "fallback", 0, List.of(),
-                    conversation, dto.getContent(), assistantRequestId);
+            return saveAssistantMessage(
+                    dto.getConversationId(),
+                    aiUnavailableMessage(e),
+                    "fallback",
+                    0,
+                    List.of(),
+                    conversation,
+                    dto.getContent(),
+                    assistantRequestId);
         }
 
         // 阶段 3: 保存助手消息 + 更新标题（短事务）
         // 用量账本：按实际 token 结算，封顶在预占上界内（Python 未返回时按预占上界结算）
-        long realTokens = aiResponse.getTokenCount() > 0
-                ? aiResponse.getTokenCount() : reserveTokens;
+        long realTokens = aiResponse.getTokenCount() > 0 ? aiResponse.getTokenCount() : reserveTokens;
         long chargeTokens = Math.min(reserveTokens, realTokens);
         usageLedgerService.settle(UsageMeter.CHAT_TOKENS, usageKey, chargeTokens, "message", requestId);
-        return saveAssistantMessageV1(dto.getConversationId(), aiResponse,
-                conversation, dto.getContent(), assistantRequestId);
+        return saveAssistantMessageV1(
+                dto.getConversationId(), aiResponse, conversation, dto.getContent(), assistantRequestId);
     }
 
     /**
@@ -340,8 +353,7 @@ public class ConversationServiceImpl implements ConversationService {
         if (!conversation.getUserId().equals(currentUserId)) throw new BusinessException("无权发送消息");
         if (conversation.getKnowledgeBaseId() != null) {
             KnowledgeBase kb = knowledgeBaseMapper.selectById(conversation.getKnowledgeBaseId());
-            if (kb == null || kb.getDeleted() == 1 || kb.getStatus() != 0)
-                throw new BusinessException("关联的知识库已被删除或禁用");
+            if (kb == null || kb.getDeleted() == 1 || kb.getStatus() != 0) throw new BusinessException("关联的知识库已被删除或禁用");
             if (!kb.getUserId().equals(currentUserId) && !kbShareService.canRead(currentUserId, kb.getId()))
                 throw new BusinessException("无权访问关联的知识库");
         }
@@ -370,18 +382,28 @@ public class ConversationServiceImpl implements ConversationService {
      * 阶段 3: 短事务保存助手消息并更新对话标题
      */
     @Transactional
-    public MessageInfoDTO saveAssistantMessage(Long conversationId,
-            String content, String model, int tokenCount,
+    public MessageInfoDTO saveAssistantMessage(
+            Long conversationId,
+            String content,
+            String model,
+            int tokenCount,
             List<Map<String, Object>> sources,
-            Conversation conversation, String userContent) {
-        return saveAssistantMessage(conversationId, content, model, tokenCount, sources, conversation, userContent, null);
+            Conversation conversation,
+            String userContent) {
+        return saveAssistantMessage(
+                conversationId, content, model, tokenCount, sources, conversation, userContent, null);
     }
 
     @Transactional
-    public MessageInfoDTO saveAssistantMessage(Long conversationId,
-            String content, String model, int tokenCount,
+    public MessageInfoDTO saveAssistantMessage(
+            Long conversationId,
+            String content,
+            String model,
+            int tokenCount,
             List<Map<String, Object>> sources,
-            Conversation conversation, String userContent, String requestId) {
+            Conversation conversation,
+            String userContent,
+            String requestId) {
         Message existingAssistant = findAssistantByRequestId(requestId);
         if (existingAssistant != null) {
             return convertToMessageInfoDTO(existingAssistant);
@@ -416,17 +438,18 @@ public class ConversationServiceImpl implements ConversationService {
      * token_usage) alongside the core answer + sources.
      */
     @Transactional
-    public MessageInfoDTO saveAssistantMessageV1(Long conversationId,
+    public MessageInfoDTO saveAssistantMessageV1(
+            Long conversationId,
             AiClient.ChatResponse aiResponse,
-            Conversation conversation, String userContent, String requestId) {
+            Conversation conversation,
+            String userContent,
+            String requestId) {
         Message existingAssistant = findAssistantByRequestId(requestId);
         if (existingAssistant != null) {
             return convertToMessageInfoDTO(existingAssistant);
         }
         // Primary content: prefer answer if content is null (V1 path sends both).
-        String primaryContent = aiResponse.getContent() != null
-                ? aiResponse.getContent()
-                : aiResponse.getAnswer();
+        String primaryContent = aiResponse.getContent() != null ? aiResponse.getContent() : aiResponse.getAnswer();
 
         Message msg = new Message();
         msg.setConversationId(conversationId);
@@ -539,17 +562,20 @@ public class ConversationServiceImpl implements ConversationService {
      * 结算量 = min(预占上界, 输入估算 + 实际输出/4)，封顶在预留内。
      * 内部吞异常，避免账本失败影响 SSE 主流程。
      */
-    private void finalizeChatUsage(Long tenantId, String usageKey, long reserveTokens,
-                                   long inputEstimate, AtomicBoolean usageFinalized,
-                                   boolean success, int outputChars) {
+    private void finalizeChatUsage(
+            Long tenantId,
+            String usageKey,
+            long reserveTokens,
+            long inputEstimate,
+            AtomicBoolean usageFinalized,
+            boolean success,
+            int outputChars) {
         if (usageFinalized.compareAndSet(false, true)) {
             TenantContext.runAs(tenantId, () -> {
                 try {
                     if (success) {
-                        long charge = Math.min(reserveTokens,
-                                inputEstimate + Math.max(0, outputChars) / 4);
-                        usageLedgerService.settle(
-                                UsageMeter.CHAT_TOKENS, usageKey, charge, "message", usageKey);
+                        long charge = Math.min(reserveTokens, inputEstimate + Math.max(0, outputChars) / 4);
+                        usageLedgerService.settle(UsageMeter.CHAT_TOKENS, usageKey, charge, "message", usageKey);
                     } else {
                         usageLedgerService.release(UsageMeter.CHAT_TOKENS, usageKey);
                     }
@@ -569,9 +595,8 @@ public class ConversationServiceImpl implements ConversationService {
         if (!StringUtils.hasText(requestId)) {
             return null;
         }
-        return messageMapper.selectOne(new LambdaQueryWrapper<Message>()
-                .eq(Message::getRole, role)
-                .eq(Message::getRequestId, requestId));
+        return messageMapper.selectOne(
+                new LambdaQueryWrapper<Message>().eq(Message::getRole, role).eq(Message::getRequestId, requestId));
     }
 
     @Override
@@ -601,8 +626,7 @@ public class ConversationServiceImpl implements ConversationService {
             try {
                 agentTaskService.cancelRun(stream.getAgentRunId());
             } catch (Exception e) {
-                log.warn("Failed to mark agent run {} as cancelled: {}",
-                        stream.getAgentRunId(), e.getMessage());
+                log.warn("Failed to mark agent run {} as cancelled: {}", stream.getAgentRunId(), e.getMessage());
             }
         }
 
@@ -614,11 +638,8 @@ public class ConversationServiceImpl implements ConversationService {
         return true;
     }
 
-    private boolean saveStreamAssistantMessage(Long conversationId,
-            String content,
-            String model,
-            List<Map<String, Object>> sources,
-            String requestId) {
+    private boolean saveStreamAssistantMessage(
+            Long conversationId, String content, String model, List<Map<String, Object>> sources, String requestId) {
         Message existingAssistant = findAssistantByRequestId(requestId);
         if (existingAssistant != null) {
             return true;
@@ -700,19 +721,19 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     static boolean shouldIncludeInChatHistory(Message message) {
-        if (message == null || message.getContent() == null || message.getContent().isBlank()) {
+        if (message == null
+                || message.getContent() == null
+                || message.getContent().isBlank()) {
             return false;
         }
         // Replies produced by the old development fallback can contain the
         // fully assembled prompt. Keep them visible for audit, but never send
         // them back to a real model as conversation context.
-        return !("assistant".equals(message.getRole())
-                && "mock-model".equals(message.getModel()));
+        return !("assistant".equals(message.getRole()) && "mock-model".equals(message.getModel()));
     }
 
     @Override
-    public List<Map<String, String>> getChatHistoryWithInstructions(
-            Long conversationId, Long userId, String query) {
+    public List<Map<String, String>> getChatHistoryWithInstructions(Long conversationId, Long userId, String query) {
         Conversation conversation = conversationMapper.selectById(conversationId);
         if (conversation == null) {
             throw new BusinessException("对话不存在");
@@ -730,17 +751,17 @@ public class ConversationServiceImpl implements ConversationService {
      * authoritative for document retrieval.
      */
     private List<Map<String, String>> withRelevantMemories(
-            List<Map<String, String>> history,
-            Long userId,
-            Long knowledgeBaseId,
-            String query) {
+            List<Map<String, String>> history, Long userId, Long knowledgeBaseId, String query) {
         if (userId == null) return history;
         var memories = memoryService.getRelevantMemories(userId, knowledgeBaseId, query, 5);
         if (memories.isEmpty()) return history;
         StringBuilder context = new StringBuilder("User-provided long-term memory (use only when relevant):\n");
         for (var memory : memories) {
-            context.append("- ").append(memory.getType()).append(": ")
-                    .append(memory.getContent()).append("\n");
+            context.append("- ")
+                    .append(memory.getType())
+                    .append(": ")
+                    .append(memory.getContent())
+                    .append("\n");
         }
         List<Map<String, String>> enriched = new java.util.ArrayList<>();
         enriched.add(Map.of("role", "system", "content", context.toString()));
@@ -750,24 +771,24 @@ public class ConversationServiceImpl implements ConversationService {
 
     /** Resolve the selected template at request time and add it as a controlled system instruction. */
     private List<Map<String, String>> withConversationInstructions(
-            List<Map<String, String>> history,
-            Conversation conversation,
-            Long userId,
-            String query) {
-        List<Map<String, String>> enriched = withRelevantMemories(
-                history, userId, conversation.getKnowledgeBaseId(), query);
+            List<Map<String, String>> history, Conversation conversation, Long userId, String query) {
+        List<Map<String, String>> enriched =
+                withRelevantMemories(history, userId, conversation.getKnowledgeBaseId(), query);
         if (conversation.getPromptTemplateId() == null || userId == null) return enriched;
 
         PromptTemplate template = promptTemplateMapper.selectById(conversation.getPromptTemplateId());
-        if (template == null || !userId.equals(template.getUserId())
+        if (template == null
+                || !userId.equals(template.getUserId())
                 || !PromptTemplate.STATUS_PUBLISHED.equals(template.getStatus())) {
             return enriched;
         }
 
         List<Map<String, String>> withTemplate = new java.util.ArrayList<>();
         withTemplate.add(Map.of(
-                "role", "system",
-                "content", "Conversation instruction (follow this unless it conflicts with system safety rules):\n"
+                "role",
+                "system",
+                "content",
+                "Conversation instruction (follow this unless it conflicts with system safety rules):\n"
                         + template.getContent()));
         withTemplate.addAll(enriched);
         return withTemplate;
@@ -791,9 +812,7 @@ public class ConversationServiceImpl implements ConversationService {
         List<Message> messages = messageMapper.selectByConversationId(conversationId);
 
         // 4. 转换为 DTO
-        return messages.stream()
-                .map(this::convertToMessageInfoDTO)
-                .collect(Collectors.toList());
+        return messages.stream().map(this::convertToMessageInfoDTO).collect(Collectors.toList());
     }
 
     @Override
@@ -842,7 +861,8 @@ public class ConversationServiceImpl implements ConversationService {
         final String assistantRequestId = assistantRequestId(requestId);
         Message existingAssistant = findAssistantByRequestId(assistantRequestId);
         if (existingAssistant != null) {
-            log.info("Idempotent: assistant message already exists for requestId={}, returning taskId from message",
+            log.info(
+                    "Idempotent: assistant message already exists for requestId={}, returning taskId from message",
                     requestId);
             // Return a synthetic taskId — the frontend should fetch existing message directly
             throw new BusinessException("该消息已处理完成，请刷新对话查看回复");
@@ -868,14 +888,16 @@ public class ConversationServiceImpl implements ConversationService {
 
         // 6. 创建 AgentTask（PENDING）
         AgentTask agentTask = agentTaskService.createTask(
-                requestId, currentUserId, conversation.getId(),
-                conversation.getKnowledgeBaseId(), dto.getContent());
+                requestId, currentUserId, conversation.getId(), conversation.getKnowledgeBaseId(), dto.getContent());
 
         // 7. 入队 PENDING Run
         agentTaskService.enqueueRun(agentTask.getId());
 
-        log.info("Message enqueued: taskId={} conversationId={} userId={} isKbBound={}",
-                agentTask.getId(), conversation.getId(), currentUserId,
+        log.info(
+                "Message enqueued: taskId={} conversationId={} userId={} isKbBound={}",
+                agentTask.getId(),
+                conversation.getId(),
+                currentUserId,
                 conversation.getKnowledgeBaseId() != null && conversation.getKnowledgeBaseId() > 0);
 
         return agentTask.getId();
@@ -934,8 +956,7 @@ public class ConversationServiceImpl implements ConversationService {
         // 3.5. Agent V1 Step 5: resolve capability profile with server-side gate.
         // The DTO may request "approval_write", but the server validates it against
         // business rules.  Regular chat is always forced to null.
-        String streamingCapability = resolveCapabilityProfile(
-                dto.getCapabilityProfile(), conversation, currentUserId);
+        String streamingCapability = resolveCapabilityProfile(dto.getCapabilityProfile(), conversation, currentUserId);
 
         // 4. 保存用户消息
         Message userMessage = findUserByRequestId(requestId);
@@ -958,35 +979,32 @@ public class ConversationServiceImpl implements ConversationService {
         // 5. 获取对话历史
         List<Map<String, String>> history = getChatHistory(conversation.getId());
         history = withConversationInstructions(history, conversation, currentUserId, dto.getContent());
-        List<Map<String, Object>> intentContext = ragIntentNodeService.routeCandidates();
+        // 异步线程无 web 上下文，不能依赖 StpUtil 取当前用户——显式传 userId
+        List<Map<String, Object>> intentContext = ragIntentNodeService.routeCandidates(currentUserId);
 
         // 5.5. Agent V1 Step 4: 创建持久化 agent_task 和 agent_run
         final AgentTask agentTask = agentTaskService.createTask(
-                requestId, currentUserId, conversation.getId(),
-                conversation.getKnowledgeBaseId(), dto.getContent());
+                requestId, currentUserId, conversation.getId(), conversation.getKnowledgeBaseId(), dto.getContent());
         final String runUuid = java.util.UUID.randomUUID().toString();
-        final AgentRun agentRun = agentTaskService.startRun(
-                agentTask.getId(), runUuid, null, "detailed", 5);
+        final AgentRun agentRun = agentTaskService.startRun(agentTask.getId(), runUuid, null, "detailed", 5);
         streamCancellation.setAgentRunId(agentRun.getId());
         streamCancellation.setAgentTaskId(agentTask.getId());
-        log.info("Agent task tracking: taskId={} runId={} runUuid={}",
-                agentTask.getId(), agentRun.getId(), runUuid);
+        log.info("Agent task tracking: taskId={} runId={} runUuid={}", agentTask.getId(), agentRun.getId(), runUuid);
 
         // 6. 使用 WebClient Flux 实现真正的流式响应
         StringBuilder responseBuilder = new StringBuilder();
         java.util.List<Map<String, Object>> accumulatedSources = new java.util.ArrayList<>();
         boolean[] assistantSaved = {false};
-        final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        final com.fasterxml.jackson.databind.ObjectMapper objectMapper =
+                new com.fasterxml.jackson.databind.ObjectMapper();
 
         // Agent V1 Step 3: KB-bound streaming MUST go through the V1 endpoint
         // so that the execution context (user_id, permissions, mode) is created
         // and the permission boundary is enforced on every tool call.
-        final boolean isKbBound = conversation.getKnowledgeBaseId() != null
-                && conversation.getKnowledgeBaseId() > 0;
+        final boolean isKbBound = conversation.getKnowledgeBaseId() != null && conversation.getKnowledgeBaseId() > 0;
         if (isKbBound && (currentUserId == null || currentUserId <= 0)) {
             emitter.completeWithError(new BusinessException(
-                    "Agent V1 配置错误：知识库会话需要已认证的用户上下文，但当前会话无法解析用户 ID。"
-                    + "请确认 JWT 令牌有效且包含 subject 声明。"));
+                    "Agent V1 配置错误：知识库会话需要已认证的用户上下文，但当前会话无法解析用户 ID。" + "请确认 JWT 令牌有效且包含 subject 声明。"));
             return;
         }
 
@@ -1003,37 +1021,44 @@ public class ConversationServiceImpl implements ConversationService {
         reactor.core.publisher.Flux<String> sseFlux;
         if (isKbBound) {
             sseFlux = aiClient.agentV1ChatStream(
-                    dto.getContent(), dto.getConversationId(),
-                    conversation.getKnowledgeBaseId(), history, requestId, currentUserId,
-                    streamingCapability, intentContext);
+                    dto.getContent(),
+                    dto.getConversationId(),
+                    conversation.getKnowledgeBaseId(),
+                    history,
+                    requestId,
+                    currentUserId,
+                    streamingCapability,
+                    intentContext);
         } else {
             sseFlux = aiClient.streamChat(
-                    dto.getContent(), dto.getConversationId(),
-                    conversation.getKnowledgeBaseId(), history, requestId,
-                    currentUserId, intentContext);
+                    dto.getContent(),
+                    dto.getConversationId(),
+                    conversation.getKnowledgeBaseId(),
+                    history,
+                    requestId,
+                    currentUserId,
+                    intentContext);
         }
 
         sseFlux = sseFlux.doFinally(signalType -> {
-                    // Reactor 线程无租户上下文，先恢复再结算/退回
-                    TenantContext.runAs(streamTenantId, () -> {
-                        // Usage safety net: if no subscriber path finalized the
-                        // reservation (edge case), settle on completion else release.
-                        if (usageFinalized.compareAndSet(false, true)) {
-                            if (signalType == reactor.core.publisher.SignalType.ON_COMPLETE) {
-                                long charge = Math.min(streamReserveTokens,
-                                        streamInputEstimate + responseBuilder.length() / 4);
-                                usageLedgerService.settle(
-                                        UsageMeter.CHAT_TOKENS, usageKey, charge, "message", usageKey);
-                            } else {
-                                usageLedgerService.release(UsageMeter.CHAT_TOKENS, usageKey);
-                            }
-                        }
-                        // Cleanup: remove from active requests and signal completion
-                        activeStreamRequests.remove(requestId, streamCancellation);
-                        streamCancellation.completed.complete(null);
-                        return null;
-                    });
-                });
+            // Reactor 线程无租户上下文，先恢复再结算/退回
+            TenantContext.runAs(streamTenantId, () -> {
+                // Usage safety net: if no subscriber path finalized the
+                // reservation (edge case), settle on completion else release.
+                if (usageFinalized.compareAndSet(false, true)) {
+                    if (signalType == reactor.core.publisher.SignalType.ON_COMPLETE) {
+                        long charge = Math.min(streamReserveTokens, streamInputEstimate + responseBuilder.length() / 4);
+                        usageLedgerService.settle(UsageMeter.CHAT_TOKENS, usageKey, charge, "message", usageKey);
+                    } else {
+                        usageLedgerService.release(UsageMeter.CHAT_TOKENS, usageKey);
+                    }
+                }
+                // Cleanup: remove from active requests and signal completion
+                activeStreamRequests.remove(requestId, streamCancellation);
+                streamCancellation.completed.complete(null);
+                return null;
+            });
+        });
 
         reactor.core.Disposable subscription = sseFlux.subscribe(
                 chunk -> TenantContext.runAs(streamTenantId, () -> {
@@ -1049,7 +1074,7 @@ public class ConversationServiceImpl implements ConversationService {
 
                     // ── Step 1: normalise the raw payload ──────────────────
                     String data = com.hfusionhub.service.AgentStreamEventProcessor.stripSsePrefix(chunk);
-                    if (data == null) return;   // empty / separator line
+                    if (data == null) return; // empty / separator line
 
                     // ── Step 2: [DONE] sentinel ───────────────────────────
                     if ("[DONE]".equals(data)) {
@@ -1057,14 +1082,24 @@ public class ConversationServiceImpl implements ConversationService {
                         try {
                             emitter.send(SseEmitter.event().data("[DONE]"));
                             emitter.complete();
-                        } catch (Exception ignored) {}
+                        } catch (Exception ignored) {
+                        }
                         if (responseBuilder.length() > 0) {
-                                assistantSaved[0] = saveStreamAssistantMessage(
-                                        dto.getConversationId(), responseBuilder.toString(),
-                                        "streaming", accumulatedSources, assistantRequestId);
-                            }
-                        finalizeChatUsage(streamTenantId, usageKey, streamReserveTokens,
-                                streamInputEstimate, usageFinalized, true, responseBuilder.length());
+                            assistantSaved[0] = saveStreamAssistantMessage(
+                                    dto.getConversationId(),
+                                    responseBuilder.toString(),
+                                    "streaming",
+                                    accumulatedSources,
+                                    assistantRequestId);
+                        }
+                        finalizeChatUsage(
+                                streamTenantId,
+                                usageKey,
+                                streamReserveTokens,
+                                streamInputEstimate,
+                                usageFinalized,
+                                true,
+                                responseBuilder.length());
                         return;
                     }
 
@@ -1079,20 +1114,34 @@ public class ConversationServiceImpl implements ConversationService {
                             try {
                                 Map<String, Object> eventMap = objectMapper.treeToValue(jsonNode, Map.class);
                                 emitter.send(SseEmitter.event().data(eventMap, MediaType.APPLICATION_JSON));
-                            } catch (Exception ignored) {}
+                            } catch (Exception ignored) {
+                            }
                             return;
                         }
 
-                        String content = jsonNode.has("content") ? jsonNode.get("content").asText() : "";
-                        boolean isCancelled = jsonNode.has("cancelled") && jsonNode.get("cancelled").asBoolean();
+                        String content = jsonNode.has("content")
+                                ? jsonNode.get("content").asText()
+                                : "";
+                        boolean isCancelled = jsonNode.has("cancelled")
+                                && jsonNode.get("cancelled").asBoolean();
                         com.fasterxml.jackson.databind.JsonNode sourcesNode = jsonNode.get("sources");
 
                         if (isCancelled) {
                             log.info("Python AI request cancelled: {}", requestId);
                             agentTaskService.cancelRun(agentRun.getId());
-                            finalizeChatUsage(streamTenantId, usageKey, streamReserveTokens,
-                                    streamInputEstimate, usageFinalized, false, 0);
-                            try { emitter.send(SseEmitter.event().data("[DONE]")); emitter.complete(); } catch (Exception ignored) {}
+                            finalizeChatUsage(
+                                    streamTenantId,
+                                    usageKey,
+                                    streamReserveTokens,
+                                    streamInputEstimate,
+                                    usageFinalized,
+                                    false,
+                                    0);
+                            try {
+                                emitter.send(SseEmitter.event().data("[DONE]"));
+                                emitter.complete();
+                            } catch (Exception ignored) {
+                            }
                             return;
                         }
 
@@ -1116,8 +1165,14 @@ public class ConversationServiceImpl implements ConversationService {
                 }),
                 error -> TenantContext.runAs(streamTenantId, () -> {
                     // onError
-                    finalizeChatUsage(streamTenantId, usageKey, streamReserveTokens,
-                            streamInputEstimate, usageFinalized, false, 0);
+                    finalizeChatUsage(
+                            streamTenantId,
+                            usageKey,
+                            streamReserveTokens,
+                            streamInputEstimate,
+                            usageFinalized,
+                            false,
+                            0);
                     if (cancelled.get()) {
                         log.info("Stream cancelled by client, requestId: {}", requestId);
                         agentTaskService.cancelRun(agentRun.getId());
@@ -1138,41 +1193,52 @@ public class ConversationServiceImpl implements ConversationService {
                         return;
                     }
                     log.error("Streaming error: {}", error.getMessage(), error);
-                    agentTaskService.failRun(agentRun.getId(),
+                    agentTaskService.failRun(
+                            agentRun.getId(),
                             "internal_error",
                             error.getMessage() != null ? error.getMessage() : "Unknown streaming error",
                             null);
                     try {
-                        String errorMessage = aiUnavailableMessage(error instanceof Exception ? (Exception) error : new RuntimeException(error));
+                        String errorMessage = aiUnavailableMessage(
+                                error instanceof Exception ? (Exception) error : new RuntimeException(error));
                         emitter.send(SseEmitter.event().data(Map.of("content", errorMessage)));
                         emitter.send(SseEmitter.event().data("[DONE]"));
                         emitter.complete();
-                        saveStreamAssistantMessage(dto.getConversationId(), errorMessage, "error", List.of(), assistantRequestId);
+                        saveStreamAssistantMessage(
+                                dto.getConversationId(), errorMessage, "error", List.of(), assistantRequestId);
                     } catch (Exception ex) {
                         emitter.completeWithError(ex);
                     }
                 }),
                 () -> TenantContext.runAs(streamTenantId, () -> {
                     // onComplete: ensure emitter is closed and assistant saved.
-                    finalizeChatUsage(streamTenantId, usageKey, streamReserveTokens,
-                            streamInputEstimate, usageFinalized,
-                            responseBuilder.length() > 0, responseBuilder.length());
+                    finalizeChatUsage(
+                            streamTenantId,
+                            usageKey,
+                            streamReserveTokens,
+                            streamInputEstimate,
+                            usageFinalized,
+                            responseBuilder.length() > 0,
+                            responseBuilder.length());
                     // Agent V1 Step 5 safety net: if the run is still in 'running'
                     // state (no run_completed / run_error / approval_required was
                     // received), converge it to failed so nothing stays running forever.
                     try {
                         AgentRun finalRunState = agentTaskService.getRunById(agentRun.getId());
-                        if (finalRunState != null
-                                && "running".equals(finalRunState.getStatus())) {
-                            log.warn("Agent run {} completed SSE stream but is still 'running' — "
-                                    + "forcing failed convergence", agentRun.getId());
-                            agentTaskService.failRun(agentRun.getId(),
+                        if (finalRunState != null && "running".equals(finalRunState.getStatus())) {
+                            log.warn(
+                                    "Agent run {} completed SSE stream but is still 'running' — "
+                                            + "forcing failed convergence",
+                                    agentRun.getId());
+                            agentTaskService.failRun(
+                                    agentRun.getId(),
                                     "internal_error",
                                     "Stream completed without terminal event; forced failed convergence",
                                     null);
                         }
                     } catch (Exception convergenceError) {
-                        log.warn("Failed to check/converge agent run state on complete: {}",
+                        log.warn(
+                                "Failed to check/converge agent run state on complete: {}",
                                 convergenceError.getMessage());
                     }
                     if (responseBuilder.length() > 0) {
@@ -1198,8 +1264,7 @@ public class ConversationServiceImpl implements ConversationService {
                             // ignore
                         }
                     }
-                })
-        );
+                }));
 
         // Track the subscription for cancellation
         streamCancellation.setSubscription(subscription);
@@ -1223,19 +1288,13 @@ public class ConversationServiceImpl implements ConversationService {
      * @param currentUserId authenticated user ID from JWT
      * @return {@code "approval_write"} if allowed, otherwise {@code null}
      */
-    private String resolveCapabilityProfile(
-            String requested,
-            Conversation conversation,
-            Long currentUserId
-    ) {
+    private String resolveCapabilityProfile(String requested, Conversation conversation, Long currentUserId) {
         if (!"approval_write".equals(requested)) {
-            return null;  // unrecognised or absent → V1.0 read-only
+            return null; // unrecognised or absent → V1.0 read-only
         }
         // approval_write requires a KB-bound conversation.
-        if (conversation.getKnowledgeBaseId() == null
-                || conversation.getKnowledgeBaseId() <= 0) {
-            log.warn("capabilityProfile=approval_write rejected: conversation {} has no KB",
-                    conversation.getId());
+        if (conversation.getKnowledgeBaseId() == null || conversation.getKnowledgeBaseId() <= 0) {
+            log.warn("capabilityProfile=approval_write rejected: conversation {} has no KB", conversation.getId());
             return null;
         }
         // User must be authenticated.
@@ -1246,12 +1305,17 @@ public class ConversationServiceImpl implements ConversationService {
         // The authenticated user must own the KB.
         KnowledgeBase kb = knowledgeBaseMapper.selectById(conversation.getKnowledgeBaseId());
         if (kb == null || !currentUserId.equals(kb.getUserId())) {
-            log.warn("capabilityProfile=approval_write rejected: user {} does not own KB {}",
-                    currentUserId, conversation.getKnowledgeBaseId());
+            log.warn(
+                    "capabilityProfile=approval_write rejected: user {} does not own KB {}",
+                    currentUserId,
+                    conversation.getKnowledgeBaseId());
             return null;
         }
-        log.info("capabilityProfile=approval_write granted for conversation {} (KB {}, user {})",
-                conversation.getId(), conversation.getKnowledgeBaseId(), currentUserId);
+        log.info(
+                "capabilityProfile=approval_write granted for conversation {} (KB {}, user {})",
+                conversation.getId(),
+                conversation.getKnowledgeBaseId(),
+                currentUserId);
         return "approval_write";
     }
 
@@ -1262,7 +1326,7 @@ public class ConversationServiceImpl implements ConversationService {
         private final Long userId;
         private final CompletableFuture<Void> completed = new CompletableFuture<>();
         private volatile reactor.core.Disposable subscription;
-        private volatile Long agentRunId;  // Agent V1: current agent_run ID for status updates
+        private volatile Long agentRunId; // Agent V1: current agent_run ID for status updates
         private volatile Long agentTaskId; // Agent V1: current agent_task ID
 
         private StreamCancellation(AtomicBoolean cancelled, Long userId) {
@@ -1306,10 +1370,23 @@ public class ConversationServiceImpl implements ConversationService {
             return List.of();
         }
 
-        List<Long> conversationIds = conversations.stream().map(Conversation::getId).collect(Collectors.toList());
-        List<Long> kbIds = conversations.stream().map(Conversation::getKnowledgeBaseId).filter(id -> id != null).distinct().collect(Collectors.toList());
-        List<Long> promptTemplateIds = conversations.stream().map(Conversation::getPromptTemplateId).filter(id -> id != null).distinct().collect(Collectors.toList());
-        List<Long> userIds = conversations.stream().map(Conversation::getUserId).filter(id -> id != null).distinct().collect(Collectors.toList());
+        List<Long> conversationIds =
+                conversations.stream().map(Conversation::getId).collect(Collectors.toList());
+        List<Long> kbIds = conversations.stream()
+                .map(Conversation::getKnowledgeBaseId)
+                .filter(id -> id != null)
+                .distinct()
+                .collect(Collectors.toList());
+        List<Long> promptTemplateIds = conversations.stream()
+                .map(Conversation::getPromptTemplateId)
+                .filter(id -> id != null)
+                .distinct()
+                .collect(Collectors.toList());
+        List<Long> userIds = conversations.stream()
+                .map(Conversation::getUserId)
+                .filter(id -> id != null)
+                .distinct()
+                .collect(Collectors.toList());
 
         // 批量查询知识库名称
         Map<Long, String> kbNameMap = new HashMap<>();
@@ -1319,15 +1396,18 @@ public class ConversationServiceImpl implements ConversationService {
 
         Map<Long, String> promptTemplateNameMap = new HashMap<>();
         if (!promptTemplateIds.isEmpty()) {
-            promptTemplateMapper.selectBatchIds(promptTemplateIds)
+            promptTemplateMapper
+                    .selectBatchIds(promptTemplateIds)
                     .forEach(template -> promptTemplateNameMap.put(template.getId(), template.getName()));
         }
 
         // 批量查询用户名
         Map<Long, String> userNameMap = new HashMap<>();
         if (!userIds.isEmpty()) {
-            userMapper.selectBatchIds(userIds).forEach(u -> userNameMap.put(u.getId(),
-                    u.getNickname() != null ? u.getNickname() : u.getUsername()));
+            userMapper
+                    .selectBatchIds(userIds)
+                    .forEach(u ->
+                            userNameMap.put(u.getId(), u.getNickname() != null ? u.getNickname() : u.getUsername()));
         }
 
         // 一次 SQL 聚合：消息数量 + 最新消息
@@ -1346,12 +1426,19 @@ public class ConversationServiceImpl implements ConversationService {
                         .id(conv.getId())
                         .knowledgeBaseId(conv.getKnowledgeBaseId())
                         .promptTemplateId(conv.getPromptTemplateId())
-                        .promptTemplateName(conv.getPromptTemplateId() == null ? null : promptTemplateNameMap.get(conv.getPromptTemplateId()))
-                        .knowledgeBaseName(conv.getKnowledgeBaseId() != null ? kbNameMap.getOrDefault(conv.getKnowledgeBaseId(), "未知知识库") : null)
+                        .promptTemplateName(
+                                conv.getPromptTemplateId() == null
+                                        ? null
+                                        : promptTemplateNameMap.get(conv.getPromptTemplateId()))
+                        .knowledgeBaseName(
+                                conv.getKnowledgeBaseId() != null
+                                        ? kbNameMap.getOrDefault(conv.getKnowledgeBaseId(), "未知知识库")
+                                        : null)
                         .userId(conv.getUserId())
                         .userName(userNameMap.getOrDefault(conv.getUserId(), "未知用户"))
                         .title(conv.getTitle())
-                        .messageCount(messageCountMap.getOrDefault(conv.getId(), 0L).intValue())
+                        .messageCount(
+                                messageCountMap.getOrDefault(conv.getId(), 0L).intValue())
                         .lastMessage(lastMessageMap.get(conv.getId()))
                         .createdAt(conv.getCreatedAt())
                         .updatedAt(conv.getUpdatedAt())
@@ -1361,7 +1448,11 @@ public class ConversationServiceImpl implements ConversationService {
 
     private static Long toLong(Object value) {
         if (value instanceof Number n) return n.longValue();
-        if (value instanceof String s) try { return Long.valueOf(s); } catch (NumberFormatException ignored) {}
+        if (value instanceof String s)
+            try {
+                return Long.valueOf(s);
+            } catch (NumberFormatException ignored) {
+            }
         return null;
     }
 
@@ -1396,7 +1487,8 @@ public class ConversationServiceImpl implements ConversationService {
 
         // 获取最后一条消息
         LambdaQueryWrapper<Message> lastWrapper = new LambdaQueryWrapper<>();
-        lastWrapper.eq(Message::getConversationId, conversation.getId())
+        lastWrapper
+                .eq(Message::getConversationId, conversation.getId())
                 .orderByDesc(Message::getCreatedAt)
                 .last("LIMIT 1");
         Message lastMessage = messageMapper.selectOne(lastWrapper);

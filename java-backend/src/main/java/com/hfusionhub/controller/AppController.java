@@ -8,11 +8,10 @@ import com.hfusionhub.service.AppService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.*;
-
 import java.util.List;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
 
 /**
  * 应用管理控制器（对外发布 Agent）
@@ -78,9 +77,13 @@ public class AppController {
 
     @Operation(summary = "创建 API Key", description = "返回的 key 明文仅展示一次")
     @PostMapping("/{id}/api-keys")
-    public R<AppApiKeyInfoDTO> createApiKey(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body) {
+    public R<AppApiKeyInfoDTO> createApiKey(
+            @PathVariable Long id, @RequestBody(required = false) Map<String, String> body) {
         AppApiKeyInfoDTO info = appService.createApiKey(id, body == null ? null : body.get("name"));
-        auditLogService.record("api_key.create", "app_api_key", String.valueOf(info.getId()),
+        auditLogService.record(
+                "api_key.create",
+                "app_api_key",
+                String.valueOf(info.getId()),
                 "为应用 " + id + " 创建 API Key: " + info.getKeyPrefix() + "****");
         return R.ok("API Key 已创建", info);
     }

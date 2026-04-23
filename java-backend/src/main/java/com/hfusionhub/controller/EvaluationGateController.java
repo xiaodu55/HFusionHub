@@ -9,6 +9,7 @@ import com.hfusionhub.service.AgentEvaluationService;
 import com.hfusionhub.service.EvaluationGateService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,8 +17,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
 
 /**
  * 评测回归门禁控制器
@@ -50,9 +49,10 @@ public class EvaluationGateController {
      */
     @GetMapping("/{datasetId}/gate-history")
     @Operation(summary = "评测门禁通过/失败历史")
-    public R<List<EvaluationGateResult>> gateHistory(@PathVariable Long datasetId,
-                                                     @RequestParam(defaultValue = "1") int page,
-                                                     @RequestParam(defaultValue = "20") int pageSize) {
+    public R<List<EvaluationGateResult>> gateHistory(
+            @PathVariable Long datasetId,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int pageSize) {
         Long userId = JwtUtils.getCurrentUserId();
         return R.ok(evaluationGateService.gateHistory(userId, datasetId, page, pageSize));
     }

@@ -1,12 +1,12 @@
 package com.hfusionhub.service;
 
 import com.hfusionhub.common.dto.PageResult;
+import com.hfusionhub.dto.PasswordChangeDTO;
 import com.hfusionhub.dto.UserInfoDTO;
 import com.hfusionhub.dto.UserLoginDTO;
 import com.hfusionhub.dto.UserRegisterDTO;
 import com.hfusionhub.dto.UserSearchDTO;
 import com.hfusionhub.dto.UserUpdateDTO;
-
 import java.util.List;
 
 /**
@@ -77,6 +77,13 @@ public interface UserService {
      * @return 轻量用户信息列表（不含敏感字段）
      */
     List<UserSearchDTO> searchUsers(String keyword);
+
+    /**
+     * 修改当前用户密码（校验旧密码后更新）
+     *
+     * @param dto 旧密码 + 新密码
+     */
+    void changePassword(PasswordChangeDTO dto);
 
     UserInfoDTO updateUserRole(Long userId, String role);
 }

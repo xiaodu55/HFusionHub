@@ -2,10 +2,9 @@ package com.hfusionhub.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.hfusionhub.entity.WebhookSubscription;
+import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
-
-import java.util.List;
 
 /**
  * Webhook 订阅配置 Mapper

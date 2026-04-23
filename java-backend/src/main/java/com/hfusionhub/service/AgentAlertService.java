@@ -3,7 +3,6 @@ package com.hfusionhub.service;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.entity.AgentAlertEvent;
 import com.hfusionhub.entity.AgentAlertRule;
-
 import java.util.List;
 
 /**
@@ -16,15 +15,21 @@ public interface AgentAlertService {
     // ── 告警规则 CRUD ──
 
     AgentAlertRule createRule(Long userId, AgentAlertRule rule);
+
     AgentAlertRule updateRule(Long userId, AgentAlertRule rule);
+
     void deleteRule(Long userId, Long ruleId);
+
     AgentAlertRule getRule(Long ruleId);
+
     List<AgentAlertRule> listRules(Long userId);
 
     // ── 告警事件查询 ──
 
     PageResult<AgentAlertEvent> listAlertEvents(Long userId, int page, int pageSize);
+
     List<AgentAlertEvent> listUnresolvedAlerts(Long userId);
+
     void resolveAlert(Long userId, Long alertId);
 
     // ── 告警检查 ──

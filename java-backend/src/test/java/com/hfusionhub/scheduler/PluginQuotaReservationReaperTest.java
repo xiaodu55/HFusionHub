@@ -1,19 +1,18 @@
 package com.hfusionhub.scheduler;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
 import com.hfusionhub.entity.UsageReservation;
 import com.hfusionhub.mapper.UsageReservationMapper;
 import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.service.UsageLedgerService;
 import com.hfusionhub.tenant.TenantContext;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
-
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
 
 class PluginQuotaReservationReaperTest {
 
@@ -35,9 +34,11 @@ class PluginQuotaReservationReaperTest {
         reservation.setRequestId("plugin:run-1:attempt-1");
         when(mapper.selectStalePluginReservations(any(), eq(100))).thenReturn(List.of(reservation));
         doAnswer(invocation -> {
-            assertEquals(11L, TenantContext.requireTenantId());
-            return null;
-        }).when(ledger).release(any(), anyString());
+                    assertEquals(11L, TenantContext.requireTenantId());
+                    return null;
+                })
+                .when(ledger)
+                .release(any(), anyString());
 
         reaper.releaseStaleReservations();
 
@@ -54,7 +55,8 @@ class PluginQuotaReservationReaperTest {
         UsageReservation next = reservation(2L, 12L, "plugin:next");
         when(mapper.selectStalePluginReservations(any(), eq(100))).thenReturn(List.of(failed, next));
         doThrow(new IllegalStateException("temporary database failure"))
-                .when(ledger).release(UsageMeter.PLUGIN_EXECUTIONS, "plugin:failed");
+                .when(ledger)
+                .release(UsageMeter.PLUGIN_EXECUTIONS, "plugin:failed");
 
         reaper.releaseStaleReservations();
 

@@ -6,5 +6,4 @@ import org.apache.ibatis.annotations.Mapper;
 
 /** Mapper for {@link PromptTestCaseResultEntity}. */
 @Mapper
-public interface PromptTestCaseResultMapper extends BaseMapper<PromptTestCaseResultEntity> {
-}
+public interface PromptTestCaseResultMapper extends BaseMapper<PromptTestCaseResultEntity> {}

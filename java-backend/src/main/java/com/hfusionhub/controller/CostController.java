@@ -10,17 +10,16 @@ import com.hfusionhub.dto.TenantCostSummaryDTO;
 import com.hfusionhub.service.CostTrackingService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeParseException;
-import java.util.List;
 
 /**
  * 模型调用成本追踪控制器
@@ -45,9 +44,10 @@ public class CostController {
     @GetMapping("/tenant/{tenantId}")
     @Operation(summary = "租户级成本汇总（管理员）")
     @SaCheckRole("admin")
-    public R<TenantCostSummaryDTO> tenantSummary(@PathVariable Long tenantId,
-                                                 @RequestParam(required = false) String start,
-                                                 @RequestParam(required = false) String end) {
+    public R<TenantCostSummaryDTO> tenantSummary(
+            @PathVariable Long tenantId,
+            @RequestParam(required = false) String start,
+            @RequestParam(required = false) String end) {
         LocalDateTime startDate = parseDateParam(start);
         LocalDateTime endDate = parseDateParam(end);
         return R.ok(costTrackingService.getTenantCostSummary(tenantId, startDate, endDate));

@@ -20,9 +20,8 @@ public interface UsageCounterMapper extends BaseMapper<UsageCounter> {
 
     @Select("SELECT * FROM usage_counter WHERE tenant_id = #{tenantId} AND meter = #{meter} "
             + "AND window_key = #{windowKey} LIMIT 1")
-    UsageCounter selectByKey(@Param("tenantId") Long tenantId,
-                             @Param("meter") String meter,
-                             @Param("windowKey") String windowKey);
+    UsageCounter selectByKey(
+            @Param("tenantId") Long tenantId, @Param("meter") String meter, @Param("windowKey") String windowKey);
 
     /**
      * 原子预占：命中并累加 reserved，否则返回 0（超限或行不存在）。
@@ -31,11 +30,12 @@ public interface UsageCounterMapper extends BaseMapper<UsageCounter> {
     @Update("UPDATE usage_counter SET reserved = reserved + #{amount} "
             + "WHERE tenant_id = #{tenantId} AND meter = #{meter} AND window_key = #{windowKey} "
             + "AND committed + reserved + #{amount} <= #{limitValue}")
-    int tryReserve(@Param("tenantId") Long tenantId,
-                   @Param("meter") String meter,
-                   @Param("windowKey") String windowKey,
-                   @Param("amount") long amount,
-                   @Param("limitValue") long limitValue);
+    int tryReserve(
+            @Param("tenantId") Long tenantId,
+            @Param("meter") String meter,
+            @Param("windowKey") String windowKey,
+            @Param("amount") long amount,
+            @Param("limitValue") long limitValue);
 
     /**
      * 结算：committed 累加实际消耗，reserved 退回预占量。
@@ -45,11 +45,12 @@ public interface UsageCounterMapper extends BaseMapper<UsageCounter> {
             + "reserved = reserved - #{reservedAmount} "
             + "WHERE tenant_id = #{tenantId} AND meter = #{meter} AND window_key = #{windowKey} "
             + "AND reserved >= #{reservedAmount}")
-    int settle(@Param("tenantId") Long tenantId,
-               @Param("meter") String meter,
-               @Param("windowKey") String windowKey,
-               @Param("actualAmount") long actualAmount,
-               @Param("reservedAmount") long reservedAmount);
+    int settle(
+            @Param("tenantId") Long tenantId,
+            @Param("meter") String meter,
+            @Param("windowKey") String windowKey,
+            @Param("actualAmount") long actualAmount,
+            @Param("reservedAmount") long reservedAmount);
 
     /**
      * 退回预占（失败/取消时释放容量）。带 {@code reserved >= reservedAmount} 守卫。
@@ -57,8 +58,9 @@ public interface UsageCounterMapper extends BaseMapper<UsageCounter> {
     @Update("UPDATE usage_counter SET reserved = reserved - #{reservedAmount} "
             + "WHERE tenant_id = #{tenantId} AND meter = #{meter} AND window_key = #{windowKey} "
             + "AND reserved >= #{reservedAmount}")
-    int release(@Param("tenantId") Long tenantId,
-                @Param("meter") String meter,
-                @Param("windowKey") String windowKey,
-                @Param("reservedAmount") long reservedAmount);
+    int release(
+            @Param("tenantId") Long tenantId,
+            @Param("meter") String meter,
+            @Param("windowKey") String windowKey,
+            @Param("reservedAmount") long reservedAmount);
 }

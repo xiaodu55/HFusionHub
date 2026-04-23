@@ -11,7 +11,6 @@ import lombok.Getter;
 @Getter
 @AllArgsConstructor
 public enum DocumentStatus {
-
     PENDING(0, "待解析"),
     PROCESSING(1, "解析中"),
     COMPLETED(2, "已完成"),

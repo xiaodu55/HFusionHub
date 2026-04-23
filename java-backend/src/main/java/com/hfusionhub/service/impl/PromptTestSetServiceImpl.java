@@ -14,31 +14,25 @@ import com.hfusionhub.dto.PromptTestSetCompareRequest;
 import com.hfusionhub.dto.PromptTestSetCompareResponse;
 import com.hfusionhub.dto.PromptTestSetDTO;
 import com.hfusionhub.dto.PromptTestSetDetailDTO;
-import com.hfusionhub.dto.PromptTestSetRunDetailDTO;
 import com.hfusionhub.dto.PromptTestSetRunDTO;
-import com.hfusionhub.dto.PromptTestSetRunResponse;
+import com.hfusionhub.dto.PromptTestSetRunDetailDTO;
 import com.hfusionhub.dto.PromptTestSetRunRequest;
+import com.hfusionhub.dto.PromptTestSetRunResponse;
 import com.hfusionhub.dto.PromptTestSetRunStatusDTO;
 import com.hfusionhub.dto.PromptTestSetSaveDTO;
 import com.hfusionhub.entity.KnowledgeBase;
+import com.hfusionhub.entity.PromptTemplate;
 import com.hfusionhub.entity.PromptTestCase;
 import com.hfusionhub.entity.PromptTestCaseResultEntity;
-import com.hfusionhub.entity.PromptTemplate;
 import com.hfusionhub.entity.PromptTestSet;
 import com.hfusionhub.entity.PromptTestSetRun;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
+import com.hfusionhub.mapper.PromptTemplateMapper;
 import com.hfusionhub.mapper.PromptTestCaseMapper;
 import com.hfusionhub.mapper.PromptTestCaseResultMapper;
-import com.hfusionhub.mapper.PromptTemplateMapper;
 import com.hfusionhub.mapper.PromptTestSetMapper;
 import com.hfusionhub.mapper.PromptTestSetRunMapper;
 import com.hfusionhub.service.PromptTestSetService;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
-
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -46,12 +40,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.UUID;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 /** 提示词测试用例集服务实现。 */
 @Slf4j
@@ -106,10 +105,13 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
     @Override
     public List<PromptTestSetDTO> listMine() {
         Long userId = JwtUtils.getCurrentUserId();
-        return testSetMapper.selectList(new LambdaQueryWrapper<PromptTestSet>()
+        return testSetMapper
+                .selectList(new LambdaQueryWrapper<PromptTestSet>()
                         .eq(PromptTestSet::getUserId, userId)
                         .orderByDesc(PromptTestSet::getUpdatedAt))
-                .stream().map(this::toSetDTO).toList();
+                .stream()
+                .map(this::toSetDTO)
+                .toList();
     }
 
     @Override
@@ -147,8 +149,7 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
     @Transactional
     public void delete(Long id) {
         requireOwned(id, JwtUtils.getCurrentUserId());
-        testCaseMapper.delete(new LambdaQueryWrapper<PromptTestCase>()
-                .eq(PromptTestCase::getSetId, id));
+        testCaseMapper.delete(new LambdaQueryWrapper<PromptTestCase>().eq(PromptTestCase::getSetId, id));
         testSetMapper.deleteById(id);
     }
 
@@ -299,8 +300,10 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
             // 0 行，事务不写入任何结果——旧 Worker 立即中止，不残留脏数据。
             boolean persisted = caseWriter.persistCase(run, token, progress + 1, r);
             if (!persisted) {
-                log.info("Run {} stale (execution token changed) — worker aborts without persisting case {}",
-                        runId, tc.getId());
+                log.info(
+                        "Run {} stale (execution token changed) — worker aborts without persisting case {}",
+                        runId,
+                        tc.getId());
                 return null;
             }
             results.add(r);
@@ -311,8 +314,13 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
 
         long totalElapsed = System.currentTimeMillis() - start;
         finalizeRun(run, success, pass, totalElapsed, PromptTestSetRunStatus.SUCCEEDED, null);
-        log.info("Prompt test set run completed: runId={} success={} fail={} pass={} elapsed={}ms",
-                runId, success, cases.size() - success, pass, totalElapsed);
+        log.info(
+                "Prompt test set run completed: runId={} success={} fail={} pass={} elapsed={}ms",
+                runId,
+                success,
+                cases.size() - success,
+                pass,
+                totalElapsed);
         return buildResponse(set, run, cases.size(), success, pass, totalElapsed, results);
     }
 
@@ -348,24 +356,26 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
         // 重新生成 executionToken：任何存活中的旧 Worker 将因 token 不匹配而在下一次
         // 守卫写入时失效，从根源上隔离取消后立即重试造成的串扰。
         String newToken = UUID.randomUUID().toString();
-        caseResultMapper.delete(new LambdaQueryWrapper<PromptTestCaseResultEntity>()
-                .eq(PromptTestCaseResultEntity::getRunId, runId));
+        caseResultMapper.delete(
+                new LambdaQueryWrapper<PromptTestCaseResultEntity>().eq(PromptTestCaseResultEntity::getRunId, runId));
         cancelledRuns.remove(runId);
-        runMapper.update(null, new LambdaUpdateWrapper<PromptTestSetRun>()
-                .eq(PromptTestSetRun::getId, runId)
-                .set(PromptTestSetRun::getStatus, PromptTestSetRunStatus.PENDING)
-                .set(PromptTestSetRun::getAttemptNumber, run.getAttemptNumber() + 1)
-                .set(PromptTestSetRun::getProgressCount, 0)
-                .set(PromptTestSetRun::getSuccessCount, 0)
-                .set(PromptTestSetRun::getFailureCount, 0)
-                .set(PromptTestSetRun::getPassCount, 0)
-                .set(PromptTestSetRun::getTotalElapsedMs, 0)
-                .set(PromptTestSetRun::getExecutionToken, newToken)
-                .set(PromptTestSetRun::getErrorMessage, null)
-                .set(PromptTestSetRun::getScheduledAt, LocalDateTime.now())
-                .set(PromptTestSetRun::getStartedAt, null)
-                .set(PromptTestSetRun::getHeartbeatAt, null)
-                .set(PromptTestSetRun::getCompletedAt, null));
+        runMapper.update(
+                null,
+                new LambdaUpdateWrapper<PromptTestSetRun>()
+                        .eq(PromptTestSetRun::getId, runId)
+                        .set(PromptTestSetRun::getStatus, PromptTestSetRunStatus.PENDING)
+                        .set(PromptTestSetRun::getAttemptNumber, run.getAttemptNumber() + 1)
+                        .set(PromptTestSetRun::getProgressCount, 0)
+                        .set(PromptTestSetRun::getSuccessCount, 0)
+                        .set(PromptTestSetRun::getFailureCount, 0)
+                        .set(PromptTestSetRun::getPassCount, 0)
+                        .set(PromptTestSetRun::getTotalElapsedMs, 0)
+                        .set(PromptTestSetRun::getExecutionToken, newToken)
+                        .set(PromptTestSetRun::getErrorMessage, null)
+                        .set(PromptTestSetRun::getScheduledAt, LocalDateTime.now())
+                        .set(PromptTestSetRun::getStartedAt, null)
+                        .set(PromptTestSetRun::getHeartbeatAt, null)
+                        .set(PromptTestSetRun::getCompletedAt, null));
         PromptTestSetRun fresh = runMapper.selectById(runId);
         log.info("Prompt test set run {} re-queued for retry (attempt {})", runId, fresh.getAttemptNumber());
         return toStatusDTO(fresh);
@@ -377,7 +387,8 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
     public List<PromptTestSetRun> listQueuedRuns(int limit) {
         return runMapper.selectList(new LambdaQueryWrapper<PromptTestSetRun>()
                 .eq(PromptTestSetRun::getStatus, PromptTestSetRunStatus.PENDING)
-                .and(w -> w.isNull(PromptTestSetRun::getScheduledAt).or()
+                .and(w -> w.isNull(PromptTestSetRun::getScheduledAt)
+                        .or()
                         .le(PromptTestSetRun::getScheduledAt, LocalDateTime.now()))
                 .orderByAsc(PromptTestSetRun::getId)
                 .last("LIMIT " + Math.max(1, limit)));
@@ -386,12 +397,15 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
     @Override
     public boolean claimRun(Long runId) {
         LocalDateTime now = LocalDateTime.now();
-        return runMapper.update(null, new LambdaUpdateWrapper<PromptTestSetRun>()
-                .eq(PromptTestSetRun::getId, runId)
-                .eq(PromptTestSetRun::getStatus, PromptTestSetRunStatus.PENDING)
-                .set(PromptTestSetRun::getStatus, PromptTestSetRunStatus.RUNNING)
-                .set(PromptTestSetRun::getStartedAt, now)
-                .set(PromptTestSetRun::getHeartbeatAt, now)) > 0;
+        return runMapper.update(
+                        null,
+                        new LambdaUpdateWrapper<PromptTestSetRun>()
+                                .eq(PromptTestSetRun::getId, runId)
+                                .eq(PromptTestSetRun::getStatus, PromptTestSetRunStatus.PENDING)
+                                .set(PromptTestSetRun::getStatus, PromptTestSetRunStatus.RUNNING)
+                                .set(PromptTestSetRun::getStartedAt, now)
+                                .set(PromptTestSetRun::getHeartbeatAt, now))
+                > 0;
     }
 
     @Override
@@ -402,13 +416,14 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
         // 且 startedAt 超过 threshold」的 running 运行才视为失联。
         List<PromptTestSetRun> stale = runMapper.selectList(new LambdaQueryWrapper<PromptTestSetRun>()
                 .eq(PromptTestSetRun::getStatus, PromptTestSetRunStatus.RUNNING)
-                .and(w -> w.isNull(PromptTestSetRun::getHeartbeatAt).and(q -> q.lt(PromptTestSetRun::getStartedAt, threshold))
-                        .or().lt(PromptTestSetRun::getHeartbeatAt, threshold)));
+                .and(w -> w.isNull(PromptTestSetRun::getHeartbeatAt)
+                        .and(q -> q.lt(PromptTestSetRun::getStartedAt, threshold))
+                        .or()
+                        .lt(PromptTestSetRun::getHeartbeatAt, threshold)));
         int marked = 0;
         for (PromptTestSetRun run : stale) {
             try {
-                finalizeRun(run, 0, 0, 0, PromptTestSetRunStatus.FAILED,
-                        "执行超时：超过 " + staleMinutes + " 分钟无心跳");
+                finalizeRun(run, 0, 0, 0, PromptTestSetRunStatus.FAILED, "执行超时：超过 " + staleMinutes + " 分钟无心跳");
                 marked++;
             } catch (Exception e) {
                 log.warn("Failed to mark stale run {} failed: {}", run.getId(), e.getMessage());
@@ -423,8 +438,8 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
     // ── Run execution internals ───────────────────────────────────────
 
     /** 单个用例执行，失败时按配置重试（默认最多 2 次尝试）。 */
-    private PromptTestCaseResult runSingleWithRetry(PromptTestSet set, PromptTestCase tc,
-                                                    PromptTestSetRunRequest request, Long userId) {
+    private PromptTestCaseResult runSingleWithRetry(
+            PromptTestSet set, PromptTestCase tc, PromptTestSetRunRequest request, Long userId) {
         PromptTestCaseResult last = null;
         for (int attempt = 1; attempt <= caseRetryMaxAttempts; attempt++) {
             if (attempt > 1 && caseRetryDelayMs > 0) {
@@ -459,8 +474,8 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
     }
 
     /** 收敛到终态（幂等：仅当 token 匹配且当前处于 pending/running 时生效）。 */
-    private void finalizeRun(PromptTestSetRun run, int success, int pass, long totalElapsed,
-                             String status, String error) {
+    private void finalizeRun(
+            PromptTestSetRun run, int success, int pass, long totalElapsed, String status, String error) {
         run.setStatus(status);
         run.setSuccessCount(success);
         run.setFailureCount(run.getTotalCases() - success);
@@ -468,27 +483,36 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
         run.setTotalElapsedMs(totalElapsed);
         run.setErrorMessage(error);
         run.setCompletedAt(LocalDateTime.now());
-        runMapper.update(null, PromptTestSetRunGuards.activeRunGuard(run.getId(), run.getExecutionToken())
-                .set(PromptTestSetRun::getStatus, status)
-                .set(PromptTestSetRun::getSuccessCount, success)
-                .set(PromptTestSetRun::getFailureCount, run.getTotalCases() - success)
-                .set(PromptTestSetRun::getPassCount, pass)
-                .set(PromptTestSetRun::getTotalElapsedMs, totalElapsed)
-                .set(PromptTestSetRun::getErrorMessage, error)
-                .set(PromptTestSetRun::getCompletedAt, run.getCompletedAt()));
+        runMapper.update(
+                null,
+                PromptTestSetRunGuards.activeRunGuard(run.getId(), run.getExecutionToken())
+                        .set(PromptTestSetRun::getStatus, status)
+                        .set(PromptTestSetRun::getSuccessCount, success)
+                        .set(PromptTestSetRun::getFailureCount, run.getTotalCases() - success)
+                        .set(PromptTestSetRun::getPassCount, pass)
+                        .set(PromptTestSetRun::getTotalElapsedMs, totalElapsed)
+                        .set(PromptTestSetRun::getErrorMessage, error)
+                        .set(PromptTestSetRun::getCompletedAt, run.getCompletedAt()));
     }
 
     private void cancelRunInternal(PromptTestSetRun run) {
         run.setStatus(PromptTestSetRunStatus.CANCELLED);
         run.setCompletedAt(LocalDateTime.now());
-        runMapper.update(null, PromptTestSetRunGuards.activeRunGuard(run.getId(), run.getExecutionToken())
-                .set(PromptTestSetRun::getStatus, PromptTestSetRunStatus.CANCELLED)
-                .set(PromptTestSetRun::getCompletedAt, run.getCompletedAt()));
+        runMapper.update(
+                null,
+                PromptTestSetRunGuards.activeRunGuard(run.getId(), run.getExecutionToken())
+                        .set(PromptTestSetRun::getStatus, PromptTestSetRunStatus.CANCELLED)
+                        .set(PromptTestSetRun::getCompletedAt, run.getCompletedAt()));
     }
 
-    private PromptTestSetRunResponse buildResponse(PromptTestSet set, PromptTestSetRun run,
-                                                   int totalCases, int success, int pass,
-                                                   long totalElapsed, List<PromptTestCaseResult> results) {
+    private PromptTestSetRunResponse buildResponse(
+            PromptTestSet set,
+            PromptTestSetRun run,
+            int totalCases,
+            int success,
+            int pass,
+            long totalElapsed,
+            List<PromptTestCaseResult> results) {
         return PromptTestSetRunResponse.builder()
                 .setId(set.getId())
                 .runId(run.getId())
@@ -535,19 +559,25 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
         return resolved;
     }
 
-    private PromptTestCaseResult runSingle(PromptTestSet set, PromptTestCase tc,
-                                           PromptTestSetRunRequest request, Long userId) {
+    private PromptTestCaseResult runSingle(
+            PromptTestSet set, PromptTestCase tc, PromptTestSetRunRequest request, Long userId) {
         long caseStart = System.currentTimeMillis();
         String rendered = renderTemplate(request.getTemplateContent(), tc.getVariables());
         try {
             AiClient.ChatResponse aiResponse;
             if (request.getKnowledgeBaseId() != null && request.getKnowledgeBaseId() > 0) {
                 aiResponse = aiClient.agentV1Chat(
-                        tc.getQuestion(), null, request.getKnowledgeBaseId(), List.of(),
-                        rendered, "detailed", 5, null, userId);
+                        tc.getQuestion(),
+                        null,
+                        request.getKnowledgeBaseId(),
+                        List.of(),
+                        rendered,
+                        "detailed",
+                        5,
+                        null,
+                        userId);
             } else {
-                aiResponse = aiClient.chat(
-                        tc.getQuestion(), null, null, List.of(), rendered, userId);
+                aiResponse = aiClient.chat(tc.getQuestion(), null, null, List.of(), rendered, userId);
             }
             PromptTestCaseResult result = PromptTestCaseResult.builder()
                     .caseId(tc.getId())
@@ -651,11 +681,14 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
     @Override
     public List<PromptTestSetRunDTO> listRuns(Long setId) {
         requireOwned(setId, JwtUtils.getCurrentUserId());
-        return runMapper.selectList(new LambdaQueryWrapper<PromptTestSetRun>()
+        return runMapper
+                .selectList(new LambdaQueryWrapper<PromptTestSetRun>()
                         .eq(PromptTestSetRun::getSetId, setId)
                         .orderByDesc(PromptTestSetRun::getCreatedAt)
                         .orderByDesc(PromptTestSetRun::getId))
-                .stream().map(this::toRunDTO).toList();
+                .stream()
+                .map(this::toRunDTO)
+                .toList();
     }
 
     @Override
@@ -669,7 +702,8 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
             query.eq(PromptTestCaseResultEntity::getExecutionToken, run.getExecutionToken());
         }
         List<PromptTestCaseResultEntity> entities = caseResultMapper.selectList(query);
-        List<PromptTestCaseResult> results = entities.stream().map(this::toCaseResultDTO).toList();
+        List<PromptTestCaseResult> results =
+                entities.stream().map(this::toCaseResultDTO).toList();
         return PromptTestSetRunDetailDTO.builder()
                 .run(toRunDTO(run))
                 .results(results)
@@ -721,13 +755,13 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
 
     private Map<Long, PromptTestCaseResult> loadResultsByCase(Long runId) {
         PromptTestSetRun run = runMapper.selectById(runId);
-        LambdaQueryWrapper<PromptTestCaseResultEntity> query = new LambdaQueryWrapper<PromptTestCaseResultEntity>()
-                .eq(PromptTestCaseResultEntity::getRunId, runId);
+        LambdaQueryWrapper<PromptTestCaseResultEntity> query =
+                new LambdaQueryWrapper<PromptTestCaseResultEntity>().eq(PromptTestCaseResultEntity::getRunId, runId);
         if (run != null && run.getExecutionToken() != null) {
             query.eq(PromptTestCaseResultEntity::getExecutionToken, run.getExecutionToken());
         }
-        return caseResultMapper.selectList(query)
-                .stream().map(this::toCaseResultDTO)
+        return caseResultMapper.selectList(query).stream()
+                .map(this::toCaseResultDTO)
                 .collect(Collectors.toMap(PromptTestCaseResult::getCaseId, Function.identity()));
     }
 
@@ -746,8 +780,11 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
 
     private int nextSortOrder(Long setId) {
         List<PromptTestCase> cases = listCases(setId);
-        return cases.isEmpty() ? 0 : (cases.get(cases.size() - 1).getSortOrder() != null
-                ? cases.get(cases.size() - 1).getSortOrder() + 1 : cases.size());
+        return cases.isEmpty()
+                ? 0
+                : (cases.get(cases.size() - 1).getSortOrder() != null
+                        ? cases.get(cases.size() - 1).getSortOrder() + 1
+                        : cases.size());
     }
 
     private PromptTestSet requireOwned(Long id, Long userId) {
@@ -858,8 +895,8 @@ public class PromptTestSetServiceImpl implements PromptTestSetService {
     }
 
     private PromptTestSetDTO toSetDTO(PromptTestSet set) {
-        long count = testCaseMapper.selectCount(new LambdaQueryWrapper<PromptTestCase>()
-                .eq(PromptTestCase::getSetId, set.getId()));
+        long count = testCaseMapper.selectCount(
+                new LambdaQueryWrapper<PromptTestCase>().eq(PromptTestCase::getSetId, set.getId()));
         return PromptTestSetDTO.builder()
                 .id(set.getId())
                 .name(set.getName())

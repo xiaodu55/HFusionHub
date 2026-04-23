@@ -3,10 +3,9 @@ package com.hfusionhub.entity;
 import com.baomidou.mybatisplus.annotation.*;
 import com.hfusionhub.handler.JsonListTypeHandler;
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.Data;
-
 import java.time.LocalDateTime;
 import java.util.List;
+import lombok.Data;
 
 /**
  * Agent 离线评测集实体

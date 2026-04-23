@@ -8,14 +8,13 @@ import com.hfusionhub.enums.DocumentStatus;
 import com.hfusionhub.mapper.*;
 import com.hfusionhub.service.DeletionService;
 import com.hfusionhub.service.VectorizationService;
+import java.io.File;
+import java.time.LocalDateTime;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.io.File;
-import java.time.LocalDateTime;
-import java.util.List;
 
 /**
  * 异步删除任务服务实现 — 支持步骤化级联删除、失败重试
@@ -68,9 +67,7 @@ public class DeletionServiceImpl implements DeletionService {
     @Override
     public List<DeletionTask> getPendingTasks() {
         LocalDateTime staleBefore = LocalDateTime.now().minusMinutes(PROCESSING_STALE_MINUTES);
-        int recovered = deletionTaskMapper.recoverStaleProcessingTasks(
-                staleBefore,
-                "任务执行超时，已恢复为可重试状态");
+        int recovered = deletionTaskMapper.recoverStaleProcessingTasks(staleBefore, "任务执行超时，已恢复为可重试状态");
         if (recovered > 0) {
             log.warn("恢复 {} 个超时的删除任务", recovered);
         }
@@ -193,8 +190,8 @@ public class DeletionServiceImpl implements DeletionService {
             case 5 -> {
                 List<Conversation> conversations = conversationMapper.selectByKnowledgeBaseIncludingDeleted(kb.getId());
                 for (Conversation conversation : conversations) {
-                    messageMapper.delete(new LambdaQueryWrapper<Message>()
-                            .eq(Message::getConversationId, conversation.getId()));
+                    messageMapper.delete(
+                            new LambdaQueryWrapper<Message>().eq(Message::getConversationId, conversation.getId()));
                     conversationMapper.purgeById(conversation.getId());
                 }
                 advanceStep(task, "KB_PURGE_CONVERSATIONS_DELETED");
@@ -288,8 +285,8 @@ public class DeletionServiceImpl implements DeletionService {
     private void deleteKbIndexJobs(KnowledgeBase kb, DeletionTask task) {
         List<Document> docs = getKbDocuments(kb.getId());
         for (Document doc : docs) {
-            documentIndexJobMapper.delete(new LambdaQueryWrapper<DocumentIndexJob>()
-                    .eq(DocumentIndexJob::getDocumentId, doc.getId()));
+            documentIndexJobMapper.delete(
+                    new LambdaQueryWrapper<DocumentIndexJob>().eq(DocumentIndexJob::getDocumentId, doc.getId()));
         }
         advanceStep(task, "INDEX_JOBS_DELETED");
     }
@@ -321,8 +318,7 @@ public class DeletionServiceImpl implements DeletionService {
         List<Conversation> conversations = conversationMapper.selectList(wrapper);
         for (Conversation conv : conversations) {
             // 物理删除消息
-            messageMapper.delete(new LambdaQueryWrapper<Message>()
-                    .eq(Message::getConversationId, conv.getId()));
+            messageMapper.delete(new LambdaQueryWrapper<Message>().eq(Message::getConversationId, conv.getId()));
             // 逻辑删除会话
             conversationMapper.deleteById(conv.getId());
         }
@@ -359,8 +355,8 @@ public class DeletionServiceImpl implements DeletionService {
                 advanceStep(task, "CHUNKS_DELETED");
             }
             case 2 -> {
-                documentIndexJobMapper.delete(new LambdaQueryWrapper<DocumentIndexJob>()
-                        .eq(DocumentIndexJob::getDocumentId, doc.getId()));
+                documentIndexJobMapper.delete(
+                        new LambdaQueryWrapper<DocumentIndexJob>().eq(DocumentIndexJob::getDocumentId, doc.getId()));
                 advanceStep(task, "INDEX_JOBS_DELETED");
             }
             case 3 -> {
@@ -437,7 +433,8 @@ public class DeletionServiceImpl implements DeletionService {
             doc.setStatus(DocumentStatus.PENDING.getCode());
             doc.setChunkCount(0);
             doc.setProcessedAt(null);
-            doc.setErrorMessage("\u77e5\u8bc6\u5e93\u5df2\u7981\u7528\uff0c\u542f\u7528\u540e\u53ef\u91cd\u65b0\u5206\u5757");
+            doc.setErrorMessage(
+                    "\u77e5\u8bc6\u5e93\u5df2\u7981\u7528\uff0c\u542f\u7528\u540e\u53ef\u91cd\u65b0\u5206\u5757");
             documentMapper.updateById(doc);
         }
     }

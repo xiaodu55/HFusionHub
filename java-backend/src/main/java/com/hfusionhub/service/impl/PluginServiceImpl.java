@@ -12,18 +12,17 @@ import com.hfusionhub.mapper.PluginDependencyMapper;
 import com.hfusionhub.mapper.PluginMapper;
 import com.hfusionhub.service.PluginService;
 import com.hfusionhub.storage.MinioArtifactStore;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 工具插件服务实现
@@ -96,13 +95,15 @@ public class PluginServiceImpl implements PluginService {
 
             int timeout = parseBoundedInt(tool.get("timeout_seconds"), 10, 2, 30, "超时时间");
             Map<String, Object> inputSchema = tool.get("input_schema") instanceof Map<?, ?> schema
-                    ? normalizeInputSchema(schema) : Map.of("type", "object", "properties", Map.of());
+                    ? normalizeInputSchema(schema)
+                    : Map.of("type", "object", "properties", Map.of());
 
             Map<String, Object> normalized = new LinkedHashMap<>();
             normalized.put("name", toolName);
             normalized.put("display_name", requireText(tool, "display_name", 100));
             normalized.put("description", requireText(tool, "description", 500));
-            normalized.put("example", String.valueOf(tool.getOrDefault("example", "")).trim());
+            normalized.put(
+                    "example", String.valueOf(tool.getOrDefault("example", "")).trim());
             normalized.put("input_schema", inputSchema);
             normalized.put("output_schema", Map.of("type", "object"));
             normalized.put("risk_level", "read_only");
@@ -135,8 +136,7 @@ public class PluginServiceImpl implements PluginService {
         String version = String.valueOf(manifest.get("version"));
 
         String objectKey = artifactStore.uploadWheel(
-                name, version, artifactHash,
-                new ByteArrayInputStream(wheelData), wheelData.length);
+                name, version, artifactHash, new ByteArrayInputStream(wheelData), wheelData.length);
 
         manifest.put("artifact_path", objectKey);
 
@@ -148,7 +148,8 @@ public class PluginServiceImpl implements PluginService {
 
     private Plugin doInstall(Map<String, Object> manifest, String objectKey, String artifactHash) {
         for (String field : REQUIRED_MANIFEST_FIELDS) {
-            if (!manifest.containsKey(field) || manifest.get(field) == null
+            if (!manifest.containsKey(field)
+                    || manifest.get(field) == null
                     || String.valueOf(manifest.get(field)).isBlank()) {
                 throw new IllegalArgumentException("manifest 缺少必填字段: " + field);
             }
@@ -226,8 +227,8 @@ public class PluginServiceImpl implements PluginService {
             }
         }
 
-        writeAuditLog(plugin.getId(), plugin.getName(), "install",
-                JwtUtils.getCurrentUserId(), null, toJson(manifest), null);
+        writeAuditLog(
+                plugin.getId(), plugin.getName(), "install", JwtUtils.getCurrentUserId(), null, toJson(manifest), null);
 
         log.info("插件安装成功: {}@{}", name, version);
         return plugin;
@@ -263,7 +264,10 @@ public class PluginServiceImpl implements PluginService {
         }
         pluginMapper.updateEnabled(plugin.getId(), true);
         pluginMapper.updateStatus(plugin.getId(), "active");
-        writeAuditLog(plugin.getId(), plugin.getName(), "enable",
+        writeAuditLog(
+                plugin.getId(),
+                plugin.getName(),
+                "enable",
                 JwtUtils.getCurrentUserId(),
                 Map.of("enabled", false, "status", plugin.getStatus()).toString(),
                 Map.of("enabled", true, "status", "active").toString(),
@@ -277,7 +281,10 @@ public class PluginServiceImpl implements PluginService {
         Plugin plugin = requirePlugin(pluginId);
         pluginMapper.updateEnabled(plugin.getId(), false);
         pluginMapper.updateStatus(plugin.getId(), "disabled");
-        writeAuditLog(plugin.getId(), plugin.getName(), "disable",
+        writeAuditLog(
+                plugin.getId(),
+                plugin.getName(),
+                "disable",
                 JwtUtils.getCurrentUserId(),
                 Map.of("enabled", true, "status", plugin.getStatus()).toString(),
                 Map.of("enabled", false, "status", "disabled").toString(),
@@ -291,7 +298,10 @@ public class PluginServiceImpl implements PluginService {
         Plugin plugin = requirePlugin(pluginId);
         String oldStatus = plugin.getStatus();
         pluginMapper.updateStatus(plugin.getId(), status);
-        writeAuditLog(plugin.getId(), plugin.getName(), "update",
+        writeAuditLog(
+                plugin.getId(),
+                plugin.getName(),
+                "update",
                 JwtUtils.getCurrentUserId(),
                 Map.of("status", oldStatus).toString(),
                 Map.of("status", status).toString(),
@@ -311,9 +321,13 @@ public class PluginServiceImpl implements PluginService {
                 log.warn("Failed to delete artifact from MinIO: {}", e.getMessage());
             }
         }
-        writeAuditLog(plugin.getId(), plugin.getName(), "uninstall",
+        writeAuditLog(
+                plugin.getId(),
+                plugin.getName(),
+                "uninstall",
                 JwtUtils.getCurrentUserId(),
-                Map.of("status", plugin.getStatus(), "enabled", plugin.getEnabled()).toString(),
+                Map.of("status", plugin.getStatus(), "enabled", plugin.getEnabled())
+                        .toString(),
                 Map.of("status", "deleted").toString(),
                 reason);
         log.info("插件已卸载: {}@{}", plugin.getName(), plugin.getVersion());
@@ -327,7 +341,10 @@ public class PluginServiceImpl implements PluginService {
             throw new IllegalArgumentException("canary_weight 必须在 0.00-1.00 之间");
         }
         pluginMapper.updateCanary(plugin.getId(), weight);
-        writeAuditLog(plugin.getId(), plugin.getName(), "canary",
+        writeAuditLog(
+                plugin.getId(),
+                plugin.getName(),
+                "canary",
                 JwtUtils.getCurrentUserId(),
                 Map.of("canary_weight", plugin.getCanaryWeight()).toString(),
                 Map.of("canary_weight", weight).toString(),
@@ -342,9 +359,13 @@ public class PluginServiceImpl implements PluginService {
         pluginMapper.updateCanary(plugin.getId(), BigDecimal.ZERO);
         pluginMapper.updateStatus(plugin.getId(), "active");
         pluginMapper.updateEnabled(plugin.getId(), true);
-        writeAuditLog(plugin.getId(), plugin.getName(), "promote",
+        writeAuditLog(
+                plugin.getId(),
+                plugin.getName(),
+                "promote",
                 JwtUtils.getCurrentUserId(),
-                Map.of("canary_weight", plugin.getCanaryWeight(), "status", plugin.getStatus()).toString(),
+                Map.of("canary_weight", plugin.getCanaryWeight(), "status", plugin.getStatus())
+                        .toString(),
                 Map.of("canary_weight", 0, "status", "active").toString(),
                 null);
         return pluginMapper.selectByPluginId(pluginId);
@@ -361,7 +382,10 @@ public class PluginServiceImpl implements PluginService {
         plugin.setVersion(plugin.getPreviousVersion());
         plugin.setPreviousVersion(oldVersion);
         pluginMapper.updateById(plugin);
-        writeAuditLog(plugin.getId(), plugin.getName(), "rollback",
+        writeAuditLog(
+                plugin.getId(),
+                plugin.getName(),
+                "rollback",
                 JwtUtils.getCurrentUserId(),
                 Map.of("version", oldVersion).toString(),
                 Map.of("version", plugin.getPreviousVersion()).toString(),
@@ -374,19 +398,21 @@ public class PluginServiceImpl implements PluginService {
         Plugin plugin = pluginId != null ? pluginMapper.selectByPluginId(pluginId) : null;
         Long dbPluginId = plugin != null ? plugin.getId() : null;
         List<PluginAuditLog> logs = auditLogMapper.selectByPluginId(dbPluginId, limit);
-        return logs.stream().map(l -> {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", l.getId());
-            m.put("event_id", l.getEventId());
-            m.put("plugin_name", l.getPluginName());
-            m.put("action", l.getAction());
-            m.put("operator_id", l.getOperatorId());
-            m.put("old_value", l.getOldValue());
-            m.put("new_value", l.getNewValue());
-            m.put("reason", l.getReason());
-            m.put("created_at", l.getCreatedAt());
-            return m;
-        }).collect(Collectors.toList());
+        return logs.stream()
+                .map(l -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", l.getId());
+                    m.put("event_id", l.getEventId());
+                    m.put("plugin_name", l.getPluginName());
+                    m.put("action", l.getAction());
+                    m.put("operator_id", l.getOperatorId());
+                    m.put("old_value", l.getOldValue());
+                    m.put("new_value", l.getNewValue());
+                    m.put("reason", l.getReason());
+                    m.put("created_at", l.getCreatedAt());
+                    return m;
+                })
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -397,18 +423,20 @@ public class PluginServiceImpl implements PluginService {
     @Override
     public List<Map<String, Object>> getAuditLogs(Long pluginId, int limit) {
         List<PluginAuditLog> logs = auditLogMapper.selectByPluginId(pluginId, limit);
-        return logs.stream().map(l -> {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", l.getId());
-            m.put("plugin_name", l.getPluginName());
-            m.put("action", l.getAction());
-            m.put("operator_id", l.getOperatorId());
-            m.put("old_value", l.getOldValue());
-            m.put("new_value", l.getNewValue());
-            m.put("reason", l.getReason());
-            m.put("created_at", l.getCreatedAt());
-            return m;
-        }).collect(Collectors.toList());
+        return logs.stream()
+                .map(l -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", l.getId());
+                    m.put("plugin_name", l.getPluginName());
+                    m.put("action", l.getAction());
+                    m.put("operator_id", l.getOperatorId());
+                    m.put("old_value", l.getOldValue());
+                    m.put("new_value", l.getNewValue());
+                    m.put("reason", l.getReason());
+                    m.put("created_at", l.getCreatedAt());
+                    return m;
+                })
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -496,8 +524,11 @@ public class PluginServiceImpl implements PluginService {
         try {
             URI uri = URI.create(endpoint);
             String host = uri.getHost();
-            if (!"https".equalsIgnoreCase(uri.getScheme()) || host == null || host.isBlank()
-                    || uri.getUserInfo() != null || host.equalsIgnoreCase("localhost")
+            if (!"https".equalsIgnoreCase(uri.getScheme())
+                    || host == null
+                    || host.isBlank()
+                    || uri.getUserInfo() != null
+                    || host.equalsIgnoreCase("localhost")
                     || host.endsWith(".local")) {
                 throw new IllegalArgumentException("接口地址必须是可公开访问的 HTTPS 地址");
             }
@@ -548,8 +579,14 @@ public class PluginServiceImpl implements PluginService {
         return plugin;
     }
 
-    private void writeAuditLog(Long pluginId, String pluginName, String action,
-                               Long operatorId, String oldValue, String newValue, String reason) {
+    private void writeAuditLog(
+            Long pluginId,
+            String pluginName,
+            String action,
+            Long operatorId,
+            String oldValue,
+            String newValue,
+            String reason) {
         PluginAuditLog logEntry = new PluginAuditLog();
         logEntry.setPluginId(pluginId);
         logEntry.setPluginName(pluginName);

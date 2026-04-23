@@ -66,27 +66,39 @@ public class QuotaProperties {
         switch (meterCode) {
             case "chat_tokens":
                 switch (planTier) {
-                    case "pro": return proChatTokens;
-                    case "enterprise": return enterpriseChatTokens;
-                    default: return freeChatTokens;
+                    case "pro":
+                        return proChatTokens;
+                    case "enterprise":
+                        return enterpriseChatTokens;
+                    default:
+                        return freeChatTokens;
                 }
             case "agent_tokens":
                 switch (planTier) {
-                    case "pro": return proAgentTokens;
-                    case "enterprise": return enterpriseAgentTokens;
-                    default: return freeAgentTokens;
+                    case "pro":
+                        return proAgentTokens;
+                    case "enterprise":
+                        return enterpriseAgentTokens;
+                    default:
+                        return freeAgentTokens;
                 }
             case "index_chunks":
                 switch (planTier) {
-                    case "pro": return proIndexChunks;
-                    case "enterprise": return enterpriseIndexChunks;
-                    default: return freeIndexChunks;
+                    case "pro":
+                        return proIndexChunks;
+                    case "enterprise":
+                        return enterpriseIndexChunks;
+                    default:
+                        return freeIndexChunks;
                 }
             case "plugin_executions":
                 switch (planTier) {
-                    case "pro": return proPluginExecutions;
-                    case "enterprise": return enterprisePluginExecutions;
-                    default: return freePluginExecutions;
+                    case "pro":
+                        return proPluginExecutions;
+                    case "enterprise":
+                        return enterprisePluginExecutions;
+                    default:
+                        return freePluginExecutions;
                 }
             default:
                 return freeChatTokens;

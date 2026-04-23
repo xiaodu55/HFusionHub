@@ -28,10 +28,11 @@ public class MessageSendDTO {
     @Size(max = 80, message = "请求ID不能超过80个字符")
     private String requestId;
 
-    @Schema(description = "能力档位（Agent V1 Step 5）。null/absent = V1.0只读；"
-            + "\"approval_write\" = V1.1受控写（write_note可见→approval_required门控）。"
-            + "服务端必须按业务权限策略决定是否允许，不能直接信任客户端。"
-            + "普通聊天始终强制null。")
+    @Schema(
+            description = "能力档位（Agent V1 Step 5）。null/absent = V1.0只读；"
+                    + "\"approval_write\" = V1.1受控写（write_note可见→approval_required门控）。"
+                    + "服务端必须按业务权限策略决定是否允许，不能直接信任客户端。"
+                    + "普通聊天始终强制null。")
     @Size(max = 50, message = "能力档位标识不能超过50个字符")
     private String capabilityProfile;
 }

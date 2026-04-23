@@ -251,6 +251,9 @@ watch(
 )
 
 onMounted(async () => {
+  // 直接从登录页等外部导航带 taskId 进入时，watch(route.query.taskId) 不会触发，
+  // 需在此显式同步视图模式（按任务查看默认切到「历史记录」）
+  viewMode.value = taskFilter.value == null ? 'pending' : 'history'
   await load()
   subscribe()
 })

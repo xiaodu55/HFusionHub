@@ -1,14 +1,15 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.utils.RedisUtils;
 import com.hfusionhub.entity.AgentApproval;
 import com.hfusionhub.mapper.*;
 import com.hfusionhub.service.AgentStatusEventService;
 import com.hfusionhub.service.AgentTaskQueueService;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -16,10 +17,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * Durable one-time execution token — concurrency and replay contract.
@@ -57,9 +56,16 @@ class AgentTaskExecutionTokenTest {
         redisUtils = mock(RedisUtils.class);
 
         service = new AgentTaskServiceImpl(
-                taskMapper, runMapper, stepMapper, approvalMapper,
-                messageMapper, userMapper, aiClient, queueService,
-                statusEventService, redisUtils,
+                taskMapper,
+                runMapper,
+                stepMapper,
+                approvalMapper,
+                messageMapper,
+                userMapper,
+                aiClient,
+                queueService,
+                statusEventService,
+                redisUtils,
                 mock(com.hfusionhub.service.UsageLedgerService.class),
                 mock(com.hfusionhub.config.QuotaProperties.class));
     }
@@ -94,8 +100,7 @@ class AgentTaskExecutionTokenTest {
                 .thenThrow(new RuntimeException("db down"));
         // The service does not swallow exceptions here; a failed atomic UPDATE
         // must be surfaced so the caller (Python decide) can reject execution.
-        assertThrows(RuntimeException.class,
-                () -> service.consumeExecutionToken("appr-1", "tok"));
+        assertThrows(RuntimeException.class, () -> service.consumeExecutionToken("appr-1", "tok"));
     }
 
     @Test
@@ -117,7 +122,11 @@ class AgentTaskExecutionTokenTest {
         for (int i = 0; i < workers; i++) {
             pool.submit(() -> {
                 ready.countDown();
-                try { start.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                try {
+                    start.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
                 try {
                     results.add(service.consumeExecutionToken("appr-par", "tok"));
                 } finally {
@@ -131,8 +140,7 @@ class AgentTaskExecutionTokenTest {
         pool.shutdownNow();
 
         long successes = results.stream().filter(b -> b).count();
-        assertEquals(1, successes,
-                "exactly one parallel consumer may consume the shared execution token");
+        assertEquals(1, successes, "exactly one parallel consumer may consume the shared execution token");
         assertEquals(workers, results.size());
     }
 

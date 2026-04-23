@@ -1,5 +1,9 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.dto.KbShareInfoDTO;
@@ -18,17 +22,15 @@ import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
-
 @ExtendWith(MockitoExtension.class)
 class KbShareServiceImplTest {
 
     @Mock
     private KbShareMapper kbShareMapper;
+
     @Mock
     private KnowledgeBaseMapper knowledgeBaseMapper;
+
     @Mock
     private UserMapper userMapper;
 

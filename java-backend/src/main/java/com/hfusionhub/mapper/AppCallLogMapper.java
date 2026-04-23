@@ -5,5 +5,4 @@ import com.hfusionhub.entity.AppCallLog;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
-public interface AppCallLogMapper extends BaseMapper<AppCallLog> {
-}
+public interface AppCallLogMapper extends BaseMapper<AppCallLog> {}

@@ -50,7 +50,9 @@ public class PageQuery {
         if (orderBy == null || orderBy.isEmpty()) {
             this.orderBy = CommonConstants.DEFAULT_ORDER_BY;
         }
-        if (orderDirection == null || (!orderDirection.equals(CommonConstants.ORDER_ASC) && !orderDirection.equals(CommonConstants.ORDER_DESC))) {
+        if (orderDirection == null
+                || (!orderDirection.equals(CommonConstants.ORDER_ASC)
+                        && !orderDirection.equals(CommonConstants.ORDER_DESC))) {
             this.orderDirection = CommonConstants.ORDER_DESC;
         }
     }

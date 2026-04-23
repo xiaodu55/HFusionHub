@@ -7,11 +7,10 @@ import com.hfusionhub.entity.Tenant;
 import com.hfusionhub.service.TenantService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.*;
-
 import java.util.List;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
 
 /**
  * 租户管理控制器
@@ -31,11 +30,7 @@ public class TenantController {
     @SaCheckRole("admin")
     public R<Tenant> create(@RequestBody Map<String, String> body) {
         Tenant tenant = tenantService.createTenant(
-            body.get("name"),
-            body.get("slug"),
-            body.getOrDefault("planTier", "free"),
-            JwtUtils.getCurrentUserId()
-        );
+                body.get("name"), body.get("slug"), body.getOrDefault("planTier", "free"), JwtUtils.getCurrentUserId());
         return R.ok("租户创建成功", tenant);
     }
 

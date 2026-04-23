@@ -25,11 +25,13 @@ services:
     container_name: redis7
     ports:
       - "127.0.0.1:6379:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     volumes:
       - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
-    command: redis-server /usr/local/etc/redis/redis.conf
+    command: ["sh", "-c", "redis-server /usr/local/etc/redis/redis.conf --requirepass \"$REDIS_PASSWORD\""]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -118,6 +120,10 @@ services:
     environment:
       ETCD_ENDPOINTS: http://etcd:2379
       COMMON_STORAGETYPE: local
+      # 可选认证：MILVUS_AUTH_ENABLED=true 时启用（Python 需配 MILVUS_USER/MILVUS_PASSWORD，
+      # Attu 登录填 root/密码）；默认关闭以保持与现有栈兼容
+      COMMON_SECURITY_AUTHORIZATIONENABLED: ${MILVUS_AUTH_ENABLED:-false}
+      COMMON_SECURITY_ROOTPASSWORD: ${MILVUS_ROOT_PASSWORD:-milvus-root-password}
     ports:
       - "127.0.0.1:19530:19530"
       - "127.0.0.1:9091:9091"

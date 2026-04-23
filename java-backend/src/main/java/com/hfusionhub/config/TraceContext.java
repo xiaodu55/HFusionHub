@@ -1,8 +1,7 @@
 package com.hfusionhub.config;
 
-import org.slf4j.MDC;
-
 import java.util.UUID;
+import org.slf4j.MDC;
 
 /**
  * Thread-local trace context propagated across Java→Python service calls.

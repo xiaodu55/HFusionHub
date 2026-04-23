@@ -38,9 +38,9 @@ test.describe('AI ability center', () => {
     await page.screenshot({ path: 'test-results/tools-mobile.png', fullPage: true })
   })
 
-  test('new tool opens the low-code plugin builder', async ({ page, userA }) => {
+  test('new tool opens the low-code plugin builder', async ({ page, admin }) => {
     await page.goto('/')
-    await page.evaluate((token) => localStorage.setItem('satoken', token), userA.token)
+    await page.evaluate((token) => localStorage.setItem('satoken', token), admin.token)
     await page.route('**/api/tool/registry**', (route) => route.fulfill({
       status: 200,
       contentType: 'application/json',

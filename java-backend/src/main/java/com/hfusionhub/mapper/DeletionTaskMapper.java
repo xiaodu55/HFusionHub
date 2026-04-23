@@ -2,13 +2,12 @@ package com.hfusionhub.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.hfusionhub.entity.DeletionTask;
+import java.time.LocalDateTime;
+import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
-
-import java.time.LocalDateTime;
-import java.util.List;
 
 /**
  * 删除任务 Mapper
@@ -21,7 +20,8 @@ public interface DeletionTaskMapper extends BaseMapper<DeletionTask> {
     @Select("SELECT * FROM deletion_task WHERE status IN ('PENDING','RETRYING') ORDER BY created_at ASC LIMIT #{limit}")
     List<DeletionTask> selectPendingTasks(@Param("limit") int limit);
 
-    @Update("""
+    @Update(
+            """
             UPDATE deletion_task
             SET status = 'RETRYING',
                 error_message = #{errorMessage},
@@ -30,13 +30,15 @@ public interface DeletionTaskMapper extends BaseMapper<DeletionTask> {
               AND updated_at < #{staleBefore}
               AND retry_count < max_retries
             """)
-    int recoverStaleProcessingTasks(@Param("staleBefore") LocalDateTime staleBefore,
-                                    @Param("errorMessage") String errorMessage);
+    int recoverStaleProcessingTasks(
+            @Param("staleBefore") LocalDateTime staleBefore, @Param("errorMessage") String errorMessage);
 
-    @Select("SELECT * FROM deletion_task WHERE status = 'FAILED' AND retry_count < max_retries ORDER BY created_at ASC LIMIT #{limit}")
+    @Select(
+            "SELECT * FROM deletion_task WHERE status = 'FAILED' AND retry_count < max_retries ORDER BY created_at ASC LIMIT #{limit}")
     List<DeletionTask> selectRetryableTasks(@Param("limit") int limit);
 
-    @Select("""
+    @Select(
+            """
             SELECT * FROM deletion_task
             WHERE task_type = #{taskType}
               AND target_id = #{targetId}

@@ -1,10 +1,15 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.entity.MemoryEntry;
 import com.hfusionhub.mapper.MemoryEntryMapper;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,14 +18,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.time.LocalDateTime;
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class MemoryServiceImplTest {
@@ -75,8 +72,7 @@ class MemoryServiceImplTest {
 
     @Test
     void listByUserShouldFilterByTypeAndConversation() {
-        when(memoryEntryMapper.selectList(any(LambdaQueryWrapper.class)))
-                .thenReturn(List.of());
+        when(memoryEntryMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
 
         List<MemoryEntry> result = memoryService.listByUser("entity_fact", 5L);
 
@@ -87,8 +83,7 @@ class MemoryServiceImplTest {
 
     @Test
     void listByUserShouldAcceptNullFilters() {
-        when(memoryEntryMapper.selectList(any(LambdaQueryWrapper.class)))
-                .thenReturn(List.of());
+        when(memoryEntryMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
 
         List<MemoryEntry> result = memoryService.listByUser(null, null);
 
@@ -128,8 +123,7 @@ class MemoryServiceImplTest {
 
     @Test
     void getRelevantMemoriesShouldReturnEntityFactsAndPreferences() {
-        when(memoryEntryMapper.selectList(any(LambdaQueryWrapper.class)))
-                .thenReturn(List.of());
+        when(memoryEntryMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
 
         List<MemoryEntry> result = memoryService.getRelevantMemories(1L, "Python", 5);
 

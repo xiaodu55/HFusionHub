@@ -1,9 +1,9 @@
 package com.hfusionhub.config;
 
+import static org.junit.jupiter.api.Assertions.*;
+
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for {@link TraceContext}.

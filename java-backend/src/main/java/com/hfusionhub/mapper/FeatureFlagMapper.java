@@ -5,5 +5,4 @@ import com.hfusionhub.entity.FeatureFlag;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
-public interface FeatureFlagMapper extends BaseMapper<FeatureFlag> {
-}
+public interface FeatureFlagMapper extends BaseMapper<FeatureFlag> {}

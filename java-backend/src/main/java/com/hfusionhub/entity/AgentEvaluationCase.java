@@ -4,11 +4,10 @@ import com.baomidou.mybatisplus.annotation.*;
 import com.hfusionhub.handler.JsonListTypeHandler;
 import com.hfusionhub.handler.JsonMapTypeHandler;
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.Data;
-
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import lombok.Data;
 
 /**
  * Agent 评测用例实体

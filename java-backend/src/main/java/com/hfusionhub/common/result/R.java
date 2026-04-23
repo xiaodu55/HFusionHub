@@ -1,9 +1,8 @@
 package com.hfusionhub.common.result;
 
 import com.hfusionhub.config.TraceContext;
-import lombok.Data;
-
 import java.io.Serializable;
+import lombok.Data;
 
 /**
  * 统一返回结果

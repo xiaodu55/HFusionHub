@@ -5,9 +5,8 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import lombok.Data;
-
 import java.time.LocalDateTime;
+import lombok.Data;
 
 /** A user-owned set of prompt test cases, run as a batch against any template. */
 @Data
@@ -16,6 +15,7 @@ public class PromptTestSet {
 
     @TableId(type = IdType.AUTO)
     private Long id;
+
     private Long userId;
     private String name;
     private String description;

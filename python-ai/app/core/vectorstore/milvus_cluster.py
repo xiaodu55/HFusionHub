@@ -49,7 +49,15 @@ class MilvusClusterStore(VectorStoreProtocol):
             if self._client is not None:
                 return self._client
             try:
-                client = MilvusClient(uri=self._uri)
+                # Milvus 认证：MILVUS_PASSWORD 非空时携带 user/password（默认 root）
+                if config.MILVUS_PASSWORD:
+                    client = MilvusClient(
+                        uri=self._uri,
+                        user=config.MILVUS_USER or "root",
+                        password=config.MILVUS_PASSWORD,
+                    )
+                else:
+                    client = MilvusClient(uri=self._uri)
                 self._client = client
                 self._last_error = None
                 logger.info("Connected to Milvus cluster at %s", self._uri)

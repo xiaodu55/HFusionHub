@@ -7,11 +7,10 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import com.hfusionhub.handler.JsonMapTypeHandler;
 import com.hfusionhub.handler.JsonStringListTypeHandler;
 import com.hfusionhub.handler.JsonTypeHandler;
-import lombok.Data;
-
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import lombok.Data;
 
 /** Per-case result of a persisted batch run. */
 @Data
@@ -20,6 +19,7 @@ public class PromptTestCaseResultEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
+
     private Long runId;
     private Long caseId;
     private String question;

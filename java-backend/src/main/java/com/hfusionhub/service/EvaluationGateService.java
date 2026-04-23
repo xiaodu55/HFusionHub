@@ -2,7 +2,6 @@ package com.hfusionhub.service;
 
 import com.hfusionhub.dto.GateResult;
 import com.hfusionhub.entity.EvaluationGateResult;
-
 import java.util.List;
 
 /**

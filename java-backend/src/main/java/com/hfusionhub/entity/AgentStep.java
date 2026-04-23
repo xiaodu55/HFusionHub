@@ -3,11 +3,10 @@ package com.hfusionhub.entity;
 import com.baomidou.mybatisplus.annotation.*;
 import com.hfusionhub.handler.JsonTypeHandler;
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.Data;
-
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import lombok.Data;
 
 /**
  * Agent 步骤记录实体 — 每次工具调用/检索/生成一条记录

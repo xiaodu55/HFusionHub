@@ -5,5 +5,4 @@ import com.hfusionhub.entity.FeatureFlagRule;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
-public interface FeatureFlagRuleMapper extends BaseMapper<FeatureFlagRule> {
-}
+public interface FeatureFlagRuleMapper extends BaseMapper<FeatureFlagRule> {}

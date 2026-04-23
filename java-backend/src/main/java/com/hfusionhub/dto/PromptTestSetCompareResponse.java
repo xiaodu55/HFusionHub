@@ -1,10 +1,9 @@
 package com.hfusionhub.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.util.List;
 import lombok.Builder;
 import lombok.Data;
-
-import java.util.List;
 
 /** 两个批量运行记录的逐用例对比结果 */
 @Data

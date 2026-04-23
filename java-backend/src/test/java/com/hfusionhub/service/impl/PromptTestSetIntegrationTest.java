@@ -1,5 +1,16 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.isNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.context.SaTokenContext;
 import cn.dev33.satoken.context.model.SaRequest;
@@ -10,6 +21,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.constant.PromptTestSetRunStatus;
 import com.hfusionhub.dto.PromptTestCaseDTO;
+import com.hfusionhub.dto.PromptTestCaseResult;
 import com.hfusionhub.dto.PromptTestCaseSaveDTO;
 import com.hfusionhub.dto.PromptTestSetCompareRequest;
 import com.hfusionhub.dto.PromptTestSetCompareResponse;
@@ -20,7 +32,6 @@ import com.hfusionhub.dto.PromptTestSetRunRequest;
 import com.hfusionhub.dto.PromptTestSetRunResponse;
 import com.hfusionhub.dto.PromptTestSetRunStatusDTO;
 import com.hfusionhub.dto.PromptTestSetSaveDTO;
-import com.hfusionhub.dto.PromptTestCaseResult;
 import com.hfusionhub.entity.PromptTemplate;
 import com.hfusionhub.entity.PromptTestSetRun;
 import com.hfusionhub.entity.User;
@@ -28,6 +39,13 @@ import com.hfusionhub.mapper.PromptTemplateMapper;
 import com.hfusionhub.mapper.PromptTestSetRunMapper;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.tenant.TenantContext;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
@@ -43,25 +61,6 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.isNull;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * Real-DB (H2) round-trip test for prompt test cases: save → read back →
@@ -217,7 +216,8 @@ class PromptTestSetIntegrationTest {
         resp.setContent("回答");
         resp.setModel("deepseek-v4-flash");
         resp.setTokenCount(10);
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong()))
+                .thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是{{角色}}，关于{{主题}}（{{topic}}）请回答");
@@ -260,7 +260,8 @@ class PromptTestSetIntegrationTest {
         resp.setContent("回答内容");
         resp.setModel("deepseek-v4-flash");
         resp.setTokenCount(88);
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong()))
+                .thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateId(template.getId());
@@ -301,7 +302,8 @@ class PromptTestSetIntegrationTest {
         resp.setContent("回答内容");
         resp.setModel("deepseek-v4-flash");
         resp.setTokenCount(88);
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong()))
+                .thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         // Edited/payload content must be ignored when a template is bound
@@ -348,8 +350,7 @@ class PromptTestSetIntegrationTest {
         request.setTemplateId(foreign.getId());
 
         com.hfusionhub.common.exception.BusinessException ex = assertThrows(
-                com.hfusionhub.common.exception.BusinessException.class,
-                () -> service.run(created.getId(), request));
+                com.hfusionhub.common.exception.BusinessException.class, () -> service.run(created.getId(), request));
         assertTrue(ex.getMessage().contains("无权"));
         assertEquals(0, service.listRuns(created.getId()).size());
     }
@@ -415,11 +416,10 @@ class PromptTestSetIntegrationTest {
         resp.setContent("7天内支持退款，请参考政策。");
         resp.setModel("deepseek-v4-flash");
         resp.setTokenCount(30);
-        resp.setSources(List.of(
-                Map.of("document_id", 11L, "chunk_id", "c1"),
-                Map.of("document_id", 22L, "chunk_id", "c2")
-        ));
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
+        resp.setSources(
+                List.of(Map.of("document_id", 11L, "chunk_id", "c1"), Map.of("document_id", 22L, "chunk_id", "c2")));
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong()))
+                .thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是客服助手");
@@ -446,7 +446,8 @@ class PromptTestSetIntegrationTest {
         resp.setModel("deepseek-v4-flash");
         resp.setTokenCount(30);
         resp.setSources(List.of(Map.of("document_id", 11L, "chunk_id", "c1")));
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong()))
+                .thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是客服助手");
@@ -516,7 +517,8 @@ class PromptTestSetIntegrationTest {
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
         resp.setModel("deepseek-v4-flash");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong()))
+                .thenReturn(resp);
 
         PromptTestSetRunRequest request = new PromptTestSetRunRequest();
         request.setTemplateContent("你是{{角色}}");
@@ -530,8 +532,11 @@ class PromptTestSetIntegrationTest {
         // Other async-lifecycle cases can leave committed pending rows in the
         // shared H2 context; use a window large enough to assert this run is
         // discoverable rather than assuming it is among the first ten.
-        assertEquals(1, service.listQueuedRuns(100).stream()
-                .filter(r -> r.getId().equals(queued.getId())).count());
+        assertEquals(
+                1,
+                service.listQueuedRuns(100).stream()
+                        .filter(r -> r.getId().equals(queued.getId()))
+                        .count());
         assertTrue(service.claimRun(queued.getId()));
         // Guarded claim: second attempt fails because it is already running
         assertFalse(service.claimRun(queued.getId()));
@@ -556,8 +561,11 @@ class PromptTestSetIntegrationTest {
         assertEquals("cancelled", cancelled.getStatus());
 
         // Cancelled run is no longer queued and won't execute
-        assertEquals(0, service.listQueuedRuns(10).stream()
-                .filter(r -> r.getId().equals(queued.getId())).count());
+        assertEquals(
+                0,
+                service.listQueuedRuns(10).stream()
+                        .filter(r -> r.getId().equals(queued.getId()))
+                        .count());
         assertFalse(service.claimRun(queued.getId()));
         assertNull(service.executeRun(queued.getId()));
 
@@ -613,11 +621,17 @@ class PromptTestSetIntegrationTest {
         stale.setId(queued.getId());
         stale.setStatus("running");
         stale.setStartedAt(java.time.LocalDateTime.now().minusMinutes(120));
-        runMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<PromptTestSetRun>()
-                .eq(PromptTestSetRun::getId, queued.getId())
-                .set(PromptTestSetRun::getStatus, "running")
-                .set(PromptTestSetRun::getStartedAt, java.time.LocalDateTime.now().minusMinutes(120))
-                .set(PromptTestSetRun::getHeartbeatAt, java.time.LocalDateTime.now().minusMinutes(120)));
+        runMapper.update(
+                null,
+                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<PromptTestSetRun>()
+                        .eq(PromptTestSetRun::getId, queued.getId())
+                        .set(PromptTestSetRun::getStatus, "running")
+                        .set(
+                                PromptTestSetRun::getStartedAt,
+                                java.time.LocalDateTime.now().minusMinutes(120))
+                        .set(
+                                PromptTestSetRun::getHeartbeatAt,
+                                java.time.LocalDateTime.now().minusMinutes(120)));
 
         int marked = service.markStaleRunsFailed(30);
         assertEquals(1, marked);
@@ -635,11 +649,17 @@ class PromptTestSetIntegrationTest {
         assertTrue(service.claimRun(queued.getId()));
 
         // 正常运行很久（started_at 已远超阈值），但最近一次心跳仍是新鲜的 → 不失联
-        runMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<PromptTestSetRun>()
-                .eq(PromptTestSetRun::getId, queued.getId())
-                .set(PromptTestSetRun::getStatus, "running")
-                .set(PromptTestSetRun::getStartedAt, java.time.LocalDateTime.now().minusMinutes(120))
-                .set(PromptTestSetRun::getHeartbeatAt, java.time.LocalDateTime.now().minusSeconds(30)));
+        runMapper.update(
+                null,
+                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<PromptTestSetRun>()
+                        .eq(PromptTestSetRun::getId, queued.getId())
+                        .set(PromptTestSetRun::getStatus, "running")
+                        .set(
+                                PromptTestSetRun::getStartedAt,
+                                java.time.LocalDateTime.now().minusMinutes(120))
+                        .set(
+                                PromptTestSetRun::getHeartbeatAt,
+                                java.time.LocalDateTime.now().minusSeconds(30)));
 
         int marked = service.markStaleRunsFailed(30);
         assertEquals(0, marked);
@@ -668,13 +688,14 @@ class PromptTestSetIntegrationTest {
         CountDownLatch releaseWorker = new CountDownLatch(1);
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenAnswer(inv -> {
-            if (calls.incrementAndGet() == 1) {
-                workerInChat.countDown();
-                releaseWorker.await(10, TimeUnit.SECONDS);
-            }
-            return resp;
-        });
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong()))
+                .thenAnswer(inv -> {
+                    if (calls.incrementAndGet() == 1) {
+                        workerInChat.countDown();
+                        releaseWorker.await(10, TimeUnit.SECONDS);
+                    }
+                    return resp;
+                });
 
         PromptTestSetRunStatusDTO queued = service.run(created.getId(), request("你是{{角色}}"));
         Long runId = queued.getId();
@@ -684,13 +705,15 @@ class PromptTestSetIntegrationTest {
 
         // 旧 Worker 启动并在首个 AI 调用内阻塞。
         AtomicReference<Throwable> workerError = new AtomicReference<>();
-        Thread worker = new Thread(() -> {
-            try {
-                service.executeRun(runId);
-            } catch (Throwable t) {
-                workerError.set(t);
-            }
-        }, "pts-stale-worker");
+        Thread worker = new Thread(
+                () -> {
+                    try {
+                        service.executeRun(runId);
+                    } catch (Throwable t) {
+                        workerError.set(t);
+                    }
+                },
+                "pts-stale-worker");
         worker.start();
         assertTrue(workerInChat.await(10, TimeUnit.SECONDS), "worker never entered AI call");
 
@@ -742,36 +765,41 @@ class PromptTestSetIntegrationTest {
         CountDownLatch releaseWorker = new CountDownLatch(1);
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenAnswer(inv -> {
-            if (calls.incrementAndGet() == 1) {
-                workerInChat.countDown();
-                releaseWorker.await(10, TimeUnit.SECONDS);
-            }
-            return resp;
-        });
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong()))
+                .thenAnswer(inv -> {
+                    if (calls.incrementAndGet() == 1) {
+                        workerInChat.countDown();
+                        releaseWorker.await(10, TimeUnit.SECONDS);
+                    }
+                    return resp;
+                });
 
         PromptTestSetRunStatusDTO queued = service.run(created.getId(), request("你是{{角色}}"));
         Long runId = queued.getId();
         assertTrue(service.claimRun(runId));
 
         AtomicReference<Throwable> workerError = new AtomicReference<>();
-        Thread worker = new Thread(() -> {
-            try {
-                service.executeRun(runId);
-            } catch (Throwable t) {
-                workerError.set(t);
-            }
-        }, "pts-worker-A");
+        Thread worker = new Thread(
+                () -> {
+                    try {
+                        service.executeRun(runId);
+                    } catch (Throwable t) {
+                        workerError.set(t);
+                    }
+                },
+                "pts-worker-A");
         worker.start();
         assertTrue(workerInChat.await(10, TimeUnit.SECONDS), "worker never entered AI call");
 
         // 模拟实例 B 取消：直接翻转 DB 状态，B 的 cancelledRuns 标志对 A 不可见。
         // 与真实跨实例取消一致——隔离完全依赖 DB 上的守卫写入。
-        runMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<PromptTestSetRun>()
-                .eq(PromptTestSetRun::getId, runId)
-                .eq(PromptTestSetRun::getStatus, PromptTestSetRunStatus.RUNNING)
-                .set(PromptTestSetRun::getStatus, PromptTestSetRunStatus.CANCELLED)
-                .set(PromptTestSetRun::getCompletedAt, java.time.LocalDateTime.now()));
+        runMapper.update(
+                null,
+                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<PromptTestSetRun>()
+                        .eq(PromptTestSetRun::getId, runId)
+                        .eq(PromptTestSetRun::getStatus, PromptTestSetRunStatus.RUNNING)
+                        .set(PromptTestSetRun::getStatus, PromptTestSetRunStatus.CANCELLED)
+                        .set(PromptTestSetRun::getCompletedAt, java.time.LocalDateTime.now()));
 
         releaseWorker.countDown();
         worker.join(10_000);
@@ -808,7 +836,8 @@ class PromptTestSetIntegrationTest {
 
         AiClient.ChatResponse resp = new AiClient.ChatResponse();
         resp.setContent("回答");
-        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong())).thenReturn(resp);
+        when(aiClient.chat(anyString(), isNull(), isNull(), any(), anyString(), anyLong()))
+                .thenReturn(resp);
 
         PromptTestSetRunStatusDTO queued = service.run(created.getId(), request("你是{{角色}}"));
         Long runId = queued.getId();
@@ -818,44 +847,47 @@ class PromptTestSetIntegrationTest {
 
         // 在「进度已写、结果未写」窗口同步点注入阻塞（生产环境该钩子为空，不改变行为）。
         Object originalHook = ReflectionTestUtils.getField(caseWriter, "caseWriteHook");
-        ReflectionTestUtils.setField(caseWriter, "caseWriteHook",
-                (PromptTestSetCaseWriter.CaseWriteHook) () -> {
-                    inWindow.countDown();
-                    try {
-                        releaseWorker.await(10, TimeUnit.SECONDS);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                });
+        ReflectionTestUtils.setField(caseWriter, "caseWriteHook", (PromptTestSetCaseWriter.CaseWriteHook) () -> {
+            inWindow.countDown();
+            try {
+                releaseWorker.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
         try {
-            Thread worker = new Thread(() -> {
-                try {
-                    service.executeRun(runId);
-                } catch (Throwable t) {
-                    // 忽略——由主线程断言负责
-                }
-            }, "pts-window-worker");
+            Thread worker = new Thread(
+                    () -> {
+                        try {
+                            service.executeRun(runId);
+                        } catch (Throwable t) {
+                            // 忽略——由主线程断言负责
+                        }
+                    },
+                    "pts-window-worker");
             worker.start();
 
-            assertTrue(inWindow.await(10, TimeUnit.SECONDS),
-                    "worker never reached the progress-written window");
+            assertTrue(inWindow.await(10, TimeUnit.SECONDS), "worker never reached the progress-written window");
 
             // 取消+重试在另一线程执行：worker 事务持有 run 行 X 锁，二者必须阻塞到 worker 提交。
-            Thread cancelThread = new Thread(() -> {
-                try {
-                    service.cancelRun(runId);
-                    service.retryRun(runId);
-                } catch (Throwable t) {
-                    cancelError.set(t);
-                } finally {
-                    cancelDone.countDown();
-                }
-            }, "pts-window-cancel");
+            Thread cancelThread = new Thread(
+                    () -> {
+                        try {
+                            service.cancelRun(runId);
+                            service.retryRun(runId);
+                        } catch (Throwable t) {
+                            cancelError.set(t);
+                        } finally {
+                            cancelDone.countDown();
+                        }
+                    },
+                    "pts-window-cancel");
             cancelThread.start();
 
             // 互斥验证：worker 事务未提交时，取消+重试不得提前完成。
             Thread.sleep(300);
-            assertFalse(cancelDone.await(50, TimeUnit.MILLISECONDS),
+            assertFalse(
+                    cancelDone.await(50, TimeUnit.MILLISECONDS),
                     "cancel/retry must block on the worker's active transaction");
 
             // 释放 worker → 结果插入并提交事务 → 重试随后执行并清除其结果。
@@ -882,17 +914,52 @@ class PromptTestSetIntegrationTest {
 
     private static class MockSaTokenContext implements SaTokenContext {
         private final Map<String, Object> store = new HashMap<>();
-        @Override public SaRequest getRequest() { return mock(SaRequest.class); }
-        @Override public SaResponse getResponse() { return mock(SaResponse.class); }
-        @Override public SaStorage getStorage() {
+
+        @Override
+        public SaRequest getRequest() {
+            return mock(SaRequest.class);
+        }
+
+        @Override
+        public SaResponse getResponse() {
+            return mock(SaResponse.class);
+        }
+
+        @Override
+        public SaStorage getStorage() {
             return new SaStorage() {
-                @Override public Object getSource() { return store; }
-                @Override public Object get(String k) { return store.get(k); }
-                @Override public SaStorage set(String k, Object v) { store.put(k, v); return this; }
-                @Override public SaStorage delete(String k) { store.remove(k); return this; }
+                @Override
+                public Object getSource() {
+                    return store;
+                }
+
+                @Override
+                public Object get(String k) {
+                    return store.get(k);
+                }
+
+                @Override
+                public SaStorage set(String k, Object v) {
+                    store.put(k, v);
+                    return this;
+                }
+
+                @Override
+                public SaStorage delete(String k) {
+                    store.remove(k);
+                    return this;
+                }
             };
         }
-        @Override public boolean matchPath(String p, String path) { return true; }
-        @Override public boolean isValid() { return true; }
+
+        @Override
+        public boolean matchPath(String p, String path) {
+            return true;
+        }
+
+        @Override
+        public boolean isValid() {
+            return true;
+        }
     }
 }

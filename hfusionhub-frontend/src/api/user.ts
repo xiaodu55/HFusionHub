@@ -55,3 +55,8 @@ export interface UserSearchResult {
 export const searchUsers = (keyword: string): Promise<ApiResponse<UserSearchResult[]>> => {
   return get('/user/search', { keyword })
 }
+
+/** 修改当前用户密码 */
+export const changePassword = (data: { oldPassword: string; newPassword: string }): Promise<ApiResponse<void>> => {
+  return post('/user/password', data)
+}

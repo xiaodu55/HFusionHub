@@ -176,9 +176,9 @@ test.describe('Plugin Management', () => {
 
   // ── UI rendering tests (mocked route) ───────────────────────────────
 
-  test('plugins page explains creation and package upload', async ({ page, userA }) => {
+  test('plugins page explains creation and package upload', async ({ page, admin }) => {
     await page.goto('/')
-    await page.evaluate((token) => localStorage.setItem('satoken', token), userA.token)
+    await page.evaluate((token) => localStorage.setItem('satoken', token), admin.token)
     await page.route('**/api/plugin/list**', (route) =>
       route.fulfill({
         status: 200,
@@ -192,9 +192,9 @@ test.describe('Plugin Management', () => {
     await expect(page.getByRole('button', { name: '上传插件包' })).toBeVisible()
   })
 
-  test('plugins page shows empty state when no plugins', async ({ page, userA }) => {
+  test('plugins page shows empty state when no plugins', async ({ page, admin }) => {
     await page.goto('/')
-    await page.evaluate((token) => localStorage.setItem('satoken', token), userA.token)
+    await page.evaluate((token) => localStorage.setItem('satoken', token), admin.token)
     await page.route('**/api/plugin/list**', (route) =>
       route.fulfill({
         status: 200,
@@ -206,7 +206,7 @@ test.describe('Plugin Management', () => {
     await expect(page.getByText('暂无插件')).toBeVisible()
   })
 
-  test('plugins page shows plugin cards when data exists', async ({ page, userA }) => {
+  test('plugins page shows plugin cards when data exists', async ({ page, admin }) => {
     const mockPlugins = [
       {
         id: 1,
@@ -226,7 +226,7 @@ test.describe('Plugin Management', () => {
     ]
 
     await page.goto('/')
-    await page.evaluate((token) => localStorage.setItem('satoken', token), userA.token)
+    await page.evaluate((token) => localStorage.setItem('satoken', token), admin.token)
     await page.route('**/api/plugin/list**', (route) =>
       route.fulfill({
         status: 200,
@@ -240,14 +240,14 @@ test.describe('Plugin Management', () => {
     await expect(page.getByText('运行中', { exact: true })).toBeVisible()
   })
 
-  test('status filter tabs show correct counts', async ({ page, userA }) => {
+  test('status filter tabs show correct counts', async ({ page, admin }) => {
     const mockPlugins = [
       { id: 1, pluginId: 'p1', name: 'a', displayName: 'A', version: '1.0.0', source: 'local', status: 'active', enabled: true, createdAt: '', updatedAt: '' },
       { id: 2, pluginId: 'p2', name: 'b', displayName: 'B', version: '1.0.0', source: 'local', status: 'disabled', enabled: false, createdAt: '', updatedAt: '' },
     ]
 
     await page.goto('/')
-    await page.evaluate((token) => localStorage.setItem('satoken', token), userA.token)
+    await page.evaluate((token) => localStorage.setItem('satoken', token), admin.token)
     await page.route('**/api/plugin/list**', (route) =>
       route.fulfill({
         status: 200,
@@ -261,9 +261,9 @@ test.describe('Plugin Management', () => {
     await expect(page.getByRole('button', { name: /1 已禁用/ })).toBeVisible()
   })
 
-  test('install dialog opens and validates input', async ({ page, userA }) => {
+  test('install dialog opens and validates input', async ({ page, admin }) => {
     await page.goto('/')
-    await page.evaluate((token) => localStorage.setItem('satoken', token), userA.token)
+    await page.evaluate((token) => localStorage.setItem('satoken', token), admin.token)
     await page.route('**/api/plugin/list**', (route) =>
       route.fulfill({
         status: 200,
@@ -303,9 +303,9 @@ test.describe('Plugin Management', () => {
     await expect(installBtn).toBeEnabled()
   })
 
-  test('low-code creator loads a complete weather example', async ({ page, userA }) => {
+  test('low-code creator loads a complete weather example', async ({ page, admin }) => {
     await page.goto('/')
-    await page.evaluate((token) => localStorage.setItem('satoken', token), userA.token)
+    await page.evaluate((token) => localStorage.setItem('satoken', token), admin.token)
     await page.route('**/api/plugin/list**', (route) =>
       route.fulfill({
         status: 200,

@@ -13,8 +13,9 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 public interface TenantAuditLogMapper extends BaseMapper<TenantAuditLog> {
 
-    int insertCrossTenant(@Param("operatorId") Long operatorId,
-                          @Param("fromTenant") Long fromTenant,
-                          @Param("toTenant") Long toTenant,
-                          @Param("action") String action);
+    int insertCrossTenant(
+            @Param("operatorId") Long operatorId,
+            @Param("fromTenant") Long fromTenant,
+            @Param("toTenant") Long toTenant,
+            @Param("action") String action);
 }

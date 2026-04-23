@@ -11,14 +11,13 @@ import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
 
 /**
  * 提示词测试台控制器 — 不创建对话，纯评测模板效果
@@ -59,25 +58,23 @@ public class PromptTestController {
                 // KB 绑定 → Agent V1 检索增强
                 aiResponse = aiClient.agentV1Chat(
                         request.getQuestion(),
-                        null,  // conversationId: null（不关联对话）
+                        null, // conversationId: null（不关联对话）
                         request.getKnowledgeBaseId(),
-                        List.of(),  // history: 测试台无历史
-                        request.getTemplateContent(),  // systemPrompt: 支持 8000 字符
+                        List.of(), // history: 测试台无历史
+                        request.getTemplateContent(), // systemPrompt: 支持 8000 字符
                         "detailed",
                         5,
-                        null,  // requestId: null（测试台不幂等）
-                        currentUserId
-                );
+                        null, // requestId: null（测试台不幂等）
+                        currentUserId);
             } else {
                 // 纯 LLM 对话
                 aiResponse = aiClient.chat(
                         request.getQuestion(),
-                        null,  // conversationId: null
-                        null,  // knowledgeBaseId: null
-                        List.of(),  // history: 测试台无历史
-                        request.getTemplateContent(),  // systemPrompt: 支持 8000 字符
-                        currentUserId
-                );
+                        null, // conversationId: null
+                        null, // knowledgeBaseId: null
+                        List.of(), // history: 测试台无历史
+                        request.getTemplateContent(), // systemPrompt: 支持 8000 字符
+                        currentUserId);
             }
         } catch (Exception e) {
             log.error("提示词测试台调用 AI 失败: {}", e.getMessage(), e);
@@ -96,8 +93,11 @@ public class PromptTestController {
                 .elapsedMs(elapsedMs)
                 .build();
 
-        log.info("提示词测试台: elapsedMs={}, model={}, tokenCount={}, hasSources={}",
-                elapsedMs, response.getModel(), response.getTokenCount(),
+        log.info(
+                "提示词测试台: elapsedMs={}, model={}, tokenCount={}, hasSources={}",
+                elapsedMs,
+                response.getModel(),
+                response.getTokenCount(),
                 response.getSources() != null && !response.getSources().isEmpty());
 
         return R.ok("测试完成", response);

@@ -11,12 +11,6 @@ import com.hfusionhub.mapper.ModelUsageRecordMapper;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.CostTrackingService;
 import com.hfusionhub.tenant.TenantContext;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
-
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -25,6 +19,11 @@ import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 /**
  * 模型调用成本追踪服务实现
@@ -66,8 +65,12 @@ public class CostTrackingServiceImpl implements CostTrackingService {
         if (record.getLatencyMs() == null) record.setLatencyMs(0);
 
         modelUsageRecordMapper.insert(record);
-        log.debug("成本记录已落账: userId={} model={} tokens={} cost={}",
-                record.getUserId(), record.getModel(), record.getTotalTokens(), record.getCostUsd());
+        log.debug(
+                "成本记录已落账: userId={} model={} tokens={} cost={}",
+                record.getUserId(),
+                record.getModel(),
+                record.getTotalTokens(),
+                record.getCostUsd());
     }
 
     @Override
@@ -79,15 +82,16 @@ public class CostTrackingServiceImpl implements CostTrackingService {
 
     @Override
     public TenantCostSummaryDTO getTenantCostSummary(Long tenantId, LocalDateTime start, LocalDateTime end) {
-        LocalDateTime startDate = start != null ? start : LocalDate.now().minusDays(DEFAULT_DAYS).atStartOfDay();
+        LocalDateTime startDate =
+                start != null ? start : LocalDate.now().minusDays(DEFAULT_DAYS).atStartOfDay();
         LocalDateTime endDate = end != null ? end : LocalDateTime.now();
 
         // 以目标租户上下文执行，保证租户行拦截器附加的 tenant_id 过滤与查询参数一致
         // （支持平台管理员经 X-Target-Tenant 头跨租户查看）。
-        Map<String, Object> total = TenantContext.runAs(tenantId, () ->
-                modelUsageRecordMapper.selectTotalCostByTenant(tenantId, startDate, endDate));
-        List<Map<String, Object>> rows = TenantContext.runAs(tenantId, () ->
-                modelUsageRecordMapper.selectCostBreakdown(tenantId, null, startDate, endDate));
+        Map<String, Object> total = TenantContext.runAs(
+                tenantId, () -> modelUsageRecordMapper.selectTotalCostByTenant(tenantId, startDate, endDate));
+        List<Map<String, Object>> rows = TenantContext.runAs(
+                tenantId, () -> modelUsageRecordMapper.selectCostBreakdown(tenantId, null, startDate, endDate));
 
         TenantCostSummaryDTO dto = new TenantCostSummaryDTO();
         dto.setTenantId(tenantId);
@@ -121,7 +125,8 @@ public class CostTrackingServiceImpl implements CostTrackingService {
         LocalDateTime endDate = LocalDateTime.now();
 
         Map<String, Object> total = modelUsageRecordMapper.selectTotalCostByUser(userId, startDate, endDate);
-        List<Map<String, Object>> rows = modelUsageRecordMapper.selectCostBreakdown(tenantId, userId, startDate, endDate);
+        List<Map<String, Object>> rows =
+                modelUsageRecordMapper.selectCostBreakdown(tenantId, userId, startDate, endDate);
 
         CostSummaryDTO dto = new CostSummaryDTO();
         dto.setUserId(userId);
@@ -149,8 +154,8 @@ public class CostTrackingServiceImpl implements CostTrackingService {
         Long tenantId = user != null ? user.getTenantId() : null;
         int effectiveDays = Math.max(1, Math.min(days, MAX_DAYS));
         LocalDateTime startDate = LocalDate.now().minusDays(effectiveDays).atStartOfDay();
-        return toModelCostList(modelUsageRecordMapper.selectCostBreakdown(
-                tenantId, userId, startDate, LocalDateTime.now()));
+        return toModelCostList(
+                modelUsageRecordMapper.selectCostBreakdown(tenantId, userId, startDate, LocalDateTime.now()));
     }
 
     @Override

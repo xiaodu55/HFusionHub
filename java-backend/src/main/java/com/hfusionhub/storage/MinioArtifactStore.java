@@ -2,15 +2,14 @@ package com.hfusionhub.storage;
 
 import io.minio.*;
 import io.minio.http.Method;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
 import jakarta.annotation.PostConstruct;
 import java.io.InputStream;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.HexFormat;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 /**
  * MinIO artifact storage for plugin wheel files.
@@ -39,11 +38,11 @@ public class MinioArtifactStore {
     @PostConstruct
     public void init() {
         try {
-            boolean exists = minioClient.bucketExists(BucketExistsArgs.builder()
-                    .bucket(bucketName).build());
+            boolean exists = minioClient.bucketExists(
+                    BucketExistsArgs.builder().bucket(bucketName).build());
             if (!exists) {
-                minioClient.makeBucket(MakeBucketArgs.builder()
-                        .bucket(bucketName).build());
+                minioClient.makeBucket(
+                        MakeBucketArgs.builder().bucket(bucketName).build());
                 log.info("Created MinIO bucket: {}", bucketName);
             }
         } catch (Exception e) {
@@ -61,14 +60,10 @@ public class MinioArtifactStore {
      * @param size        wheel file size in bytes
      * @return MinIO object key
      */
-    public String uploadWheel(String pluginName, String version, String artifactHash,
-                              InputStream data, long size) {
+    public String uploadWheel(String pluginName, String version, String artifactHash, InputStream data, long size) {
         String objectKey = buildObjectKey(pluginName, version, artifactHash);
         try {
-            minioClient.putObject(PutObjectArgs.builder()
-                    .bucket(bucketName)
-                    .object(objectKey)
-                    .stream(data, size, -1)
+            minioClient.putObject(PutObjectArgs.builder().bucket(bucketName).object(objectKey).stream(data, size, -1)
                     .contentType("application/zip")
                     .build());
             log.info("Uploaded plugin wheel: {} ({} bytes)", objectKey, size);
@@ -83,10 +78,8 @@ public class MinioArtifactStore {
      */
     public InputStream downloadWheel(String objectKey) {
         try {
-            return minioClient.getObject(GetObjectArgs.builder()
-                    .bucket(bucketName)
-                    .object(objectKey)
-                    .build());
+            return minioClient.getObject(
+                    GetObjectArgs.builder().bucket(bucketName).object(objectKey).build());
         } catch (Exception e) {
             throw new RuntimeException("Failed to download artifact from MinIO: " + e.getMessage(), e);
         }
@@ -152,8 +145,8 @@ public class MinioArtifactStore {
     }
 
     private String buildObjectKey(String pluginName, String version, String artifactHash) {
-        String shortHash = artifactHash != null && artifactHash.length() >= 8
-                ? artifactHash.substring(0, 8) : "unknown";
+        String shortHash =
+                artifactHash != null && artifactHash.length() >= 8 ? artifactHash.substring(0, 8) : "unknown";
         return String.format("plugins/%s/%s/%s-%s-%s.whl", pluginName, version, pluginName, version, shortHash);
     }
 }

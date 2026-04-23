@@ -190,7 +190,9 @@ test.describe('Approval Page (UI rendering)', () => {
     await page.evaluate((token) => localStorage.setItem('satoken', token), userA.token)
     await page.goto('/approvals')
     await page.waitForSelector('#app', { timeout: 10_000 })
-    await expect(page.getByText('工具审批中心')).toBeVisible({ timeout: 10_000 })
+    // 页面头部（新 UI 为「待确认操作」，旧文案「工具审批中心」已不存在）
+    // 注意：侧边栏与页面标题都有该文案，用 heading 角色 + first 避免 strict violation
+    await expect(page.getByRole('heading', { name: '待确认操作' }).first()).toBeVisible({ timeout: 10_000 })
   })
 
   test('task jump (taskId query) loads approvals by task, shows terminal states + masked params + traceId', async ({ page, userA }) => {
@@ -208,30 +210,28 @@ test.describe('Approval Page (UI rendering)', () => {
     await page.goto('/approvals?taskId=999')
     await page.waitForSelector('#app', { timeout: 10_000 })
 
-    // Header should mention the task filter.
-    await expect(page.getByText('仅显示任务 #999 的审批')).toBeVisible({ timeout: 10_000 })
+    // Header should mention the task filter（新 UI 文案为「确认记录」）。
+    await expect(page.getByText('仅显示任务 #999 的确认记录')).toBeVisible({ timeout: 10_000 })
 
-    // All four records should be visible by status badges.
-    await expect(page.getByText('待审批').first()).toBeVisible({ timeout: 10_000 })
+    // 按任务查看默认是「历史记录」视图 → 只渲染终态（pending 被过滤掉）。
     await expect(page.getByText('已批准').first()).toBeVisible({ timeout: 10_000 })
     await expect(page.getByText('已拒绝').first()).toBeVisible({ timeout: 10_000 })
     await expect(page.getByText('已执行').first()).toBeVisible({ timeout: 10_000 })
-
-    // Trace IDs should render in the list.
-    await expect(page.getByText('tr-e2e-001')).toBeVisible({ timeout: 10_000 })
-    await expect(page.getByText('tr-e2e-004')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('待审批')).toHaveCount(0)
 
     // Masked params: key names visible, raw secret values hidden.
     await expect(page.getByText('api_key').first()).toBeVisible({ timeout: 5_000 })
     await expect(page.getByText('sk-live-123')).toBeHidden()
 
-    // Open detail dialog by clicking the first record.
-    await page.getByText('write_note').first().click()
-    await expect(page.getByText('审批详情')).toBeVisible({ timeout: 5_000 })
-    await expect(page.getByText('风险等级')).toBeVisible()
-    await expect(page.getByText('读写').first()).toBeVisible()
-    await expect(page.getByText('Trace ID').first()).toBeVisible()
-    await expect(page.getByText('tr-e2e-001').first()).toBeVisible()
+    // Open detail dialog on the executed record (last "保存一条知识笔记" row).
+    await page.getByText('保存一条知识笔记').last().click()
+    await expect(page.getByRole('heading', { name: '确认操作', exact: true })).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByText('可能影响')).toBeVisible()
+    await expect(page.getByText('会修改数据').first()).toBeVisible()
+    // Trace ID 折叠在「查看技术信息」详情里，展开后可见。
+    await page.getByText('查看技术信息').click()
+    await expect(page.getByText('Trace ID：tr-e2e-004')).toBeVisible()
+    await expect(page.getByText('工具：write_note')).toBeVisible()
     // Masked: key names visible, raw secrets hidden.
     await expect(page.getByText('api_key').first()).toBeVisible()
     await expect(page.getByText('sk-live-123')).toBeHidden()
@@ -252,8 +252,8 @@ test.describe('Approval Page (UI rendering)', () => {
     await page.waitForSelector('#app', { timeout: 10_000 })
 
     // No approvals should render — the page should not crash.
-    await expect(page.getByText('工具审批中心')).toBeVisible({ timeout: 10_000 })
-    await expect(page.getByText('仅显示任务 #999 的审批')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('heading', { name: '待确认操作' }).first()).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('仅显示任务 #999 的确认记录')).toBeVisible({ timeout: 10_000 })
   })
 })
 
@@ -263,7 +263,7 @@ test.describe('Approval Flow (live UI)', () => {
     test.skip(!process.env.HFUSIONHUB_RUN_APPROVAL_LIVE, 'requires live stack')
     await page.goto('/approvals')
     await page.waitForSelector('#app', { timeout: 15_000 })
-    await expect(page.getByText('工具审批中心')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('待确认操作')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText('实时同步中').first()).toBeVisible({ timeout: 15_000 })
   })
 

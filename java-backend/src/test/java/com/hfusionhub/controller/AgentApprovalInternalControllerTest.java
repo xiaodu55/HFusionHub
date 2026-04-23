@@ -1,21 +1,20 @@
 package com.hfusionhub.controller;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.service.AgentTaskService;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.HashMap;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
-
-import java.util.HashMap;
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
 
 /**
  * Contract test for POST /internal/agent/approvals/consume.
@@ -118,8 +117,7 @@ class AgentApprovalInternalControllerTest {
 
     @Test
     void partialInternalTokenReturns403() {
-        R<Map<String, Object>> r = controller.consume(
-                body("appr-1", "tok"), req(VALID_TOKEN.substring(0, 5)));
+        R<Map<String, Object>> r = controller.consume(body("appr-1", "tok"), req(VALID_TOKEN.substring(0, 5)));
         assertEquals(403, r.getCode());
         verifyNoInteractions(agentTaskService);
     }

@@ -1,16 +1,15 @@
 package com.hfusionhub.common.utils;
 
 import com.hfusionhub.common.exception.BusinessException;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
-import javax.crypto.Cipher;
-import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
+import javax.crypto.Cipher;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 @Component
 public class ModelCredentialCipher {
@@ -65,8 +64,7 @@ public class ModelCredentialCipher {
     }
 
     private SecretKeySpec key() throws Exception {
-        byte[] digest = MessageDigest.getInstance("SHA-256")
-                .digest(encryptionSecret.getBytes(StandardCharsets.UTF_8));
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(encryptionSecret.getBytes(StandardCharsets.UTF_8));
         return new SecretKeySpec(digest, "AES");
     }
 

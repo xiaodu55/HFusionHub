@@ -13,7 +13,9 @@ public class RagIntentNodeUpdateDTO {
 
     private Long parentId;
 
-    @Pattern(regexp = "^[A-Za-z0-9_.:-]{2,64}$", message = "intentCode only supports letters, numbers, dot, colon, dash and underscore")
+    @Pattern(
+            regexp = "^[A-Za-z0-9_.:-]{2,64}$",
+            message = "intentCode only supports letters, numbers, dot, colon, dash and underscore")
     private String intentCode;
 
     @Size(max = 100, message = "name must be at most 100 characters")

@@ -16,14 +16,13 @@ import com.hfusionhub.mapper.UsageReservationMapper;
 import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.service.UsageLedgerService;
 import com.hfusionhub.tenant.TenantContext;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.time.LocalDate;
-import java.time.ZoneOffset;
 
 /**
  * 用量账本服务实现
@@ -96,12 +95,16 @@ public class UsageLedgerServiceImpl implements UsageLedgerService {
         ensureCounterRow(tenantId, meter, windowKey);
         int updated = usageCounterMapper.tryReserve(tenantId, meter.getCode(), windowKey, amount, limit);
         if (updated == 0) {
-            throw new BusinessException(StatusCode.QUOTA_EXCEEDED,
-                    "今日用量已达上限（" + limit + "），请明天再试或联系管理员提升配额");
+            throw new BusinessException(StatusCode.QUOTA_EXCEEDED, "今日用量已达上限（" + limit + "），请明天再试或联系管理员提升配额");
         }
         insertEvent(tenantId, meter.getCode(), OP_RESERVE, requestId, windowKey, amount, refType, refId);
-        log.info("Usage reserved: tenant={} meter={} requestId={} amount={} limit={}",
-                tenantId, meter.getCode(), requestId, amount, limit);
+        log.info(
+                "Usage reserved: tenant={} meter={} requestId={} amount={} limit={}",
+                tenantId,
+                meter.getCode(),
+                requestId,
+                amount,
+                limit);
     }
 
     @Override
@@ -118,21 +121,22 @@ public class UsageLedgerServiceImpl implements UsageLedgerService {
             return;
         }
         if (UsageReservation.STATE_RELEASED.equals(reservation.getState())) {
-            log.warn("Invalid settle after release: tenant={} requestId={} — reservation already released",
-                    tenantId, requestId);
+            log.warn(
+                    "Invalid settle after release: tenant={} requestId={} — reservation already released",
+                    tenantId,
+                    requestId);
             return;
         }
 
         // 独占转换 RESERVED → COMMITTED；0 行说明并发线程已先行转换
-        int transitioned = usageReservationMapper.tryCommit(tenantId, meter.getCode(), requestId,
-                Math.max(actualAmount, 0));
+        int transitioned =
+                usageReservationMapper.tryCommit(tenantId, meter.getCode(), requestId, Math.max(actualAmount, 0));
         if (transitioned == 0) {
             UsageReservation current = usageReservationMapper.selectByKey(tenantId, meter.getCode(), requestId);
             if (current != null && UsageReservation.STATE_COMMITTED.equals(current.getState())) {
                 return;
             }
-            throw new BusinessException(StatusCode.INTERNAL_ERROR,
-                    "并发预占终态转换失败，请重试 requestId=" + requestId);
+            throw new BusinessException(StatusCode.INTERNAL_ERROR, "并发预占终态转换失败，请重试 requestId=" + requestId);
         }
 
         // 结算量封顶为预占上界；作用于预占所在窗口
@@ -140,10 +144,15 @@ public class UsageLedgerServiceImpl implements UsageLedgerService {
         long charge = Math.min(Math.max(actualAmount, 0), reservedAmount);
         ensureCounterRow(tenantId, meter, reservation.getWindowKey());
         usageCounterMapper.settle(tenantId, meter.getCode(), reservation.getWindowKey(), charge, reservedAmount);
-        insertEvent(tenantId, meter.getCode(), OP_COMMIT, requestId, reservation.getWindowKey(),
-                charge, refType, refId);
-        log.info("Usage settled: tenant={} meter={} requestId={} actual={} reserved={}",
-                tenantId, meter.getCode(), requestId, charge, reservedAmount);
+        insertEvent(
+                tenantId, meter.getCode(), OP_COMMIT, requestId, reservation.getWindowKey(), charge, refType, refId);
+        log.info(
+                "Usage settled: tenant={} meter={} requestId={} actual={} reserved={}",
+                tenantId,
+                meter.getCode(),
+                requestId,
+                charge,
+                reservedAmount);
     }
 
     @Override
@@ -160,8 +169,10 @@ public class UsageLedgerServiceImpl implements UsageLedgerService {
             return;
         }
         if (UsageReservation.STATE_COMMITTED.equals(reservation.getState())) {
-            log.warn("Invalid release after commit: tenant={} requestId={} — reservation already committed",
-                    tenantId, requestId);
+            log.warn(
+                    "Invalid release after commit: tenant={} requestId={} — reservation already committed",
+                    tenantId,
+                    requestId);
             return;
         }
 
@@ -172,17 +183,27 @@ public class UsageLedgerServiceImpl implements UsageLedgerService {
             if (current != null && UsageReservation.STATE_RELEASED.equals(current.getState())) {
                 return;
             }
-            throw new BusinessException(StatusCode.INTERNAL_ERROR,
-                    "并发预占终态转换失败，请重试 requestId=" + requestId);
+            throw new BusinessException(StatusCode.INTERNAL_ERROR, "并发预占终态转换失败，请重试 requestId=" + requestId);
         }
 
         long reservedAmount = reservation.getReservedAmount();
         ensureCounterRow(tenantId, meter, reservation.getWindowKey());
         usageCounterMapper.release(tenantId, meter.getCode(), reservation.getWindowKey(), reservedAmount);
-        insertEvent(tenantId, meter.getCode(), OP_RELEASE, requestId, reservation.getWindowKey(),
-                reservedAmount, reservation.getRefType(), reservation.getRefId());
-        log.info("Usage released: tenant={} meter={} requestId={} amount={}",
-                tenantId, meter.getCode(), requestId, reservedAmount);
+        insertEvent(
+                tenantId,
+                meter.getCode(),
+                OP_RELEASE,
+                requestId,
+                reservation.getWindowKey(),
+                reservedAmount,
+                reservation.getRefType(),
+                reservation.getRefId());
+        log.info(
+                "Usage released: tenant={} meter={} requestId={} amount={}",
+                tenantId,
+                meter.getCode(),
+                requestId,
+                reservedAmount);
     }
 
     @Override
@@ -219,8 +240,7 @@ public class UsageLedgerServiceImpl implements UsageLedgerService {
     }
 
     private UsageCounter currentCounter(UsageMeter meter) {
-        return usageCounterMapper.selectByKey(
-                TenantContext.requireTenantId(), meter.getCode(), windowKey());
+        return usageCounterMapper.selectByKey(TenantContext.requireTenantId(), meter.getCode(), windowKey());
     }
 
     private void ensureCounterRow(Long tenantId, UsageMeter meter, String windowKey) {
@@ -240,9 +260,15 @@ public class UsageLedgerServiceImpl implements UsageLedgerService {
         }
     }
 
-    private void insertEvent(Long tenantId, String meterCode, String operation,
-                             String requestId, String windowKey, long amount,
-                             String refType, String refId) {
+    private void insertEvent(
+            Long tenantId,
+            String meterCode,
+            String operation,
+            String requestId,
+            String windowKey,
+            long amount,
+            String refType,
+            String refId) {
         UsageEvent event = new UsageEvent();
         event.setTenantId(tenantId);
         event.setMeter(meterCode);

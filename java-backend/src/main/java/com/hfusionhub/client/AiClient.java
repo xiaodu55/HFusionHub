@@ -1,24 +1,20 @@
 package com.hfusionhub.client;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
+import com.hfusionhub.service.UserModelConfigService;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.util.UriComponentsBuilder;
-import reactor.core.publisher.Flux;
-import com.hfusionhub.service.UserModelConfigService;
-
-import com.fasterxml.jackson.annotation.JsonProperty;
-
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.function.Consumer;
 
 /**
  * AI Client - Call Python AI Service
@@ -39,8 +35,7 @@ public class AiClient {
     @Value("${python-ai.internal-token:}")
     private String internalApiToken;
 
-    public AiClient(RestTemplate restTemplate, WebClient webClient,
-                    UserModelConfigService userModelConfigService) {
+    public AiClient(RestTemplate restTemplate, WebClient webClient, UserModelConfigService userModelConfigService) {
         this.restTemplate = restTemplate;
         this.webClient = webClient;
         this.userModelConfigService = userModelConfigService;
@@ -56,13 +51,21 @@ public class AiClient {
      * @return AI response
      */
     public ChatResponse chat(
-            String message,
-            Long conversationId,
-            Long knowledgeBaseId,
-            List<Map<String, String>> history
-    ) {
-        return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                "detailed", 5, null, null, null, null, null, null);
+            String message, Long conversationId, Long knowledgeBaseId, List<Map<String, String>> history) {
+        return doChat(
+                "/api/chat",
+                message,
+                conversationId,
+                knowledgeBaseId,
+                history,
+                "detailed",
+                5,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 
     public ChatResponse chat(
@@ -71,10 +74,21 @@ public class AiClient {
             Long knowledgeBaseId,
             List<Map<String, String>> history,
             Long userId,
-            List<Map<String, Object>> intentContext
-    ) {
-        return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                "detailed", 5, null, userId, null, null, null, intentContext);
+            List<Map<String, Object>> intentContext) {
+        return doChat(
+                "/api/chat",
+                message,
+                conversationId,
+                knowledgeBaseId,
+                history,
+                "detailed",
+                5,
+                null,
+                userId,
+                null,
+                null,
+                null,
+                intentContext);
     }
 
     /**
@@ -86,10 +100,21 @@ public class AiClient {
             Long knowledgeBaseId,
             List<Map<String, String>> history,
             String style,
-            int maxToolSteps
-    ) {
-        return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                style, maxToolSteps, null, null, null, null, null, null);
+            int maxToolSteps) {
+        return doChat(
+                "/api/chat",
+                message,
+                conversationId,
+                knowledgeBaseId,
+                history,
+                style,
+                maxToolSteps,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 
     /**
@@ -103,10 +128,21 @@ public class AiClient {
             Long conversationId,
             Long knowledgeBaseId,
             List<Map<String, String>> history,
-            String systemPrompt
-    ) {
-        return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                "detailed", 5, null, null, null, systemPrompt, null, null);
+            String systemPrompt) {
+        return doChat(
+                "/api/chat",
+                message,
+                conversationId,
+                knowledgeBaseId,
+                history,
+                "detailed",
+                5,
+                null,
+                null,
+                null,
+                systemPrompt,
+                null,
+                null);
     }
 
     public ChatResponse chat(
@@ -115,10 +151,21 @@ public class AiClient {
             Long knowledgeBaseId,
             List<Map<String, String>> history,
             String systemPrompt,
-            Long userId
-    ) {
-        return doChat("/api/chat", message, conversationId, knowledgeBaseId, history,
-                "detailed", 5, null, userId, null, systemPrompt, null, null);
+            Long userId) {
+        return doChat(
+                "/api/chat",
+                message,
+                conversationId,
+                knowledgeBaseId,
+                history,
+                "detailed",
+                5,
+                null,
+                userId,
+                null,
+                systemPrompt,
+                null,
+                null);
     }
 
     /**
@@ -145,10 +192,9 @@ public class AiClient {
             String style,
             int maxToolSteps,
             String requestId,
-            Long userId
-    ) {
-        return agentV1Chat(message, conversationId, knowledgeBaseId, history,
-                style, maxToolSteps, requestId, userId, null, null);
+            Long userId) {
+        return agentV1Chat(
+                message, conversationId, knowledgeBaseId, history, style, maxToolSteps, requestId, userId, null, null);
     }
 
     /**
@@ -169,10 +215,19 @@ public class AiClient {
             String requestId,
             Long userId,
             String capabilityProfile,
-            String userRole
-    ) {
-        return agentV1Chat(message, conversationId, knowledgeBaseId, history, style,
-                maxToolSteps, requestId, userId, capabilityProfile, userRole, null);
+            String userRole) {
+        return agentV1Chat(
+                message,
+                conversationId,
+                knowledgeBaseId,
+                history,
+                style,
+                maxToolSteps,
+                requestId,
+                userId,
+                capabilityProfile,
+                userRole,
+                null);
     }
 
     public ChatResponse agentV1Chat(
@@ -186,18 +241,29 @@ public class AiClient {
             Long userId,
             String capabilityProfile,
             String userRole,
-            List<Map<String, Object>> intentContext
-    ) {
+            List<Map<String, Object>> intentContext) {
         if (knowledgeBaseId == null || knowledgeBaseId <= 0) {
-            throw new BusinessException(StatusCode.BAD_REQUEST,
-                    "Agent V1 requires a non-null knowledge_base_id");
+            throw new BusinessException(StatusCode.BAD_REQUEST, "Agent V1 requires a non-null knowledge_base_id");
         }
         if (userId == null || userId <= 0) {
-            throw new BusinessException(StatusCode.BAD_REQUEST,
+            throw new BusinessException(
+                    StatusCode.BAD_REQUEST,
                     "Agent V1 requires a non-null user_id — Java session must provide authenticated user ID");
         }
-        return doChat("/api/agent/v1/chat", message, conversationId, knowledgeBaseId,
-                history, style, maxToolSteps, requestId, userId, capabilityProfile, null, userRole, intentContext);
+        return doChat(
+                "/api/agent/v1/chat",
+                message,
+                conversationId,
+                knowledgeBaseId,
+                history,
+                style,
+                maxToolSteps,
+                requestId,
+                userId,
+                capabilityProfile,
+                null,
+                userRole,
+                intentContext);
     }
 
     /**
@@ -215,18 +281,29 @@ public class AiClient {
             String style,
             int maxToolSteps,
             String requestId,
-            Long userId
-    ) {
+            Long userId) {
         if (knowledgeBaseId == null || knowledgeBaseId <= 0) {
-            throw new BusinessException(StatusCode.BAD_REQUEST,
-                    "Agent V1 requires a non-null knowledge_base_id");
+            throw new BusinessException(StatusCode.BAD_REQUEST, "Agent V1 requires a non-null knowledge_base_id");
         }
         if (userId == null || userId <= 0) {
-            throw new BusinessException(StatusCode.BAD_REQUEST,
+            throw new BusinessException(
+                    StatusCode.BAD_REQUEST,
                     "Agent V1 requires a non-null user_id — Java session must provide authenticated user ID");
         }
-        return doChat("/api/agent/v1/chat", message, conversationId, knowledgeBaseId,
-                history, style, maxToolSteps, requestId, userId, null, systemPrompt, null, null);
+        return doChat(
+                "/api/agent/v1/chat",
+                message,
+                conversationId,
+                knowledgeBaseId,
+                history,
+                style,
+                maxToolSteps,
+                requestId,
+                userId,
+                null,
+                systemPrompt,
+                null,
+                null);
     }
 
     private ChatResponse doChat(
@@ -242,8 +319,7 @@ public class AiClient {
             String capabilityProfile,
             String systemPrompt,
             String userRole,
-            List<Map<String, Object>> intentContext
-    ) {
+            List<Map<String, Object>> intentContext) {
         try {
             Map<String, Object> request = new HashMap<>();
             request.put("message", message);
@@ -290,12 +366,8 @@ public class AiClient {
             String url = baseUrl + path;
             log.info("Calling AI service: {}", url);
 
-            ResponseEntity<ChatResponse> response = restTemplate.exchange(
-                    url,
-                    HttpMethod.POST,
-                    entity,
-                    ChatResponse.class
-            );
+            ResponseEntity<ChatResponse> response =
+                    restTemplate.exchange(url, HttpMethod.POST, entity, ChatResponse.class);
 
             if (response.getBody() != null) {
                 return response.getBody();
@@ -307,10 +379,12 @@ public class AiClient {
             throw e;
         } catch (ResourceAccessException e) {
             log.error("AI service connection failed: {}", e.getMessage());
-            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "AI service is unavailable. Please try again later.");
+            throw new BusinessException(
+                    StatusCode.SERVICE_UNAVAILABLE, "AI service is unavailable. Please try again later.");
         } catch (Exception e) {
             log.error("Chat with AI failed: {}", e.getMessage(), e);
-            throw new BusinessException(StatusCode.INTERNAL_ERROR, "Failed to get AI response. Please try again later.");
+            throw new BusinessException(
+                    StatusCode.INTERNAL_ERROR, "Failed to get AI response. Please try again later.");
         }
     }
 
@@ -333,8 +407,7 @@ public class AiClient {
             Long conversationId,
             Long knowledgeBaseId,
             List<Map<String, String>> history,
-            String requestId
-    ) {
+            String requestId) {
         return streamChat(message, conversationId, knowledgeBaseId, history, requestId, null, null);
     }
 
@@ -345,8 +418,7 @@ public class AiClient {
             List<Map<String, String>> history,
             String requestId,
             Long userId,
-            List<Map<String, Object>> intentContext
-    ) {
+            List<Map<String, Object>> intentContext) {
         // Build request body
         Map<String, Object> request = new HashMap<>();
         request.put("message", message);
@@ -371,20 +443,20 @@ public class AiClient {
         // event-loop thread during reactive subscription.
         final HttpHeaders capturedHeaders = internalHeaders();
 
-        return webClient.post()
+        return webClient
+                .post()
                 .uri(url)
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.TEXT_EVENT_STREAM)
                 .headers(h -> h.addAll(capturedHeaders))
                 .bodyValue(request)
                 .retrieve()
-                .onStatus(
-                        status -> status.isError(),
-                        clientResponse -> clientResponse.bodyToMono(String.class)
-                                .flatMap(body -> reactor.core.publisher.Mono.error(
-                                        new BusinessException(StatusCode.SERVICE_UNAVAILABLE,
-                                                "Python AI returned status " + clientResponse.statusCode().value() + ": " + body)))
-                )
+                .onStatus(status -> status.isError(), clientResponse -> clientResponse
+                        .bodyToMono(String.class)
+                        .flatMap(body -> reactor.core.publisher.Mono.error(new BusinessException(
+                                StatusCode.SERVICE_UNAVAILABLE,
+                                "Python AI returned status "
+                                        + clientResponse.statusCode().value() + ": " + body))))
                 .bodyToFlux(String.class)
                 .doOnNext(chunk -> log.debug("SSE raw chunk ({}B)", chunk.length()))
                 .doOnError(ResourceAccessException.class, e -> {
@@ -419,10 +491,8 @@ public class AiClient {
             Long knowledgeBaseId,
             List<Map<String, String>> history,
             String requestId,
-            Long userId
-    ) {
-        return agentV1ChatStream(message, conversationId, knowledgeBaseId, history,
-                requestId, userId, null);
+            Long userId) {
+        return agentV1ChatStream(message, conversationId, knowledgeBaseId, history, requestId, userId, null);
     }
 
     /**
@@ -440,10 +510,9 @@ public class AiClient {
             List<Map<String, String>> history,
             String requestId,
             Long userId,
-            String capabilityProfile
-    ) {
-        return agentV1ChatStream(message, conversationId, knowledgeBaseId, history,
-                requestId, userId, capabilityProfile, null);
+            String capabilityProfile) {
+        return agentV1ChatStream(
+                message, conversationId, knowledgeBaseId, history, requestId, userId, capabilityProfile, null);
     }
 
     public reactor.core.publisher.Flux<String> agentV1ChatStream(
@@ -454,14 +523,14 @@ public class AiClient {
             String requestId,
             Long userId,
             String capabilityProfile,
-            List<Map<String, Object>> intentContext
-    ) {
+            List<Map<String, Object>> intentContext) {
         if (knowledgeBaseId == null || knowledgeBaseId <= 0) {
-            throw new BusinessException(StatusCode.BAD_REQUEST,
-                    "Agent V1 streaming requires a non-null knowledge_base_id");
+            throw new BusinessException(
+                    StatusCode.BAD_REQUEST, "Agent V1 streaming requires a non-null knowledge_base_id");
         }
         if (userId == null || userId <= 0) {
-            throw new BusinessException(StatusCode.BAD_REQUEST,
+            throw new BusinessException(
+                    StatusCode.BAD_REQUEST,
                     "Agent V1 streaming requires a non-null user_id — Java session must provide authenticated user ID");
         }
 
@@ -484,28 +553,31 @@ public class AiClient {
         addUserProviderConfig(request, userId);
 
         String url = baseUrl + "/api/agent/v1/chat/stream";
-        log.info("Starting Agent V1 streaming request to Python AI: {}, requestId: {}, userId: {}",
-                url, requestId, userId);
+        log.info(
+                "Starting Agent V1 streaming request to Python AI: {}, requestId: {}, userId: {}",
+                url,
+                requestId,
+                userId);
 
         // Capture headers at call time — TenantContext is ThreadLocal-based
         // and may be null when the WebClient request executes on a Netty
         // event-loop thread during reactive subscription.
         final HttpHeaders capturedV1Headers = internalHeaders();
 
-        return webClient.post()
+        return webClient
+                .post()
                 .uri(url)
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.TEXT_EVENT_STREAM)
                 .headers(h -> h.addAll(capturedV1Headers))
                 .bodyValue(request)
                 .retrieve()
-                .onStatus(
-                        status -> status.isError(),
-                        clientResponse -> clientResponse.bodyToMono(String.class)
-                                .flatMap(body -> reactor.core.publisher.Mono.error(
-                                        new BusinessException(StatusCode.SERVICE_UNAVAILABLE,
-                                                "Python AI returned status " + clientResponse.statusCode().value() + ": " + body)))
-                )
+                .onStatus(status -> status.isError(), clientResponse -> clientResponse
+                        .bodyToMono(String.class)
+                        .flatMap(body -> reactor.core.publisher.Mono.error(new BusinessException(
+                                StatusCode.SERVICE_UNAVAILABLE,
+                                "Python AI returned status "
+                                        + clientResponse.statusCode().value() + ": " + body))))
                 .bodyToFlux(String.class)
                 .doOnNext(chunk -> log.debug("Agent V1 SSE raw chunk ({}B)", chunk.length()))
                 .doOnError(ResourceAccessException.class, e -> {
@@ -526,11 +598,7 @@ public class AiClient {
      */
     @Deprecated
     public StreamResponse chatStream(
-            String message,
-            Long conversationId,
-            Long knowledgeBaseId,
-            List<Map<String, String>> history
-    ) {
+            String message, Long conversationId, Long knowledgeBaseId, List<Map<String, String>> history) {
         // Delegate to the synchronous chat() method for backward compatibility.
         // New code should use streamChat() with Flux for true SSE streaming.
         String requestId = java.util.UUID.randomUUID().toString();
@@ -546,8 +614,8 @@ public class AiClient {
     public boolean isHealthy() {
         try {
             String url = baseUrl + "/api/chat/health";
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), Map.class);
+            ResponseEntity<Map> response =
+                    restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), Map.class);
 
             if (response.getBody() != null) {
                 Object status = response.getBody().get("status");
@@ -574,17 +642,15 @@ public class AiClient {
             String url = UriComponentsBuilder.fromHttpUrl(baseUrl + "/api/tools/registry")
                     .queryParam("tenant_id", tenantId)
                     .toUriString();
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), Map.class);
+            ResponseEntity<Map> response =
+                    restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), Map.class);
             if (response.getBody() == null) {
-                return Map.of("tools", List.of(), "total", 0,
-                        "error", "AI 服务返回了空的工具注册表。");
+                return Map.of("tools", List.of(), "total", 0, "error", "AI 服务返回了空的工具注册表。");
             }
             return new HashMap<>(response.getBody());
         } catch (Exception e) {
             log.warn("Tool registry unavailable: {}", e.getMessage());
-            return Map.of("tools", List.of(), "total", 0,
-                    "error", "暂时无法连接 AI 服务获取工具列表。");
+            return Map.of("tools", List.of(), "total", 0, "error", "暂时无法连接 AI 服务获取工具列表。");
         }
     }
 
@@ -599,14 +665,13 @@ public class AiClient {
     public Map<String, Object> getRuntimeOverview() {
         try {
             String url = baseUrl + "/api/runtime/overview";
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), Map.class);
+            ResponseEntity<Map> response =
+                    restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), Map.class);
             if (response.getBody() == null) {
                 return Map.of(
                         "status", "unavailable",
                         "gateway_reachable", false,
-                        "detail", "AI 服务返回了空的运行状态。"
-                );
+                        "detail", "AI 服务返回了空的运行状态。");
             }
 
             Map<String, Object> overview = new HashMap<>(response.getBody());
@@ -617,8 +682,7 @@ public class AiClient {
             return Map.of(
                     "status", "unavailable",
                     "gateway_reachable", false,
-                    "detail", "暂时无法连接 AI 服务，请确认 AI 服务已启动后重试。"
-            );
+                    "detail", "暂时无法连接 AI 服务，请确认 AI 服务已启动后重试。");
         }
     }
 
@@ -629,8 +693,8 @@ public class AiClient {
             Map<String, Object> request = Map.of("provider_config", providerConfig);
             HttpHeaders headers = internalHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.POST, new HttpEntity<>(request, headers), Map.class);
+            ResponseEntity<Map> response =
+                    restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(request, headers), Map.class);
             if (response.getBody() == null) {
                 return Map.of("success", false, "message", "AI 服务没有返回测试结果");
             }
@@ -660,8 +724,8 @@ public class AiClient {
             }
             HttpHeaders headers = internalHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    requestUrl, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            ResponseEntity<Map> response =
+                    restTemplate.exchange(requestUrl, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
             if (response.getBody() == null) {
                 return Map.of("success", false, "message", "AI 服务没有返回抓取结果");
             }
@@ -678,8 +742,8 @@ public class AiClient {
     public Map<String, Object> listMcpServers() {
         try {
             String url = baseUrl + "/api/mcp/servers";
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), Map.class);
+            ResponseEntity<Map> response =
+                    restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), Map.class);
             return response.getBody() == null ? Map.of("servers", List.of()) : new HashMap<>(response.getBody());
         } catch (Exception e) {
             log.warn("MCP server list unavailable: {}", e.getMessage());
@@ -693,9 +757,10 @@ public class AiClient {
             String url = baseUrl + "/api/mcp/servers";
             HttpHeaders headers = internalHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
-            return response.getBody() == null ? Map.of("success", false, "message", "AI 服务没有返回结果")
+            ResponseEntity<Map> response =
+                    restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            return response.getBody() == null
+                    ? Map.of("success", false, "message", "AI 服务没有返回结果")
                     : new HashMap<>(response.getBody());
         } catch (Exception e) {
             log.warn("MCP server add failed: {}", e.getMessage());
@@ -707,9 +772,10 @@ public class AiClient {
     public Map<String, Object> reconnectMcpServer(String serverId) {
         try {
             String url = baseUrl + "/api/mcp/servers/" + serverId + "/reconnect";
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.POST, new HttpEntity<>(internalHeaders()), Map.class);
-            return response.getBody() == null ? Map.of("success", false, "message", "AI 服务没有返回结果")
+            ResponseEntity<Map> response =
+                    restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(internalHeaders()), Map.class);
+            return response.getBody() == null
+                    ? Map.of("success", false, "message", "AI 服务没有返回结果")
                     : new HashMap<>(response.getBody());
         } catch (Exception e) {
             log.warn("MCP server reconnect failed: {}", e.getMessage());
@@ -721,9 +787,10 @@ public class AiClient {
     public Map<String, Object> removeMcpServer(String serverId) {
         try {
             String url = baseUrl + "/api/mcp/servers/" + serverId;
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.DELETE, new HttpEntity<>(internalHeaders()), Map.class);
-            return response.getBody() == null ? Map.of("success", true, "message", "已移除")
+            ResponseEntity<Map> response =
+                    restTemplate.exchange(url, HttpMethod.DELETE, new HttpEntity<>(internalHeaders()), Map.class);
+            return response.getBody() == null
+                    ? Map.of("success", true, "message", "已移除")
                     : new HashMap<>(response.getBody());
         } catch (Exception e) {
             log.warn("MCP server remove failed: {}", e.getMessage());
@@ -747,9 +814,10 @@ public class AiClient {
             }
             HttpHeaders headers = internalHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
-            return response.getBody() == null ? Map.of("status", "error", "message", "AI 服务没有返回评测结果")
+            ResponseEntity<Map> response =
+                    restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            return response.getBody() == null
+                    ? Map.of("status", "error", "message", "AI 服务没有返回评测结果")
                     : new HashMap<>(response.getBody());
         } catch (Exception e) {
             log.warn("Answer judge failed: {}", e.getMessage());
@@ -791,8 +859,7 @@ public class AiClient {
             Long conversationId,
             String model,
             String executionToken,
-            String userRole
-    ) {
+            String userRole) {
         try {
             Map<String, Object> request = new HashMap<>();
             request.put("approval_id", approvalId);
@@ -803,8 +870,7 @@ public class AiClient {
             request.put("tool_name", toolName);
             // Parse tool_input from JSON string to object
             try {
-                com.fasterxml.jackson.databind.ObjectMapper mapper =
-                        new com.fasterxml.jackson.databind.ObjectMapper();
+                com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
                 request.put("tool_input", mapper.readTree(toolInput));
             } catch (Exception e) {
                 request.put("tool_input", Map.of("_raw", toolInput));
@@ -828,28 +894,27 @@ public class AiClient {
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
 
             String url = baseUrl + "/api/agent/v1/chat/decide";
-            log.info("Calling AI decide endpoint: {} approvalId={} decision={}",
-                    url, approvalId, decision);
+            log.info("Calling AI decide endpoint: {} approvalId={} decision={}", url, approvalId, decision);
 
-            ResponseEntity<ChatResponse> response = restTemplate.exchange(
-                    url, HttpMethod.POST, entity, ChatResponse.class);
+            ResponseEntity<ChatResponse> response =
+                    restTemplate.exchange(url, HttpMethod.POST, entity, ChatResponse.class);
 
             if (response.getBody() != null) {
                 return response.getBody();
             }
-            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE,
-                    "AI service returned empty response for decide");
+            throw new BusinessException(
+                    StatusCode.SERVICE_UNAVAILABLE, "AI service returned empty response for decide");
 
         } catch (BusinessException e) {
             throw e;
         } catch (ResourceAccessException e) {
             log.error("AI decide connection failed: {}", e.getMessage());
-            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE,
-                    "AI service is unavailable. Please try again later.");
+            throw new BusinessException(
+                    StatusCode.SERVICE_UNAVAILABLE, "AI service is unavailable. Please try again later.");
         } catch (Exception e) {
             log.error("Decide approval failed: {}", e.getMessage(), e);
-            throw new BusinessException(StatusCode.INTERNAL_ERROR,
-                    "Failed to process approval decision. Please try again later.");
+            throw new BusinessException(
+                    StatusCode.INTERNAL_ERROR, "Failed to process approval decision. Please try again later.");
         }
     }
 
@@ -862,8 +927,8 @@ public class AiClient {
     public boolean cancelRequest(String requestId) {
         try {
             String url = baseUrl + "/api/chat/cancel?request_id=" + requestId;
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.POST, new HttpEntity<>(internalHeaders()), Map.class);
+            ResponseEntity<Map> response =
+                    restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(internalHeaders()), Map.class);
 
             if (response.getBody() != null) {
                 Object status = response.getBody().get("status");
@@ -919,84 +984,175 @@ public class AiClient {
         // ── Java-compat ──
         private String content;
         private String model;
+
         @JsonProperty("token_count")
         private int tokenCount;
+
         private List<Map<String, Object>> steps;
         private List<Map<String, Object>> sources;
+
         @JsonProperty("auto_detected_kb_id")
         private Long autoDetectedKbId;
 
         // ── Agent V1 ──
         private String answer;
         private String status;
+
         @JsonProperty("agent_run_id")
         private String agentRunId;
+
         @JsonProperty("token_usage")
         private Map<String, Object> tokenUsage;
+
         @JsonProperty("tool_calls_count")
         private int toolCallsCount;
+
         @JsonProperty("style_used")
         private String styleUsed;
+
         @JsonProperty("max_tool_steps")
         private int maxToolSteps;
+
         @JsonProperty("error_detail")
         private String errorDetail;
+
         @JsonProperty("failed_tool")
         private String failedTool;
+
         @JsonProperty("step_events")
         private List<Map<String, Object>> stepEvents;
 
         public ChatResponse() {}
 
         // ── Java-compat getters/setters ──
-        public String getContent() { return content; }
-        public void setContent(String content) { this.content = content; }
+        public String getContent() {
+            return content;
+        }
 
-        public String getModel() { return model; }
-        public void setModel(String model) { this.model = model; }
+        public void setContent(String content) {
+            this.content = content;
+        }
 
-        public int getTokenCount() { return tokenCount; }
-        public void setTokenCount(int tokenCount) { this.tokenCount = tokenCount; }
+        public String getModel() {
+            return model;
+        }
 
-        public List<Map<String, Object>> getSteps() { return steps; }
-        public void setSteps(List<Map<String, Object>> steps) { this.steps = steps; }
+        public void setModel(String model) {
+            this.model = model;
+        }
 
-        public List<Map<String, Object>> getSources() { return sources; }
-        public void setSources(List<Map<String, Object>> sources) { this.sources = sources; }
+        public int getTokenCount() {
+            return tokenCount;
+        }
 
-        public Long getAutoDetectedKbId() { return autoDetectedKbId; }
-        public void setAutoDetectedKbId(Long autoDetectedKbId) { this.autoDetectedKbId = autoDetectedKbId; }
+        public void setTokenCount(int tokenCount) {
+            this.tokenCount = tokenCount;
+        }
+
+        public List<Map<String, Object>> getSteps() {
+            return steps;
+        }
+
+        public void setSteps(List<Map<String, Object>> steps) {
+            this.steps = steps;
+        }
+
+        public List<Map<String, Object>> getSources() {
+            return sources;
+        }
+
+        public void setSources(List<Map<String, Object>> sources) {
+            this.sources = sources;
+        }
+
+        public Long getAutoDetectedKbId() {
+            return autoDetectedKbId;
+        }
+
+        public void setAutoDetectedKbId(Long autoDetectedKbId) {
+            this.autoDetectedKbId = autoDetectedKbId;
+        }
 
         // ── Agent V1 getters/setters ──
-        public String getAnswer() { return answer; }
-        public void setAnswer(String answer) { this.answer = answer; }
+        public String getAnswer() {
+            return answer;
+        }
 
-        public String getStatus() { return status; }
-        public void setStatus(String status) { this.status = status; }
+        public void setAnswer(String answer) {
+            this.answer = answer;
+        }
 
-        public String getAgentRunId() { return agentRunId; }
-        public void setAgentRunId(String agentRunId) { this.agentRunId = agentRunId; }
+        public String getStatus() {
+            return status;
+        }
 
-        public Map<String, Object> getTokenUsage() { return tokenUsage; }
-        public void setTokenUsage(Map<String, Object> tokenUsage) { this.tokenUsage = tokenUsage; }
+        public void setStatus(String status) {
+            this.status = status;
+        }
 
-        public int getToolCallsCount() { return toolCallsCount; }
-        public void setToolCallsCount(int toolCallsCount) { this.toolCallsCount = toolCallsCount; }
+        public String getAgentRunId() {
+            return agentRunId;
+        }
 
-        public String getStyleUsed() { return styleUsed; }
-        public void setStyleUsed(String styleUsed) { this.styleUsed = styleUsed; }
+        public void setAgentRunId(String agentRunId) {
+            this.agentRunId = agentRunId;
+        }
 
-        public int getMaxToolSteps() { return maxToolSteps; }
-        public void setMaxToolSteps(int maxToolSteps) { this.maxToolSteps = maxToolSteps; }
+        public Map<String, Object> getTokenUsage() {
+            return tokenUsage;
+        }
 
-        public String getErrorDetail() { return errorDetail; }
-        public void setErrorDetail(String errorDetail) { this.errorDetail = errorDetail; }
+        public void setTokenUsage(Map<String, Object> tokenUsage) {
+            this.tokenUsage = tokenUsage;
+        }
 
-        public String getFailedTool() { return failedTool; }
-        public void setFailedTool(String failedTool) { this.failedTool = failedTool; }
+        public int getToolCallsCount() {
+            return toolCallsCount;
+        }
 
-        public List<Map<String, Object>> getStepEvents() { return stepEvents; }
-        public void setStepEvents(List<Map<String, Object>> stepEvents) { this.stepEvents = stepEvents; }
+        public void setToolCallsCount(int toolCallsCount) {
+            this.toolCallsCount = toolCallsCount;
+        }
+
+        public String getStyleUsed() {
+            return styleUsed;
+        }
+
+        public void setStyleUsed(String styleUsed) {
+            this.styleUsed = styleUsed;
+        }
+
+        public int getMaxToolSteps() {
+            return maxToolSteps;
+        }
+
+        public void setMaxToolSteps(int maxToolSteps) {
+            this.maxToolSteps = maxToolSteps;
+        }
+
+        public String getErrorDetail() {
+            return errorDetail;
+        }
+
+        public void setErrorDetail(String errorDetail) {
+            this.errorDetail = errorDetail;
+        }
+
+        public String getFailedTool() {
+            return failedTool;
+        }
+
+        public void setFailedTool(String failedTool) {
+            this.failedTool = failedTool;
+        }
+
+        public List<Map<String, Object>> getStepEvents() {
+            return stepEvents;
+        }
+
+        public void setStepEvents(List<Map<String, Object>> stepEvents) {
+            this.stepEvents = stepEvents;
+        }
     }
 
     /**
@@ -1011,7 +1167,12 @@ public class AiClient {
             this.requestId = requestId;
         }
 
-        public String getContent() { return content; }
-        public String getRequestId() { return requestId; }
+        public String getContent() {
+            return content;
+        }
+
+        public String getRequestId() {
+            return requestId;
+        }
     }
 }

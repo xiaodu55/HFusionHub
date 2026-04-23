@@ -1,11 +1,10 @@
 package com.hfusionhub.webhook;
 
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
-
-import java.util.Map;
 
 /**
  * Webhook 事件发布器
@@ -39,8 +38,7 @@ public class WebhookEventPublisher {
             log.warn("忽略发布 Webhook 事件 {}：缺少租户上下文", eventType);
             return;
         }
-        applicationEventPublisher.publishEvent(
-                new WebhookEvent(this, eventType, tenantId, userId, payload));
+        applicationEventPublisher.publishEvent(new WebhookEvent(this, eventType, tenantId, userId, payload));
         log.debug("Webhook 事件已发布: type={} tenant={} user={}", eventType, tenantId, userId);
     }
 }

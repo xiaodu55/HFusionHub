@@ -5,5 +5,4 @@ import com.hfusionhub.entity.SystemNotice;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
-public interface SystemNoticeMapper extends BaseMapper<SystemNotice> {
-}
+public interface SystemNoticeMapper extends BaseMapper<SystemNotice> {}

@@ -20,16 +20,15 @@ import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.DeletionService;
 import com.hfusionhub.service.KnowledgeBaseService;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.List;
-import java.util.Map;
-import java.time.LocalDateTime;
-import java.util.stream.Collectors;
+import org.springframework.util.StringUtils;
 
 /**
  * 知识库服务实现
@@ -62,8 +61,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
         // 检查知识库名称是否已存在（当前用户下）
         LambdaQueryWrapper<KnowledgeBase> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(KnowledgeBase::getUserId, userId)
-                .eq(KnowledgeBase::getName, createDTO.getName());
+        wrapper.eq(KnowledgeBase::getUserId, userId).eq(KnowledgeBase::getName, createDTO.getName());
         Long count = knowledgeBaseMapper.selectCount(wrapper);
         if (count > 0) {
             throw new BusinessException(StatusCode.KNOWLEDGE_BASE_EXISTS, "知识库名称已存在");
@@ -148,11 +146,13 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     }
 
     private void clearKbDisabledDocumentMessage(Long knowledgeBaseId) {
-        documentMapper.update(null, new LambdaUpdateWrapper<Document>()
-                .eq(Document::getKnowledgeBaseId, knowledgeBaseId)
-                .eq(Document::getDeleted, 0)
-                .eq(Document::getErrorMessage, KB_DISABLED_DOCUMENT_MESSAGE)
-                .set(Document::getErrorMessage, null));
+        documentMapper.update(
+                null,
+                new LambdaUpdateWrapper<Document>()
+                        .eq(Document::getKnowledgeBaseId, knowledgeBaseId)
+                        .eq(Document::getDeleted, 0)
+                        .eq(Document::getErrorMessage, KB_DISABLED_DOCUMENT_MESSAGE)
+                        .set(Document::getErrorMessage, null));
     }
 
     /**
@@ -180,11 +180,8 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
         // 知识库删除先进入回收站，保留文档、原文件和索引，确保可以完整恢复。
         LocalDateTime recycledAt = LocalDateTime.now();
-        int updated = knowledgeBaseMapper.markRecycled(
-                id,
-                recycledAt,
-                recycledAt.plusDays(7),
-                knowledgeBase.getStatus());
+        int updated =
+                knowledgeBaseMapper.markRecycled(id, recycledAt, recycledAt.plusDays(7), knowledgeBase.getStatus());
         if (updated != 1) {
             throw new BusinessException("知识库移入回收站失败");
         }
@@ -196,19 +193,16 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     public PageResult<KnowledgeBaseInfoDTO> listRecycleBin(KnowledgeBaseQueryDTO queryDTO) {
         queryDTO.validate();
         Long currentUserId = jwtUtils.getCurrentUserId();
-        String name = StringUtils.hasText(queryDTO.getName()) ? queryDTO.getName().trim() : null;
+        String name =
+                StringUtils.hasText(queryDTO.getName()) ? queryDTO.getName().trim() : null;
         long total = knowledgeBaseMapper.countRecycle(currentUserId, name);
         if (total == 0) {
             return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), 0, List.of());
         }
         List<KnowledgeBase> records = knowledgeBaseMapper.selectRecyclePage(
-                currentUserId,
-                name,
-                (queryDTO.getPage() - 1) * queryDTO.getPageSize(),
-                queryDTO.getPageSize());
-        List<KnowledgeBaseInfoDTO> result = records.stream()
-                .map(this::convertToInfoDTO)
-                .collect(Collectors.toList());
+                currentUserId, name, (queryDTO.getPage() - 1) * queryDTO.getPageSize(), queryDTO.getPageSize());
+        List<KnowledgeBaseInfoDTO> result =
+                records.stream().map(this::convertToInfoDTO).collect(Collectors.toList());
         return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), total, result);
     }
 
@@ -223,15 +217,16 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         }
 
         LambdaQueryWrapper<KnowledgeBase> duplicate = new LambdaQueryWrapper<>();
-        duplicate.eq(KnowledgeBase::getUserId, jwtUtils.getCurrentUserId())
+        duplicate
+                .eq(KnowledgeBase::getUserId, jwtUtils.getCurrentUserId())
                 .eq(KnowledgeBase::getName, knowledgeBase.getName());
         if (knowledgeBaseMapper.selectCount(duplicate) > 0) {
             throw new BusinessException("已有同名知识库，请先修改现有知识库名称");
         }
-        int restoreStatus = knowledgeBase.getStatus() != null
-                && knowledgeBase.getStatus() == CommonConstants.KB_STATUS_DISABLED
-                ? CommonConstants.KB_STATUS_DISABLED
-                : CommonConstants.KB_STATUS_NORMAL;
+        int restoreStatus =
+                knowledgeBase.getStatus() != null && knowledgeBase.getStatus() == CommonConstants.KB_STATUS_DISABLED
+                        ? CommonConstants.KB_STATUS_DISABLED
+                        : CommonConstants.KB_STATUS_NORMAL;
         if (knowledgeBaseMapper.restoreFromRecycle(id, restoreStatus) != 1) {
             throw new BusinessException("恢复知识库失败");
         }
@@ -340,19 +335,18 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         Map<Long, String> usernameMap = Map.of();
         if (!userIds.isEmpty()) {
             List<User> users = userMapper.selectBatchIds(userIds);
-            usernameMap = users.stream()
-                    .collect(java.util.stream.Collectors.toMap(User::getId, User::getUsername));
+            usernameMap = users.stream().collect(java.util.stream.Collectors.toMap(User::getId, User::getUsername));
         }
 
         // 批量预加载文档数量（避免N+1）
-        List<Long> kbIds = result.getRecords().stream()
-                .map(KnowledgeBase::getId)
-                .collect(Collectors.toList());
+        List<Long> kbIds =
+                result.getRecords().stream().map(KnowledgeBase::getId).collect(Collectors.toList());
         Map<Long, Long> docCountMap = Map.of();
         if (!kbIds.isEmpty()) {
             // 使用SQL分组查询获取每个知识库的文档数
             LambdaQueryWrapper<com.hfusionhub.entity.Document> docWrapper = new LambdaQueryWrapper<>();
-            docWrapper.in(com.hfusionhub.entity.Document::getKnowledgeBaseId, kbIds)
+            docWrapper
+                    .in(com.hfusionhub.entity.Document::getKnowledgeBaseId, kbIds)
                     .select(com.hfusionhub.entity.Document::getKnowledgeBaseId);
             List<com.hfusionhub.entity.Document> docs = documentMapper.selectList(docWrapper);
             docCountMap = docs.stream()
@@ -374,7 +368,8 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                         .status(kb.getStatus())
                         .recycledAt(kb.getRecycledAt())
                         .recycleExpiresAt(kb.getRecycleExpiresAt())
-                        .documentCount(finalDocCountMap.getOrDefault(kb.getId(), 0L).intValue())
+                        .documentCount(
+                                finalDocCountMap.getOrDefault(kb.getId(), 0L).intValue())
                         .createdAt(kb.getCreatedAt())
                         .updatedAt(kb.getUpdatedAt())
                         .build())

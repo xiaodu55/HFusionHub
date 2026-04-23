@@ -6,7 +6,6 @@ import com.hfusionhub.dto.AgentTaskSummaryDTO;
 import com.hfusionhub.entity.AgentApproval;
 import com.hfusionhub.entity.AgentRun;
 import com.hfusionhub.entity.AgentTask;
-
 import java.util.List;
 import java.util.Map;
 
@@ -31,8 +30,7 @@ public interface AgentTaskService {
      * @param query          原始问题
      * @return 任务实体
      */
-    AgentTask createTask(String requestId, Long userId, Long conversationId,
-                         Long kbId, String query);
+    AgentTask createTask(String requestId, Long userId, Long conversationId, Long kbId, String query);
 
     /**
      * 开始一次运行（task: pending → running，创建 agent_run）
@@ -57,8 +55,7 @@ public interface AgentTaskService {
      * @param leaseHolder 租约持有者（流式路径传 "stream:..."，Worker 传 worker ID）
      * @return 运行实体
      */
-    AgentRun startRun(Long taskId, String runUuid, String model, String style,
-                      int maxToolSteps, String leaseHolder);
+    AgentRun startRun(Long taskId, String runUuid, String model, String style, int maxToolSteps, String leaseHolder);
 
     /**
      * 记录一个步骤
@@ -73,17 +70,30 @@ public interface AgentTaskService {
      * @param durationMs   耗时(ms)
      * @param errorCode    错误码
      */
-    void recordStep(Long runId, int sequence, String stepType, String action,
-                    String inputSummary, String outputSummary,
-                    List<Map<String, Object>> sources, long durationMs, String errorCode);
+    void recordStep(
+            Long runId,
+            int sequence,
+            String stepType,
+            String action,
+            String inputSummary,
+            String outputSummary,
+            List<Map<String, Object>> sources,
+            long durationMs,
+            String errorCode);
 
     /**
      * 完成一次运行（run → 终态，task → 终态）
      */
-    void completeRun(Long runId, String status, String model,
-                     Map<String, Object> tokenUsage, int toolCallsCount,
-                     long durationMs, String errorCode, String errorDetail,
-                     String failedTool);
+    void completeRun(
+            Long runId,
+            String status,
+            String model,
+            Map<String, Object> tokenUsage,
+            int toolCallsCount,
+            long durationMs,
+            String errorCode,
+            String errorDetail,
+            String failedTool);
 
     /**
      * 标记运行失败并关闭任务
@@ -185,9 +195,14 @@ public interface AgentTaskService {
      * @param argumentsSummary 参数摘要
      * @return 审批记录
      */
-    AgentApproval pauseForApproval(Long taskId, Long runId, Long userId,
-                                   String toolName, String toolInput, String argumentsSummary,
-                                   String riskLevel);
+    AgentApproval pauseForApproval(
+            Long taskId,
+            Long runId,
+            Long userId,
+            String toolName,
+            String toolInput,
+            String argumentsSummary,
+            String riskLevel);
 
     /**
      * 审批决定（批准/拒绝）

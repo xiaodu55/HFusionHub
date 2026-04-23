@@ -1,5 +1,9 @@
 package com.hfusionhub.controller;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.*;
+
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.UserMapper;
@@ -7,16 +11,11 @@ import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.service.UsageLedgerService;
 import com.hfusionhub.tenant.TenantContext;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
-
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.*;
 
 class InternalPluginQuotaControllerTest {
 
@@ -44,17 +43,18 @@ class InternalPluginQuotaControllerTest {
         user.setTenantId(11L);
         when(userMapper.selectById(7L)).thenReturn(user);
         doAnswer(invocation -> {
-            assertEquals(11L, TenantContext.requireTenantId());
-            return null;
-        }).when(ledger).reserve(any(), anyString(), anyLong(), anyString(), anyString());
+                    assertEquals(11L, TenantContext.requireTenantId());
+                    return null;
+                })
+                .when(ledger)
+                .reserve(any(), anyString(), anyLong(), anyString(), anyString());
 
         R<Map<String, Object>> response = controller.transition(payload("RESERVE", 11L), request(TOKEN));
 
         assertEquals(200, response.getCode());
         assertEquals("reserve", response.getData().get("operation"));
         assertEquals(11L, response.getData().get("tenant_id"));
-        verify(ledger).reserve(UsageMeter.PLUGIN_EXECUTIONS, "exec-1", 1L,
-                "PLUGIN_TOOL", "plugin-1:lookup");
+        verify(ledger).reserve(UsageMeter.PLUGIN_EXECUTIONS, "exec-1", 1L, "PLUGIN_TOOL", "plugin-1:lookup");
     }
 
     @Test
@@ -87,20 +87,24 @@ class InternalPluginQuotaControllerTest {
         R<Map<String, Object>> release = controller.transition(payload("RELEASE", 11L), request(TOKEN));
 
         assertTrue(settle.getCode() == 200 && release.getCode() == 200);
-        verify(ledger).settle(UsageMeter.PLUGIN_EXECUTIONS, "exec-1", 1L,
-                "PLUGIN_TOOL", "plugin-1:lookup");
+        verify(ledger).settle(UsageMeter.PLUGIN_EXECUTIONS, "exec-1", 1L, "PLUGIN_TOOL", "plugin-1:lookup");
         verify(ledger).release(UsageMeter.PLUGIN_EXECUTIONS, "exec-1");
     }
 
     private static Map<String, Object> payload(String operation, Long tenantId) {
         return Map.of(
-                "operation", operation,
-                "tenant_id", tenantId,
-                "user_id", 7L,
-                "execution_id", "exec-1",
-                "plugin_id", "plugin-1",
-                "tool_name", "lookup"
-        );
+                "operation",
+                operation,
+                "tenant_id",
+                tenantId,
+                "user_id",
+                7L,
+                "execution_id",
+                "exec-1",
+                "plugin_id",
+                "plugin-1",
+                "tool_name",
+                "lookup");
     }
 
     private static HttpServletRequest request(String token) {

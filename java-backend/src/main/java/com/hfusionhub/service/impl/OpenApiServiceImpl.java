@@ -13,16 +13,14 @@ import com.hfusionhub.mapper.AppApiKeyMapper;
 import com.hfusionhub.mapper.AppCallLogMapper;
 import com.hfusionhub.mapper.AppMapper;
 import com.hfusionhub.service.OpenApiService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
 
 /**
  * 开放 API 对话服务实现
@@ -42,6 +40,7 @@ public class OpenApiServiceImpl implements OpenApiService {
 
     /** 每 Key 每分钟最大调用次数（C4 限流） */
     private static final int RATE_LIMIT_PER_MINUTE = 60;
+
     private static final String RATE_LIMIT_KEY_PREFIX = "appkey:rl:";
 
     @Override
@@ -93,8 +92,7 @@ public class OpenApiServiceImpl implements OpenApiService {
                         "openapi-" + UUID.randomUUID(),
                         app.getUserId(),
                         null,
-                        "user"
-                );
+                        "user");
             } else {
                 ai = aiClient.chat(
                         request.getQuery(),
@@ -102,14 +100,14 @@ public class OpenApiServiceImpl implements OpenApiService {
                         null,
                         request.getHistory(),
                         app.getStyle() == null ? "detailed" : app.getStyle(),
-                        5
-                );
+                        5);
             }
             response.setContent(ai.getContent());
             response.setSources(ai.getSources());
             response.setModel(ai.getModel());
             response.setStatus(ai.getStatus());
-            response.setTokenUsage(ai.getTokenUsage() != null ? ai.getTokenUsage() : Map.of("total_tokens", ai.getTokenCount()));
+            response.setTokenUsage(
+                    ai.getTokenUsage() != null ? ai.getTokenUsage() : Map.of("total_tokens", ai.getTokenCount()));
             Map<String, Object> usage = ai.getTokenUsage();
             promptTokens = intVal(usage, "prompt_tokens", 0);
             completionTokens = intVal(usage, "completion_tokens", 0);

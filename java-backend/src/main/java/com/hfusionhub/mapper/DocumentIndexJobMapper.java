@@ -2,13 +2,12 @@ package com.hfusionhub.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.hfusionhub.entity.DocumentIndexJob;
+import java.time.LocalDateTime;
+import java.util.List;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
-
-import java.time.LocalDateTime;
-import java.util.List;
 
 @Mapper
 public interface DocumentIndexJobMapper extends BaseMapper<DocumentIndexJob> {
@@ -22,13 +21,13 @@ public interface DocumentIndexJobMapper extends BaseMapper<DocumentIndexJob> {
 
     @Select("SELECT * FROM document_index_job WHERE status = 'PROCESSING' AND deleted = 0 "
             + "AND started_at < #{before} AND attempt < #{maxAttempts} ORDER BY id ASC")
-    List<DocumentIndexJob> selectStaleProcessingJobs(@Param("before") LocalDateTime before,
-                                                      @Param("maxAttempts") int maxAttempts);
+    List<DocumentIndexJob> selectStaleProcessingJobs(
+            @Param("before") LocalDateTime before, @Param("maxAttempts") int maxAttempts);
 
     @Select("SELECT * FROM document_index_job WHERE status = 'PROCESSING' AND deleted = 0 "
             + "AND started_at < #{before} AND attempt >= #{maxAttempts} ORDER BY id ASC")
-    List<DocumentIndexJob> selectExhaustedProcessingJobs(@Param("before") LocalDateTime before,
-                                                          @Param("maxAttempts") int maxAttempts);
+    List<DocumentIndexJob> selectExhaustedProcessingJobs(
+            @Param("before") LocalDateTime before, @Param("maxAttempts") int maxAttempts);
 
     @Delete("DELETE FROM document_index_job WHERE document_id = #{documentId}")
     int purgeByDocumentId(@Param("documentId") Long documentId);

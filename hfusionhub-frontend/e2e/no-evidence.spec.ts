@@ -8,7 +8,9 @@ import {
 } from './helpers'
 
 test.describe('No-evidence Answer', () => {
-  test.setTimeout(90_000)
+  // 无知识库会话走 Python /api/chat 全链路，实测单次响应约 37~46s；
+  // 全量套件并发时可能更慢。60s 请求超时/90s 用例超时曾导致偶发失败，故放宽。
+  test.setTimeout(180_000)
 
   test('empty KB returns response without sources', async ({ javaApi, userA }) => {
     const kb = await apiCreateKB(javaApi, userA.headers)
@@ -20,7 +22,7 @@ test.describe('No-evidence Answer', () => {
         conversationId: conv.id,
         content: 'What is the meaning of life?',
       },
-      timeout: 60_000,
+      timeout: 120_000,
     })
 
     const body = await assertJson(response)
@@ -43,7 +45,7 @@ test.describe('No-evidence Answer', () => {
         conversationId: conv.id,
         content: 'Tell me about quantum computing',
       },
-      timeout: 60_000,
+      timeout: 120_000,
     })
 
     const body = await assertJson(response)

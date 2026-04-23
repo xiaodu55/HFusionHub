@@ -15,6 +15,5 @@ import org.apache.ibatis.annotations.Select;
 public interface TenantQuotaMapper extends BaseMapper<TenantQuota> {
 
     @Select("SELECT * FROM tenant_quota WHERE tenant_id = #{tenantId} AND meter = #{meter} LIMIT 1")
-    TenantQuota selectByTenantAndMeter(@Param("tenantId") Long tenantId,
-                                       @Param("meter") String meter);
+    TenantQuota selectByTenantAndMeter(@Param("tenantId") Long tenantId, @Param("meter") String meter);
 }

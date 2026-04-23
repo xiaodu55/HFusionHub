@@ -4,12 +4,16 @@ import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.UserMapper;
+import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.service.UsageLedgerService;
 import com.hfusionhub.tenant.TenantContext;
-import com.hfusionhub.quota.UsageMeter;
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,11 +21,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
-import java.util.Locale;
-import java.util.Map;
 
 /** Internal ledger boundary for sandboxed plugin executions. */
 @Slf4j
@@ -39,8 +38,7 @@ public class InternalPluginQuotaController {
     private String expectedToken;
 
     @PostMapping("/quota")
-    public R<Map<String, Object>> transition(@RequestBody Map<String, Object> body,
-                                              HttpServletRequest request) {
+    public R<Map<String, Object>> transition(@RequestBody Map<String, Object> body, HttpServletRequest request) {
         if (!constantTimeEquals(expectedToken, request.getHeader("X-Internal-Token"))) {
             return R.fail(403, "Forbidden: invalid or missing X-Internal-Token");
         }
@@ -51,13 +49,18 @@ public class InternalPluginQuotaController {
         String operation = text(body, "operation");
         String pluginId = text(body, "plugin_id");
         String toolName = text(body, "tool_name");
-        if (requestedTenantId == null || userId == null || executionId == null || operation == null
-                || pluginId == null || toolName == null) {
+        if (requestedTenantId == null
+                || userId == null
+                || executionId == null
+                || operation == null
+                || pluginId == null
+                || toolName == null) {
             return R.fail(400, "tenant_id, user_id, execution_id, operation, plugin_id and tool_name are required");
         }
 
         String normalizedOperation = operation.toUpperCase(Locale.ROOT);
-        if (!"RESERVE".equals(normalizedOperation) && !"SETTLE".equals(normalizedOperation)
+        if (!"RESERVE".equals(normalizedOperation)
+                && !"SETTLE".equals(normalizedOperation)
                 && !"RELEASE".equals(normalizedOperation)) {
             return R.fail(400, "operation must be RESERVE, SETTLE, or RELEASE");
         }
@@ -81,8 +84,11 @@ public class InternalPluginQuotaController {
                 }
             });
         } catch (BusinessException | IllegalStateException e) {
-            log.warn("Plugin quota transition failed: operation={} executionId={} reason={}",
-                    normalizedOperation, executionId, e.getMessage());
+            log.warn(
+                    "Plugin quota transition failed: operation={} executionId={} reason={}",
+                    normalizedOperation,
+                    executionId,
+                    e.getMessage());
             int code = e instanceof BusinessException businessException ? businessException.getCode() : 500;
             return R.fail(code, e.getMessage());
         }
@@ -117,8 +123,12 @@ public class InternalPluginQuotaController {
         byte[] b = provided.getBytes(StandardCharsets.UTF_8);
         if (a.length != b.length) {
             int diff = 0;
-            for (byte ignored : a) { diff |= ignored; }
-            for (byte ignored : b) { diff |= ignored; }
+            for (byte ignored : a) {
+                diff |= ignored;
+            }
+            for (byte ignored : b) {
+                diff |= ignored;
+            }
             return false;
         }
         int diff = 0;

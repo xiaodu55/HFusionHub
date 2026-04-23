@@ -2,6 +2,8 @@ package com.hfusionhub.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
@@ -25,8 +27,16 @@ import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.service.UsageLedgerService;
 import com.hfusionhub.service.VectorizationService;
 import com.hfusionhub.tenant.TenantContext;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,17 +45,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
-
-import java.time.Duration;
-import java.time.LocalDateTime;
-import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
-import java.nio.file.Path;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 
 /**
  * 向量化服务实现
@@ -117,8 +116,8 @@ public class VectorizationServiceImpl implements VectorizationService {
 
         // A new request supersedes any callback from an older worker.  The
         // version is sent to Python and checked again when it calls back.
-        List<DocumentIndexJob> supersededJobs = documentIndexJobMapper.selectList(
-                new LambdaQueryWrapper<DocumentIndexJob>()
+        List<DocumentIndexJob> supersededJobs =
+                documentIndexJobMapper.selectList(new LambdaQueryWrapper<DocumentIndexJob>()
                         .eq(DocumentIndexJob::getDocumentId, documentId)
                         .eq(DocumentIndexJob::getStatus, "PROCESSING"));
         documentIndexJobMapper.update(
@@ -127,8 +126,7 @@ public class VectorizationServiceImpl implements VectorizationService {
                         .eq(DocumentIndexJob::getDocumentId, documentId)
                         .eq(DocumentIndexJob::getStatus, "PROCESSING")
                         .set(DocumentIndexJob::getStatus, "SUPERSEDED")
-                        .set(DocumentIndexJob::getCompletedAt, LocalDateTime.now())
-        );
+                        .set(DocumentIndexJob::getCompletedAt, LocalDateTime.now()));
         // 退回被取代的索引任务预占
         for (DocumentIndexJob superseded : supersededJobs) {
             releaseIndexChunks(document, superseded);
@@ -205,17 +203,15 @@ public class VectorizationServiceImpl implements VectorizationService {
         // Legacy documents created before V2 have no durable metadata yet.
         // Keep the old Python route as a temporary read fallback until they
         // are re-indexed.
-        String url = pythonEngineUrl + "/api/chunks/" + documentId
-                + "?page=" + safePage
-                + "&size=" + safeSize;
+        String url = pythonEngineUrl + "/api/chunks/" + documentId + "?page=" + safePage + "&size=" + safeSize;
 
         if (blockType != null && !blockType.isEmpty()) {
             url += "&block_type=" + blockType;
         }
 
         try {
-            ResponseEntity<String> response = restTemplate.exchange(
-                    url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), String.class);
+            ResponseEntity<String> response =
+                    restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), String.class);
             @SuppressWarnings("unchecked")
             Map<String, Object> legacy = objectMapper.readValue(response.getBody(), Map.class);
             return legacyChunkPageFromPython(legacy, documentId);
@@ -267,8 +263,11 @@ public class VectorizationServiceImpl implements VectorizationService {
             return;
         }
         if (callback.getIndexVersion() == null || !callback.getIndexVersion().equals(currentJob.getIndexVersion())) {
-            log.warn("忽略过期索引回调: documentId={}, callbackVersion={}, currentVersion={}",
-                    documentId, callback.getIndexVersion(), currentJob.getIndexVersion());
+            log.warn(
+                    "忽略过期索引回调: documentId={}, callbackVersion={}, currentVersion={}",
+                    documentId,
+                    callback.getIndexVersion(),
+                    currentJob.getIndexVersion());
             return;
         }
         if (!"PROCESSING".equals(currentJob.getStatus())) {
@@ -344,14 +343,15 @@ public class VectorizationServiceImpl implements VectorizationService {
             throw new BusinessException("无法删除向量索引: " + e.getMessage());
         }
         documentChunkMapper.deleteByDocumentId(documentId);
-        documentIndexJobMapper.delete(new LambdaQueryWrapper<DocumentIndexJob>()
-                .eq(DocumentIndexJob::getDocumentId, documentId));
+        documentIndexJobMapper.delete(
+                new LambdaQueryWrapper<DocumentIndexJob>().eq(DocumentIndexJob::getDocumentId, documentId));
     }
 
     @Override
     public int recoverStaleIndexJobs() {
         LocalDateTime staleBefore = LocalDateTime.now().minusMinutes(staleAfterMinutes);
-        for (DocumentIndexJob exhaustedJob : documentIndexJobMapper.selectExhaustedProcessingJobs(staleBefore, maxAttempts)) {
+        for (DocumentIndexJob exhaustedJob :
+                documentIndexJobMapper.selectExhaustedProcessingJobs(staleBefore, maxAttempts)) {
             exhaustedJob.setStatus("FAILED");
             exhaustedJob.setErrorMessage("索引任务超过最大重试次数");
             exhaustedJob.setCompletedAt(LocalDateTime.now());
@@ -371,9 +371,12 @@ public class VectorizationServiceImpl implements VectorizationService {
         int recovered = 0;
         for (DocumentIndexJob staleJob : staleJobs) {
             try {
-                log.warn("恢复超时索引任务: documentId={}, version={}, attempt={}", staleJob.getDocumentId(),
-                        staleJob.getIndexVersion(), staleJob.getAttempt());
-                  startVectorizationInternal(staleJob.getDocumentId(), staleJob.getEmbeddingModel(), false);
+                log.warn(
+                        "恢复超时索引任务: documentId={}, version={}, attempt={}",
+                        staleJob.getDocumentId(),
+                        staleJob.getIndexVersion(),
+                        staleJob.getAttempt());
+                startVectorizationInternal(staleJob.getDocumentId(), staleJob.getEmbeddingModel(), false);
                 recovered++;
             } catch (Exception e) {
                 log.error("恢复索引任务失败: documentId={}", staleJob.getDocumentId(), e);
@@ -446,9 +449,7 @@ public class VectorizationServiceImpl implements VectorizationService {
         // 仅查询当前用户知识库下待处理或处理中的文档
         LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<>();
         wrapper.in(Document::getKnowledgeBaseId, kbIds)
-                .in(Document::getStatus,
-                        DocumentStatus.PENDING.getCode(),
-                        DocumentStatus.PROCESSING.getCode());
+                .in(Document::getStatus, DocumentStatus.PENDING.getCode(), DocumentStatus.PROCESSING.getCode());
         List<Document> pendingDocs = documentMapper.selectList(wrapper);
 
         int updated = 0;
@@ -508,15 +509,18 @@ public class VectorizationServiceImpl implements VectorizationService {
             }
             response.put("document_id", String.valueOf(documentId));
             response.put("status", status);
-            response.put("message", job == null
-                    ? "文档尚未开始索引"
-                    : (job.getErrorMessage() == null ? "索引任务状态已同步" : job.getErrorMessage()));
-            response.put("chunks_count", job == null
-                    ? (document.getChunkCount() == null ? 0 : document.getChunkCount())
-                    : job.getChunkCount());
+            response.put(
+                    "message",
+                    job == null ? "文档尚未开始索引" : (job.getErrorMessage() == null ? "索引任务状态已同步" : job.getErrorMessage()));
+            response.put(
+                    "chunks_count",
+                    job == null
+                            ? (document.getChunkCount() == null ? 0 : document.getChunkCount())
+                            : job.getChunkCount());
             response.put("index_version", job == null ? null : job.getIndexVersion());
             if (completedButMissingChunks) {
-                response.put("message",
+                response.put(
+                        "message",
                         "\u7d22\u5f15\u4efb\u52a1\u66fe\u5b8c\u6210\uff0c\u4f46\u5206\u5757\u6570\u636e\u7f3a\u5931\uff0c\u8bf7\u91cd\u65b0\u5206\u5757");
                 response.put("chunks_count", 0);
             }
@@ -536,21 +540,13 @@ public class VectorizationServiceImpl implements VectorizationService {
         return status == null ? "PENDING" : status.name();
     }
 
-    private void enrichWithEstimatedProgress(Map<String, Object> response,
-            Document document,
-            DocumentIndexJob job,
-            String status) {
+    private void enrichWithEstimatedProgress(
+            Map<String, Object> response, Document document, DocumentIndexJob job, String status) {
         int initialEstimatedSeconds = estimateProcessingSeconds(document);
         int elapsedSeconds = elapsedSeconds(job);
         int progress = estimateProgress(status, elapsedSeconds, initialEstimatedSeconds);
-        int estimatedSeconds = dynamicEstimatedSeconds(
-                status,
-                elapsedSeconds,
-                progress,
-                initialEstimatedSeconds);
-        int remainingSeconds = isTerminalStatus(status)
-                ? 0
-                : Math.max(1, estimatedSeconds - elapsedSeconds);
+        int estimatedSeconds = dynamicEstimatedSeconds(status, elapsedSeconds, progress, initialEstimatedSeconds);
+        int remainingSeconds = isTerminalStatus(status) ? 0 : Math.max(1, estimatedSeconds - elapsedSeconds);
 
         response.put("stage", stageForStatus(status, progress));
         response.put("progress", progress);
@@ -561,8 +557,10 @@ public class VectorizationServiceImpl implements VectorizationService {
     }
 
     private void mergePythonTaskStatus(Map<String, Object> response, Long documentId, DocumentIndexJob job) {
-        if (job == null || !"PROCESSING".equals(job.getStatus())
-                || internalApiToken == null || internalApiToken.isBlank()) {
+        if (job == null
+                || !"PROCESSING".equals(job.getStatus())
+                || internalApiToken == null
+                || internalApiToken.isBlank()) {
             return;
         }
         try {
@@ -609,13 +607,15 @@ public class VectorizationServiceImpl implements VectorizationService {
     private int estimateProcessingSeconds(Document document) {
         long fileSize = document.getFileSize() == null ? 1024 * 1024 : document.getFileSize();
         long sizeMb = Math.max(1, (long) Math.ceil(fileSize / (1024.0 * 1024.0)));
-        String fileType = document.getFileType() == null ? "" : document.getFileType().toLowerCase();
-        int base = switch (fileType) {
-            case "pdf", ".pdf" -> 45;
-            case "docx", ".docx" -> 35;
-            case "txt", ".txt", "md", ".md" -> 15;
-            default -> 30;
-        };
+        String fileType =
+                document.getFileType() == null ? "" : document.getFileType().toLowerCase();
+        int base =
+                switch (fileType) {
+                    case "pdf", ".pdf" -> 45;
+                    case "docx", ".docx" -> 35;
+                    case "txt", ".txt", "md", ".md" -> 15;
+                    default -> 30;
+                };
         long estimate = base + sizeMb * 25;
         return (int) Math.max(15, Math.min(900, estimate));
     }
@@ -645,10 +645,7 @@ public class VectorizationServiceImpl implements VectorizationService {
         return Math.max(5, Math.min(90, progress));
     }
 
-    private int dynamicEstimatedSeconds(String status,
-            int elapsedSeconds,
-            int progress,
-            int initialEstimatedSeconds) {
+    private int dynamicEstimatedSeconds(String status, int elapsedSeconds, int progress, int initialEstimatedSeconds) {
         if (isTerminalStatus(status) || progress <= 5 || elapsedSeconds < 1) {
             return initialEstimatedSeconds;
         }
@@ -687,21 +684,25 @@ public class VectorizationServiceImpl implements VectorizationService {
     private void ensureSourceFileAvailable(Document document) {
         String filePath = document.getFilePath();
         if (filePath == null || filePath.isBlank()) {
-            failDocumentBeforeStart(document,
+            failDocumentBeforeStart(
+                    document,
                     "\u6587\u6863\u6e90\u6587\u4ef6\u8def\u5f84\u4e3a\u7a7a\uff0c\u8bf7\u91cd\u65b0\u4e0a\u4f20\u540e\u518d\u89e3\u6790");
         }
         try {
             Path path = Path.of(filePath);
             if (!Files.isRegularFile(path)) {
-                failDocumentBeforeStart(document,
+                failDocumentBeforeStart(
+                        document,
                         "\u6587\u6863\u6e90\u6587\u4ef6\u4e0d\u5b58\u5728\uff0c\u8bf7\u91cd\u65b0\u4e0a\u4f20\u540e\u518d\u89e3\u6790");
             }
             if (!Files.isReadable(path)) {
-                failDocumentBeforeStart(document,
+                failDocumentBeforeStart(
+                        document,
                         "\u6587\u6863\u6e90\u6587\u4ef6\u4e0d\u53ef\u8bfb\uff0c\u8bf7\u68c0\u67e5\u6743\u9650\u6216\u91cd\u65b0\u4e0a\u4f20");
             }
         } catch (InvalidPathException e) {
-            failDocumentBeforeStart(document,
+            failDocumentBeforeStart(
+                    document,
                     "\u6587\u6863\u6e90\u6587\u4ef6\u8def\u5f84\u65e0\u6548\uff0c\u8bf7\u91cd\u65b0\u4e0a\u4f20\u540e\u518d\u89e3\u6790");
         }
     }
@@ -782,15 +783,17 @@ public class VectorizationServiceImpl implements VectorizationService {
                 Map.entry("document_id", String.valueOf(document.getId())),
                 Map.entry("file_path", document.getFilePath()),
                 Map.entry("file_type", document.getFileType() != null ? document.getFileType() : "md"),
-                Map.entry("knowledge_base_id", document.getKnowledgeBaseId() != null ? document.getKnowledgeBaseId() : 0),
+                Map.entry(
+                        "knowledge_base_id", document.getKnowledgeBaseId() != null ? document.getKnowledgeBaseId() : 0),
                 Map.entry("document_title", document.getTitle()),
                 Map.entry("index_version", job.getIndexVersion()),
                 Map.entry("callback_url", callbackUrl),
                 Map.entry("callback_secret", callbackSecret),
                 Map.entry("embedding_model", job.getEmbeddingModel()),
-                Map.entry("embedding_dimension", job.getEmbeddingDimension() != null ? job.getEmbeddingDimension() : 1024),
-                Map.entry("embedding_version", job.getEmbeddingVersion() != null ? job.getEmbeddingVersion() : "v1")
-        );
+                Map.entry(
+                        "embedding_dimension",
+                        job.getEmbeddingDimension() != null ? job.getEmbeddingDimension() : 1024),
+                Map.entry("embedding_version", job.getEmbeddingVersion() != null ? job.getEmbeddingVersion() : "v1"));
 
         HttpHeaders headers = internalHeaders();
 
@@ -803,14 +806,19 @@ public class VectorizationServiceImpl implements VectorizationService {
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
 
-        log.info("调用Python引擎: {}, 回调URL: {}, 模型: {}, 索引版本: {}, tenantId: {}", url, callbackUrl,
-                job.getEmbeddingModel(), job.getIndexVersion(), tenantId);
+        log.info(
+                "调用Python引擎: {}, 回调URL: {}, 模型: {}, 索引版本: {}, tenantId: {}",
+                url,
+                callbackUrl,
+                job.getEmbeddingModel(),
+                job.getIndexVersion(),
+                tenantId);
         ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
         log.info("Python引擎响应: {}", response.getBody());
     }
 
-    private DocumentChunk toDocumentChunk(Document document, DocumentIndexJob job,
-                                          DocumentChunkCallbackDTO callbackChunk) {
+    private DocumentChunk toDocumentChunk(
+            Document document, DocumentIndexJob job, DocumentChunkCallbackDTO callbackChunk) {
         if (callbackChunk.getChunkId() == null || callbackChunk.getChunkId().isBlank()) {
             throw new BusinessException("索引回调包含空 chunkId");
         }
@@ -1056,9 +1064,12 @@ public class VectorizationServiceImpl implements VectorizationService {
         }
         long estimate = estimateIndexChunks(document);
         TenantContext.runAs(tenantId, () -> {
-            usageLedgerService.reserve(UsageMeter.INDEX_CHUNKS,
-                    indexReservationKey(job.getIndexVersion()), estimate,
-                    "document_index", String.valueOf(document.getId()));
+            usageLedgerService.reserve(
+                    UsageMeter.INDEX_CHUNKS,
+                    indexReservationKey(job.getIndexVersion()),
+                    estimate,
+                    "document_index",
+                    String.valueOf(document.getId()));
             return null;
         });
     }
@@ -1070,9 +1081,12 @@ public class VectorizationServiceImpl implements VectorizationService {
             return;
         }
         TenantContext.runAs(tenantId, () -> {
-            usageLedgerService.settle(UsageMeter.INDEX_CHUNKS,
-                    indexReservationKey(job.getIndexVersion()), Math.max(actualChunks, 0),
-                    "document_index", String.valueOf(document.getId()));
+            usageLedgerService.settle(
+                    UsageMeter.INDEX_CHUNKS,
+                    indexReservationKey(job.getIndexVersion()),
+                    Math.max(actualChunks, 0),
+                    "document_index",
+                    String.valueOf(document.getId()));
             return null;
         });
     }
@@ -1084,8 +1098,7 @@ public class VectorizationServiceImpl implements VectorizationService {
             return;
         }
         TenantContext.runAs(tenantId, () -> {
-            usageLedgerService.release(UsageMeter.INDEX_CHUNKS,
-                    indexReservationKey(job.getIndexVersion()));
+            usageLedgerService.release(UsageMeter.INDEX_CHUNKS, indexReservationKey(job.getIndexVersion()));
             return null;
         });
     }

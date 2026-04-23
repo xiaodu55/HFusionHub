@@ -1,5 +1,9 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.constant.AgentConstants;
 import com.hfusionhub.common.utils.RedisUtils;
@@ -7,18 +11,13 @@ import com.hfusionhub.entity.AgentRun;
 import com.hfusionhub.entity.AgentTask;
 import com.hfusionhub.mapper.*;
 import com.hfusionhub.service.*;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.test.util.ReflectionTestUtils;
-
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.UUID;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
 
 /**
  * AgentTaskQueueService 回归测试
@@ -64,11 +63,20 @@ class AgentTaskQueueServiceTest {
         workerExecutor.initialize();
 
         queueService = new AgentTaskQueueServiceImpl(
-                taskMapper, runMapper, stepMapper, recoveryEventMapper,
-                agentTaskService, streamEventProcessor, conversationService,
-                statusEventService, retryPolicy, aiClient, redisUtils,
-                messageMapper, sseManager, workerExecutor
-        );
+                taskMapper,
+                runMapper,
+                stepMapper,
+                recoveryEventMapper,
+                agentTaskService,
+                streamEventProcessor,
+                conversationService,
+                statusEventService,
+                retryPolicy,
+                aiClient,
+                redisUtils,
+                messageMapper,
+                sseManager,
+                workerExecutor);
         ReflectionTestUtils.setField(queueService, "leaseSeconds", 120);
         ReflectionTestUtils.setField(queueService, "timeoutSeconds", 180);
         ReflectionTestUtils.setField(queueService, "batchSize", 5);
@@ -90,8 +98,8 @@ class AgentTaskQueueServiceTest {
         when(runMapper.selectQueuedRuns(any(), eq(5))).thenReturn(List.of(pendingRun));
         // First claim succeeds, second fails
         when(runMapper.claimRun(eq(1L), anyString(), any(), any(), any()))
-                .thenReturn(1)   // first call succeeds
-                .thenReturn(0);  // second worker fails
+                .thenReturn(1) // first call succeeds
+                .thenReturn(0); // second worker fails
 
         int dispatched = queueService.pollAndDispatch();
 
@@ -116,8 +124,7 @@ class AgentTaskQueueServiceTest {
         orphanRun.setLeaseExpiresAt(LocalDateTime.now().minusSeconds(60));
         orphanRun.setDispatchCount(1);
 
-        when(runMapper.selectLeaseExpiredRuns(any(), eq(10)))
-                .thenReturn(List.of(orphanRun));
+        when(runMapper.selectLeaseExpiredRuns(any(), eq(10))).thenReturn(List.of(orphanRun));
         when(runMapper.requeueOrphan(eq(10L), anyString(), any())).thenReturn(1);
         when(runMapper.completeRunGuarded(anyLong(), anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(1);
@@ -127,7 +134,8 @@ class AgentTaskQueueServiceTest {
         when(retryPolicy.shouldDeadLetter(anyInt())).thenReturn(false);
         when(taskMapper.selectById(200L)).thenReturn(new AgentTask());
 
-        when(retryPolicy.computeNextScheduledAt(anyInt())).thenReturn(LocalDateTime.now().plusSeconds(60));
+        when(retryPolicy.computeNextScheduledAt(anyInt()))
+                .thenReturn(LocalDateTime.now().plusSeconds(60));
         when(retryPolicy.backoffSeconds(anyInt())).thenReturn(60L);
 
         queueService.recoverAll();
@@ -155,23 +163,35 @@ class AgentTaskQueueServiceTest {
         timedOutRun.setDispatchCount(1);
         timedOutRun.setAttemptNumber(1);
 
-        when(runMapper.selectLeaseExpiredRuns(any(), eq(10)))
-                .thenReturn(List.of(timedOutRun));
-        when(runMapper.completeRunGuarded(eq(20L), eq(AgentConstants.STATUS_TIMED_OUT),
-                eq(AgentConstants.ERR_WATCHDOG_TIMEOUT), anyString(), isNull(), any())).thenReturn(1);
+        when(runMapper.selectLeaseExpiredRuns(any(), eq(10))).thenReturn(List.of(timedOutRun));
+        when(runMapper.completeRunGuarded(
+                        eq(20L),
+                        eq(AgentConstants.STATUS_TIMED_OUT),
+                        eq(AgentConstants.ERR_WATCHDOG_TIMEOUT),
+                        anyString(),
+                        isNull(),
+                        any()))
+                .thenReturn(1);
         when(retryPolicy.getMaxAttempts()).thenReturn(3);
         when(retryPolicy.getMaxDispatchCount()).thenReturn(3);
         when(retryPolicy.isRetryable(anyString())).thenReturn(true);
         when(retryPolicy.shouldDeadLetter(anyInt())).thenReturn(false);
         when(taskMapper.selectById(300L)).thenReturn(new AgentTask());
-        when(retryPolicy.computeNextScheduledAt(anyInt())).thenReturn(LocalDateTime.now().plusSeconds(60));
+        when(retryPolicy.computeNextScheduledAt(anyInt()))
+                .thenReturn(LocalDateTime.now().plusSeconds(60));
         when(retryPolicy.backoffSeconds(anyInt())).thenReturn(60L);
 
         queueService.recoverAll();
 
         // Verify: runCompletedGuarded with TIMED_OUT + watchdog_timeout called (not reclaim)
-        verify(runMapper).completeRunGuarded(eq(20L), eq(AgentConstants.STATUS_TIMED_OUT),
-                eq(AgentConstants.ERR_WATCHDOG_TIMEOUT), anyString(), isNull(), any());
+        verify(runMapper)
+                .completeRunGuarded(
+                        eq(20L),
+                        eq(AgentConstants.STATUS_TIMED_OUT),
+                        eq(AgentConstants.ERR_WATCHDOG_TIMEOUT),
+                        anyString(),
+                        isNull(),
+                        any());
         verify(stepMapper, never()).deleteByRunId(20L); // should NOT reclaim, just watchdog
     }
 
@@ -203,11 +223,10 @@ class AgentTaskQueueServiceTest {
 
         // Verify: task was moved to dead_letter
         // atLeastOnce: recoverAll step 2 (convergence) may also call updateById on the same mock matcher
-        verify(taskMapper, atLeastOnce()).updateById(argThat(t ->
-                AgentConstants.STATUS_DEAD_LETTER.equals(t.getStatus())
+        verify(taskMapper, atLeastOnce())
+                .updateById(argThat(t -> AgentConstants.STATUS_DEAD_LETTER.equals(t.getStatus())
                         && t.getDeadLetterReason() != null
-                        && t.getDeadLetterAt() != null
-        ));
+                        && t.getDeadLetterAt() != null));
     }
 
     // ================================================================
@@ -246,7 +265,8 @@ class AgentTaskQueueServiceTest {
         oldRun.setAttemptNumber(1);
 
         when(runMapper.selectByTaskId(600L)).thenReturn(List.of(oldRun));
-        when(retryPolicy.computeNextScheduledAt(2)).thenReturn(LocalDateTime.now().plusSeconds(30));
+        when(retryPolicy.computeNextScheduledAt(2))
+                .thenReturn(LocalDateTime.now().plusSeconds(30));
         when(retryPolicy.backoffSeconds(2)).thenReturn(30L);
 
         AgentRun newRun = queueService.scheduleNextAttempt(task);
@@ -258,8 +278,13 @@ class AgentTaskQueueServiceTest {
         assertNotNull(newRun.getScheduledAt());
         verify(runMapper).insert(any(AgentRun.class));
         verify(taskMapper).updateById(task);
-        verify(statusEventService).record(eq(600L), eq(newRun.getId()),
-                eq("RETRY_SCHEDULED"), eq(AgentConstants.STATUS_PENDING), anyMap());
+        verify(statusEventService)
+                .record(
+                        eq(600L),
+                        eq(newRun.getId()),
+                        eq("RETRY_SCHEDULED"),
+                        eq(AgentConstants.STATUS_PENDING),
+                        anyMap());
     }
 
     // ================================================================

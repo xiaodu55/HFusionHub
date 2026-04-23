@@ -1,9 +1,8 @@
 package com.hfusionhub.dto;
 
-import lombok.Data;
-
 import java.util.List;
 import java.util.Map;
+import lombok.Data;
 
 /** Lightweight chunk metadata returned by the indexing worker callback. */
 @Data

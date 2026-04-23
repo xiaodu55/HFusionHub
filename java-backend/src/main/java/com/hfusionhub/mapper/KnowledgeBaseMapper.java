@@ -2,14 +2,13 @@ package com.hfusionhub.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.hfusionhub.entity.KnowledgeBase;
-import org.apache.ibatis.annotations.Mapper;
+import java.time.LocalDateTime;
+import java.util.List;
 import org.apache.ibatis.annotations.Delete;
+import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
-
-import java.time.LocalDateTime;
-import java.util.List;
 
 /**
  * 知识库 Mapper 接口
@@ -22,7 +21,8 @@ public interface KnowledgeBaseMapper extends BaseMapper<KnowledgeBase> {
     @Select("SELECT * FROM knowledge_base WHERE id = #{id}")
     KnowledgeBase selectIncludingDeleted(@Param("id") Long id);
 
-    @Select("""
+    @Select(
+            """
             SELECT * FROM knowledge_base
             WHERE deleted = 1
               AND user_id = #{userId}
@@ -30,12 +30,14 @@ public interface KnowledgeBaseMapper extends BaseMapper<KnowledgeBase> {
             ORDER BY recycled_at DESC, id DESC
             LIMIT #{offset}, #{size}
             """)
-    List<KnowledgeBase> selectRecyclePage(@Param("userId") Long userId,
-                                           @Param("name") String name,
-                                           @Param("offset") int offset,
-                                           @Param("size") int size);
+    List<KnowledgeBase> selectRecyclePage(
+            @Param("userId") Long userId,
+            @Param("name") String name,
+            @Param("offset") int offset,
+            @Param("size") int size);
 
-    @Select("""
+    @Select(
+            """
             SELECT COUNT(*) FROM knowledge_base
             WHERE deleted = 1
               AND user_id = #{userId}
@@ -43,7 +45,8 @@ public interface KnowledgeBaseMapper extends BaseMapper<KnowledgeBase> {
             """)
     long countRecycle(@Param("userId") Long userId, @Param("name") String name);
 
-    @Select("""
+    @Select(
+            """
             SELECT * FROM knowledge_base
             WHERE deleted = 1
               AND recycle_expires_at IS NOT NULL
@@ -53,7 +56,8 @@ public interface KnowledgeBaseMapper extends BaseMapper<KnowledgeBase> {
             """)
     List<KnowledgeBase> selectExpiredRecycled(@Param("limit") int limit);
 
-    @Update("""
+    @Update(
+            """
             UPDATE knowledge_base
             SET deleted = 1,
                 recycled_at = #{recycledAt},
@@ -62,12 +66,14 @@ public interface KnowledgeBaseMapper extends BaseMapper<KnowledgeBase> {
                 updated_at = NOW()
             WHERE id = #{id} AND deleted = 0
             """)
-    int markRecycled(@Param("id") Long id,
-                     @Param("recycledAt") LocalDateTime recycledAt,
-                     @Param("recycleExpiresAt") LocalDateTime recycleExpiresAt,
-                     @Param("status") Integer status);
+    int markRecycled(
+            @Param("id") Long id,
+            @Param("recycledAt") LocalDateTime recycledAt,
+            @Param("recycleExpiresAt") LocalDateTime recycleExpiresAt,
+            @Param("status") Integer status);
 
-    @Update("""
+    @Update(
+            """
             UPDATE knowledge_base
             SET deleted = 0,
                 recycled_at = NULL,

@@ -4,7 +4,6 @@ import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.dto.AgentAggregatedStatsDTO;
 import com.hfusionhub.dto.AgentMetricsDTO;
 import com.hfusionhub.dto.AgentMetricsSummaryDTO;
-
 import java.time.LocalDateTime;
 import java.util.Map;
 
@@ -29,15 +28,12 @@ public interface AgentMetricsService {
      * 获取 Run 指标列表（可分页、可筛选）
      */
     PageResult<AgentMetricsSummaryDTO> listRunMetrics(
-            Long userId, Long kbId, String status,
-            LocalDateTime start, LocalDateTime end,
-            int page, int pageSize);
+            Long userId, Long kbId, String status, LocalDateTime start, LocalDateTime end, int page, int pageSize);
 
     /**
      * 聚合统计（按用户、知识库、时间范围聚合）
      */
-    AgentAggregatedStatsDTO getAggregatedStats(
-            Long userId, Long kbId, int days);
+    AgentAggregatedStatsDTO getAggregatedStats(Long userId, Long kbId, int days);
 
     /**
      * Dashboard 概览（当前用户的今日+近7天统计）

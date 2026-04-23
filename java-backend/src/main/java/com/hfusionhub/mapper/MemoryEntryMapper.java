@@ -5,5 +5,4 @@ import com.hfusionhub.entity.MemoryEntry;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
-public interface MemoryEntryMapper extends BaseMapper<MemoryEntry> {
-}
+public interface MemoryEntryMapper extends BaseMapper<MemoryEntry> {}

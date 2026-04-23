@@ -2,10 +2,9 @@ package com.hfusionhub.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.hfusionhub.entity.Plugin;
+import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
-
-import java.util.List;
 
 /**
  * 插件 Mapper
@@ -29,9 +28,10 @@ public interface PluginMapper extends BaseMapper<Plugin> {
 
     int updateEnabled(@Param("id") Long id, @Param("enabled") Boolean enabled);
 
-    int updateArtifact(@Param("id") Long id,
-                       @Param("artifactPath") String artifactPath,
-                       @Param("artifactHash") String artifactHash);
+    int updateArtifact(
+            @Param("id") Long id,
+            @Param("artifactPath") String artifactPath,
+            @Param("artifactHash") String artifactHash);
 
     int updateCanary(@Param("id") Long id, @Param("canaryWeight") java.math.BigDecimal canaryWeight);
 

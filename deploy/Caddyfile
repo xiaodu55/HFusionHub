@@ -1,0 +1,20 @@
+# HFusionHub Caddy reverse proxy
+# 设置 SITE_DOMAIN 后自动申请/续期 HTTPS 证书（Let's Encrypt）；
+# 未设置时回退 localhost（Caddy 内部 CA，仅用于本地演练）。
+{$SITE_DOMAIN:localhost} {
+	encode gzip zstd
+
+	# 前端静态资源 + /api 反向代理（frontend nginx 内部已完成 /api → java-backend 转发）
+	reverse_proxy frontend:80
+
+	# 可选：把 Attu 控制台暴露到 /attu（需在 frontend nginx 加对应 location）
+	# handle /attu* {
+	# 	reverse_proxy attu:3000
+	# }
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}

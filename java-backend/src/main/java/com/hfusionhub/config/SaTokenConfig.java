@@ -40,52 +40,49 @@ public class SaTokenConfig implements WebMvcConfigurer {
         // Spring removes server.servlet.context-path before interceptor
         // matching.  These patterns must therefore be relative to /api.
         registry.addInterceptor(new SaInterceptor(handle -> {
-            SaRouter.match("/**")
-                    .notMatch(
-                            "/user/login",
-                            "/user/register",
-                            "/health",
-                            "/vectorize/*/callback",
-                            "/internal/feature-flags/snapshot",
-                            "/internal/agent/**",
-                            "/internal/plugin/**",
-                            "/openapi/**",
-                            "/doc.html",
-                            "/swagger-ui.html",
-                            "/swagger-ui/**",
-                            "/v3/api-docs/**",
-                            "/webjars/**"
-                    )
-                    .check(r -> StpUtil.checkLogin());
+                    SaRouter.match("/**")
+                            .notMatch(
+                                    "/user/login",
+                                    "/user/register",
+                                    "/health",
+                                    "/vectorize/*/callback",
+                                    "/internal/feature-flags/snapshot",
+                                    "/internal/agent/**",
+                                    "/internal/plugin/**",
+                                    "/openapi/**",
+                                    "/doc.html",
+                                    "/swagger-ui.html",
+                                    "/swagger-ui/**",
+                                    "/v3/api-docs/**",
+                                    "/webjars/**")
+                            .check(r -> StpUtil.checkLogin());
 
-            // Newly registered accounts may log in and inspect their account state,
-            // but cannot access any business capability until the sole super admin
-            // assigns an approved platform role.
-            SaRouter.match("/**")
-                    .notMatch(
-                            "/user/**",
-                            "/health",
-                            "/vectorize/*/callback",
-                            "/internal/**",
-                            "/openapi/**",
-                            "/doc.html",
-                            "/swagger-ui.html",
-                            "/swagger-ui/**",
-                            "/v3/api-docs/**",
-                            "/webjars/**"
-                    )
-                    .check(r -> {
-                        boolean approved = StpUtil.hasRole(CommonConstants.ROLE_USER)
-                                || StpUtil.hasRole(CommonConstants.ROLE_BUILDER)
-                                || StpUtil.hasRole(CommonConstants.ROLE_ADMIN);
-                        if (!approved) {
-                            throw new BusinessException(
-                                    StatusCode.FORBIDDEN,
-                                    "账号正在等待管理员分配身份，暂时不能使用业务功能"
-                            );
-                        }
-                    });
-        })).addPathPatterns("/**").order(2);
+                    // Newly registered accounts may log in and inspect their account state,
+                    // but cannot access any business capability until the sole super admin
+                    // assigns an approved platform role.
+                    SaRouter.match("/**")
+                            .notMatch(
+                                    "/user/**",
+                                    "/health",
+                                    "/vectorize/*/callback",
+                                    "/internal/**",
+                                    "/openapi/**",
+                                    "/doc.html",
+                                    "/swagger-ui.html",
+                                    "/swagger-ui/**",
+                                    "/v3/api-docs/**",
+                                    "/webjars/**")
+                            .check(r -> {
+                                boolean approved = StpUtil.hasRole(CommonConstants.ROLE_USER)
+                                        || StpUtil.hasRole(CommonConstants.ROLE_BUILDER)
+                                        || StpUtil.hasRole(CommonConstants.ROLE_ADMIN);
+                                if (!approved) {
+                                    throw new BusinessException(StatusCode.FORBIDDEN, "账号正在等待管理员分配身份，暂时不能使用业务功能");
+                                }
+                            });
+                }))
+                .addPathPatterns("/**")
+                .order(2);
 
         // Tenant context — runs AFTER auth so we can resolve the user's tenant.
         // Only business routes participate.  Infrastructure/certuration routes
@@ -107,8 +104,7 @@ public class SaTokenConfig implements WebMvcConfigurer {
                         "/internal/feature-flags/snapshot",
                         "/internal/agent/**",
                         "/internal/plugin/**",
-                        "/openapi/**"
-                )
+                        "/openapi/**")
                 .order(3);
     }
 }

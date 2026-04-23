@@ -1,11 +1,9 @@
 package com.hfusionhub.dto;
 
-import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.util.Map;
 import lombok.Builder;
 import lombok.Data;
-
-import java.util.Map;
 
 /**
  * Agent 单任务/Run 指标详情

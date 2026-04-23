@@ -1,19 +1,17 @@
 package com.hfusionhub.controller;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.entity.Plugin;
 import com.hfusionhub.service.PluginService;
+import java.util.*;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
-
-import java.util.*;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for {@link PluginController}.
@@ -98,8 +96,7 @@ class PluginControllerTest {
                 "name", "weather_helper",
                 "version", "1.0.0",
                 "description", "查询天气",
-                "tools", List.of(Map.of("name", "custom_weather"))
-        ));
+                "tools", List.of(Map.of("name", "custom_weather"))));
 
         assertEquals(200, result.getCode());
         assertEquals("declarative", result.getData().getPluginKind());
@@ -211,9 +208,7 @@ class PluginControllerTest {
 
     @Test
     void getAuditLogsDelegatesToService() {
-        List<Map<String, Object>> logs = List.of(
-                Map.of("action", "install", "plugin_name", "test_plugin")
-        );
+        List<Map<String, Object>> logs = List.of(Map.of("action", "install", "plugin_name", "test_plugin"));
         Plugin plugin = samplePlugin("pid-1", "test_plugin", "1.0.0");
         when(pluginService.getByPluginId("pid-1")).thenReturn(plugin);
         when(pluginService.getAuditLogs(1L, 10)).thenReturn(logs);
@@ -226,9 +221,8 @@ class PluginControllerTest {
 
     @Test
     void getToolSpecsReturnsPluginSpecs() {
-        List<Map<String, Object>> specs = List.of(
-                Map.of("plugin_id", "pid-1", "name", "test_plugin", "permissions", List.of("web"))
-        );
+        List<Map<String, Object>> specs =
+                List.of(Map.of("plugin_id", "pid-1", "name", "test_plugin", "permissions", List.of("web")));
         when(pluginService.getPluginToolSpecs()).thenReturn(specs);
 
         R<List<Map<String, Object>>> result = controller.getToolSpecs();

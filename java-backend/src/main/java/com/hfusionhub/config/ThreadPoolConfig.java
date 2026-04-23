@@ -1,12 +1,10 @@
 package com.hfusionhub.config;
 
+import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadPoolExecutor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-
-import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ThreadPoolExecutor;
 
 /**
  * 线程池配置
@@ -18,15 +16,13 @@ public class ThreadPoolConfig {
 
     /**
      * SSE 流式响应线程池。
-     * <p>每个 SSE 连接会占用一个线程长达数分钟：JDK 21+ 优先使用虚拟线程
-     * （每连接一个虚拟线程，不再受 20 线程上限约束），JDK 17 回退平台线程池。</p>
+     * <p>注意：不能用虚拟线程执行器——任务从请求线程提交到该执行器时，
+     * 虚拟线程不继承父线程的普通 ThreadLocal，Sa-Token/租户上下文会丢失
+     * （表现为流式对话 NotLoginException、无内容）。平台线程池 + CallerRunsPolicy
+     * 保持请求线程的 ThreadLocal 语义，是 SSE 转发链路的正确选择。</p>
      */
     @Bean("sseTaskExecutor")
     public Executor sseTaskExecutor() {
-        ExecutorService virtual = ExecutorSupport.newVirtualThreadPerTaskExecutor("sse");
-        if (virtual != null) {
-            return virtual;
-        }
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(5);
         executor.setMaxPoolSize(20);

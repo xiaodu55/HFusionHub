@@ -1,10 +1,9 @@
 package com.hfusionhub.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
-import lombok.Data;
-
 import java.io.Serializable;
 import java.time.LocalDateTime;
+import lombok.Data;
 
 /**
  * 删除任务实体 — 知识库/文档异步删除的 Outbox

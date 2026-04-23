@@ -1,21 +1,20 @@
 package com.hfusionhub.tenant;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import jakarta.servlet.ServletException;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.util.ReflectionTestUtils;
-
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Unit tests for {@link CallbackSignatureFilter} — the HMAC gate that must be
@@ -70,7 +69,8 @@ class CallbackSignatureFilterTest {
         // The wrapper must re-serve the FULL body via both streams — this is the
         // regression guard for the P0 where ContentCachingRequestWrapper consumed
         // the stream and left @RequestBody with an empty payload.
-        String viaReader = new String(passed.getReader().readLine().getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8);
+        String viaReader =
+                new String(passed.getReader().readLine().getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8);
         String viaStream = new String(passed.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         String viaStreamAgain = new String(passed.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         assertEquals(body, viaReader);

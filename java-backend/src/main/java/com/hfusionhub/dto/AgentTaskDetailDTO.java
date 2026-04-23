@@ -2,11 +2,10 @@ package com.hfusionhub.dto;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.Builder;
-import lombok.Data;
-
 import java.time.LocalDateTime;
 import java.util.List;
+import lombok.Builder;
+import lombok.Data;
 
 /**
  * Agent 任务详情（含所有 Run 和 Step 时间线）

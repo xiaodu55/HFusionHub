@@ -2,16 +2,13 @@ package com.hfusionhub.common.utils;
 
 import cn.dev33.satoken.stp.StpInterface;
 import cn.dev33.satoken.stp.StpUtil;
-import com.hfusionhub.common.constant.CommonConstants;
+import com.hfusionhub.entity.TenantMember;
 import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.UserMapper;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-
-import java.util.List;
-
-import com.hfusionhub.entity.TenantMember;
 
 /**
  * JWT 工具类（基于 Sa-Token）
@@ -61,8 +58,7 @@ public class JwtUtils implements StpInterface {
 
     private TenantMember getUserTenantMember(User user) {
         try {
-            var mapper = SpringContextHolder.getBean(
-                com.hfusionhub.mapper.TenantMemberMapper.class);
+            var mapper = SpringContextHolder.getBean(com.hfusionhub.mapper.TenantMemberMapper.class);
             return mapper.selectByTenantAndUser(user.getTenantId(), user.getId());
         } catch (Exception e) {
             return null;
@@ -71,8 +67,7 @@ public class JwtUtils implements StpInterface {
 
     private List<String> getPermissionsForRole(String role) {
         try {
-            var mapper = SpringContextHolder.getBean(
-                com.hfusionhub.mapper.RolePermissionMapper.class);
+            var mapper = SpringContextHolder.getBean(com.hfusionhub.mapper.RolePermissionMapper.class);
             return mapper.selectPermissionsByRole(role);
         } catch (Exception e) {
             return List.of();

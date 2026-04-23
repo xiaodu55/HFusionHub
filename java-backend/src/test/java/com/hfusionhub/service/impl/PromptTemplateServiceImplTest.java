@@ -1,5 +1,10 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.*;
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.hfusionhub.common.exception.BusinessException;
@@ -11,6 +16,7 @@ import com.hfusionhub.entity.PromptTemplate;
 import com.hfusionhub.entity.PromptTemplateVersion;
 import com.hfusionhub.mapper.PromptTemplateMapper;
 import com.hfusionhub.mapper.PromptTemplateVersionMapper;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,14 +26,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class PromptTemplateServiceImplTest {
@@ -126,8 +124,7 @@ class PromptTemplateServiceImplTest {
         when(promptTemplateMapper.selectById(3L)).thenReturn(template, current);
         when(promptTemplateMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(0);
 
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> promptTemplateService.publish(3L, 1));
+        BusinessException ex = assertThrows(BusinessException.class, () -> promptTemplateService.publish(3L, 1));
         assertTrue(ex.getMessage().contains("已被其他操作更新"));
         assertTrue(ex.getMessage().contains("v3"));
         assertEquals(409, ex.getCode());
@@ -163,8 +160,7 @@ class PromptTemplateServiceImplTest {
         when(promptTemplateMapper.selectById(3L)).thenReturn(template, current);
         when(promptTemplateMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(0);
 
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> promptTemplateService.unpublish(3L, 1));
+        BusinessException ex = assertThrows(BusinessException.class, () -> promptTemplateService.unpublish(3L, 1));
         assertTrue(ex.getMessage().contains("已被其他操作更新"));
         assertEquals(409, ex.getCode());
     }
@@ -218,8 +214,8 @@ class PromptTemplateServiceImplTest {
         when(promptTemplateMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
         when(promptTemplateMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(0);
 
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> promptTemplateService.update(3L, save("客服助手", "我的修改", 3)));
+        BusinessException ex =
+                assertThrows(BusinessException.class, () -> promptTemplateService.update(3L, save("客服助手", "我的修改", 3)));
         assertTrue(ex.getMessage().contains("已被其他操作更新"));
         assertTrue(ex.getMessage().contains("v4"));
         assertEquals(409, ex.getCode());
@@ -231,9 +227,11 @@ class PromptTemplateServiceImplTest {
         PromptTemplate template = owned(3L, 7L, "客服助手", "简洁回答", 1, PromptTemplate.STATUS_DRAFT);
         when(promptTemplateMapper.selectById(3L)).thenReturn(template);
 
-        BusinessException ex = assertThrows(BusinessException.class,
+        BusinessException ex = assertThrows(
+                BusinessException.class,
                 () -> promptTemplateService.update(3L, save("客服助手", "新内容"))); // no expectedVersion
-        assertTrue(ex.getMessage().contains("expectedVersion"),
+        assertTrue(
+                ex.getMessage().contains("expectedVersion"),
                 "Expected error about missing expectedVersion, got: " + ex.getMessage());
         verify(promptTemplateMapper, never()).update(any(), any());
     }
@@ -302,8 +300,7 @@ class PromptTemplateServiceImplTest {
         when(versionMapper.selectById(10L)).thenReturn(v1);
         when(promptTemplateMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(0);
 
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> promptTemplateService.rollback(3L, 10L, 3));
+        BusinessException ex = assertThrows(BusinessException.class, () -> promptTemplateService.rollback(3L, 10L, 3));
         assertTrue(ex.getMessage().contains("已被其他操作更新"));
         assertTrue(ex.getMessage().contains("v4"));
         assertEquals(409, ex.getCode());
@@ -376,14 +373,19 @@ class PromptTemplateServiceImplTest {
         when(promptTemplateMapper.selectById(3L)).thenReturn(template);
 
         PromptTemplateVersion v3 = new PromptTemplateVersion();
-        v3.setId(30L); v3.setVersion(3); v3.setOperation(PromptTemplateVersion.OP_EDIT);
+        v3.setId(30L);
+        v3.setVersion(3);
+        v3.setOperation(PromptTemplateVersion.OP_EDIT);
         PromptTemplateVersion v2 = new PromptTemplateVersion();
-        v2.setId(20L); v2.setVersion(2); v2.setOperation(PromptTemplateVersion.OP_EDIT);
+        v2.setId(20L);
+        v2.setVersion(2);
+        v2.setOperation(PromptTemplateVersion.OP_EDIT);
         PromptTemplateVersion v1 = new PromptTemplateVersion();
-        v1.setId(10L); v1.setVersion(1); v1.setOperation(PromptTemplateVersion.OP_CREATE);
+        v1.setId(10L);
+        v1.setVersion(1);
+        v1.setOperation(PromptTemplateVersion.OP_CREATE);
 
-        when(versionMapper.selectList(any(LambdaQueryWrapper.class)))
-                .thenReturn(List.of(v3, v2, v1));
+        when(versionMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(v3, v2, v1));
 
         List<PromptTemplateVersionDTO> versions = promptTemplateService.listVersions(3L);
 

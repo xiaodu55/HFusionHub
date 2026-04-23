@@ -8,11 +8,10 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import com.hfusionhub.handler.JsonLongListTypeHandler;
 import com.hfusionhub.handler.JsonMapTypeHandler;
 import com.hfusionhub.handler.JsonStringListTypeHandler;
-import lombok.Data;
-
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import lombok.Data;
 
 /** A single fixed question (+ optional variable values) inside a prompt test set. */
 @Data
@@ -21,6 +20,7 @@ public class PromptTestCase {
 
     @TableId(type = IdType.AUTO)
     private Long id;
+
     private Long setId;
     private String question;
 

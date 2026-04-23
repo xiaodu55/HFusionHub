@@ -7,14 +7,13 @@ import com.hfusionhub.mapper.TenantMapper;
 import com.hfusionhub.mapper.TenantMemberMapper;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.TenantService;
+import java.util.List;
+import java.util.NoSuchElementException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
-
-import java.util.List;
-import java.util.NoSuchElementException;
 
 /**
  * 租户管理服务实现
@@ -163,8 +162,7 @@ public class TenantServiceImpl implements TenantService {
     private TenantMember requireMember(Long tenantId, Long userId) {
         TenantMember member = tenantMemberMapper.selectByTenantAndUser(tenantId, userId);
         if (member == null) {
-            throw new NoSuchElementException(
-                "成员不存在: tenant=" + tenantId + " user=" + userId);
+            throw new NoSuchElementException("成员不存在: tenant=" + tenantId + " user=" + userId);
         }
         return member;
     }

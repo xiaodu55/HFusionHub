@@ -55,8 +55,7 @@ public class AdminInitializer implements ApplicationRunner {
                 return;
             }
 
-            User admin = userMapper.selectOne(
-                    new LambdaQueryWrapper<User>().eq(User::getUsername, adminUsername));
+            User admin = userMapper.selectOne(new LambdaQueryWrapper<User>().eq(User::getUsername, adminUsername));
 
             if (admin == null) {
                 admin = new User();
@@ -90,7 +89,8 @@ public class AdminInitializer implements ApplicationRunner {
     }
 
     private void ensureAdminMembership(User admin) {
-        TenantMember member = tenantMemberMapper.selectByTenantAndUser(CommonConstants.DEFAULT_TENANT_ID, admin.getId());
+        TenantMember member =
+                tenantMemberMapper.selectByTenantAndUser(CommonConstants.DEFAULT_TENANT_ID, admin.getId());
         if (member == null) {
             member = new TenantMember();
             member.setTenantId(CommonConstants.DEFAULT_TENANT_ID);

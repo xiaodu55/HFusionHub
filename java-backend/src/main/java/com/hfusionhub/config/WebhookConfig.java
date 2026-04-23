@@ -1,17 +1,15 @@
 package com.hfusionhub.config;
 
+import java.time.Duration;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.client.RestTemplate;
-
-import java.time.Duration;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Webhook 异步投递配置
@@ -27,14 +25,11 @@ public class WebhookConfig {
 
     /**
      * Webhook 事件监听线程池（{@code @Async} 用）。
-     * <p>JDK 21+ 优先虚拟线程（虚拟线程默认守护、不阻塞 JVM 退出）；JDK 17 回退平台池。</p>
+     * <p>使用平台线程池：虚拟线程不继承父线程 ThreadLocal，处理器若依赖
+     * 租户/请求上下文会丢失。线程设为守护线程（不阻塞 JVM 退出）。</p>
      */
     @Bean("webhookExecutor")
     public Executor webhookExecutor() {
-        ExecutorService virtual = ExecutorSupport.newVirtualThreadPerTaskExecutor("webhook");
-        if (virtual != null) {
-            return virtual;
-        }
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(2);
         executor.setMaxPoolSize(8);
@@ -68,8 +63,7 @@ public class WebhookConfig {
      */
     @Bean("webhookRestTemplate")
     public RestTemplate webhookRestTemplate(RestTemplateBuilder builder) {
-        return builder
-                .setConnectTimeout(Duration.ofSeconds(5))
+        return builder.setConnectTimeout(Duration.ofSeconds(5))
                 .setReadTimeout(Duration.ofSeconds(10))
                 .build();
     }

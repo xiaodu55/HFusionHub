@@ -50,16 +50,14 @@ public class DocumentController {
     @Operation(summary = "更新文档", description = "更新文档信息")
     @PutMapping("/{id}")
     public R<DocumentInfoDTO> update(
-            @Parameter(description = "文档ID") @PathVariable Long id,
-            @Valid @RequestBody DocumentUpdateDTO dto) {
+            @Parameter(description = "文档ID") @PathVariable Long id, @Valid @RequestBody DocumentUpdateDTO dto) {
         DocumentInfoDTO info = documentService.update(id, dto);
         return R.ok("更新成功", info);
     }
 
     @Operation(summary = "删除文档", description = "删除指定文档")
     @DeleteMapping("/{id}")
-    public R<Void> delete(
-            @Parameter(description = "文档ID") @PathVariable Long id) {
+    public R<Void> delete(@Parameter(description = "文档ID") @PathVariable Long id) {
         documentService.delete(id);
         return R.ok();
     }
@@ -86,16 +84,14 @@ public class DocumentController {
 
     @Operation(summary = "获取文档详情", description = "获取指定文档的详细信息")
     @GetMapping("/{id}")
-    public R<DocumentInfoDTO> getById(
-            @Parameter(description = "文档ID") @PathVariable Long id) {
+    public R<DocumentInfoDTO> getById(@Parameter(description = "文档ID") @PathVariable Long id) {
         DocumentInfoDTO info = documentService.getById(id);
         return R.ok(info);
     }
 
     @Operation(summary = "获取文档内容", description = "获取指定文档的内容")
     @GetMapping("/{id}/content")
-    public R<String> getContent(
-            @Parameter(description = "文档ID") @PathVariable Long id) {
+    public R<String> getContent(@Parameter(description = "文档ID") @PathVariable Long id) {
         String content = documentService.getContent(id);
         return R.ok(content);
     }
@@ -110,8 +106,7 @@ public class DocumentController {
     @Operation(summary = "获取知识库下的文档列表", description = "获取指定知识库下的文档列表")
     @GetMapping("/list/{knowledgeBaseId}")
     public R<PageResult<DocumentInfoDTO>> listByKnowledgeBase(
-            @Parameter(description = "知识库ID") @PathVariable Long knowledgeBaseId,
-            DocumentQueryDTO queryDTO) {
+            @Parameter(description = "知识库ID") @PathVariable Long knowledgeBaseId, DocumentQueryDTO queryDTO) {
         PageResult<DocumentInfoDTO> result = documentService.listByKnowledgeBase(knowledgeBaseId, queryDTO);
         return R.ok(result);
     }
@@ -119,16 +114,14 @@ public class DocumentController {
     @Operation(summary = "获取我的知识库下的文档列表", description = "获取当前用户知识库下的文档列表")
     @GetMapping("/my/{knowledgeBaseId}")
     public R<PageResult<DocumentInfoDTO>> listByCurrentUser(
-            @Parameter(description = "知识库ID") @PathVariable Long knowledgeBaseId,
-            DocumentQueryDTO queryDTO) {
+            @Parameter(description = "知识库ID") @PathVariable Long knowledgeBaseId, DocumentQueryDTO queryDTO) {
         PageResult<DocumentInfoDTO> result = documentService.listByCurrentUser(knowledgeBaseId, queryDTO);
         return R.ok(result);
     }
 
     @Operation(summary = "获取文档名称", description = "根据文档ID获取文档名称，用于向量化搜索结果显示")
     @GetMapping("/{id}/name")
-    public R<DocumentNameDTO> getDocumentName(
-            @Parameter(description = "文档ID") @PathVariable Long id) {
+    public R<DocumentNameDTO> getDocumentName(@Parameter(description = "文档ID") @PathVariable Long id) {
         DocumentNameDTO nameDTO = documentService.getDocumentName(id);
         return R.ok(nameDTO);
     }

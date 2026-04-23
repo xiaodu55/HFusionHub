@@ -22,6 +22,5 @@ public final class WebhookEventTypes {
     /** 离线评测完成 */
     public static final String EVALUATION_COMPLETED = "evaluation.completed";
 
-    private WebhookEventTypes() {
-    }
+    private WebhookEventTypes() {}
 }

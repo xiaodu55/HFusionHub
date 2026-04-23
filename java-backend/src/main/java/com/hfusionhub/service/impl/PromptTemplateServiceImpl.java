@@ -12,13 +12,12 @@ import com.hfusionhub.entity.PromptTemplateVersion;
 import com.hfusionhub.mapper.PromptTemplateMapper;
 import com.hfusionhub.mapper.PromptTemplateVersionMapper;
 import com.hfusionhub.service.PromptTemplateService;
+import java.time.LocalDateTime;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
-
-import java.time.LocalDateTime;
-import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -32,18 +31,22 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
     @Override
     public List<PromptTemplateInfoDTO> listMine() {
         Long userId = JwtUtils.getCurrentUserId();
-        return promptTemplateMapper.selectList(new LambdaQueryWrapper<PromptTemplate>()
+        return promptTemplateMapper
+                .selectList(new LambdaQueryWrapper<PromptTemplate>()
                         .eq(PromptTemplate::getUserId, userId)
                         .orderByDesc(PromptTemplate::getUpdatedAt))
-                .stream().map(this::toInfo).toList();
+                .stream()
+                .map(this::toInfo)
+                .toList();
     }
 
     @Override
     public List<PromptTemplateInfoDTO> listRecycleBin(String keyword) {
         Long userId = JwtUtils.getCurrentUserId();
         String normalized = StringUtils.hasText(keyword) ? keyword.trim() : null;
-        return promptTemplateMapper.selectRecycle(userId, normalized)
-                .stream().map(this::toInfo).toList();
+        return promptTemplateMapper.selectRecycle(userId, normalized).stream()
+                .map(this::toInfo)
+                .toList();
     }
 
     @Override
@@ -82,14 +85,13 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
         // Atomic optimistic-lock UPDATE: WHERE id = ? AND version = ?
         UpdateWrapper<PromptTemplate> wrapper = new UpdateWrapper<>();
         wrapper.eq("id", id)
-               .eq("version", expectedVersion)
-               .set("name", dto.getName().trim())
-               .set("description", clean(dto.getDescription()))
-               .set("content", dto.getContent().trim());
+                .eq("version", expectedVersion)
+                .set("name", dto.getName().trim())
+                .set("description", clean(dto.getDescription()))
+                .set("content", dto.getContent().trim());
 
         if (changed) {
-            wrapper.set("status", PromptTemplate.STATUS_DRAFT)
-                   .setSql("version = version + 1");
+            wrapper.set("status", PromptTemplate.STATUS_DRAFT).setSql("version = version + 1");
         }
 
         int rows = promptTemplateMapper.update(null, wrapper);
@@ -117,9 +119,9 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
         // Atomic optimistic-lock UPDATE: WHERE id = ? AND version = ?
         UpdateWrapper<PromptTemplate> wrapper = new UpdateWrapper<>();
         wrapper.eq("id", id)
-               .eq("version", expectedVersion)
-               .set("status", PromptTemplate.STATUS_PUBLISHED)
-               .setSql("version = version + 1");
+                .eq("version", expectedVersion)
+                .set("status", PromptTemplate.STATUS_PUBLISHED)
+                .setSql("version = version + 1");
 
         int rows = promptTemplateMapper.update(null, wrapper);
         if (rows == 0) {
@@ -141,9 +143,9 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
         // Atomic optimistic-lock UPDATE: WHERE id = ? AND version = ?
         UpdateWrapper<PromptTemplate> wrapper = new UpdateWrapper<>();
         wrapper.eq("id", id)
-               .eq("version", expectedVersion)
-               .set("status", PromptTemplate.STATUS_DRAFT)
-               .setSql("version = version + 1");
+                .eq("version", expectedVersion)
+                .set("status", PromptTemplate.STATUS_DRAFT)
+                .setSql("version = version + 1");
 
         int rows = promptTemplateMapper.update(null, wrapper);
         if (rows == 0) {
@@ -210,12 +212,14 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
     @Override
     public List<PromptTemplateVersionDTO> listVersions(Long templateId) {
         requireOwned(templateId, JwtUtils.getCurrentUserId());
-        return versionMapper.selectList(
-                new LambdaQueryWrapper<PromptTemplateVersion>()
+        return versionMapper
+                .selectList(new LambdaQueryWrapper<PromptTemplateVersion>()
                         .eq(PromptTemplateVersion::getTemplateId, templateId)
                         .orderByDesc(PromptTemplateVersion::getVersion)
                         .orderByDesc(PromptTemplateVersion::getId))
-                .stream().map(this::toVersionDTO).toList();
+                .stream()
+                .map(this::toVersionDTO)
+                .toList();
     }
 
     @Override
@@ -238,12 +242,12 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
         // Atomic optimistic-lock UPDATE: WHERE id = ? AND version = ?
         UpdateWrapper<PromptTemplate> wrapper = new UpdateWrapper<>();
         wrapper.eq("id", templateId)
-               .eq("version", expectedVersion)
-               .set("name", target.getName())
-               .set("description", target.getDescription())
-               .set("content", target.getContent())
-               .set("status", PromptTemplate.STATUS_DRAFT)
-               .setSql("version = version + 1");
+                .eq("version", expectedVersion)
+                .set("name", target.getName())
+                .set("description", target.getDescription())
+                .set("content", target.getContent())
+                .set("status", PromptTemplate.STATUS_DRAFT)
+                .setSql("version = version + 1");
 
         int rows = promptTemplateMapper.update(null, wrapper);
         if (rows == 0) {
@@ -263,9 +267,8 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
     private BusinessException versionConflict(Long id, int expectedVersion) {
         PromptTemplate current = promptTemplateMapper.selectById(id);
         int actualVersion = current != null && current.getVersion() != null ? current.getVersion() : -1;
-        return new BusinessException(409,
-                "模板已被其他操作更新（当前版本 v" + actualVersion
-                        + "，你的版本 v" + expectedVersion + "），请刷新后重试");
+        return new BusinessException(
+                409, "模板已被其他操作更新（当前版本 v" + actualVersion + "，你的版本 v" + expectedVersion + "），请刷新后重试");
     }
 
     private PromptTemplate requireOwned(Long id, Long userId) {

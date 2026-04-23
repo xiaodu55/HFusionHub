@@ -69,15 +69,14 @@ public final class TenantContext {
      * Record a platform-admin cross-tenant operation in the tenant audit log.
      * Uses {@code SpringContextHolder} so it works from interceptor scope.
      */
-    public static void logCrossTenant(Long operatorId, Long fromTenant, Long toTenant,
-                                      String action) {
+    public static void logCrossTenant(Long operatorId, Long fromTenant, Long toTenant, String action) {
         try {
-            var mapper = com.hfusionhub.common.utils.SpringContextHolder
-                .getBean(com.hfusionhub.mapper.TenantAuditLogMapper.class);
+            var mapper = com.hfusionhub.common.utils.SpringContextHolder.getBean(
+                    com.hfusionhub.mapper.TenantAuditLogMapper.class);
             mapper.insertCrossTenant(operatorId, fromTenant, toTenant, action);
         } catch (Exception e) {
             org.slf4j.LoggerFactory.getLogger(TenantContext.class)
-                .warn("Failed to record cross-tenant audit: {}", e.getMessage());
+                    .warn("Failed to record cross-tenant audit: {}", e.getMessage());
         }
     }
 
@@ -95,9 +94,8 @@ public final class TenantContext {
     public static Long requireTenantId() {
         Long id = TENANT_HOLDER.get();
         if (id == null) {
-            throw new IllegalStateException(
-                "No tenant context set. Ensure TenantContextInterceptor is registered " +
-                "or wrap the call with TenantContext.runAs().");
+            throw new IllegalStateException("No tenant context set. Ensure TenantContextInterceptor is registered "
+                    + "or wrap the call with TenantContext.runAs().");
         }
         return id;
     }

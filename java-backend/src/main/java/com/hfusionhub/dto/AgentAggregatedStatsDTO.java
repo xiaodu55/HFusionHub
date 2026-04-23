@@ -2,11 +2,10 @@ package com.hfusionhub.dto;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.Builder;
-import lombok.Data;
-
 import java.time.LocalDateTime;
 import java.util.List;
+import lombok.Builder;
+import lombok.Data;
 
 /**
  * Agent 聚合统计DTO — 按用户/KB/时间窗口汇总
@@ -97,16 +96,22 @@ public class AgentAggregatedStatsDTO {
     public static class DailyMetricDTO {
         @Schema(description = "日期")
         private String date;
+
         @Schema(description = "Run数")
         private Integer runCount;
+
         @Schema(description = "成功数")
         private Integer successCount;
+
         @Schema(description = "失败数")
         private Integer failureCount;
+
         @Schema(description = "平均耗时(ms)")
         private Long avgDurationMs;
+
         @Schema(description = "平均工具调用")
         private Double avgToolCalls;
+
         @Schema(description = "平均Token")
         private Double avgTokens;
     }

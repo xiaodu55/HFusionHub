@@ -13,14 +13,13 @@ import com.hfusionhub.mapper.AgentRunMapper;
 import com.hfusionhub.mapper.AgentStepMapper;
 import com.hfusionhub.mapper.AgentTaskMapper;
 import com.hfusionhub.service.AgentMetricsService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
 
 /**
  * Agent 指标聚合与查询服务实现
@@ -85,9 +84,9 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
             List<AgentStep> steps = stepMapper.selectByRunId(run.getId());
             totalSteps += steps.size();
             totalSources += steps.stream()
-                .filter(s -> s.getSources() != null)
-                .mapToInt(s -> s.getSources().size())
-                .sum();
+                    .filter(s -> s.getSources() != null)
+                    .mapToInt(s -> s.getSources().size())
+                    .sum();
         }
 
         int runCount = Math.max(runs.size(), 1);
@@ -131,7 +130,8 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
             avgStepMs = totalStepMs / steps.size();
             maxStepMs = steps.stream()
                     .mapToLong(s -> s.getDurationMs() != null ? s.getDurationMs() : 0L)
-                    .max().orElse(0L);
+                    .max()
+                    .orElse(0L);
             sourcesCount = steps.stream()
                     .filter(s -> s.getSources() != null)
                     .mapToInt(s -> s.getSources().size())
@@ -149,8 +149,7 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
         }
 
         // approval count & duration for this run
-        LambdaQueryWrapper<com.hfusionhub.entity.AgentApproval> approvalQuery =
-                new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<com.hfusionhub.entity.AgentApproval> approvalQuery = new LambdaQueryWrapper<>();
         approvalQuery.eq(com.hfusionhub.entity.AgentApproval::getRunId, runId);
         var approvals = approvalMapper.selectList(approvalQuery);
         int approvalCount = approvals != null ? approvals.size() : 0;
@@ -195,9 +194,7 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
 
     @Override
     public PageResult<AgentMetricsSummaryDTO> listRunMetrics(
-            Long userId, Long kbId, String status,
-            LocalDateTime start, LocalDateTime end,
-            int page, int pageSize) {
+            Long userId, Long kbId, String status, LocalDateTime start, LocalDateTime end, int page, int pageSize) {
 
         // Build task IDs filter
         Set<Long> allowedTaskIds = null;
@@ -223,8 +220,7 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
         long total = runMapper.selectCount(query);
         int offset = (page - 1) * pageSize;
         // MyBatis Plus pagination via LIMIT
-        List<AgentRun> runs = runMapper.selectList(
-                query.last("LIMIT " + offset + "," + pageSize));
+        List<AgentRun> runs = runMapper.selectList(query.last("LIMIT " + offset + "," + pageSize));
 
         // Build task lookup for query text
         Map<Long, AgentTask> taskMap = new HashMap<>();
@@ -234,47 +230,49 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
             }
         }
 
-        List<AgentMetricsSummaryDTO> summaries = runs.stream().map(run -> {
-            AgentTask task = taskMap.get(run.getTaskId());
-            String querySummary = null;
-            Long kbIdOut = null;
-            if (task != null) {
-                querySummary = task.getQuery();
-                if (querySummary != null && querySummary.length() > 100) {
-                    querySummary = querySummary.substring(0, 97) + "...";
-                }
-                kbIdOut = task.getKnowledgeBaseId();
-            }
+        List<AgentMetricsSummaryDTO> summaries = runs.stream()
+                .map(run -> {
+                    AgentTask task = taskMap.get(run.getTaskId());
+                    String querySummary = null;
+                    Long kbIdOut = null;
+                    if (task != null) {
+                        querySummary = task.getQuery();
+                        if (querySummary != null && querySummary.length() > 100) {
+                            querySummary = querySummary.substring(0, 97) + "...";
+                        }
+                        kbIdOut = task.getKnowledgeBaseId();
+                    }
 
-            // count sources for this run
-            List<AgentStep> steps = stepMapper.selectByRunId(run.getId());
-            int sourcesCount = steps.stream()
-                    .filter(s -> s.getSources() != null)
-                    .mapToInt(s -> s.getSources().size())
-                    .sum();
+                    // count sources for this run
+                    List<AgentStep> steps = stepMapper.selectByRunId(run.getId());
+                    int sourcesCount = steps.stream()
+                            .filter(s -> s.getSources() != null)
+                            .mapToInt(s -> s.getSources().size())
+                            .sum();
 
-            long totalTokens = 0L;
-            if (run.getTokenUsage() != null) {
-                totalTokens = toLong(run.getTokenUsage().get("total_tokens"));
-            }
+                    long totalTokens = 0L;
+                    if (run.getTokenUsage() != null) {
+                        totalTokens = toLong(run.getTokenUsage().get("total_tokens"));
+                    }
 
-            return AgentMetricsSummaryDTO.builder()
-                    .runId(run.getId())
-                    .runUuid(run.getRunUuid())
-                    .taskId(run.getTaskId())
-                    .knowledgeBaseId(kbIdOut)
-                    .querySummary(querySummary)
-                    .status(run.getStatus())
-                    .model(run.getModel())
-                    .durationMs(run.getDurationMs())
-                    .totalTokens(totalTokens)
-                    .toolCallsCount(run.getToolCallsCount())
-                    .sourcesCount(sourcesCount)
-                    .errorCode(run.getErrorCode())
-                    .startedAt(run.getStartedAt())
-                    .completedAt(run.getCompletedAt())
-                    .build();
-        }).collect(Collectors.toList());
+                    return AgentMetricsSummaryDTO.builder()
+                            .runId(run.getId())
+                            .runUuid(run.getRunUuid())
+                            .taskId(run.getTaskId())
+                            .knowledgeBaseId(kbIdOut)
+                            .querySummary(querySummary)
+                            .status(run.getStatus())
+                            .model(run.getModel())
+                            .durationMs(run.getDurationMs())
+                            .totalTokens(totalTokens)
+                            .toolCallsCount(run.getToolCallsCount())
+                            .sourcesCount(sourcesCount)
+                            .errorCode(run.getErrorCode())
+                            .startedAt(run.getStartedAt())
+                            .completedAt(run.getCompletedAt())
+                            .build();
+                })
+                .collect(Collectors.toList());
 
         return PageResult.of(page, pageSize, Math.toIntExact(total), summaries);
     }
@@ -284,8 +282,7 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
     // ================================================================
 
     @Override
-    public AgentAggregatedStatsDTO getAggregatedStats(
-            Long userId, Long kbId, int days) {
+    public AgentAggregatedStatsDTO getAggregatedStats(Long userId, Long kbId, int days) {
 
         LocalDateTime periodStart = LocalDateTime.now().minusDays(Math.max(1, Math.min(days, 30)));
 
@@ -331,34 +328,44 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
 
         if (taskIds.isEmpty()) {
             return Map.of(
-                "todayRuns", 0, "todayErrors", 0, "todayAvgLatencyMs", 0L,
-                "recentRunCount", 0, "recentFailureRate", 0.0,
-                "activeTasks", 0, "pendingApprovals", 0
-            );
+                    "todayRuns",
+                    0,
+                    "todayErrors",
+                    0,
+                    "todayAvgLatencyMs",
+                    0L,
+                    "recentRunCount",
+                    0,
+                    "recentFailureRate",
+                    0.0,
+                    "activeTasks",
+                    0,
+                    "pendingApprovals",
+                    0);
         }
 
         // Today
         LambdaQueryWrapper<AgentRun> todayQuery = new LambdaQueryWrapper<>();
-        todayQuery.in(AgentRun::getTaskId, taskIds)
-                .ge(AgentRun::getStartedAt, todayStart);
+        todayQuery.in(AgentRun::getTaskId, taskIds).ge(AgentRun::getStartedAt, todayStart);
         List<AgentRun> todayRuns = runMapper.selectList(todayQuery);
 
         // Last 7 days
         LambdaQueryWrapper<AgentRun> weekQuery = new LambdaQueryWrapper<>();
-        weekQuery.in(AgentRun::getTaskId, taskIds)
-                .ge(AgentRun::getStartedAt, weekAgo);
+        weekQuery.in(AgentRun::getTaskId, taskIds).ge(AgentRun::getStartedAt, weekAgo);
         List<AgentRun> weekRuns = runMapper.selectList(weekQuery);
 
-        long todayAvgMs = todayRuns.isEmpty() ? 0L :
-                todayRuns.stream().mapToLong(r -> r.getDurationMs() != null ? r.getDurationMs() : 0L).sum()
-                / todayRuns.size();
-        long todayErrors = todayRuns.stream()
-                .filter(r -> r.getErrorCode() != null).count();
+        long todayAvgMs = todayRuns.isEmpty()
+                ? 0L
+                : todayRuns.stream()
+                                .mapToLong(r -> r.getDurationMs() != null ? r.getDurationMs() : 0L)
+                                .sum()
+                        / todayRuns.size();
+        long todayErrors =
+                todayRuns.stream().filter(r -> r.getErrorCode() != null).count();
 
-        long weekFailures = weekRuns.stream()
-                .filter(r -> r.getErrorCode() != null).count();
-        double weekFailureRate = weekRuns.isEmpty() ? 0.0 :
-                (double) weekFailures / weekRuns.size();
+        long weekFailures =
+                weekRuns.stream().filter(r -> r.getErrorCode() != null).count();
+        double weekFailureRate = weekRuns.isEmpty() ? 0.0 : (double) weekFailures / weekRuns.size();
 
         // Active tasks (pending or running)
         long activeTasks = userTasks.stream()
@@ -366,9 +373,9 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
                 .count();
 
         // Pending approvals
-        LambdaQueryWrapper<com.hfusionhub.entity.AgentApproval> pendingQuery =
-                new LambdaQueryWrapper<>();
-        pendingQuery.eq(com.hfusionhub.entity.AgentApproval::getStatus, "pending")
+        LambdaQueryWrapper<com.hfusionhub.entity.AgentApproval> pendingQuery = new LambdaQueryWrapper<>();
+        pendingQuery
+                .eq(com.hfusionhub.entity.AgentApproval::getStatus, "pending")
                 .eq(com.hfusionhub.entity.AgentApproval::getUserId, userId);
         int pendingApprovals = Math.toIntExact(approvalMapper.selectCount(pendingQuery));
 
@@ -390,28 +397,44 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
     private static long toLong(Object value) {
         if (value instanceof Number n) return n.longValue();
         if (value instanceof String s) {
-            try { return Long.parseLong(s); } catch (NumberFormatException ignored) {}
+            try {
+                return Long.parseLong(s);
+            } catch (NumberFormatException ignored) {
+            }
         }
         return 0L;
     }
 
     private AgentAggregatedStatsDTO buildEmptyStats(Long userId, Long kbId, LocalDateTime periodStart) {
         return AgentAggregatedStatsDTO.builder()
-                .userId(userId).knowledgeBaseId(kbId)
-                .periodStart(periodStart).periodEnd(LocalDateTime.now())
-                .totalTasks(0).totalRuns(0)
-                .successCount(0).failureCount(0).timeoutCount(0).cancelledCount(0)
-                .successRate(0.0).failureRate(0.0)
-                .avgDurationMs(0L).p50DurationMs(0L).p95DurationMs(0L).maxDurationMs(0L)
-                .avgToolCalls(0.0).totalPromptTokens(0L).totalCompletionTokens(0L)
-                .totalTokens(0L).avgTokensPerRun(0.0).avgApprovalDurationMs(0L)
+                .userId(userId)
+                .knowledgeBaseId(kbId)
+                .periodStart(periodStart)
+                .periodEnd(LocalDateTime.now())
+                .totalTasks(0)
+                .totalRuns(0)
+                .successCount(0)
+                .failureCount(0)
+                .timeoutCount(0)
+                .cancelledCount(0)
+                .successRate(0.0)
+                .failureRate(0.0)
+                .avgDurationMs(0L)
+                .p50DurationMs(0L)
+                .p95DurationMs(0L)
+                .maxDurationMs(0L)
+                .avgToolCalls(0.0)
+                .totalPromptTokens(0L)
+                .totalCompletionTokens(0L)
+                .totalTokens(0L)
+                .avgTokensPerRun(0.0)
+                .avgApprovalDurationMs(0L)
                 .dailyMetrics(List.of())
                 .build();
     }
 
     private AgentAggregatedStatsDTO buildStatsFromRuns(
-            List<AgentRun> runs, Long userId, Long kbId,
-            LocalDateTime periodStart, int days) {
+            List<AgentRun> runs, Long userId, Long kbId, LocalDateTime periodStart, int days) {
 
         int total = runs.size();
         if (total == 0) return buildEmptyStats(userId, kbId, periodStart);
@@ -444,31 +467,44 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
 
         Collections.sort(durations);
         long p50 = durations.isEmpty() ? 0L : durations.get(durations.size() / 2);
-        long p95 = durations.isEmpty() ? 0L
-                : durations.get((int) (durations.size() * 0.95));
+        long p95 = durations.isEmpty() ? 0L : durations.get((int) (durations.size() * 0.95));
 
         // Daily breakdown
         Map<java.time.LocalDate, List<AgentRun>> byDay = runs.stream()
                 .filter(r -> r.getStartedAt() != null)
-                .collect(Collectors.groupingBy(
-                        r -> r.getStartedAt().toLocalDate()));
+                .collect(Collectors.groupingBy(r -> r.getStartedAt().toLocalDate()));
 
         List<AgentAggregatedStatsDTO.DailyMetricDTO> dailyMetrics = new ArrayList<>();
         for (int i = 0; i < days; i++) {
             java.time.LocalDate date = java.time.LocalDate.now().minusDays(days - 1 - i);
             List<AgentRun> dayRuns = byDay.getOrDefault(date, List.of());
             int dc = dayRuns.size();
-            int ds = (int) dayRuns.stream().filter(r -> "succeeded".equals(r.getStatus())).count();
-            int df = (int) dayRuns.stream().filter(r -> "failed".equals(r.getStatus())).count();
-            long dDur = dayRuns.stream().mapToLong(r -> r.getDurationMs() != null ? r.getDurationMs() : 0L).sum();
-            double dTc = dayRuns.stream().mapToInt(r -> r.getToolCallsCount() != null ? r.getToolCallsCount() : 0).average().orElse(0.0);
-            double dTok = dayRuns.stream().mapToLong(r -> {
-                if (r.getTokenUsage() != null) return toLong(r.getTokenUsage().get("total_tokens"));
-                return 0L;
-            }).average().orElse(0.0);
+            int ds = (int) dayRuns.stream()
+                    .filter(r -> "succeeded".equals(r.getStatus()))
+                    .count();
+            int df = (int)
+                    dayRuns.stream().filter(r -> "failed".equals(r.getStatus())).count();
+            long dDur = dayRuns.stream()
+                    .mapToLong(r -> r.getDurationMs() != null ? r.getDurationMs() : 0L)
+                    .sum();
+            double dTc = dayRuns.stream()
+                    .mapToInt(r -> r.getToolCallsCount() != null ? r.getToolCallsCount() : 0)
+                    .average()
+                    .orElse(0.0);
+            double dTok = dayRuns.stream()
+                    .mapToLong(r -> {
+                        if (r.getTokenUsage() != null)
+                            return toLong(r.getTokenUsage().get("total_tokens"));
+                        return 0L;
+                    })
+                    .average()
+                    .orElse(0.0);
 
             dailyMetrics.add(AgentAggregatedStatsDTO.DailyMetricDTO.builder()
-                    .date(date.toString()).runCount(dc).successCount(ds).failureCount(df)
+                    .date(date.toString())
+                    .runCount(dc)
+                    .successCount(ds)
+                    .failureCount(df)
                     .avgDurationMs(dc > 0 ? dDur / dc : 0L)
                     .avgToolCalls(Math.round(dTc * 100.0) / 100.0)
                     .avgTokens(Math.round(dTok * 100.0) / 100.0)
@@ -476,16 +512,22 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
         }
 
         return AgentAggregatedStatsDTO.builder()
-                .userId(userId).knowledgeBaseId(kbId)
-                .periodStart(periodStart).periodEnd(LocalDateTime.now())
-                .totalTasks((int) runs.stream().map(AgentRun::getTaskId).distinct().count())
+                .userId(userId)
+                .knowledgeBaseId(kbId)
+                .periodStart(periodStart)
+                .periodEnd(LocalDateTime.now())
+                .totalTasks(
+                        (int) runs.stream().map(AgentRun::getTaskId).distinct().count())
                 .totalRuns(total)
-                .successCount(successCount).failureCount(failureCount)
-                .timeoutCount(timeoutCount).cancelledCount(cancelledCount)
+                .successCount(successCount)
+                .failureCount(failureCount)
+                .timeoutCount(timeoutCount)
+                .cancelledCount(cancelledCount)
                 .successRate(total > 0 ? (double) successCount / total : 0.0)
                 .failureRate(total > 0 ? (double) (failureCount + timeoutCount) / total : 0.0)
                 .avgDurationMs(total > 0 ? totalDuration / total : 0L)
-                .p50DurationMs(p50).p95DurationMs(p95)
+                .p50DurationMs(p50)
+                .p95DurationMs(p95)
                 .maxDurationMs(durations.isEmpty() ? 0L : durations.get(durations.size() - 1))
                 .avgToolCalls(total > 0 ? (double) totalToolCalls / total : 0.0)
                 .totalPromptTokens(totalPromptTokens)

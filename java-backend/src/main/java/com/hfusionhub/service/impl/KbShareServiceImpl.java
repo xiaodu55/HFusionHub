@@ -11,13 +11,12 @@ import com.hfusionhub.mapper.KbShareMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.KbShareService;
+import java.util.List;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * 知识库共享服务实现
@@ -79,19 +78,25 @@ public class KbShareServiceImpl implements KbShareService {
         if (kb == null || !kb.getUserId().equals(currentUserId)) {
             throw new BusinessException("无权查看该知识库的共享记录");
         }
-        return kbShareMapper.selectList(new LambdaQueryWrapper<KbShare>()
+        return kbShareMapper
+                .selectList(new LambdaQueryWrapper<KbShare>()
                         .eq(KbShare::getKnowledgeBaseId, knowledgeBaseId)
                         .orderByDesc(KbShare::getCreatedAt))
-                .stream().map(this::toDTO).collect(Collectors.toList());
+                .stream()
+                .map(this::toDTO)
+                .collect(Collectors.toList());
     }
 
     @Override
     public List<KbShareInfoDTO> listSharedToMe() {
         Long currentUserId = JwtUtils.getCurrentUserId();
-        return kbShareMapper.selectList(new LambdaQueryWrapper<KbShare>()
+        return kbShareMapper
+                .selectList(new LambdaQueryWrapper<KbShare>()
                         .eq(KbShare::getSharedUserId, currentUserId)
                         .orderByDesc(KbShare::getCreatedAt))
-                .stream().map(this::toDTO).collect(Collectors.toList());
+                .stream()
+                .map(this::toDTO)
+                .collect(Collectors.toList());
     }
 
     @Override

@@ -1,7 +1,6 @@
 package com.hfusionhub.service;
 
 import com.hfusionhub.dto.AgentStatusEventDTO;
-
 import java.util.List;
 import java.util.Map;
 
@@ -21,8 +20,7 @@ public interface AgentStatusEventService {
      * @param status    事件发生时任务状态
      * @param payload   附加载荷
      */
-    void record(Long taskId, Long runId, String eventType, String status,
-                Map<String, Object> payload);
+    void record(Long taskId, Long runId, String eventType, String status, Map<String, Object> payload);
 
     /**
      * 按任务ID查询事件（支持断点续传 sinceId）

@@ -5,11 +5,10 @@ import com.hfusionhub.dto.KbShareInfoDTO;
 import com.hfusionhub.service.KbShareService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.*;
-
 import java.util.List;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
 
 /**
  * 知识库共享控制器
@@ -31,7 +30,10 @@ public class KbShareController {
         Long knowledgeBaseId = Long.valueOf(String.valueOf(body.get("knowledgeBaseId")));
         Long targetUserId = Long.valueOf(String.valueOf(body.get("targetUserId")));
         KbShareInfoDTO dto = kbShareService.share(knowledgeBaseId, targetUserId);
-        auditLogService.record("kb.share", "kb_share", String.valueOf(dto.getId()),
+        auditLogService.record(
+                "kb.share",
+                "kb_share",
+                String.valueOf(dto.getId()),
                 "共享知识库 " + knowledgeBaseId + " 给用户 " + targetUserId);
         return R.ok("共享成功", dto);
     }
@@ -52,8 +54,8 @@ public class KbShareController {
     @DeleteMapping("/{knowledgeBaseId}/{shareId}")
     public R<Void> revoke(@PathVariable Long knowledgeBaseId, @PathVariable Long shareId) {
         kbShareService.revoke(knowledgeBaseId, shareId);
-        auditLogService.record("kb.share.revoke", "kb_share", String.valueOf(shareId),
-                "撤销知识库 " + knowledgeBaseId + " 的共享");
+        auditLogService.record(
+                "kb.share.revoke", "kb_share", String.valueOf(shareId), "撤销知识库 " + knowledgeBaseId + " 的共享");
         return R.ok("已撤销共享", null);
     }
 }

@@ -6,11 +6,10 @@ import com.hfusionhub.dto.ConversationInfoDTO;
 import com.hfusionhub.dto.ConversationQueryDTO;
 import com.hfusionhub.dto.MessageInfoDTO;
 import com.hfusionhub.dto.MessageSendDTO;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
  * 对话服务接口
@@ -141,8 +140,7 @@ public interface ConversationService {
      * Return history with the conversation's active prompt template and
      * relevant memories.  Queue workers use this to match direct streaming.
      */
-    List<Map<String, String>> getChatHistoryWithInstructions(
-            Long conversationId, Long userId, String query);
+    List<Map<String, String>> getChatHistoryWithInstructions(Long conversationId, Long userId, String query);
 
     /**
      * V13 队列模式入口 — 校验权限、保存用户消息、创建 AgentTask + PENDING Run、

@@ -15,11 +15,6 @@ import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.RagIntentNodeMapper;
 import com.hfusionhub.service.RagIntentNodeService;
 import com.hfusionhub.tenant.TenantContext;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -29,6 +24,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
@@ -82,7 +81,8 @@ public class RagIntentNodeServiceImpl implements RagIntentNodeService {
         String nextLevel = dto.getLevel() != null ? dto.getLevel() : node.getLevel();
         String nextKind = dto.getKind() != null ? dto.getKind() : node.getKind();
         Long nextParentId = dto.getParentId() != null ? dto.getParentId() : node.getParentId();
-        Long nextKnowledgeBaseId = dto.getKnowledgeBaseId() != null ? dto.getKnowledgeBaseId() : node.getKnowledgeBaseId();
+        Long nextKnowledgeBaseId =
+                dto.getKnowledgeBaseId() != null ? dto.getKnowledgeBaseId() : node.getKnowledgeBaseId();
         Long nextMcpToolId = dto.getMcpToolId() != null ? dto.getMcpToolId() : node.getMcpToolId();
 
         if (dto.getIntentCode() != null && !dto.getIntentCode().equals(node.getIntentCode())) {
@@ -165,22 +165,33 @@ public class RagIntentNodeServiceImpl implements RagIntentNodeService {
                 .eq(StringUtils.hasText(queryDTO.getKind()), RagIntentNode::getKind, queryDTO.getKind());
         if (StringUtils.hasText(queryDTO.getKeyword())) {
             String keyword = queryDTO.getKeyword().trim();
-            wrapper.and(w -> w.like(RagIntentNode::getName, keyword)
-                    .or()
-                    .like(RagIntentNode::getIntentCode, keyword));
+            wrapper.and(w -> w.like(RagIntentNode::getName, keyword).or().like(RagIntentNode::getIntentCode, keyword));
         }
         wrapper.orderByAsc(RagIntentNode::getSortOrder).orderByDesc(RagIntentNode::getUpdatedAt);
         Page<RagIntentNode> result = ragIntentNodeMapper.selectPage(page, wrapper);
         Map<Long, String> kbNames = loadKnowledgeBaseNames(result.getRecords());
-        List<RagIntentNodeInfoDTO> records = result.getRecords().stream()
-                .map(node -> convert(node, kbNames))
-                .toList();
+        List<RagIntentNodeInfoDTO> records =
+                result.getRecords().stream().map(node -> convert(node, kbNames)).toList();
         return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), result.getTotal(), records);
     }
 
     @Override
     public List<RagIntentNodeInfoDTO> tree(Integer enabled) {
-        Long userId = jwtUtils.getCurrentUserId();
+        return treeForUser(enabled, null);
+    }
+
+    @Override
+    public List<Map<String, Object>> routeCandidates() {
+        return routeCandidatesForUser(null);
+    }
+
+    @Override
+    public List<Map<String, Object>> routeCandidates(Long userId) {
+        return routeCandidatesForUser(userId);
+    }
+
+    private List<RagIntentNodeInfoDTO> treeForUser(Integer enabled, Long explicitUserId) {
+        Long userId = explicitUserId != null ? explicitUserId : jwtUtils.getCurrentUserId();
         List<RagIntentNode> nodes = listOwnedNodes(userId, enabled);
         Map<Long, String> kbNames = loadKnowledgeBaseNames(nodes);
         Map<Long, RagIntentNodeInfoDTO> dtoById = new HashMap<>();
@@ -199,19 +210,16 @@ public class RagIntentNodeServiceImpl implements RagIntentNodeService {
         return roots;
     }
 
-    @Override
-    public List<Map<String, Object>> routeCandidates() {
+    private List<Map<String, Object>> routeCandidatesForUser(Long userId) {
         List<Map<String, Object>> candidates = new ArrayList<>();
-        for (RagIntentNodeInfoDTO root : tree(1)) {
+        for (RagIntentNodeInfoDTO root : treeForUser(1, userId)) {
             collectRouteCandidates(root, new ArrayList<>(), candidates);
         }
         return candidates;
     }
 
     private void collectRouteCandidates(
-            RagIntentNodeInfoDTO node,
-            List<String> parentPath,
-            List<Map<String, Object>> candidates) {
+            RagIntentNodeInfoDTO node, List<String> parentPath, List<Map<String, Object>> candidates) {
         List<String> path = new ArrayList<>(parentPath);
         path.add(node.getName());
         if (LEVEL_TOPIC.equals(node.getLevel())) {
@@ -300,8 +308,8 @@ public class RagIntentNodeServiceImpl implements RagIntentNodeService {
 
     private boolean isDescendant(Long userId, Long ancestorId, Long candidateId) {
         List<RagIntentNode> all = listOwnedNodes(userId, null);
-        Map<Long, Long> parentById = all.stream()
-                .collect(Collectors.toMap(RagIntentNode::getId, RagIntentNode::getParentId));
+        Map<Long, Long> parentById =
+                all.stream().collect(Collectors.toMap(RagIntentNode::getId, RagIntentNode::getParentId));
         Long cursor = candidateId;
         Set<Long> visited = new HashSet<>();
         while (cursor != null && visited.add(cursor)) {
@@ -350,9 +358,7 @@ public class RagIntentNodeServiceImpl implements RagIntentNodeService {
                 .level(node.getLevel())
                 .kind(node.getKind())
                 .knowledgeBaseId(node.getKnowledgeBaseId())
-                .knowledgeBaseName(node.getKnowledgeBaseId() == null
-                        ? null
-                        : kbNames.get(node.getKnowledgeBaseId()))
+                .knowledgeBaseName(node.getKnowledgeBaseId() == null ? null : kbNames.get(node.getKnowledgeBaseId()))
                 .mcpToolId(node.getMcpToolId())
                 .topK(node.getTopK())
                 .routeConfig(node.getRouteConfig())

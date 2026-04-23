@@ -5,6 +5,9 @@ import com.hfusionhub.service.AgentTaskService;
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,10 +15,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /**
  * Internal-only endpoint for the durable one-time execution token.
@@ -44,8 +43,7 @@ public class AgentApprovalInternalController {
     private String expectedToken;
 
     @PostMapping("/approvals/consume")
-    public R<Map<String, Object>> consume(@RequestBody Map<String, String> body,
-                                          HttpServletRequest request) {
+    public R<Map<String, Object>> consume(@RequestBody Map<String, String> body, HttpServletRequest request) {
         String provided = request.getHeader("X-Internal-Token");
         if (!constantTimeEquals(expectedToken, provided)) {
             return R.fail(403, "Forbidden: invalid or missing X-Internal-Token");
@@ -76,8 +74,12 @@ public class AgentApprovalInternalController {
         byte[] b = provided.getBytes(StandardCharsets.UTF_8);
         if (a.length != b.length) {
             int diff = 0;
-            for (byte ignored : a) { diff |= ignored; }
-            for (byte ignored : b) { diff |= ignored; }
+            for (byte ignored : a) {
+                diff |= ignored;
+            }
+            for (byte ignored : b) {
+                diff |= ignored;
+            }
             return false;
         }
         int diff = 0;

@@ -16,7 +16,9 @@ public class RagIntentNodeCreateDTO {
     private Long parentId;
 
     @NotBlank(message = "intentCode is required")
-    @Pattern(regexp = "^[A-Za-z0-9_.:-]{2,64}$", message = "intentCode only supports letters, numbers, dot, colon, dash and underscore")
+    @Pattern(
+            regexp = "^[A-Za-z0-9_.:-]{2,64}$",
+            message = "intentCode only supports letters, numbers, dot, colon, dash and underscore")
     private String intentCode;
 
     @NotBlank(message = "name is required")

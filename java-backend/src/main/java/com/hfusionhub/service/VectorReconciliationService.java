@@ -2,15 +2,14 @@ package com.hfusionhub.service;
 
 import com.hfusionhub.entity.DocumentChunk;
 import com.hfusionhub.mapper.DocumentChunkMapper;
+import java.util.*;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
-
-import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Detects and reports inconsistencies between the MySQL chunk index and the
@@ -42,8 +41,7 @@ public class VectorReconciliationService {
             int vectorChunkCount,
             List<String> orphanVectorIds,
             List<Long> missingVectorDocIds,
-            boolean healthy
-    ) {}
+            boolean healthy) {}
 
     /**
      * Compare MySQL chunks against the vector store for a single document.
@@ -56,18 +54,15 @@ public class VectorReconciliationService {
         List<DocumentChunk> mysqlChunks = documentChunkMapper.selectList(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<DocumentChunk>()
                         .eq(DocumentChunk::getDocumentId, documentId));
-        Set<String> mysqlIds = mysqlChunks.stream()
-                .map(DocumentChunk::getChunkId)
-                .collect(Collectors.toSet());
+        Set<String> mysqlIds =
+                mysqlChunks.stream().map(DocumentChunk::getChunkId).collect(Collectors.toSet());
 
         // Vector store side: all chunk IDs for this document
         Set<String> vectorIds = fetchVectorChunkIds(documentId);
 
         // Orphan vectors: in Milvus but not in MySQL
-        List<String> orphans = vectorIds.stream()
-                .filter(id -> !mysqlIds.contains(id))
-                .sorted()
-                .toList();
+        List<String> orphans =
+                vectorIds.stream().filter(id -> !mysqlIds.contains(id)).sorted().toList();
 
         // Missing vectors: in MySQL but not in Milvus
         List<Long> missingDocIds = mysqlIds.stream()
@@ -78,17 +73,14 @@ public class VectorReconciliationService {
 
         boolean healthy = orphans.isEmpty() && missingDocIds.isEmpty();
         if (!healthy) {
-            log.warn("Document {} reconciliation: orphans={}, missing_vectors={}",
-                    documentId, orphans.size(), missingDocIds.size());
+            log.warn(
+                    "Document {} reconciliation: orphans={}, missing_vectors={}",
+                    documentId,
+                    orphans.size(),
+                    missingDocIds.size());
         }
 
-        return new ReconciliationResult(
-                mysqlIds.size(),
-                vectorIds.size(),
-                orphans,
-                missingDocIds,
-                healthy
-        );
+        return new ReconciliationResult(mysqlIds.size(), vectorIds.size(), orphans, missingDocIds, healthy);
     }
 
     /**
@@ -97,9 +89,7 @@ public class VectorReconciliationService {
     public Map<String, Object> reconcileAll() {
         // Get all distinct document IDs that have chunks in MySQL
         List<DocumentChunk> allChunks = documentChunkMapper.selectList(null);
-        Set<Long> docIds = allChunks.stream()
-                .map(DocumentChunk::getDocumentId)
-                .collect(Collectors.toSet());
+        Set<Long> docIds = allChunks.stream().map(DocumentChunk::getDocumentId).collect(Collectors.toSet());
 
         int totalMysqlChunks = allChunks.size();
         List<String> allOrphans = new ArrayList<>();

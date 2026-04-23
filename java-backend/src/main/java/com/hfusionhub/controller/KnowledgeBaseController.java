@@ -48,8 +48,7 @@ public class KnowledgeBaseController {
      */
     @PutMapping("/{id}")
     @Operation(summary = "更新知识库", description = "更新知识库信息")
-    public R<KnowledgeBaseInfoDTO> update(@PathVariable Long id,
-                                          @Valid @RequestBody KnowledgeBaseUpdateDTO updateDTO) {
+    public R<KnowledgeBaseInfoDTO> update(@PathVariable Long id, @Valid @RequestBody KnowledgeBaseUpdateDTO updateDTO) {
         KnowledgeBaseInfoDTO info = knowledgeBaseService.update(id, updateDTO);
         return R.ok("更新成功", info);
     }

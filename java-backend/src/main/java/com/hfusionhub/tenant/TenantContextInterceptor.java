@@ -50,6 +50,7 @@ public class TenantContextInterceptor implements HandlerInterceptor {
 
     /** Callback path pattern, e.g. {@code /vectorize/{documentId}/callback}. */
     static final String CALLBACK_PATH_PREFIX = "/vectorize/";
+
     static final String CALLBACK_PATH_SUFFIX = "/callback";
 
     /** Request attribute set by {@link CallbackSignatureFilter} after verification. */
@@ -66,8 +67,7 @@ public class TenantContextInterceptor implements HandlerInterceptor {
     private Long defaultTenantId;
 
     @Override
-    public boolean preHandle(HttpServletRequest request, HttpServletResponse response,
-                             Object handler) {
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
 
         // 1. Authenticated user request — tenant comes from login + validated membership.
         if (JwtUtils.isLogin()) {
@@ -80,16 +80,14 @@ public class TenantContextInterceptor implements HandlerInterceptor {
 
                 // 1a. Platform admin may act on behalf of an explicit target tenant.
                 String targetTenant = request.getHeader("X-Target-Tenant");
-                if (Boolean.TRUE.equals(user.getPlatformAdmin())
-                        && targetTenant != null && !targetTenant.isBlank()) {
+                if (Boolean.TRUE.equals(user.getPlatformAdmin()) && targetTenant != null && !targetTenant.isBlank()) {
                     return resolveTargetTenant(user, targetTenant, request, response);
                 }
 
                 // 1b. User's own tenant, validated against tenant_member membership.
                 // Platform admins bypass membership check — they are cross-tenant
                 // and bootstrapped without a tenant_member record.
-                if (!Boolean.TRUE.equals(user.getPlatformAdmin())
-                        && !isActiveMember(user.getTenantId(), userId)) {
+                if (!Boolean.TRUE.equals(user.getPlatformAdmin()) && !isActiveMember(user.getTenantId(), userId)) {
                     log.warn("User {} is not an active member of tenant {}", userId, user.getTenantId());
                     return rejectNoTenant(request, response);
                 }
@@ -106,8 +104,7 @@ public class TenantContextInterceptor implements HandlerInterceptor {
         //    CallbackSignatureFilter (set as a request attribute).  Any other
         //    unauthenticated request is rejected in strict mode — never does an
         //    unverified client control the tenant context.
-        if (isCallbackPath(request) && Boolean.TRUE.equals(
-                request.getAttribute(CALLBACK_VERIFIED_ATTR))) {
+        if (isCallbackPath(request) && Boolean.TRUE.equals(request.getAttribute(CALLBACK_VERIFIED_ATTR))) {
             String headerTenant = request.getHeader("X-Tenant-Id");
             if (headerTenant != null && !headerTenant.isBlank()) {
                 try {
@@ -141,21 +138,18 @@ public class TenantContextInterceptor implements HandlerInterceptor {
      * malformed header yields 403; a well-formed id that does not name an
      * existing, {@code active} tenant yields 404.</p>
      */
-    private boolean resolveTargetTenant(User user, String targetTenant,
-                                        HttpServletRequest request,
-                                        HttpServletResponse response) {
+    private boolean resolveTargetTenant(
+            User user, String targetTenant, HttpServletRequest request, HttpServletResponse response) {
         Long target;
         try {
             target = Long.parseLong(targetTenant);
         } catch (NumberFormatException e) {
             log.warn("Invalid X-Target-Tenant header: {}", targetTenant);
-            return rejectWithStatus(response, HttpServletResponse.SC_FORBIDDEN,
-                    "Invalid X-Target-Tenant header");
+            return rejectWithStatus(response, HttpServletResponse.SC_FORBIDDEN, "Invalid X-Target-Tenant header");
         }
         if (target == null || target < 1) {
             log.warn("Invalid X-Target-Tenant value: {}", targetTenant);
-            return rejectWithStatus(response, HttpServletResponse.SC_FORBIDDEN,
-                    "Invalid X-Target-Tenant value");
+            return rejectWithStatus(response, HttpServletResponse.SC_FORBIDDEN, "Invalid X-Target-Tenant value");
         }
 
         Tenant tenant;
@@ -163,19 +157,17 @@ public class TenantContextInterceptor implements HandlerInterceptor {
             tenant = tenantMapper.selectById(target);
         } catch (Exception e) {
             log.warn("Target tenant lookup failed for {}: {}", target, e.getMessage());
-            return rejectWithStatus(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                    "Tenant resolution failed");
+            return rejectWithStatus(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Tenant resolution failed");
         }
         if (tenant == null || !"active".equalsIgnoreCase(tenant.getStatus())) {
             log.warn("X-Target-Tenant {} does not exist or is not active", target);
-            return rejectWithStatus(response, HttpServletResponse.SC_NOT_FOUND,
-                    "Target tenant not found or inactive");
+            return rejectWithStatus(response, HttpServletResponse.SC_NOT_FOUND, "Target tenant not found or inactive");
         }
 
         TenantContext.setTenantId(target);
         TenantContext.setCrossTenant(true);
-        TenantContext.logCrossTenant(user.getId(), user.getTenantId(), target,
-                request.getMethod() + " " + request.getRequestURI());
+        TenantContext.logCrossTenant(
+                user.getId(), user.getTenantId(), target, request.getMethod() + " " + request.getRequestURI());
         return true;
     }
 
@@ -207,11 +199,10 @@ public class TenantContextInterceptor implements HandlerInterceptor {
     }
 
     private boolean rejectNoTenant(HttpServletRequest request, HttpServletResponse response) {
-        log.warn("No tenant resolved for request: {} {} (strict mode)",
-                 request.getMethod(), request.getRequestURI());
+        log.warn("No tenant resolved for request: {} {} (strict mode)", request.getMethod(), request.getRequestURI());
         if (strict) {
-            return rejectWithStatus(response, HttpServletResponse.SC_FORBIDDEN,
-                    "Tenant context required but not resolved");
+            return rejectWithStatus(
+                    response, HttpServletResponse.SC_FORBIDDEN, "Tenant context required but not resolved");
         }
         TenantContext.setTenantId(defaultTenantId);
         return true;
@@ -222,13 +213,14 @@ public class TenantContextInterceptor implements HandlerInterceptor {
         response.setContentType("application/json;charset=UTF-8");
         try {
             response.getWriter().write("{\"code\":" + status + ",\"message\":\"" + message + "\"}");
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
         return false;
     }
 
     @Override
-    public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
-                                Object handler, Exception ex) {
+    public void afterCompletion(
+            HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
         TenantContext.clear();
     }
 }

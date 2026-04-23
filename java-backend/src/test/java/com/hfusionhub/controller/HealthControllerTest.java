@@ -1,12 +1,11 @@
 package com.hfusionhub.controller;
 
-import com.hfusionhub.common.result.R;
-import org.junit.jupiter.api.Test;
-
-import java.util.Map;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+import com.hfusionhub.common.result.R;
+import java.util.Map;
+import org.junit.jupiter.api.Test;
 
 /**
  * Pure unit test for {@link HealthController}.

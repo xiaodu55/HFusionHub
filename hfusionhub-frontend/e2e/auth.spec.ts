@@ -69,7 +69,7 @@ test.describe('Register & Login', () => {
     expect(token.length).toBeGreaterThan(10)
   })
 
-  test('API register returns user info', async ({ javaApi }) => {
+  test('API register returns user info (role pending until assigned)', async ({ javaApi }) => {
     const username = uid('api_reg')
     const res = await javaApi.post('user/register', {
       data: { username, password: 'Test1234', nickname: username },
@@ -77,6 +77,7 @@ test.describe('Register & Login', () => {
     const body = await assertJson(res)
     expect(body.code).toBe(200)
     expect(body.data.username).toBe(username)
-    expect(body.data.role).toBe('user')
+    // 新业务规则：注册即“待分配”(pending)，由 admin 后续提升角色。
+    expect(body.data.role).toBe('pending')
   })
 })

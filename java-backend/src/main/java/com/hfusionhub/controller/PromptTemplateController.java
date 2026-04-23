@@ -6,10 +6,9 @@ import com.hfusionhub.dto.PromptTemplateSaveDTO;
 import com.hfusionhub.dto.PromptTemplateVersionDTO;
 import com.hfusionhub.service.PromptTemplateService;
 import jakarta.validation.Valid;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/prompt-templates")
@@ -24,8 +23,7 @@ public class PromptTemplateController {
     }
 
     @GetMapping("/recycle-bin")
-    public R<List<PromptTemplateInfoDTO>> listRecycleBin(
-            @RequestParam(required = false) String keyword) {
+    public R<List<PromptTemplateInfoDTO>> listRecycleBin(@RequestParam(required = false) String keyword) {
         return R.ok(promptTemplateService.listRecycleBin(keyword));
     }
 
@@ -40,14 +38,12 @@ public class PromptTemplateController {
     }
 
     @PostMapping("/{id}/publish")
-    public R<PromptTemplateInfoDTO> publish(@PathVariable Long id,
-                                           @RequestParam Integer expectedVersion) {
+    public R<PromptTemplateInfoDTO> publish(@PathVariable Long id, @RequestParam Integer expectedVersion) {
         return R.ok("模板已发布，可用于新建对话", promptTemplateService.publish(id, expectedVersion));
     }
 
     @PostMapping("/{id}/unpublish")
-    public R<PromptTemplateInfoDTO> unpublish(@PathVariable Long id,
-                                             @RequestParam Integer expectedVersion) {
+    public R<PromptTemplateInfoDTO> unpublish(@PathVariable Long id, @RequestParam Integer expectedVersion) {
         return R.ok("模板已撤回，不再用于新建对话", promptTemplateService.unpublish(id, expectedVersion));
     }
 
@@ -77,9 +73,8 @@ public class PromptTemplateController {
     }
 
     @PostMapping("/{id}/rollback/{versionId}")
-    public R<PromptTemplateInfoDTO> rollback(@PathVariable Long id,
-                                              @PathVariable Long versionId,
-                                              @RequestParam Integer expectedVersion) {
+    public R<PromptTemplateInfoDTO> rollback(
+            @PathVariable Long id, @PathVariable Long versionId, @RequestParam Integer expectedVersion) {
         PromptTemplateInfoDTO result = promptTemplateService.rollback(id, versionId, expectedVersion);
         return R.ok("已回滚到目标版本，当前为草稿。请确认内容后重新发布。", result);
     }

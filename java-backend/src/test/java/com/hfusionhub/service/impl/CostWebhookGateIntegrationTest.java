@@ -1,5 +1,10 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.hfusionhub.dto.GateResult;
@@ -21,6 +26,9 @@ import com.hfusionhub.service.WebhookSubscriptionService;
 import com.hfusionhub.tenant.TenantContext;
 import com.hfusionhub.webhook.WebhookEventPublisher;
 import com.hfusionhub.webhook.WebhookEventTypes;
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,15 +38,6 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.ActiveProfiles;
-
-import java.math.BigDecimal;
-import java.util.List;
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 三个新能力模块（成本追踪 / Webhook / 评测回归门禁）集成冒烟测试（H2）。
@@ -140,8 +139,7 @@ class CostWebhookGateIntegrationTest {
         WebhookSubscription sub = new WebhookSubscription();
         sub.setName("评测通知");
         sub.setUrl(UNREACHABLE_URL);
-        sub.setEvents(List.of(WebhookEventTypes.EVALUATION_COMPLETED,
-                WebhookEventTypes.AGENT_TASK_COMPLETED));
+        sub.setEvents(List.of(WebhookEventTypes.EVALUATION_COMPLETED, WebhookEventTypes.AGENT_TASK_COMPLETED));
 
         WebhookSubscription created = webhookSubscriptionService.create(1L, sub);
         assertNotNull(created.getId(), "创建应返回 ID");
@@ -157,8 +155,8 @@ class CostWebhookGateIntegrationTest {
         // 更新
         loaded.setName("改名后的订阅");
         webhookSubscriptionService.update(1L, created.getId(), loaded);
-        assertEquals("改名后的订阅",
-                webhookSubscriptionService.get(1L, created.getId()).getName());
+        assertEquals(
+                "改名后的订阅", webhookSubscriptionService.get(1L, created.getId()).getName());
 
         // 停用
         webhookSubscriptionService.setActive(1L, created.getId(), false);
@@ -175,13 +173,13 @@ class CostWebhookGateIntegrationTest {
         assertTrue(history.getTotal() >= 1, "应有投递历史");
 
         // 归属校验
-        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
-                () -> webhookSubscriptionService.get(999L, created.getId()));
+        org.junit.jupiter.api.Assertions.assertThrows(
+                RuntimeException.class, () -> webhookSubscriptionService.get(999L, created.getId()));
 
         // 逻辑删除
         webhookSubscriptionService.delete(1L, created.getId());
-        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
-                () -> webhookSubscriptionService.get(1L, created.getId()));
+        org.junit.jupiter.api.Assertions.assertThrows(
+                RuntimeException.class, () -> webhookSubscriptionService.get(1L, created.getId()));
     }
 
     @Test
@@ -195,18 +193,18 @@ class CostWebhookGateIntegrationTest {
         // 发布不匹配事件 → 不应触发投递
         webhookEventPublisher.publish(WebhookEventTypes.DOCUMENT_INDEXED, 1L, 1L, Map.of());
         Thread.sleep(500);
-        assertEquals(0L, countDeliveries(created.getId(), WebhookEventTypes.DOCUMENT_INDEXED),
-                "未订阅的事件不应触发投递");
+        assertEquals(0L, countDeliveries(created.getId(), WebhookEventTypes.DOCUMENT_INDEXED), "未订阅的事件不应触发投递");
 
         // 发布匹配事件 → 异步分发投递（失败但留下记录），连续失败计数 +1
-        webhookEventPublisher.publish(WebhookEventTypes.EVALUATION_COMPLETED, 1L, 1L, Map.of(
-                "datasetId", 1L, "passed", true));
-        waitFor(() -> countDeliveries(created.getId(), WebhookEventTypes.EVALUATION_COMPLETED) >= 1,
+        webhookEventPublisher.publish(
+                WebhookEventTypes.EVALUATION_COMPLETED, 1L, 1L, Map.of("datasetId", 1L, "passed", true));
+        waitFor(() -> countDeliveries(created.getId(), WebhookEventTypes.EVALUATION_COMPLETED) >= 1, 10_000);
+        waitFor(
+                () -> {
+                    WebhookSubscription after = webhookSubscriptionMapper.selectById(created.getId());
+                    return after != null && after.getFailureCount() != null && after.getFailureCount() >= 1;
+                },
                 10_000);
-        waitFor(() -> {
-            WebhookSubscription after = webhookSubscriptionMapper.selectById(created.getId());
-            return after != null && after.getFailureCount() != null && after.getFailureCount() >= 1;
-        }, 10_000);
     }
 
     // ================================================================
@@ -218,19 +216,17 @@ class CostWebhookGateIntegrationTest {
         Long datasetId = insertDataset("门禁测试集", 1L);
 
         // 基线评测：成本 0.010000
-        Long baselineRunId = insertRun(datasetId, "completed", 0.85,
-                Map.of("latency_p95", 1200.0, "token_cost", 0.010000));
+        Long baselineRunId =
+                insertRun(datasetId, "completed", 0.85, Map.of("latency_p95", 1200.0, "token_cost", 0.010000));
         // 本次评测：准确率高、延迟低、成本不超基线 1.2 倍 → 通过
-        Long passRunId = insertRun(datasetId, "completed", 0.92,
-                Map.of("latency_p95", 900.0, "token_cost", 0.011000));
+        Long passRunId = insertRun(datasetId, "completed", 0.92, Map.of("latency_p95", 900.0, "token_cost", 0.011000));
 
         GateResult passed = evaluationGateService.checkGate(1L, datasetId, passRunId);
         assertTrue(passed.isPassed(), "成本未超基线 1.2 倍应通过门禁");
         assertNotNull(passed.getBaselineRunUuid(), "应识别出基线评测");
 
         // 本次评测成本 0.02 >= 基线 0.01 × 1.2 → 成本项失败
-        Long failRunId = insertRun(datasetId, "completed", 0.95,
-                Map.of("latency_p95", 500.0, "token_cost", 0.020000));
+        Long failRunId = insertRun(datasetId, "completed", 0.95, Map.of("latency_p95", 500.0, "token_cost", 0.020000));
         GateResult failed = evaluationGateService.checkGate(1L, datasetId, failRunId);
         assertFalse(failed.isPassed(), "成本超基线应未通过门禁");
         assertNotNull(failed.getCriteria());
@@ -238,8 +234,8 @@ class CostWebhookGateIntegrationTest {
                 .anyMatch(c -> "token_cost".equals(c.getName()) && "FAILED".equals(c.getStatus())));
 
         // 延迟超 5000ms → 延迟项失败
-        Long latencyFailRunId = insertRun(datasetId, "completed", 0.99,
-                Map.of("latency_p95", 6000.0, "token_cost", 0.005000));
+        Long latencyFailRunId =
+                insertRun(datasetId, "completed", 0.99, Map.of("latency_p95", 6000.0, "token_cost", 0.005000));
         GateResult latencyFailed = evaluationGateService.checkGate(1L, datasetId, latencyFailRunId);
         assertFalse(latencyFailed.isPassed(), "延迟超 5000ms 应未通过门禁");
         assertTrue(latencyFailed.getCriteria().stream()
@@ -259,8 +255,8 @@ class CostWebhookGateIntegrationTest {
     // 辅助
     // ================================================================
 
-    private void recordUsage(Long userId, String model, int prompt, int completion,
-                             double costUsd, int latencyMs, String requestType) {
+    private void recordUsage(
+            Long userId, String model, int prompt, int completion, double costUsd, int latencyMs, String requestType) {
         ModelUsageRecord record = new ModelUsageRecord();
         record.setUserId(userId);
         record.setTenantId(1L);
@@ -283,8 +279,7 @@ class CostWebhookGateIntegrationTest {
         return dataset.getId();
     }
 
-    private Long insertRun(Long datasetId, String status, Double score,
-                           Map<String, Object> summary) {
+    private Long insertRun(Long datasetId, String status, Double score, Map<String, Object> summary) {
         AgentEvaluationRun run = new AgentEvaluationRun();
         run.setDatasetId(datasetId);
         run.setRunUuid("run-" + System.nanoTime());
@@ -297,8 +292,7 @@ class CostWebhookGateIntegrationTest {
 
     private long countDeliveries(Long subscriptionId, String eventType) {
         LambdaQueryWrapper<WebhookDelivery> query = new LambdaQueryWrapper<>();
-        query.eq(WebhookDelivery::getSubscriptionId, subscriptionId)
-             .eq(WebhookDelivery::getEventType, eventType);
+        query.eq(WebhookDelivery::getSubscriptionId, subscriptionId).eq(WebhookDelivery::getEventType, eventType);
         return webhookDeliveryMapper.selectCount(query);
     }
 

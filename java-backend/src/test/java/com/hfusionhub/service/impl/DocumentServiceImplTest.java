@@ -1,5 +1,14 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.dto.DocumentUpdateDTO;
@@ -11,6 +20,7 @@ import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.DeletionService;
 import com.hfusionhub.service.VectorizationService;
+import java.time.LocalDateTime;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,17 +29,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.time.LocalDateTime;
-
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class DocumentServiceImplTest {
@@ -69,8 +68,7 @@ class DocumentServiceImplTest {
     void updateRejectsMissingDocument() {
         when(documentMapper.selectById(10L)).thenReturn(null);
 
-        assertThrows(BusinessException.class,
-                () -> documentService.update(10L, new DocumentUpdateDTO()));
+        assertThrows(BusinessException.class, () -> documentService.update(10L, new DocumentUpdateDTO()));
         verify(knowledgeBaseMapper, never()).selectById(org.mockito.ArgumentMatchers.anyLong());
     }
 
@@ -80,8 +78,7 @@ class DocumentServiceImplTest {
         when(documentMapper.selectById(10L)).thenReturn(document);
         when(knowledgeBaseMapper.selectById(20L)).thenReturn(knowledgeBase(20L, 2L));
 
-        assertThrows(BusinessException.class,
-                () -> documentService.update(10L, new DocumentUpdateDTO()));
+        assertThrows(BusinessException.class, () -> documentService.update(10L, new DocumentUpdateDTO()));
         verify(documentMapper, never()).updateById(document);
     }
 
@@ -196,8 +193,7 @@ class DocumentServiceImplTest {
         when(documentMapper.selectById(10L)).thenReturn(document);
         when(knowledgeBaseMapper.selectById(20L)).thenReturn(knowledgeBase(20L, 2L));
 
-        assertThrows(BusinessException.class,
-                () -> documentService.parseDocument(10L, "ollama"));
+        assertThrows(BusinessException.class, () -> documentService.parseDocument(10L, "ollama"));
         verify(vectorizationService, never()).startVectorization(10L, "ollama");
     }
 
@@ -220,7 +216,8 @@ class DocumentServiceImplTest {
         document.setRecycleExpiresAt(LocalDateTime.now().plusDays(1));
         when(documentMapper.selectIncludingDeleted(10L)).thenReturn(document);
         when(knowledgeBaseMapper.selectById(20L)).thenReturn(knowledgeBase(20L, 1L));
-        when(documentMapper.restoreFromRecycle(10L, DocumentStatus.PENDING.getCode())).thenReturn(1);
+        when(documentMapper.restoreFromRecycle(10L, DocumentStatus.PENDING.getCode()))
+                .thenReturn(1);
 
         assertDoesNotThrow(() -> documentService.restore(10L));
 

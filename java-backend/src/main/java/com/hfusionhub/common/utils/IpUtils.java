@@ -10,11 +10,7 @@ import jakarta.servlet.http.HttpServletRequest;
 public final class IpUtils {
 
     private static final String[] IP_HEADER_CANDIDATES = {
-            "X-Forwarded-For",
-            "Proxy-Client-IP",
-            "WL-Proxy-Client-IP",
-            "HTTP_X_FORWARDED_FOR",
-            "HTTP_CLIENT_IP"
+        "X-Forwarded-For", "Proxy-Client-IP", "WL-Proxy-Client-IP", "HTTP_X_FORWARDED_FOR", "HTTP_CLIENT_IP"
     };
 
     private IpUtils() {

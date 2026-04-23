@@ -10,12 +10,10 @@ import com.hfusionhub.entity.AgentRun;
 import com.hfusionhub.service.AgentStatusEventService;
 import com.hfusionhub.service.AgentTaskService;
 import com.hfusionhub.service.ApprovalEventSseManager;
-
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -71,8 +69,7 @@ public class AgentTaskController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int pageSize) {
         Long userId = JwtUtils.getCurrentUserId();
-        PageResult<AgentTaskSummaryDTO> result = agentTaskService.listUserTasks(
-                userId, status, page, pageSize);
+        PageResult<AgentTaskSummaryDTO> result = agentTaskService.listUserTasks(userId, status, page, pageSize);
         return R.ok(result);
     }
 
@@ -108,8 +105,7 @@ public class AgentTaskController {
 
     @Operation(summary = "审批决定（批准/拒绝工具调用）")
     @PostMapping("/{taskId}/approve")
-    public R<AgentApproval> decideApproval(@PathVariable Long taskId,
-                                           @RequestBody Map<String, String> body) {
+    public R<AgentApproval> decideApproval(@PathVariable Long taskId, @RequestBody Map<String, String> body) {
         Long userId = JwtUtils.getCurrentUserId();
         String approvalId = body.get("approvalId");
         String decision = body.get("decision");
@@ -220,11 +216,10 @@ public class AgentTaskController {
     @Operation(summary = "查询当前用户的死信任务列表")
     @GetMapping("/dead-letter")
     public R<PageResult<AgentTaskSummaryDTO>> listDeadLetterTasks(
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "10") int pageSize) {
+            @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "10") int pageSize) {
         Long userId = JwtUtils.getCurrentUserId();
-        PageResult<AgentTaskSummaryDTO> result = agentTaskService.listUserTasks(
-                userId, AgentConstants.STATUS_DEAD_LETTER, page, pageSize);
+        PageResult<AgentTaskSummaryDTO> result =
+                agentTaskService.listUserTasks(userId, AgentConstants.STATUS_DEAD_LETTER, page, pageSize);
         return R.ok(result);
     }
 

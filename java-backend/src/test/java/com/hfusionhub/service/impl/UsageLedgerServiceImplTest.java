@@ -1,5 +1,10 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.entity.TenantQuota;
@@ -7,13 +12,15 @@ import com.hfusionhub.entity.UsageCounter;
 import com.hfusionhub.entity.UsageReservation;
 import com.hfusionhub.mapper.TenantQuotaMapper;
 import com.hfusionhub.mapper.UsageCounterMapper;
+import com.hfusionhub.mapper.UsageEventMapper;
 import com.hfusionhub.mapper.UsageReservationMapper;
 import com.hfusionhub.quota.UsageMeter;
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.hfusionhub.entity.UsageEvent;
-import com.hfusionhub.mapper.UsageEventMapper;
 import com.hfusionhub.service.UsageLedgerService;
 import com.hfusionhub.tenant.TenantContext;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,15 +32,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 用量账本核心集成测试（H2，真实 MyBatis-Plus mapper 栈）。
@@ -219,9 +217,9 @@ class UsageLedgerServiceImplTest {
     @Test
     void noTenantContextFailsClosed() {
         TenantContext.clear();
-        assertThrows(IllegalStateException.class,
-                () -> usageLedgerService.currentReserved(UsageMeter.CHAT_TOKENS));
-        assertThrows(IllegalStateException.class,
+        assertThrows(IllegalStateException.class, () -> usageLedgerService.currentReserved(UsageMeter.CHAT_TOKENS));
+        assertThrows(
+                IllegalStateException.class,
                 () -> usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, "chat:nctx", 10, "message", "nctx"));
     }
 
@@ -258,9 +256,9 @@ class UsageLedgerServiceImplTest {
         long limit = usageLedgerService.effectiveDailyLimit(UsageMeter.CHAT_TOKENS);
         assertTrue(limit >= 100000);
 
-        BusinessException ex = assertThrows(BusinessException.class, () ->
-                usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, "chat:over", limit + 1,
-                        "message", "over"));
+        BusinessException ex = assertThrows(
+                BusinessException.class,
+                () -> usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, "chat:over", limit + 1, "message", "over"));
         assertEquals(StatusCode.QUOTA_EXCEEDED, ex.getCode());
 
         assertEquals(0, usageLedgerService.currentUsage(UsageMeter.CHAT_TOKENS));
@@ -273,8 +271,9 @@ class UsageLedgerServiceImplTest {
         usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, "chat:a", half, "message", "a");
         usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, "chat:b", half, "message", "b");
 
-        BusinessException ex = assertThrows(BusinessException.class, () ->
-                usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, "chat:c", 1, "message", "c"));
+        BusinessException ex = assertThrows(
+                BusinessException.class,
+                () -> usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, "chat:c", 1, "message", "c"));
         assertEquals(StatusCode.QUOTA_EXCEEDED, ex.getCode());
         assertEquals(limit, usageLedgerService.currentUsage(UsageMeter.CHAT_TOKENS));
     }
@@ -290,8 +289,10 @@ class UsageLedgerServiceImplTest {
         assertEquals(42L, usageLedgerService.effectiveDailyLimit(UsageMeter.CHAT_TOKENS));
 
         usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, "chat:override", 42, "message", "override");
-        BusinessException ex = assertThrows(BusinessException.class, () ->
-                usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, "chat:override-2", 1, "message", "override-2"));
+        BusinessException ex = assertThrows(
+                BusinessException.class,
+                () -> usageLedgerService.reserve(
+                        UsageMeter.CHAT_TOKENS, "chat:override-2", 1, "message", "override-2"));
         assertEquals(StatusCode.QUOTA_EXCEEDED, ex.getCode());
     }
 

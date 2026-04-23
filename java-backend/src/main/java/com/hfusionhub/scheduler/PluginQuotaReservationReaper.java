@@ -5,14 +5,13 @@ import com.hfusionhub.mapper.UsageReservationMapper;
 import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.service.UsageLedgerService;
 import com.hfusionhub.tenant.TenantContext;
+import java.time.LocalDateTime;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-
-import java.time.LocalDateTime;
-import java.util.List;
 
 /**
  * Releases plugin reservations whose Python terminal callback was lost.
@@ -43,12 +42,16 @@ public class PluginQuotaReservationReaper {
         int released = 0;
         for (UsageReservation reservation : stale) {
             try {
-                TenantContext.runAs(reservation.getTenantId(), () ->
-                        usageLedgerService.release(UsageMeter.PLUGIN_EXECUTIONS, reservation.getRequestId()));
+                TenantContext.runAs(
+                        reservation.getTenantId(),
+                        () -> usageLedgerService.release(UsageMeter.PLUGIN_EXECUTIONS, reservation.getRequestId()));
                 released++;
             } catch (Exception e) {
-                log.warn("Failed to release stale plugin reservation id={} requestId={}: {}",
-                        reservation.getId(), reservation.getRequestId(), e.getMessage());
+                log.warn(
+                        "Failed to release stale plugin reservation id={} requestId={}: {}",
+                        reservation.getId(),
+                        reservation.getRequestId(),
+                        e.getMessage());
             }
         }
         if (released > 0) {

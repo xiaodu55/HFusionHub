@@ -1,5 +1,16 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import cn.hutool.crypto.digest.BCrypt;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.hfusionhub.common.constant.StatusCode;
@@ -22,17 +33,6 @@ import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class UserServiceImplTest {
@@ -68,8 +68,7 @@ class UserServiceImplTest {
         UserLoginDTO login = login("missing", "password");
         when(userMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(null);
 
-        BusinessException error = assertThrows(BusinessException.class,
-                () -> userService.login(login));
+        BusinessException error = assertThrows(BusinessException.class, () -> userService.login(login));
 
         assertEquals(StatusCode.LOGIN_ERROR, error.getCode());
         verify(rateLimiter).recordFailedAttempt("unknown");
@@ -82,8 +81,8 @@ class UserServiceImplTest {
         user.setPassword("not-a-valid-hash");
         when(userMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(user);
 
-        BusinessException error = assertThrows(BusinessException.class,
-                () -> userService.login(login("alice", "password")));
+        BusinessException error =
+                assertThrows(BusinessException.class, () -> userService.login(login("alice", "password")));
 
         assertEquals(StatusCode.USER_DISABLED, error.getCode());
         verify(rateLimiter, never()).recordFailedAttempt("unknown");
@@ -95,8 +94,8 @@ class UserServiceImplTest {
         user.setPassword(BCrypt.hashpw("correct-password"));
         when(userMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(user);
 
-        BusinessException error = assertThrows(BusinessException.class,
-                () -> userService.login(login("alice", "wrong-password")));
+        BusinessException error =
+                assertThrows(BusinessException.class, () -> userService.login(login("alice", "wrong-password")));
 
         assertEquals(StatusCode.LOGIN_ERROR, error.getCode());
         verify(rateLimiter).recordFailedAttempt("unknown");
@@ -123,8 +122,7 @@ class UserServiceImplTest {
         UserRegisterDTO register = register("alice", "alice@example.com");
         when(userMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
 
-        BusinessException error = assertThrows(BusinessException.class,
-                () -> userService.register(register));
+        BusinessException error = assertThrows(BusinessException.class, () -> userService.register(register));
 
         assertEquals(StatusCode.USER_EXISTS, error.getCode());
         verify(userMapper, never()).insert(any(User.class));
@@ -137,8 +135,7 @@ class UserServiceImplTest {
                 .thenReturn(0L)
                 .thenReturn(1L);
 
-        BusinessException error = assertThrows(BusinessException.class,
-                () -> userService.register(register));
+        BusinessException error = assertThrows(BusinessException.class, () -> userService.register(register));
 
         assertEquals(StatusCode.USER_EXISTS, error.getCode());
         verify(userMapper, never()).insert(any(User.class));
@@ -191,10 +188,10 @@ class UserServiceImplTest {
                 .thenReturn(0L)
                 .thenReturn(0L);
         doThrow(new DuplicateKeyException("duplicate username"))
-                .when(userMapper).insert(any(User.class));
+                .when(userMapper)
+                .insert(any(User.class));
 
-        BusinessException error = assertThrows(BusinessException.class,
-                () -> userService.register(register));
+        BusinessException error = assertThrows(BusinessException.class, () -> userService.register(register));
 
         assertEquals(StatusCode.USER_EXISTS, error.getCode());
     }
@@ -204,8 +201,7 @@ class UserServiceImplTest {
         jwtUtilsMock.when(JwtUtils::getCurrentUserId).thenReturn(1L);
         jwtUtilsMock.when(() -> JwtUtils.hasRole("admin")).thenReturn(false);
 
-        BusinessException error = assertThrows(BusinessException.class,
-                () -> userService.getUserById(2L));
+        BusinessException error = assertThrows(BusinessException.class, () -> userService.getUserById(2L));
 
         assertEquals(StatusCode.FORBIDDEN, error.getCode());
         verify(userMapper, never()).selectById(2L);
@@ -242,8 +238,7 @@ class UserServiceImplTest {
     void administratorCannotGrantSuperAdminRole() {
         jwtUtilsMock.when(JwtUtils::getCurrentUserId).thenReturn(1L);
 
-        BusinessException error = assertThrows(BusinessException.class,
-                () -> userService.updateUserRole(2L, "admin"));
+        BusinessException error = assertThrows(BusinessException.class, () -> userService.updateUserRole(2L, "admin"));
 
         assertEquals(StatusCode.BAD_REQUEST, error.getCode());
         verify(userMapper, never()).selectById(2L);
@@ -257,8 +252,7 @@ class UserServiceImplTest {
         jwtUtilsMock.when(JwtUtils::getCurrentUserId).thenReturn(1L);
         when(userMapper.selectById(1L)).thenReturn(current);
 
-        BusinessException error = assertThrows(BusinessException.class,
-                () -> userService.updateUserRole(1L, "user"));
+        BusinessException error = assertThrows(BusinessException.class, () -> userService.updateUserRole(1L, "user"));
 
         assertEquals(StatusCode.BAD_REQUEST, error.getCode());
         verify(userMapper, never()).updateById(current);
@@ -273,8 +267,7 @@ class UserServiceImplTest {
         when(userMapper.selectById(1L)).thenReturn(current);
         when(userMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
 
-        BusinessException error = assertThrows(BusinessException.class,
-                () -> userService.updateUser(update));
+        BusinessException error = assertThrows(BusinessException.class, () -> userService.updateUser(update));
 
         assertEquals(StatusCode.USER_EXISTS, error.getCode());
         verify(userMapper, never()).updateById(current);

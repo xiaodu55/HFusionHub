@@ -1,15 +1,12 @@
 package com.hfusionhub.service;
 
-import com.hfusionhub.common.constant.AgentConstants;
-import com.hfusionhub.service.AgentStatusEventService;
-import com.hfusionhub.service.AgentTaskService;
-import org.junit.jupiter.api.Test;
-
-import java.util.Map;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+
+import com.hfusionhub.common.constant.AgentConstants;
+import java.util.Map;
+import org.junit.jupiter.api.Test;
 
 /**
  * AgentStreamEventProcessor 单元测试 — SSE 解析、状态映射
@@ -18,20 +15,17 @@ class AgentStreamEventProcessorTest {
 
     @Test
     void stripSsePrefixStandardFormat() {
-        assertEquals("{\"key\":\"value\"}",
-                AgentStreamEventProcessor.stripSsePrefix("data: {\"key\":\"value\"}"));
+        assertEquals("{\"key\":\"value\"}", AgentStreamEventProcessor.stripSsePrefix("data: {\"key\":\"value\"}"));
     }
 
     @Test
     void stripSsePrefixNoSpace() {
-        assertEquals("{\"key\":\"value\"}",
-                AgentStreamEventProcessor.stripSsePrefix("data:{\"key\":\"value\"}"));
+        assertEquals("{\"key\":\"value\"}", AgentStreamEventProcessor.stripSsePrefix("data:{\"key\":\"value\"}"));
     }
 
     @Test
     void stripSsePrefixDoneSentinel() {
-        assertEquals("[DONE]",
-                AgentStreamEventProcessor.stripSsePrefix("data: [DONE]"));
+        assertEquals("[DONE]", AgentStreamEventProcessor.stripSsePrefix("data: [DONE]"));
     }
 
     @Test
@@ -53,77 +47,77 @@ class AgentStreamEventProcessorTest {
 
     @Test
     void mapPythonStatusCompleted() {
-        assertEquals(AgentConstants.STATUS_SUCCEEDED,
-                AgentConstants.mapPythonStatus("completed"));
+        assertEquals(AgentConstants.STATUS_SUCCEEDED, AgentConstants.mapPythonStatus("completed"));
     }
 
     @Test
     void mapPythonStatusInsufficientEvidence() {
-        assertEquals(AgentConstants.STATUS_SUCCEEDED,
-                AgentConstants.mapPythonStatus("insufficient_evidence"));
+        assertEquals(AgentConstants.STATUS_SUCCEEDED, AgentConstants.mapPythonStatus("insufficient_evidence"));
     }
 
     @Test
     void mapPythonStatusTimeout() {
-        assertEquals(AgentConstants.STATUS_TIMED_OUT,
-                AgentConstants.mapPythonStatus("timeout"));
+        assertEquals(AgentConstants.STATUS_TIMED_OUT, AgentConstants.mapPythonStatus("timeout"));
     }
 
     @Test
     void mapPythonStatusToolError() {
-        assertEquals(AgentConstants.STATUS_FAILED,
-                AgentConstants.mapPythonStatus("tool_error"));
+        assertEquals(AgentConstants.STATUS_FAILED, AgentConstants.mapPythonStatus("tool_error"));
     }
 
     @Test
     void mapPythonStatusAgentFailure() {
-        assertEquals(AgentConstants.STATUS_FAILED,
-                AgentConstants.mapPythonStatus("agent_failure"));
+        assertEquals(AgentConstants.STATUS_FAILED, AgentConstants.mapPythonStatus("agent_failure"));
     }
 
     @Test
     void mapPythonStatusCancelled() {
-        assertEquals(AgentConstants.STATUS_CANCELLED,
-                AgentConstants.mapPythonStatus("cancelled"));
+        assertEquals(AgentConstants.STATUS_CANCELLED, AgentConstants.mapPythonStatus("cancelled"));
     }
 
     @Test
     void mapPythonStatusNull() {
-        assertEquals(AgentConstants.STATUS_FAILED,
-                AgentConstants.mapPythonStatus(null));
+        assertEquals(AgentConstants.STATUS_FAILED, AgentConstants.mapPythonStatus(null));
     }
 
     @Test
     void mapPythonStatusUnknown() {
-        assertEquals(AgentConstants.STATUS_FAILED,
-                AgentConstants.mapPythonStatus("some_unknown_status"));
+        assertEquals(AgentConstants.STATUS_FAILED, AgentConstants.mapPythonStatus("some_unknown_status"));
     }
 
     @Test
     void runCompletedForwardsTokenUsageForDurableSettlement() {
         AgentTaskService taskService = mock(AgentTaskService.class);
-        AgentStreamEventProcessor processor = new AgentStreamEventProcessor(
-                taskService, mock(AgentStatusEventService.class));
+        AgentStreamEventProcessor processor =
+                new AgentStreamEventProcessor(taskService, mock(AgentStatusEventService.class));
 
-        processor.handleLine("data: {\"event\":\"run_completed\",\"status\":\"completed\","
-                + "\"tool_calls_count\":2,\"token_usage\":{\"prompt_tokens\":100,"
-                + "\"completion_tokens\":40,\"total_tokens\":140}}", 9L);
+        processor.handleLine(
+                "data: {\"event\":\"run_completed\",\"status\":\"completed\","
+                        + "\"tool_calls_count\":2,\"token_usage\":{\"prompt_tokens\":100,"
+                        + "\"completion_tokens\":40,\"total_tokens\":140}}",
+                9L);
 
-        verify(taskService).completeRun(eq(9L), eq(AgentConstants.STATUS_SUCCEEDED), isNull(),
-                eq(Map.of("prompt_tokens", 100, "completion_tokens", 40, "total_tokens", 140)),
-                eq(2), eq(0L), isNull(), isNull(), isNull());
+        verify(taskService)
+                .completeRun(
+                        eq(9L),
+                        eq(AgentConstants.STATUS_SUCCEEDED),
+                        isNull(),
+                        eq(Map.of("prompt_tokens", 100, "completion_tokens", 40, "total_tokens", 140)),
+                        eq(2),
+                        eq(0L),
+                        isNull(),
+                        isNull(),
+                        isNull());
     }
 
     @Test
     void canTransitionPendingToDeadLetter() {
-        assertTrue(AgentConstants.canTransition(
-                AgentConstants.STATUS_PENDING, AgentConstants.STATUS_DEAD_LETTER));
+        assertTrue(AgentConstants.canTransition(AgentConstants.STATUS_PENDING, AgentConstants.STATUS_DEAD_LETTER));
     }
 
     @Test
     void canTransitionRunningToDeadLetter() {
-        assertTrue(AgentConstants.canTransition(
-                AgentConstants.STATUS_RUNNING, AgentConstants.STATUS_DEAD_LETTER));
+        assertTrue(AgentConstants.canTransition(AgentConstants.STATUS_RUNNING, AgentConstants.STATUS_DEAD_LETTER));
     }
 
     @Test

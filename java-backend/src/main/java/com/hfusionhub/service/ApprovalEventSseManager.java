@@ -3,12 +3,6 @@ package com.hfusionhub.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hfusionhub.entity.AgentApproval;
 import com.hfusionhub.mapper.AgentApprovalMapper;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,6 +10,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
  * Global approvals SSE stream — current-user view with DB polling.
@@ -60,31 +59,31 @@ public class ApprovalEventSseManager {
             }
             emitter.send(SseEmitter.event()
                     .name("snapshot")
-                    .data(objectMapper.writeValueAsString(Map.of(
-                            "type", "snapshot",
-                            "data", approvals))));
+                    .data(objectMapper.writeValueAsString(Map.of("type", "snapshot", "data", approvals))));
         } catch (Exception e) {
             log.warn("Failed to send approvals SSE snapshot for user {}: {}", userId, e.getMessage());
         }
 
         // 2. DB poll loop: emit a record only when its status changed.
-        ScheduledFuture<?> pollTask = pollScheduler.scheduleWithFixedDelay(() -> {
-            try {
-                List<AgentApproval> fresh = approvalMapper.selectRecentByUserId(userId, SNAPSHOT_LIMIT);
-                for (AgentApproval a : fresh) {
-                    String prev = known.put(a.getApprovalId(), a.getStatus());
-                    if (prev == null || !prev.equals(a.getStatus())) {
-                        emitter.send(SseEmitter.event()
-                                .name("approval")
-                                .data(objectMapper.writeValueAsString(Map.of(
-                                        "type", "approval",
-                                        "data", a))));
+        ScheduledFuture<?> pollTask = pollScheduler.scheduleWithFixedDelay(
+                () -> {
+                    try {
+                        List<AgentApproval> fresh = approvalMapper.selectRecentByUserId(userId, SNAPSHOT_LIMIT);
+                        for (AgentApproval a : fresh) {
+                            String prev = known.put(a.getApprovalId(), a.getStatus());
+                            if (prev == null || !prev.equals(a.getStatus())) {
+                                emitter.send(SseEmitter.event()
+                                        .name("approval")
+                                        .data(objectMapper.writeValueAsString(Map.of("type", "approval", "data", a))));
+                            }
+                        }
+                    } catch (Exception e) {
+                        log.debug("Approvals SSE poll error for user {}: {}", userId, e.getMessage());
                     }
-                }
-            } catch (Exception e) {
-                log.debug("Approvals SSE poll error for user {}: {}", userId, e.getMessage());
-            }
-        }, 0, pollDelayMs, TimeUnit.MILLISECONDS);
+                },
+                0,
+                pollDelayMs,
+                TimeUnit.MILLISECONDS);
 
         emitter.onCompletion(() -> pollTask.cancel(false));
         emitter.onTimeout(() -> pollTask.cancel(false));

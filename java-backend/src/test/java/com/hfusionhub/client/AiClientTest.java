@@ -1,7 +1,15 @@
 package com.hfusionhub.client;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.service.UserModelConfigService;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -10,23 +18,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClient.RequestBodyUriSpec;
 import org.springframework.web.reactive.function.client.WebClient.RequestBodySpec;
+import org.springframework.web.reactive.function.client.WebClient.RequestBodyUriSpec;
 import org.springframework.web.reactive.function.client.WebClient.RequestHeadersSpec;
 import org.springframework.web.reactive.function.client.WebClient.ResponseSpec;
-import org.springframework.web.client.RestTemplate;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
-
-import java.util.List;
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class AiClientTest {
@@ -80,14 +79,11 @@ class AiClientTest {
         when(requestHeadersSpec.retrieve()).thenReturn(responseSpec);
         when(responseSpec.onStatus(any(), any())).thenReturn(responseSpec);
         when(responseSpec.bodyToFlux(String.class))
-                .thenReturn(Flux.just(
-                        "data: {\"content\":\"Hello\"}",
-                        "data: {\"content\":\" World\"}",
-                        "data: [DONE]"));
+                .thenReturn(
+                        Flux.just("data: {\"content\":\"Hello\"}", "data: {\"content\":\" World\"}", "data: [DONE]"));
 
         // When
-        Flux<String> result = aiClient.streamChat(
-                "test message", 1L, null, List.of(), "req-001");
+        Flux<String> result = aiClient.streamChat("test message", 1L, null, List.of(), "req-001");
 
         // Then
         StepVerifier.create(result)
@@ -108,17 +104,13 @@ class AiClientTest {
         when(requestBodySpec.bodyValue(any())).thenReturn(requestHeadersSpec);
         when(requestHeadersSpec.retrieve()).thenReturn(responseSpec);
         when(responseSpec.onStatus(any(), any())).thenReturn(responseSpec);
-        when(responseSpec.bodyToFlux(String.class))
-                .thenReturn(Flux.just("data: [DONE]"));
+        when(responseSpec.bodyToFlux(String.class)).thenReturn(Flux.just("data: [DONE]"));
 
         // When: streamChat is called (verifies stream=true is in the request body)
-        Flux<String> result = aiClient.streamChat(
-                "query", 2L, 10L, List.of(), "req-002");
+        Flux<String> result = aiClient.streamChat("query", 2L, 10L, List.of(), "req-002");
 
         // Then
-        StepVerifier.create(result)
-                .expectNextCount(1)
-                .verifyComplete();
+        StepVerifier.create(result).expectNextCount(1).verifyComplete();
     }
 
     @Test
@@ -131,11 +123,9 @@ class AiClientTest {
         when(requestBodySpec.bodyValue(any())).thenReturn(requestHeadersSpec);
         when(requestHeadersSpec.retrieve()).thenReturn(responseSpec);
         when(responseSpec.onStatus(any(), any())).thenReturn(responseSpec);
-        when(responseSpec.bodyToFlux(String.class))
-                .thenReturn(Flux.just("data: [DONE]"));
+        when(responseSpec.bodyToFlux(String.class)).thenReturn(Flux.just("data: [DONE]"));
 
-        Flux<String> result = aiClient.streamChat(
-                "test", 1L, null, null, "req-003");
+        Flux<String> result = aiClient.streamChat("test", 1L, null, null, "req-003");
 
         assertNotNull(result);
         StepVerifier.create(result).expectNextCount(1).verifyComplete();
@@ -149,8 +139,7 @@ class AiClientTest {
         when(restTemplate.exchange(anyString(), any(), any(), any(Class.class)))
                 .thenThrow(new org.springframework.web.client.ResourceAccessException("Connection refused"));
 
-        assertThrows(BusinessException.class, () ->
-                aiClient.chatStream("msg", 1L, null, List.of()));
+        assertThrows(BusinessException.class, () -> aiClient.chatStream("msg", 1L, null, List.of()));
     }
 
     @Test
@@ -243,8 +232,7 @@ class AiClientTest {
         stubRestTemplateSuccess();
         String template = "T".repeat(8000);
 
-        aiClient.agentV1Chat("question", null, 42L, List.of(),
-                template, "detailed", 5, null, 1L);
+        aiClient.agentV1Chat("question", null, 42L, List.of(), template, "detailed", 5, null, 1L);
 
         Map<String, Object> body = captureRequestBody();
         assertTrue(body.containsKey("system_prompt"), "system_prompt key must be present");

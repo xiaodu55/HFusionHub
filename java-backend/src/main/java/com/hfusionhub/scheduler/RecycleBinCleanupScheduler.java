@@ -8,12 +8,11 @@ import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.PromptTemplateMapper;
 import com.hfusionhub.service.DeletionService;
 import com.hfusionhub.tenant.TenantContext;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-
-import java.util.List;
 
 /**
  * Schedules physical cleanup for documents whose seven-day recycle period

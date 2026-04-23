@@ -1,5 +1,9 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.constant.AgentConstants;
 import com.hfusionhub.entity.AgentRun;
@@ -8,20 +12,15 @@ import com.hfusionhub.mapper.*;
 import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.service.*;
 import com.hfusionhub.tenant.TenantContext;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.core.task.SyncTaskExecutor;
 import org.springframework.test.util.ReflectionTestUtils;
-
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
 
 /**
  * Agent 队列端到端集成测试：入队 → Worker 同步执行 → 状态事件 → 完成/取消。
@@ -71,18 +70,36 @@ class AgentTaskQueueIntegrationTest {
         quotaProperties = mock(com.hfusionhub.config.QuotaProperties.class);
         when(quotaProperties.getChatMaxOutputTokens()).thenReturn(8192L);
         agentTaskService = new AgentTaskServiceImpl(
-                taskMapper, runMapper, stepMapper, approvalMapper, messageMapper,
+                taskMapper,
+                runMapper,
+                stepMapper,
+                approvalMapper,
+                messageMapper,
                 mock(com.hfusionhub.mapper.UserMapper.class),
-                aiClient, queueServiceRef, statusEventService, redisUtils,
-                usageLedgerService, quotaProperties);
+                aiClient,
+                queueServiceRef,
+                statusEventService,
+                redisUtils,
+                usageLedgerService,
+                quotaProperties);
         ReflectionTestUtils.setField(agentTaskService, "leaseSeconds", 120);
         ReflectionTestUtils.setField(agentTaskService, "cancelFlagTtlSeconds", 3600);
 
         queueService = new AgentTaskQueueServiceImpl(
-                taskMapper, runMapper, stepMapper, recoveryEventMapper,
-                agentTaskService, streamEventProcessor, conversationService,
-                statusEventService, retryPolicy, aiClient, redisUtils,
-                messageMapper, sseManager, syncExecutor);
+                taskMapper,
+                runMapper,
+                stepMapper,
+                recoveryEventMapper,
+                agentTaskService,
+                streamEventProcessor,
+                conversationService,
+                statusEventService,
+                retryPolicy,
+                aiClient,
+                redisUtils,
+                messageMapper,
+                sseManager,
+                syncExecutor);
         ReflectionTestUtils.setField(queueService, "leaseSeconds", 120);
         ReflectionTestUtils.setField(queueService, "timeoutSeconds", 180);
         ReflectionTestUtils.setField(queueService, "batchSize", 5);
@@ -127,14 +144,18 @@ class AgentTaskQueueIntegrationTest {
         assertNotNull(run.getRunUuid());
 
         // QUEUED event recorded
-        verify(statusEventService).record(eq(100L), eq(200L), eq("QUEUED"),
-                eq(AgentConstants.STATUS_PENDING), argThat(payload ->
-                        payload.containsKey("attemptNumber") && payload.containsKey("runUuid")));
+        verify(statusEventService)
+                .record(
+                        eq(100L),
+                        eq(200L),
+                        eq("QUEUED"),
+                        eq(AgentConstants.STATUS_PENDING),
+                        argThat(payload -> payload.containsKey("attemptNumber") && payload.containsKey("runUuid")));
 
         // Task updated: PENDING, currentRunId set
-        verify(taskMapper).updateById(argThat(t ->
-                AgentConstants.STATUS_PENDING.equals(t.getStatus())
-                        && t.getCurrentRunId() != null));
+        verify(taskMapper)
+                .updateById(argThat(
+                        t -> AgentConstants.STATUS_PENDING.equals(t.getStatus()) && t.getCurrentRunId() != null));
     }
 
     @Test
@@ -165,8 +186,7 @@ class AgentTaskQueueIntegrationTest {
         task.setStatus(AgentConstants.STATUS_SUCCEEDED);
         when(taskMapper.selectById(300L)).thenReturn(task);
 
-        assertThrows(com.hfusionhub.common.exception.BusinessException.class,
-                () -> agentTaskService.enqueueRun(300L));
+        assertThrows(com.hfusionhub.common.exception.BusinessException.class, () -> agentTaskService.enqueueRun(300L));
     }
 
     // ================================================================
@@ -187,7 +207,8 @@ class AgentTaskQueueIntegrationTest {
         AgentRun pendingRun = buildClaimedRun(50L, 500L);
 
         when(runMapper.selectQueuedRuns(any(), eq(5))).thenReturn(List.of(pendingRun));
-        when(runMapper.claimRun(eq(50L), eq("test-worker"), any(), any(), any())).thenReturn(1);
+        when(runMapper.claimRun(eq(50L), eq("test-worker"), any(), any(), any()))
+                .thenReturn(1);
         when(runMapper.selectById(50L)).thenReturn(pendingRun);
         when(runMapper.releaseLease(eq(50L), anyString())).thenReturn(1);
         when(taskMapper.selectById(500L)).thenReturn(task);
@@ -196,11 +217,9 @@ class AgentTaskQueueIntegrationTest {
 
         // Simulate non-KB stream: content + [DONE]
         reactor.core.publisher.Flux<String> contentFlux = reactor.core.publisher.Flux.just(
-                "data: {\"content\":\"Hello\"}",
-                "data: {\"content\":\" World\"}",
-                "data: [DONE]"
-        );
-        when(aiClient.streamChat(eq("test query"), eq(50L), isNull(), anyList(), eq(pendingRun.getRunUuid()), anyLong(), any()))
+                "data: {\"content\":\"Hello\"}", "data: {\"content\":\" World\"}", "data: [DONE]");
+        when(aiClient.streamChat(
+                        eq("test query"), eq(50L), isNull(), anyList(), eq(pendingRun.getRunUuid()), anyLong(), any()))
                 .thenReturn(contentFlux);
 
         // Act — SyncTaskExecutor makes executeRun complete within pollAndDispatch
@@ -236,21 +255,34 @@ class AgentTaskQueueIntegrationTest {
         run.setTenantId(null);
 
         when(runMapper.selectQueuedRuns(any(), eq(5))).thenReturn(List.of(run));
-        when(runMapper.claimRun(eq(56L), eq("test-worker"), any(), any(), any())).thenReturn(1);
+        when(runMapper.claimRun(eq(56L), eq("test-worker"), any(), any(), any()))
+                .thenReturn(1);
         when(runMapper.selectById(56L)).thenReturn(run);
         when(runMapper.releaseLease(eq(56L), anyString())).thenReturn(1);
         when(taskMapper.selectById(560L)).thenReturn(task);
         when(redisUtils.hasKey(anyString())).thenReturn(false);
-        when(runMapper.completeRunGuarded(eq(56L), eq(AgentConstants.STATUS_FAILED),
-                eq("tenant_unresolvable"), anyString(), isNull(), any())).thenReturn(1);
+        when(runMapper.completeRunGuarded(
+                        eq(56L),
+                        eq(AgentConstants.STATUS_FAILED),
+                        eq("tenant_unresolvable"),
+                        anyString(),
+                        isNull(),
+                        any()))
+                .thenReturn(1);
         when(taskMapper.updateById(any(AgentTask.class))).thenReturn(1);
 
         assertEquals(1, queueService.pollAndDispatch());
 
         verify(aiClient, never()).streamChat(anyString(), any(), any(), any(), anyString(), any(), any());
         verify(aiClient, never()).agentV1ChatStream(anyString(), any(), any(), any(), anyString(), any(), any());
-        verify(runMapper).completeRunGuarded(eq(56L), eq(AgentConstants.STATUS_FAILED),
-                eq("tenant_unresolvable"), anyString(), isNull(), any());
+        verify(runMapper)
+                .completeRunGuarded(
+                        eq(56L),
+                        eq(AgentConstants.STATUS_FAILED),
+                        eq("tenant_unresolvable"),
+                        anyString(),
+                        isNull(),
+                        any());
     }
 
     @Test
@@ -267,7 +299,8 @@ class AgentTaskQueueIntegrationTest {
         AgentRun pendingRun = buildClaimedRun(51L, 510L);
 
         when(runMapper.selectQueuedRuns(any(), eq(5))).thenReturn(List.of(pendingRun));
-        when(runMapper.claimRun(eq(51L), eq("test-worker"), any(), any(), any())).thenReturn(1);
+        when(runMapper.claimRun(eq(51L), eq("test-worker"), any(), any(), any()))
+                .thenReturn(1);
         when(runMapper.selectById(51L)).thenReturn(pendingRun);
         when(runMapper.releaseLease(eq(51L), anyString())).thenReturn(1);
         when(taskMapper.selectById(510L)).thenReturn(task);
@@ -275,11 +308,9 @@ class AgentTaskQueueIntegrationTest {
         when(redisUtils.hasKey(anyString())).thenReturn(false);
 
         String sourcesJson = "data: {\"sources\":[{\"title\":\"doc1.pdf\",\"page\":3}]}";
-        reactor.core.publisher.Flux<String> flux = reactor.core.publisher.Flux.just(
-                sourcesJson,
-                "data: [DONE]"
-        );
-        when(aiClient.streamChat(anyString(), anyLong(), isNull(), anyList(), anyString(), anyLong(), any())).thenReturn(flux);
+        reactor.core.publisher.Flux<String> flux = reactor.core.publisher.Flux.just(sourcesJson, "data: [DONE]");
+        when(aiClient.streamChat(anyString(), anyLong(), isNull(), anyList(), anyString(), anyLong(), any()))
+                .thenReturn(flux);
 
         queueService.pollAndDispatch();
 
@@ -299,11 +330,18 @@ class AgentTaskQueueIntegrationTest {
 
         AgentRun run = buildClaimedRun(54L, 540L);
         when(runMapper.selectQueuedRuns(any(), eq(5))).thenReturn(List.of(run));
-        when(runMapper.claimRun(eq(54L), eq("test-worker"), any(), any(), any())).thenReturn(1);
+        when(runMapper.claimRun(eq(54L), eq("test-worker"), any(), any(), any()))
+                .thenReturn(1);
         when(runMapper.selectById(54L)).thenReturn(run);
         when(runMapper.selectByTaskId(540L)).thenReturn(List.of(run));
-        when(runMapper.completeRunGuarded(eq(54L), eq(AgentConstants.STATUS_TIMED_OUT),
-                eq(AgentConstants.ERR_EXECUTION_TIMEOUT), anyString(), isNull(), any())).thenReturn(1);
+        when(runMapper.completeRunGuarded(
+                        eq(54L),
+                        eq(AgentConstants.STATUS_TIMED_OUT),
+                        eq(AgentConstants.ERR_EXECUTION_TIMEOUT),
+                        anyString(),
+                        isNull(),
+                        any()))
+                .thenReturn(1);
         when(runMapper.releaseLease(eq(54L), anyString())).thenReturn(0);
         when(runMapper.insert(any(AgentRun.class))).thenAnswer(invocation -> {
             AgentRun retry = invocation.getArgument(0);
@@ -316,25 +354,33 @@ class AgentTaskQueueIntegrationTest {
         when(aiClient.cancelRequest(anyString())).thenReturn(true);
         when(retryPolicy.isRetryable(AgentConstants.ERR_EXECUTION_TIMEOUT)).thenReturn(true);
         when(retryPolicy.shouldDeadLetter(1)).thenReturn(false);
-        when(retryPolicy.computeNextScheduledAt(2)).thenReturn(LocalDateTime.now().plusSeconds(1));
+        when(retryPolicy.computeNextScheduledAt(2))
+                .thenReturn(LocalDateTime.now().plusSeconds(1));
         when(retryPolicy.backoffSeconds(2)).thenReturn(1L);
 
         ReflectionTestUtils.setField(queueService, "timeoutSeconds", 1);
         reactor.core.publisher.Flux<String> neverEnding = reactor.core.publisher.Flux.just(
-                "data: {\"content\":\"partial\"}")
+                        "data: {\"content\":\"partial\"}")
                 .concatWith(reactor.core.publisher.Flux.never());
-        when(aiClient.streamChat(eq("stuck query"), isNull(), isNull(), anyList(), eq(run.getRunUuid()), anyLong(), any()))
+        when(aiClient.streamChat(
+                        eq("stuck query"), isNull(), isNull(), anyList(), eq(run.getRunUuid()), anyLong(), any()))
                 .thenReturn(neverEnding);
 
         assertEquals(1, queueService.pollAndDispatch());
 
         verify(aiClient, atLeastOnce()).cancelRequest(run.getRunUuid());
-        verify(runMapper).completeRunGuarded(eq(54L), eq(AgentConstants.STATUS_TIMED_OUT),
-                eq(AgentConstants.ERR_EXECUTION_TIMEOUT), anyString(), isNull(), any());
-        verify(statusEventService).record(eq(540L), eq(54L), eq("RUN_TIMED_OUT"),
-                eq(AgentConstants.STATUS_TIMED_OUT), anyMap());
-        verify(statusEventService).record(eq(540L), eq(55L), eq("RETRY_SCHEDULED"),
-                eq(AgentConstants.STATUS_PENDING), anyMap());
+        verify(runMapper)
+                .completeRunGuarded(
+                        eq(54L),
+                        eq(AgentConstants.STATUS_TIMED_OUT),
+                        eq(AgentConstants.ERR_EXECUTION_TIMEOUT),
+                        anyString(),
+                        isNull(),
+                        any());
+        verify(statusEventService)
+                .record(eq(540L), eq(54L), eq("RUN_TIMED_OUT"), eq(AgentConstants.STATUS_TIMED_OUT), anyMap());
+        verify(statusEventService)
+                .record(eq(540L), eq(55L), eq("RETRY_SCHEDULED"), eq(AgentConstants.STATUS_PENDING), anyMap());
         verify(sseManager, never()).broadcastDone(540L);
     }
 
@@ -353,7 +399,8 @@ class AgentTaskQueueIntegrationTest {
         AgentRun pendingRun = buildClaimedRun(52L, 520L);
 
         when(runMapper.selectQueuedRuns(any(), eq(5))).thenReturn(List.of(pendingRun));
-        when(runMapper.claimRun(eq(52L), eq("test-worker"), any(), any(), any())).thenReturn(1);
+        when(runMapper.claimRun(eq(52L), eq("test-worker"), any(), any(), any()))
+                .thenReturn(1);
         when(runMapper.selectById(52L)).thenReturn(pendingRun);
         when(runMapper.releaseLease(eq(52L), anyString())).thenReturn(1);
         when(taskMapper.selectById(520L)).thenReturn(task);
@@ -362,11 +409,10 @@ class AgentTaskQueueIntegrationTest {
 
         // V1 endpoint returns structured events
         reactor.core.publisher.Flux<String> v1Flux = reactor.core.publisher.Flux.just(
-                "data: {\"event\":\"step_completed\",\"data\":{}}",
-                "data: {\"event\":\"run_completed\",\"data\":{}}"
-        );
-        when(aiClient.agentV1ChatStream(eq("kb query"), eq(52L), eq(5L), anyList(),
-                eq(pendingRun.getRunUuid()), eq(1L), isNull())).thenReturn(v1Flux);
+                "data: {\"event\":\"step_completed\",\"data\":{}}", "data: {\"event\":\"run_completed\",\"data\":{}}");
+        when(aiClient.agentV1ChatStream(
+                        eq("kb query"), eq(52L), eq(5L), anyList(), eq(pendingRun.getRunUuid()), eq(1L), isNull()))
+                .thenReturn(v1Flux);
 
         queueService.pollAndDispatch();
 
@@ -389,24 +435,25 @@ class AgentTaskQueueIntegrationTest {
         AgentRun claimedRun = buildClaimedRun(53L, 530L);
 
         when(runMapper.selectQueuedRuns(any(), eq(5))).thenReturn(List.of(claimedRun));
-        when(runMapper.claimRun(eq(53L), eq("test-worker"), any(), any(), any())).thenReturn(1);
+        when(runMapper.claimRun(eq(53L), eq("test-worker"), any(), any(), any()))
+                .thenReturn(1);
         when(runMapper.selectById(53L)).thenReturn(claimedRun);
         when(runMapper.releaseLease(eq(53L), anyString())).thenReturn(1);
         when(taskMapper.selectById(530L)).thenReturn(task);
         when(conversationService.getChatHistory(53L)).thenReturn(List.of());
         // cancelRun → completeRun → completeRunGuarded
-        when(runMapper.completeRunGuarded(eq(53L), eq(AgentConstants.STATUS_CANCELLED),
-                anyString(), anyString(), isNull(), any())).thenReturn(1);
+        when(runMapper.completeRunGuarded(
+                        eq(53L), eq(AgentConstants.STATUS_CANCELLED), anyString(), anyString(), isNull(), any()))
+                .thenReturn(1);
         when(taskMapper.updateById(any(AgentTask.class))).thenReturn(1);
         // Cancel flag becomes true during stream processing (second check)
         when(redisUtils.hasKey("agent:cancel:53")).thenReturn(false, true);
         when(redisUtils.delete(anyString())).thenReturn(true);
 
-        reactor.core.publisher.Flux<String> flux = reactor.core.publisher.Flux.just(
-                "data: {\"content\":\"Hello\"}",
-                "data: {\"content\":\" World\"}"
-        );
-        when(aiClient.streamChat(anyString(), anyLong(), isNull(), anyList(), anyString(), anyLong(), any())).thenReturn(flux);
+        reactor.core.publisher.Flux<String> flux =
+                reactor.core.publisher.Flux.just("data: {\"content\":\"Hello\"}", "data: {\"content\":\" World\"}");
+        when(aiClient.streamChat(anyString(), anyLong(), isNull(), anyList(), anyString(), anyLong(), any()))
+                .thenReturn(flux);
         when(aiClient.cancelRequest(anyString())).thenReturn(true);
 
         queueService.pollAndDispatch();
@@ -414,8 +461,9 @@ class AgentTaskQueueIntegrationTest {
         // Redis cancel key cleaned up by convergeCancel (may be called twice due to both chunks)
         verify(redisUtils, atLeastOnce()).delete("agent:cancel:53");
         // Run was completed as cancelled (guarded write is idempotent)
-        verify(runMapper, atLeastOnce()).completeRunGuarded(eq(53L), eq(AgentConstants.STATUS_CANCELLED),
-                anyString(), anyString(), isNull(), any());
+        verify(runMapper, atLeastOnce())
+                .completeRunGuarded(
+                        eq(53L), eq(AgentConstants.STATUS_CANCELLED), anyString(), anyString(), isNull(), any());
     }
 
     // ================================================================
@@ -443,11 +491,10 @@ class AgentTaskQueueIntegrationTest {
 
         queueService.recoverAll();
 
-        verify(taskMapper, atLeastOnce()).updateById(argThat(t ->
-                AgentConstants.STATUS_DEAD_LETTER.equals(t.getStatus())
+        verify(taskMapper, atLeastOnce())
+                .updateById(argThat(t -> AgentConstants.STATUS_DEAD_LETTER.equals(t.getStatus())
                         && t.getDeadLetterReason() != null
-                        && t.getDeadLetterAt() != null
-        ));
+                        && t.getDeadLetterAt() != null));
     }
 
     // ================================================================
@@ -491,9 +538,13 @@ class AgentTaskQueueIntegrationTest {
             agentTaskService.startRun(700L, "uuid-7001", "deepseek", "detailed", 5);
 
             // reserve 量 = 输入估算(64) + 8192 × (5+1) = 49216，幂等键 agent_run:uuid-7001
-            verify(usageLedgerService).reserve(eq(UsageMeter.AGENT_TOKENS),
-                    eq("agent_run:uuid-7001"), eq(49216L),
-                    eq("agent_run"), eq("7001"));
+            verify(usageLedgerService)
+                    .reserve(
+                            eq(UsageMeter.AGENT_TOKENS),
+                            eq("agent_run:uuid-7001"),
+                            eq(49216L),
+                            eq("agent_run"),
+                            eq("7001"));
         } finally {
             TenantContext.clear();
         }
@@ -512,19 +563,35 @@ class AgentTaskQueueIntegrationTest {
             run.setStartedAt(LocalDateTime.now());
 
             when(runMapper.selectById(8001L)).thenReturn(run);
-            when(runMapper.completeRunGuarded(eq(8001L), anyString(), any(),
-                    any(), any(), any())).thenReturn(1);
+            when(runMapper.completeRunGuarded(eq(8001L), anyString(), any(), any(), any(), any()))
+                    .thenReturn(1);
             when(taskMapper.selectById(800L)).thenReturn(null);
 
-            agentTaskService.completeRun(8001L, AgentConstants.STATUS_SUCCEEDED, "deepseek",
+            agentTaskService.completeRun(
+                    8001L,
+                    AgentConstants.STATUS_SUCCEEDED,
+                    "deepseek",
                     Map.of("prompt_tokens", 100, "completion_tokens", 40, "total_tokens", 140),
-                    3, 500, null, null, null);
+                    3,
+                    500,
+                    null,
+                    null,
+                    null);
 
-            verify(usageLedgerService).settle(eq(UsageMeter.AGENT_TOKENS),
-                    eq("agent_run:uuid-8001"), eq(140L), eq("agent_run"), eq("8001"));
-            verify(runMapper).updateCompletionMetadata(eq(8001L), eq("deepseek"),
-                    eq(Map.of("prompt_tokens", 100, "completion_tokens", 40, "total_tokens", 140)),
-                    eq(3), eq(500L));
+            verify(usageLedgerService)
+                    .settle(
+                            eq(UsageMeter.AGENT_TOKENS),
+                            eq("agent_run:uuid-8001"),
+                            eq(140L),
+                            eq("agent_run"),
+                            eq("8001"));
+            verify(runMapper)
+                    .updateCompletionMetadata(
+                            eq(8001L),
+                            eq("deepseek"),
+                            eq(Map.of("prompt_tokens", 100, "completion_tokens", 40, "total_tokens", 140)),
+                            eq(3),
+                            eq(500L));
         } finally {
             TenantContext.clear();
         }
@@ -543,15 +610,14 @@ class AgentTaskQueueIntegrationTest {
             run.setStartedAt(LocalDateTime.now());
 
             when(runMapper.selectById(8002L)).thenReturn(run);
-            when(runMapper.completeRunGuarded(eq(8002L), anyString(), any(),
-                    any(), any(), any())).thenReturn(1);
+            when(runMapper.completeRunGuarded(eq(8002L), anyString(), any(), any(), any(), any()))
+                    .thenReturn(1);
             when(taskMapper.selectById(801L)).thenReturn(null);
 
-            agentTaskService.completeRun(8002L, AgentConstants.STATUS_FAILED, "deepseek",
-                    null, 0, 500, "internal_error", "boom", null);
+            agentTaskService.completeRun(
+                    8002L, AgentConstants.STATUS_FAILED, "deepseek", null, 0, 500, "internal_error", "boom", null);
 
-            verify(usageLedgerService).release(eq(UsageMeter.AGENT_TOKENS),
-                    eq("agent_run:uuid-8002"));
+            verify(usageLedgerService).release(eq(UsageMeter.AGENT_TOKENS), eq("agent_run:uuid-8002"));
         } finally {
             TenantContext.clear();
         }
@@ -571,15 +637,15 @@ class AgentTaskQueueIntegrationTest {
             run.setLeaseExpiresAt(LocalDateTime.now().minusSeconds(10));
 
             when(runMapper.selectLeaseExpiredRuns(any(), eq(10))).thenReturn(List.of(run));
-            when(runMapper.completeRunGuarded(eq(10001L), eq(AgentConstants.STATUS_TIMED_OUT),
-                    any(), any(), any(), any())).thenReturn(1);
+            when(runMapper.completeRunGuarded(
+                            eq(10001L), eq(AgentConstants.STATUS_TIMED_OUT), any(), any(), any(), any()))
+                    .thenReturn(1);
             when(runMapper.selectById(10001L)).thenReturn(run);
             when(taskMapper.selectById(1000L)).thenReturn(null);
 
             queueService.recoverAll();
 
-            verify(usageLedgerService).release(eq(UsageMeter.AGENT_TOKENS),
-                    eq("agent_run:uuid-10001"));
+            verify(usageLedgerService).release(eq(UsageMeter.AGENT_TOKENS), eq("agent_run:uuid-10001"));
         } finally {
             TenantContext.clear();
         }

@@ -10,5 +10,4 @@ import org.apache.ibatis.annotations.Mapper;
  * @author HFusionHub Team
  */
 @Mapper
-public interface WebhookDeliveryMapper extends BaseMapper<WebhookDelivery> {
-}
+public interface WebhookDeliveryMapper extends BaseMapper<WebhookDelivery> {}

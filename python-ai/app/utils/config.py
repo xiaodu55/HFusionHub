@@ -27,6 +27,9 @@ class Config:
     MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
     MILVUS_PORT = int(os.getenv("MILVUS_PORT", "19530"))
     MILVUS_COLLECTION = os.getenv("MILVUS_COLLECTION", "hfusionhub_chunks")
+    MILVUS_USER = os.getenv("MILVUS_USER", "root")
+    # 空 = 不启用认证（Milvus 默认无鉴权）；启用 MILVUS_AUTH_ENABLED=true 后需配置
+    MILVUS_PASSWORD = os.getenv("MILVUS_PASSWORD", "")
     MILVUS_LITE_PATH = os.getenv("MILVUS_LITE_PATH", "./milvus_data.db")
 
     # Vector store mode: "lite" (single-process embedded) or "cluster" (remote Milvus).

@@ -7,6 +7,8 @@ import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.service.RagIntentNodeService;
+import java.util.HashMap;
+import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,9 +24,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
-
-import java.util.Map;
-import java.util.HashMap;
 
 /**
  * RAG 调试与评测 API 网关。
@@ -52,9 +51,10 @@ public class RagObservabilityController {
     }
 
     @Autowired
-    public RagObservabilityController(RestTemplate restTemplate,
-                                      KnowledgeBaseMapper knowledgeBaseMapper,
-                                      RagIntentNodeService ragIntentNodeService) {
+    public RagObservabilityController(
+            RestTemplate restTemplate,
+            KnowledgeBaseMapper knowledgeBaseMapper,
+            RagIntentNodeService ragIntentNodeService) {
         this.restTemplate = restTemplate;
         this.knowledgeBaseMapper = knowledgeBaseMapper;
         this.ragIntentNodeService = ragIntentNodeService;
@@ -67,8 +67,7 @@ public class RagObservabilityController {
             @RequestParam Long knowledgeBaseId,
             @RequestParam(defaultValue = "false") boolean errorOnly,
             @RequestParam(required = false) String query,
-            @RequestParam(required = false) String source
-    ) {
+            @RequestParam(required = false) String source) {
         requireOwnedKnowledgeBase(knowledgeBaseId);
         if (limit < 1 || limit > 200) {
             throw new BusinessException("limit 必须在 1 到 200 之间");
@@ -87,9 +86,7 @@ public class RagObservabilityController {
     }
 
     @GetMapping("/traces/stats")
-    public R<Map> traceStats(
-            @RequestParam(defaultValue = "7") int days,
-            @RequestParam Long knowledgeBaseId) {
+    public R<Map> traceStats(@RequestParam(defaultValue = "7") int days, @RequestParam Long knowledgeBaseId) {
         requireOwnedKnowledgeBase(knowledgeBaseId);
         if (days < 1 || days > 30) {
             throw new BusinessException("days 必须在 1 到 30 之间");
@@ -106,8 +103,7 @@ public class RagObservabilityController {
             @RequestParam Long knowledgeBaseId,
             @RequestParam(defaultValue = "false") boolean errorOnly,
             @RequestParam(required = false) String query,
-            @RequestParam(required = false) String source
-    ) {
+            @RequestParam(required = false) String source) {
         requireOwnedKnowledgeBase(knowledgeBaseId);
         if (!"json".equalsIgnoreCase(format) && !"csv".equalsIgnoreCase(format)) {
             throw new BusinessException("format 只能是 json 或 csv");
@@ -143,10 +139,7 @@ public class RagObservabilityController {
             headers.setContentType(MediaType.APPLICATION_JSON);
             addInternalToken(headers);
             Map response = restTemplate.postForObject(
-                    aiServiceBaseUrl + "/api/rag/evaluate",
-                    new HttpEntity<>(request, headers),
-                    Map.class
-            );
+                    aiServiceBaseUrl + "/api/rag/evaluate", new HttpEntity<>(request, headers), Map.class);
             return R.ok(response);
         } catch (Exception exception) {
             if (exception instanceof BusinessException businessException) {
@@ -178,8 +171,7 @@ public class RagObservabilityController {
             Map response = restTemplate.postForObject(
                     aiServiceBaseUrl + "/api/rag/evaluate/answer-judge",
                     new HttpEntity<>(trustedRequest, headers),
-                    Map.class
-            );
+                    Map.class);
             return R.ok(response);
         } catch (Exception exception) {
             if (exception instanceof BusinessException businessException) {
@@ -197,34 +189,31 @@ public class RagObservabilityController {
         if (requestedKnowledgeBaseId != null) {
             requireOwnedKnowledgeBase(requiredKnowledgeBaseId(requestedKnowledgeBaseId));
         }
-        trustedRequest.put("intent_context",
+        trustedRequest.put(
+                "intent_context",
                 ragIntentNodeService == null ? java.util.List.of() : ragIntentNodeService.routeCandidates());
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             addInternalToken(headers);
             Map response = restTemplate.postForObject(
-                    aiServiceBaseUrl + "/api/rag/eval",
-                    new HttpEntity<>(trustedRequest, headers),
-                    Map.class
-            );
+                    aiServiceBaseUrl + "/api/rag/eval", new HttpEntity<>(trustedRequest, headers), Map.class);
             if (response == null) {
-                throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "RAG evaluation returned an empty response");
+                throw new BusinessException(
+                        StatusCode.SERVICE_UNAVAILABLE, "RAG evaluation returned an empty response");
             }
             return R.ok(response);
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
             log.error("Production-path RAG evaluation failed", exception);
-            throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "RAG production-path evaluation is unavailable");
+            throw new BusinessException(
+                    StatusCode.SERVICE_UNAVAILABLE, "RAG production-path evaluation is unavailable");
         }
     }
 
     @GetMapping("/evaluation-runs")
-    public R<Map> listEvaluationRuns(
-            @RequestParam(defaultValue = "50") int limit,
-            @RequestParam Long knowledgeBaseId
-    ) {
+    public R<Map> listEvaluationRuns(@RequestParam(defaultValue = "50") int limit, @RequestParam Long knowledgeBaseId) {
         requireOwnedKnowledgeBase(knowledgeBaseId);
         if (limit < 1 || limit > 200) {
             throw new BusinessException("limit 必须在 1 到 200 之间");
@@ -237,9 +226,13 @@ public class RagObservabilityController {
 
     private Map get(String url) {
         try {
-            Map response = restTemplate.exchange(
-                    url, org.springframework.http.HttpMethod.GET,
-                    new HttpEntity<>(internalHeaders()), Map.class).getBody();
+            Map response = restTemplate
+                    .exchange(
+                            url,
+                            org.springframework.http.HttpMethod.GET,
+                            new HttpEntity<>(internalHeaders()),
+                            Map.class)
+                    .getBody();
             if (response == null) {
                 throw new BusinessException(StatusCode.SERVICE_UNAVAILABLE, "RAG 服务返回为空");
             }

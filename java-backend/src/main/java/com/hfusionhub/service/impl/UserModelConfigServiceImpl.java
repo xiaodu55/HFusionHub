@@ -8,16 +8,15 @@ import com.hfusionhub.dto.UserModelConfigSaveDTO;
 import com.hfusionhub.entity.UserModelConfig;
 import com.hfusionhub.mapper.UserModelConfigMapper;
 import com.hfusionhub.service.UserModelConfigService;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
-
 import java.net.URI;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
@@ -94,8 +93,12 @@ public class UserModelConfigServiceImpl implements UserModelConfigService {
         if (userId == null || userId <= 0) return Map.of();
         UserModelConfig config = find(userId);
         if (config == null || !Integer.valueOf(1).equals(config.getEnabled())) return Map.of();
-        return runtimeMap(config.getProviderType(), config.getProviderName(), config.getBaseUrl(),
-                config.getModelName(), cipher.decrypt(config.getApiKeyCiphertext()));
+        return runtimeMap(
+                config.getProviderType(),
+                config.getProviderName(),
+                config.getBaseUrl(),
+                config.getModelName(),
+                cipher.decrypt(config.getApiKeyCiphertext()));
     }
 
     @Override
@@ -115,8 +118,12 @@ public class UserModelConfigServiceImpl implements UserModelConfigService {
                 throw new BusinessException("首次配置或更换 Base URL 时，请填写 API Key 后再测试连接");
             }
         }
-        return runtimeMap(dto.getProviderType(), dto.getProviderName().trim(),
-                normalizeBaseUrl(dto.getBaseUrl()), dto.getModelName().trim(), apiKey);
+        return runtimeMap(
+                dto.getProviderType(),
+                dto.getProviderName().trim(),
+                normalizeBaseUrl(dto.getBaseUrl()),
+                dto.getModelName().trim(),
+                apiKey);
     }
 
     @Override
@@ -148,7 +155,8 @@ public class UserModelConfigServiceImpl implements UserModelConfigService {
             String value = raw == null ? "" : raw.trim();
             URI uri = URI.create(value);
             if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
-                    || !StringUtils.hasText(uri.getHost()) || uri.getUserInfo() != null) {
+                    || !StringUtils.hasText(uri.getHost())
+                    || uri.getUserInfo() != null) {
                 throw new IllegalArgumentException("invalid URL");
             }
             while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
@@ -158,8 +166,7 @@ public class UserModelConfigServiceImpl implements UserModelConfigService {
         }
     }
 
-    private Map<String, Object> runtimeMap(String type, String name, String baseUrl,
-                                           String model, String apiKey) {
+    private Map<String, Object> runtimeMap(String type, String name, String baseUrl, String model, String apiKey) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("provider_type", type);
         result.put("provider_name", name);
@@ -187,8 +194,7 @@ public class UserModelConfigServiceImpl implements UserModelConfigService {
 
     private String cleanMessage(String message) {
         if (!StringUtils.hasText(message)) return null;
-        String clean = message.replaceAll("(?i)(bearer\\s+)[^\\s]+", "$1***")
-                .replaceAll("sk-[A-Za-z0-9_-]+", "sk-***");
+        String clean = message.replaceAll("(?i)(bearer\\s+)[^\\s]+", "$1***").replaceAll("sk-[A-Za-z0-9_-]+", "sk-***");
         return clean.length() > 500 ? clean.substring(0, 500) : clean;
     }
 

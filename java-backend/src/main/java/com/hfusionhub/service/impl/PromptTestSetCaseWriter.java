@@ -5,13 +5,12 @@ import com.hfusionhub.entity.PromptTestCaseResultEntity;
 import com.hfusionhub.entity.PromptTestSetRun;
 import com.hfusionhub.mapper.PromptTestCaseResultMapper;
 import com.hfusionhub.mapper.PromptTestSetRunMapper;
+import java.time.LocalDateTime;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.time.LocalDateTime;
 
 /**
  * 提示词测试集批量运行的单用例「原子写」。
@@ -40,8 +39,7 @@ public class PromptTestSetCaseWriter {
     @Autowired(required = false)
     private CaseWriteHook caseWriteHook;
 
-    public PromptTestSetCaseWriter(PromptTestSetRunMapper runMapper,
-                                   PromptTestCaseResultMapper caseResultMapper) {
+    public PromptTestSetCaseWriter(PromptTestSetRunMapper runMapper, PromptTestCaseResultMapper caseResultMapper) {
         this.runMapper = runMapper;
         this.caseResultMapper = caseResultMapper;
     }
@@ -53,13 +51,14 @@ public class PromptTestSetCaseWriter {
      *         活跃集合），Worker 应中止且不得继续执行后续用例。
      */
     @Transactional(propagation = Propagation.REQUIRED)
-    public boolean persistCase(PromptTestSetRun run, String token, int newProgress,
-                               PromptTestCaseResult result) {
+    public boolean persistCase(PromptTestSetRun run, String token, int newProgress, PromptTestCaseResult result) {
         Long runId = run.getId();
-        int updated = runMapper.update(null, PromptTestSetRunGuards.activeRunGuard(runId, token)
-                .set(PromptTestSetRun::getProgressCount, newProgress)
-                // 每个用例写入即刷新心跳：长时批量正常推进不会被误判为失联
-                .set(PromptTestSetRun::getHeartbeatAt, LocalDateTime.now()));
+        int updated = runMapper.update(
+                null,
+                PromptTestSetRunGuards.activeRunGuard(runId, token)
+                        .set(PromptTestSetRun::getProgressCount, newProgress)
+                        // 每个用例写入即刷新心跳：长时批量正常推进不会被误判为失联
+                        .set(PromptTestSetRun::getHeartbeatAt, LocalDateTime.now()));
         if (updated == 0) {
             log.info("Prompt test set run {} stale — atomic case write rejected, worker aborts", runId);
             return false;

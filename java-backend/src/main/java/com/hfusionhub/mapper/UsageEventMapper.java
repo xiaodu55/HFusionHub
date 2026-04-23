@@ -19,8 +19,9 @@ public interface UsageEventMapper extends BaseMapper<UsageEvent> {
      */
     @Select("SELECT * FROM usage_event WHERE tenant_id = #{tenantId} AND meter = #{meter} "
             + "AND request_id = #{requestId} AND operation = #{operation} LIMIT 1")
-    UsageEvent selectByRequestAndOperation(@Param("tenantId") Long tenantId,
-                                           @Param("meter") String meter,
-                                           @Param("requestId") String requestId,
-                                           @Param("operation") String operation);
+    UsageEvent selectByRequestAndOperation(
+            @Param("tenantId") Long tenantId,
+            @Param("meter") String meter,
+            @Param("requestId") String requestId,
+            @Param("operation") String operation);
 }

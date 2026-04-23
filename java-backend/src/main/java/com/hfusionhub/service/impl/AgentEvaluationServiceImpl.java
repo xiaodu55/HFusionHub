@@ -10,6 +10,9 @@ import com.hfusionhub.mapper.AgentEvaluationDatasetMapper;
 import com.hfusionhub.mapper.AgentEvaluationRunMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.service.AgentEvaluationService;
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,10 +20,6 @@ import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
-
-import java.time.LocalDateTime;
-import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Agent 离线评测集管理与评测执行服务实现
@@ -45,11 +44,10 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
     private String internalApiToken;
 
     private static final Map<String, Double> DEFAULT_THRESHOLDS = Map.of(
-        "answer_correctness", 0.5,
-        "citation_consistency", 0.5,
-        "privilege_containment", 0.8,
-        "tool_success_rate", 0.8
-    );
+            "answer_correctness", 0.5,
+            "citation_consistency", 0.5,
+            "privilege_containment", 0.8,
+            "tool_success_rate", 0.8);
 
     // ================================================================
     // 评测集 CRUD
@@ -82,8 +80,7 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
     }
 
     @Override
-    public List<AgentEvaluationDataset> listDatasets(Long userId, Long kbId,
-                                                      int page, int pageSize) {
+    public List<AgentEvaluationDataset> listDatasets(Long userId, Long kbId, int page, int pageSize) {
         page = Math.max(1, page);
         pageSize = Math.max(1, Math.min(pageSize, 100));
         int offset = (page - 1) * pageSize;
@@ -91,8 +88,7 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
         if (userId == null) throw new BusinessException("invalid user");
         query.eq(AgentEvaluationDataset::getUserId, userId);
         if (kbId != null) query.eq(AgentEvaluationDataset::getKnowledgeBaseId, kbId);
-        query.orderByDesc(AgentEvaluationDataset::getCreatedAt)
-             .last("LIMIT " + offset + "," + pageSize);
+        query.orderByDesc(AgentEvaluationDataset::getCreatedAt).last("LIMIT " + offset + "," + pageSize);
         return datasetMapper.selectList(query);
     }
 
@@ -133,8 +129,7 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
     public List<AgentEvaluationCase> getCases(Long userId, Long datasetId) {
         getDataset(userId, datasetId);
         LambdaQueryWrapper<AgentEvaluationCase> query = new LambdaQueryWrapper<>();
-        query.eq(AgentEvaluationCase::getDatasetId, datasetId)
-             .orderByAsc(AgentEvaluationCase::getId);
+        query.eq(AgentEvaluationCase::getDatasetId, datasetId).orderByAsc(AgentEvaluationCase::getId);
         return caseMapper.selectList(query);
     }
 
@@ -183,25 +178,34 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
 
         // Build request for Python — only send query + ground truth.
         // Python will invoke the real Agent to get actual answer/sources/tool_calls.
-        List<Map<String, Object>> caseRequests = cases.stream().map(c -> {
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("case_id", String.valueOf(c.getId()));
-            item.put("query", c.getQuery() != null ? c.getQuery() : "");
-            // ground_truth = expectedAnswer (used for scoring, NOT as fake answer)
-            if (c.getExpectedAnswer() != null) item.put("ground_truth", c.getExpectedAnswer());
-            if (c.getExpectedSources() != null) item.put("expected_document_ids", c.getExpectedSources());
-            if (c.getPrivilegeTest() != null) item.put("privilege_test", c.getPrivilegeTest());
-            if (c.getMetadata() != null) item.put("metadata", c.getMetadata());
-            item.put("user_id", userId);
-            return item;
-        }).collect(Collectors.toList());
+        List<Map<String, Object>> caseRequests = cases.stream()
+                .map(c -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("case_id", String.valueOf(c.getId()));
+                    item.put("query", c.getQuery() != null ? c.getQuery() : "");
+                    // ground_truth = expectedAnswer (used for scoring, NOT as fake answer)
+                    if (c.getExpectedAnswer() != null) item.put("ground_truth", c.getExpectedAnswer());
+                    if (c.getExpectedSources() != null) item.put("expected_document_ids", c.getExpectedSources());
+                    if (c.getPrivilegeTest() != null) item.put("privilege_test", c.getPrivilegeTest());
+                    if (c.getMetadata() != null) item.put("metadata", c.getMetadata());
+                    item.put("user_id", userId);
+                    return item;
+                })
+                .collect(Collectors.toList());
 
         Map<String, Object> requestBody = new LinkedHashMap<>();
         requestBody.put("knowledge_base_id", ds.getKnowledgeBaseId());
         requestBody.put("user_id", userId);
         requestBody.put("label", "dataset_" + ds.getId() + "_" + runUuid.substring(0, 8));
-        requestBody.put("dimensions", ds.getDimensions() != null ? ds.getDimensions()
-                : List.of("answer_correctness", "citation_consistency", "privilege_containment", "tool_success_rate"));
+        requestBody.put(
+                "dimensions",
+                ds.getDimensions() != null
+                        ? ds.getDimensions()
+                        : List.of(
+                                "answer_correctness",
+                                "citation_consistency",
+                                "privilege_containment",
+                                "tool_success_rate"));
         requestBody.put("cases", caseRequests);
 
         // Call Python
@@ -214,8 +218,7 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
             Map<String, Object> pythonResponse = restTemplate.postForObject(
                     aiServiceBaseUrl + "/api/agent/observability/evaluate/run",
                     new HttpEntity<>(requestBody, headers),
-                    Map.class
-            );
+                    Map.class);
 
             // Update run record
             if (pythonResponse != null) {
@@ -262,8 +265,7 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
         }
 
         runMapper.updateById(run);
-        log.info("Evaluation run {} completed: status={} score={}",
-                runUuid, run.getStatus(), run.getOverallScore());
+        log.info("Evaluation run {} completed: status={} score={}", runUuid, run.getStatus(), run.getOverallScore());
         return run;
     }
 
@@ -275,8 +277,8 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
         int offset = (page - 1) * pageSize;
         LambdaQueryWrapper<AgentEvaluationRun> query = new LambdaQueryWrapper<>();
         query.eq(AgentEvaluationRun::getDatasetId, datasetId)
-             .orderByDesc(AgentEvaluationRun::getCreatedAt)
-             .last("LIMIT " + offset + "," + pageSize);
+                .orderByDesc(AgentEvaluationRun::getCreatedAt)
+                .last("LIMIT " + offset + "," + pageSize);
         return runMapper.selectList(query);
     }
 
@@ -298,17 +300,21 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
         // Get latest evaluation run for this dataset
         LambdaQueryWrapper<AgentEvaluationRun> query = new LambdaQueryWrapper<>();
         query.eq(AgentEvaluationRun::getDatasetId, datasetId)
-             .orderByDesc(AgentEvaluationRun::getCreatedAt)
-             .last("LIMIT 1");
+                .orderByDesc(AgentEvaluationRun::getCreatedAt)
+                .last("LIMIT 1");
         List<AgentEvaluationRun> runs = runMapper.selectList(query);
         if (runs.isEmpty()) {
             return Map.of(
-                "passed", false,
-                "message", "No evaluation runs found for this dataset",
-                "dimensions", Map.of(),
-                "scores", Map.of(),
-                "thresholds", DEFAULT_THRESHOLDS
-            );
+                    "passed",
+                    false,
+                    "message",
+                    "No evaluation runs found for this dataset",
+                    "dimensions",
+                    Map.of(),
+                    "scores",
+                    Map.of(),
+                    "thresholds",
+                    DEFAULT_THRESHOLDS);
         }
 
         AgentEvaluationRun latest = runs.get(0);
@@ -332,15 +338,13 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
 
         boolean allPassed = failed.isEmpty();
         return Map.of(
-            "passed", allPassed,
-            "message", allPassed ? "All quality gates passed."
-                    : "Failed dimensions: " + String.join(", ", failed),
-            "dimensions", dimResults,
-            "scores", dimScoreValues,
-            "thresholds", DEFAULT_THRESHOLDS,
-            "failed_dimensions", failed,
-            "evaluation_run_id", latest.getRunUuid()
-        );
+                "passed", allPassed,
+                "message", allPassed ? "All quality gates passed." : "Failed dimensions: " + String.join(", ", failed),
+                "dimensions", dimResults,
+                "scores", dimScoreValues,
+                "thresholds", DEFAULT_THRESHOLDS,
+                "failed_dimensions", failed,
+                "evaluation_run_id", latest.getRunUuid());
     }
 
     @Override
@@ -349,8 +353,7 @@ public class AgentEvaluationServiceImpl implements AgentEvaluationService {
     }
 
     private void requireOwner(Long userId, AgentEvaluationDataset dataset) {
-        if (dataset == null || userId == null || dataset.getUserId() == null
-                || !userId.equals(dataset.getUserId())) {
+        if (dataset == null || userId == null || dataset.getUserId() == null || !userId.equals(dataset.getUserId())) {
             throw new BusinessException("unauthorized evaluation dataset");
         }
     }

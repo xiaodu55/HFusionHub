@@ -1,5 +1,12 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
+
 import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.context.SaTokenContext;
 import cn.dev33.satoken.context.model.SaRequest;
@@ -23,6 +30,8 @@ import com.hfusionhub.service.ConversationService;
 import com.hfusionhub.service.MemoryService;
 import com.hfusionhub.service.UsageLedgerService;
 import com.hfusionhub.tenant.TenantContext;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,16 +44,6 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
-
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.when;
 
 /**
  * 流式聊天用量结算集成测试（P0-4 异步上下文回归）。
@@ -117,8 +116,10 @@ class ConversationStreamingUsageTest {
         AgentRun run = new AgentRun();
         run.setId(1L);
         run.setStatus("running");
-        when(agentTaskService.createTask(anyString(), anyLong(), anyLong(), any(), anyString())).thenReturn(task);
-        when(agentTaskService.startRun(anyLong(), anyString(), any(), anyString(), anyInt())).thenReturn(run);
+        when(agentTaskService.createTask(anyString(), anyLong(), anyLong(), any(), anyString()))
+                .thenReturn(task);
+        when(agentTaskService.startRun(anyLong(), anyString(), any(), anyString(), anyInt()))
+                .thenReturn(run);
         when(agentTaskService.getRunById(anyLong())).thenReturn(null);
     }
 
@@ -203,16 +204,38 @@ class ConversationStreamingUsageTest {
         @Override
         public SaStorage getStorage() {
             return new SaStorage() {
-                @Override public Object getSource() { return storage; }
-                @Override public Object get(String key) { return storage.get(key); }
-                @Override public SaStorage set(String key, Object value) { storage.put(key, value); return this; }
-                @Override public SaStorage delete(String key) { storage.remove(key); return this; }
+                @Override
+                public Object getSource() {
+                    return storage;
+                }
+
+                @Override
+                public Object get(String key) {
+                    return storage.get(key);
+                }
+
+                @Override
+                public SaStorage set(String key, Object value) {
+                    storage.put(key, value);
+                    return this;
+                }
+
+                @Override
+                public SaStorage delete(String key) {
+                    storage.remove(key);
+                    return this;
+                }
             };
         }
 
         @Override
-        public boolean matchPath(String pattern, String path) { return true; }
+        public boolean matchPath(String pattern, String path) {
+            return true;
+        }
+
         @Override
-        public boolean isValid() { return true; }
+        public boolean isValid() {
+            return true;
+        }
     }
 }

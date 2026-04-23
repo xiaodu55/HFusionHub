@@ -10,5 +10,4 @@ import org.apache.ibatis.annotations.Mapper;
  * @author HFusionHub Team
  */
 @Mapper
-public interface AgentEvaluationCaseMapper extends BaseMapper<AgentEvaluationCase> {
-}
+public interface AgentEvaluationCaseMapper extends BaseMapper<AgentEvaluationCase> {}

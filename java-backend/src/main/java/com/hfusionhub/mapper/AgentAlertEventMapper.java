@@ -10,5 +10,4 @@ import org.apache.ibatis.annotations.Mapper;
  * @author HFusionHub Team
  */
 @Mapper
-public interface AgentAlertEventMapper extends BaseMapper<AgentAlertEvent> {
-}
+public interface AgentAlertEventMapper extends BaseMapper<AgentAlertEvent> {}

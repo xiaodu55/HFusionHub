@@ -8,6 +8,11 @@ import com.hfusionhub.entity.WebhookSubscription;
 import com.hfusionhub.mapper.WebhookDeliveryMapper;
 import com.hfusionhub.mapper.WebhookSubscriptionMapper;
 import com.hfusionhub.tenant.TenantContext;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -20,12 +25,6 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
-
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Webhook 异步事件分发器
@@ -86,8 +85,8 @@ public class WebhookDispatcher {
             return;
         }
         try {
-            List<WebhookSubscription> subscriptions = TenantContext.runAs(tenantId, () ->
-                    subscriptionMapper.selectActiveByEvent(event.getEventType()));
+            List<WebhookSubscription> subscriptions =
+                    TenantContext.runAs(tenantId, () -> subscriptionMapper.selectActiveByEvent(event.getEventType()));
             if (subscriptions.isEmpty()) {
                 return;
             }
@@ -108,10 +107,9 @@ public class WebhookDispatcher {
      * @param payload      载荷
      * @return 投递记录
      */
-    public WebhookDelivery deliverSync(WebhookSubscription subscription, String eventType,
-                                       Map<String, Object> payload) {
-        Long tenantId = subscription.getTenantId() != null
-                ? subscription.getTenantId() : TenantContext.getTenantId();
+    public WebhookDelivery deliverSync(
+            WebhookSubscription subscription, String eventType, Map<String, Object> payload) {
+        Long tenantId = subscription.getTenantId() != null ? subscription.getTenantId() : TenantContext.getTenantId();
         return TenantContext.runAs(tenantId, () -> {
             WebhookDelivery delivery = attempt(subscription, eventType, payload);
             if (delivery.getSuccess() == 1) {
@@ -132,8 +130,7 @@ public class WebhookDispatcher {
      * 调度下一次尝试；重试前重新读取订阅，若已被删除/停用则放弃。
      */
     private void deliverWithRetry(WebhookSubscription subscription, WebhookEvent event, int attempt) {
-        Long tenantId = subscription.getTenantId() != null
-                ? subscription.getTenantId() : event.getTenantId();
+        Long tenantId = subscription.getTenantId() != null ? subscription.getTenantId() : event.getTenantId();
         TenantContext.runAs(tenantId, () -> {
             WebhookDelivery delivery = attempt(subscription, event.getEventType(), event.getPayload());
             if (delivery.getSuccess() == 1) {
@@ -146,29 +143,38 @@ public class WebhookDispatcher {
                 return null;
             }
             if (attempt + 1 >= MAX_RETRIES) {
-                log.warn("Webhook 订阅 {} 事件 {} 经 {} 次尝试仍失败，放弃投递",
-                        subscription.getId(), event.getEventType(), attempt + 1);
+                log.warn(
+                        "Webhook 订阅 {} 事件 {} 经 {} 次尝试仍失败，放弃投递",
+                        subscription.getId(),
+                        event.getEventType(),
+                        attempt + 1);
                 return null;
             }
             long delayMs = RETRY_DELAYS_MS[attempt];
-            log.info("Webhook 订阅 {} 事件 {} 第 {} 次投递失败，{}ms 后重试",
-                    subscription.getId(), event.getEventType(), attempt + 1, delayMs);
-            retryScheduler.schedule(() -> {
-                try {
-                    TenantContext.runAs(tenantId, () -> {
-                        WebhookSubscription current = subscriptionMapper.selectById(subscription.getId());
-                        if (current == null || !Integer.valueOf(1).equals(current.getIsActive())) {
-                            log.warn("Webhook 订阅 {} 在重试前已被删除或停用，放弃重试", subscription.getId());
-                            return null;
+            log.info(
+                    "Webhook 订阅 {} 事件 {} 第 {} 次投递失败，{}ms 后重试",
+                    subscription.getId(),
+                    event.getEventType(),
+                    attempt + 1,
+                    delayMs);
+            retryScheduler.schedule(
+                    () -> {
+                        try {
+                            TenantContext.runAs(tenantId, () -> {
+                                WebhookSubscription current = subscriptionMapper.selectById(subscription.getId());
+                                if (current == null || !Integer.valueOf(1).equals(current.getIsActive())) {
+                                    log.warn("Webhook 订阅 {} 在重试前已被删除或停用，放弃重试", subscription.getId());
+                                    return null;
+                                }
+                                deliverWithRetry(current, event, attempt + 1);
+                                return null;
+                            });
+                        } catch (Exception e) {
+                            log.error("Webhook 重试执行异常: sub={} event={}", subscription.getId(), event.getEventType(), e);
                         }
-                        deliverWithRetry(current, event, attempt + 1);
-                        return null;
-                    });
-                } catch (Exception e) {
-                    log.error("Webhook 重试执行异常: sub={} event={}", subscription.getId(),
-                            event.getEventType(), e);
-                }
-            }, delayMs, TimeUnit.MILLISECONDS);
+                    },
+                    delayMs,
+                    TimeUnit.MILLISECONDS);
             return null;
         });
     }
@@ -176,8 +182,7 @@ public class WebhookDispatcher {
     /**
      * 执行一次 HTTP 投递并落投递记录（单次，不含重试逻辑）。
      */
-    private WebhookDelivery attempt(WebhookSubscription subscription, String eventType,
-                                    Map<String, Object> payload) {
+    private WebhookDelivery attempt(WebhookSubscription subscription, String eventType, Map<String, Object> payload) {
         long start = System.currentTimeMillis();
         String payloadJson = toJson(payload);
 
@@ -204,14 +209,19 @@ public class WebhookDispatcher {
             delivery.setResponseBody(truncate(response.getBody(), BODY_MAX_LENGTH));
             delivery.setSuccess(response.getStatusCode().is2xxSuccessful() ? 1 : 0);
             if (delivery.getSuccess() != 1) {
-                log.warn("Webhook 投递返回非 2xx: sub={} status={}", subscription.getId(),
+                log.warn(
+                        "Webhook 投递返回非 2xx: sub={} status={}",
+                        subscription.getId(),
                         response.getStatusCode().value());
             }
         } catch (RestClientException e) {
             delivery.setResponseStatus(0);
             delivery.setResponseBody(truncate(e.getMessage(), BODY_MAX_LENGTH));
-            log.warn("Webhook 投递网络异常: sub={} url={} error={}",
-                    subscription.getId(), subscription.getUrl(), e.getMessage());
+            log.warn(
+                    "Webhook 投递网络异常: sub={} url={} error={}",
+                    subscription.getId(),
+                    subscription.getUrl(),
+                    e.getMessage());
         } finally {
             delivery.setDurationMs((int) (System.currentTimeMillis() - start));
             try {
@@ -231,9 +241,11 @@ public class WebhookDispatcher {
     /** 更新订阅的最近触发时间 */
     private void touchLastTriggered(WebhookSubscription subscription) {
         try {
-            subscriptionMapper.update(null, new LambdaUpdateWrapper<WebhookSubscription>()
-                    .eq(WebhookSubscription::getId, subscription.getId())
-                    .set(WebhookSubscription::getLastTriggeredAt, LocalDateTime.now()));
+            subscriptionMapper.update(
+                    null,
+                    new LambdaUpdateWrapper<WebhookSubscription>()
+                            .eq(WebhookSubscription::getId, subscription.getId())
+                            .set(WebhookSubscription::getLastTriggeredAt, LocalDateTime.now()));
         } catch (Exception e) {
             log.warn("更新订阅触发时间失败: sub={}", subscription.getId(), e);
         }
@@ -244,9 +256,11 @@ public class WebhookDispatcher {
         if (subscription.getFailureCount() == null || subscription.getFailureCount() == 0) {
             return;
         }
-        subscriptionMapper.update(null, new LambdaUpdateWrapper<WebhookSubscription>()
-                .eq(WebhookSubscription::getId, subscription.getId())
-                .set(WebhookSubscription::getFailureCount, 0));
+        subscriptionMapper.update(
+                null,
+                new LambdaUpdateWrapper<WebhookSubscription>()
+                        .eq(WebhookSubscription::getId, subscription.getId())
+                        .set(WebhookSubscription::getFailureCount, 0));
     }
 
     /**
@@ -255,16 +269,18 @@ public class WebhookDispatcher {
      * @return 更新后的订阅（null 表示订阅已不存在）
      */
     private WebhookSubscription incrementFailureCount(WebhookSubscription subscription) {
-        subscriptionMapper.update(null, new LambdaUpdateWrapper<WebhookSubscription>()
-                .eq(WebhookSubscription::getId, subscription.getId())
-                .setSql("failure_count = failure_count + 1"));
+        subscriptionMapper.update(
+                null,
+                new LambdaUpdateWrapper<WebhookSubscription>()
+                        .eq(WebhookSubscription::getId, subscription.getId())
+                        .setSql("failure_count = failure_count + 1"));
         WebhookSubscription updated = subscriptionMapper.selectById(subscription.getId());
-        if (updated != null && updated.getFailureCount() != null
+        if (updated != null
+                && updated.getFailureCount() != null
                 && updated.getFailureCount() >= MAX_CONSECUTIVE_FAILURES) {
             updated.setIsActive(0);
             subscriptionMapper.updateById(updated);
-            log.warn("Webhook 订阅 {} 连续失败 {} 次，已自动停用",
-                    updated.getId(), updated.getFailureCount());
+            log.warn("Webhook 订阅 {} 连续失败 {} 次，已自动停用", updated.getId(), updated.getFailureCount());
         }
         return updated;
     }

@@ -5,5 +5,4 @@ import com.hfusionhub.entity.RagAnswerFeedback;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
-public interface RagAnswerFeedbackMapper extends BaseMapper<RagAnswerFeedback> {
-}
+public interface RagAnswerFeedbackMapper extends BaseMapper<RagAnswerFeedback> {}

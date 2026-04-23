@@ -4,14 +4,13 @@ import cn.dev33.satoken.annotation.SaCheckRole;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.service.VectorReconciliationService;
 import io.swagger.v3.oas.annotations.Operation;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.Map;
 
 /**
  * Admin API to trigger and inspect MySQL ↔ vector store reconciliation.
@@ -30,8 +29,7 @@ public class VectorReconciliationController {
     @SaCheckRole("admin")
     @GetMapping("/documents/{documentId}")
     @Operation(summary = "Reconcile a single document (admin only)")
-    public R<VectorReconciliationService.ReconciliationResult> reconcileDocument(
-            @PathVariable Long documentId) {
+    public R<VectorReconciliationService.ReconciliationResult> reconcileDocument(@PathVariable Long documentId) {
         return R.ok(reconciliationService.reconcileDocument(documentId));
     }
 

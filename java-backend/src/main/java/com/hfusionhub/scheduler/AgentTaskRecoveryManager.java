@@ -2,6 +2,7 @@ package com.hfusionhub.scheduler;
 
 import com.hfusionhub.service.AgentTaskQueueService;
 import com.hfusionhub.tenant.TenantContext;
+import java.util.concurrent.CompletableFuture;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -9,8 +10,6 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
-
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Agent 任务启动恢复管理器 — 应用就绪后立即执行一次全面恢复扫描。
@@ -39,13 +38,15 @@ public class AgentTaskRecoveryManager implements ApplicationListener<Application
         }
         log.info("Starting agent task recovery on application ready...");
         // Run async on worker executor to avoid blocking startup
-        CompletableFuture.runAsync(() -> {
-            try {
-                int recovered = TenantContext.runAsSystem(queueService::recoverAll);
-                log.info("Startup recovery completed: {} runs processed", recovered);
-            } catch (Exception e) {
-                log.error("Startup recovery error", e);
-            }
-        }, agentWorkerExecutor);
+        CompletableFuture.runAsync(
+                () -> {
+                    try {
+                        int recovered = TenantContext.runAsSystem(queueService::recoverAll);
+                        log.info("Startup recovery completed: {} runs processed", recovered);
+                    } catch (Exception e) {
+                        log.error("Startup recovery error", e);
+                    }
+                },
+                agentWorkerExecutor);
     }
 }

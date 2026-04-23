@@ -3,10 +3,9 @@ package com.hfusionhub.controller;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.entity.MemoryEntry;
 import com.hfusionhub.service.MemoryService;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/memory")
@@ -17,8 +16,7 @@ public class MemoryController {
 
     @GetMapping
     public R<List<MemoryEntry>> list(
-            @RequestParam(required = false) String type,
-            @RequestParam(required = false) Long conversationId) {
+            @RequestParam(required = false) String type, @RequestParam(required = false) Long conversationId) {
         return R.ok(memoryService.listByUser(type, conversationId));
     }
 

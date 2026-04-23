@@ -16,15 +16,13 @@ import com.hfusionhub.mapper.AgentRunMapper;
 import com.hfusionhub.mapper.AgentStepMapper;
 import com.hfusionhub.mapper.AgentTaskMapper;
 import com.hfusionhub.service.AgentAlertService;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
+import java.util.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
-import java.util.*;
 
 /**
  * Agent 告警服务实现
@@ -120,8 +118,7 @@ public class AgentAlertServiceImpl implements AgentAlertService {
 
         long total = eventMapper.selectCount(query);
         int offset = (page - 1) * pageSize;
-        List<AgentAlertEvent> events = eventMapper.selectList(
-                query.last("LIMIT " + offset + "," + pageSize));
+        List<AgentAlertEvent> events = eventMapper.selectList(query.last("LIMIT " + offset + "," + pageSize));
         return PageResult.of(page, pageSize, Math.toIntExact(total), events);
     }
 
@@ -176,8 +173,12 @@ public class AgentAlertServiceImpl implements AgentAlertService {
                     rule.setLastTriggeredAt(LocalDateTime.now());
                     ruleMapper.updateById(rule);
                     newEvents.add(event);
-                    log.warn("Alert triggered: rule={} metric={} current={} threshold={}",
-                            rule.getName(), rule.getMetricName(), result.currentValue, rule.getThresholdValue());
+                    log.warn(
+                            "Alert triggered: rule={} metric={} current={} threshold={}",
+                            rule.getName(),
+                            rule.getMetricName(),
+                            result.currentValue,
+                            rule.getThresholdValue());
                 }
             } catch (Exception e) {
                 log.error("Alert evaluation failed for rule {}: {}", rule.getId(), e.getMessage());
@@ -224,7 +225,8 @@ public class AgentAlertServiceImpl implements AgentAlertService {
         LocalDateTime windowStart = LocalDateTime.now().minusMinutes(windowMinutes);
 
         List<AgentRun> runs = getRunsInWindow(userId, windowStart);
-        long completed = runs.stream().filter(r -> "succeeded".equals(r.getStatus())).count();
+        long completed =
+                runs.stream().filter(r -> "succeeded".equals(r.getStatus())).count();
         if (completed == 0) return new AlertEvalResult(false, 0.0, "insufficient_data");
 
         // Check each completed run's steps for sources
@@ -232,8 +234,8 @@ public class AgentAlertServiceImpl implements AgentAlertService {
         for (AgentRun r : runs) {
             if (!"succeeded".equals(r.getStatus())) continue;
             List<AgentStep> steps = stepMapper.selectByRunId(r.getId());
-            boolean hasSources = steps.stream().anyMatch(
-                    s -> s.getSources() != null && !s.getSources().isEmpty());
+            boolean hasSources = steps.stream()
+                    .anyMatch(s -> s.getSources() != null && !s.getSources().isEmpty());
             if (!hasSources && !steps.isEmpty()) missingCitations++;
         }
 
@@ -256,8 +258,8 @@ public class AgentAlertServiceImpl implements AgentAlertService {
 
         double rate = (double) failures / total;
         boolean triggered = compareValue(rate, rule.getThresholdValue(), rule.getComparisonOperator());
-        return new AlertEvalResult(triggered, rate,
-                "failures=" + failures + " total=" + total + " rate=" + String.format("%.4f", rate));
+        return new AlertEvalResult(
+                triggered, rate, "failures=" + failures + " total=" + total + " rate=" + String.format("%.4f", rate));
     }
 
     private AlertEvalResult evalRunningTimeout(Long userId, AgentAlertRule rule) {
@@ -276,9 +278,9 @@ public class AgentAlertServiceImpl implements AgentAlertService {
             }
         }
 
-        boolean triggered = staleCount > 0 && compareValue((double) staleCount, rule.getThresholdValue(), rule.getComparisonOperator());
-        return new AlertEvalResult(triggered, (double) staleCount,
-                "stale_running_tasks=" + staleCount);
+        boolean triggered = staleCount > 0
+                && compareValue((double) staleCount, rule.getThresholdValue(), rule.getComparisonOperator());
+        return new AlertEvalResult(triggered, (double) staleCount, "stale_running_tasks=" + staleCount);
     }
 
     private AlertEvalResult evalApprovalTimeout(Long userId, AgentAlertRule rule) {
@@ -286,14 +288,14 @@ public class AgentAlertServiceImpl implements AgentAlertService {
 
         LambdaQueryWrapper<AgentApproval> query = new LambdaQueryWrapper<>();
         query.eq(AgentApproval::getStatus, "pending")
-             .eq(AgentApproval::getUserId, userId)
-             .lt(AgentApproval::getCreatedAt, threshold);
+                .eq(AgentApproval::getUserId, userId)
+                .lt(AgentApproval::getCreatedAt, threshold);
         List<AgentApproval> staleApprovals = approvalMapper.selectList(query);
 
         long count = staleApprovals.size();
-        boolean triggered = count > 0 && compareValue((double) count, rule.getThresholdValue(), rule.getComparisonOperator());
-        return new AlertEvalResult(triggered, (double) count,
-                "stale_pending_approvals=" + count);
+        boolean triggered =
+                count > 0 && compareValue((double) count, rule.getThresholdValue(), rule.getComparisonOperator());
+        return new AlertEvalResult(triggered, (double) count, "stale_pending_approvals=" + count);
     }
 
     // ================================================================
@@ -303,13 +305,12 @@ public class AgentAlertServiceImpl implements AgentAlertService {
     private List<AgentRun> getRunsInWindow(Long userId, LocalDateTime windowStart) {
         LambdaQueryWrapper<AgentTask> taskQuery = new LambdaQueryWrapper<>();
         taskQuery.eq(AgentTask::getUserId, userId);
-        List<Long> taskIds = taskMapper.selectList(taskQuery).stream()
-                .map(AgentTask::getId).toList();
+        List<Long> taskIds =
+                taskMapper.selectList(taskQuery).stream().map(AgentTask::getId).toList();
         if (taskIds.isEmpty()) return List.of();
 
         LambdaQueryWrapper<AgentRun> runQuery = new LambdaQueryWrapper<>();
-        runQuery.in(AgentRun::getTaskId, taskIds)
-                .ge(AgentRun::getStartedAt, windowStart);
+        runQuery.in(AgentRun::getTaskId, taskIds).ge(AgentRun::getStartedAt, windowStart);
         return runMapper.selectList(runQuery);
     }
 
@@ -341,10 +342,14 @@ public class AgentAlertServiceImpl implements AgentAlertService {
     }
 
     private String buildAlertMessage(AgentAlertRule rule, AlertEvalResult result) {
-        return String.format("[%s] %s: current=%.4f threshold=%.4f (%s) — %s",
-                rule.getSeverity(), rule.getName(),
-                result.currentValue, rule.getThresholdValue(),
-                rule.getComparisonOperator(), result.context);
+        return String.format(
+                "[%s] %s: current=%.4f threshold=%.4f (%s) — %s",
+                rule.getSeverity(),
+                rule.getName(),
+                result.currentValue,
+                rule.getThresholdValue(),
+                rule.getComparisonOperator(),
+                result.context);
     }
 
     // ── 内部评估结果 ──

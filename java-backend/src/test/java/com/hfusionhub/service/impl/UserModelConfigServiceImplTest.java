@@ -1,28 +1,29 @@
 package com.hfusionhub.service.impl;
 
-import com.hfusionhub.common.exception.BusinessException;
-import com.hfusionhub.common.utils.ModelCredentialCipher;
-import com.hfusionhub.dto.UserModelConfigDTO;
-import com.hfusionhub.dto.UserModelConfigSaveDTO;
-import com.hfusionhub.mapper.UserModelConfigMapper;
-import com.hfusionhub.entity.UserModelConfig;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.hfusionhub.common.exception.BusinessException;
+import com.hfusionhub.common.utils.ModelCredentialCipher;
+import com.hfusionhub.dto.UserModelConfigDTO;
+import com.hfusionhub.dto.UserModelConfigSaveDTO;
+import com.hfusionhub.entity.UserModelConfig;
+import com.hfusionhub.mapper.UserModelConfigMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
 @ExtendWith(MockitoExtension.class)
 class UserModelConfigServiceImplTest {
 
     @Mock
     private UserModelConfigMapper mapper;
+
     @Mock
     private ModelCredentialCipher cipher;
 

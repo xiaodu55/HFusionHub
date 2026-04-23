@@ -7,15 +7,14 @@ import com.hfusionhub.entity.Plugin;
 import com.hfusionhub.service.PluginService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
-
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * 工具插件管理控制器。
@@ -67,8 +66,7 @@ public class PluginController {
     @Operation(summary = "上传 wheel 文件并安装插件 — 管理员")
     @PostMapping("/install/upload")
     public R<Plugin> installWithWheel(
-            @RequestPart("manifest") Map<String, Object> manifest,
-            @RequestPart("wheel") MultipartFile wheel) {
+            @RequestPart("manifest") Map<String, Object> manifest, @RequestPart("wheel") MultipartFile wheel) {
         if (wheel.getSize() > MAX_WHEEL_SIZE) {
             return R.fail(400, "插件文件大小超过限制 (50 MB)");
         }
@@ -100,8 +98,7 @@ public class PluginController {
     @SaCheckRole("admin")
     @Operation(summary = "禁用插件 — 管理员")
     @PostMapping("/{pluginId}/disable")
-    public R<Plugin> disable(@PathVariable String pluginId,
-                             @RequestBody(required = false) Map<String, String> body) {
+    public R<Plugin> disable(@PathVariable String pluginId, @RequestBody(required = false) Map<String, String> body) {
         try {
             String reason = body != null ? body.get("reason") : null;
             return R.ok(pluginService.disable(pluginId, reason));
@@ -113,8 +110,7 @@ public class PluginController {
     @SaCheckRole("admin")
     @Operation(summary = "卸载插件 — 管理员")
     @PostMapping("/{pluginId}/uninstall")
-    public R<Void> uninstall(@PathVariable String pluginId,
-                             @RequestBody(required = false) Map<String, String> body) {
+    public R<Void> uninstall(@PathVariable String pluginId, @RequestBody(required = false) Map<String, String> body) {
         try {
             String reason = body != null ? body.get("reason") : null;
             pluginService.uninstall(pluginId, reason);
@@ -127,9 +123,7 @@ public class PluginController {
     @SaCheckRole("admin")
     @Operation(summary = "设置金丝雀流量权重 — 管理员")
     @PostMapping("/{pluginId}/canary")
-    public R<Plugin> setCanary(
-            @PathVariable String pluginId,
-            @RequestBody Map<String, Object> body) {
+    public R<Plugin> setCanary(@PathVariable String pluginId, @RequestBody Map<String, Object> body) {
         try {
             BigDecimal weight = new BigDecimal(String.valueOf(body.get("weight")));
             return R.ok(pluginService.setCanary(pluginId, weight));
@@ -205,8 +199,7 @@ public class PluginController {
     @Operation(summary = "获取插件审计日志")
     @GetMapping("/{pluginId}/audit-logs")
     public R<List<Map<String, Object>>> getAuditLogs(
-            @PathVariable String pluginId,
-            @RequestParam(defaultValue = "20") int limit) {
+            @PathVariable String pluginId, @RequestParam(defaultValue = "20") int limit) {
         Plugin plugin = pluginService.getByPluginId(pluginId);
         if (plugin == null) {
             return R.fail("插件不存在");

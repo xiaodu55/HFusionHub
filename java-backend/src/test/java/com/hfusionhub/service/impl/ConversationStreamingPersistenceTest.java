@@ -1,5 +1,14 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
+
 import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.context.SaTokenContext;
 import cn.dev33.satoken.context.model.SaRequest;
@@ -29,6 +38,9 @@ import com.hfusionhub.mapper.UsageReservationMapper;
 import com.hfusionhub.service.ConversationService;
 import com.hfusionhub.service.MemoryService;
 import com.hfusionhub.tenant.TenantContext;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,19 +53,6 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
-
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.when;
 
 /**
  * 流式聊天持久化集成测试。
@@ -157,15 +156,15 @@ class ConversationStreamingPersistenceTest {
 
         when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any()))
                 .thenReturn(Flux.just(
-                        "data: {\"content\":\"Hello persistence\"}\n\n",
-                        "data: {\"event\":\"step_completed\",\"sequence\":1,"
-                                + "\"step_type\":\"retrieval\",\"action\":\"search\","
-                                + "\"input_summary\":\"q\",\"output_summary\":\"docs\"}\n\n",
-                        "data: {\"event\":\"run_completed\",\"status\":\"completed\","
-                                + "\"tool_calls_count\":2,\"token_usage\":{\"prompt_tokens\":100,"
-                                + "\"completion_tokens\":40,\"total_tokens\":140}}\n\n",
-                        "data: [DONE]\n\n"
-                ).subscribeOn(Schedulers.single()));
+                                "data: {\"content\":\"Hello persistence\"}\n\n",
+                                "data: {\"event\":\"step_completed\",\"sequence\":1,"
+                                        + "\"step_type\":\"retrieval\",\"action\":\"search\","
+                                        + "\"input_summary\":\"q\",\"output_summary\":\"docs\"}\n\n",
+                                "data: {\"event\":\"run_completed\",\"status\":\"completed\","
+                                        + "\"tool_calls_count\":2,\"token_usage\":{\"prompt_tokens\":100,"
+                                        + "\"completion_tokens\":40,\"total_tokens\":140}}\n\n",
+                                "data: [DONE]\n\n")
+                        .subscribeOn(Schedulers.single()));
 
         MessageSendDTO dto = new MessageSendDTO();
         dto.setConversationId(conversationId);
@@ -189,8 +188,7 @@ class ConversationStreamingPersistenceTest {
         assertFalse(runs.isEmpty(), "agent_run should be persisted");
         AgentRun run = waitForTerminalRun(runs.get(0).getId());
         assertEquals(AgentConstants.STATUS_SUCCEEDED, run.getStatus());
-        assertEquals(Map.of("prompt_tokens", 100, "completion_tokens", 40, "total_tokens", 140),
-                run.getTokenUsage());
+        assertEquals(Map.of("prompt_tokens", 100, "completion_tokens", 40, "total_tokens", 140), run.getTokenUsage());
 
         AgentStep step = agentStepMapper.selectOne(Wrappers.<AgentStep>lambdaQuery()
                 .eq(AgentStep::getRunId, run.getId())
@@ -220,10 +218,10 @@ class ConversationStreamingPersistenceTest {
 
         when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any()))
                 .thenReturn(Flux.just(
-                        "data: {\"content\":\"Hello from pure content\"}\n\n",
-                        "data: {\"content\":\" stream\"}\n\n",
-                        "data: [DONE]\n\n"
-                ).subscribeOn(Schedulers.single()));
+                                "data: {\"content\":\"Hello from pure content\"}\n\n",
+                                "data: {\"content\":\" stream\"}\n\n",
+                                "data: [DONE]\n\n")
+                        .subscribeOn(Schedulers.single()));
 
         MessageSendDTO dto = new MessageSendDTO();
         dto.setConversationId(conversationId);
@@ -240,9 +238,8 @@ class ConversationStreamingPersistenceTest {
         assertEquals(conversationId, assistant.getConversationId());
 
         // 用户消息也应落库
-        Message user = messageMapper.selectOne(Wrappers.<Message>lambdaQuery()
-                .eq(Message::getRole, "user")
-                .eq(Message::getRequestId, requestId));
+        Message user = messageMapper.selectOne(
+                Wrappers.<Message>lambdaQuery().eq(Message::getRole, "user").eq(Message::getRequestId, requestId));
         assertNotNull(user, "user message should be persisted");
         assertEquals("hello world", user.getContent());
     }
@@ -304,16 +301,38 @@ class ConversationStreamingPersistenceTest {
         @Override
         public SaStorage getStorage() {
             return new SaStorage() {
-                @Override public Object getSource() { return storage; }
-                @Override public Object get(String key) { return storage.get(key); }
-                @Override public SaStorage set(String key, Object value) { storage.put(key, value); return this; }
-                @Override public SaStorage delete(String key) { storage.remove(key); return this; }
+                @Override
+                public Object getSource() {
+                    return storage;
+                }
+
+                @Override
+                public Object get(String key) {
+                    return storage.get(key);
+                }
+
+                @Override
+                public SaStorage set(String key, Object value) {
+                    storage.put(key, value);
+                    return this;
+                }
+
+                @Override
+                public SaStorage delete(String key) {
+                    storage.remove(key);
+                    return this;
+                }
             };
         }
 
         @Override
-        public boolean matchPath(String pattern, String path) { return true; }
+        public boolean matchPath(String pattern, String path) {
+            return true;
+        }
+
         @Override
-        public boolean isValid() { return true; }
+        public boolean isValid() {
+            return true;
+        }
     }
 }

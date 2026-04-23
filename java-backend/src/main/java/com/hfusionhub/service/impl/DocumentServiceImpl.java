@@ -23,15 +23,6 @@ import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.DeletionService;
 import com.hfusionhub.service.DocumentService;
 import com.hfusionhub.service.VectorizationService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
-import org.springframework.util.StringUtils;
-import org.springframework.web.multipart.MultipartFile;
-
 import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
@@ -42,6 +33,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * 文档服务实现
@@ -63,9 +62,7 @@ public class DocumentServiceImpl implements DocumentService {
     private static final String UPLOAD_DIR = "uploads/documents";
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
     // 允许的文件扩展名（优先使用扩展名检查，比MIME类型更可靠）
-    private static final List<String> ALLOWED_EXTENSIONS = List.of(
-            ".pdf", ".docx", ".txt", ".md", ".csv", ".xlsx"
-    );
+    private static final List<String> ALLOWED_EXTENSIONS = List.of(".pdf", ".docx", ".txt", ".md", ".csv", ".xlsx");
     // 允许的MIME类型（作为辅助验证）
     private static final List<String> ALLOWED_TYPES = List.of(
             "application/pdf",
@@ -75,8 +72,8 @@ public class DocumentServiceImpl implements DocumentService {
             "text/markdown",
             "text/csv",
             "application/vnd.ms-excel",
-            "application/octet-stream"  // 允许通用二进制流（由扩展名验证）
-    );
+            "application/octet-stream" // 允许通用二进制流（由扩展名验证）
+            );
 
     @Override
     @Transactional
@@ -192,8 +189,7 @@ public class DocumentServiceImpl implements DocumentService {
         document.setFilePath(filePath);
         document.setFileType("md");
         Object contentLength = ingest.get("content_length");
-        document.setFileSize(contentLength instanceof Number
-                ? ((Number) contentLength).longValue() : 0L);
+        document.setFileSize(contentLength instanceof Number ? ((Number) contentLength).longValue() : 0L);
         document.setStatus(DocumentStatus.PENDING.getCode());
         documentMapper.insert(document);
 
@@ -270,17 +266,15 @@ public class DocumentServiceImpl implements DocumentService {
     public PageResult<DocumentInfoDTO> listRecycleBin(DocumentQueryDTO queryDTO) {
         queryDTO.validate();
         Long currentUserId = JwtUtils.getCurrentUserId();
-        String title = StringUtils.hasText(queryDTO.getTitle()) ? queryDTO.getTitle().trim() : null;
+        String title =
+                StringUtils.hasText(queryDTO.getTitle()) ? queryDTO.getTitle().trim() : null;
         long total = documentMapper.countRecycle(currentUserId, title);
         if (total == 0) {
             return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), 0, List.of());
         }
 
         List<Document> records = documentMapper.selectRecyclePage(
-                currentUserId,
-                title,
-                (queryDTO.getPage() - 1) * queryDTO.getPageSize(),
-                queryDTO.getPageSize());
+                currentUserId, title, (queryDTO.getPage() - 1) * queryDTO.getPageSize(), queryDTO.getPageSize());
         List<DocumentInfoDTO> result = records.stream()
                 .map(document -> {
                     KnowledgeBase kb = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
@@ -352,7 +346,6 @@ public class DocumentServiceImpl implements DocumentService {
     public PageResult<DocumentInfoDTO> list(DocumentQueryDTO queryDTO) {
         // A user-facing "all" list must still be scoped to that user's KBs.
         return listByCurrentUser(null, queryDTO);
-
     }
 
     @Override
@@ -422,12 +415,12 @@ public class DocumentServiceImpl implements DocumentService {
             docQuery.orderByDesc("created_at");
 
             long total = documentMapper.selectCount(docQuery);
-            IPage<Document> page = documentMapper.selectPage(
-                    new Page<>(queryDTO.getPage(), queryDTO.getPageSize()), docQuery);
+            IPage<Document> page =
+                    documentMapper.selectPage(new Page<>(queryDTO.getPage(), queryDTO.getPageSize()), docQuery);
 
             // 构建知识库名称映射
-            Map<Long, String> kbNameMap = userKbs.stream()
-                    .collect(Collectors.toMap(KnowledgeBase::getId, KnowledgeBase::getName));
+            Map<Long, String> kbNameMap =
+                    userKbs.stream().collect(Collectors.toMap(KnowledgeBase::getId, KnowledgeBase::getName));
 
             List<DocumentInfoDTO> records = page.getRecords().stream()
                     .map(doc -> convertToInfoDTO(doc, kbNameMap.get(doc.getKnowledgeBaseId())))
@@ -546,7 +539,10 @@ public class DocumentServiceImpl implements DocumentService {
             Path finalDir = tempFile.getParent().getParent(); // uploads/documents
             Path finalFile = finalDir.resolve(tempFile.getFileName());
             try {
-                Files.move(tempFile, finalFile, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                Files.move(
+                        tempFile,
+                        finalFile,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE,
                         java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             } catch (AtomicMoveNotSupportedException ignored) {
                 Files.move(tempFile, finalFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
@@ -607,8 +603,8 @@ public class DocumentServiceImpl implements DocumentService {
     /**
      * Document 转换为 DocumentInfoDTO（使用预查询数据，避免 N+1）
      */
-    private DocumentInfoDTO convertToInfoDTO(Document document, String knowledgeBaseName,
-                                              KnowledgeBase kb, Map<Long, String> usernameMap) {
+    private DocumentInfoDTO convertToInfoDTO(
+            Document document, String knowledgeBaseName, KnowledgeBase kb, Map<Long, String> usernameMap) {
         String username = "unknown";
         if (kb != null) {
             username = usernameMap.getOrDefault(kb.getUserId(), "unknown");

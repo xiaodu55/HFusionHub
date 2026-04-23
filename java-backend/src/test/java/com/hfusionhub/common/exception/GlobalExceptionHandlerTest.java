@@ -1,13 +1,13 @@
 package com.hfusionhub.common.exception;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
 import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.result.R;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class GlobalExceptionHandlerTest {
 
@@ -24,8 +24,8 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void mapsHttpBusinessCodeToMatchingStatus() {
-        ResponseEntity<R<?>> response = handler.handleBusinessException(
-                new BusinessException(StatusCode.TOO_MANY_REQUESTS, "too many"));
+        ResponseEntity<R<?>> response =
+                handler.handleBusinessException(new BusinessException(StatusCode.TOO_MANY_REQUESTS, "too many"));
 
         assertEquals(HttpStatus.TOO_MANY_REQUESTS, response.getStatusCode());
         assertNotNull(response.getBody());
@@ -34,8 +34,8 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void mapsDomainBusinessCodeToBadRequest() {
-        ResponseEntity<R<?>> response = handler.handleBusinessException(
-                new BusinessException(StatusCode.LOGIN_ERROR, "invalid credentials"));
+        ResponseEntity<R<?>> response =
+                handler.handleBusinessException(new BusinessException(StatusCode.LOGIN_ERROR, "invalid credentials"));
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertNotNull(response.getBody());

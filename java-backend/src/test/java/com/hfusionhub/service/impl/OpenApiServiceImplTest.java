@@ -1,5 +1,11 @@
 package com.hfusionhub.service.impl;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.*;
+
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.RedisUtils;
@@ -10,34 +16,31 @@ import com.hfusionhub.entity.AppApiKey;
 import com.hfusionhub.mapper.AppApiKeyMapper;
 import com.hfusionhub.mapper.AppCallLogMapper;
 import com.hfusionhub.mapper.AppMapper;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.util.List;
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.*;
-
 @ExtendWith(MockitoExtension.class)
 class OpenApiServiceImplTest {
 
     @Mock
     private AppMapper appMapper;
+
     @Mock
     private AppApiKeyMapper apiKeyMapper;
+
     @Mock
     private AppCallLogMapper callLogMapper;
+
     @Mock
     private AiClient aiClient;
+
     @Mock
     private RedisUtils redisUtils;
 
@@ -94,8 +97,8 @@ class OpenApiServiceImplTest {
         OpenApiChatRequest request = new OpenApiChatRequest();
         request.setQuery("你好");
 
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> openApiService.chat("hf_invalidkey", request));
+        BusinessException ex =
+                assertThrows(BusinessException.class, () -> openApiService.chat("hf_invalidkey", request));
         assertEquals(401, ex.getCode());
     }
 
@@ -111,8 +114,7 @@ class OpenApiServiceImplTest {
         OpenApiChatRequest request = new OpenApiChatRequest();
         request.setQuery("你好");
 
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> openApiService.chat(secret, request));
+        BusinessException ex = assertThrows(BusinessException.class, () -> openApiService.chat(secret, request));
         assertEquals(403, ex.getCode());
     }
 
@@ -126,8 +128,7 @@ class OpenApiServiceImplTest {
         OpenApiChatRequest request = new OpenApiChatRequest();
         request.setQuery("你好");
 
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> openApiService.chat(secret, request));
+        BusinessException ex = assertThrows(BusinessException.class, () -> openApiService.chat(secret, request));
         assertEquals(429, ex.getCode());
         verify(callLogMapper).insert(any());
     }
@@ -145,7 +146,8 @@ class OpenApiServiceImplTest {
         ai.setStatus("completed");
         ai.setTokenCount(120);
         ai.setTokenUsage(Map.of("prompt_tokens", 80, "completion_tokens", 40, "total_tokens", 120));
-        when(aiClient.agentV1Chat(anyString(), any(), any(), any(), anyString(), anyInt(), anyString(), anyLong(), any(), any()))
+        when(aiClient.agentV1Chat(
+                        anyString(), any(), any(), any(), anyString(), anyInt(), anyString(), anyLong(), any(), any()))
                 .thenReturn(ai);
 
         OpenApiChatRequest request = new OpenApiChatRequest();
@@ -156,7 +158,18 @@ class OpenApiServiceImplTest {
 
         assertEquals("客服答复内容", response.getContent());
         assertEquals("completed", response.getStatus());
-        verify(aiClient).agentV1Chat(eq("退货政策是什么？"), isNull(), eq(10L), any(), eq("detailed"), anyInt(), anyString(), eq(1L), any(), any());
+        verify(aiClient)
+                .agentV1Chat(
+                        eq("退货政策是什么？"),
+                        isNull(),
+                        eq(10L),
+                        any(),
+                        eq("detailed"),
+                        anyInt(),
+                        anyString(),
+                        eq(1L),
+                        any(),
+                        any());
         verify(callLogMapper).insert(any());
     }
 }

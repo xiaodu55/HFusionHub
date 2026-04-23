@@ -1,9 +1,8 @@
 package com.hfusionhub.webhook;
 
+import java.util.Map;
 import lombok.Getter;
 import org.springframework.context.ApplicationEvent;
-
-import java.util.Map;
 
 /**
  * Webhook 应用事件
@@ -40,8 +39,7 @@ public class WebhookEvent extends ApplicationEvent {
      * @param userId    用户ID（可为 null）
      * @param payload   载荷
      */
-    public WebhookEvent(Object source, String eventType, Long tenantId, Long userId,
-                        Map<String, Object> payload) {
+    public WebhookEvent(Object source, String eventType, Long tenantId, Long userId, Map<String, Object> payload) {
         super(source);
         this.eventType = eventType;
         this.tenantId = tenantId;

@@ -17,11 +17,6 @@ import com.hfusionhub.service.EvaluationGateService;
 import com.hfusionhub.tenant.TenantContext;
 import com.hfusionhub.webhook.WebhookEventPublisher;
 import com.hfusionhub.webhook.WebhookEventTypes;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
@@ -29,6 +24,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 评测回归门禁服务实现
@@ -116,7 +115,8 @@ public class EvaluationGateServiceImpl implements EvaluationGateService {
 
         // 基线：同数据集最近一次 completed 且非本次的评测
         LambdaQueryWrapper<AgentEvaluationRun> baselineQuery = new LambdaQueryWrapper<>();
-        baselineQuery.eq(AgentEvaluationRun::getDatasetId, datasetId)
+        baselineQuery
+                .eq(AgentEvaluationRun::getDatasetId, datasetId)
                 .eq(AgentEvaluationRun::getStatus, "completed")
                 .ne(AgentEvaluationRun::getId, runId)
                 .orderByDesc(AgentEvaluationRun::getCreatedAt)
@@ -159,8 +159,14 @@ public class EvaluationGateServiceImpl implements EvaluationGateService {
 
         persistGateResult(result, baseline != null ? baseline.getRunUuid() : null, baselineTokenCost);
         publishWebhookEvent(userId, result, run);
-        log.info("评测门禁检查完成: dataset={} run={} passed={} score={} latency={} cost={}",
-                datasetId, runId, passed, accuracy, latencyP95, tokenCost);
+        log.info(
+                "评测门禁检查完成: dataset={} run={} passed={} score={} latency={} cost={}",
+                datasetId,
+                runId,
+                passed,
+                accuracy,
+                latencyP95,
+                tokenCost);
         return result;
     }
 
@@ -172,9 +178,9 @@ public class EvaluationGateServiceImpl implements EvaluationGateService {
         int offset = (page - 1) * pageSize;
         LambdaQueryWrapper<EvaluationGateResult> query = new LambdaQueryWrapper<>();
         query.eq(EvaluationGateResult::getDatasetId, datasetId)
-             .orderByDesc(EvaluationGateResult::getCreatedAt)
-             .orderByDesc(EvaluationGateResult::getId)
-             .last("LIMIT " + offset + "," + pageSize);
+                .orderByDesc(EvaluationGateResult::getCreatedAt)
+                .orderByDesc(EvaluationGateResult::getId)
+                .last("LIMIT " + offset + "," + pageSize);
         return gateResultMapper.selectList(query);
     }
 
@@ -184,18 +190,16 @@ public class EvaluationGateServiceImpl implements EvaluationGateService {
 
     /** 准确率：accuracy &gt; 0.80 */
     private GateCriterion evaluateAccuracy(Double accuracy) {
-        GateCriterion.GateCriterionBuilder builder = GateCriterion.builder()
-                .name("accuracy")
-                .description("综合准确率")
-                .threshold("> " + ACCURACY_THRESHOLD);
+        GateCriterion.GateCriterionBuilder builder =
+                GateCriterion.builder().name("accuracy").description("综合准确率").threshold("> " + ACCURACY_THRESHOLD);
         if (accuracy == null) {
-            return builder.status("SKIPPED").actual("N/A")
-                    .detail("评测未上报综合得分").build();
+            return builder.status("SKIPPED").actual("N/A").detail("评测未上报综合得分").build();
         }
         boolean passed = accuracy > ACCURACY_THRESHOLD;
         return builder.status(passed ? "PASSED" : "FAILED")
                 .actual(String.format("%.4f", accuracy))
-                .detail(passed ? "" : "低于门槛 " + ACCURACY_THRESHOLD).build();
+                .detail(passed ? "" : "低于门槛 " + ACCURACY_THRESHOLD)
+                .build();
     }
 
     /** 延迟：latency_p95 &lt; 5000ms */
@@ -205,13 +209,16 @@ public class EvaluationGateServiceImpl implements EvaluationGateService {
                 .description("P95 延迟（毫秒）")
                 .threshold("< " + LATENCY_P95_MAX_MS);
         if (latencyP95 == null) {
-            return builder.status("SKIPPED").actual("N/A")
-                    .detail("评测未上报 P95 延迟").build();
+            return builder.status("SKIPPED")
+                    .actual("N/A")
+                    .detail("评测未上报 P95 延迟")
+                    .build();
         }
         boolean passed = latencyP95 < LATENCY_P95_MAX_MS;
         return builder.status(passed ? "PASSED" : "FAILED")
                 .actual(String.format("%.1f", latencyP95))
-                .detail(passed ? "" : "超出门槛 " + LATENCY_P95_MAX_MS + "ms").build();
+                .detail(passed ? "" : "超出门槛 " + LATENCY_P95_MAX_MS + "ms")
+                .build();
     }
 
     /** 成本：token_cost &lt; 基线 × 1.2（无基线时该项不构成回退，记 PASSED） */
@@ -221,20 +228,28 @@ public class EvaluationGateServiceImpl implements EvaluationGateService {
                 .description("token 成本（美元）")
                 .threshold("< 基线 × " + COST_BASELINE_RATIO);
         if (tokenCost == null) {
-            return builder.status("SKIPPED").actual("N/A")
-                    .detail("评测未上报 token 成本").build();
+            return builder.status("SKIPPED")
+                    .actual("N/A")
+                    .detail("评测未上报 token 成本")
+                    .build();
         }
         if (baselineTokenCost == null) {
-            return builder.status("PASSED").actual(String.format("%.6f", tokenCost))
-                    .detail("无基线可比，成本项不构成回退").build();
+            return builder.status("PASSED")
+                    .actual(String.format("%.6f", tokenCost))
+                    .detail("无基线可比，成本项不构成回退")
+                    .build();
         }
         double limit = baselineTokenCost * COST_BASELINE_RATIO;
         boolean passed = tokenCost < limit;
         return builder.status(passed ? "PASSED" : "FAILED")
                 .actual(String.format("%.6f", tokenCost))
                 .threshold(String.format("< %.6f（基线 %.6f × %s）", limit, baselineTokenCost, COST_BASELINE_RATIO))
-                .detail(passed ? "" : "超出基线成本 " + String.format("%.6f", baselineTokenCost)
-                        + " 的 " + COST_BASELINE_RATIO + " 倍").build();
+                .detail(
+                        passed
+                                ? ""
+                                : "超出基线成本 " + String.format("%.6f", baselineTokenCost) + " 的 " + COST_BASELINE_RATIO
+                                        + " 倍")
+                .build();
     }
 
     // ================================================================
@@ -247,15 +262,20 @@ public class EvaluationGateServiceImpl implements EvaluationGateService {
         entity.setRunId(result.getRunId());
         entity.setRunUuid(result.getRunUuid());
         entity.setPassed(result.isPassed() ? 1 : 0);
-        entity.setAccuracy(result.getAccuracy() != null
-                ? BigDecimal.valueOf(result.getAccuracy()).setScale(4, RoundingMode.HALF_UP) : null);
-        entity.setLatencyP95(result.getLatencyP95() != null
-                ? (int) Math.round(result.getLatencyP95()) : null);
-        entity.setTokenCost(result.getTokenCost() != null
-                ? BigDecimal.valueOf(result.getTokenCost()).setScale(6, RoundingMode.HALF_UP) : null);
+        entity.setAccuracy(
+                result.getAccuracy() != null
+                        ? BigDecimal.valueOf(result.getAccuracy()).setScale(4, RoundingMode.HALF_UP)
+                        : null);
+        entity.setLatencyP95(result.getLatencyP95() != null ? (int) Math.round(result.getLatencyP95()) : null);
+        entity.setTokenCost(
+                result.getTokenCost() != null
+                        ? BigDecimal.valueOf(result.getTokenCost()).setScale(6, RoundingMode.HALF_UP)
+                        : null);
         entity.setBaselineRunUuid(baselineRunUuid);
-        entity.setBaselineTokenCost(baselineTokenCost != null
-                ? BigDecimal.valueOf(baselineTokenCost).setScale(6, RoundingMode.HALF_UP) : null);
+        entity.setBaselineTokenCost(
+                baselineTokenCost != null
+                        ? BigDecimal.valueOf(baselineTokenCost).setScale(6, RoundingMode.HALF_UP)
+                        : null);
         entity.setCriteriaJson(toJson(result.getCriteria()));
         entity.setDetails(toJson(result.getDetails()));
         gateResultMapper.insert(entity);
@@ -286,8 +306,7 @@ public class EvaluationGateServiceImpl implements EvaluationGateService {
     // ================================================================
 
     private void requireOwner(Long userId, AgentEvaluationDataset dataset) {
-        if (dataset == null || userId == null || dataset.getUserId() == null
-                || !userId.equals(dataset.getUserId())) {
+        if (dataset == null || userId == null || dataset.getUserId() == null || !userId.equals(dataset.getUserId())) {
             throw new BusinessException("unauthorized evaluation dataset");
         }
     }

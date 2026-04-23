@@ -3,6 +3,7 @@ package com.hfusionhub.controller;
 import cn.dev33.satoken.annotation.SaCheckRole;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.result.R;
+import com.hfusionhub.dto.PasswordChangeDTO;
 import com.hfusionhub.dto.UserInfoDTO;
 import com.hfusionhub.dto.UserLoginDTO;
 import com.hfusionhub.dto.UserRegisterDTO;
@@ -13,10 +14,9 @@ import com.hfusionhub.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 /**
  * 用户控制器
@@ -125,11 +125,17 @@ public class UserController {
         return R.ok(userService.searchUsers(keyword));
     }
 
+    @PostMapping("/password")
+    @Operation(summary = "修改密码", description = "校验当前密码后更新为新密码")
+    public R<Void> changePassword(@Valid @RequestBody PasswordChangeDTO dto) {
+        userService.changePassword(dto);
+        return R.ok("密码已更新", null);
+    }
+
     @SaCheckRole("admin")
     @PutMapping("/{userId}/role")
     @Operation(summary = "修改用户身份", description = "管理员分配普通用户、AI 配置员或系统管理员身份")
-    public R<UserInfoDTO> updateUserRole(@PathVariable Long userId,
-                                         @Valid @RequestBody UserRoleUpdateDTO dto) {
+    public R<UserInfoDTO> updateUserRole(@PathVariable Long userId, @Valid @RequestBody UserRoleUpdateDTO dto) {
         return R.ok("身份已更新", userService.updateUserRole(userId, dto.getRole()));
     }
 }

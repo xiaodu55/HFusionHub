@@ -47,11 +47,13 @@ services:
     container_name: hfusionhub-redis
     ports:
       - "127.0.0.1:6379:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     volumes:
       - ../docker/redis.conf:/usr/local/etc/redis/redis.conf:ro
-    command: redis-server /usr/local/etc/redis/redis.conf
+    command: ["sh", "-c", "redis-server /usr/local/etc/redis/redis.conf --requirepass \"$REDIS_PASSWORD\""]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -91,6 +93,10 @@ services:
     environment:
       ETCD_ENDPOINTS: http://etcd:2379
       COMMON_STORAGETYPE: local
+      # 可选认证：MILVUS_AUTH_ENABLED=true 时启用（Python 需配 MILVUS_USER/MILVUS_PASSWORD，
+      # Attu 登录填 root/密码）；默认关闭
+      COMMON_SECURITY_AUTHORIZATIONENABLED: ${MILVUS_AUTH_ENABLED:-false}
+      COMMON_SECURITY_ROOTPASSWORD: ${MILVUS_ROOT_PASSWORD:-milvus-root-password}
     ports:
       - "127.0.0.1:19530:19530"
       - "127.0.0.1:9091:9091"
@@ -137,6 +143,7 @@ services:
       DB_PASSWORD: ${MYSQL_PASSWORD}
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql8:3306/hfusionhub?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
       SPRING_DATA_REDIS_HOST: redis7
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?required}
       CALLBACK_SECRET: ${CALLBACK_SECRET:?required}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?required}
@@ -277,12 +284,31 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # HTTPS 反向代理（Caddy 自动证书）：设置 SITE_DOMAIN 后对外提供 https://域名
+  caddy:
+    image: caddy:2-alpine
+    container_name: hfusionhub-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - frontend
+    restart: unless-stopped
+
 volumes:
   mysql-data:
   python-data:
   uploads-data:
   milvus-data:
   plugin-artifacts:
+  caddy-data:
+  caddy-config:
 
 secrets:
   plugin-runner-ca:

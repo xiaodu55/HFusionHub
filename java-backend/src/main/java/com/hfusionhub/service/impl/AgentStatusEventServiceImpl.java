@@ -4,17 +4,16 @@ import com.hfusionhub.dto.AgentStatusEventDTO;
 import com.hfusionhub.entity.AgentStatusEvent;
 import com.hfusionhub.mapper.AgentStatusEventMapper;
 import com.hfusionhub.service.AgentStatusEventService;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * Agent 状态事件服务实现
@@ -33,8 +32,7 @@ public class AgentStatusEventServiceImpl implements AgentStatusEventService {
 
     @Override
     @Transactional(propagation = Propagation.REQUIRED)
-    public void record(Long taskId, Long runId, String eventType, String status,
-                       Map<String, Object> payload) {
+    public void record(Long taskId, Long runId, String eventType, String status, Map<String, Object> payload) {
         AgentStatusEvent event = new AgentStatusEvent();
         event.setTaskId(taskId);
         event.setRunId(runId);
@@ -48,9 +46,7 @@ public class AgentStatusEventServiceImpl implements AgentStatusEventService {
     public List<AgentStatusEventDTO> listEvents(Long taskId, Long sinceId, int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 200));
         List<AgentStatusEvent> events = statusEventMapper.selectAfter(taskId, sinceId, safeLimit);
-        return events.stream()
-                .map(this::toDTO)
-                .collect(Collectors.toList());
+        return events.stream().map(this::toDTO).collect(Collectors.toList());
     }
 
     @Override

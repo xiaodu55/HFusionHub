@@ -3,15 +3,6 @@ package com.hfusionhub.scheduler;
 import com.hfusionhub.entity.PromptTestSetRun;
 import com.hfusionhub.service.PromptTestSetService;
 import com.hfusionhub.tenant.TenantContext;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.ApplicationListener;
-import org.springframework.context.SmartLifecycle;
-import org.springframework.core.task.AsyncTaskExecutor;
-import org.springframework.stereotype.Component;
-
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -24,6 +15,14 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ApplicationListener;
+import org.springframework.context.SmartLifecycle;
+import org.springframework.core.task.AsyncTaskExecutor;
+import org.springframework.stereotype.Component;
 
 /**
  * 提示词测试用例集批量运行 Worker 调度器 — 定期认领并派发排队中的 Run，
@@ -102,8 +101,10 @@ public class PromptTestSetRunWorkerScheduler implements ApplicationListener<Appl
 
     /** 启动轮询与恢复任务（包级可见，便于测试直接驱动）。 */
     void startScheduling() {
-        log.info("Prompt test set run worker scheduler starting: pollDelay={}ms recoveryDelay={}ms",
-                pollDelayMs, recoveryDelayMs);
+        log.info(
+                "Prompt test set run worker scheduler starting: pollDelay={}ms recoveryDelay={}ms",
+                pollDelayMs,
+                recoveryDelayMs);
         shuttingDown = false;
         running = true;
         scheduler.scheduleWithFixedDelay(this::pollAndDispatch, 1, pollDelayMs, TimeUnit.MILLISECONDS);
@@ -114,8 +115,7 @@ public class PromptTestSetRunWorkerScheduler implements ApplicationListener<Appl
 
     /** 调度启动由 {@link ApplicationReadyEvent} 触发（{@link #startScheduling()}），此处不自动启动。 */
     @Override
-    public void start() {
-    }
+    public void start() {}
 
     /** Spring 关闭时调用：停止轮询并等待已提交任务在限定时间内结束。 */
     @Override
@@ -148,8 +148,10 @@ public class PromptTestSetRunWorkerScheduler implements ApplicationListener<Appl
             if (running) {
                 shuttingDown = true;
                 scheduler.shutdown();
-                log.info("Prompt test set run worker scheduler stopping — awaiting up to {}ms for {} in-flight run(s)",
-                        shutdownTimeoutMs, inFlight.size());
+                log.info(
+                        "Prompt test set run worker scheduler stopping — awaiting up to {}ms for {} in-flight run(s)",
+                        shutdownTimeoutMs,
+                        inFlight.size());
                 awaitInFlight();
                 inFlight.clear();
                 log.info("Prompt test run worker scheduler stopped");
@@ -167,8 +169,10 @@ public class PromptTestSetRunWorkerScheduler implements ApplicationListener<Appl
         for (Future<?> future : inFlight) {
             long remaining = deadline - System.currentTimeMillis();
             if (remaining <= 0) {
-                log.warn("Prompt test set run worker shutdown timed out with {} in-flight task(s) still running; "
-                        + "left-over running runs will be recovered on next startup", inFlight.size());
+                log.warn(
+                        "Prompt test set run worker shutdown timed out with {} in-flight task(s) still running; "
+                                + "left-over running runs will be recovered on next startup",
+                        inFlight.size());
                 return;
             }
             try {
@@ -203,20 +207,22 @@ public class PromptTestSetRunWorkerScheduler implements ApplicationListener<Appl
                         CompletableFuture<Void> tracking = new CompletableFuture<>();
                         inFlight.add(tracking);
                         try {
-                        runExecutor.submit(() -> {
-                            try {
-                                TenantContext.runAs(run.getTenantId(),
-                                        () -> promptTestSetService.executeRun(run.getId()));
-                            } finally {
-                                inFlight.remove(tracking);
-                                tracking.complete(null);
-                            }
-                        });
+                            runExecutor.submit(() -> {
+                                try {
+                                    TenantContext.runAs(
+                                            run.getTenantId(), () -> promptTestSetService.executeRun(run.getId()));
+                                } finally {
+                                    inFlight.remove(tracking);
+                                    tracking.complete(null);
+                                }
+                            });
                         } catch (RejectedExecutionException e) {
                             // 停机过程中运行线程池已关闭——已认领的 run 交由 recovery 兜底
                             inFlight.remove(tracking);
-                            log.warn("Run {} claimed but scheduler is shutting down — not dispatched, "
-                                    + "left for recovery", run.getId());
+                            log.warn(
+                                    "Run {} claimed but scheduler is shutting down — not dispatched, "
+                                            + "left for recovery",
+                                    run.getId());
                         }
                     }
                 }

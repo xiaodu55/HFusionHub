@@ -12,13 +12,6 @@ import com.hfusionhub.mapper.DocumentMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.service.DemoImportService;
 import com.hfusionhub.service.VectorizationService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.Resource;
-import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
-import org.springframework.stereotype.Service;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -29,6 +22,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.stereotype.Service;
 
 /**
  * 演示知识库导入实现。
@@ -49,16 +48,14 @@ public class DemoImportServiceImpl implements DemoImportService {
     private final VectorizationService vectorizationService;
 
     private static final String DEMO_KB_NAME = "演示知识库";
-    private static final String DEMO_KB_DESC =
-            "一键导入的示例知识库（员工手册、产品目录、权限矩阵），可直接体验 RAG 问答";
+    private static final String DEMO_KB_DESC = "一键导入的示例知识库（员工手册、产品目录、权限矩阵），可直接体验 RAG 问答";
     private static final String DEMO_RESOURCE_DIR = "demo/kb/";
 
     /** 示例文档文件名 → 展示标题 */
     private static final Map<String, String> DEMO_TITLES = Map.of(
             "employee-handbook.md", "员工手册（演示）",
             "product-catalog.md", "产品目录（演示）",
-            "permissions-matrix.md", "权限矩阵（演示）"
-    );
+            "permissions-matrix.md", "权限矩阵（演示）");
 
     @Value("${demo.upload-dir:uploads/documents}")
     private String uploadDir;
@@ -107,8 +104,7 @@ public class DemoImportServiceImpl implements DemoImportService {
                     vectorizationService.startVectorization(docId, null);
                 } catch (Exception e) {
                     parseFailed++;
-                    log.warn("演示文档触发解析失败: docId={}, title={}, 原因={}（AI 服务不可用时可在文档页稍后重试）",
-                            docId, title, e.getMessage());
+                    log.warn("演示文档触发解析失败: docId={}, title={}, 原因={}（AI 服务不可用时可在文档页稍后重试）", docId, title, e.getMessage());
                 }
             } catch (IOException e) {
                 log.error("演示文档写入失败: {}", title, e);
@@ -117,8 +113,12 @@ public class DemoImportServiceImpl implements DemoImportService {
         }
 
         String message = buildMessage(createdKb, imported, skipped, parseFailed);
-        log.info("演示知识库导入完成: kbId={}, imported={}, skipped={}, parseFailed={}",
-                kb.getId(), imported, skipped, parseFailed);
+        log.info(
+                "演示知识库导入完成: kbId={}, imported={}, skipped={}, parseFailed={}",
+                kb.getId(),
+                imported,
+                skipped,
+                parseFailed);
 
         return DemoImportResultDTO.builder()
                 .knowledgeBaseId(kb.getId())
@@ -146,8 +146,8 @@ public class DemoImportServiceImpl implements DemoImportService {
 
     private List<Resource> loadDemoResources() {
         try {
-            Resource[] resources = new PathMatchingResourcePatternResolver()
-                    .getResources("classpath:" + DEMO_RESOURCE_DIR + "*.md");
+            Resource[] resources =
+                    new PathMatchingResourcePatternResolver().getResources("classpath:" + DEMO_RESOURCE_DIR + "*.md");
             return new ArrayList<>(List.of(resources));
         } catch (IOException e) {
             throw new BusinessException("读取演示文档资源失败");
@@ -193,8 +193,7 @@ public class DemoImportServiceImpl implements DemoImportService {
             sb.append("，跳过已存在的 ").append(skipped).append(" 篇");
         }
         if (parseFailed > 0) {
-            sb.append("；有 ").append(parseFailed)
-                    .append(" 篇触发解析失败（AI 服务不可用？可稍后在文档页重试）");
+            sb.append("；有 ").append(parseFailed).append(" 篇触发解析失败（AI 服务不可用？可稍后在文档页重试）");
         }
         return sb.toString();
     }

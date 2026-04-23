@@ -3,7 +3,6 @@ package com.hfusionhub.controller;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.common.utils.JwtUtils;
-import com.hfusionhub.tenant.TenantContext;
 import com.hfusionhub.dto.ConversationCreateDTO;
 import com.hfusionhub.dto.ConversationInfoDTO;
 import com.hfusionhub.dto.ConversationQueryDTO;
@@ -11,22 +10,21 @@ import com.hfusionhub.dto.MessageInfoDTO;
 import com.hfusionhub.dto.MessageSendDTO;
 import com.hfusionhub.service.ConversationService;
 import com.hfusionhub.service.TaskEventSseManager;
+import com.hfusionhub.tenant.TenantContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.MediaType;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
  * 对话控制器
@@ -56,8 +54,7 @@ public class ConversationController {
 
     @Operation(summary = "删除对话", description = "删除指定对话")
     @DeleteMapping("/{id}")
-    public R<Void> delete(
-            @Parameter(description = "对话ID") @PathVariable Long id) {
+    public R<Void> delete(@Parameter(description = "对话ID") @PathVariable Long id) {
         conversationService.delete(id);
         return R.ok();
     }
@@ -65,8 +62,7 @@ public class ConversationController {
     @Operation(summary = "重命名对话", description = "修改对话名称")
     @PutMapping("/{id}")
     public R<Void> rename(
-            @Parameter(description = "对话ID") @PathVariable Long id,
-            @RequestBody Map<String, String> body) {
+            @Parameter(description = "对话ID") @PathVariable Long id, @RequestBody Map<String, String> body) {
         String title = body == null ? null : body.get("title");
         conversationService.rename(id, title);
         return R.ok("重命名成功", null);
@@ -74,8 +70,7 @@ public class ConversationController {
 
     @Operation(summary = "清空对话消息", description = "删除对话下的全部消息，保留对话本身")
     @DeleteMapping("/{id}/messages")
-    public R<Void> clearMessages(
-            @Parameter(description = "对话ID") @PathVariable Long id) {
+    public R<Void> clearMessages(@Parameter(description = "对话ID") @PathVariable Long id) {
         conversationService.clearMessages(id);
         return R.ok("已清空", null);
     }
@@ -91,8 +86,7 @@ public class ConversationController {
 
     @Operation(summary = "获取对话详情", description = "获取指定对话的详细信息")
     @GetMapping("/{id}")
-    public R<ConversationInfoDTO> getById(
-            @Parameter(description = "对话ID") @PathVariable Long id) {
+    public R<ConversationInfoDTO> getById(@Parameter(description = "对话ID") @PathVariable Long id) {
         ConversationInfoDTO info = conversationService.getById(id);
         return R.ok(info);
     }
@@ -120,8 +114,7 @@ public class ConversationController {
 
     @Operation(summary = "获取对话历史", description = "获取指定对话的所有消息")
     @GetMapping("/{id}/messages")
-    public R<List<MessageInfoDTO>> getMessages(
-            @Parameter(description = "对话ID") @PathVariable Long id) {
+    public R<List<MessageInfoDTO>> getMessages(@Parameter(description = "对话ID") @PathVariable Long id) {
         List<MessageInfoDTO> messages = conversationService.getMessages(id);
         return R.ok(messages);
     }
@@ -129,8 +122,8 @@ public class ConversationController {
     @Operation(summary = "发送消息（流式响应）", description = "向对话发送消息，返回SSE流式响应")
     @PostMapping(value = "/message/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter sendMessageStream(
-            @Valid @RequestBody MessageSendDTO dto,
-            jakarta.servlet.http.HttpServletResponse response) throws Exception {
+            @Valid @RequestBody MessageSendDTO dto, jakarta.servlet.http.HttpServletResponse response)
+            throws Exception {
         // 禁用 SSE 缓冲，确保实时推送
         response.setHeader("X-Accel-Buffering", "no");
         response.setHeader("Cache-Control", "no-cache");
@@ -144,8 +137,10 @@ public class ConversationController {
         if (agentQueueEnabled) {
             try {
                 Long taskId = conversationService.enqueueMessage(dto, currentUserId);
-                log.info("Queue mode: task {} enqueued for conversation {}, returning SSE subscription",
-                        taskId, dto.getConversationId());
+                log.info(
+                        "Queue mode: task {} enqueued for conversation {}, returning SSE subscription",
+                        taskId,
+                        dto.getConversationId());
                 return taskEventSseManager.register(taskId, currentUserId);
             } catch (Exception e) {
                 log.error("Queue mode enqueue failed for conversation {}: {}", dto.getConversationId(), e.getMessage());
@@ -183,11 +178,11 @@ public class ConversationController {
         // 使用线程池执行异步任务，通过 runAs 保留租户上下文
         sseTaskExecutor.execute(() -> {
             TenantContext.runAs(currentTenantId, () -> {
-            try {
-                conversationService.sendMessageStream(dto, emitter, currentUserId, cancelled);
-            } catch (Exception e) {
-                emitter.completeWithError(e);
-            }
+                try {
+                    conversationService.sendMessageStream(dto, emitter, currentUserId, cancelled);
+                } catch (Exception e) {
+                    emitter.completeWithError(e);
+                }
             });
         });
 
@@ -201,9 +196,7 @@ public class ConversationController {
         if (requestId == null || requestId.isBlank()) {
             return R.fail("requestId 不能为空");
         }
-        boolean cancelled = conversationService.cancelMessageStream(
-                requestId,
-                JwtUtils.getCurrentUserId());
+        boolean cancelled = conversationService.cancelMessageStream(requestId, JwtUtils.getCurrentUserId());
         return R.ok(cancelled);
     }
 }

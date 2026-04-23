@@ -1,22 +1,20 @@
 package com.hfusionhub.tenant;
 
-import com.hfusionhub.common.utils.SpringContextHolder;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Base64;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
-
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.util.Base64;
 
 /**
  * Verifies the Python→Java callback signature (X-Callback-Secret + HMAC over
@@ -62,8 +60,8 @@ public class CallbackSignatureFilter extends OncePerRequestFilter {
     }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
-                                    FilterChain filterChain) throws ServletException, IOException {
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
         RepeatableReadRequestWrapper wrapping = new RepeatableReadRequestWrapper(request);
         try {
             // Buffer the body once; it is re-served to the controller
@@ -73,19 +71,17 @@ public class CallbackSignatureFilter extends OncePerRequestFilter {
             String secret = request.getHeader("X-Callback-Secret");
             String signature = request.getHeader("X-Callback-Signature");
             boolean verified;
-            if (callbackSecret == null || callbackSecret.isBlank()
+            if (callbackSecret == null
+                    || callbackSecret.isBlank()
                     || secret == null
                     || !MessageDigest.isEqual(
-                            callbackSecret.getBytes(StandardCharsets.UTF_8),
-                            secret.getBytes(StandardCharsets.UTF_8))) {
+                            callbackSecret.getBytes(StandardCharsets.UTF_8), secret.getBytes(StandardCharsets.UTF_8))) {
                 verified = false;
-                log.warn("Callback secret mismatch on {} {}", request.getMethod(),
-                        request.getRequestURI());
+                log.warn("Callback secret mismatch on {} {}", request.getMethod(), request.getRequestURI());
             } else {
                 verified = verifyHmacSignature(body, callbackSecret, signature);
                 if (!verified) {
-                    log.warn("Callback HMAC mismatch on {} {}", request.getMethod(),
-                            request.getRequestURI());
+                    log.warn("Callback HMAC mismatch on {} {}", request.getMethod(), request.getRequestURI());
                 }
             }
             wrapping.setAttribute(VERIFIED_ATTR, verified);
@@ -107,8 +103,7 @@ public class CallbackSignatureFilter extends OncePerRequestFilter {
             byte[] computed = mac.doFinal(payload);
             String expected = Base64.getEncoder().encodeToString(computed);
             return MessageDigest.isEqual(
-                    expected.getBytes(StandardCharsets.UTF_8),
-                    signature.getBytes(StandardCharsets.UTF_8));
+                    expected.getBytes(StandardCharsets.UTF_8), signature.getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             log.error("HMAC signature verification failed", e);
             return false;

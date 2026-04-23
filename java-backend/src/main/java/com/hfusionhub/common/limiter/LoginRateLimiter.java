@@ -4,11 +4,10 @@ import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.RedisUtils;
+import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-
-import java.util.concurrent.TimeUnit;
 
 /**
  * Redis-based login rate limiter.
@@ -71,8 +70,7 @@ public class LoginRateLimiter {
 
         if (attempts >= MAX_ATTEMPTS) {
             String lockKey = lockoutKey(ip);
-            redisUtils.set(lockKey, String.valueOf(System.currentTimeMillis()),
-                    LOCKOUT_SECONDS, TimeUnit.SECONDS);
+            redisUtils.set(lockKey, String.valueOf(System.currentTimeMillis()), LOCKOUT_SECONDS, TimeUnit.SECONDS);
             log.warn("LOGIN_RATE_LIMIT_LOCKED_OUT ip={} attempts={}", ip, attempts);
         }
     }

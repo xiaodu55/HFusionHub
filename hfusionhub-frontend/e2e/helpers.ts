@@ -36,6 +36,20 @@ export async function apiRegister(
   })
   const body = await assertJson(res)
   expect(body.code).toBe(200)
+
+  // 注册后身份为“待分配”(pending)；默认由 admin 提升为普通用户（user），
+  // 与原测试语义一致；需要更高身份时通过 opts.role 指定（如 builder/admin）。
+  const role = opts?.role ?? 'user'
+  if (role && role !== 'pending') {
+    const admin = await ensureAdmin(request)
+    const promote = await request.put(`${JAVA_BASE}/user/${body.data.id}/role`, {
+      headers: admin.headers,
+      data: { role },
+    })
+    const promoteBody = await assertJson(promote)
+    expect(promoteBody.code).toBe(200)
+  }
+
   return { username, password, userInfo: body.data }
 }
 

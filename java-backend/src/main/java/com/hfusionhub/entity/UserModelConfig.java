@@ -4,9 +4,8 @@ import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import lombok.Data;
-
 import java.time.LocalDateTime;
+import lombok.Data;
 
 @Data
 @TableName("user_model_config")
@@ -14,6 +13,7 @@ public class UserModelConfig {
 
     @TableId
     private Long id;
+
     private Long userId;
     private String providerType;
     private String providerName;
@@ -31,4 +31,3 @@ public class UserModelConfig {
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
 }
-
