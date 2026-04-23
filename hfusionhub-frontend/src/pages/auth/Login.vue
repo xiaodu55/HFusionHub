@@ -46,14 +46,16 @@ const goToRegister = () => {
 
 <template>
   <div class="app-shell flex min-h-screen items-stretch">
-    <!-- 左侧品牌区（移动端隐藏） -->
-    <div class="relative hidden w-[46%] flex-col justify-between overflow-hidden p-10 lg:flex xl:p-14">
+    <!-- 左侧品牌区（移动端隐藏）— 固定深色背景，浅色主题下也保持可读 -->
+    <div class="relative hidden w-[46%] flex-col justify-between overflow-hidden bg-gradient-to-br from-[#0e1512] to-[#060907] p-10 lg:flex xl:p-14">
+      <div class="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full bg-emerald-500/15 blur-3xl" />
+      <div class="pointer-events-none absolute -bottom-28 -left-16 h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl" />
       <div class="relative z-10">
         <div class="flex items-center gap-3">
           <span class="brand-mark">HF</span>
           <span class="text-left">
             <span class="block text-base font-semibold text-white">HFusionHub</span>
-            <span class="block text-xs text-zinc-500">AI Knowledge OS</span>
+            <span class="block text-xs text-zinc-400">AI Knowledge OS</span>
           </span>
         </div>
       </div>
@@ -81,7 +83,7 @@ const goToRegister = () => {
         </ul>
       </div>
 
-      <p class="relative z-10 text-xs text-zinc-600">HFusionHub · Java + Python + Vue 企业级 AI Agent 平台</p>
+      <p class="relative z-10 text-xs text-zinc-500">HFusionHub · Java + Python + Vue 企业级 AI Agent 平台</p>
     </div>
 
     <!-- 右侧登录表单区 -->
