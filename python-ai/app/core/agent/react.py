@@ -42,7 +42,11 @@ from ..policy import build_arguments_summary
 
 logger = logging.getLogger(__name__)
 
-NO_SUFFICIENT_EVIDENCE_REPLY = "我在当前知识库中未检索到足够依据，无法基于资料回答这个问题。"
+NO_SUFFICIENT_EVIDENCE_REPLY = (
+    "我在当前知识库中未检索到足够依据，无法基于资料回答这个问题。"
+    "建议：1) 到「文档」页确认相关资料已完成解析；2) 换一种问法，或补充包含该内容的资料。"
+    "我不会编造知识库范围外的内容。"
+)
 
 
 def _approval_required_payload(
@@ -852,10 +856,23 @@ class ReactAgent(Agent):
                 and getattr(t["_spec"], "risk_level", "read_only") != "read_only"
             ]
             if not non_retrieval_tools:
+                # 区分"知识库为空/资料解析中"与"确实无相关内容"，给出针对性提示
+                try:
+                    from app.core.vectorstore.milvus_store import _get_store
+                    corpus = _get_store().all_chunks(knowledge_base_id=self.knowledge_base_id)
+                    has_content = bool(corpus)
+                except Exception:
+                    has_content = True  # 无法确认时按普通无依据处理
+                reply = (
+                    "当前知识库还没有可检索的内容。如果资料刚上传，可能仍在解析中，"
+                    "请稍候或到「文档」页查看解析状态；解析完成后即可基于资料回答。"
+                    if not has_content
+                    else NO_SUFFICIENT_EVIDENCE_REPLY
+                )
                 self._last_sources = []
                 return AgentResponse(
-                    content=NO_SUFFICIENT_EVIDENCE_REPLY,
-                    answer=NO_SUFFICIENT_EVIDENCE_REPLY,
+                    content=reply,
+                    answer=reply,
                     steps=[],
                     model=getattr(llm, "model", "unknown"),
                     token_count=0,
@@ -1262,7 +1279,20 @@ class ReactAgent(Agent):
             self._last_sources = sources
 
             if has_selected_kb and not context:
-                yield NO_SUFFICIENT_EVIDENCE_REPLY
+                # 区分"知识库为空/资料解析中"与"确实无相关内容"，给出针对性提示
+                try:
+                    from app.core.vectorstore.milvus_store import _get_store
+                    corpus = _get_store().all_chunks(knowledge_base_id=self.knowledge_base_id)
+                    has_content = bool(corpus)
+                except Exception:
+                    has_content = True  # 无法确认时按普通无依据处理
+                if not has_content:
+                    yield (
+                        "当前知识库还没有可检索的内容。如果资料刚上传，可能仍在解析中，"
+                        "请稍候或到「文档」页查看解析状态；解析完成后即可基于资料回答。"
+                    )
+                else:
+                    yield NO_SUFFICIENT_EVIDENCE_REPLY
                 return
 
             prompt = self._build_rag_prompt(context, query, self.style) if context else query

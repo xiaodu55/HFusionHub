@@ -79,10 +79,23 @@ class BoundedMultiAgentWorkflow(Agent):
                 return False, "invalid_citation"
         return True, "accepted"
 
-    def _insufficient(self, run: AgentRun, started: float, reason: str) -> AgentResponse:
+    def _insufficient(self, run: AgentRun, started: float, reason: str,
+                      original: Optional[AgentResponse] = None) -> AgentResponse:
         self._finish(run, "insufficient_evidence", reason, started)
+        # The delegate (ReactAgent) already produces a tailored reply for the
+        # insufficient_evidence case (e.g. "knowledge base is empty / still
+        # parsing").  Preserve that content instead of stamping a generic
+        # refusal — otherwise the empty-KB hint is lost.  For every other
+        # rejection reason (missing_evidence / invalid_citation / scope_mismatch)
+        # the generic refusal is kept because the answer may be hallucinated.
+        preserve = (
+            reason == "insufficient_evidence"
+            and original is not None
+            and bool(getattr(original, "content", ""))
+        )
+        content = original.content if preserve else NO_SUFFICIENT_EVIDENCE_REPLY
         return AgentResponse(
-            content=NO_SUFFICIENT_EVIDENCE_REPLY,
+            content=content,
             finish_reason="insufficient_evidence",
             sources=[],
             agent_run_id=run.run_id,
@@ -136,7 +149,7 @@ class BoundedMultiAgentWorkflow(Agent):
         self._event(run, "evidence_critic", "completed" if accepted else "rejected", critic_started,
                     None if accepted else reason)
         if not accepted:
-            return self._insufficient(run, started, reason)
+            return self._insufficient(run, started, reason, original=response)
 
         synthesis_started = time.monotonic()
         # The synthesis role preserves the answer and citations verbatim.  It

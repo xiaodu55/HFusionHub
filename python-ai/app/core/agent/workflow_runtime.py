@@ -30,7 +30,11 @@ STATUS_TOOL_ERROR = "tool_error"
 STATUS_TIMEOUT = "timeout"
 STATUS_FAILED = "failed"
 
-NO_SUFFICIENT_EVIDENCE_REPLY = "我在当前知识库中未检索到足够依据，无法基于资料回答这个问题。"
+NO_SUFFICIENT_EVIDENCE_REPLY = (
+    "我在当前知识库中未检索到足够依据，无法基于资料回答这个问题。"
+    "建议：1) 到「文档」页确认相关资料已完成解析；2) 换一种问法，或补充包含该内容的资料。"
+    "我不会编造知识库范围外的内容。"
+)
 SERVICE_UNAVAILABLE_REPLY = "抱歉，AI 服务暂时不可用，请稍后重试。"
 
 
