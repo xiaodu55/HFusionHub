@@ -5,7 +5,7 @@ import { useUserStore } from '@/stores/user'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { BookOpen, Eye, EyeOff, MessageSquare, Sparkles } from 'lucide-vue-next'
+import { BookOpen, CheckCircle2, Eye, EyeOff, MessageSquare, Sparkles } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
@@ -45,63 +45,35 @@ const goToRegister = () => {
 </script>
 
 <template>
-  <div class="app-shell flex min-h-screen items-stretch">
-    <!-- 左侧品牌区（移动端隐藏）— 固定深色背景，浅色主题下也保持可读 -->
-    <div class="relative hidden w-[46%] flex-col justify-between overflow-hidden bg-gradient-to-br from-[#0e1512] to-[#060907] p-10 lg:flex xl:p-14">
-      <div class="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full bg-emerald-500/15 blur-3xl" />
-      <div class="pointer-events-none absolute -bottom-28 -left-16 h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl" />
-      <div class="relative z-10">
-        <div class="flex items-center gap-3">
-          <span class="brand-mark">HF</span>
-          <span class="text-left">
-            <span class="block text-base font-semibold text-white">HFusionHub</span>
-            <span class="block text-xs text-zinc-400">AI Knowledge OS</span>
-          </span>
-        </div>
-      </div>
-
-      <div class="relative z-10 max-w-md">
-        <h1 class="text-3xl font-semibold leading-tight tracking-tight text-white xl:text-4xl">
-          让 AI 基于<span class="text-emerald-400">你的资料</span>回答问题
-        </h1>
-        <p class="mt-4 text-sm leading-6 text-zinc-400">
-          上传文档、建立知识库，即可获得带来源引用的智能问答；支持 Agent 任务、工具调用与多模型接入。
-        </p>
-        <ul class="mt-8 space-y-4 text-sm text-zinc-300">
-          <li class="flex items-center gap-3">
-            <span class="next-step-icon"><BookOpen class="h-4 w-4" /></span>
-            知识库驱动的 RAG 问答，回答附带可追溯来源
-          </li>
-          <li class="flex items-center gap-3">
-            <span class="next-step-icon"><MessageSquare class="h-4 w-4" /></span>
-            多轮流式对话，支持停止、重试与反馈优化
-          </li>
-          <li class="flex items-center gap-3">
-            <span class="next-step-icon"><Sparkles class="h-4 w-4" /></span>
-            DeepSeek / Ollama 多模型，成本用量一目了然
-          </li>
-        </ul>
-      </div>
-
-      <p class="relative z-10 text-xs text-zinc-500">HFusionHub · Java + Python + Vue 企业级 AI Agent 平台</p>
+  <!-- 统一主题：背景渐变 + 光晕，玻璃卡片自动适配深浅色，无生硬分栏 -->
+  <div class="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4">
+    <!-- 背景光晕与网格纹理 -->
+    <div class="pointer-events-none absolute inset-0 overflow-hidden">
+      <div class="absolute -top-32 left-1/2 h-80 w-[36rem] -translate-x-1/2 rounded-full bg-primary/15 blur-3xl" />
+      <div class="absolute -bottom-40 -left-24 h-80 w-80 rounded-full bg-cyan-500/10 blur-3xl" />
+      <div class="absolute -bottom-32 -right-24 h-72 w-72 rounded-full bg-emerald-500/10 blur-3xl" />
+      <div class="absolute inset-0 opacity-[0.35] [background-image:linear-gradient(rgba(120,140,130,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(120,140,130,0.08)_1px,transparent_1px)] [background-size:56px_56px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,black,transparent)]" />
     </div>
 
-    <!-- 右侧登录表单区 -->
-    <div class="flex flex-1 items-center justify-center p-4 sm:p-8">
-      <div class="w-full max-w-md">
-        <div class="mb-8 flex items-center gap-3 lg:hidden">
-          <span class="brand-mark">HF</span>
-          <span class="text-left">
-            <span class="block text-base font-semibold text-foreground">HFusionHub</span>
-            <span class="block text-xs text-muted-foreground">AI Knowledge OS</span>
-          </span>
+    <div class="relative z-10 w-full max-w-md">
+      <!-- 玻璃卡片（glass-panel 自动适配深浅主题） -->
+      <div class="glass-panel rounded-2xl p-7 sm:p-9">
+        <!-- 品牌 -->
+        <div class="flex flex-col items-center text-center">
+          <span class="brand-mark h-12 w-12 text-lg">HF</span>
+          <h1 class="mt-4 text-xl font-semibold tracking-tight">HFusionHub</h1>
+          <p class="mt-0.5 text-xs tracking-[0.18em] text-muted-foreground">AI KNOWLEDGE OS</p>
         </div>
 
-        <h2 class="text-2xl font-semibold tracking-tight">欢迎回来</h2>
-        <p class="mt-1 text-sm text-muted-foreground">登录以继续使用你的知识库与智能助手</p>
+        <h2 class="mt-7 text-center text-2xl font-semibold tracking-tight">欢迎回来</h2>
+        <p class="mt-1.5 text-center text-sm text-muted-foreground">登录以继续使用你的知识库与智能助手</p>
 
-        <div v-if="registered" class="mt-5 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.08] px-4 py-3 text-sm text-emerald-600 dark:text-emerald-400">
-          注册成功。登录后请联系管理员 admin 分配身份。
+        <div
+          v-if="registered"
+          class="mt-5 flex items-start gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.08] px-4 py-3 text-sm text-emerald-600 dark:text-emerald-400"
+        >
+          <CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0" />
+          <span>注册成功。登录后请联系管理员 admin 分配身份。</span>
         </div>
 
         <form class="mt-6 space-y-4" @submit.prevent="handleLogin">
@@ -117,9 +89,7 @@ const goToRegister = () => {
             />
           </div>
           <div class="space-y-2">
-            <div class="flex items-center justify-between">
-              <Label for="password">密码</Label>
-            </div>
+            <Label for="password">密码</Label>
             <div class="relative">
               <Input
                 id="password"
@@ -143,9 +113,11 @@ const goToRegister = () => {
               </button>
             </div>
           </div>
+
           <div v-if="error" class="rounded-xl border border-destructive/25 bg-destructive/[0.08] px-4 py-3 text-sm text-destructive">
             {{ error }}
           </div>
+
           <Button class="w-full" type="submit" :disabled="loading">
             {{ loading ? '登录中...' : '登录' }}
           </Button>
@@ -157,6 +129,13 @@ const goToRegister = () => {
             立即注册
           </Button>
         </div>
+      </div>
+
+      <!-- 轻量特性提示 -->
+      <div class="mt-6 grid grid-cols-3 gap-2 text-center text-[11px] text-muted-foreground/80">
+        <span class="flex items-center justify-center gap-1"><BookOpen class="h-3.5 w-3.5 text-primary/70" />知识库问答</span>
+        <span class="flex items-center justify-center gap-1"><MessageSquare class="h-3.5 w-3.5 text-primary/70" />流式对话</span>
+        <span class="flex items-center justify-center gap-1"><Sparkles class="h-3.5 w-3.5 text-primary/70" />多模型接入</span>
       </div>
     </div>
   </div>
