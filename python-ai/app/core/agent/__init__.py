@@ -104,9 +104,20 @@ def get_agent(
     )
 
     tool_policy = None
+    # V1.1 write capability: when the Java-validated capability_profile is
+    # "approval_write", write_note must pass BOTH the workflow tool whitelist
+    # and the ToolExecutionPolicy, otherwise the agent can see the tool but
+    # can never invoke it.
+    _write_capable = (
+        execution_context is not None
+        and getattr(execution_context, "capability_profile", None) == "approval_write"
+    )
     if _ff_workflow:
+        _allowed = set(config.RAG_AGENT_ALLOWED_TOOLS)
+        if _write_capable:
+            _allowed.add("write_note")
         tool_policy = ToolExecutionPolicy(
-            allowed_names=set(config.RAG_AGENT_ALLOWED_TOOLS),
+            allowed_names=_allowed,
             knowledge_base_id=knowledge_base_id,
             timeout_seconds=config.RAG_AGENT_TOOL_TIMEOUT_SECONDS,
             max_search_results=config.RAG_AGENT_MAX_SEARCH_RESULTS,
@@ -129,6 +140,10 @@ def get_agent(
         timeout_seconds=config.RAG_AGENT_TIMEOUT_SECONDS,
         max_retries=config.RAG_AGENT_MAX_RETRIES,
         retry_delay_seconds=config.RAG_AGENT_RETRY_DELAY_SECONDS,
+        allowed_tools=frozenset(
+            set(config.RAG_AGENT_ALLOWED_TOOLS)
+            | ({"write_note"} if _write_capable else set())
+        ),
     )
     if not (_ff_multi and knowledge_base_id and knowledge_base_id > 0):
         return bounded_agent

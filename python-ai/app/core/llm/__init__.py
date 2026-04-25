@@ -8,7 +8,7 @@ import time
 from typing import Dict, Tuple
 
 from .base import BaseLLM, ChatMessage, LLMResponse
-from .deepseek_llm import DeepSeekLLM
+from .deepseek_llm import DeepSeekLLM, _is_placeholder_key
 from .failover_llm import FailoverLLM
 from .mock_llm import MockLLM
 from .ollama_llm import OllamaLLM
@@ -91,7 +91,7 @@ def get_llm(model: str = None) -> BaseLLM:
         return MockLLM()
 
     providers = []
-    if config.DEEPSEEK_API_KEY:
+    if config.DEEPSEEK_API_KEY and not _is_placeholder_key(config.DEEPSEEK_API_KEY):
         providers.append(DeepSeekLLM(
             api_key=config.DEEPSEEK_API_KEY,
             base_url=config.DEEPSEEK_BASE_URL,
@@ -104,13 +104,28 @@ def get_llm(model: str = None) -> BaseLLM:
     # though the service is starting successfully.  When a cloud provider is
     # already configured, retain Ollama as a runtime fallback candidate; the
     # FailoverLLM will handle a genuinely unavailable local service safely.
+    # The same applies when Ollama would be the ONLY provider (e.g. the
+    # DeepSeek key is still a scaffolding placeholder): dropping it because of
+    # a cold probe would leave the user with no LLM at all — a cold local
+    # Ollama is far more likely than a misconfigured one.
     if ollama_available or providers:
+        providers.append(OllamaLLM(base_url=ollama_url, model=model or config.OLLAMA_MODEL))
+    elif not providers:
+        # Ollama is the only candidate (no cloud provider configured/valid).
+        # Keep it so a cold probe does not leave the user with no LLM; the
+        # FailoverLLM path (single provider) fails fast if truly unavailable.
+        logger.warning(
+            "Ollama cold probe failed (%s) and no cloud provider is configured; "
+            "retaining Ollama as the sole LLM candidate",
+            ollama_url,
+        )
         providers.append(OllamaLLM(base_url=ollama_url, model=model or config.OLLAMA_MODEL))
 
     # Optional OpenAI-compatible backup provider (B2): any chat-completions
     # compatible endpoint (OpenAI, 通义, Kimi, …) joins the chain after
     # DeepSeek/Ollama so a configured primary failure can fail over.
-    if config.OPENAI_COMPATIBLE_API_KEY and config.OPENAI_COMPATIBLE_BASE_URL:
+    if config.OPENAI_COMPATIBLE_API_KEY and config.OPENAI_COMPATIBLE_BASE_URL \
+            and not _is_placeholder_key(config.OPENAI_COMPATIBLE_API_KEY):
         providers.append(DeepSeekLLM(
             api_key=config.OPENAI_COMPATIBLE_API_KEY,
             base_url=config.OPENAI_COMPATIBLE_BASE_URL,

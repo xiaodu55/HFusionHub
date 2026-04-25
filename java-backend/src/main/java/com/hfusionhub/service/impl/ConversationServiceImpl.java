@@ -18,6 +18,7 @@ import com.hfusionhub.entity.AgentTask;
 import com.hfusionhub.entity.Conversation;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.entity.Message;
+import com.hfusionhub.entity.ModelUsageRecord;
 import com.hfusionhub.entity.PromptTemplate;
 import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.ConversationMapper;
@@ -28,9 +29,11 @@ import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.service.AgentTaskService;
 import com.hfusionhub.service.ConversationService;
+import com.hfusionhub.service.CostTrackingService;
 import com.hfusionhub.service.MemoryService;
 import com.hfusionhub.service.UsageLedgerService;
 import com.hfusionhub.tenant.TenantContext;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HashMap;
@@ -70,6 +73,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final AgentTaskService agentTaskService;
     private final MemoryService memoryService;
     private final UsageLedgerService usageLedgerService;
+    private final CostTrackingService costTrackingService;
     private final QuotaProperties quotaProperties;
     private final com.hfusionhub.service.AgentStreamEventProcessor streamEventProcessor;
     private final com.hfusionhub.service.RagIntentNodeService ragIntentNodeService;
@@ -333,6 +337,8 @@ public class ConversationServiceImpl implements ConversationService {
         long realTokens = aiResponse.getTokenCount() > 0 ? aiResponse.getTokenCount() : reserveTokens;
         long chargeTokens = Math.min(reserveTokens, realTokens);
         usageLedgerService.settle(UsageMeter.CHAT_TOKENS, usageKey, chargeTokens, "message", requestId);
+        // 模型用量落账（model_usage_record）：同步聊天路径记录真实 token 用量。
+        recordChatModelUsage(currentUserId, dto.getConversationId(), aiResponse);
         return saveAssistantMessageV1(
                 dto.getConversationId(), aiResponse, conversation, dto.getContent(), assistantRequestId);
     }
@@ -655,6 +661,10 @@ public class ConversationServiceImpl implements ConversationService {
         assistantMessage.setRequestId(requestId);
         try {
             messageMapper.insert(assistantMessage);
+            // 模型用量落账（model_usage_record）：知识库流式会话由 Agent run 终态
+            // （completeRun）记录真实 token；非知识库流式会话 Python 不返回 token，
+            // 此处按输出内容长度估算记录，保证 /cost 页面有数据。
+            recordStreamUsageEstimate(conversationId, content);
             return true;
         } catch (DuplicateKeyException e) {
             existingAssistant = findAssistantByRequestId(requestId);
@@ -663,6 +673,86 @@ public class ConversationServiceImpl implements ConversationService {
             }
             throw e;
         }
+    }
+
+    /**
+     * 非知识库流式聊天的用量估算落账（估算值，非精确 token）。
+     */
+    private void recordStreamUsageEstimate(Long conversationId, String content) {
+        try {
+            if (conversationId == null) {
+                return;
+            }
+            Conversation conv = conversationMapper.selectById(conversationId);
+            if (conv == null || conv.getUserId() == null) {
+                return;
+            }
+            // 知识库会话由 Agent run 终态记录真实用量，此处跳过避免重复。
+            if (conv.getKnowledgeBaseId() != null && conv.getKnowledgeBaseId() > 0) {
+                return;
+            }
+            ModelUsageRecord rec = new ModelUsageRecord();
+            rec.setUserId(conv.getUserId());
+            rec.setTenantId(TenantContext.getTenantId());
+            rec.setConversationId(conversationId);
+            rec.setModel("streaming");
+            rec.setProvider("streaming");
+            rec.setRequestType("chat");
+            int outTokens = content == null ? 0 : Math.max(1, content.length() / 4);
+            rec.setPromptTokens(0);
+            rec.setCompletionTokens(outTokens);
+            rec.setTotalTokens(outTokens);
+            rec.setCostUsd(BigDecimal.ZERO);
+            rec.setLatencyMs(0);
+            costTrackingService.record(rec);
+            log.debug("Stream usage estimate recorded: conversationId={} tokens={}", conversationId, outTokens);
+        } catch (Exception e) {
+            log.warn("Failed to record stream usage estimate (non-blocking): {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 同步聊天路径的模型用量落账（model_usage_record）。
+     */
+    private void recordChatModelUsage(Long userId, Long conversationId, AiClient.ChatResponse aiResponse) {
+        try {
+            if (userId == null || userId <= 0) {
+                return;
+            }
+            ModelUsageRecord rec = new ModelUsageRecord();
+            rec.setUserId(userId);
+            rec.setConversationId(conversationId);
+            rec.setTenantId(TenantContext.getTenantId());
+            String model = aiResponse.getModel();
+            rec.setModel(model != null && !model.isBlank() ? model : "unknown");
+            rec.setProvider(rec.getModel());
+            rec.setRequestType("chat");
+            int prompt = 0;
+            int completion = 0;
+            int total = aiResponse.getTokenCount();
+            Map<String, Object> usage = aiResponse.getTokenUsage();
+            if (usage != null) {
+                prompt = usageInt(usage.get("prompt_tokens"));
+                completion = usageInt(usage.get("completion_tokens"));
+                total = usageInt(usage.get("total_tokens"));
+                if (total <= 0) {
+                    total = prompt + completion;
+                }
+            }
+            rec.setPromptTokens(prompt);
+            rec.setCompletionTokens(completion);
+            rec.setTotalTokens(total);
+            rec.setCostUsd(BigDecimal.ZERO);
+            rec.setLatencyMs(0);
+            costTrackingService.record(rec);
+            log.debug("Chat model usage recorded: userId={} model={} tokens={}", userId, rec.getModel(), total);
+        } catch (Exception e) {
+            log.warn("Failed to record chat model usage (non-blocking): {}", e.getMessage());
+        }
+    }
+
+    private static int usageInt(Object value) {
+        return value instanceof Number n ? n.intValue() : 0;
     }
 
     private void sendExistingAssistantAndComplete(SseEmitter emitter, Message message) {

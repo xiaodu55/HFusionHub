@@ -596,6 +596,14 @@ class ToolRegistry:
                 or Permissions.KB_WRITE in spec.required_permissions):
             safe_input["knowledge_base_id"] = self._knowledge_base_id
 
+        # Inject user_id for WRITE tools (anti-spoofing: from context, not model).
+        # Read tools don't need it; write tools (write_note) persist on behalf of
+        # the authenticated user that owns the KB.
+        if (Permissions.KB_WRITE in spec.required_permissions
+                and context is not None
+                and getattr(context, "user_id", None)):
+            safe_input["user_id"] = context.user_id
+
         # ── Content guardrails: input check on tool arguments ────────
         # Defense in depth on top of the policy engine.  Runs for EVERY call
         # (including scoped-grant calls — a grant authorises the call, not

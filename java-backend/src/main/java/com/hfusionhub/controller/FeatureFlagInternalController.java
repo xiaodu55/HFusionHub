@@ -29,7 +29,7 @@ public class FeatureFlagInternalController {
 
     private final FeatureFlagService featureFlagService;
 
-    @Value("${app.internal-token:}")
+    @Value("${python-ai.internal-token:}")
     private String expectedToken;
 
     @GetMapping("/snapshot")

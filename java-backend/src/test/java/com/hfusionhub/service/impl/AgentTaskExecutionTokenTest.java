@@ -67,7 +67,8 @@ class AgentTaskExecutionTokenTest {
                 statusEventService,
                 redisUtils,
                 mock(com.hfusionhub.service.UsageLedgerService.class),
-                mock(com.hfusionhub.config.QuotaProperties.class));
+                mock(com.hfusionhub.config.QuotaProperties.class),
+                mock(com.hfusionhub.service.CostTrackingService.class));
     }
 
     @Test

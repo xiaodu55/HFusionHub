@@ -198,4 +198,6 @@ export interface MessageSendDTO {
   conversationId: number
   content: string
   requestId?: string
+  /** 能力档位："approval_write" 时 Agent 可见 write_note 工具（服务端校验）。 */
+  capabilityProfile?: string
 }

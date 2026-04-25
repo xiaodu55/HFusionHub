@@ -10,6 +10,36 @@ from typing import List, AsyncGenerator, NoReturn
 from .base import BaseLLM, ChatMessage, LLMResponse
 
 
+# Placeholder values that indicate the user has NOT configured a real API key
+# yet (copied from .env.example / scaffolding).  Treating these as "configured"
+# makes every chat request burn a failing upstream call (401) before failover
+# kicks in, which adds seconds of latency to the first token.
+_PLACEHOLDER_KEYS = {
+    "your_api_key_here",
+    "your_api_key",
+    "your-key-here",
+    "sk-xxx",
+    "xxx",
+    "changeme",
+}
+
+
+def _is_placeholder_key(api_key: str) -> bool:
+    if not api_key:
+        return True
+    lowered = api_key.strip().lower()
+    if lowered in _PLACEHOLDER_KEYS:
+        return True
+    # Common scaffolding shapes: "your_..._key", "your-...-key", "xxx...".
+    if lowered.startswith("your_") and lowered.endswith("_key"):
+        return True
+    if lowered.startswith("your-") and lowered.endswith("-key"):
+        return True
+    if lowered.startswith("xxx"):
+        return True
+    return False
+
+
 class DeepSeekLLM(BaseLLM):
     """DeepSeek LLM implementation"""
 
@@ -22,7 +52,7 @@ class DeepSeekLLM(BaseLLM):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.model = model
-        self._available = True
+        self._available = not _is_placeholder_key(api_key)
 
     def _chat_completions_url(self) -> str:
         # Accept the two common Base URL forms users encounter in provider docs:

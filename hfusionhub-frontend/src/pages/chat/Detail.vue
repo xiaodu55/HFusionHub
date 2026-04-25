@@ -3,12 +3,13 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import * as conversationApi from '@/api/conversation'
 import { getAnswerFeedback, saveAnswerFeedback } from '@/api/rag'
+import { listPendingApprovals, decideApproval, type AgentApproval } from '@/api/approval'
 import type { Conversation, Message } from '@/api/types'
 import { useUserStore } from '@/stores/user'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
-import { ArrowLeft, BookOpen, Copy, Download, Eraser, Pencil, Send, User, Bot, Loader2, RotateCcw, Square, RefreshCw, ThumbsUp, ThumbsDown } from 'lucide-vue-next'
+import { ArrowLeft, BookOpen, Check, Copy, Download, Eraser, Pencil, Send, User, Bot, Loader2, RotateCcw, Square, RefreshCw, ThumbsUp, ThumbsDown, X } from 'lucide-vue-next'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useToast } from '@/composables/useToast'
 import { formatDateTime, formatTime } from '@/utils/date'
@@ -36,6 +37,55 @@ const inputMessage = ref('')
 const isComposing = ref(false) // 中文输入法组合态：组合期间按 Enter 不发送
 const messagesContainer = ref<HTMLElement | null>(null)
 const streamingMessageId = ref<number | null>(null) // 正在流式输出的消息ID
+
+// ── 工具调用审批确认（write_note 等写工具）──────────────────────────
+const approvalPrompt = ref<AgentApproval | null>(null) // 待确认的审批
+const approvalBusy = ref(false) // 确认按钮处理中
+let lastApprovalCheck = 0 // 防抖：同一时间窗只检查一次
+
+/** 检查是否有刚产生的待审批（最近 3 分钟内），有则弹出确认卡片。 */
+const maybeCheckApproval = async () => {
+  try {
+    const now = Date.now()
+    if (now - lastApprovalCheck < 2000) return // 2s 防抖
+    lastApprovalCheck = now
+    const res = await listPendingApprovals()
+    const pending = (res.data || []).filter(a => {
+      if (a.status !== 'pending') return false
+      const created = new Date(a.createdAt).getTime()
+      return now - created < 3 * 60 * 1000 // 最近 3 分钟
+    })
+    // 优先展示 write_note 相关的审批
+    const target = pending.find(a => a.toolName === 'write_note') || pending[0]
+    if (target) approvalPrompt.value = target
+  } catch {
+    // 静默失败：不打断聊天
+  }
+}
+
+/** 用户点击同意/拒绝 → 调用审批决定接口，Agent 将继续/终止执行。 */
+const handleApprovalDecision = async (decision: 'approved' | 'denied') => {
+  const approval = approvalPrompt.value
+  if (!approval || !approval.taskId) return
+  approvalBusy.value = true
+  try {
+    await decideApproval(approval.taskId, {
+      approvalId: approval.approvalId,
+      decision,
+      reason: decision === 'approved' ? '用户在聊天中确认' : '用户在聊天中拒绝',
+    })
+    toast.success(decision === 'approved' ? '已批准，Agent 将继续执行' : '已拒绝')
+    approvalPrompt.value = null
+    // 批准后 Agent 恢复执行，稍后刷新消息
+    if (decision === 'approved') {
+      setTimeout(() => loadMessages(true), 2500)
+    }
+  } catch (e) {
+    toast.error(friendlyErrorMessage(e, '审批操作失败，请稍后重试'))
+  } finally {
+    approvalBusy.value = false
+  }
+}
 
 // 用于取消流式请求的 AbortController
 let abortController: AbortController | null = null
@@ -137,6 +187,8 @@ const handleSend = async () => {
         conversationId: Number(route.params.id),
         content,
         requestId,
+        // KB 会话启用写能力：模型可见 write_note（写工具），调用前会请求人工审批
+        capabilityProfile: conversation.value?.knowledgeBaseId ? 'approval_write' : undefined,
       }),
       signal: abortController.signal,
     })
@@ -247,6 +299,7 @@ const handleSend = async () => {
         conversationId: Number(route.params.id),
         content,
         requestId,
+        capabilityProfile: conversation.value?.knowledgeBaseId ? 'approval_write' : undefined,
       })
       // 如果占位消息还在（有部分内容），替换为新完整回复
       if (pendingId !== null) {
@@ -283,6 +336,8 @@ const handleSend = async () => {
     if (activeRequestId === requestId) {
       activeRequestId = null
     }
+    // 工具调用可能已产生待审批（如 write_note），延迟检查并弹出确认卡片
+    setTimeout(maybeCheckApproval, 1500)
   }
 }
 
@@ -664,6 +719,33 @@ onMounted(() => {
         </div>
       </div>
       <template v-else>
+        <!-- 工具调用审批确认卡片（write_note 等写工具） -->
+        <div
+          v-if="approvalPrompt"
+          class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4"
+        >
+          <div class="flex items-start gap-3">
+            <Pencil class="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium text-amber-600">需要你的确认</p>
+              <p class="mt-1 text-sm text-foreground">
+                Agent 请求{{ approvalPrompt.toolName === 'write_note' ? '把内容整理成笔记保存到知识库' : `调用工具 ${approvalPrompt.toolName}` }}，是否允许执行？
+              </p>
+              <p v-if="approvalPrompt.argumentsSummary" class="mt-1 line-clamp-3 text-xs text-muted-foreground">
+                {{ approvalPrompt.argumentsSummary }}
+              </p>
+              <div class="mt-3 flex items-center gap-2">
+                <Button size="sm" variant="default" :disabled="approvalBusy" @click="handleApprovalDecision('approved')">
+                  <Check class="mr-1 h-4 w-4" /> 同意执行
+                </Button>
+                <Button size="sm" variant="outline" :disabled="approvalBusy" @click="handleApprovalDecision('denied')">
+                  <X class="mr-1 h-4 w-4" /> 拒绝
+                </Button>
+                <Loader2 v-if="approvalBusy" class="ml-1 h-4 w-4 animate-spin text-muted-foreground" />
+              </div>
+            </div>
+          </div>
+        </div>
         <div
           v-for="message in messages"
           :key="message.id"

@@ -81,7 +81,8 @@ class AgentTaskQueueIntegrationTest {
                 statusEventService,
                 redisUtils,
                 usageLedgerService,
-                quotaProperties);
+                quotaProperties,
+                mock(com.hfusionhub.service.CostTrackingService.class));
         ReflectionTestUtils.setField(agentTaskService, "leaseSeconds", 120);
         ReflectionTestUtils.setField(agentTaskService, "cancelFlagTtlSeconds", 3600);
 

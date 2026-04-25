@@ -895,16 +895,21 @@ def _build_gateway_from_config() -> ModelGateway:
 
     default_rate = _env_int("MODEL_GATEWAY_RATE_LIMIT_PER_MIN", 60_000)
 
-    # DeepSeek — cloud provider; only usable when an API key is configured.
+    # DeepSeek — cloud provider; only usable when a REAL API key is configured.
+    # Scaffolding placeholder keys (e.g. "your_api_key_here") must not enable
+    # the provider — otherwise every request burns a failing upstream call.
+    from app.core.llm.deepseek_llm import _is_placeholder_key
+    deepseek_key = config.DEEPSEEK_API_KEY or ""
+    deepseek_enabled = bool(deepseek_key) and not _is_placeholder_key(deepseek_key)
     gateway.register_provider(ProviderConfig(
         name="deepseek",
         provider_type="openai",
         base_url=config.DEEPSEEK_BASE_URL,
-        api_key=config.DEEPSEEK_API_KEY or None,
+        api_key=deepseek_key or None,
         models=[config.DEEPSEEK_MODEL, "deepseek-chat", "deepseek-reasoner"],
         price_per_1k_input=_DEEPSEEK_PRICE_PER_1K_INPUT,
         price_per_1k_output=_DEEPSEEK_PRICE_PER_1K_OUTPUT,
-        enabled=bool(config.DEEPSEEK_API_KEY),
+        enabled=deepseek_enabled,
         rate_limit_tokens_per_min=default_rate,
     ))
 
@@ -936,7 +941,7 @@ def _build_gateway_from_config() -> ModelGateway:
         models=openai_models,
         price_per_1k_input=_env_float("OPENAI_COMPATIBLE_PRICE_INPUT_PER_1K", 0.0005),
         price_per_1k_output=_env_float("OPENAI_COMPATIBLE_PRICE_OUTPUT_PER_1K", 0.0015),
-        enabled=bool(openai_base and openai_api_key),
+        enabled=bool(openai_base and openai_api_key and not _is_placeholder_key(openai_api_key)),
         rate_limit_tokens_per_min=_env_int("OPENAI_COMPATIBLE_RATE_LIMIT_PER_MIN", default_rate),
     ))
 

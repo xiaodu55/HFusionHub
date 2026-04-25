@@ -49,6 +49,7 @@ public class SaTokenConfig implements WebMvcConfigurer {
                                     "/internal/feature-flags/snapshot",
                                     "/internal/agent/**",
                                     "/internal/plugin/**",
+                                    "/internal/notes/**",
                                     "/openapi/**",
                                     "/doc.html",
                                     "/swagger-ui.html",
@@ -104,6 +105,7 @@ public class SaTokenConfig implements WebMvcConfigurer {
                         "/internal/feature-flags/snapshot",
                         "/internal/agent/**",
                         "/internal/plugin/**",
+                        "/internal/notes/**",
                         "/openapi/**")
                 .order(3);
     }

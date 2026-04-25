@@ -15,6 +15,7 @@ import com.hfusionhub.entity.AgentRun;
 import com.hfusionhub.entity.AgentStep;
 import com.hfusionhub.entity.AgentTask;
 import com.hfusionhub.entity.Message;
+import com.hfusionhub.entity.ModelUsageRecord;
 import com.hfusionhub.mapper.AgentApprovalMapper;
 import com.hfusionhub.mapper.AgentRunMapper;
 import com.hfusionhub.mapper.AgentStepMapper;
@@ -23,8 +24,10 @@ import com.hfusionhub.mapper.MessageMapper;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.service.AgentTaskService;
+import com.hfusionhub.service.CostTrackingService;
 import com.hfusionhub.service.UsageLedgerService;
 import com.hfusionhub.tenant.TenantContext;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
@@ -57,6 +60,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     private final com.hfusionhub.common.utils.RedisUtils redisUtils;
     private final UsageLedgerService usageLedgerService;
     private final QuotaProperties quotaProperties;
+    private final CostTrackingService costTrackingService;
 
     @SuppressWarnings("java:S107")
     public AgentTaskServiceImpl(
@@ -71,7 +75,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             com.hfusionhub.service.AgentStatusEventService statusEventService,
             com.hfusionhub.common.utils.RedisUtils redisUtils,
             UsageLedgerService usageLedgerService,
-            QuotaProperties quotaProperties) {
+            QuotaProperties quotaProperties,
+            CostTrackingService costTrackingService) {
         this.taskMapper = taskMapper;
         this.runMapper = runMapper;
         this.stepMapper = stepMapper;
@@ -84,6 +89,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         this.redisUtils = redisUtils;
         this.usageLedgerService = usageLedgerService;
         this.quotaProperties = quotaProperties;
+        this.costTrackingService = costTrackingService;
     }
 
     @org.springframework.beans.factory.annotation.Value("${agent.run.lease-seconds:120}")
@@ -284,12 +290,71 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         run.setDurationMs(actualDuration);
         runMapper.updateCompletionMetadata(runId, model, tokenUsage, toolCallsCount, actualDuration);
 
+        // 模型用量落账（model_usage_record）：Agent 运行终态记录真实 token 用量。
+        recordAgentModelUsage(run, task, tokenUsage, model);
+
         log.info(
                 "Agent run {} completed: status={} duration={}ms toolCalls={}",
                 runId,
                 status,
                 actualDuration,
                 toolCallsCount);
+    }
+
+    /**
+     * Agent 运行终态时记录模型用量到 model_usage_record（成本追踪）。
+     * 记录失败仅告警，不影响主流程。task 可能为 null（如孤儿 run），此时跳过。
+     */
+    private void recordAgentModelUsage(AgentRun run, AgentTask task, Map<String, Object> tokenUsage, String model) {
+        try {
+            if (task == null || task.getUserId() == null) {
+                return;
+            }
+            ModelUsageRecord rec = new ModelUsageRecord();
+            rec.setUserId(task.getUserId());
+            rec.setTenantId(run.getTenantId());
+            rec.setAgentTaskId(task.getId());
+            rec.setConversationId(task.getConversationId());
+            String resolvedModel = model;
+            if (resolvedModel == null || resolvedModel.isBlank()) {
+                resolvedModel = run.getModel();
+            }
+            if (resolvedModel == null || resolvedModel.isBlank()) {
+                resolvedModel = "unknown";
+            }
+            rec.setModel(resolvedModel);
+            rec.setProvider(resolvedModel);
+            rec.setRequestType("agent");
+            int prompt = 0;
+            int completion = 0;
+            int total = 0;
+            if (tokenUsage != null) {
+                prompt = usageInt(tokenUsage.get("prompt_tokens"));
+                completion = usageInt(tokenUsage.get("completion_tokens"));
+                total = usageInt(tokenUsage.get("total_tokens"));
+                if (total <= 0) {
+                    total = prompt + completion;
+                }
+            }
+            rec.setPromptTokens(prompt);
+            rec.setCompletionTokens(completion);
+            rec.setTotalTokens(total);
+            rec.setCostUsd(BigDecimal.ZERO);
+            rec.setLatencyMs(run.getDurationMs() != null ? run.getDurationMs().intValue() : 0);
+            costTrackingService.record(rec);
+            log.debug(
+                    "Agent model usage recorded: runId={} userId={} model={} tokens={}",
+                    run.getId(),
+                    task.getUserId(),
+                    resolvedModel,
+                    total);
+        } catch (Exception e) {
+            log.warn("Failed to record agent model usage (non-blocking): {}", e.getMessage());
+        }
+    }
+
+    private static int usageInt(Object value) {
+        return value instanceof Number n ? n.intValue() : 0;
     }
 
     @Override

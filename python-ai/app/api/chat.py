@@ -607,6 +607,8 @@ async def agent_v1_chat_stream(request: AgentV1Request):
     run_error) alongside content chunks for Java backend persistence.
     """
     try:
+        _t0 = time_module.monotonic()
+        logger.info("[stream-timing] V1 endpoint entered at %.3fs", _t0)
         style = request.style if request.style in _VALID_STYLES else "detailed"
 
         history = _build_history_with_system_prompt(
@@ -646,6 +648,7 @@ async def agent_v1_chat_stream(request: AgentV1Request):
             _terminal_event_emitted = False
 
             # Emit run_started event before agent execution.
+            logger.info("[stream-timing] first yield (run_started) at %.3fs (elapsed %.3fs)", time_module.monotonic(), time_module.monotonic() - _t0)
             yield _agent_chunk_to_sse(_build_run_started_event(agent_run_id))
 
             try:

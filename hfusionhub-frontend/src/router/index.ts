@@ -148,6 +148,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/memory/Index.vue'),
       },
       {
+        path: 'notes',
+        name: 'Notes',
+        component: () => import('@/pages/notes/Index.vue'),
+      },
+      {
         path: 'rag',
         name: 'RagObservability',
         component: () => import('@/pages/rag/Index.vue'),

@@ -166,12 +166,18 @@ class BoundedMultiAgentWorkflow(Agent):
         history: List[Dict[str, str]] = None,
         **kwargs: Any,
     ) -> AsyncGenerator[str, None]:
-        """Buffer P10 output until citation review has completed safely."""
-        response = await self.run(query=query, history=history, **kwargs)
-        if response.content:
-            yield response.content
-        if response.sources:
-            yield json.dumps({"sources": response.sources}, ensure_ascii=False)
+        """Stream delegate output incrementally (no P10 buffering).
+
+        The evidence critic only guards the non-streaming ``run()`` path.
+        Streaming forwards the delegate's chunks immediately so the user sees
+        token-by-token output instead of one delayed blob.  The delegate
+        (ReactAgent.run_stream) already applies its own groundedness and
+        insufficient-evidence gates before emitting final text, and emits
+        step_completed events during retrieval — the critic is a safety net
+        for the synchronous path only.
+        """
+        async for chunk in self.delegate.run_stream(query=query, history=history, **kwargs):
+            yield chunk
 
     def get_tools(self) -> List[Dict[str, Any]]:
         return self.delegate.get_tools()

@@ -26,6 +26,7 @@ from ..tools.registry import ToolRegistry, create_v1_registry
 # ── Agent V1 status constants ──
 STATUS_COMPLETED = "completed"
 STATUS_INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+STATUS_WAITING_APPROVAL = "waiting_approval"
 STATUS_TOOL_ERROR = "tool_error"
 STATUS_TIMEOUT = "timeout"
 STATUS_FAILED = "failed"
@@ -267,6 +268,8 @@ class SingleAgentWorkflow(Agent):
                 fr = response.finish_reason or ""
                 if fr == "insufficient_evidence":
                     v1_status = STATUS_INSUFFICIENT_EVIDENCE
+                elif fr == "waiting_approval":
+                    v1_status = STATUS_WAITING_APPROVAL
                 elif fr in ("tool_error", "agent_failure"):
                     v1_status = STATUS_TOOL_ERROR
                 elif fr in ("agent_timeout", "timeout"):
