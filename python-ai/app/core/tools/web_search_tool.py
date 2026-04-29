@@ -82,18 +82,72 @@ class WebSearchTool(BaseTool):
                     "snippet": data.get("AbstractText", ""),
                     "type": "abstract",
                 })
-            for topic in data.get("RelatedTopics", [])[:max_results]:
-                if isinstance(topic, dict) and "Text" in topic:
-                    results.append({
-                        "title": topic.get("FirstURL", "").split("/")[-1].replace("_", " "),
-                        "url": topic.get("FirstURL", ""),
-                        "snippet": topic.get("Text", ""),
-                        "type": "related",
-                    })
+            # DuckDuckGo groups related topics into nested categories
+            # ({Text: …} leaves and {Topics: […]}) — flatten both levels.
+            def _flatten_topics(topics: List[Any]) -> List[Dict[str, Any]]:
+                flat: List[Dict[str, Any]] = []
+                for topic in topics:
+                    if isinstance(topic, dict):
+                        if "Text" in topic:
+                            flat.append(topic)
+                        elif isinstance(topic.get("Topics"), list):
+                            flat.extend(_flatten_topics(topic["Topics"]))
+                return flat
+
+            for topic in _flatten_topics(data.get("RelatedTopics", []))[:max_results]:
+                results.append({
+                    "title": topic.get("FirstURL", "").split("/")[-1].replace("_", " "),
+                    "url": topic.get("FirstURL", ""),
+                    "snippet": topic.get("Text", ""),
+                    "type": "related",
+                })
+
+            # Instant Answer API only returns curated cards and returns empty
+            # for most plain queries — fall back to the lite HTML endpoint
+            # (no API key required) which returns real search results.
+            if not results:
+                results = await self._search_duckduckgo_lite(query, max_results)
             return (results or [{"error": "No results found", "query": query}])[:max_results]
         except Exception as e:
             logger.warning("DuckDuckGo web search failed: %s", e)
             return [{"error": f"Web search failed: {e}", "query": query}]
+
+    async def _search_duckduckgo_lite(self, query: str, max_results: int) -> List[Dict[str, Any]]:
+        """DuckDuckGo Lite HTML search — real web results, no API key."""
+        import re
+
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                resp = await client.post(
+                    "https://lite.duckduckgo.com/lite/",
+                    data={"q": query},
+                    headers={"User-Agent": "Mozilla/5.0 (HFusionHub/1.0)"},
+                )
+                resp.raise_for_status()
+            html = resp.text
+            results: List[Dict[str, Any]] = []
+            link_re = re.compile(r'<a rel="nofollow" href="([^"]+)"[^>]*>(.*?)</a>', re.S)
+            snip_re = re.compile(r'class="result-snippet">(.*?)</td>', re.S)
+            snippets = snip_re.findall(html)
+            for i, (url, title_html) in enumerate(link_re.findall(html)):
+                if url.startswith("//"):
+                    url = "https:" + url
+                title = re.sub(r"<[^>]+>", "", title_html).strip()
+                snippet = ""
+                if i < len(snippets):
+                    snippet = re.sub(r"<[^>]+>", "", snippets[i]).strip()
+                results.append({
+                    "title": title or url.split("/")[-1],
+                    "url": url,
+                    "snippet": snippet,
+                    "type": "web",
+                })
+            return results[:max_results]
+        except Exception as e:
+            logger.warning("DuckDuckGo lite search failed: %s", e)
+            return []
 
     async def _search_tavily(self, query: str, max_results: int) -> List[Dict[str, Any]]:
         """Tavily Search API (needs WEB_SEARCH_API_KEY)."""

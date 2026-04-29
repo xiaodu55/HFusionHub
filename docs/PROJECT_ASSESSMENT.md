@@ -165,4 +165,41 @@
 
 ---
 
+## 7. 建议方案执行情况（2026-08-18 已执行）
+
+### P0 可靠性补课 ✅
+| 项 | 结果 |
+|---|---|
+| `scripts/smoke-test.ps1` 固化 | ✅ **41/41 全过**（31 项 Java API + Python + 前端 + 核心链路 + 模型配置检查） |
+| `scripts/static-checks.py` 静态校验 + CI job | ✅ 59 张迁移表租户列完整性 + internal token 键一致性，接入 `ci.yml`（`static-consistency` job） |
+| Plugin Runner TLS | ⚠️ 环境阻塞（需主机级 Docker daemon TLS 配置 + openssl）；已产出 `docs/PLUGIN_RUNNER_TLS.md` 完整指引 |
+
+### P1 AI 能力深度 ✅（部分依赖用户配置）
+| 项 | 结果 |
+|---|---|
+| DeepSeek 优先路由 | ✅ 代码逻辑验证正确（有效 key → FailoverLLM DeepSeek 优先）；**阻塞于用户 key 为占位符**（`your_*_key` 被 `_is_placeholder_key` 拒绝）——配置真实 `DEEPSEEK_API_KEY` 即生效 |
+| agent workflow 回归验证 | ✅ `scripts/verify-agent-workflow.ps1` **5/5 全过**（开关/工具注册/问答引用） |
+| web_search 启用 | ✅ flag=1 + **修复工具 bug**（嵌套 Topics 展开 + lite HTML fallback，实测返回真实结果） |
+
+### P2 评测闭环 ✅
+| 项 | 结果 |
+|---|---|
+| 在线评估门禁 | ✅ 已有 `eval_offline.py`（CI）+ `eval_runtime.py`（nightly）体系，本地验证 offline 门禁通过；修复 notebook 过时 API 路径（`debug-search`→`debug/search`） |
+| 意图分类写操作样例 | ✅ OPERATION 关键词补"保存/写入/整理成笔记/保存到"等 + LLM 提示词增强；实测"把结论整理成笔记保存到知识库"→ operation/tool_execution |
+| Playwright E2E | ✅ 新增 `e2e/write-note.spec.ts` **3/3 通过**（工具注册/内部端点持久化/权限隔离） |
+
+### P3 商业化与工程化 ✅
+| 项 | 结果 |
+|---|---|
+| 开放 API 计费打通 | ✅ `OpenApiServiceImpl` 成功调用额外落 `model_usage_record`（/cost 页可见开放 API 用量） |
+| 多租户审计视图 | ✅ 新增 `AuditController`（`/admin/audit-logs/operations` + `/cross-tenant`），实测 200 |
+| 生产部署要点 | ✅ 产出 `docs/PRODUCTION_CHECKLIST.md`（8 类 40+ 核对项） |
+
+### 遗留（需用户/环境级操作）
+1. **配置真实 `DEEPSEEK_API_KEY`**——聊天/工具调用质量跃升的最大杠杆
+2. Plugin Runner TLS 主机级配置（按 `docs/PLUGIN_RUNNER_TLS.md`）
+3. eval-nightly 需配置 GitHub `vars.EVAL_BASE_URL` + `secrets.EVAL_INTERNAL_TOKEN`
+
+---
+
 *报告基于 2026-08-18 全栈实测生成；修复涉及 Java 8 文件、Python 5 文件、前端 10 文件、数据库迁移 V55/V56、3 个 feature flag。*

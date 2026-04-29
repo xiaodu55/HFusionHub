@@ -101,6 +101,20 @@ jobs:
           fi
           echo "Rendered $docs Kubernetes resources."
 
+  # ─── 静态一致性（租户列完整性 + 内部 token 键）───
+  # 防 V52/V53 类问题复发：MyBatis-Plus 租户拦截器对非忽略表自动注入
+  # tenant_id 条件，若表无该列则整表功能 500。本 job 在 PR 阶段静态扫描
+  # 迁移 SQL 与 MybatisPlusConfig，发现违规即阻断。
+  static-consistency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run static consistency checks
+        run: python scripts/static-checks.py
+
   # ─── Python 静态检查与依赖审计 ───
   python-lint:
     runs-on: ubuntu-latest

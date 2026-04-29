@@ -162,6 +162,13 @@ class LLMClassificationStrategy(ClassificationStrategy):
         return f"""分析以下用户查询的意图和复杂度。{history_text}
 用户查询：{query}
 
+意图说明：
+- factual: 事实型问题（是什么/怎么/如何）
+- comparison: 对比型（区别/优缺点/比较）
+- summary: 总结型（总结/概括/简述）
+- operation: 操作型（创建/删除/修改/执行/保存/写入/把…整理成笔记/保存到知识库等需要执行动作的请求）
+- chitchat: 闲聊
+
 请返回 JSON 格式（不要包含其他内容）：
 {{
     "intent": "factual|comparison|summary|operation|chitchat",
@@ -255,7 +262,10 @@ class RuleClassificationStrategy(ClassificationStrategy):
             ],
             IntentType.OPERATION: [
                 "帮我", "创建", "删除", "修改", "执行", "添加",
-                "更新", "设置", "配置", "安装", "部署"
+                "更新", "设置", "配置", "安装", "部署",
+                # 写操作（笔记/知识库）—— 触发工具路径（write_note 等）
+                "保存", "写入", "记录", "整理成", "保存到", "存为",
+                "添加到", "写笔记", "保存为", "写入知识库", "保存笔记"
             ],
             IntentType.CHITCHAT: [
                 "你好", "谢谢", "再见", "嗨", "您好", "OK",

@@ -9,9 +9,11 @@ import com.hfusionhub.dto.OpenApiChatResponse;
 import com.hfusionhub.entity.App;
 import com.hfusionhub.entity.AppApiKey;
 import com.hfusionhub.entity.AppCallLog;
+import com.hfusionhub.entity.ModelUsageRecord;
 import com.hfusionhub.mapper.AppApiKeyMapper;
 import com.hfusionhub.mapper.AppCallLogMapper;
 import com.hfusionhub.mapper.AppMapper;
+import com.hfusionhub.service.CostTrackingService;
 import com.hfusionhub.service.OpenApiService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -37,6 +39,7 @@ public class OpenApiServiceImpl implements OpenApiService {
     private final AppCallLogMapper callLogMapper;
     private final AiClient aiClient;
     private final RedisUtils redisUtils;
+    private final CostTrackingService costTrackingService;
 
     /** 每 Key 每分钟最大调用次数（C4 限流） */
     private static final int RATE_LIMIT_PER_MINUTE = 60;
@@ -162,6 +165,25 @@ public class OpenApiServiceImpl implements OpenApiService {
             callLogMapper.insert(logEntry);
         } catch (Exception e) {
             log.warn("应用调用记录写入失败: {}", e.getMessage());
+        }
+        // P3: 开放 API 用量同时落 model_usage_record（/cost 模型用量页可见）
+        if ("ok".equals(status) && app.getUserId() != null) {
+            try {
+                ModelUsageRecord rec = new ModelUsageRecord();
+                rec.setUserId(app.getUserId());
+                rec.setTenantId(app.getTenantId());
+                rec.setRequestType("openapi");
+                rec.setModel(app.getModel() != null && !app.getModel().isBlank() ? app.getModel() : "unknown");
+                rec.setProvider(rec.getModel());
+                rec.setPromptTokens(prompt);
+                rec.setCompletionTokens(completion);
+                rec.setTotalTokens(total > 0 ? total : prompt + completion);
+                rec.setCostUsd(java.math.BigDecimal.ZERO);
+                rec.setLatencyMs(0);
+                costTrackingService.record(rec);
+            } catch (Exception e) {
+                log.warn("开放 API 用量落账失败: {}", e.getMessage());
+            }
         }
     }
 
