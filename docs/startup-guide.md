@@ -280,6 +280,10 @@ $env:DB_PASSWORD="<与 MYSQL_PASSWORD 相同>"
 $env:CALLBACK_SECRET="<与 Python 相同>"
 $env:PYTHON_AI_INTERNAL_TOKEN="<与 Python 相同>"
 $env:ADMIN_PASSWORD="<管理员初始化密码>"
+# 若 docker/.env 的 MINIO_ROOT_USER/PASSWORD 非默认值（minioadmin），必须传给 Java，
+# 否则日志提示 "MinIO not available, artifact storage disabled"（插件工件存储被禁用）：
+$env:MINIO_ACCESS_KEY="<MINIO_ROOT_USER 值>"
+$env:MINIO_SECRET_KEY="<MINIO_ROOT_PASSWORD 值>"
 mvn spring-boot:run
 ```
 
@@ -653,6 +657,10 @@ $env:DB_PASSWORD="<same as MYSQL_PASSWORD>"
 $env:CALLBACK_SECRET="<same secret used by Python>"
 $env:PYTHON_AI_INTERNAL_TOKEN="<same token used by Python>"
 $env:ADMIN_PASSWORD="<admin bootstrap password>"
+# If MINIO_ROOT_USER/PASSWORD in docker/.env are not the defaults (minioadmin),
+# pass them explicitly, otherwise Java disables MinIO artifact storage:
+$env:MINIO_ACCESS_KEY="<value of MINIO_ROOT_USER>"
+$env:MINIO_SECRET_KEY="<value of MINIO_ROOT_PASSWORD>"
 mvn spring-boot:run
 ```
 

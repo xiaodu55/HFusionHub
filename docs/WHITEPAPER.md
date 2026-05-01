@@ -1,4 +1,4 @@
-# HFusionHub Architecture Whitepaper
+# HFusionHub 架构白皮书
 
 > Why a Java + Python hybrid architecture for RAG/Agent platforms — and when you should use one.
 

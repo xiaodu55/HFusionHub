@@ -222,6 +222,10 @@ docker compose up -d
 ```bash
 # 终端 1：Java 后端
 cd HFusionHub/java-backend
+# 若 docker/.env 的 MINIO_ROOT_USER/PASSWORD 非默认值，需显式传给 Java，
+# 否则 MinIO 工件存储会被禁用（日志提示签名不匹配）：
+export MINIO_ACCESS_KEY="$MINIO_ROOT_USER"
+export MINIO_SECRET_KEY="$MINIO_ROOT_PASSWORD"
 mvn spring-boot:run
 ```
 

@@ -1,4 +1,4 @@
-# Roadmap
+# 路线图
 
 > HFusionHub project roadmap — updated quarterly.
 
@@ -59,7 +59,28 @@
 - [x] **知识库共享** — kb_share 只读协作，共享用户可创建对话
 - [x] **操作审计** — audit_log 表记录应用/API Key/共享/公告等敏感操作
 - [x] **在线答案评测** — `/api/rag/evaluate/answer-judge` LLM-as-judge 打分（无标准答案模式）
-- [ ] **Dynamic feature flags** — DB-driven `feature_flag` table, per-user/KB scoping（表已建，规则层完善中）
+- [x] **Dynamic feature flags** — DB 驱动 `feature_flag` + 规则；Java→Python snapshot 同步 8 flags（`agent.enabled` / `write_tools` / `web_search` 等）
+- [x] **E2E tests** — Playwright 覆盖登录/知识库/文档/对话/审批/写笔记等关键路径（`e2e/write-note.spec.ts` 3 项）
 - [ ] **Theme system** — light/dark/system tri-state, server-side preference sync
-- [ ] **E2E tests** — Playwright or Cypress for critical user journeys
 - [ ] **SSO/OIDC** — 需要外部 IdP 与 sa-token OAuth2 集成，暂缓（会话体系已具备扩展点）
+
+## Phase 5 — 写笔记闭环 + 工程化补课（2026-08-18）✅
+
+- [x] **写笔记闭环（P0–P4）** — `note` 表（V55）+ 用户笔记 API + Python `write_note` 真实持久化 + 审批门控（approval_required）+ 前端确认卡片 + 「我的笔记」页面
+- [x] **模型用量接通** — 聊天/Agent/开放 API 均落 `model_usage_record`，/cost 页面有真实数据
+- [x] **全栈冒烟脚本** — `scripts/smoke-test.ps1`（41 项，含核心链路）
+- [x] **静态一致性校验** — `scripts/static-checks.py` 租户列完整性 + token 键一致性（CI `static-consistency` job）
+- [x] **Agent 工作流回归** — `scripts/verify-agent-workflow.ps1`（5 项）
+- [x] **意图分类写操作** — "保存/整理成笔记"→ operation 意图（工具触发率提升）
+- [x] **web_search 工具修复** — 嵌套 Topics + lite HTML fallback
+- [x] **管理端审计视图** — `/admin/audit-logs/operations` + `/cross-tenant`
+- [x] **修复** — kb_share/app_api_key 缺 tenant_id（V56）、FeatureFlag snapshot token 键、workflow 白名单漏 write_note、waiting_approval 状态映射
+- [x] **生产核对清单** — `docs/PRODUCTION_CHECKLIST.md`
+
+## Phase 6 — 建议方向（待排期）
+
+- [ ] **配置真实 DEEPSEEK_API_KEY** — 当前为占位符（聊天走 Ollama）；配置后自动 DeepSeek 优先（逻辑已验证）
+- [ ] **Plugin Runner TLS** — 主机级 Docker daemon TLS 配置（`docs/PLUGIN_RUNNER_TLS.md`）
+- [ ] **eval-nightly 启用** — GitHub 配置 `vars.EVAL_BASE_URL` + `secrets.EVAL_INTERNAL_TOKEN`
+- [ ] **多 Agent 协作** — `agent.multi_agent.enabled`（当前冻结，收益待验证）
+- [ ] **租户配额计费展示** — usage_ledger → 前端配额面板

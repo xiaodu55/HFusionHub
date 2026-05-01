@@ -1,4 +1,4 @@
-# Python AI Service Development Guide
+# Python AI 服务开发指南
 
 > FastAPI + Milvus (Standalone 默认 / Lite 可选) + DeepSeek API + ReAct Agent + Multi-Channel RAG
 

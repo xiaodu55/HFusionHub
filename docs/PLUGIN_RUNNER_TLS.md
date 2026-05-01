@@ -1,4 +1,4 @@
-# Plugin Runner TLS 配置指引
+# 插件运行器 TLS 配置指引
 
 > 状态：**环境阻塞项**。本地开发默认 `plugin-runner` 容器为 unhealthy，原因是
 > 宿主 Docker daemon 未开启 TLS 监听（:2376），而 Plugin Runner 出于安全设计

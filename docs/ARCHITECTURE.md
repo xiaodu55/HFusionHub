@@ -1,4 +1,4 @@
-# HFusionHub Architecture
+# HFusionHub 架构全景
 
 > English architecture overview of the Java + Python + Vue three-tier AI Agent platform.
 
