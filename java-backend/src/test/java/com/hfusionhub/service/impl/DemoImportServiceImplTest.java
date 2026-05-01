@@ -15,10 +15,20 @@ import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.dto.DemoImportResultDTO;
+import com.hfusionhub.entity.App;
 import com.hfusionhub.entity.Document;
 import com.hfusionhub.entity.KnowledgeBase;
+import com.hfusionhub.entity.MemoryEntry;
+import com.hfusionhub.entity.Note;
+import com.hfusionhub.entity.PromptTemplate;
+import com.hfusionhub.entity.SystemNotice;
+import com.hfusionhub.mapper.AppMapper;
 import com.hfusionhub.mapper.DocumentMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
+import com.hfusionhub.mapper.MemoryEntryMapper;
+import com.hfusionhub.mapper.NoteMapper;
+import com.hfusionhub.mapper.PromptTemplateMapper;
+import com.hfusionhub.mapper.SystemNoticeMapper;
 import com.hfusionhub.service.VectorizationService;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,11 +42,11 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
 
 /**
- * Unit tests for {@link DemoImportServiceImpl} — demo knowledge base import.
+ * Unit tests for {@link DemoImportServiceImpl} - demo data import.
  *
  * <p>Verifies: KB creation/reuse, per-document idempotent import, file
- * persistence, parse trigger, and graceful handling when the AI service is
- * unreachable.</p>
+ * persistence, parse trigger, graceful handling when the AI service is
+ * unreachable, and per-menu section seeding (prompts/notes/memory/app/notice).</p>
  */
 class DemoImportServiceImplTest {
 
@@ -46,6 +56,11 @@ class DemoImportServiceImplTest {
     private KnowledgeBaseMapper knowledgeBaseMapper;
     private DocumentMapper documentMapper;
     private VectorizationService vectorizationService;
+    private PromptTemplateMapper promptTemplateMapper;
+    private NoteMapper noteMapper;
+    private MemoryEntryMapper memoryEntryMapper;
+    private AppMapper appMapper;
+    private SystemNoticeMapper systemNoticeMapper;
     private DemoImportServiceImpl service;
 
     @BeforeEach
@@ -57,7 +72,13 @@ class DemoImportServiceImplTest {
         knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
         documentMapper = mock(DocumentMapper.class);
         vectorizationService = mock(VectorizationService.class);
-        service = new DemoImportServiceImpl(knowledgeBaseMapper, documentMapper, vectorizationService);
+        promptTemplateMapper = mock(PromptTemplateMapper.class);
+        noteMapper = mock(NoteMapper.class);
+        memoryEntryMapper = mock(MemoryEntryMapper.class);
+        appMapper = mock(AppMapper.class);
+        systemNoticeMapper = mock(SystemNoticeMapper.class);
+        service = new DemoImportServiceImpl(knowledgeBaseMapper, documentMapper, vectorizationService,
+                promptTemplateMapper, noteMapper, memoryEntryMapper, appMapper, systemNoticeMapper);
         // 演示文档写入临时目录，避免污染工作区
         ReflectionTestUtils.setField(service, "uploadDir", tempDir.toString());
         StpUtil.login(1L);
@@ -66,6 +87,31 @@ class DemoImportServiceImplTest {
     @AfterEach
     void tearDown() {
         StpUtil.logout();
+    }
+
+    /** 新菜单分项全部视为不存在（fresh import）。 */
+    private void stubSectionsEmpty() {
+        when(promptTemplateMapper.selectCount(any())).thenReturn(0L);
+        when(noteMapper.selectCount(any())).thenReturn(0L);
+        when(memoryEntryMapper.selectCount(any())).thenReturn(0L);
+        when(appMapper.selectCount(any())).thenReturn(0L);
+        when(systemNoticeMapper.selectCount(any())).thenReturn(0L);
+    }
+
+    /** 新菜单分项全部视为已存在（idempotent re-import）。 */
+    private void stubSectionsFull() {
+        when(promptTemplateMapper.selectCount(any())).thenReturn(1L);
+        when(noteMapper.selectCount(any())).thenReturn(1L);
+        when(memoryEntryMapper.selectCount(any())).thenReturn(1L);
+        when(appMapper.selectCount(any())).thenReturn(1L);
+        when(systemNoticeMapper.selectCount(any())).thenReturn(1L);
+    }
+
+    private DemoImportResultDTO.SectionResult sectionOf(DemoImportResultDTO result, String section) {
+        return result.getSections().stream()
+                .filter(s -> section.equals(s.getSection()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("缺少分项: " + section));
     }
 
     @Test
@@ -77,6 +123,7 @@ class DemoImportServiceImplTest {
             return 1;
         });
         when(documentMapper.selectCount(any())).thenReturn(0L);
+        stubSectionsEmpty();
         AtomicLong idSeq = new AtomicLong(10);
         when(documentMapper.insert(any(Document.class))).thenAnswer(inv -> {
             Document doc = inv.getArgument(0);
@@ -84,7 +131,7 @@ class DemoImportServiceImplTest {
             return 1;
         });
 
-        DemoImportResultDTO result = service.importDemoKnowledgeBase();
+        DemoImportResultDTO result = service.importDemoData();
 
         assertEquals(3, result.getImportedCount(), "应导入 3 篇示例文档");
         assertEquals(0, result.getSkippedCount());
@@ -98,23 +145,48 @@ class DemoImportServiceImplTest {
             fileCount = stream.count();
         }
         assertEquals(3, fileCount, "应写入 3 个演示文档文件");
+
+        // 各菜单分项均应导入示例数据
+        assertEquals(3, sectionOf(result, "kb").getImportedCount());
+        assertEquals(3, sectionOf(result, "prompts").getImportedCount(), "应导入 3 个回答方案");
+        assertEquals(2, sectionOf(result, "notes").getImportedCount(), "应导入 2 篇示例笔记");
+        assertEquals(2, sectionOf(result, "memory").getImportedCount(), "应导入 2 条示例记忆");
+        assertEquals(1, sectionOf(result, "apps").getImportedCount(), "应导入 1 个示例应用");
+        assertEquals(1, sectionOf(result, "notices").getImportedCount(), "应导入 1 条欢迎公告");
+
+        verify(promptTemplateMapper, times(3)).insert(any(PromptTemplate.class));
+        verify(noteMapper, times(2)).insert(any(Note.class));
+        verify(memoryEntryMapper, times(2)).insert(any(MemoryEntry.class));
+        verify(appMapper, times(1)).insert(any(App.class));
+        verify(systemNoticeMapper, times(1)).insert(any(SystemNotice.class));
     }
 
     @Test
-    void secondImportIsIdempotentAndSkipsExistingDocs() {
+    void secondImportIsIdempotentAndSkipsExistingData() {
         KnowledgeBase existing = new KnowledgeBase();
         existing.setId(5L);
         existing.setName("演示知识库");
         when(knowledgeBaseMapper.selectOne(any())).thenReturn(existing);
         when(documentMapper.selectCount(any())).thenReturn(1L);
+        stubSectionsFull();
 
-        DemoImportResultDTO result = service.importDemoKnowledgeBase();
+        DemoImportResultDTO result = service.importDemoData();
 
         assertEquals(0, result.getImportedCount());
         assertEquals(3, result.getSkippedCount());
         verify(knowledgeBaseMapper, never()).insert(any(KnowledgeBase.class));
         verify(documentMapper, never()).insert(any(Document.class));
         verify(vectorizationService, never()).startVectorization(anyLong(), any());
+        // 各分项全部跳过
+        result.getSections().forEach(s -> {
+            assertEquals(0, s.getImportedCount(), s.getSection() + " 应跳过");
+            assertTrue(s.getSkippedCount() > 0, s.getSection() + " 应有跳过计数");
+        });
+        verify(promptTemplateMapper, never()).insert(any(PromptTemplate.class));
+        verify(noteMapper, never()).insert(any(Note.class));
+        verify(memoryEntryMapper, never()).insert(any(MemoryEntry.class));
+        verify(appMapper, never()).insert(any(App.class));
+        verify(systemNoticeMapper, never()).insert(any(SystemNotice.class));
     }
 
     @Test
@@ -126,6 +198,7 @@ class DemoImportServiceImplTest {
             return 1;
         });
         when(documentMapper.selectCount(any())).thenReturn(0L);
+        stubSectionsEmpty();
         AtomicLong idSeq = new AtomicLong(10);
         when(documentMapper.insert(any(Document.class))).thenAnswer(inv -> {
             Document doc = inv.getArgument(0);
@@ -134,11 +207,13 @@ class DemoImportServiceImplTest {
         });
         doThrow(new BusinessException("AI 服务不可用")).when(vectorizationService).startVectorization(anyLong(), any());
 
-        DemoImportResultDTO result = service.importDemoKnowledgeBase();
+        DemoImportResultDTO result = service.importDemoData();
 
         assertEquals(3, result.getImportedCount(), "文档仍应导入成功");
         assertEquals(3, result.getParseFailedCount(), "解析失败应被计数而非中断导入");
         assertTrue(result.getMessage().contains("重试"), "提示信息应包含重试指引");
+        // 其他菜单分项不受解析失败影响
+        assertEquals(3, sectionOf(result, "prompts").getImportedCount());
     }
 
     /** Minimal in-memory SaTokenContext for unit tests without a servlet container. */

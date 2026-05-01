@@ -10,7 +10,7 @@ import {
   type AiRuntimeOverview,
   type UserModelConfig,
 } from '@/api/system'
-import { importDemoKnowledgeBase } from '@/api/demo'
+import { importDemoData } from '@/api/demo'
 import * as knowledgeBaseApi from '@/api/knowledgeBase'
 import * as conversationApi from '@/api/conversation'
 import { useToast } from '@/composables/useToast'
@@ -106,7 +106,7 @@ const handleImportDemo = async () => {
   if (!userStore.isAdmin) return
   importing.value = true
   try {
-    const res = await importDemoKnowledgeBase()
+    const res = await importDemoData()
     const data = res.data
     if (data.parseFailedCount > 0) {
       toast.warning(`${data.message}（AI 服务就绪后可到文档页重新解析）`)
@@ -115,7 +115,7 @@ const handleImportDemo = async () => {
     }
     await refresh()
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : '导入演示知识库失败')
+    toast.error(error instanceof Error ? error.message : '导入演示数据失败')
   } finally {
     importing.value = false
   }
@@ -186,8 +186,8 @@ onMounted(refresh)
       <div class="flex items-start gap-2.5 text-sm text-zinc-300">
         <MessageSquare class="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
         <span>
-          想快速体验？<span class="text-zinc-100">一键导入演示知识库</span>
-          （员工手册、产品目录、权限矩阵），导入后即可直接提问。
+          想快速体验？<span class="text-zinc-100">一键导入演示数据</span>
+          （知识库文档、回答方案、我的笔记、我的记忆、应用发布、公告），导入后即可直接提问。
         </span>
       </div>
       <Button
@@ -196,7 +196,7 @@ onMounted(refresh)
         @click="handleImportDemo"
       >
         <Loader2 v-if="importing" class="mr-1.5 h-4 w-4 animate-spin" />
-        {{ importing ? '正在导入…' : '导入演示知识库' }}
+        {{ importing ? '正在导入…' : '导入演示数据' }}
       </Button>
     </div>
   </section>

@@ -34,6 +34,18 @@ const transportOptions = [
   { label: 'Streamable HTTP', value: 'streamable-http' },
 ]
 
+/** 一键填入官方 MCP 服务器示例，可修改后再添加 */
+function applyExample() {
+  form.value = {
+    id: 'notion',
+    name: 'Notion MCP',
+    url: 'https://mcp.notion.com/mcp',
+    transport: 'streamable-http',
+    api_key: '',
+  }
+  toast.success('已填入示例配置，可修改后添加')
+}
+
 const statusClass = (status: string) => ({
   connected: 'border-emerald-400/30 bg-emerald-400/[0.06] text-emerald-300',
   connecting: 'border-amber-400/30 bg-amber-400/[0.06] text-amber-300',
@@ -180,6 +192,7 @@ onMounted(load)
               </div>
             </div>
             <DialogFooter>
+              <Button variant="outline" :disabled="adding" @click="applyExample">填入示例</Button>
               <Button :disabled="adding" @click="add">{{ adding ? '添加中…' : '添加并连接' }}</Button>
             </DialogFooter>
           </DialogContent>
@@ -195,7 +208,8 @@ onMounted(load)
       <CardContent class="space-y-3">
         <LoadingSkeleton v-if="loading" type="card" :count="3" />
         <div v-else-if="!servers.length" class="py-10 text-center text-sm text-muted-foreground">
-          还没有 MCP 服务。可通过环境变量 <code class="rounded bg-muted px-1">MCP_SERVERS_CONFIG</code> 或在此添加。
+          还没有 MCP 服务。可通过环境变量 <code class="rounded bg-muted px-1">MCP_SERVERS_CONFIG</code> 配置，
+          或点击「添加服务」后用「填入示例」快速开始。
         </div>
         <article v-for="server in servers" :key="server.id" class="rounded-xl border border-border bg-muted/20 p-4">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

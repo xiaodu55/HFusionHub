@@ -1,19 +1,28 @@
 import { post } from './request'
 import type { ApiResponse } from './types'
 
-/** 演示知识库导入结果 */
+/** 单个菜单的分项导入结果 */
+export interface DemoSectionResult {
+  section: string
+  label: string
+  importedCount: number
+  skippedCount: number
+}
+
+/** 演示数据导入结果 */
 export interface DemoImportResult {
   knowledgeBaseId: number
   knowledgeBaseName: string
   importedCount: number
   skippedCount: number
   parseFailedCount: number
+  sections?: DemoSectionResult[]
   message: string
 }
 
 /**
- * 一键导入演示知识库（管理员）：
- * 创建/复用「演示知识库」，导入内置示例文档并触发解析，幂等可重复调用。
+ * 一键导入演示数据（管理员）：
+ * 覆盖知识库文档、回答方案、我的笔记、我的记忆、应用发布、公告，幂等可重复调用。
  */
-export const importDemoKnowledgeBase = (): Promise<ApiResponse<DemoImportResult>> =>
+export const importDemoData = (): Promise<ApiResponse<DemoImportResult>> =>
   post('/demo/import')

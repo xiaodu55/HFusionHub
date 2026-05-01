@@ -207,7 +207,7 @@ onMounted(loadNotes)
         </DialogHeader>
         <div class="space-y-3">
           <Input v-model="createTitle" placeholder="标题（可选，默认取内容前 30 字）" />
-          <Textarea v-model="createContent" rows="8" placeholder="支持 Markdown…" />
+          <Textarea v-model="createContent" :rows="8" placeholder="支持 Markdown…" />
         </div>
         <DialogFooter>
           <Button variant="outline" @click="createOpen = false">取消</Button>
