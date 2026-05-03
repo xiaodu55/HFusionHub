@@ -192,6 +192,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/admin/Notices.vue'),
         meta: { roles: ADMIN_ROLES },
       },
+      {
+        path: 'admin/audit-logs',
+        name: 'AuditLogs',
+        component: () => import('@/pages/admin/AuditLogs.vue'),
+        meta: { roles: ADMIN_ROLES },
+      },
     ],
   },
 ]

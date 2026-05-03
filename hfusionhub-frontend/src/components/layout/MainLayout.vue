@@ -25,6 +25,7 @@ import {
   Home,
   LogOut,
   Megaphone,
+  ScrollText,
   Menu,
   MessageSquare,
   Moon,
@@ -98,6 +99,7 @@ const menuItems: Array<{
   { path: '/admin/intent-tree', label: '问题分流', description: '让不同问题使用对应知识库', icon: GitBranch, roles: ['admin'], group: 'admin', keywords: ['意图', '路由', '问题分流', 'intent tree'] },
   { path: '/admin/users', label: '账号权限', description: '给新用户分配身份', icon: Users, roles: ['admin'], group: 'admin', keywords: ['用户', '权限', '身份', '角色'] },
   { path: '/admin/notices', label: '公告管理', description: '发布和删除系统公告', icon: Megaphone, roles: ['admin'], group: 'admin', keywords: ['公告', '通知', 'notice', '发布'] },
+  { path: '/admin/audit-logs', label: '审计日志', description: '敏感操作与跨租户审计', icon: ScrollText, roles: ['admin'], group: 'admin', keywords: ['审计', 'audit', '日志', '跨租户'] },
 ]
 
 const visibleMenuItems = computed(() => menuItems.filter(item => !item.roles || userStore.hasAnyRole(item.roles)))
