@@ -12,6 +12,11 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    // 允许局域网/内网穿透（cpolar 等）通过外部域名访问：
+    // host: true 监听所有网卡；allowedHosts: true 放开 Host 校验。
+    // 生产环境走 Nginx，不受此影响。
+    host: true,
+    allowedHosts: true,
     proxy: {
       '/api': {
         target: 'http://localhost:8080',
