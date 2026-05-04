@@ -24,4 +24,16 @@ export default defineConfig({
       },
     },
   },
+  // 生产预览（vite preview）：公网穿透用打包产物（无 transform，加载快）
+  preview: {
+    port: 3000,
+    host: true,
+    allowedHosts: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+    },
+  },
 })
