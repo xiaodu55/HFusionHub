@@ -61,7 +61,7 @@
 - [x] **在线答案评测** — `/api/rag/evaluate/answer-judge` LLM-as-judge 打分（无标准答案模式）
 - [x] **Dynamic feature flags** — DB 驱动 `feature_flag` + 规则；Java→Python snapshot 同步 8 flags（`agent.enabled` / `write_tools` / `web_search` 等）
 - [x] **E2E tests** — Playwright 覆盖登录/知识库/文档/对话/审批/写笔记等关键路径（`e2e/write-note.spec.ts` 3 项）
-- [ ] **Theme system** — light/dark/system tri-state, server-side preference sync
+- [x] **Theme system** — light/dark/system 三档 + 服务端偏好同步（`sys_user.theme_preference` V57；登录时 `getUserInfo()` 远端优先，换设备自动应用）
 - [ ] **SSO/OIDC** — 需要外部 IdP 与 sa-token OAuth2 集成，暂缓（会话体系已具备扩展点）
 
 ## Phase 5 — 写笔记闭环 + 工程化补课（2026-08-18）✅
@@ -79,8 +79,9 @@
 
 ## Phase 6 — 建议方向（待排期）
 
+- [x] **各菜单一键导入示例数据（2026-08-19）** - `/demo/import` 覆盖知识库/回答方案/笔记/记忆/应用/公告 6 个菜单（幂等分项计数，导入后按菜单显示新增/已存在）；`/demo/clear` 一键清除（软删除，7 天可恢复）；MCP 服务页空状态 CTA 直接预填示例并打开表单；工作台统计失败展示具体原因 + 重试
 - [ ] **配置真实 DEEPSEEK_API_KEY** — 当前为占位符（聊天走 Ollama）；配置后自动 DeepSeek 优先（逻辑已验证）
 - [ ] **Plugin Runner TLS** — 主机级 Docker daemon TLS 配置（`docs/PLUGIN_RUNNER_TLS.md`）
 - [ ] **eval-nightly 启用** — GitHub 配置 `vars.EVAL_BASE_URL` + `secrets.EVAL_INTERNAL_TOKEN`
 - [ ] **多 Agent 协作** — `agent.multi_agent.enabled`（当前冻结，收益待验证）
-- [ ] **租户配额计费展示** — usage_ledger → 前端配额面板
+- [x] **租户配额计费展示** — `/api/quota/summary`（QuotaController + QuotaSummaryDTO）→ /cost 页配额面板（用量条 70%/90% 分级告警）

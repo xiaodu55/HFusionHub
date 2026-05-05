@@ -29,6 +29,8 @@ import com.hfusionhub.mapper.MemoryEntryMapper;
 import com.hfusionhub.mapper.NoteMapper;
 import com.hfusionhub.mapper.PromptTemplateMapper;
 import com.hfusionhub.mapper.SystemNoticeMapper;
+import com.hfusionhub.service.KnowledgeBaseService;
+import com.hfusionhub.service.PromptTemplateService;
 import com.hfusionhub.service.VectorizationService;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -61,6 +63,8 @@ class DemoImportServiceImplTest {
     private MemoryEntryMapper memoryEntryMapper;
     private AppMapper appMapper;
     private SystemNoticeMapper systemNoticeMapper;
+    private KnowledgeBaseService knowledgeBaseService;
+    private PromptTemplateService promptTemplateService;
     private DemoImportServiceImpl service;
 
     @BeforeEach
@@ -77,8 +81,11 @@ class DemoImportServiceImplTest {
         memoryEntryMapper = mock(MemoryEntryMapper.class);
         appMapper = mock(AppMapper.class);
         systemNoticeMapper = mock(SystemNoticeMapper.class);
+        knowledgeBaseService = mock(KnowledgeBaseService.class);
+        promptTemplateService = mock(PromptTemplateService.class);
         service = new DemoImportServiceImpl(knowledgeBaseMapper, documentMapper, vectorizationService,
-                promptTemplateMapper, noteMapper, memoryEntryMapper, appMapper, systemNoticeMapper);
+                promptTemplateMapper, noteMapper, memoryEntryMapper, appMapper, systemNoticeMapper,
+                knowledgeBaseService, promptTemplateService);
         // 演示文档写入临时目录，避免污染工作区
         ReflectionTestUtils.setField(service, "uploadDir", tempDir.toString());
         StpUtil.login(1L);
@@ -214,6 +221,63 @@ class DemoImportServiceImplTest {
         assertTrue(result.getMessage().contains("重试"), "提示信息应包含重试指引");
         // 其他菜单分项不受解析失败影响
         assertEquals(3, sectionOf(result, "prompts").getImportedCount());
+    }
+
+    @Test
+    void clearDemoDataRemovesAllSections() {
+        KnowledgeBase existing = new KnowledgeBase();
+        existing.setId(5L);
+        existing.setName("演示知识库");
+        when(knowledgeBaseMapper.selectOne(any())).thenReturn(existing);
+        when(promptTemplateMapper.selectOne(any())).thenAnswer(inv -> {
+            PromptTemplate t = new PromptTemplate();
+            t.setId(10L);
+            return t;
+        });
+        Note note = new Note();
+        note.setId(20L);
+        when(noteMapper.selectOne(any())).thenReturn(note);
+        MemoryEntry memory = new MemoryEntry();
+        memory.setId(30L);
+        when(memoryEntryMapper.selectOne(any())).thenReturn(memory);
+        App app = new App();
+        app.setId(40L);
+        when(appMapper.selectOne(any())).thenReturn(app);
+        SystemNotice notice = new SystemNotice();
+        notice.setId(50L);
+        when(systemNoticeMapper.selectOne(any())).thenReturn(notice);
+
+        DemoImportResultDTO result = service.clearDemoData();
+
+        // 知识库与回答方案通过既有服务移入回收站
+        verify(knowledgeBaseService, times(1)).delete(5L);
+        verify(promptTemplateService, times(3)).delete(anyLong());
+        // 其余菜单直接删除
+        verify(noteMapper, times(2)).deleteById(anyLong());
+        verify(memoryEntryMapper, times(2)).deleteById(anyLong());
+        verify(appMapper, times(1)).deleteById(anyLong());
+        verify(systemNoticeMapper, times(1)).deleteById(anyLong());
+        assertTrue(result.getMessage().contains("已清除"), "提示信息应包含清除说明");
+    }
+
+    @Test
+    void clearDemoDataIsNoopWhenNothingImported() {
+        when(knowledgeBaseMapper.selectOne(any())).thenReturn(null);
+        when(promptTemplateMapper.selectOne(any())).thenReturn(null);
+        when(noteMapper.selectOne(any())).thenReturn(null);
+        when(memoryEntryMapper.selectOne(any())).thenReturn(null);
+        when(appMapper.selectOne(any())).thenReturn(null);
+        when(systemNoticeMapper.selectOne(any())).thenReturn(null);
+
+        DemoImportResultDTO result = service.clearDemoData();
+
+        verify(knowledgeBaseService, never()).delete(anyLong());
+        verify(promptTemplateService, never()).delete(anyLong());
+        verify(noteMapper, never()).deleteById((java.io.Serializable) any());
+        verify(memoryEntryMapper, never()).deleteById((java.io.Serializable) any());
+        verify(appMapper, never()).deleteById((java.io.Serializable) any());
+        verify(systemNoticeMapper, never()).deleteById((java.io.Serializable) any());
+        assertTrue(result.getMessage().contains("未发现"), "未导入时应提示无需清除");
     }
 
     /** Minimal in-memory SaTokenContext for unit tests without a servlet container. */

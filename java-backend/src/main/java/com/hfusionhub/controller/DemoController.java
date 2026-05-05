@@ -30,4 +30,11 @@ public class DemoController {
     public R<DemoImportResultDTO> importDemo() {
         return R.ok(demoImportService.importDemoData());
     }
+
+    @Operation(summary = "清除演示数据", description = "清除已导入的演示数据：知识库与回答方案移入回收站（7 天保留），笔记/记忆/应用/公告直接删除（仅管理员可用）")
+    @PostMapping("/clear")
+    @SaCheckRole("admin")
+    public R<DemoImportResultDTO> clearDemo() {
+        return R.ok(demoImportService.clearDemoData());
+    }
 }

@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import EmptyState from '@/components/EmptyState.vue'
 import { useToast } from '@/composables/useToast'
 
 type MemoryType = 'user_preference' | 'entity_fact' | 'conversation_summary'
@@ -214,11 +215,12 @@ onMounted(load)
           </CardHeader>
           <CardContent class="p-4 sm:p-5">
             <LoadingSkeleton v-if="loading" type="list" :count="3" />
-            <div v-else-if="!filteredMemories.length" class="flex min-h-56 flex-col items-center justify-center rounded-xl border border-dashed border-border px-6 text-center">
-              <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-muted text-muted-foreground"><Lightbulb class="h-5 w-5" /></div>
-              <h3 class="mt-4 font-medium">{{ activeFilter === 'ALL' ? '还没有保存记忆' : '该分类下暂无记忆' }}</h3>
-              <p class="mt-1 max-w-sm text-sm leading-6 text-muted-foreground">{{ activeFilter === 'ALL' ? '从上方填写一条你希望 AI 在以后记住的信息。' : '可以切换分类查看，或在上方添加新的记忆。' }}</p>
-            </div>
+            <EmptyState
+              v-else-if="!filteredMemories.length"
+              :icon="Lightbulb"
+              :title="activeFilter === 'ALL' ? '还没有保存记忆' : '该分类下暂无记忆'"
+              :description="activeFilter === 'ALL' ? '从上方填写一条你希望 AI 在以后记住的信息。' : '可以切换分类查看，或在上方添加新的记忆。'"
+            />
             <div v-else class="grid gap-3 md:grid-cols-2">
               <article v-for="memory in filteredMemories" :key="memory.id" class="group relative rounded-xl border border-border bg-muted/20 p-4 transition-colors hover:border-primary/25 hover:bg-muted/40">
                 <div class="flex items-start justify-between gap-3">

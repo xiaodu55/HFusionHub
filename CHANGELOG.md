@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第九轮优化（2026-08-19）：主题系统 + 配额展示 + 空状态统一 + 演示数据清理
+
+#### Added
+- **主题系统三档切换 + 服务端同步**：`sys_user.theme_preference`（V57 迁移，枚举 `light`/`dark`/`system`）；`PATCH /api/user/theme-preference` 持久化到数据库；`GET /api/user/info` 下发主题偏好；前端 `useTheme` composable 登录时优先采用远端配置（换设备自动应用），设置页三档切换器
+- **租户配额展示**：`QuotaController` + `QuotaSummaryDTO`（`GET /api/quota/summary`）→ `/cost` 页新增租户配额面板，用量条 70%/90% 分级告警色（琥珀/红色），超额时禁用对话发送按钮
+- **演示数据清理**：`DELETE /api/demo` 清空当前租户下的演示知识库、文档、回答方案、笔记、记忆、应用、公告（保留用户账号和其他真实数据）；设置页新增「清空演示数据」区块，确认对话框 + 操作反馈
+- **EmptyState 组件统一**：12 个页面迁移至统一 `EmptyState.vue` 组件（支持图标、标题、描述、可选 CTA 按钮）——`/admin/audit-logs`、`/admin/notices`、`/builder/apps`、`/builder/plugins`、`/builder/mcp-servers`、`/notes`、`/memory`、`/document`、`/knowledge/detail`、`/knowledge/chunks`；受控 Dialog 模式（`v-model:open`）确保 EmptyState CTA 可正常打开对话框
+
+#### Changed
+- **页面标题样式统一**：`/settings` 和 `/cost` 页面标题改为 `<h1 class="flex items-center gap-2 text-xl font-semibold">` + 内联图标，移除厚重的 border/shadow 包装
+
+#### Fixed
+- **Plugins.vue 零宽字符编译错误**：EmptyState 组件属性中混入 U+200B（零宽空格）导致 TypeScript 编译失败，已清理并重写
+
+#### Notes
+- 所有测试通过：Java 443 passed（含 `QuotaController` 断言）、Python 1220+ passed、Frontend 33 passed + build 成功
+- `/cost` 页配额面板仅展示 `usage_quota` 表已有数据，租户配额初始化由管理员在管理端设置（未来可接入计费系统）
+
 ### 第八轮优化（2026-08-19）：各菜单一键导入示例数据
 
 #### Added

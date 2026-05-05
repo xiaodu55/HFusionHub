@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { RegisterForm, UserInfo, UserRole } from '@/api/types'
 import * as userApi from '@/api/user'
+import { useTheme } from '@/composables/useTheme'
 
 export const useUserStore = defineStore('user', () => {
   // State
@@ -55,6 +56,11 @@ export const useUserStore = defineStore('user', () => {
   const getUserInfo = async () => {
     const res = await userApi.getUserInfo()
     userInfo.value = res.data
+    // 服务端保存的主题偏好优先于本地：换设备登录后自动应用
+    const remoteTheme = res.data?.themePreference
+    if (remoteTheme && remoteTheme !== localStorage.getItem('hfusionhub-theme')) {
+      useTheme().setTheme(remoteTheme)
+    }
     return res
   }
 

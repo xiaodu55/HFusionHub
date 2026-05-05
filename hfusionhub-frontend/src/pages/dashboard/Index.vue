@@ -42,6 +42,7 @@ const userStore = useUserStore()
 const toast = useToast()
 const loading = ref(false)
 const loadError = ref(false)
+const loadErrorMessage = ref('')
 const aiReady = ref<boolean | null>(null)
 
 const stats = ref<StatCard[]>([
@@ -178,6 +179,7 @@ const loadStats = async () => {
   } catch (error) {
     console.error('加载工作台统计失败', error)
     loadError.value = true
+    loadErrorMessage.value = error instanceof Error ? error.message : '网络或服务异常'
   } finally {
     loading.value = false
   }
@@ -256,10 +258,13 @@ onMounted(async () => {
       </button>
     </section>
 
-    <section v-if="loadError" class="glass-panel flex items-center justify-between gap-4 p-4 text-sm text-amber-200">
-      <span>统计数据加载失败，当前展示为占位状态。</span>
-      <Button class="rounded-lg border border-amber-300/20 bg-amber-300/10 text-amber-100 hover:bg-amber-300/20" @click="loadStats">
-        重试
+    <section v-if="loadError" class="glass-panel flex flex-col gap-3 p-4 text-sm text-amber-200 sm:flex-row sm:items-center sm:justify-between">
+      <div class="min-w-0">
+        <p>统计数据读取失败，下方数字可能不是最新的。</p>
+        <p v-if="loadErrorMessage" class="mt-1 truncate text-xs text-amber-200/70">原因：{{ loadErrorMessage }}</p>
+      </div>
+      <Button class="shrink-0 rounded-lg border border-amber-300/20 bg-amber-300/10 text-amber-100 hover:bg-amber-300/20" :disabled="loading" @click="loadStats">
+        {{ loading ? '正在重试…' : '重试' }}
       </Button>
     </section>
 

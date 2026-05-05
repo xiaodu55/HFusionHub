@@ -26,3 +26,10 @@ export interface DemoImportResult {
  */
 export const importDemoData = (): Promise<ApiResponse<DemoImportResult>> =>
   post('/demo/import')
+
+/**
+ * 一键清除演示数据（管理员）：
+ * 知识库与回答方案移入回收站（7 天保留），笔记/记忆/应用/公告直接删除。
+ */
+export const clearDemoData = (): Promise<ApiResponse<DemoImportResult>> =>
+  post('/demo/clear')

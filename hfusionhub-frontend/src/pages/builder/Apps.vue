@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import EmptyState from '@/components/EmptyState.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 const toast = useToast()
@@ -75,6 +76,10 @@ async function loadKnowledgeBases() {
 function openCreate() {
   form.value = { name: '', description: '', knowledgeBaseId: undefined, style: 'detailed' }
   isEditDialogOpen.value = true
+}
+
+function openCreateDialog() {
+  openCreate()
 }
 
 function openEdit(app: AppInfo) {
@@ -260,9 +265,15 @@ onMounted(() => {
       </CardHeader>
       <CardContent class="space-y-3">
         <LoadingSkeleton v-if="loading" type="card" :count="3" />
-        <div v-else-if="!apps.length" class="py-10 text-center text-sm text-muted-foreground">
-          还没有应用。创建一个应用并绑定知识库，即可发布为对外 API。
-        </div>
+        <EmptyState
+          v-else-if="!apps.length"
+          :icon="Rocket"
+          title="还没有应用"
+          description="创建一个应用并绑定知识库，即可发布为对外 API。"
+          action="创建应用"
+          show-action
+          @action="openCreateDialog"
+        />
         <article v-for="app in apps" :key="app.id" class="rounded-xl border border-border bg-muted/20 p-4">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div class="min-w-0">
@@ -366,7 +377,12 @@ onMounted(() => {
 
         <div class="space-y-2">
           <p v-if="keysLoading" class="py-4 text-center text-sm text-muted-foreground">正在加载…</p>
-          <div v-else-if="!keys.length" class="py-4 text-center text-sm text-muted-foreground">还没有 API Key。</div>
+          <EmptyState
+            v-else-if="!keys.length"
+            :icon="KeyRound"
+            title="还没有 API Key"
+            description="生成一个 API Key 后，可通过 /openapi/chat 端点调用此应用。"
+          />
           <article v-for="key in keys" :key="key.id" class="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-3 py-2">
             <div class="min-w-0">
               <p class="text-sm font-medium">{{ key.name }}</p>

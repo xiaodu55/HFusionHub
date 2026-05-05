@@ -10,7 +10,7 @@ import {
   type AiRuntimeOverview,
   type UserModelConfig,
 } from '@/api/system'
-import { importDemoData } from '@/api/demo'
+import { clearDemoData, importDemoData, type DemoSectionResult } from '@/api/demo'
 import * as knowledgeBaseApi from '@/api/knowledgeBase'
 import * as conversationApi from '@/api/conversation'
 import { useToast } from '@/composables/useToast'
@@ -30,6 +30,8 @@ const modelConfig = ref<UserModelConfig | null>(null)
 const kbCount = ref(0)
 const convCount = ref(0)
 const importing = ref(false)
+const clearing = ref(false)
+const lastSections = ref<DemoSectionResult[]>([])
 const dismissed = ref(localStorage.getItem(DISMISS_KEY) === '1')
 
 const modelReady = computed(() => {
@@ -108,6 +110,7 @@ const handleImportDemo = async () => {
   try {
     const res = await importDemoData()
     const data = res.data
+    lastSections.value = (data.sections ?? []).filter((s) => s.importedCount > 0 || s.skippedCount > 0)
     if (data.parseFailedCount > 0) {
       toast.warning(`${data.message}（AI 服务就绪后可到文档页重新解析）`)
     } else {
@@ -118,6 +121,21 @@ const handleImportDemo = async () => {
     toast.error(error instanceof Error ? error.message : '导入演示数据失败')
   } finally {
     importing.value = false
+  }
+}
+
+const handleClearDemo = async () => {
+  if (!userStore.isAdmin) return
+  clearing.value = true
+  try {
+    const res = await clearDemoData()
+    lastSections.value = []
+    toast.success(res.data.message)
+    await refresh()
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '清除演示数据失败')
+  } finally {
+    clearing.value = false
   }
 }
 
@@ -181,23 +199,47 @@ onMounted(refresh)
 
     <div
       v-if="userStore.isAdmin"
-      class="mt-4 flex flex-col gap-3 rounded-lg border border-emerald-400/15 bg-emerald-400/5 p-3 sm:flex-row sm:items-center sm:justify-between"
+      class="mt-4 rounded-lg border border-emerald-400/15 bg-emerald-400/5 p-3"
     >
-      <div class="flex items-start gap-2.5 text-sm text-zinc-300">
-        <MessageSquare class="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
-        <span>
-          想快速体验？<span class="text-zinc-100">一键导入演示数据</span>
-          （知识库文档、回答方案、我的笔记、我的记忆、应用发布、公告），导入后即可直接提问。
-        </span>
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex items-start gap-2.5 text-sm text-zinc-300">
+          <MessageSquare class="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+          <span>
+            想快速体验？<span class="text-zinc-100">一键导入演示数据</span>
+            （知识库文档、回答方案、我的笔记、我的记忆、应用发布、公告），导入后即可直接提问。
+          </span>
+        </div>
+        <div class="flex shrink-0 gap-2">
+          <Button
+            variant="outline"
+            class="rounded-lg border-white/15 text-zinc-300 hover:bg-white/10 disabled:opacity-60"
+            :disabled="importing || clearing"
+            title="知识库与回答方案移入回收站，7 天内可恢复"
+            @click="handleClearDemo"
+          >
+            <Loader2 v-if="clearing" class="mr-1.5 h-4 w-4 animate-spin" />
+            {{ clearing ? '正在清除…' : '清除演示数据' }}
+          </Button>
+          <Button
+            class="rounded-lg bg-emerald-400 text-black hover:bg-emerald-300 disabled:opacity-60"
+            :disabled="importing || clearing"
+            @click="handleImportDemo"
+          >
+            <Loader2 v-if="importing" class="mr-1.5 h-4 w-4 animate-spin" />
+            {{ importing ? '正在导入…' : '导入演示数据' }}
+          </Button>
+        </div>
       </div>
-      <Button
-        class="shrink-0 rounded-lg bg-emerald-400 text-black hover:bg-emerald-300 disabled:opacity-60"
-        :disabled="importing"
-        @click="handleImportDemo"
-      >
-        <Loader2 v-if="importing" class="mr-1.5 h-4 w-4 animate-spin" />
-        {{ importing ? '正在导入…' : '导入演示数据' }}
-      </Button>
+
+      <!-- 分项结果：让管理员看清每个菜单导入了多少 -->
+      <ul v-if="lastSections.length" class="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-white/10 pt-3 text-xs text-zinc-400">
+        <li v-for="section in lastSections" :key="section.section">
+          {{ section.label }}：
+          <span v-if="section.importedCount" class="text-emerald-300">新增 {{ section.importedCount }}</span>
+          <span v-if="section.importedCount && section.skippedCount"> · </span>
+          <span v-if="section.skippedCount">已存在 {{ section.skippedCount }}</span>
+        </li>
+      </ul>
     </div>
   </section>
 </template>

@@ -9,6 +9,7 @@ import { ArrowLeft, FileText, Code, Table, List, Heading, AlignLeft } from 'luci
 import { useToast } from '@/composables/useToast'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import ErrorState from '@/components/ErrorState.vue'
+import EmptyState from '@/components/EmptyState.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -179,10 +180,12 @@ onMounted(() => {
       <CardContent>
         <LoadingSkeleton v-if="loading" type="card" :count="3" />
         <ErrorState v-else-if="loadError" message="加载分块数据失败" @retry="loadChunks" />
-        <div v-else-if="chunks.length === 0" class="text-center py-8">
-          <FileText class="mx-auto h-12 w-12 text-muted-foreground" />
-          <p class="mt-4 text-muted-foreground">暂无分块数据</p>
-        </div>
+        <EmptyState
+          v-else-if="chunks.length === 0"
+          :icon="FileText"
+          title="暂无分块数据"
+          description="文档解析完成后，系统会将内容分割成多个可检索的小块。"
+        />
         <div v-else class="space-y-4">
           <div
             v-for="(chunk, index) in chunks"

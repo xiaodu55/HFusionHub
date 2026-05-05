@@ -63,6 +63,12 @@ public class User extends BaseEntity {
     private String avatar;
 
     /**
+     * 界面主题偏好：light-浅色，dark-深色，system-跟随系统（空=未设置）
+     */
+    @Schema(description = "界面主题偏好：light | dark | system")
+    private String themePreference;
+
+    /**
      * 角色：pending-待分配，user-普通用户，builder-AI配置员，admin-唯一超级管理员
      */
     @Schema(description = "角色：pending-待分配，user-普通用户，builder-AI配置员，admin-唯一超级管理员")

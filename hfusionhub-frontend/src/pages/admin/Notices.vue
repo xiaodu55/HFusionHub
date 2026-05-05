@@ -11,12 +11,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import EmptyState from '@/components/EmptyState.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 const toast = useToast()
 const loading = ref(false)
 const notices = ref<SystemNotice[]>([])
 const saving = ref(false)
+const addDialogOpen = ref(false)
 const deleteTarget = ref<SystemNotice | null>(null)
 const confirmDeleteOpen = ref(false)
 const confirmDeleteLoading = ref(false)
@@ -79,6 +81,7 @@ async function publish() {
     })
     toast.success('公告已发布')
     form.value = { title: '', content: '', level: 'info', scope: 'all', expiresAt: '' }
+    addDialogOpen.value = false
     await load()
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '发布失败')
@@ -131,7 +134,7 @@ onMounted(load)
         <Button variant="outline" size="sm" @click="load">
           <RefreshCw class="mr-1.5 h-4 w-4" /> 刷新
         </Button>
-        <Dialog>
+        <Dialog v-model:open="addDialogOpen">
           <DialogTrigger as-child>
             <Button size="sm">
               <Plus class="mr-1.5 h-4 w-4" /> 发布公告
@@ -190,7 +193,15 @@ onMounted(load)
       </CardHeader>
       <CardContent class="space-y-3">
         <LoadingSkeleton v-if="loading" type="card" :count="3" />
-        <div v-else-if="!notices.length" class="py-10 text-center text-sm text-muted-foreground">还没有发布过公告。</div>
+        <EmptyState
+          v-else-if="!notices.length"
+          :icon="Megaphone"
+          title="还没有发布过公告"
+          description="发布公告后，用户会在通知铃铛中看到并标记已读。点击上方按钮开始。"
+          action="发布公告"
+          show-action
+          @action="addDialogOpen = true"
+        />
         <article
           v-for="notice in notices"
           :key="notice.id"

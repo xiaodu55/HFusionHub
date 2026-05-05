@@ -21,6 +21,8 @@ import com.hfusionhub.mapper.NoteMapper;
 import com.hfusionhub.mapper.PromptTemplateMapper;
 import com.hfusionhub.mapper.SystemNoticeMapper;
 import com.hfusionhub.service.DemoImportService;
+import com.hfusionhub.service.KnowledgeBaseService;
+import com.hfusionhub.service.PromptTemplateService;
 import com.hfusionhub.service.VectorizationService;
 import com.hfusionhub.tenant.TenantContext;
 import java.io.IOException;
@@ -63,6 +65,8 @@ public class DemoImportServiceImpl implements DemoImportService {
     private final MemoryEntryMapper memoryEntryMapper;
     private final AppMapper appMapper;
     private final SystemNoticeMapper systemNoticeMapper;
+    private final KnowledgeBaseService knowledgeBaseService;
+    private final PromptTemplateService promptTemplateService;
 
     private static final String DEMO_KB_NAME = "演示知识库";
     private static final String DEMO_KB_DESC = "一键导入的示例知识库（员工手册、产品目录、权限矩阵），可直接体验 RAG 问答";
@@ -155,6 +159,143 @@ public class DemoImportServiceImpl implements DemoImportService {
                 .sections(sections)
                 .message(message)
                 .build();
+    }
+
+    @Override
+    public DemoImportResultDTO clearDemoData() {
+        Long userId = JwtUtils.getCurrentUserId();
+        Long tenantId = resolveTenantId();
+
+        List<DemoImportResultDTO.SectionResult> sections = new ArrayList<>();
+        sections.add(clearDemoKb(userId));
+        sections.add(clearPromptTemplates(userId));
+        sections.add(clearNotes(userId));
+        sections.add(clearMemories(userId));
+        sections.add(clearApp(userId));
+        sections.add(clearNotice());
+
+        int total = sections.stream().mapToInt(DemoImportResultDTO.SectionResult::getImportedCount).sum();
+        String message = total > 0
+                ? "演示数据已清除（知识库与回答方案进入回收站，7 天内可恢复）"
+                : "未发现需要清除的演示数据";
+        log.info("演示数据清除完成: userId={}, sections={}", userId, sections);
+        return DemoImportResultDTO.builder()
+                .knowledgeBaseId(null)
+                .knowledgeBaseName(DEMO_KB_NAME)
+                .sections(sections)
+                .message(message)
+                .build();
+    }
+
+    // ── 清除演示数据 ────────────────────────────────────────────────────
+
+    private DemoImportResultDTO.SectionResult clearDemoKb(Long userId) {
+        KnowledgeBase kb = findDemoKb(userId);
+        if (kb == null) {
+            return section("kb", "知识库文档", 0, 0);
+        }
+        try {
+            // 知识库移入回收站（保留文档与索引，可恢复），其下文档一并进入回收站
+            knowledgeBaseService.delete(kb.getId());
+            return section("kb", "知识库文档", 1, 0);
+        } catch (Exception e) {
+            log.warn("清除演示知识库失败: kbId={}, 原因={}", kb.getId(), e.getMessage());
+            return section("kb", "知识库文档", 0, 0);
+        }
+    }
+
+    private DemoImportResultDTO.SectionResult clearPromptTemplates(Long userId) {
+        int removed = 0;
+        for (DemoPrompt demo : DEMO_PROMPTS) {
+            PromptTemplate template = promptTemplateMapper.selectOne(new LambdaQueryWrapper<PromptTemplate>()
+                    .eq(PromptTemplate::getUserId, userId)
+                    .eq(PromptTemplate::getName, demo.name())
+                    .last("LIMIT 1"));
+            if (template == null) {
+                continue;
+            }
+            try {
+                promptTemplateService.delete(template.getId());
+                removed++;
+            } catch (Exception e) {
+                log.warn("清除回答方案失败: id={}, 原因={}", template.getId(), e.getMessage());
+            }
+        }
+        return section("prompts", "回答方案", removed, 0);
+    }
+
+    private DemoImportResultDTO.SectionResult clearNotes(Long userId) {
+        int removed = 0;
+        for (Resource resource : loadResources(DEMO_NOTE_RESOURCE_DIR, "示例笔记")) {
+            String title = DEMO_NOTE_TITLES.getOrDefault(resource.getFilename(), resource.getFilename());
+            Note note = noteMapper.selectOne(new LambdaQueryWrapper<Note>()
+                    .eq(Note::getUserId, userId)
+                    .eq(Note::getTitle, title)
+                    .last("LIMIT 1"));
+            if (note == null) {
+                continue;
+            }
+            try {
+                noteMapper.deleteById(note.getId());
+                removed++;
+            } catch (Exception e) {
+                log.warn("清除示例笔记失败: id={}, 原因={}", note.getId(), e.getMessage());
+            }
+        }
+        return section("notes", "我的笔记", removed, 0);
+    }
+
+    private DemoImportResultDTO.SectionResult clearMemories(Long userId) {
+        int removed = 0;
+        for (String content : List.of("回答风格偏好", "演示知识库包含员工手册")) {
+            MemoryEntry entry = memoryEntryMapper.selectOne(new LambdaQueryWrapper<MemoryEntry>()
+                    .eq(MemoryEntry::getUserId, userId)
+                    .like(MemoryEntry::getContent, content)
+                    .last("LIMIT 1"));
+            if (entry == null) {
+                continue;
+            }
+            try {
+                memoryEntryMapper.deleteById(entry.getId());
+                removed++;
+            } catch (Exception e) {
+                log.warn("清除示例记忆失败: id={}, 原因={}", entry.getId(), e.getMessage());
+            }
+        }
+        return section("memory", "我的记忆", removed, 0);
+    }
+
+    private DemoImportResultDTO.SectionResult clearApp(Long userId) {
+        App app = appMapper.selectOne(new LambdaQueryWrapper<App>()
+                .eq(App::getUserId, userId)
+                .eq(App::getName, DEMO_APP_NAME)
+                .last("LIMIT 1"));
+        if (app == null) {
+            return section("apps", "应用发布", 0, 0);
+        }
+        try {
+            appMapper.deleteById(app.getId());
+            return section("apps", "应用发布", 1, 0);
+        } catch (Exception e) {
+            log.warn("清除示例应用失败: id={}, 原因={}", app.getId(), e.getMessage());
+            return section("apps", "应用发布", 0, 0);
+        }
+    }
+
+    private DemoImportResultDTO.SectionResult clearNotice() {
+        SystemNotice notice = systemNoticeMapper.selectOne(new LambdaQueryWrapper<SystemNotice>()
+                .eq(SystemNotice::getTitle, DEMO_NOTICE_TITLE)
+                .last("LIMIT 1"));
+        if (notice == null) {
+            return section("notices", "公告管理", 0, 0);
+        }
+        try {
+            systemNoticeMapper.deleteById(notice.getId());
+            return section("notices", "公告管理", 1, 0);
+        } catch (Exception e) {
+            log.warn("清除欢迎公告失败: id={}, 原因={}", notice.getId(), e.getMessage());
+            return section("notices", "公告管理", 0, 0);
+        }
     }
 
     /** 文档导入计数 */

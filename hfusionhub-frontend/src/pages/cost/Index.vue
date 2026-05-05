@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { useToast } from '@/composables/useToast'
 import * as costApi from '@/api/cost'
 import type { CostSummary, DailyCost, ModelBreakdown } from '@/api/cost'
+import * as quotaApi from '@/api/quota'
+import type { QuotaSummary } from '@/api/quota'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 
 const router = useRouter()
@@ -15,6 +17,18 @@ const loading = ref(false)
 const summary = ref<CostSummary | null>(null)
 const dailyCosts = ref<DailyCost[]>([])
 const modelBreakdown = ref<ModelBreakdown[]>([])
+const quotas = ref<QuotaSummary[]>([])
+
+/** 配额用量条颜色：>=90% 红，>=70% 琥珀，其余绿 */
+function quotaBarClass(percent: number) {
+  if (percent >= 90) return 'bg-rose-500'
+  if (percent >= 70) return 'bg-amber-500'
+  return 'bg-primary'
+}
+
+function formatQuota(value: number, unit: string) {
+  return `${value.toLocaleString()} ${unit}`
+}
 
 const timeRanges = [{ label: '7 天', value: 7 }, { label: '30 天', value: 30 }, { label: '90 天', value: 90 }]
 const hasUsage = computed(() => Boolean(summary.value?.totalRequests || modelBreakdown.value.length))
@@ -40,14 +54,16 @@ function modelPercentage(tokens: number) {
 async function loadData() {
   loading.value = true
   try {
-    const [summaryRes, dailyRes, modelsRes] = await Promise.all([
+    const [summaryRes, dailyRes, modelsRes, quotaRes] = await Promise.all([
       costApi.getCostSummary(days.value),
       costApi.getDailyCosts(days.value),
       costApi.getModelBreakdown(days.value),
+      quotaApi.getQuotaSummary(),
     ])
     summary.value = summaryRes.data
     dailyCosts.value = dailyRes.data
     modelBreakdown.value = modelsRes.data
+    quotas.value = quotaRes.data ?? []
   } catch (error) {
     toast.error(error instanceof Error ? error.message : '加载用量数据失败')
   } finally {
@@ -64,12 +80,16 @@ onMounted(loadData)
 </script>
 
 <template>
-  <div class="mx-auto max-w-7xl space-y-5 pb-8">
-    <header class="flex flex-col gap-4 border-b border-border pb-5 lg:flex-row lg:items-end lg:justify-between">
+  <div class="mx-auto max-w-7xl space-y-6 p-6">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
       <div>
-        <p class="text-sm font-medium text-primary">模型用量</p>
-        <h1 class="mt-1 text-2xl font-semibold">用量与费用</h1>
-        <p class="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">查看您实际调用了哪些模型、消耗多少 Token，以及产生的费用。这里只统计已经完成的 AI 请求。</p>
+        <h1 class="flex items-center gap-2 text-xl font-semibold">
+          <BarChart3 class="h-5 w-5 text-primary" />
+          用量与费用
+        </h1>
+        <p class="mt-1 text-sm text-muted-foreground">
+          查看您实际调用了哪些模型、消耗多少 Token，以及产生的费用。这里只统计已经完成的 AI 请求。
+        </p>
       </div>
       <div class="flex items-center gap-2">
         <div class="flex rounded-md border border-border p-1">
@@ -77,7 +97,7 @@ onMounted(loadData)
         </div>
         <Button variant="outline" size="icon" title="刷新用量" :disabled="loading" @click="loadData"><RefreshCw class="h-4 w-4" :class="loading && 'animate-spin'" /></Button>
       </div>
-    </header>
+    </div>
 
     <LoadingSkeleton v-if="loading && !summary" type="card" :count="4" />
 
@@ -87,6 +107,35 @@ onMounted(loadData)
         <div class="border-b border-border p-4 xl:border-b-0 xl:border-r"><p class="flex items-center gap-2 text-sm text-muted-foreground"><BarChart3 class="h-4 w-4" />预估月费</p><p class="mt-2 text-2xl font-semibold">{{ formatCost(summary.estimatedMonthCost) }}</p><p class="mt-1 text-xs text-muted-foreground">按当前使用速度估算</p></div>
         <div class="border-b border-border p-4 sm:border-b-0 sm:border-r"><p class="flex items-center gap-2 text-sm text-muted-foreground"><Zap class="h-4 w-4" />Token 用量</p><p class="mt-2 text-2xl font-semibold">{{ summary.totalTokens.toLocaleString() }}</p><p class="mt-1 text-xs text-muted-foreground">模型处理的文本单位</p></div>
         <div class="p-4"><p class="flex items-center gap-2 text-sm text-muted-foreground"><Bot class="h-4 w-4" />AI 请求</p><p class="mt-2 text-2xl font-semibold">{{ summary.totalRequests.toLocaleString() }}</p><p class="mt-1 text-xs text-muted-foreground">平均 {{ formatCost(avgCostPerRequest) }} / 次</p></div>
+      </section>
+
+      <!-- 租户配额（今日）：读 usage_ledger 预占/结算与 usage_quota 日限额 -->
+      <section v-if="quotas.length" class="rounded-lg border border-border bg-card/35 p-5">
+        <div class="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 class="font-medium">今日配额</h2>
+            <p class="mt-1 text-sm text-muted-foreground">当前租户今日各项用量与日限额，超限时相关请求会被拒绝。</p>
+          </div>
+          <span class="text-xs text-muted-foreground">每日 00:00 重置</span>
+        </div>
+        <div class="mt-5 grid gap-5 sm:grid-cols-2">
+          <div v-for="quota in quotas" :key="quota.meter">
+            <div class="flex items-baseline justify-between gap-3 text-sm">
+              <span class="font-medium">{{ quota.label }}</span>
+              <span class="shrink-0 text-muted-foreground">
+                {{ formatQuota(quota.used, quota.unit) }} / {{ formatQuota(quota.dailyLimit, quota.unit) }}
+              </span>
+            </div>
+            <div class="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+              <div class="h-full rounded-full transition-all" :class="quotaBarClass(quota.percent)" :style="{ width: `${Math.min(quota.percent, 100)}%` }" />
+            </div>
+            <p class="mt-1.5 text-xs text-muted-foreground">
+              剩余 {{ formatQuota(quota.remaining, quota.unit) }}
+              <span v-if="quota.reserved > 0">· 预占中 {{ formatQuota(quota.reserved, quota.unit) }}</span>
+              <span v-if="quota.percent >= 90" class="text-rose-400">· 即将超限</span>
+            </p>
+          </div>
+        </div>
       </section>
 
       <section v-if="!hasUsage" class="grid overflow-hidden rounded-lg border border-border bg-card/35 lg:grid-cols-[minmax(0,1fr)_22rem]">

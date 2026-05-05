@@ -2,6 +2,7 @@ package com.hfusionhub.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -27,4 +28,8 @@ public class UserUpdateDTO {
 
     @Schema(description = "头像URL", example = "https://example.com/avatar.jpg")
     private String avatar;
+
+    @Pattern(regexp = "^(light|dark|system)$", message = "主题偏好只能是 light、dark 或 system")
+    @Schema(description = "界面主题偏好：light | dark | system", example = "dark")
+    private String themePreference;
 }

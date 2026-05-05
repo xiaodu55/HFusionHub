@@ -270,6 +270,9 @@ public class UserServiceImpl implements UserService {
         if (updateDTO.getAvatar() != null) {
             user.setAvatar(updateDTO.getAvatar());
         }
+        if (updateDTO.getThemePreference() != null) {
+            user.setThemePreference(updateDTO.getThemePreference());
+        }
 
         userMapper.updateById(user);
 
@@ -413,6 +416,7 @@ public class UserServiceImpl implements UserService {
                 .nickname(user.getNickname())
                 .email(user.getEmail())
                 .phone(user.getPhone())
+                .themePreference(user.getThemePreference())
                 .avatar(user.getAvatar())
                 .role(user.getRole())
                 .status(user.getStatus())

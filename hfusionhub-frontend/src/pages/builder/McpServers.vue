@@ -11,12 +11,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import EmptyState from '@/components/EmptyState.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 const toast = useToast()
 const loading = ref(false)
 const servers = ref<McpServerInfo[]>([])
 const adding = ref(false)
+const addDialogOpen = ref(false)
 const deleteTarget = ref<McpServerInfo | null>(null)
 const confirmDeleteOpen = ref(false)
 const confirmDeleteLoading = ref(false)
@@ -44,6 +46,12 @@ function applyExample() {
     api_key: '',
   }
   toast.success('已填入示例配置，可修改后添加')
+}
+
+/** 空状态 CTA：打开添加对话框并预填示例 */
+function applyExampleAndOpen() {
+  applyExample()
+  addDialogOpen.value = true
 }
 
 const statusClass = (status: string) => ({
@@ -92,6 +100,7 @@ async function add() {
     if (response.data.success) {
       toast.success(response.data.message ?? '已添加')
       form.value = { id: '', name: '', url: '', transport: 'sse', api_key: '' }
+      addDialogOpen.value = false
     } else {
       toast.error(response.data.message ?? '添加失败')
     }
@@ -156,7 +165,7 @@ onMounted(load)
       </div>
       <div class="flex items-center gap-2">
         <Button variant="outline" size="sm" @click="load"><RefreshCw class="mr-1.5 h-4 w-4" /> 刷新</Button>
-        <Dialog>
+        <Dialog v-model:open="addDialogOpen">
           <DialogTrigger as-child>
             <Button size="sm"><Plus class="mr-1.5 h-4 w-4" /> 添加服务</Button>
           </DialogTrigger>
@@ -207,10 +216,15 @@ onMounted(load)
       </CardHeader>
       <CardContent class="space-y-3">
         <LoadingSkeleton v-if="loading" type="card" :count="3" />
-        <div v-else-if="!servers.length" class="py-10 text-center text-sm text-muted-foreground">
-          还没有 MCP 服务。可通过环境变量 <code class="rounded bg-muted px-1">MCP_SERVERS_CONFIG</code> 配置，
-          或点击「添加服务」后用「填入示例」快速开始。
-        </div>
+        <EmptyState
+          v-else-if="!servers.length"
+          :icon="Cable"
+          title="还没有 MCP 服务"
+          description="MCP 让 AI 连接外部工具（如 Notion、GitHub）。可用「填入示例」快速开始，或通过环境变量 MCP_SERVERS_CONFIG 配置。"
+          action="填入示例配置"
+          show-action
+          @action="applyExampleAndOpen"
+        />
         <article v-for="server in servers" :key="server.id" class="rounded-xl border border-border bg-muted/20 p-4">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div class="min-w-0">

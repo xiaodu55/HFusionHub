@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import EmptyState from '@/components/EmptyState.vue'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import { useToast } from '@/composables/useToast'
 import { formatDateTime } from '@/utils/date'
@@ -131,13 +132,15 @@ onMounted(loadNotes)
       <LoadingSkeleton type="card" :count="3" class="w-full" />
     </div>
 
-    <div v-else-if="notes.length === 0" class="flex flex-col items-center justify-center py-16 text-center">
-      <NotebookPen class="h-12 w-12 text-muted-foreground" />
-      <p class="mt-4 text-muted-foreground">还没有笔记</p>
-      <p class="mt-1 text-xs text-muted-foreground/70">
-        在关联知识库的对话中让 AI「把结论整理成笔记保存到知识库」，确认后即可在这里查看
-      </p>
-    </div>
+    <EmptyState
+      v-else-if="notes.length === 0"
+      :icon="NotebookPen"
+      title="还没有笔记"
+      description="在关联知识库的对话中让 AI「把结论整理成笔记保存到知识库」，确认后即可在这里查看。也可以手动新建笔记。"
+      action="新建笔记"
+      show-action
+      @action="openCreate"
+    />
 
     <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <Card v-for="note in notes" :key="note.id" class="flex flex-col">

@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS sys_user (
     email VARCHAR(100) DEFAULT NULL,
     phone VARCHAR(20) DEFAULT NULL,
     avatar VARCHAR(500) DEFAULT NULL,
+    theme_preference VARCHAR(16) DEFAULT NULL,
     role VARCHAR(20) NOT NULL DEFAULT 'user',
     status SMALLINT NOT NULL DEFAULT 0,
     last_login_time TIMESTAMP DEFAULT NULL,
@@ -1112,7 +1113,7 @@ CREATE TABLE IF NOT EXISTS rag_answer_feedback (
 CREATE INDEX IF NOT EXISTS idx_rag_feedback_tenant_created ON rag_answer_feedback (tenant_id, created_at);
 
 -- =====================================================
--- Ó¦ÓÃ·¢²¼Óë API Key (V52)
+-- Ó¦ï¿½Ã·ï¿½ï¿½ï¿½ï¿½ï¿½ API Key (V52)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS app (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -1162,7 +1163,7 @@ CREATE INDEX IF NOT EXISTS idx_call_app ON app_call_log (app_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_call_key ON app_call_log (api_key_id);
 
 -- =====================================================
--- ÖªÊ¶¿â¹²Ïí (V53)
+-- ÖªÊ¶ï¿½â¹²ï¿½ï¿½ (V53)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS kb_share (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -1177,7 +1178,7 @@ CREATE TABLE IF NOT EXISTS kb_share (
 CREATE INDEX IF NOT EXISTS idx_share_user ON kb_share (shared_user_id);
 
 -- =====================================================
--- ²Ù×÷Éó¼ÆÈÕÖ¾ (V54)
+-- ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¾ (V54)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS audit_log (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,

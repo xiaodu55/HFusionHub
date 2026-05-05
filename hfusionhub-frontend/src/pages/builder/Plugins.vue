@@ -26,6 +26,7 @@ import type { PluginEntry, PluginAuditLog } from '@/api/plugins'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import EmptyState from '@/components/EmptyState.vue'
 import { useToast } from '@/composables/useToast'
 
 const toast = useToast()
@@ -504,11 +505,15 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Empty state -->
-    <div v-else-if="filteredPlugins.length === 0" class="flex flex-col items-center justify-center py-12 text-muted-foreground">
-      <Package class="h-12 w-12 mb-4 opacity-50" />
-      <p class="text-lg font-medium">暂无插件</p>
-      <p class="text-sm">点击“新建插件”从示例开始，或上传开发者制作的插件包。</p>
-    </div>
+    <EmptyState
+      v-else-if="filteredPlugins.length === 0"
+      :icon="Package"
+      title="暂无插件"
+      description="点击「新建插件」从示例开始，或上传开发者制作的插件包。"
+      action="新建插件"
+      show-action
+      @action="showCreateDialog = true"
+    />
 
     <!-- Plugin list -->
     <div v-else class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

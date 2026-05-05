@@ -9,6 +9,7 @@ import {
   Cpu,
   Database,
   LoaderCircle,
+  MonitorSmartphone,
   Moon,
   Palette,
   RefreshCw,
@@ -23,11 +24,22 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { useTheme } from '@/composables/useTheme'
 import { useUserStore } from '@/stores/user'
+import * as userApi from '@/api/user'
 import * as systemApi from '@/api/system'
 
 const router = useRouter()
 const userStore = useUserStore()
-const { isDarkMode, initializeTheme, setTheme } = useTheme()
+const { preference, initializeTheme, setTheme } = useTheme()
+
+/** 切换主题并同步到服务端（失败不影响本地生效） */
+const chooseTheme = async (value: 'light' | 'dark' | 'system') => {
+  setTheme(value)
+  try {
+    await userApi.updateUserInfo({ themePreference: value })
+  } catch {
+    // 未登录或网络异常时仅保留本地偏好
+  }
+}
 
 // ── Provider status ──
 const runtime = ref<systemApi.AiRuntimeOverview | null>(null)
@@ -98,13 +110,57 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="mx-auto max-w-5xl space-y-6 pb-4">
-    <section class="rounded-2xl border border-border bg-card/80 p-5 shadow-[0_18px_45px_rgba(0,0,0,0.18)] sm:p-6">
-      <div class="flex items-center gap-4"><div class="flex h-11 w-11 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><Settings2 class="h-5 w-5" /></div><div><p class="text-xs font-medium tracking-[0.16em] text-primary/90">PREFERENCES</p><h1 class="mt-1 text-2xl font-semibold">设置</h1><p class="mt-1 text-sm text-muted-foreground">管理界面偏好、AI 供应商状态和常用账户入口。</p></div></div>
-    </section>
+  <div class="mx-auto max-w-5xl space-y-6 p-6">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="flex items-center gap-2 text-xl font-semibold">
+          <Settings2 class="h-5 w-5 text-primary" />
+          设置
+        </h1>
+        <p class="mt-1 text-sm text-muted-foreground">
+          管理界面偏好、AI 供应商状态和常用账户入口。
+        </p>
+      </div>
+    </div>
 
     <div class="grid gap-6 lg:grid-cols-2">
-      <Card class="border-border bg-card/80"><CardHeader><div class="flex items-center gap-2"><Palette class="h-4 w-4 text-primary" /><CardTitle class="text-base">外观</CardTitle></div><CardDescription>主题会保存在当前浏览器中。</CardDescription></CardHeader><CardContent><div class="grid grid-cols-2 gap-3"><button class="rounded-xl border p-4 text-left transition-colors" :class="!isDarkMode ? 'border-primary/50 bg-primary/[0.08]' : 'border-border bg-muted/25 hover:bg-muted/40'" @click="setTheme(false)"><Sun class="h-5 w-5 text-amber-300" /><p class="mt-3 text-sm font-medium">浅色主题</p><p class="mt-1 text-xs text-muted-foreground">明亮、适合白天使用</p></button><button class="rounded-xl border p-4 text-left transition-colors" :class="isDarkMode ? 'border-primary/50 bg-primary/[0.08]' : 'border-border bg-muted/25 hover:bg-muted/40'" @click="setTheme(true)"><Moon class="h-5 w-5 text-cyan-200" /><p class="mt-3 text-sm font-medium">深色主题</p><p class="mt-1 text-xs text-muted-foreground">低亮度、适合长时间阅读</p></button></div></CardContent></Card>
+      <Card class="border-border bg-card/80">
+        <CardHeader>
+          <div class="flex items-center gap-2"><Palette class="h-4 w-4 text-primary" /><CardTitle class="text-base">外观</CardTitle></div>
+          <CardDescription>主题会保存到您的账号，换设备登录后自动应用。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div class="grid grid-cols-3 gap-3">
+            <button
+              class="rounded-xl border p-4 text-left transition-colors"
+              :class="preference === 'light' ? 'border-primary/50 bg-primary/[0.08]' : 'border-border bg-muted/25 hover:bg-muted/40'"
+              @click="chooseTheme('light')"
+            >
+              <Sun class="h-5 w-5 text-amber-300" />
+              <p class="mt-3 text-sm font-medium">浅色</p>
+              <p class="mt-1 text-xs text-muted-foreground">明亮、适合白天</p>
+            </button>
+            <button
+              class="rounded-xl border p-4 text-left transition-colors"
+              :class="preference === 'dark' ? 'border-primary/50 bg-primary/[0.08]' : 'border-border bg-muted/25 hover:bg-muted/40'"
+              @click="chooseTheme('dark')"
+            >
+              <Moon class="h-5 w-5 text-cyan-200" />
+              <p class="mt-3 text-sm font-medium">深色</p>
+              <p class="mt-1 text-xs text-muted-foreground">低亮度、久看不累</p>
+            </button>
+            <button
+              class="rounded-xl border p-4 text-left transition-colors"
+              :class="preference === 'system' ? 'border-primary/50 bg-primary/[0.08]' : 'border-border bg-muted/25 hover:bg-muted/40'"
+              @click="chooseTheme('system')"
+            >
+              <MonitorSmartphone class="h-5 w-5 text-primary" />
+              <p class="mt-3 text-sm font-medium">跟随系统</p>
+              <p class="mt-1 text-xs text-muted-foreground">随系统自动切换</p>
+            </button>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card class="border-border bg-card/80"><CardHeader><div class="flex items-center gap-2"><UserRound class="h-4 w-4 text-primary" /><CardTitle class="text-base">账户</CardTitle></div><CardDescription>更新昵称、邮箱和手机号。</CardDescription></CardHeader><CardContent><Button variant="outline" class="w-full justify-between" @click="router.push('/profile')"><span>打开个人中心</span><ArrowRight class="h-4 w-4" /></Button></CardContent></Card>
 

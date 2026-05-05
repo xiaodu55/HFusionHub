@@ -45,6 +45,8 @@ export interface UserInfo {
   email: string
   phone: string
   avatar: string
+  /** 界面主题偏好：light | dark | system（空=未设置） */
+  themePreference?: 'light' | 'dark' | 'system'
   role: UserRole
   status: number
   lastLoginTime?: string

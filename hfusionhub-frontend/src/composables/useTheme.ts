@@ -1,30 +1,54 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+
+export type ThemePreference = 'light' | 'dark' | 'system'
 
 const STORAGE_KEY = 'hfusionhub-theme'
-const isDarkMode = ref(true)
+const preference = ref<ThemePreference>((localStorage.getItem(STORAGE_KEY) as ThemePreference) || 'dark')
+const isDarkMode = ref(preference.value === 'dark')
 let initialized = false
 
-const applyTheme = (dark: boolean) => {
+const systemDark = () =>
+  typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches
+
+const resolveDark = (pref: ThemePreference) => (pref === 'system' ? systemDark() : pref === 'dark')
+
+const applyTheme = (pref: ThemePreference) => {
+  const dark = resolveDark(pref)
   document.documentElement.classList.toggle('dark', dark)
   document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+  isDarkMode.value = dark
 }
+
+let mediaQuery: MediaQueryList | null = null
+let onSystemChange: ((e: MediaQueryListEvent) => void) | null = null
 
 export const useTheme = () => {
   const initializeTheme = () => {
     if (initialized) return
-    const storedTheme = localStorage.getItem(STORAGE_KEY)
-    isDarkMode.value = storedTheme ? storedTheme === 'dark' : true
-    applyTheme(isDarkMode.value)
+    applyTheme(preference.value)
     initialized = true
   }
 
-  const setTheme = (dark: boolean) => {
-    isDarkMode.value = dark
-    applyTheme(dark)
-    localStorage.setItem(STORAGE_KEY, dark ? 'dark' : 'light')
+  const setTheme = (pref: ThemePreference) => {
+    preference.value = pref
+    localStorage.setItem(STORAGE_KEY, pref)
+    applyTheme(pref)
+    // 跟随系统时监听系统变化；非 system 时移除监听
+    mediaQuery?.removeEventListener?.('change', onSystemChange!)
+    onSystemChange = null
+    if (pref === 'system' && typeof window !== 'undefined') {
+      mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+      onSystemChange = (e: MediaQueryListEvent) => {
+        isDarkMode.value = e.matches
+        applyTheme(preference.value)
+      }
+      mediaQuery.addEventListener('change', onSystemChange)
+    }
   }
 
-  const toggleTheme = () => setTheme(!isDarkMode.value)
+  const toggleTheme = () => setTheme(isDarkMode.value ? 'light' : 'dark')
 
-  return { isDarkMode, initializeTheme, setTheme, toggleTheme }
+  watch(preference, (value) => localStorage.setItem(STORAGE_KEY, value))
+
+  return { preference, isDarkMode, initializeTheme, setTheme, toggleTheme }
 }

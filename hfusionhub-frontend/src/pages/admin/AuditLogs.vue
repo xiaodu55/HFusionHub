@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import EmptyState from '@/components/EmptyState.vue'
 import { useToast } from '@/composables/useToast'
 import { formatDateTime } from '@/utils/date'
 import { friendlyErrorMessage } from '@/utils/errorMessage'
@@ -93,9 +94,12 @@ onMounted(load)
       </CardHeader>
       <CardContent>
         <div v-if="loading" class="space-y-2"><LoadingSkeleton type="card" :count="3" /></div>
-        <div v-else-if="(tab === 'operations' ? operations : crossTenant).length === 0" class="py-10 text-center text-sm text-muted-foreground">
-          暂无审计记录
-        </div>
+        <EmptyState
+          v-else-if="(tab === 'operations' ? operations : crossTenant).length === 0"
+          :icon="ScrollText"
+          title="暂无审计记录"
+          description="敏感操作（应用发布、API Key 生成、知识库共享、公告发布）会记录在这里。"
+        />
         <div v-else class="space-y-2">
           <template v-if="tab === 'operations'">
             <div

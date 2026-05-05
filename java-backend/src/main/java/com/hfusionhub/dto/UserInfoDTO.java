@@ -34,6 +34,9 @@ public class UserInfoDTO {
     @Schema(description = "手机号")
     private String phone;
 
+    @Schema(description = "界面主题偏好：light | dark | system（空=未设置）")
+    private String themePreference;
+
     @Schema(description = "头像URL")
     private String avatar;
 

@@ -103,12 +103,30 @@ $tests = @(
     @{ n = '通知-未读数';     m = 'GET';  p = '/notifications/unread-count' },
     @{ n = '工具-列表';       m = 'GET';  p = '/tools' },
     @{ n = '模型配置';        m = 'GET';  p = '/model-config' },
-    @{ n = '共享-给我的';     m = 'GET';  p = '/knowledge-base/share/to-me' }
+    @{ n = '共享-给我的';     m = 'GET';  p = '/knowledge-base/share/to-me' },
+    @{ n = '配额-摘要';       m = 'GET';  p = '/quota/summary' }
 )
 foreach ($t in $tests) {
     $r = Invoke-Api $t.m $t.p $headers
     Test-Ok $t.n ($r -ne $null -and $r.code -eq 200)
 }
+
+# ── 1.5 用户偏好 API ────────────────────────────────────────────────────
+$userInfo = Invoke-Api 'GET' '/user/info' $headers
+Test-Ok '用户信息-主题偏好字段' ($userInfo -ne $null -and $null -ne $userInfo.data.PSObject.Properties['themePreference'])
+
+$themeUpdate = Invoke-Api 'PATCH' '/user/theme-preference' $headers (@{ themePreference = 'dark' } | ConvertTo-Json)
+Test-Ok '主题偏好-更新' ($themeUpdate -ne $null -and $themeUpdate.code -eq 200)
+
+$themeRestore = Invoke-Api 'PATCH' '/user/theme-preference' $headers (@{ themePreference = 'system' } | ConvertTo-Json)
+Test-Ok '主题偏好-恢复' ($themeRestore -ne $null -and $themeRestore.code -eq 200)
+
+# ── 1.6 演示数据 API ────────────────────────────────────────────────────
+$demoImport = Invoke-Api 'POST' '/demo/import' $headers
+Test-Ok '演示数据-导入' ($demoImport -ne $null -and $demoImport.code -eq 200 -and $demoImport.data.sections)
+
+$demoClear = Invoke-Api 'DELETE' '/demo' $headers
+Test-Ok '演示数据-清空' ($demoClear -ne $null -and $demoClear.code -eq 200)
 
 # ── 2. Python AI ────────────────────────────────────────────────────────
 $pyToken = Get-EnvVal 'PYTHON_AI_INTERNAL_TOKEN'

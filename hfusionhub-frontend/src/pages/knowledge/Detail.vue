@@ -28,6 +28,7 @@ import { ArrowLeft, Plus, FileText, Trash2, Upload, Play, Eye, Loader2, RefreshC
 import { formatDateTime } from '@/utils/date'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import ErrorState from '@/components/ErrorState.vue'
+import EmptyState from '@/components/EmptyState.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 const route = useRoute()
@@ -408,10 +409,15 @@ onMounted(() => {
       <CardContent>
         <LoadingSkeleton v-if="loading" type="card" :count="3" />
         <ErrorState v-else-if="loadError" message="加载文档失败" @retry="loadDocuments" />
-        <div v-else-if="documents.length === 0" class="text-center py-8">
-          <FileText class="mx-auto h-12 w-12 text-muted-foreground" />
-          <p class="mt-4 text-muted-foreground">暂无文档，点击上方按钮上传</p>
-        </div>
+        <EmptyState
+          v-else-if="documents.length === 0"
+          :icon="FileText"
+          title="暂无文档"
+          description="点击上方按钮上传文档，解析完成后即可在对话中检索。"
+          action="添加文档"
+          show-action
+          @action="isUploadDialogOpen = true"
+        />
         <div v-else class="space-y-4">
           <div
             v-for="doc in documents"
@@ -659,9 +665,12 @@ onMounted(() => {
           <div class="space-y-2">
             <p class="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">当前共享（{{ shares.length }}）</p>
             <div v-if="shareLoading" class="py-4 text-center text-sm text-muted-foreground">正在加载…</div>
-            <div v-else-if="!shares.length" class="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
-              还没有共享给其他用户。
-            </div>
+            <EmptyState
+              v-else-if="!shares.length"
+              :icon="Share2"
+              title="还没有共享给其他用户"
+              description="搜索用户并授权后，对方可在自己的知识库列表中看到此库。"
+            />
             <div v-else class="space-y-1.5">
               <div
                 v-for="share in shares"
