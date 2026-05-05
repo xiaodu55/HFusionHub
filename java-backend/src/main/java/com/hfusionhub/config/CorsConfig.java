@@ -1,7 +1,9 @@
 package com.hfusionhub.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.util.StringUtils;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
@@ -9,23 +11,20 @@ import org.springframework.web.filter.CorsFilter;
 /**
  * 跨域配置
  *
+ * <p>开发/内网穿透场景（cpolar 等）的 Origin 是动态域名，无法枚举白名单；
+ * 默认放行任意 Origin（allowedOriginPatterns("*")）。生产环境应通过
+ * {@code app.cors.allowed-origins}（逗号分隔）配置固定域名收紧。</p>
+ *
  * @author HFusionHub Team
  */
 @Configuration
 public class CorsConfig {
 
     /**
-     * 允许跨域请求的来源
+     * 允许跨域请求的来源（逗号分隔；留空 = 放行任意 Origin，用于开发/穿透）
      */
-    private static final String[] ALLOWED_ORIGINS = {
-        "http://localhost:5173", // Vite 开发服务器
-        "http://localhost:3000", // 前端端口
-        "http://localhost:3001", // 前端端口（端口占用时 Vite 自动递增）
-        "http://localhost:8080", // 前端部署端口
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001"
-    };
+    @Value("${app.cors.allowed-origins:}")
+    private String allowedOrigins;
 
     /**
      * 允许的请求方法
@@ -60,9 +59,17 @@ public class CorsConfig {
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();
 
-        // 允许的来源
-        for (String origin : ALLOWED_ORIGINS) {
-            config.addAllowedOrigin(origin);
+        // 允许的来源：配置了 app.cors.allowed-origins 则用白名单，否则放行任意 Origin
+        if (StringUtils.hasText(allowedOrigins)) {
+            for (String origin : allowedOrigins.split(",")) {
+                String trimmed = origin.trim();
+                if (StringUtils.hasText(trimmed)) {
+                    config.addAllowedOriginPattern(trimmed);
+                }
+            }
+        } else {
+            // 开发/内网穿透（cpolar 动态域名）：放行任意 Origin
+            config.addAllowedOriginPattern("*");
         }
 
         // 允许的请求方法
