@@ -404,6 +404,27 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
+     * 更新用户主题偏好
+     *
+     * @param themePreference 主题偏好（light/dark/system）
+     * @return 用户信息
+     */
+    @Override
+    public UserInfoDTO updateThemePreference(String themePreference) {
+        Long userId = jwtUtils.getCurrentUserId();
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(StatusCode.NOT_FOUND, "用户不存在");
+        }
+        User update = new User();
+        update.setId(userId);
+        update.setThemePreference(themePreference);
+        userMapper.updateById(update);
+        user.setThemePreference(themePreference);
+        return convertToUserInfoDTO(user);
+    }
+
+    /**
      * User 实体转换为 UserInfoDTO
      *
      * @param user 用户实体

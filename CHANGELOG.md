@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### 第九轮优化（2026-08-19）：主题系统 + 配额展示 + 空状态统一 + 演示数据清理
+### 第九轮优化（2026-08-19）：主题系统 + 配额展示 + 空状态统一 + 演示数据清理 + 文档体系完善
 
 #### Added
 - **主题系统三档切换 + 服务端同步**：`sys_user.theme_preference`（V57 迁移，枚举 `light`/`dark`/`system`）；`PATCH /api/user/theme-preference` 持久化到数据库；`GET /api/user/info` 下发主题偏好；前端 `useTheme` composable 登录时优先采用远端配置（换设备自动应用），设置页三档切换器
@@ -20,8 +20,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 #### Fixed
 - **Plugins.vue 零宽字符编译错误**：EmptyState 组件属性中混入 U+200B（零宽空格）导致 TypeScript 编译失败，已清理并重写
 
+#### Testing
+- 所有测试通过：Java 445 passed（含 `QuotaController` 断言）、Python 1220+ passed、Frontend 33 passed + build 成功
+- E2E 测试覆盖：主题切换/持久化（3 场景）、配额展示/限流（3 场景）、演示数据导入/清空（4 场景）
+
+#### Documentation
+- 新增 `docs/PRODUCTION_CHECKLIST.md` — 生产环境检查清单（安全、备份、监控、合规）
+- 新增 `docs/SWAGGER_UI.md` — API 文档访问与安全配置指南
+- 新增 `docs/PERFORMANCE_BASELINE.md` — 性能基线测试方法与目标
+- 新增 `docs/TROUBLESHOOTING.md` — 故障排查手册（P0-P3 分级，覆盖常见问题）
+- 新增 `docs/SCALING.md` — 扩容与性能优化指南（垂直/水平扩容、K8s 部署）
+- 新增 `scripts/run-all-benchmarks.ps1` — 自动化性能基线测试脚本
+- 新增 `TODO.md` — 完整操作清单（P0-P3 优先级，含时间估算）
+- 新增 `PROJECT_SUMMARY.md` — 项目推进总结与下一步行动计划
+
 #### Notes
-- 所有测试通过：Java 443 passed（含 `QuotaController` 断言）、Python 1220+ passed、Frontend 33 passed + build 成功
 - `/cost` 页配额面板仅展示 `usage_quota` 表已有数据，租户配额初始化由管理员在管理端设置（未来可接入计费系统）
 
 ### 第八轮优化（2026-08-19）：各菜单一键导入示例数据

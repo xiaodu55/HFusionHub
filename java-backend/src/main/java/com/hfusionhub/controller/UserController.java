@@ -4,6 +4,7 @@ import cn.dev33.satoken.annotation.SaCheckRole;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.dto.PasswordChangeDTO;
+import com.hfusionhub.dto.ThemePreferenceUpdateDTO;
 import com.hfusionhub.dto.UserInfoDTO;
 import com.hfusionhub.dto.UserLoginDTO;
 import com.hfusionhub.dto.UserRegisterDTO;
@@ -137,5 +138,18 @@ public class UserController {
     @Operation(summary = "修改用户身份", description = "管理员分配普通用户、AI 配置员或系统管理员身份")
     public R<UserInfoDTO> updateUserRole(@PathVariable Long userId, @Valid @RequestBody UserRoleUpdateDTO dto) {
         return R.ok("身份已更新", userService.updateUserRole(userId, dto.getRole()));
+    }
+
+    /**
+     * 更新主题偏好
+     *
+     * @param request 主题偏好请求
+     * @return 用户信息
+     */
+    @PatchMapping("/theme-preference")
+    @Operation(summary = "更新主题偏好", description = "更新当前用户的主题偏好（light/dark/system）")
+    public R<UserInfoDTO> updateThemePreference(@Valid @RequestBody ThemePreferenceUpdateDTO request) {
+        UserInfoDTO userInfo = userService.updateThemePreference(request.getThemePreference());
+        return R.ok("主题偏好已更新", userInfo);
     }
 }

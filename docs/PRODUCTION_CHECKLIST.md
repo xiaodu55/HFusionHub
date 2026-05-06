@@ -1,75 +1,172 @@
-# HFusionHub 生产部署核对清单
+# 生产环境检查清单
 
-> 生产部署（`deploy/`）前的逐项核对清单。任何一项未满足都可能导致安全或功能缺陷。
-> 依据：2026-08 全栈验证 + `docs/ENVIRONMENT.md` + `docs/PRODUCTION_OPS.md`。
+## 🔐 安全配置
 
-## 0. 前置依赖
+### 必需项（上线前必须完成）
 
-- [ ] Docker 24+ / Docker Compose v2
-- [ ] 域名证书（HTTPS 入口，Nginx/Ingress）
-- [ ] 生产 MySQL 8.0（独立实例，非开发卷）
-- [ ] 可用的 DeepSeek API Key（**非占位符**——本项目 `_is_placeholder_key` 会拒绝 `your_*_key` 类占位值，聊天将静默回退 Ollama）
+- [ ] **修改所有默认密码**
+  - `docker/.env` → `ADMIN_PASSWORD`（当前：`***REMOVED-BY-REWRITE***`）
+  - `docker/.env` → `MYSQL_ROOT_PASSWORD`（当前：`***REMOVED-BY-REWRITE***`）
+  - `docker/.env` → `MYSQL_PASSWORD`（当前：`***REMOVED-BY-REWRITE***`）
+  - `docker/.env` → `REDIS_PASSWORD`（当前：`***REMOVED-BY-REWRITE***`）
+  - `docker/.env` → `MINIO_ROOT_PASSWORD`（当前：`***REMOVED-BY-REWRITE***`）
 
-## 1. 密钥与配置（deploy/.env）
+- [ ] **配置真实 DeepSeek API Key**
+  - `python-ai/.env` → `DEEPSEEK_API_KEY=sk-your-real-key`
+  - 当前为占位符，聊天默认走 Ollama fallback
 
-- [ ] `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD`：强随机，不与开发环境共用
-- [ ] `ADMIN_PASSWORD`：首次启动初始化 admin（无该值则不创建）
-- [ ] `PYTHON_AI_INTERNAL_TOKEN` 与 `CALLBACK_SECRET`：两段长随机值，**Java 与 Python 两端一致**
-- [ ] `DEEPSEEK_API_KEY`：真实 key（占位符会被跳过，静默回退本地模型）
-- [ ] `PLUGIN_RUNNER_TOKEN`：runner 令牌
-- [ ] `MINIO_ROOT_USER/PASSWORD`：非默认值
-- [ ] `LLM_ALLOW_MOCK=false`、`EMBEDDING_ALLOW_FALLBACK=false`（生产禁止随机向量降级）
+- [ ] **更新内部通信令牌**
+  - `docker/.env` → `PYTHON_AI_INTERNAL_TOKEN`（32 字符随机字符串）
+  - `docker/.env` → `PLUGIN_RUNNER_SECRET_KEY`（32 字符随机字符串）
 
-## 2. Plugin Runner（插件沙箱）
+- [ ] **启用 HTTPS**
+  - 配置 Nginx 反向代理（示例：`deploy/nginx.conf`）
+  - 申请 SSL 证书（Let's Encrypt 推荐）
+  - 强制 HTTP → HTTPS 重定向
 
-- [ ] 生成 TLS 证书：`bash scripts/generate-runner-tls.sh deploy/runner-tls`
-- [ ] `PLUGIN_RUNNER_DOCKER_HOST=tcp://<docker-engine>:2376` 指向**隔离的 Docker 引擎**
-- [ ] 证书挂载进 runner 容器（`deploy/docker-compose.prod.yml` 已配置）
-- [ ] `docker compose ps` 中 plugin-runner 为 **healthy**（连不上 Docker 会 503/unhealthy——**开发环境已知问题，生产必须验证**）
+- [ ] **CORS 白名单**
+  - `docker/.env` → `CORS_ALLOWED_ORIGINS=https://your-domain.com`
+  - 移除 `*` 通配符
 
-## 3. 数据库与迁移
-
-- [ ] Flyway 迁移：启动时自动执行 V1–V56+；**新表必须带 `tenant_id` 列**（否则租户拦截器 SQL 报错，见 `scripts/static-checks.py`）
-- [ ] 备份策略：MySQL 每日备份；Milvus 向量卷备份（`scripts/backup_milvus.sh`）
-- [ ] 迁移前在 staging 验证 `mvn flyway:migrate`（CI `java` job 已覆盖）
-
-## 4. 特性开关（feature_flag 表，生产建议值）
-
-- [ ] `agent.enabled=1`（Agent 工作流）
-- [ ] `agent.write_tools.enabled=1`（写笔记，配合 `approval.required_for_write=1` 强制审批）
-- [ ] `agent.web_search.enabled=0`（默认关闭；启用需确认 WEB_SEARCH_PROVIDER/配额）
-- [ ] `agent.multi_agent.enabled=0`（默认关闭，收益未验证）
-- [ ] `rag.hybrid.enabled=1`、`rag.graph.enabled=0`、`rag.reranker.enabled=0`（按检索评测调优）
-
-## 5. 服务健康验证（部署后）
-
-- [ ] `docker compose -f deploy/docker-compose.prod.yml ps` 全部 healthy（含 java/python/frontend/milvus/etcd/mysql/redis/minio/plugin-runner/attu）
-- [ ] Java `/api/actuator/health` 200（db/redis/ping UP）
-- [ ] Python `/health` 与 `/ready` 200
-- [ ] 前端 https://<domain>/ 可登录
-- [ ] 跑 `scripts/smoke-test.ps1`（或 CI 冒烟）全绿
-- [ ] 跑 `python-ai/scripts/eval_offline.py` 门禁通过
-- [ ] 实测一条知识库问答（有来源引用）+ 一次"保存笔记"审批流
-
-## 6. 安全基线
-
-- [ ] CI gitleaks 通过（无硬编码密钥）
-- [ ] 内部端点仅经 X-Internal-Token 访问（`/internal/**` 已从登录检查排除，但受 token 保护）
-- [ ] 插件沙箱：cap_drop=ALL、pids_limit、no-new-privileges（Dockerfile 已内置）
-- [ ] 日志不打印密钥/提示词（`docs/ENVIRONMENT.md` 审计项）
-- [ ] CORS 白名单指向生产域名
-
-## 7. 监控与告警（deploy/docker-compose.monitoring.yml）
-
-- [ ] Prometheus 抓取 `/actuator/prometheus`（Java）与 Python 指标
-- [ ] 告警规则：服务 down、error_rate、p95 延迟、用量成本超预算
-- [ ] 日志汇聚（ELK/Loki）
-
-## 8. 回滚
-
-- [ ] 镜像版本固定（`HFUSIONHUB_TAG` 而非 latest）
-- [ ] 数据库迁移前备份（Flyway 不支持降级）
-- [ ] Helm：`helm list` 版本回滚路径确认
+- [ ] **Sa-Token JWT 密钥**
+  - `docker/.env` → `SA_TOKEN_JWT_SECRET_KEY`（建议 64 字符）
 
 ---
-*配套脚本：`scripts/smoke-test.ps1`（全功能冒烟）、`scripts/static-checks.py`（租户列/token 静态校验）、`python-ai/scripts/eval_offline.py`（离线评测门禁）。*
+
+## 🗄️ 数据库与持久化
+
+- [ ] **Flyway 迁移验证**
+  - 确保 V1–V57 全部成功应用
+  - 检查 `flyway_schema_history` 表状态
+
+- [ ] **备份策略**
+  - MySQL 每日备份（推荐 3AM cron + mysqldump）
+  - Milvus 数据卷定期快照
+  - MinIO 文件桶备份（mc mirror）
+
+- [ ] **Redis 持久化**
+  - AOF 已启用（`appendonly yes`）
+  - RDB 每小时备份（`save 3600 1`）
+
+---
+
+## 🚀 性能与扩展性
+
+- [ ] **资源限制**
+  - Docker Compose `deploy.resources.limits` 已配置
+  - JVM 堆内存：`-Xmx4g -Xms2g`（根据实际调整）
+  - Python worker 数：`WEB_CONCURRENCY=4`
+
+- [ ] **连接池优化**
+  - HikariCP `maximum-pool-size=20`（根据负载调整）
+  - Milvus 连接池：`MILVUS_POOL_SIZE=10`
+
+- [ ] **向量索引参数**
+  - Milvus HNSW `M=16, efConstruction=200`（默认值，超 100 万条数据需调优）
+
+- [ ] **缓存预热**
+  - 高频知识库元数据预加载
+  - Prompt 模板缓存
+
+---
+
+## 📊 监控与告警
+
+- [ ] **Prometheus + Grafana**
+  - 导入 `deploy/monitoring/grafana-dashboard.json`
+  - 配置告警规则（CPU > 80%、内存 > 90%、磁盘 > 85%）
+
+- [ ] **关键指标监控**
+  - 文档解析成功率（目标 > 95%）
+  - RAG 检索 P95 延迟（目标 < 500ms）
+  - Agent 任务超时率（目标 < 5%）
+  - 用量配额告警（> 90%）
+
+- [ ] **日志聚合**
+  - ELK Stack 或 Loki + Grafana
+  - 关键错误日志告警（Slack/邮件/钉钉）
+
+- [ ] **健康检查**
+  - Java：`GET /actuator/health`
+  - Python：`GET /health`
+  - 配置 Docker healthcheck 或 K8s liveness/readiness
+
+---
+
+## 🧪 测试验证
+
+- [ ] **冒烟测试通过**
+  ```powershell
+  .\scripts\smoke-test.ps1
+  ```
+  全部项目 PASS（Java API + Python AI + 核心链路）
+
+- [ ] **E2E 测试通过**
+  ```bash
+  cd hfusionhub-frontend && npx playwright test
+  ```
+  所有场景通过（登录、文档上传、聊天、主题切换、配额展示）
+
+- [ ] **压力测试**
+  - 并发用户：100（JMeter/Locust）
+  - 文档上传→解析→检索链路稳定性
+  - 数据库连接池无泄漏
+
+---
+
+## 🔧 运维工具
+
+- [ ] **备份恢复演练**
+  - 模拟 MySQL 数据丢失 → 从备份恢复 → 验证数据完整性
+  - 模拟 Milvus 数据损坏 → 重建向量索引
+
+- [ ] **日志轮转**
+  - Docker 日志：`max-size: 100m, max-file: 3`
+  - 应用日志：Logback 每日切分（保留 30 天）
+
+- [ ] **灾难恢复计划**
+  - RTO（恢复时间目标）：< 4 小时
+  - RPO（恢复点目标）：< 24 小时
+
+---
+
+## 📜 合规与文档
+
+- [ ] **隐私政策**
+  - 用户数据处理声明
+  - Cookie 使用说明
+
+- [ ] **API 文档**
+  - Swagger UI：`http://localhost:8080/swagger-ui/index.html`
+  - 确保生产环境关闭或限制访问（`springdoc.swagger-ui.enabled=false`）
+
+- [ ] **运维文档**
+  - 故障排查手册（`docs/TROUBLESHOOTING.md`）
+  - 扩容步骤（`docs/SCALING.md`）
+
+---
+
+## ✅ 上线前最终确认
+
+- [ ] 所有必需项（🔐 安全配置）已完成
+- [ ] 在预生产环境运行 7 天无 P0/P1 故障
+- [ ] 备份恢复流程已演练
+- [ ] 监控告警已配置并测试
+- [ ] 回滚计划已准备（Docker 镜像版本标记）
+
+---
+
+## 📞 应急联系人
+
+| 角色 | 姓名 | 联系方式 | 职责 |
+|------|------|----------|------|
+| 技术负责人 | ___ | ___ | 架构决策、P0 故障 |
+| 后端开发 | ___ | ___ | Java/Python 服务 |
+| 运维工程师 | ___ | ___ | 基础设施、监控 |
+| DBA | ___ | ___ | 数据库优化、备份 |
+
+---
+
+**生成日期**：2026-08-19  
+**文档版本**：v1.0  
+**下次审查**：每季度或重大版本发布前

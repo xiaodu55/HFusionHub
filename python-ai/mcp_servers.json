@@ -1,0 +1,8 @@
+[
+  {
+    "id": "notion",
+    "name": "Notion MCP",
+    "url": "https://mcp.notion.com/mcp",
+    "transport": "streamable-http"
+  }
+]

@@ -86,4 +86,12 @@ public interface UserService {
     void changePassword(PasswordChangeDTO dto);
 
     UserInfoDTO updateUserRole(Long userId, String role);
+
+    /**
+     * 更新用户主题偏好
+     *
+     * @param themePreference 主题偏好（light/dark/system）
+     * @return 用户信息
+     */
+    UserInfoDTO updateThemePreference(String themePreference);
 }
