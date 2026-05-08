@@ -125,7 +125,7 @@ Test-Ok '主题偏好-恢复' ($themeRestore -ne $null -and $themeRestore.code -
 $demoImport = Invoke-Api 'POST' '/demo/import' $headers
 Test-Ok '演示数据-导入' ($demoImport -ne $null -and $demoImport.code -eq 200 -and $demoImport.data.sections)
 
-$demoClear = Invoke-Api 'DELETE' '/demo' $headers
+$demoClear = Invoke-Api 'POST' '/demo/clear' $headers
 Test-Ok '演示数据-清空' ($demoClear -ne $null -and $demoClear.code -eq 200)
 
 # ── 2. Python AI ────────────────────────────────────────────────────────
@@ -146,10 +146,11 @@ foreach ($u in @(
 
 # ── 2.5 模型配置检查（DeepSeek key 是否有效）──────────────────────────
 $pyVenv = Join-Path $RepoRoot 'python-ai\.venv\Scripts\python.exe'
+$pyDir = Join-Path $RepoRoot 'python-ai'
 if (Test-Path $pyVenv) {
     $probe = @"
 import os
-os.environ['PYTHONAI_SKIP_DOTENV'] = '1'
+os.chdir(r'$pyDir')
 from app.utils.config import config
 from app.core.llm import get_llm
 from app.core.llm.deepseek_llm import _is_placeholder_key
@@ -189,7 +190,8 @@ if (-not $Quick) {
             $up = $upJson | ConvertFrom-Json
             if ($up.code -eq 200 -and $up.data.id) {
                 Test-Ok '链路-文档上传' $true "docId=$($up.data.id)"
-                curl.exe -s -X POST "$BaseUrl/api/document/$($up.data.id)/parse" -H "satoken: $($login.data)" | Out-Null
+                $parseResp = curl.exe -s -X POST "$BaseUrl/api/document/$($up.data.id)/parse" -H "satoken: $($login.data)"
+                if ($parseResp -notmatch '200|success|开始解析') { Test-Ok '链路-触发解析' $false $parseResp }
                 $completed = $false
                 for ($i = 0; $i -lt 24; $i++) {
                     Start-Sleep -Seconds 5
