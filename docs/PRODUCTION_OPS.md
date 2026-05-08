@@ -1,11 +1,75 @@
 # HFusionHub 生产运维手册
 
-> 面向生产值班 / SRE / 平台管理员。覆盖五个最常踩的生产操作：
-> Runner TLS 证书生成与轮换、插件镜像 digest 发布与登记、配额账本排查、
-> Agent 执行失败 / 租户拒绝 / Runner 不可达定位。所有命令均可在 Linux 或
-> Docker Desktop（Windows）环境中执行。
+> 面向生产值班 / SRE / 平台管理员。本文档合并原 PRODUCTION_OPS.md（运维操作）、
+> PRODUCTION_CHECKLIST.md（上线前检查清单）与 DR_VECTORS.md（向量库容灾）为
+> 唯一运维手册。覆盖：上线前检查清单、Runner TLS 证书生成与轮换、插件镜像 digest
+> 发布与登记、配额账本排查、Agent 执行失败 / 租户拒绝 / Runner 不可达定位、
+> 向量库容灾备份与恢复。所有命令均可在 Linux 或 Docker Desktop（Windows）环境中执行。
 
-## 架构速览（运维视角）
+## 0. 上线前检查清单
+
+> 原 `docs/PRODUCTION_CHECKLIST.md` 内容。**生产环境密码等敏感值一律从
+> `docker/.env` / `deploy/.env` 读取，不要硬编码到文档或代码中。**
+
+### 🔐 安全配置（必需项，上线前必须完成）
+
+- [ ] **修改所有默认密码** — `docker/.env` 中的 `ADMIN_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`REDIS_PASSWORD`、`MINIO_ROOT_PASSWORD` 全部替换为强随机值（`scripts/init-env.ps1` 自动生成）
+- [ ] **配置真实 DeepSeek API Key** — `python-ai/.env` → `DEEPSEEK_API_KEY`（当前已配置真实 key，聊天默认 DeepSeek 优先，Ollama 降级为 embedding/离线）
+- [ ] **更新内部通信令牌** — `docker/.env` → `PYTHON_AI_INTERNAL_TOKEN`、`PLUGIN_RUNNER_SECRET_KEY`（32 字符随机字符串，两端一致）
+- [ ] **启用 HTTPS** — 配置 Nginx 反向代理（示例：`deploy/nginx.conf`）、申请 SSL 证书（Let's Encrypt 推荐）、强制 HTTP → HTTPS 重定向
+- [ ] **CORS 白名单** — `docker/.env` → `CORS_ALLOWED_ORIGINS=https://your-domain.com`，移除 `*` 通配符（开发/穿透默认放行，生产收紧）
+- [ ] **Sa-Token JWT 密钥** — `docker/.env` → `SA_TOKEN_JWT_SECRET_KEY`（建议 64 字符）
+- [ ] **关闭或限制 Swagger UI** — 生产 `springdoc.swagger-ui.enabled=false` 或 IP 白名单（详见 [SWAGGER_UI.md](SWAGGER_UI.md)）
+
+### 🗄️ 数据库与持久化
+
+- [ ] **Flyway 迁移验证** — 确保 V1–V57 全部成功应用；检查 `flyway_schema_history` 表状态
+- [ ] **备份策略** — MySQL 每日备份（推荐 3AM cron + mysqldump）、Milvus 数据卷定期快照、MinIO 文件桶备份（mc mirror）
+- [ ] **Redis 持久化** — AOF 已启用（`appendonly yes`）；RDB 每小时备份（`save 3600 1`）
+
+### 🚀 性能与扩展性
+
+- [ ] **资源限制** — Docker Compose `deploy.resources.limits` 已配置；JVM 堆内存 `-Xmx4g -Xms2g`（按实际调整）；Python worker 数 `WEB_CONCURRENCY=4`
+- [ ] **连接池优化** — HikariCP `maximum-pool-size=20`（按负载调整）；Milvus 连接池 `MILVUS_POOL_SIZE=10`
+- [ ] **向量索引参数** — Milvus HNSW `M=16, efConstruction=200`（默认值，超 100 万条数据需调优）
+- [ ] **缓存预热** — 高频知识库元数据预加载；Prompt 模板缓存
+
+### 📊 监控与告警
+
+- [ ] **Prometheus + Grafana** — 导入 `deploy/monitoring/grafana/` 目录下的 dashboard；配置告警规则（CPU > 80%、内存 > 90%、磁盘 > 85%）
+- [ ] **关键指标监控** — 文档解析成功率（目标 > 95%）、RAG 检索 P95 延迟（目标 < 500ms）、Agent 任务超时率（目标 < 5%）、用量配额告警（> 90%）
+- [ ] **日志聚合** — ELK Stack 或 Loki + Grafana；关键错误日志告警（Slack/邮件/钉钉）
+- [ ] **健康检查** — Java：`GET /api/actuator/health`；Python：`GET /health`；配置 Docker healthcheck 或 K8s liveness/readiness
+
+### 🧪 测试验证
+
+- [ ] **冒烟测试通过** — `.\scripts\smoke-test.ps1` 全部 PASS（当前 47 PASS / 0 FAIL）
+- [ ] **E2E 测试通过** — `cd hfusionhub-frontend && npx playwright test`
+- [ ] **压力测试** — 并发用户 100（JMeter/Locust）；文档上传→解析→检索链路稳定性；数据库连接池无泄漏
+
+### 🔧 运维工具
+
+- [ ] **备份恢复演练** — 模拟 MySQL 数据丢失 → 从备份恢复 → 验证数据完整性；模拟 Milvus 数据损坏 → 重建向量索引
+- [ ] **日志轮转** — Docker 日志 `max-size: 100m, max-file: 3`；应用日志 Logback 每日切分（保留 30 天）
+- [ ] **灾难恢复计划** — RTO（恢复时间目标）< 4 小时；RPO（恢复点目标）< 24 小时
+
+### 📜 合规与文档
+
+- [ ] **隐私政策** — 用户数据处理声明；Cookie 使用说明
+- [ ] **API 文档** — Swagger UI 生产关闭或限制访问
+- [ ] **运维文档** — 故障排查手册（[TROUBLESHOOTING.md](TROUBLESHOOTING.md)）、扩容步骤（[SCALING.md](SCALING.md)）
+
+### ✅ 上线前最终确认
+
+- [ ] 所有必需项（🔐 安全配置）已完成
+- [ ] 在预生产环境运行 7 天无 P0/P1 故障
+- [ ] 备份恢复流程已演练
+- [ ] 监控告警已配置并测试
+- [ ] 回滚计划已准备（Docker 镜像版本标记）
+
+---
+
+## 1. 架构速览（运维视角）
 
 ```
 Internet ──> Ingress/FE(:80) ──> Java Backend(:8080) ──► Python AI(:9000)
@@ -172,7 +236,7 @@ Python 语义 `completed/insufficient_evidence/timeout/tool_error/agent_failure`
    WHERE run.id = <runId>;
    ```
    三列为空则是归属链断裂，属配置/数据问题而非代码异常。
-3. **Run **超时**：确认 `agent.run.timeout-seconds` 与租约 `lease-seconds` 配置，
+3. **Run 超时**：确认 `agent.run.timeout-seconds` 与租约 `lease-seconds` 配置，
    看 Python 侧是否在 `chat_stream` 完成后才发 `run_completed`。
 4. **Runner / Engine 不可达**：
    ```bash
@@ -206,9 +270,9 @@ bash scripts/staging-rehearsal.sh
 bash scripts/staging-rehearsal.sh --no-dind   # 无嵌套虚拟化时 runner 预期 503
 
 # 健康端点
-curl -fsS http://127.0.0.1:8080/api/health    # Java
-curl -fsS http://127.0.0.1:9000/ready          # Python
-curl -fsS http://127.0.0.1:9100/health         # Runner（503=Engine 不可达）
+curl -fsS http://127.0.0.1:8080/api/actuator/health   # Java
+curl -fsS http://127.0.0.1:9000/health                # Python
+curl -fsS http://127.0.0.1:9100/health                # Runner（503=Engine 不可达）
 ```
 
 ## 相关文件
@@ -218,7 +282,150 @@ curl -fsS http://127.0.0.1:9100/health         # Runner（503=Engine 不可达�
 - `V35__usage_ledger.sql`、`V31__plugin_image_digest.sql`、`V29__tool_plugin_sandbox.sql`
 - `.github/workflows/ci.yml`（Helm 渲染 / compose 校验门禁）
 
-## 8. Isolated Engine Rehearsal
+---
+
+## 8. 容灾手册：向量库（原 DR_VECTORS.md）
+
+HFusionHub uses a dual-store architecture for document chunks:
+- **MySQL** (`document_chunk` table): durable citation metadata (chunk_id, document_id, content_excerpt, outline_path, embedding_model/dimension/version)
+- **Milvus** (standalone cluster in production): dense vector embeddings for similarity search
+
+The MySQL chunk index is the **source of truth** for document ownership, citation integrity, and reconciliation. Milvus is rebuildable from the original documents; MySQL is not.
+
+### 8.1 备份策略
+
+**MySQL（主 — 每日、自动化）**
+```bash
+mysqldump -u root -p --single-transaction --routines --triggers \
+  hfusionhub > hfusionhub_mysql_$(date +%Y%m%d_%H%M%S).sql
+
+# Restore
+mysql -u root -p hfusionhub < hfusionhub_mysql_YYYYMMDD_HHMMSS.sql
+```
+
+**Milvus（次 — 数据卷快照）**
+
+数据卷实际名为 `<project>_milvus-data`（project = compose 文件所在目录名或 `COMPOSE_PROJECT_NAME`）。开发栈为 `docker_milvus-data`，生产栈（`deploy/docker-compose.prod.yml`）为 `deploy_milvus-data`。推荐直接用 `scripts/backup_milvus.sh` / `restore_milvus.sh`：
+
+```bash
+./scripts/backup_milvus.sh [backup_dir]
+./scripts/restore_milvus.sh <backup_file.tar.gz>
+```
+
+手动等价命令：
+
+```bash
+# Stop Milvus briefly for consistent snapshot
+docker compose -f deploy/docker-compose.prod.yml stop milvus
+
+# Snapshot the data volume
+docker run --rm -v ${COMPOSE_PROJECT_NAME:-deploy}_milvus-data:/data -v $(pwd)/backups:/backup \
+  alpine tar czf /backup/milvus_$(date +%Y%m%d_%H%M%S).tar.gz -C /data .
+
+# Restart Milvus
+docker compose -f deploy/docker-compose.prod.yml start milvus
+```
+
+**Cluster mode: co-store JSON is not used**
+Production / staging run in `VECTOR_STORE_MODE=cluster`. BM25 and citations
+read their scoped corpus directly from Milvus via `all_chunks()`; there is no
+per-pod `chunks_store.json`, so no separate co-store backup is required.
+
+**Lite dev mode (bare-metal only): co-store JSON only**
+`VECTOR_STORE_MODE=lite` 仅用于本地裸跑（无 Docker）与测试。此时 `python-ai/data/chunks_store.json`
+本地 co-store 会被读写，可作为普通文件直接拷贝备份：
+
+```bash
+cp python-ai/data/chunks_store.json backups/chunks_store_$(date +%Y%m%d_%H%M%S).json
+```
+
+### 8.2 恢复流程
+
+**Scenario 1: Milvus data loss, MySQL intact**
+1. Milvus volume is corrupt or deleted.
+2. MySQL `document_chunk` table has all metadata (embedding_model, embedding_dimension, embedding_version).
+3. **Action**: Drop and recreate the Milvus collection. Re-index affected documents from their source files via the Java API.
+
+```bash
+# Force collection drop
+export MILVUS_ALLOW_COLLECTION_DROP=true
+# Trigger re-index for affected documents via the UI or API:
+#   POST /api/vectorize/{documentId}/start
+```
+
+**Scenario 2: MySQL chunk data loss, Milvus intact**
+1. `document_chunk` table is empty or corrupt.
+2. Milvus has the vectors but no citation metadata.
+3. **Action**: Rebuild MySQL from Milvus query results (chunk_id, document_id, knowledge_base_id, content). Content excerpts are in Milvus `content` field. This is a partial recovery — outline_path and metadata may be incomplete.
+
+**Scenario 3: Both stores lost**
+1. Full rebuild from source documents.
+2. Restore MySQL from backup if available, then re-index all documents.
+
+**Scenario 4: Orphan vectors detected (reconciliation failure)**
+1. Run `VectorReconciliationService.reconcileAll()` via admin endpoint or scheduled job.
+2. Orphan vectors (in Milvus but not MySQL): safe to delete — they serve no citation purpose.
+3. Missing vectors (in MySQL but not Milvus): re-index the affected documents.
+
+### 8.3 索引版本控制
+
+Every indexing run produces a unique `index_version` (UUID). This is stored in:
+- `document_index_job.index_version`
+- `document_chunk.index_version`
+- Milvus chunk metadata
+
+Stale callbacks from superseded workers are rejected by matching `index_version`.
+
+When the embedding model or dimension changes:
+1. Set a new `embedding_version` (e.g., `v2`) in the Python config.
+2. Re-index all documents — old chunks are automatically superseded.
+3. The `embedding_model`, `embedding_dimension`, and `embedding_version` columns on `document_chunk` track provenance per chunk.
+
+### 8.4 对账命令
+
+**Check a single document**
+```bash
+curl -H "X-Internal-Token: $PYTHON_AI_INTERNAL_TOKEN" \
+  http://localhost:9000/api/chunks/{documentId}?page=1&size=100000
+```
+
+**Compare with MySQL**
+```sql
+SELECT chunk_id, document_id, embedding_model, embedding_dimension
+FROM document_chunk
+WHERE document_id = {documentId}
+ORDER BY chunk_index;
+```
+
+**Delete orphan vectors**
+```bash
+# Via the vectorization API
+curl -X DELETE -H "X-Internal-Token: $PYTHON_AI_INTERNAL_TOKEN" \
+  http://localhost:9000/api/documents/{documentId}/chunks
+```
+
+### 8.5 向量库环境变量参考
+
+| Variable | Default | Description |
+|---|---|---|
+| `VECTOR_STORE_MODE` | `lite` | `lite`（代码默认，仅本地裸跑/测试）或 `cluster`（Docker/生产，推荐） |
+| `SERVER_ENV` | `development` | `production`/`staging`/`development` |
+| `MILVUS_HOST` | `localhost` | Milvus standalone host |
+| `MILVUS_PORT` | `19530` | Milvus standalone port |
+| `MILVUS_LITE_PATH` | `./milvus_data.db` | 仅 `VECTOR_STORE_MODE=lite` 时的嵌入式 Lite 文件路径 |
+| `MILVUS_ALLOW_COLLECTION_DROP` | `false` | Safety gate for destructive ops |
+| `EMBEDDING_MODEL` | `unknown` | Current embedding model name |
+| `EMBEDDING_DIMENSION` | `1024` | Vector dimension |
+
+### 8.6 向量库监控
+
+- **Prometheus metrics**: `python_ai_vector_store_insert_total`, `python_ai_vector_store_search_total`
+- **Alert rules**: `deploy/monitoring/alert_rules.yml` — vector store errors, high latency, reconciliation failures
+- **Health check**: `GET /health` on Python AI service (returns Milvus connection status)
+
+---
+
+## 9. Isolated Engine Rehearsal
 
 Run the full local rehearsal only with a disposable `docker:dind` Engine. The
 runner receives TLS client files as Compose secrets; it never receives the host

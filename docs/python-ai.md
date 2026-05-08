@@ -39,7 +39,7 @@ All advanced features are gated via environment variables (see `.env.example`):
 | `RAG_GRAPH_ENABLED` | `false` | Scoped GraphRAG channel (P7) |
 | `RAG_RERANKER_MODE` | `disabled` | Second-stage reranking (P6) |
 | `RAG_MULTIMODAL_ENABLED` | `false` | OCR/image evidence (P8) |
-| `RAG_AGENT_WORKFLOW_ENABLED` | `false` | Bounded single-agent workflow (P9) |
+| `RAG_AGENT_WORKFLOW_ENABLED` | `true` | Bounded single-agent workflow (P9) — 当前 `.env` 已启用 |
 | `RAG_MULTI_AGENT_ENABLED` | `false` | Multi-agent collaboration (P10) |
 
 ## Setup

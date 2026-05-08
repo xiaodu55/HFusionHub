@@ -72,8 +72,8 @@ cd hfusionhub-frontend && npm run test && npm run build
 
 ## Flyway Migrations
 
-- **Never modify** existing migration files (V1–V35)
-- Create new `V36+` scripts for schema changes
+- **Never modify** existing migration files (V1–V57)
+- Create new `V58+` scripts for schema changes
 - See [docs/database.md](docs/database.md) for migration rules
 
 ## Documentation

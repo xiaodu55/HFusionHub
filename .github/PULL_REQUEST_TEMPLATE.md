@@ -30,5 +30,5 @@ Closes #
 - [ ] I have added/updated tests for this change
 - [ ] I have updated documentation if needed (`docs/` or `README.md`)
 - [ ] I have followed the existing code style (Java: Lombok + MyBatis Plus patterns; Python: PEP 8 + type hints; Vue: Composition API + Tailwind)
-- [ ] New DB migrations follow Flyway rules (new V36+ script, no modification to existing migrations)
+- [ ] New DB migrations follow Flyway rules (new V58+ script, no modification to existing V1–V57 migrations)
 - [ ] Environment variables documented in `docs/ENVIRONMENT.md` or `.env.example`

@@ -195,7 +195,7 @@ springdoc:
 
 3. **测试接口**
    - 点击 `/user/login` → "Try it out"
-   - 输入 `{"username":"admin","password":"***REMOVED-BY-REWRITE***"}`
+   - 输入 `{"username":"admin","password":"<docker/.env 中的 ADMIN_PASSWORD>"}`
    - 执行并验证响应
 
 4. **复制 Token**
@@ -218,4 +218,4 @@ springdoc:
 ---
 
 **最后更新**：2026-08-19  
-**相关文档**：[API 开发规范](./API_STANDARDS.md)
+**相关文档**：[api.md](api.md)（API 参考）、[java-backend.md](java-backend.md)（Java 后端开发指南）

@@ -1,6 +1,7 @@
 # 路线图
 
 > HFusionHub project roadmap — updated quarterly.
+> This document merges the former ROADMAP.md and the PROJECT_ASSESSMENT.md snapshot (2026-08-18) into a single roadmap with historical evaluation records.
 
 ## Current Status (2026-08)
 
@@ -12,7 +13,7 @@
 - **Notifications**: System notice table + read tracking (V9)
 - **Production**: Docker Compose prod (MySQL/Redis/MinIO/Milvus/etcd/Attu/Java/Python/Plugin Runner), Helm chart, GHCR 镜像发布流水线（`v*` tag 自动构建推送）
 - **Release**: 版本 1.0.0；`scripts/setup.ps1/.sh` 一键启动 + `init-env` 自动生成随机密钥；演示数据一键导入；Setup 引导清单
-- **Tests**: Python 1220+ ✅ | Java 423 ✅ | Frontend 33 ✅
+- **Tests**: Python 1220+ ✅ | Java 445 ✅ | Frontend 33 ✅
 - **Security**: SECURITY.md / CODE_OF_CONDUCT / NOTICE / dependabot / gitleaks / ruff+pip-audit CI 门禁
 - **Frontend**: P0-P4 completed — dashboard cleanup, RAG trend chart, notification stub, SetupChecklist, 能力开关设置页
 
@@ -75,13 +76,97 @@
 - [x] **web_search 工具修复** — 嵌套 Topics + lite HTML fallback
 - [x] **管理端审计视图** — `/admin/audit-logs/operations` + `/cross-tenant`
 - [x] **修复** — kb_share/app_api_key 缺 tenant_id（V56）、FeatureFlag snapshot token 键、workflow 白名单漏 write_note、waiting_approval 状态映射
-- [x] **生产核对清单** — `docs/PRODUCTION_CHECKLIST.md`
+- [x] **生产核对清单** — `docs/PRODUCTION_CHECKLIST.md`（已并入 [PRODUCTION_OPS.md](PRODUCTION_OPS.md)）
 
-## Phase 6 — 建议方向（待排期）
+## Phase 6 — 2026-08-19 交付与建议方向
 
-- [x] **各菜单一键导入示例数据（2026-08-19）** - `/demo/import` 覆盖知识库/回答方案/笔记/记忆/应用/公告 6 个菜单（幂等分项计数，导入后按菜单显示新增/已存在）；`/demo/clear` 一键清除（软删除，7 天可恢复）；MCP 服务页空状态 CTA 直接预填示例并打开表单；工作台统计失败展示具体原因 + 重试
-- [ ] **配置真实 DEEPSEEK_API_KEY** — 当前为占位符（聊天走 Ollama）；配置后自动 DeepSeek 优先（逻辑已验证）
+### 已交付（2026-08-19）
+
+- [x] **各菜单一键导入示例数据** - `/demo/import` 覆盖知识库/回答方案/笔记/记忆/应用/公告 6 个菜单（幂等分项计数，导入后按菜单显示新增/已存在）；`/demo/clear` 一键清除（软删除，7 天可恢复）；MCP 服务页空状态 CTA 直接预填示例并打开表单；工作台统计失败展示具体原因 + 重试
+- [x] **真实 DeepSeek API Key 配置** — `python-ai/.env` 已写入真实 key（`deepseek-v4-flash`），流式聊天实测通过（"你好呀！很高兴能和你聊天…"）
+- [x] **冒烟测试全绿** — `scripts/smoke-test.ps1` **47 PASS / 0 FAIL**（修复演示数据清空端点为 `POST /demo/clear`、DeepSeek 探测 cwd、文档解析响应捕获 3 处脚本缺陷）
+- [x] **CORS 支持配置化/任意 Origin** — `app.cors.allowed-origins`：修复内网穿透（cpolar 动态域名）下浏览器登录 403；开发/穿透默认放行，生产可配置白名单收紧
+- [x] **公网访问改用生产预览** — vite preview + preview.proxy：dev 模式 33 模块经公网逐模块加载需 40s，打包产物 <4s 渲染
+- [x] **隧道 URL 查询脚本** — `scripts/get-tunnel-url.ps1` 一键查询 cpolar 当前公网 URL（隧道重连后 URL 变化时使用）
+- [x] **文档体系整合** — WHITEPAPER→ARCHITECTURE、PROJECT_ASSESSMENT→ROADMAP、PRODUCTION_CHECKLIST+DR_VECTORS→PRODUCTION_OPS、PERFORMANCE_BASELINE→SCALING；删除 PROJECT_SUMMARY；README 新增文档索引（见 [README.md](../README.md)）
+
+### 待排期
+
 - [ ] **Plugin Runner TLS** — 主机级 Docker daemon TLS 配置（`docs/PLUGIN_RUNNER_TLS.md`）
 - [ ] **eval-nightly 启用** — GitHub 配置 `vars.EVAL_BASE_URL` + `secrets.EVAL_INTERNAL_TOKEN`
 - [ ] **多 Agent 协作** — `agent.multi_agent.enabled`（当前冻结，收益待验证）
 - [x] **租户配额计费展示** — `/api/quota/summary`（QuotaController + QuotaSummaryDTO）→ /cost 页配额面板（用量条 70%/90% 分级告警）
+
+---
+
+## 附：2026-08-18 项目评估快照（历史记录）
+
+> 原 PROJECT_ASSESSMENT.md 全文存档。评估日期：2026-08-18；评估方式：全栈启动 + 功能冒烟测试（API 级）+ 核心链路实测。
+
+### 评估方法与范围
+
+| 层 | 验证方式 | 覆盖 |
+|---|---|---|
+| 基础设施 | `docker compose ps` 健康检查 | MySQL / Redis / MinIO / Milvus / etcd / Attu / Plugin Runner |
+| Java 后端 | 登录后 31 项 API 冒烟（全部 controller 模块） | 认证、知识库、文档、对话、Agent、审批、记忆、用量、笔记、插件、提示词、MCP、RAG 可观测、系统、功能开关、通知、共享、模型配置 |
+| Python AI | 8 项健康/能力检查 + RAG 实测 | health、gateway、工具注册表、MCP、RAG 检索、Agent 聊天 |
+| 核心链路 | 端到端实测 | 文档上传→解析→分块→向量化→检索→知识库问答引用；聊天用量落账；写笔记审批触发 |
+| 前端 | 页面加载 + 路由文件完整性 + Vite 编译 | 24 个页面文件、SPA 挂载 |
+
+### 功能验证结果矩阵（2026-08-18）
+
+**基础设施（6/7，86%）**：MySQL ✅ healthy（Flyway V1–V56）、Redis ✅、Milvus Standalone ✅（18 chunks 入库）、etcd ✅、MinIO ✅、Attu ✅ running；**Plugin Runner ⚠️ unhealthy**（Docker TLS 证书未配置，见下）。
+
+**Java 后端 API（31/31，100%）**：认证/知识库（共享本轮修复 V56）/文档（18 chunks COMPLETED）/对话/Agent/记忆/用量（本轮修复，原永远为 0）/笔记/插件/提示词/MCP/RAG 可观测/系统/功能开关/通知/模型配置 全部 ✅。
+
+**Python AI（12/12，100%）**：health、runtime、gateway、工具注册表（write_note 可见）、MCP、RAG debug/search（3 条 score 0.99）、Agent V1 聊天（3 来源引用）✅。
+
+**核心链路（6/6，100%）**：文档处理闭环、检索引用问答、聊天用量落账、写笔记审批触发、写笔记持久化、Feature flag 同步 8 flags ✅。
+
+### 目标达标对照
+
+| 指标 | 目标 | 实测 | 达标 |
+|---|---|---|---|
+| 后端 API 可用率 | 100% | 100%（31/31） | ✅ |
+| 基础设施健康率 | 100% | 86%（6/7） | ⚠️ plugin-runner |
+| 文档处理成功率 | 100% | 100%（18/18 chunks） | ✅ |
+| 检索相关性（Top-1 score） | ≥ 0.90 | 0.99 | ✅ |
+| 用量数据可用 | 有数据 | 有（真实 token） | ✅ |
+| 功能覆盖率（已交付 vs 代码存在） | 100% | 100% | ✅ |
+
+### 当时发现并修复的问题
+
+**本轮修复（3 项）**：
+
+| # | 问题 | 修复 |
+|---|---|---|
+| 1 | `kb_share`、`app_api_key` 表缺 `tenant_id` 列 → 共享/开放 API Key 功能整体 500 | **V56 迁移**补列 + 回填 + 索引；复测通过 |
+| 2 | 模型用量链路从未接通（`CostTrackingService.record()` 无调用方）→ /cost 永远为 0 | Java 聊天/Agent 完成时落账（含流式估算） |
+| 3 | Feature flag snapshot 鉴权键错误（`${app.internal-token}` 未定义）→ Python 拉到 0 flags | 改为 `${python-ai.internal-token}`，实测同步 8 flags |
+
+**遗留（需外部配置/产品决策）**：
+1. **Plugin Runner unhealthy**（容器内 Docker TLS 证书缺失）→ 运行 `scripts/generate-runner-tls.sh deploy/runner-tls`（指引见 [PLUGIN_RUNNER_TLS.md](PLUGIN_RUNNER_TLS.md)）
+2. **默认 LLM 为 Ollama（qwen2.5:3b）**：工具调用不稳定 → 已解决（2026-08-19 配置真实 DeepSeek key 后聊天默认路由 DeepSeek）
+3. `notebooks/rag_evaluation.ipynb` API 路径过时 → 已修复（`debug-search`→`debug/search`）
+4. 测试数据残留（KB 52 演示文档等）→ 可 `POST /api/demo/clear` 清理
+
+### 总体评估结论
+
+**平台功能完整、核心链路可用，处于"功能齐全但深度与工程化待补"阶段。**
+
+**优势**：架构清晰（CQRS 式 Java/Python 分层，工具注册表+策略引擎+审批门控）、功能覆盖面广（RAG/Agent/插件/MCP/开放 API/租户/用量成本）、可靠性机制（Flyway、幂等索引、孤儿恢复、租户拦截器）、可观测（RAG traces、Agent dashboard、用量成本、告警规则）。
+
+**短板（暴露的问题模式）**：① 建表遗漏类问题（V52/V53 缺 tenant_id）说明多租户表覆盖检查不足 → 已加 CI 静态校验；② "代码存在但未接线"（用量、feature flag 键、write_note 白名单）→ 已有冒烟/契约测试兜底（47 项全绿）；③ 模型依赖（Ollama 3B 意图分类/工具调用质量）→ 已切换 DeepSeek；④ 插件沙箱未就绪。
+
+### 下一步建议（方向性结论）
+
+按"先稳后深再变现"排序：**当前最大杠杆是"把已有能力的开关全部接通并加验证门禁"，而非新增功能**；之后把模型路由切到强模型（已实现），工具与多 Agent 能力即可兑现为可演示的差异化价值。
+
+- P0 可靠性补课（已完成）：Plugin Runner TLS 接入；CI 静态校验（租户列完整性、token 键一致性）；冒烟脚本固化进 CI
+- P1 AI 能力深度（已完成）：默认模型路由切换 DeepSeek；Agent workflow 回归验证（5/5）；web_search 启用 + bug 修复
+- P2 评测与质量闭环（已完成）：在线评估门禁（eval_offline CI + eval_runtime nightly）；意图分类写操作样例；Playwright E2E（write-note 3/3）
+- P3 商业化与工程化（已完成）：开放 API 计费打通；多租户审计视图；生产部署要点清单（PRODUCTION_CHECKLIST → 已并入 PRODUCTION_OPS）
+
+---
+
+*HFusionHub — Built with Java's reliability and Python's AI ecosystem.*

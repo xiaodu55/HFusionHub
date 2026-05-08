@@ -10,7 +10,7 @@
 
 ## 风险与待确认
 
-- DeepSeek API Key 仍为占位符，聊天当前走本地 Ollama
+- DeepSeek API Key 已配置，聊天默认 DeepSeek 优先（Ollama 降级为 embedding/离线）
 - Plugin Runner TLS 尚未配置，插件沙箱运行在开发模式
 
 ## 下一步行动

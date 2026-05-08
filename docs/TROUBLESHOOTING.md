@@ -99,18 +99,18 @@ Migration V57__user_theme_preference.sql failed
 **诊断**：
 ```sql
 -- 查看迁移历史
-docker exec hfusionhub-mysql mysql -uhfusionhub -p<密码> hfusionhub_db \
+docker exec hfusionhub-mysql mysql -uhfusionhub -p<密码> hfusionhub \
   -e "SELECT * FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 5"
 ```
 
 **解决**：
 ```sql
 -- 如果迁移卡住，手动标记为成功（谨慎！）
-docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub_db \
+docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub \
   -e "UPDATE flyway_schema_history SET success=1 WHERE version='57'"
 
 -- 或删除失败记录后重启
-docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub_db \
+docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub \
   -e "DELETE FROM flyway_schema_history WHERE version='57' AND success=0"
 ```
 
@@ -235,11 +235,11 @@ npm ci
 **解决**：
 ```sql
 -- 查看当前 admin 密码哈希
-docker exec hfusionhub-mysql mysql -uhfusionhub -p<密码> hfusionhub_db \
+docker exec hfusionhub-mysql mysql -uhfusionhub -p<密码> hfusionhub \
   -e "SELECT username, password FROM sys_user WHERE username='admin'"
 
 -- 重置密码（BCrypt 哈希，对应 'admin123'）
-docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub_db \
+docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub \
   -e "UPDATE sys_user SET password='\$2a\$10\$N9qo8uLOickgx2ZMRZoMye3K7i6M/xbJvbP3lIkRVwB2Y1V8VdYR2' WHERE username='admin'"
 ```
 
@@ -257,7 +257,7 @@ docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub_db \
 cd python-ai && tail -f logs/app.log | grep "parse"
 
 # 检查 document_index_job 表
-docker exec hfusionhub-mysql mysql -uhfusionhub -p<密码> hfusionhub_db \
+docker exec hfusionhub-mysql mysql -uhfusionhub -p<密码> hfusionhub \
   -e "SELECT id, document_id, status, error_message FROM document_index_job ORDER BY id DESC LIMIT 5"
 ```
 
@@ -397,12 +397,12 @@ LLM_PROVIDER=ollama
 **诊断**：
 ```sql
 -- 查看慢查询
-docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub_db \
+docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub \
   -e "SHOW FULL PROCESSLIST"
 
 -- 查看表大小
-docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub_db \
-  -e "SELECT table_name, ROUND((data_length + index_length) / 1024 / 1024, 2) AS 'Size (MB)' FROM information_schema.TABLES WHERE table_schema='hfusionhub_db' ORDER BY (data_length + index_length) DESC"
+docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub \
+  -e "SELECT table_name, ROUND((data_length + index_length) / 1024 / 1024, 2) AS 'Size (MB)' FROM information_schema.TABLES WHERE table_schema='hfusionhub' ORDER BY (data_length + index_length) DESC"
 ```
 
 **解决**：
@@ -484,12 +484,12 @@ cd docker && docker compose up -d attu
 
 **备份**：
 ```bash
-docker exec hfusionhub-mysql mysqldump -uroot -p<密码> hfusionhub_db > backup-$(date +%Y%m%d).sql
+docker exec hfusionhub-mysql mysqldump -uroot -p<密码> hfusionhub > backup-$(date +%Y%m%d).sql
 ```
 
 **恢复**：
 ```bash
-docker exec -i hfusionhub-mysql mysql -uroot -p<密码> hfusionhub_db < backup-20260819.sql
+docker exec -i hfusionhub-mysql mysql -uroot -p<密码> hfusionhub < backup-20260819.sql
 ```
 
 ### Milvus 数据重建

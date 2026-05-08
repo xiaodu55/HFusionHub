@@ -4,9 +4,9 @@
 
 ## 概述
 
-数据库 `hfusionhub` 由 Flyway 管理，迁移脚本位于 `java-backend/src/main/resources/db/migration/`，当前已应用到 **V56**。
+数据库 `hfusionhub` 由 Flyway 管理，迁移脚本位于 `java-backend/src/main/resources/db/migration/`，当前已应用到 **V57**。
 
-## 迁移历史（V1–V56）
+## 迁移历史（V1–V57）
 
 | 版本 | 文件 | 说明 |
 |------|------|------|
@@ -49,11 +49,12 @@
 | V54 | `V54__audit_log.sql` | 操作审计日志 |
 | V55 | `V55__note.sql` | **用户笔记（写笔记闭环）** |
 | V56 | `V56__fix_tenant_id_share_and_apikey.sql` | **修复 kb_share/app_api_key 缺 tenant_id 列** |
+| V57 | `V57__user_theme_preference.sql` | **用户主题偏好**（sys_user.theme_preference，light/dark/system） |
 
 ## 迁移规则
 
-1. **历史迁移（V1–V56）不可修改**——修改会导致 Flyway checksum mismatch。
-2. **所有新表结构变更必须使用 V57+ 脚本**。
+1. **历史迁移（V1–V57）不可修改**——修改会导致 Flyway checksum mismatch。
+2. **所有新表结构变更必须使用 V58+ 脚本**。
 3. **新表必须包含 `tenant_id` 列**（除非加入 `MybatisPlusConfig.TENANT_IGNORE_TABLES`）——租户拦截器会对非忽略表自动注入 `WHERE tenant_id=?`，缺列会导致整表功能 500（V52/V53 曾因此出问题，`scripts/static-checks.py` 在 CI 中静态校验）。
 4. **生产环境**：禁止手动修改 `flyway_schema_history`。
 5. **本地重置**：`cd docker && docker compose down -v && docker compose up -d`。

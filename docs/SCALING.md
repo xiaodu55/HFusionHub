@@ -1,5 +1,181 @@
 # 扩容与性能优化指南
 
+> 本文档合并原 SCALING.md（扩容优化）与 PERFORMANCE_BASELINE.md（性能基线测试）为
+> 唯一扩容与性能手册。按需查阅：扩容决策 → 垂直/水平扩容 → Kubernetes → 性能基线测试 → 监控告警。
+>
+> ⚠️ 本文中的 `docker-compose.scale.yml`、`nginx-lb.conf`、`milvus-cluster.yml`、
+> `hfusionhub-chart/`、`alert-rules.yml` 等为**部署思路示例**，仓库实际文件为
+> `deploy/docker-compose.prod.yml`、`deploy/nginx.conf`、`deploy/helm/hfusionhub/`、
+> `deploy/monitoring/`（Prometheus 告警规则）——请以实际文件为准。
+
+## 📊 性能基线测试（原 PERFORMANCE_BASELINE.md）
+
+### 测试目标
+
+建立 HFusionHub 各核心功能的性能基线，用于：
+- 版本迭代对比（回归检测）
+- 容量规划（资源评估）
+- 瓶颈识别（优化方向）
+
+### 测试环境要求
+
+**硬件规格**：CPU 4 核 / 8 线程（最低）、内存 16 GB、SSD（NVMe 推荐）、千兆局域网。
+**软件版本**：Docker 24.0+、JDK 21、Python 3.11、MySQL 8.0、Milvus 2.3+。
+**初始状态**：空数据库（仅 admin 用户）、缓存已预热（启动后等待 30 秒）、无其他负载。
+
+### 快速冒烟测试（5 分钟）
+
+验证所有服务可用性：
+
+```powershell
+.\scripts\smoke-test.ps1
+```
+
+**预期结果**：`==== 结果: 47 PASS / 0 FAIL ====`
+
+### 一键运行全套基线
+
+项目提供统一基线脚本，会执行 Java API + RAG + 文档处理端到端基线测试：
+
+```powershell
+.\scripts\run-all-benchmarks.ps1
+```
+
+> 注意：仓库当前只提供 `smoke-test.ps1` 与 `run-all-benchmarks.ps1` 两个真实存在的
+> 基准脚本。逐项细粒度压测（文档管线 / RAG 检索 / Java API 专项）可按下方示例在本地临时编写。
+
+### 1. 文档上传→解析→向量化（端到端）基线目标
+
+- **运行方式**：通过 `run-all-benchmarks.ps1` 或按下方示例临时脚本。
+- **基线目标**（3KB Markdown 文件，10 次迭代）：
+  - 平均耗时：< 8s
+  - P95 延迟：< 12s
+  - 成功率：100%
+
+示例脚本（`benchmark-document-pipeline.ps1` 逻辑，需时可在本地保存复用）：
+
+```powershell
+param(
+    [int]$Iterations = 10,
+    [string]$BaseUrl = 'http://localhost:8080',
+    [string]$DocPath = 'test-data\java-threads.md'
+)
+$ErrorActionPreference = 'Stop'
+$envFile = '.\docker\.env'
+$adminPw = (Get-Content $envFile | Where-Object { $_ -match '^ADMIN_PASSWORD=' } | ForEach-Object { ($_ -split '=')[1] })
+$login = Invoke-RestMethod -Uri "$BaseUrl/api/user/login" -Method Post -Body (@{username='admin';password=$adminPw}|ConvertTo-Json) -ContentType 'application/json'
+$headers = @{ satoken = $login.data }
+$kb = Invoke-RestMethod -Uri "$BaseUrl/api/knowledge-base" -Method Post -Headers $headers -Body (@{name='Benchmark KB';description='性能测试'}|ConvertTo-Json) -ContentType 'application/json'
+$kbId = $kb.data.id
+$durations = @()
+for ($i = 1; $i -le $Iterations; $i++) {
+    Write-Host "[$i/$Iterations] 上传并解析文档..."
+    $start = Get-Date
+    $upJson = curl.exe -s -X POST "$BaseUrl/api/document/upload" -H "satoken: $($login.data)" -F "file=@$DocPath" -F "title=Bench-$i" -F "knowledgeBaseId=$kbId"
+    $up = $upJson | ConvertFrom-Json
+    $docId = $up.data.id
+    curl.exe -s -X POST "$BaseUrl/api/document/$docId/parse" -H "satoken: $($login.data)" | Out-Null
+    while ($true) {
+        Start-Sleep -Seconds 2
+        $doc = (curl.exe -s "$BaseUrl/api/document/$docId" -H "satoken: $($login.data)") | ConvertFrom-Json
+        if ($doc.data.status -eq 2) { break }
+        if ($doc.data.status -eq 3) { throw "解析失败" }
+    }
+    $duration = ((Get-Date) - $start).TotalSeconds
+    $durations += $duration
+    Write-Host "  耗时: $([math]::Round($duration, 2))s"
+}
+$avg = ($durations | Measure-Object -Average).Average
+$p50 = $durations | Sort-Object | Select-Object -Index ([math]::Floor($durations.Count * 0.5))
+$p95 = $durations | Sort-Object | Select-Object -Index ([math]::Floor($durations.Count * 0.95))
+Write-Host "`n==== 文档处理性能 ===="
+Write-Host "平均耗时: $([math]::Round($avg, 2))s"
+Write-Host "P50 延迟: $([math]::Round($p50, 2))s"
+Write-Host "P95 延迟: $([math]::Round($p95, 2))s"
+Invoke-RestMethod -Uri "$BaseUrl/api/knowledge-base/$kbId" -Method Delete -Headers $headers | Out-Null
+```
+
+### 2. RAG 检索性能基线目标
+
+- **运行方式**：`POST $PythonUrl/api/rag/debug/search`（X-Internal-Token + X-Tenant-Id 头），100 次迭代，查询池 4 条，`top_k=5`。
+- **前置**：KB 52 存在且有文档。
+- **基线目标**（KB 内含 50 文档，~1000 chunks）：
+  - 平均延迟：< 300ms
+  - P95 延迟：< 500ms
+  - P99 延迟：< 800ms
+
+### 3. Java 后端 API 响应基线目标
+
+- **运行方式**：登录后对核心端点（`/user/info`、`/knowledge-base/my`、`/conversation/my`、`/cost/summary`）各请求 50 次。
+- **基线目标**：用户信息 < 50ms (P95)、知识库列表 < 100ms (P95)、对话列表 < 150ms (P95)。
+
+### 4. LLM 生成基线目标
+
+- **运行方式**：`cd python-ai && .venv\Scripts\activate && python -m app.benchmark.llm`（或在本地临时编写调用 `get_llm().generate()` 的脚本，20 次迭代）。
+- **基线目标**（DeepSeek API）：平均 < 2000ms、P95 < 3500ms。
+
+### 5. 向量检索基线目标
+
+- **运行方式**：Milvus `collection.search()` 或通过 RAG debug/search。
+- **基线目标**（100 万向量）：检索延迟 < 50ms (P95)。
+
+### 6. 前端 Lighthouse 基线目标
+
+```bash
+cd hfusionhub-frontend
+npm run build && npm run preview
+npx lighthouse http://localhost:4173 --output html --output-path report.html
+```
+
+**基线目标**：Performance > 90、Accessibility > 95、Best Practices > 90、SEO > 85。
+
+### 基线记录模板
+
+```markdown
+# 性能基线 — v1.0.0 (2026-08-19)
+
+## 环境
+- CPU: Intel i7-12700K (8P+4E) / RAM: 32 GB DDR5 / Disk: Samsung 980 Pro NVMe / OS: Windows 11
+
+## 结果
+| 指标 | 平均 | P95 | P99 | 目标 | 状态 |
+|------|------|-----|-----|------|------|
+| 文档处理端到端 | 7.2s | 9.8s | - | < 8s | ✅ |
+| RAG 检索延迟 | 280ms | 420ms | 650ms | < 500ms | ✅ |
+| 聊天响应（含 RAG） | 4.1s | 6.5s | - | < 5s | ⚠️ |
+| 用户信息 API | 28ms | 45ms | - | < 50ms | ✅ |
+| LLM 生成（DeepSeek） | 1850ms | 3200ms | - | < 3500ms | ✅ |
+| Milvus 检索 | 32ms | 48ms | - | < 50ms | ✅ |
+
+## 瓶颈
+- 聊天响应 P95 超目标 30%，主因：LLM API 网络波动
+```
+
+### 回归测试
+
+每次版本发布前运行全套基线测试，对比结果：
+
+```powershell
+.\scripts\run-all-benchmarks.ps1 > baseline-v1.1.0.txt
+diff baseline-v1.0.0.txt baseline-v1.1.0.txt
+```
+
+### 慢查询与连接池监控
+
+```sql
+SET GLOBAL slow_query_log = 'ON';
+SET GLOBAL long_query_time = 0.5;  -- 超过 500ms 记录
+SET GLOBAL slow_query_log_file = '/var/log/mysql/slow.log';
+```
+
+```bash
+docker exec hfusionhub-mysql mysqldumpslow -s t -t 10 /var/log/mysql/slow.log
+curl http://localhost:8080/api/actuator/metrics/hikaricp.connections.active
+curl http://localhost:8080/api/actuator/metrics/hikaricp.connections.idle
+```
+
+---
+
 ## 📈 扩容决策矩阵
 
 根据监控指标决定扩容时机：
@@ -412,7 +588,7 @@ services:
 ```bash
 # 使用项目提供的 Helm Chart
 cd deploy/helm
-helm install hfusionhub ./hfusionhub-chart \
+helm install hfusionhub ./hfusionhub \
   --namespace hfusionhub \
   --create-namespace \
   --values production-values.yaml
@@ -421,7 +597,7 @@ helm install hfusionhub ./hfusionhub-chart \
 ### HPA（水平 Pod 自动扩展）
 
 ```yaml
-# deploy/helm/hfusionhub-chart/templates/hpa.yaml
+# deploy/helm/hfusionhub/templates/hpa.yaml（示例）
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -546,4 +722,4 @@ groups:
 ---
 
 **最后更新**：2026-08-19  
-**相关文档**：[性能基线测试](./PERFORMANCE_BASELINE.md)、[生产环境检查清单](./PRODUCTION_CHECKLIST.md)
+**相关文档**：[PRODUCTION_OPS.md](PRODUCTION_OPS.md)（含生产检查清单）、[TROUBLESHOOTING.md](TROUBLESHOOTING.md)

@@ -6,12 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第十轮优化（2026-08-19）：文档体系整合
+
+#### Documentation
+- **合并 5 份文档为 3 份唯一权威**：
+  - `WHITEPAPER.md` → `ARCHITECTURE.md`（架构全景 + 白皮书原理合并为单一架构文档）
+  - `PROJECT_ASSESSMENT.md` → `ROADMAP.md`（2026-08-18 评估快照存档为路线图附录）
+  - `PRODUCTION_CHECKLIST.md` + `DR_VECTORS.md` → `PRODUCTION_OPS.md`（上线检查清单 + 向量库容灾并入运维手册，**移除明文密码**）
+  - `PERFORMANCE_BASELINE.md` → `SCALING.md`（性能基线并入扩容手册，清理 6 个不存在的基准脚本引用）
+- **删除**：`PROJECT_SUMMARY.md`（内容被 CHANGELOG + TODO 覆盖）
+- **更新**：`startup-guide.md`（V35→V57、去占位符提示）、`java-backend.md`（V35→V57）、`database.md`（补 V57 主题偏好迁移）、`python-ai.md`/`ENVIRONMENT.md`（`RAG_AGENT_WORKFLOW_ENABLED` 实际已启用、`OLLAMA_EMBEDDING_MODEL` 默认 `bge-m3:latest`）、`SWAGGER_UI.md`（移除硬编码密码、修复 API_STANDARDS.md 死链）、`TROUBLESHOOTING.md`（统一数据库名 `hfusionhub`）、`CHANGELOG.md`（修正 `DELETE /api/demo` → `POST /api/demo/clear`）
+- **README.md**：新增「文档索引」章节，逐份说明 `docs/` 下每个文档的作用；修正徽章测试数（Java 445 / Frontend 33）与过时表述
+
+#### Notes
+- 事实统一基线：Java 445 测试、Python 1220+、Frontend 33、Flyway 当前 V57、DeepSeek key 已配置
+
 ### 第九轮优化（2026-08-19）：主题系统 + 配额展示 + 空状态统一 + 演示数据清理 + 文档体系完善
 
 #### Added
 - **主题系统三档切换 + 服务端同步**：`sys_user.theme_preference`（V57 迁移，枚举 `light`/`dark`/`system`）；`PATCH /api/user/theme-preference` 持久化到数据库；`GET /api/user/info` 下发主题偏好；前端 `useTheme` composable 登录时优先采用远端配置（换设备自动应用），设置页三档切换器
 - **租户配额展示**：`QuotaController` + `QuotaSummaryDTO`（`GET /api/quota/summary`）→ `/cost` 页新增租户配额面板，用量条 70%/90% 分级告警色（琥珀/红色），超额时禁用对话发送按钮
-- **演示数据清理**：`DELETE /api/demo` 清空当前租户下的演示知识库、文档、回答方案、笔记、记忆、应用、公告（保留用户账号和其他真实数据）；设置页新增「清空演示数据」区块，确认对话框 + 操作反馈
+- **演示数据清理**：`POST /api/demo/clear` 清空当前租户下的演示知识库、文档、回答方案、笔记、记忆、应用、公告（保留用户账号和其他真实数据）；设置页新增「清空演示数据」区块，确认对话框 + 操作反馈
 - **EmptyState 组件统一**：12 个页面迁移至统一 `EmptyState.vue` 组件（支持图标、标题、描述、可选 CTA 按钮）——`/admin/audit-logs`、`/admin/notices`、`/builder/apps`、`/builder/plugins`、`/builder/mcp-servers`、`/notes`、`/memory`、`/document`、`/knowledge/detail`、`/knowledge/chunks`；受控 Dialog 模式（`v-model:open`）确保 EmptyState CTA 可正常打开对话框
 
 #### Changed
@@ -73,7 +88,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Notes
 - feature flags 现状：`agent.enabled=1`、`agent.write_tools.enabled=1`、`agent.web_search.enabled=1`、`approval.required_for_write=1`（`agent.multi_agent.enabled=0` 保持冻结）；`RAG_AGENT_WORKFLOW_ENABLED=true`
-- `DEEPSEEK_API_KEY` 当前为占位符（聊天走 Ollama）；配置真实 key 后自动 DeepSeek 优先（代码逻辑已验证）
+- `DEEPSEEK_API_KEY` 已配置真实 key（2026-08-19 配置后聊天默认 DeepSeek 优先，流式实测通过）
 - Plugin Runner 在本机仍 unhealthy（Docker daemon TLS 需主机级配置，见 `docs/PLUGIN_RUNNER_TLS.md`）
 
 ## [Unreleased]

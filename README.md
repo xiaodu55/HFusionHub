@@ -8,7 +8,7 @@
 ![Java](https://img.shields.io/badge/Java-17%2B-orange)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883)
-![Tests](https://img.shields.io/badge/Tests-Python%201220%2B%20%7C%20Java%20400%2B%20%7C%20Frontend%2032%2B-success)
+![Tests](https://img.shields.io/badge/Tests-Python%201220%2B%20%7C%20Java%20445%20%7C%20Frontend%2033-success)
 
 ## 🚀 项目简介
 
@@ -184,7 +184,7 @@ bash scripts/setup.sh --fullstack  # 全部容器化
 3. 启动基础设施（MySQL / Redis / MinIO / Plugin Runner）并等待健康；
 4. `-FullStack` 模式继续构建/拉取 Java、Python、前端镜像并启动全平台，完成后打印访问地址。
 
-> 仍需手动填写：`DEEPSEEK_API_KEY`（模型供应商控制台获取）与 Runner TLS 证书路径（`bash scripts/generate-runner-tls.sh deploy/runner-tls`）。
+> Runner TLS 证书路径需手动生成：`bash scripts/generate-runner-tls.sh deploy/runner-tls`。
 > 管理员账号：`admin` / `ADMIN_PASSWORD`（由 init-env 随机生成并打印，可在 `docker/.env` 中修改）。
 
 ### 方式二：手动启动（开发热重载）
@@ -307,7 +307,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 | KnowledgeGraph | 知识图谱 | 59 |
 | Utils | 公共工具 | 36 |
 
-**RAG 模块：337 个测试用例，100% 通过 | Python AI 总计：1214+ 测试用例 | Java 后端：401 测试用例**
+**RAG 模块：337 个测试用例，100% 通过 | Python AI 总计：1220+ 测试用例 | Java 后端：445 测试用例 | 前端：33 测试用例**
 
 ## 🚀 启动指南
 
@@ -323,6 +323,52 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 - [Python AI 层开发指南](docs/python-ai.md)
 - [数据库设计文档](docs/database.md)
 - [API 接口文档](docs/api.md)
+
+## 📖 文档索引（Documentation Index）
+
+> 所有文档位于 [docs/](docs/) 目录。按用途分四类：**入口**、**开发**、**运维**、**治理**。
+> 2026-08-19 已做文档体系整合：合并 5 份为 3 份权威，删除 1 份冗余，统一关键事实基线
+> （Java 445 测试 / Python 1220+ / 前端 33 / Flyway V57 / DeepSeek 已配置）。
+
+### 入口类
+
+| 文档 | 作用 |
+|------|------|
+| [README.md](README.md) | **本文件**。项目总览、功能模块、快速开始、生产部署、文档索引 |
+| [CLAUDE.md](CLAUDE.md) / [AGENTS.md](AGENTS.md) | AI 编码代理（Claude Code / Codex）的工作指引：架构、命令、数据流、测试、规则（AGENTS 为 CLAUDE 的精简版，二者需保持同步） |
+| [CHANGELOG.md](CHANGELOG.md) | 版本变更日志（Keep a Changelog 格式，各轮优化记录） |
+| [TODO.md](TODO.md) | 待办操作清单（P0 上线安全 / P1 验证 / P2 生产准备 / P3 优化），含"已自动完成"记录 |
+
+### 开发类
+
+| 文档 | 作用 |
+|------|------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **架构全景**（原 ARCHITECTURE + WHITEPAPER 合并）。CQRS 三层架构图、数据流、关键设计决策、安全边界、设计模式、与 Dify/Ragent/LangChain 对比 |
+| [docs/java-backend.md](docs/java-backend.md) | Java 后端开发指南：项目结构、设计模式、环境变量、Flyway 规则（V1–V57）、测试与构建 |
+| [docs/python-ai.md](docs/python-ai.md) | Python AI 开发指南：模块结构、RAG 管线、Feature Flags、SSE 输出格式、Provider 说明 |
+| [docs/database.md](docs/database.md) | 数据库设计：V1–V57 全部迁移历史、核心表、实体关系、迁移规则 |
+| [docs/api.md](docs/api.md) | API 接口参考：模块列表、公开端点、调用约定 |
+| [docs/agent-v1-scope.md](docs/agent-v1-scope.md) | Agent V1 软件契约：只读研究型 Agent 的能力边界、输入/输出 JSON 契约 |
+| [docs/SWAGGER_UI.md](docs/SWAGGER_UI.md) | Swagger UI 配置指南：访问地址、生产关闭/IP 白名单/Basic Auth 策略、注解规范、常见问题 |
+| [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) | **环境变量清单（唯一权威）**：Docker/Java/Python 全部变量、Feature Flags（P5 稳定开、实验默认关、冻结保持关） |
+
+### 运维类
+
+| 文档 | 作用 |
+|------|------|
+| [docs/startup-guide.md](docs/startup-guide.md) | **启动/重启/排障双语指南**（中英对照）：首次安装、一键启动、日常启动顺序、重启决策表、数据库重置、生产部署注意 |
+| [docs/PRODUCTION_OPS.md](docs/PRODUCTION_OPS.md) | **生产运维手册**（原 PRODUCTION_OPS + PRODUCTION_CHECKLIST + DR_VECTORS 合并）：上线检查清单、Runner TLS、插件 digest、配额账本、Agent 故障定位、向量库容灾、Staging 演练 |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 故障排查手册：P0 服务不可用 / P1 功能异常 / P2 性能 / P3 非关键，含数据恢复与日志收集 |
+| [docs/SCALING.md](docs/SCALING.md) | **扩容与性能手册**（原 SCALING + PERFORMANCE_BASELINE 合并）：扩容决策矩阵、垂直/水平扩容、K8s/Helm、性能基线测试、监控告警、成本优化 |
+| [docs/PLUGIN_RUNNER_TLS.md](docs/PLUGIN_RUNNER_TLS.md) | Plugin Runner 主机级 Docker daemon TLS 配置指引（当前环境阻塞项） |
+
+### 治理类
+
+| 文档 | 作用 |
+|------|------|
+| [docs/ROADMAP.md](docs/ROADMAP.md) | **路线图**（原 ROADMAP + PROJECT_ASSESSMENT 合并）：当前状态、Phase 0–6 完成情况、2026-08-18 评估快照存档 |
+| [docs/CI_GATES.md](docs/CI_GATES.md) | CI 门禁：Compose 校验、Python/Java/前端测试、离线评测门禁（PR 阻塞）、nightly 运行时评测 |
+| [docs/SECURITY_REGRESSION.md](docs/SECURITY_REGRESSION.md) | 安全回归清单：每日/每次发布必查的 5 条安全边界（租户隔离、HMAC 回调、插件沙箱、配额幂等、租户拒绝执行） |
 
 ## 🧩 高级功能矩阵
 

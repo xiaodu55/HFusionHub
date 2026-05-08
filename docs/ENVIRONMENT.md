@@ -81,7 +81,7 @@ Copy `python-ai/.env.example` to `python-ai/.env`:
 | `DEEPSEEK_BASE_URL` | No | `https://api.deepseek.com` | DeepSeek API endpoint |
 | `DEEPSEEK_MODEL` | No | `deepseek-v4-flash` | Model name |
 | `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama URL for local LLM fallback and embeddings |
-| `OLLAMA_EMBEDDING_MODEL` | No | `qwen3-embedding:8b-fp16` | Ollama embedding model (**use this**, not the deprecated `OLLAMA_MODEL`) |
+| `OLLAMA_EMBEDDING_MODEL` | No | `bge-m3:latest` | Ollama embedding model (**use this**, not the deprecated `OLLAMA_MODEL`；当前 `.env` 使用 `bge-m3:latest`） |
 | `OPENAI_COMPATIBLE_API_KEY` | No | `` | OpenAI 兼容备用供应商（B2）：加入 FailoverLLM 链，主供应商故障时切换 |
 | `OPENAI_COMPATIBLE_BASE_URL` | No | `` | 同上，chat-completions 兼容端点（OpenAI/通义/Kimi 等） |
 | `OPENAI_COMPATIBLE_MODEL` | No | `` | 同上，模型名（空则用 DEEPSEEK_MODEL） |
@@ -113,7 +113,7 @@ All advanced RAG features are gated via environment variables in `python-ai/.env
 | `RAG_GRAPH_ENABLED` | `false` | ❄️ Frozen | Scoped graph index built |
 | `RAG_RERANKER_MODE` | `disabled` | 🧪 Beta（cross_encoder 已冻结） | `pip install -r requirements-reranker.txt` (cross_encoder only) |
 | `RAG_MULTIMODAL_ENABLED` | `false` | ❄️ Frozen | Tesseract OCR + `pip install -r requirements-multimodal.txt` |
-| `RAG_AGENT_WORKFLOW_ENABLED` | `false` | 🧪 Beta | None (pure Python) |
+| `RAG_AGENT_WORKFLOW_ENABLED` | `true` | 🧪 Beta | None (pure Python)；当前 `.env` 已启用 |
 | `RAG_MULTI_AGENT_ENABLED` | `false` | ❄️ Frozen | Requires P9 enabled + selected KB |
 
 **P5: Hybrid Retrieval (Vector + BM25) — ✅ Stable**
@@ -141,9 +141,9 @@ Modes:
 
 > **治理状态（2026-08）**：已冻结。依赖系统级 Tesseract、收益低。等 vision-LLM 路线（可选 C5）再重启。
 
-**P9: Bounded Single-Agent Workflow — 🧪 Beta**
+**P9: Bounded Single-Agent Workflow — 🧪 Beta（当前已启用）**
 
-默认关闭。为 ReAct Agent 增加超时（45s）、重试（1 次，0.2s 延迟）与运行追踪。仅白名单工具可被调用。
+默认开启（当前 `.env` 为 `true`）。为 ReAct Agent 增加超时（45s）、重试（1 次，0.2s 延迟）与运行追踪。仅白名单工具可被调用。
 
 **P10: Multi-Agent Collaboration — ❄️ 冻结（不再投入）**
 
