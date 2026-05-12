@@ -157,16 +157,6 @@ async def get_models():
             "description": "本地 Ollama 嵌入模型，无需网络"
         })
 
-    # 检查 DeepSeek 模型（如果有API Key）
-    if service._deepseek.api_key:
-        models.append({
-            "id": "deepseek",
-            "name": "DeepSeek Embedding",
-            "type": "cloud",
-            "dimension": service.dimension,
-            "description": "DeepSeek 云端嵌入模型"
-        })
-
     # 如果没有可用模型，返回默认选项
     if not models:
         models.append({
@@ -658,7 +648,7 @@ async def _generate_embedding(text: str, model: Optional[str] = None) -> List[fl
 
     Args:
         text: Input text
-        model: Embedding model name (e.g. "ollama", "deepseek")
+        model: Embedding model name (e.g. "ollama")
     """
     service = get_embedding_service()
     return await service.generate(text, model=model)

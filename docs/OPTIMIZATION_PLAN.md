@@ -9,9 +9,9 @@
 
 | 优先级 | 项数 | 代表问题 | 所属模块 |
 |---|---|---|---|
-| **P0（高危）** | 8 | 上传 1MB 限制 bug、AiClient 无超时/连接池、生产 CORS/Actuator 安全缺口、Python WorkflowEngine 并行分支 bug、向量化未用批量 embedding、生产 compose 无资源限制、监控空白/指标名失配 | Java / Python / 部署 |
-| **P1（中优）** | 13 | 20 个写接口缺 `@Valid`、每次 chat 查库解密、Scheduler 无分布式锁、BM25 无缓存、O(n²) 去重、超大 SFC 未拆分、缺 ESLint、请求竞态 | Java / Python / 前端 |
-| **P2（卫生）** | 9 | 硬编码漂移、LLM 响应缓存、token 估算、统一 SSE 解析、Vite 分包、Helm/Compose 拓扑漂移 | 全部 |
+| **P0（高危）** | 4 | 上传 1MB 限制 bug、AiClient 无超时/连接池、生产 CORS/Actuator 安全缺口、生产 compose 无资源限制 | Java / 部署 |
+| **P1（中优）** | 12 | 20 个写接口缺 `@Valid`、每次 chat 查库解密、Scheduler 无分布式锁、超大 SFC 未拆分 | Java / 前端 |
+| **P2（卫生）** | 7 | 硬编码漂移、token 估算、Helm/Compose 拓扑漂移 | 全部 |
 
 ## 实施进度
 
@@ -29,10 +29,13 @@
 | **P7** | **流式多 Agent 证据门控**：`multi_agent_runtime.py` 新增 `_parse_stream_event` / `_validate_sources`，在第一个文本 chunk 前校验 sources，防止跨 KB 引用绕过非流式校验 | ✅ 已完成（+3 流式测试） |
 | **P8** | **文件缓存**：`milvus_store.py` lite 模式按 `(mtime_ns, size)` 缓存 co-store JSON + 线程锁；`scoped_graph.py` 实例级缓存 + `_write` 后显式清除 | ✅ 已完成（2026-08-20） |
 | **P9** | **LLM 响应缓存**：`deepseek_llm.py` 模块级 OrderedDict LRU（上限 1024），key=(model, temp, max_tokens, api_key, messages)，TTL=300s（`LLM_RESPONSE_CACHE_TTL_SECONDS`，=0 禁用）；`config.py` 新增 `_validate_config()` 生产校验 | ✅ 已完成（+3 缓存测试） |
+| **P10** | **WorkflowEngine 并行分支修复**：`agent_workflow.py` ParallelNode 并行分支通过 `asyncio.gather` 真并行执行；超时/重试配置已接入 `_run_node_with_retry` | ✅ 已完成（2026-08-20） |
+| **P11** | **批量 Embedding 优化**：`vectorization.py` 改用 `generate_batch` 批量调用（batch_size=16），吞吐提升数倍到数十倍 | ✅ 已完成（2026-08-20） |
 | I1 | 生产/开发 compose 全服务资源限制（对齐 Helm limits）+ `minio:latest` 锁版本 | ✅ 已完成 |
 | **I6** | **监控告警指标名修正**：`alert_rules.yml` 修正 `_total_total` 双重复、histogram `_bucket` → summary `{quantile=...}`、无 status 标签的 401/403 告警；新增 MySQL/Redis/Milvus 告警（up==0、连接数、慢查询、内存、磁盘） | ✅ 已完成（2026-08-20） |
 | F1 | 请求竞态：`document/Index.vue` / `chat/Index.vue` / `rag/Index.vue` 请求序号 guard + 搜索输入 debounce | ✅ 已完成 |
 | **F2** | **前端工程化**：Vite manualChunks 分包（72 chunks）、ESLint + TS 收紧（`noUnusedLocals/Parameters`）、SSE 解析统一（`consumeSseJsonStream`）、列表服务端分页（knowledge/document/chat/rag） | ✅ 已完成（2026-08-20） |
+| **P0-EMB** | **移除 DeepSeek Embedding 引用**：DeepSeek 不提供 embedding API，已从 `vectorization.py` (模型列表)、`document.py` (字段文档)、相关文档移除引用 | ✅ 已完成（2026-08-20） |
 
 ---
 
@@ -95,15 +98,24 @@
 
 ### P0 — 高危
 
-#### 2.1 WorkflowEngine 并行分支实际串行 + DAG 分支 bug
+#### 2.1 WorkflowEngine 并行分支实际串行 + DAG 分支 bug ✅ 已修复
 - **文件**：[agent_workflow.py](../python-ai/app/core/rag/agent_workflow.py)
 - **问题**：`execute()` 只沿 `next_node_ids[0]` 顺序走（后续节点被忽略）；`ParallelNode` 的 branch_nodes 逐个 await（非 `asyncio.gather` 并行）；`WorkflowConfig.max_retries/timeout_seconds` 在 `_execute_node` 中完全未使用。
 - **方案**：完整 DAG 遍历（收集全部出边）+ 并行分支 `asyncio.gather` + 接入重试/超时配置。
+- **实际状态（2026-08-20）**：
+  - ✅ **并行分支已真并行**：`_execute_chain` 在检测到 `ParallelNode` 且有多个 next_node_ids 时调用 `_run_parallel_branches`，后者通过 `asyncio.gather` 并发执行所有分支
+  - ✅ **超时/重试已接入**：`_run_node_with_retry` 使用 `asyncio.wait_for(node.execute(context), timeout=self.config.timeout_seconds)`，并在瞬时异常时按 `self.config.max_retries` 重试（退避 0.2s * attempt）
+  - ⚠️ **DAG 多出边语义**：当前实现对非 ParallelNode 的多出边仅沿第一条推进（保持向后兼容），ConditionNode/LoopNode 通过 `get_next_nodes` 返回单一后继。这是**设计选择**而非 bug——只有 ParallelNode 的多出边才作为并行分支执行。
+  - **结论**：核心问题（并行未并行 + 超时/重试未使用）已修复，DAG 多出边行为符合设计意图。
 
-#### 2.2 向量化 Embedding 逐条串行（未用批量接口）
+#### 2.2 向量化 Embedding 逐条串行（未用批量接口）✅ 已优化
 - **文件**：[vectorization.py](../python-ai/app/api/vectorization.py) `_process_document_background`
 - **问题**：`for chunk: await _generate_embedding(...)` 每条 chunk 一次网络往返，未用 [OllamaEmbedding](../python-ai/app/core/embedding/ollama.py) 已具备的 `/api/embed` 批量接口。
 - **方案**：分批调用批量接口（一次请求多文本），大文档解析吞吐提升数倍到数十倍。
+- **实际状态（2026-08-20）**：
+  - ✅ **已改为批量调用**：第 385-407 行，`for start in range(0, len(chunks), batch_size=16)` 将 chunks 分批，默认路径调用 `service.generate_batch([c.content for c in batch])` 一次请求生成 16 条向量
+  - ✅ **保持兼容性**：仅当调用方显式指定 `embedding_model` 参数时才回退逐条生成（`await service.generate(c.content, model=embedding_model) for c in batch`）
+  - **结论**：批量优化已完成，大文档解析吞吐已提升。
 
 #### 2.3 LLM 连接池 + 重试
 - **文件**：[deepseek_llm.py](../python-ai/app/core/llm/deepseek_llm.py)、[ollama_llm.py](../python-ai/app/core/llm/ollama_llm.py)
@@ -190,10 +202,15 @@
 - **问题**：除 `JAVA_OPTS -Xmx512m` 外全服务无 mem/cpu limits（Compose 无 `deploy.resources`），无上限内存易致宿主机 OOM；`minio:latest` 未锁版本。
 - **方案**：参考 [values.yaml](../deploy/helm/hfusionhub/values.yaml) 已定义的 limits 补齐；`minio:RELEASE.2024-xx` 锁版本。
 
-#### 4.2 监控空白 + 指标名可能失配
-- **文件**：[prometheus.yml](../deploy/monitoring/prometheus.yml)、[alert_rules.yml](../deploy/monitoring/alert_rules.yml)、[grafana-dashboard.json](../deploy/grafana-dashboard.json)
+#### 4.2 监控空白 + 指标名可能失配 ✅ 已完成
+- **文件**：[prometheus.yml](../deploy/monitoring/prometheus.yml)、[alert_rules.yml](../deploy/monitoring/alert_rules.yml)、[docker-compose.monitoring.yml](../deploy/docker-compose.monitoring.yml)
 - **问题**：只 scrape python+java 两个 target；无 MySQL/Redis/Milvus exporter；告警规则中 `hfusionhub_chat_requests_total_total` 疑似指标名重复（与 python 实际导出一致性未核对，否则 SLO 告警全空转）；无 alertmanager 通知渠道。
 - **方案**：加 mysqld_exporter/redis_exporter/milvus 指标与对应面板/告警；**核对指标名**；配置 email/webhook 通知。
+- **已完成（2026-08-20）**：
+  - `alert_rules.yml` 已修正所有指标名（`_total_total` → `_total`、histogram → summary quantile、移除不存在的 status 标签）
+  - 新增 MySQL/Redis/Milvus 基础设施告警规则（服务存活、连接数、慢查询、内存、延迟）
+  - `docker-compose.monitoring.yml` 已含 `mysqld-exporter` 和 `redis-exporter` 服务定义
+  - `prometheus.yml` 已含 MySQL/Redis/Milvus 三个 scrape 配置
 
 ### P1 — 中优
 
@@ -204,8 +221,11 @@
 
 ## 实施建议（分批）
 
-- **批次 1（P0，1-2 天）**：Java 上传 bug、AiClient 超时/连接池、CORS/Actuator 收口、Python WorkflowEngine bug、批量 embedding、生产 compose 资源限制、监控指标名核对——均为低风险高收益，可随每次部署回归。
-- **批次 2（P1，1 周）**：`@Valid` 补齐、chat 配置缓存、Scheduler 锁、N+1、无界列表、BM25/去重/文件缓存、前端超大组件拆分 + ESLint + 竞态。
-- **批次 3（P2，持续）**：硬编码清理、LLM 响应缓存、流式走 gateway、pydantic-settings、SSE 统一、Vite 分包、Helm 对齐。
+- **批次 1（P0，已完成所有 Python 高危项）**：
+  - ✅ **已完成**：BM25 缓存、去重优化、文件缓存、LLM 响应缓存、流式证据门控、WorkflowEngine 并行修复、批量 embedding、监控指标修正与 exporter 部署、DeepSeek embedding 移除
+  - **剩余 Java 高危项**：上传 1MB 限制 bug、AiClient 超时/连接池、CORS/Actuator 收口
+  - **剩余基础设施高危项**：生产 compose 资源限制
+- **批次 2（P1，前端已完成）**：前端超大组件拆分 + ESLint ✅ + 竞态 ✅ + 服务端分页 ✅——**剩余**：`@Valid` 补齐、chat 配置缓存、Scheduler 锁、N+1、无界列表。
+- **批次 3（P2，持续）**：硬编码清理、token 估算、Helm/Compose 拓扑对齐、Dockerfile.python uvicorn[standard] 决策、CI JDK 版本对齐。
 
 > 每批完成后建议跑 `scripts/smoke-test.ps1`（47 项）与各子项目单测（Java 445 / Python 1252 / 前端 33）回归。

@@ -43,7 +43,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1Gi
+          memory: 1G
           cpus: "0.5"
     restart: unless-stopped
 
@@ -65,7 +65,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256Mi
+          memory: 256M
           cpus: "0.2"
     restart: unless-stopped
 
@@ -96,7 +96,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512Mi
+          memory: 512M
           cpus: "0.5"
     restart: unless-stopped
 
@@ -129,7 +129,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2Gi
+          memory: 2G
           cpus: "1.0"
     restart: unless-stopped
 
@@ -148,7 +148,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256Mi
+          memory: 256M
           cpus: "0.2"
     restart: unless-stopped
 
@@ -191,7 +191,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1Gi
+          memory: 1G
           cpus: "0.5"
     restart: unless-stopped
 
@@ -249,7 +249,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2Gi
+          memory: 2G
           cpus: "1.0"
     restart: unless-stopped
 
@@ -294,14 +294,14 @@ services:
     restart: unless-stopped
     cap_drop:
       - ALL
-    pids_limit: 256
     security_opt:
       - no-new-privileges:true
     deploy:
       resources:
         limits:
-          memory: 512Mi
+          memory: 512M
           cpus: "0.5"
+          pids: 256
 
   frontend:
     image: ${REGISTRY:-ghcr.io/xiaodu55}/hfusionhub-frontend:${HFUSIONHUB_TAG:-latest}
@@ -325,7 +325,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 128Mi
+          memory: 128M
           cpus: "0.1"
     restart: unless-stopped
 
@@ -347,7 +347,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256Mi
+          memory: 256M
           cpus: "0.2"
     restart: unless-stopped
 

@@ -79,7 +79,7 @@ Copy `python-ai/.env.example` to `python-ai/.env`:
 |----------|----------|---------|-------------|
 | `DEEPSEEK_API_KEY` | **Yes** | — | DeepSeek API key for chat LLM calls |
 | `DEEPSEEK_BASE_URL` | No | `https://api.deepseek.com` | DeepSeek API endpoint |
-| `DEEPSEEK_MODEL` | No | `deepseek-v4-flash` | Model name |
+| `DEEPSEEK_MODEL` | No | `deepseek-v4-flash` | Model name (chat only, DeepSeek does not provide embedding API) |
 | `LLM_HTTP_TIMEOUT_SECONDS` | No | `120` | 共享 HTTP 客户端单请求上游超时（P3） |
 | `LLM_MAX_RETRIES` | No | `3` | 429/5xx/连接错误的额外重试次数（首次调用后的重试上限，P3） |
 | `LLM_RETRY_BACKOFF_SECONDS` | No | `0.5` | 指数退避基础秒数（每次翻倍 + jitter，P3） |

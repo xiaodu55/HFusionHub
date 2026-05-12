@@ -1,6 +1,6 @@
 """
-Embedding 模块 - 支持多种 Embedding 服务
-策略: Ollama BGE-M3 -> DeepSeek -> 随机向量
+Embedding 模块 - 支持 Ollama Embedding 服务
+策略: Ollama (BGE-M3 / qwen3-embedding) -> 随机向量（仅测试）
 """
 import os
 import random
@@ -8,7 +8,6 @@ import logging
 import asyncio
 from typing import List, Optional
 
-from app.core.embedding.deepseek import DeepSeekEmbedding
 from app.core.embedding.ollama import OllamaEmbedding
 from app.core.exceptions import EmbeddingException
 from app.utils.config import config
@@ -17,13 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
-    """多策略 Embedding 服务"""
+    """Ollama Embedding 服务"""
 
     def __init__(
         self,
         dimension: int = 1024,
-        deepseek_api_key: Optional[str] = None,
-        deepseek_base_url: Optional[str] = None,
         ollama_base_url: Optional[str] = None,
         ollama_model: Optional[str] = None
     ):
@@ -32,21 +29,12 @@ class EmbeddingService:
 
         Args:
             dimension: 向量维度
-            deepseek_api_key: DeepSeek API Key
-            deepseek_base_url: DeepSeek API 地址
             ollama_base_url: Ollama API 地址
             ollama_model: Ollama Embedding 模型名称
         """
         self.dimension = dimension
 
-        # DeepSeek Embedding
-        self._deepseek = DeepSeekEmbedding(
-            api_key=deepseek_api_key,
-            base_url=deepseek_base_url,
-            dimension=dimension
-        )
-
-        # Ollama Embedding (BGE-M3)
+        # Ollama Embedding (BGE-M3 or qwen3-embedding)
         self._ollama = OllamaEmbedding(
             base_url=ollama_base_url,
             model=ollama_model,
@@ -56,45 +44,37 @@ class EmbeddingService:
     async def generate(self, text: str, model: str = None) -> List[float]:
         """
         生成单个文本的 Embedding
-        策略: Ollama -> DeepSeek -> (测试环境) 随机向量
+        策略: Ollama -> (测试环境) 随机向量
 
         Args:
             text: 输入文本
-            model: 指定使用的模型 (ollama/deepseek)，None 则按默认策略
+            model: 指定使用的模型 (ollama)，None 则按默认策略
 
         Returns:
             Embedding 向量
 
         Raises:
-            EmbeddingException: 所有嵌入服务均不可用
+            EmbeddingException: 嵌入服务不可用
         """
-        # 1. 尝试 Ollama BGE-M3
+        # 尝试 Ollama
         if self._ollama.is_available:
             try:
-                logger.info("Trying Ollama BGE-M3 embedding...")
+                logger.info("Trying Ollama embedding...")
                 embedding = await self._ollama.generate(text)
-                logger.info("Ollama BGE-M3 embedding successful")
+                logger.info("Ollama embedding successful")
                 return embedding
             except Exception as e:
-                logger.warning(f"Ollama BGE-M3 failed: {e}, trying DeepSeek...")
+                logger.warning(f"Ollama failed: {e}")
         else:
-            logger.info("Ollama not available, trying DeepSeek...")
+            logger.info("Ollama not available")
 
-        # 2. 尝试 DeepSeek API
-        try:
-            embedding = await self._deepseek.generate(text)
-            logger.info("DeepSeek embedding successful")
-            return embedding
-        except Exception as e:
-            logger.warning(f"DeepSeek failed: {e}")
-
-        # 3. 仅在测试配置下允许随机向量降级
+        # 仅在测试配置下允许随机向量降级
         if config.EMBEDDING_ALLOW_FALLBACK:
             logger.warning("Using random vectors as fallback (test mode)")
             return self._generate_random_vector()
 
-        logger.error("All embedding providers failed, no fallback available")
-        raise EmbeddingException("无法生成向量嵌入：所有嵌入服务均不可用")
+        logger.error("Ollama embedding failed, no fallback available")
+        raise EmbeddingException("无法生成向量嵌入：Ollama 服务不可用")
 
     def get_embedding(self, text: str) -> List[float]:
         """
@@ -153,35 +133,27 @@ class EmbeddingService:
             Embedding 向量列表
 
         Raises:
-            EmbeddingException: 所有嵌入服务均不可用
+            EmbeddingException: 嵌入服务不可用
         """
-        # 1. 尝试 Ollama BGE-M3
+        # 尝试 Ollama
         if self._ollama.is_available:
             try:
-                logger.info("Trying Ollama BGE-M3 batch embedding...")
+                logger.info("Trying Ollama batch embedding...")
                 embeddings = await self._ollama.generate_batch(texts)
-                logger.info("Ollama BGE-M3 batch embedding successful")
+                logger.info("Ollama batch embedding successful")
                 return embeddings
             except Exception as e:
-                logger.warning(f"Ollama BGE-M3 batch failed: {e}, trying DeepSeek...")
+                logger.warning(f"Ollama batch failed: {e}")
         else:
-            logger.info("Ollama not available, trying DeepSeek...")
+            logger.info("Ollama not available")
 
-        # 2. 尝试 DeepSeek API
-        try:
-            embeddings = await self._deepseek.generate_batch(texts)
-            logger.info("DeepSeek batch embedding successful")
-            return embeddings
-        except Exception as e:
-            logger.warning(f"DeepSeek batch failed: {e}")
-
-        # 3. 仅在测试配置下允许随机向量降级
+        # 仅在测试配置下允许随机向量降级
         if config.EMBEDDING_ALLOW_FALLBACK:
             logger.warning("Using random vectors as fallback (test mode)")
             return [self._generate_random_vector() for _ in texts]
 
-        logger.error("All embedding providers failed, no fallback available")
-        raise EmbeddingException("无法生成向量嵌入：所有嵌入服务均不可用")
+        logger.error("Ollama embedding failed, no fallback available")
+        raise EmbeddingException("无法生成向量嵌入：Ollama 服务不可用")
 
     def _generate_random_vector(self) -> List[float]:
         """生成随机归一化向量（作为最终降级方案）"""
@@ -205,8 +177,6 @@ def get_embedding_service() -> EmbeddingService:
 
         _embedding_service = EmbeddingService(
             dimension=dimension,
-            deepseek_api_key=os.getenv("DEEPSEEK_API_KEY"),
-            deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             ollama_model=os.getenv("OLLAMA_EMBEDDING_MODEL", "qwen3-embedding:8b-fp16")
         )

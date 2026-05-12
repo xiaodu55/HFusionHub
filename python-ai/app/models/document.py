@@ -27,7 +27,7 @@ class ParseRequest(BaseModel):
     knowledge_base_id: Optional[int] = Field(None, description="Knowledge base ID")
     document_title: Optional[str] = Field(None, description="Document title for citations")
     index_version: str = Field(..., description="Java-issued index version used to reject stale callbacks")
-    embedding_model: Optional[str] = Field(None, description="Embedding model to use: ollama, deepseek, or random")
+    embedding_model: Optional[str] = Field(None, description="Embedding model to use: ollama or random")
     embedding_dimension: Optional[int] = Field(None, description="Embedding vector dimension")
     embedding_version: Optional[str] = Field(None, description="Embedding version identifier")
 
