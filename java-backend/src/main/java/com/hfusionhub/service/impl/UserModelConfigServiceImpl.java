@@ -13,7 +13,9 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -23,9 +25,12 @@ import org.springframework.util.StringUtils;
 public class UserModelConfigServiceImpl implements UserModelConfigService {
 
     private static final Set<String> PROVIDER_TYPES = Set.of("openai_compatible", "ollama");
+    private static final String CACHE_KEY_PREFIX = "user_model_config:";
+    private static final long CACHE_TTL_SECONDS = 60;
 
     private final UserModelConfigMapper mapper;
     private final ModelCredentialCipher cipher;
+    private final RedisTemplate<String, Object> redisTemplate;
 
     @Override
     public UserModelConfigDTO get(Long userId) {
@@ -78,6 +83,10 @@ public class UserModelConfigServiceImpl implements UserModelConfigService {
         config.setLastTestedAt(null);
         if (creating) mapper.insert(config);
         else mapper.updateById(config);
+
+        // Invalidate cache on save
+        evictCache(userId);
+
         return toDTO(config);
     }
 
@@ -85,20 +94,40 @@ public class UserModelConfigServiceImpl implements UserModelConfigService {
     @Transactional
     public void reset(Long userId) {
         UserModelConfig config = find(userId);
-        if (config != null) mapper.deleteById(config.getId());
+        if (config != null) {
+            mapper.deleteById(config.getId());
+            evictCache(userId);
+        }
     }
 
     @Override
     public Map<String, Object> getRuntimeConfig(Long userId) {
         if (userId == null || userId <= 0) return Map.of();
+
+        // Try cache first
+        String cacheKey = CACHE_KEY_PREFIX + userId;
+        @SuppressWarnings("unchecked")
+        Map<String, Object> cached = (Map<String, Object>) redisTemplate.opsForValue().get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+
+        // Cache miss: query DB + decrypt
         UserModelConfig config = find(userId);
-        if (config == null || !Integer.valueOf(1).equals(config.getEnabled())) return Map.of();
-        return runtimeMap(
+        if (config == null || !Integer.valueOf(1).equals(config.getEnabled())) {
+            return Map.of();
+        }
+
+        Map<String, Object> runtimeConfig = runtimeMap(
                 config.getProviderType(),
                 config.getProviderName(),
                 config.getBaseUrl(),
                 config.getModelName(),
                 cipher.decrypt(config.getApiKeyCiphertext()));
+
+        // Cache for 60s
+        redisTemplate.opsForValue().set(cacheKey, runtimeConfig, CACHE_TTL_SECONDS, TimeUnit.SECONDS);
+        return runtimeConfig;
     }
 
     @Override
@@ -200,5 +229,11 @@ public class UserModelConfigServiceImpl implements UserModelConfigService {
 
     private void requireUser(Long userId) {
         if (userId == null || userId <= 0) throw new BusinessException("无法识别当前登录用户");
+    }
+
+    private void evictCache(Long userId) {
+        if (userId != null && userId > 0) {
+            redisTemplate.delete(CACHE_KEY_PREFIX + userId);
+        }
     }
 }

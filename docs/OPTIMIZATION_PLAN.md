@@ -70,10 +70,11 @@
 
 ### P1 — 中优
 
-#### 1.5 每次 chat 查库 + 解密（无缓存）
-- **文件**：[AiClient.java](../java-backend/src/main/java/com/hfusionhub/client/AiClient.java#L952) `addUserProviderConfig()`
+#### 1.5 每次 chat 查库 + 解密（无缓存）✅ 已完成（2026-08-20）
+- **文件**：[AiClient.java](../java-backend/src/main/java/com/hfusionhub/client/AiClient.java#L952) `addUserProviderConfig()`、[UserModelConfigServiceImpl.java](../java-backend/src/main/java/com/hfusionhub/service/impl/UserModelConfigServiceImpl.java)
 - **问题**：每次 chat 调用 `getRuntimeConfig(userId)` → 查 `user_model_config` 表 + `cipher.decrypt`，高并发热点无缓存。
 - **方案**：Redis 缓存（TTL 60s，配置变更时失效）。
+- **实际状态**：`getRuntimeConfig` 已接入 Redis 缓存（key=`user_model_config:{userId}`，TTL=60s，值经 Jackson JSON 序列化含解密后的 `api_key`）；`save`/`reset` 时主动 `evictCache` 失效；新增 5 个缓存专项测试（共 9 个用例）。
 
 #### 1.6 Scheduler 无分布式锁
 - **文件**：`AgentAlertScheduler`、`ApprovalExpiryScheduler`、`DeletionTaskScheduler`、`OrphanCleanupScheduler`、`RecycleBinCleanupScheduler` 等 14 个任务（仅 `AgentTaskWorkerScheduler` 有 DB lease 幂等）
@@ -231,7 +232,7 @@
   - ✅ **Python 高危项**：BM25 缓存、去重优化、文件缓存、LLM 响应缓存、流式证据门控、WorkflowEngine 并行修复、批量 embedding、DeepSeek embedding 移除
   - ✅ **Java 高危项**：上传 1MB 限制（application.yml 已配置）、AiClient 超时/连接池（RestTemplateConfig 已实现）、CORS/Actuator 安全（CorsConfig 已有门控）
   - ✅ **基础设施高危项**：生产 compose 资源限制（所有服务已配 limits）、监控指标修正与 exporter 部署
-- **批次 2（P1，前端已完成 + Java 部分待办）**：前端超大组件拆分 ✅ + ESLint ✅ + 竞态 ✅ + 服务端分页 ✅——**剩余 Java 项**：`@Valid` 补齐、chat 配置缓存、Scheduler 锁、N+1、无界列表。
+- **批次 2（P1，前端已完成 + Java 部分待办）**：前端超大组件拆分 ✅ + ESLint ✅ + 竞态 ✅ + 服务端分页 ✅ + chat 配置缓存 ✅（2026-08-20）——**剩余 Java 项**：`@Valid` 补齐、Scheduler 锁、N+1、无界列表。
 - **批次 3（P2，持续）**：硬编码清理、token 估算、Helm/Compose 拓扑对齐、Dockerfile.python uvicorn[standard] 决策、CI JDK 版本对齐。
 
 > 每批完成后建议跑 `scripts/smoke-test.ps1`（47 项）与各子项目单测（Java 445 / Python 1252 / 前端 33）回归。
