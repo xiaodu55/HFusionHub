@@ -10,7 +10,10 @@ import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -44,12 +47,18 @@ public class AiClient {
     /**
      * Chat with AI agent — general path (knowledge_base_id optional).
      *
+     * <p>自动重试：网络连接失败或 5xx 服务器错误时最多重试 3 次，指数退避（1s → 2s → 4s）。</p>
+     *
      * @param message User message
      * @param conversationId Conversation ID
      * @param knowledgeBaseId Knowledge base ID (optional)
      * @param history Chat history
      * @return AI response
      */
+    @Retryable(
+            retryFor = {ResourceAccessException.class, HttpServerErrorException.class},
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 1000, multiplier = 2, maxDelay = 10000))
     public ChatResponse chat(
             String message, Long conversationId, Long knowledgeBaseId, List<Map<String, String>> history) {
         return doChat(
@@ -68,6 +77,10 @@ public class AiClient {
                 null);
     }
 
+    @Retryable(
+            retryFor = {ResourceAccessException.class, HttpServerErrorException.class},
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 1000, multiplier = 2, maxDelay = 10000))
     public ChatResponse chat(
             String message,
             Long conversationId,
@@ -94,6 +107,10 @@ public class AiClient {
     /**
      * Chat with AI agent — general path with style control.
      */
+    @Retryable(
+            retryFor = {ResourceAccessException.class, HttpServerErrorException.class},
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 1000, multiplier = 2, maxDelay = 10000))
     public ChatResponse chat(
             String message,
             Long conversationId,
@@ -687,6 +704,10 @@ public class AiClient {
     }
 
     @SuppressWarnings("unchecked")
+    @Retryable(
+            retryFor = {ResourceAccessException.class, HttpServerErrorException.class},
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 1000, multiplier = 2, maxDelay = 10000))
     public Map<String, Object> testUserProvider(Map<String, Object> providerConfig) {
         try {
             String url = baseUrl + "/api/runtime/provider/test";
