@@ -80,6 +80,9 @@ Copy `python-ai/.env.example` to `python-ai/.env`:
 | `DEEPSEEK_API_KEY` | **Yes** | — | DeepSeek API key for chat LLM calls |
 | `DEEPSEEK_BASE_URL` | No | `https://api.deepseek.com` | DeepSeek API endpoint |
 | `DEEPSEEK_MODEL` | No | `deepseek-v4-flash` | Model name |
+| `LLM_HTTP_TIMEOUT_SECONDS` | No | `120` | 共享 HTTP 客户端单请求上游超时（P3） |
+| `LLM_MAX_RETRIES` | No | `3` | 429/5xx/连接错误的额外重试次数（首次调用后的重试上限，P3） |
+| `LLM_RETRY_BACKOFF_SECONDS` | No | `0.5` | 指数退避基础秒数（每次翻倍 + jitter，P3） |
 | `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama URL for local LLM fallback and embeddings |
 | `OLLAMA_EMBEDDING_MODEL` | No | `bge-m3:latest` | Ollama embedding model (**use this**, not the deprecated `OLLAMA_MODEL`；当前 `.env` 使用 `bge-m3:latest`） |
 | `OPENAI_COMPATIBLE_API_KEY` | No | `` | OpenAI 兼容备用供应商（B2）：加入 FailoverLLM 链，主供应商故障时切换 |

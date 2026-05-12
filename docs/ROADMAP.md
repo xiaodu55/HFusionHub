@@ -92,6 +92,7 @@
 
 ### 待排期
 
+- [ ] **逐功能后续优化方案** — [docs/OPTIMIZATION_PLAN.md](OPTIMIZATION_PLAN.md)：三大模块 P0/P1/P2 优化清单（含上传 1MB 限制 bug、AiClient 超时治理、生产 CORS/Actuator 收口、Python 批量 embedding、WorkflowEngine 并行 bug 等，详见文档）
 - [ ] **Plugin Runner TLS** — 主机级 Docker daemon TLS 配置（`docs/PLUGIN_RUNNER_TLS.md`）
 - [ ] **eval-nightly 启用** — GitHub 配置 `vars.EVAL_BASE_URL` + `secrets.EVAL_INTERNAL_TOKEN`
 - [ ] **多 Agent 协作** — `agent.multi_agent.enabled`（当前冻结，收益待验证）

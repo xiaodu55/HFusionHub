@@ -4,7 +4,6 @@ import { useRoute } from 'vue-router'
 import {
   AlertTriangle,
   CheckCircle2,
-  CircleAlert,
   Clock,
   Download,
   Eye,
@@ -15,7 +14,6 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
-  ShieldOff,
   ShieldAlert,
   Trash2,
   Wrench,
@@ -384,15 +382,6 @@ const handleSetCanary = async () => {
     await loadPlugins()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '设置金丝雀失败'
-  }
-}
-
-const handlePromoteCanary = async (pluginId: string) => {
-  try {
-    await pluginsApi.promoteCanary(pluginId)
-    await loadPlugins()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '提升失败'
   }
 }
 

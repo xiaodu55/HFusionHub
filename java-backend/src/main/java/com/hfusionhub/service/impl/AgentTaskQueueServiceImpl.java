@@ -156,6 +156,16 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
         return dispatched;
     }
 
+    @Override
+    public int countQueuedRuns() {
+        return Math.toIntExact(runMapper.selectCount(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentRun>()
+                        .eq(AgentRun::getStatus, AgentConstants.STATUS_PENDING)
+                        .and(w -> w.isNull(AgentRun::getScheduledAt)
+                                .or()
+                                .le(AgentRun::getScheduledAt, LocalDateTime.now()))));
+    }
+
     // ================================================================
     // Worker 执行主体
     // ================================================================

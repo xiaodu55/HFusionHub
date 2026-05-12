@@ -17,6 +17,12 @@ public interface AgentTaskQueueService {
     int pollAndDispatch();
 
     /**
+     * 统计待执行的 pending Run 数（Prometheus gauge 数据源，供 agent_queue_depth 告警）。
+     * @return 待执行 Run 数量
+     */
+    int countQueuedRuns();
+
+    /**
      * 综合恢复扫描：孤儿检测、超时看门狗、Task 收敛、死信到期处理。
      * 幂等，可重复调用。
      * @return 恢复处理的 Run 数量

@@ -1,4 +1,4 @@
-import { del, get, post, put } from './request'
+import { get, post } from './request'
 import type { ApiResponse, PageResult } from './types'
 
 export interface AgentTaskSummary {

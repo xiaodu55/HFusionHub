@@ -57,16 +57,22 @@ class TraceMiddleware(BaseHTTPMiddleware):
             raise
         finally:
             elapsed = time.perf_counter() - start
+            status = getattr(response, "status_code", 0) if "response" in locals() else 0
             # Record metrics (best-effort; import cycles avoided by lazy import)
             try:
                 from app.api.metrics import get_metrics
                 get_metrics().inc("http_requests_total")
                 get_metrics().observe("http_latency", elapsed)
+                # Status-class counter so alerts can distinguish security events
+                # (4xx: unauthorised access attempts) from server faults (5xx).
+                # The registry only supports name-keyed counters, so encode the
+                # status class into the metric name rather than adding labels.
+                if status >= 400:
+                    get_metrics().inc(f"http_status_{status // 100}xx_total")
             except Exception:
                 pass
 
             # Log with trace_id
-            status = getattr(response, "status_code", 0) if "response" in locals() else 0
             logger.info(
                 "%s %s -> %s (%.1fms) trace=%s",
                 request.method,

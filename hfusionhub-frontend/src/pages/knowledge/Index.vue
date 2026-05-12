@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import * as knowledgeBaseApi from '@/api/knowledgeBase'
 import type { KnowledgeBase } from '@/api/types'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Plus, Search, Edit, Trash2, BookOpen, Power, PowerOff, Loader2, ArrowRight, FileText, FolderOpen, Archive } from 'lucide-vue-next'
+import { Plus, Search, Edit, Trash2, BookOpen, Power, PowerOff, Loader2, ArrowRight, FolderOpen, Archive, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { formatDateTime } from '@/utils/date'
 import { useToast } from '@/composables/useToast'
 import EmptyState from '@/components/EmptyState.vue'
@@ -30,6 +30,13 @@ const knowledgeBases = ref<KnowledgeBase[]>([])
 const loading = ref(false)
 const loadError = ref(false)
 const searchQuery = ref('')
+// 服务端分页（后端 /knowledge-base/my 支持 page/pageSize）
+const currentPage = ref(1)
+const pageSize = ref(9)
+const total = ref(0)
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+// 请求序号：快速翻页/切换时丢弃过期响应（F1 模式）
+let loadSeq = 0
 const isCreateDialogOpen = ref(false)
 const isEditDialogOpen = ref(false)
 const isDeleteDialogOpen = ref(false)
@@ -47,20 +54,35 @@ const editForm = ref({
 })
 
 const loadKnowledgeBases = async () => {
+  const seq = ++loadSeq
   loading.value = true
   loadError.value = false
   try {
     const res = await knowledgeBaseApi.getMyKnowledgeBaseList({
-      page: 1,
-      pageSize: 100,
+      page: currentPage.value,
+      pageSize: pageSize.value,
     })
+    if (seq !== loadSeq) return // 过期响应（用户已翻页）
     knowledgeBases.value = res.data.records
+    total.value = res.data.total
+    // 删除后当前页可能为空：若总页数仍大于 0，回退一页
+    if (knowledgeBases.value.length === 0 && currentPage.value > 1 && total.value > 0) {
+      currentPage.value -= 1
+      await loadKnowledgeBases()
+    }
   } catch (error) {
+    if (seq !== loadSeq) return
     loadError.value = true
     toast.error(error instanceof Error ? error.message : '加载知识库失败，请检查网络连接后重试')
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
+}
+
+const handlePageChange = async (page: number) => {
+  if (page < 1 || page > totalPages.value || page === currentPage.value) return
+  currentPage.value = page
+  await loadKnowledgeBases()
 }
 
 const creating = ref(false)
@@ -183,7 +205,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <Card class="border-border bg-card/80"><CardContent class="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-5"><div class="relative flex-1"><Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input v-model="searchQuery" placeholder="按名称或描述搜索知识库" class="pl-10" /></div><div class="flex items-center gap-3 text-sm text-muted-foreground"><span class="rounded-full bg-muted px-3 py-1.5">{{ knowledgeBases.length }} 个知识库</span><span class="rounded-full bg-primary/10 px-3 py-1.5 text-primary">{{ knowledgeBases.filter(item => item.status === 0).length }} 个可用</span></div></CardContent></Card>
+    <Card class="border-border bg-card/80"><CardContent class="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-5"><div class="relative flex-1"><Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input v-model="searchQuery" placeholder="按名称或描述搜索知识库" class="pl-10" /></div><div class="flex items-center gap-3 text-sm text-muted-foreground"><span class="rounded-full bg-muted px-3 py-1.5">{{ total }} 个知识库</span><span class="rounded-full bg-primary/10 px-3 py-1.5 text-primary">{{ knowledgeBases.filter(item => item.status === 0).length }} 个可用</span></div></CardContent></Card>
 
     <LoadingSkeleton v-if="loading" type="card" :count="6" />
     <ErrorState v-else-if="loadError" message="加载知识库失败" @retry="loadKnowledgeBases" />
@@ -196,6 +218,12 @@ onMounted(() => {
         <div class="mt-4 flex items-center justify-between gap-2"><span class="truncate text-xs text-muted-foreground">{{ kb.username ? `创建者：${kb.username}` : '我的知识空间' }}</span><Button variant="ghost" size="sm" class="gap-1.5 text-primary" @click.stop="goToDetail(kb.id)">管理<ArrowRight class="h-3.5 w-3.5" /></Button></div>
         <div class="absolute right-5 top-16 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"><Button variant="ghost" size="icon" class="h-8 w-8" aria-label="切换知识库状态" :disabled="statusUpdatingId === kb.id || (kb.status !== 0 && kb.status !== 1)" :title="kb.status === 0 ? '停用知识库' : '启用知识库'" @click.stop="handleToggleStatus(kb)"><Loader2 v-if="statusUpdatingId === kb.id" class="h-4 w-4 animate-spin" /><PowerOff v-else-if="kb.status === 0" class="h-4 w-4" /><Power v-else class="h-4 w-4" /></Button><Button variant="ghost" size="icon" class="h-8 w-8" aria-label="编辑知识库" title="编辑" @click.stop="handleEdit(kb)"><Edit class="h-4 w-4" /></Button><Button variant="ghost" size="icon" class="h-8 w-8 hover:bg-rose-400/10" aria-label="删除知识库" title="删除" @click.stop="handleDelete(kb)"><Trash2 class="h-4 w-4 text-destructive" /></Button></div>
       </article>
+    </div>
+
+    <div v-if="totalPages > 1" class="flex items-center justify-center gap-3 pt-2">
+      <Button variant="outline" size="sm" :disabled="loading || currentPage === 1" @click="handlePageChange(currentPage - 1)"><ChevronLeft class="mr-1 h-3.5 w-3.5" />上一页</Button>
+      <span class="text-xs text-muted-foreground">第 {{ currentPage }} / {{ totalPages }} 页 · 共 {{ total }} 条</span>
+      <Button variant="outline" size="sm" :disabled="loading || currentPage === totalPages" @click="handlePageChange(currentPage + 1)">下一页<ChevronRight class="ml-1 h-3.5 w-3.5" /></Button>
     </div>
 
     <Dialog v-model:open="isCreateDialogOpen">

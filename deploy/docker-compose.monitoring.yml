@@ -51,6 +51,34 @@ services:
       - alertmanager-data:/alertmanager
     restart: unless-stopped
 
+  # MySQL exporter — scrape mysqld_* metrics into Prometheus.
+  # Requires MYSQL_ROOT_PASSWORD from deploy/.env (shared with the prod compose).
+  mysqld-exporter:
+    image: prom/mysqld-exporter:v0.15.1
+    container_name: hfusionhub-mysqld-exporter
+    environment:
+      # Root needs no extra grants to read performance_schema; a dedicated
+      # "exporter" user (PROCESS/REPLICATION CLIENT/SELECT) is a hardening step.
+      DATA_SOURCE_NAME: "root:${MYSQL_ROOT_PASSWORD:?required}@tcp(mysql8:3306)/"
+    ports:
+      - "127.0.0.1:9104:9104"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # Redis exporter — scrape redis_* metrics into Prometheus.
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    container_name: hfusionhub-redis-exporter
+    environment:
+      REDIS_ADDR: redis://redis7:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    ports:
+      - "127.0.0.1:9121:9121"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   prometheus-data:
   grafana-data:

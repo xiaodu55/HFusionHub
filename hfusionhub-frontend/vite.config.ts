@@ -3,8 +3,31 @@ import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
+// 手动分包：把稳定的大依赖归并为 vendor chunk，避免 ~200 个小 chunk
+const manualChunks = (id: string) => {
+  if (!id.includes('node_modules')) return undefined
+  if (id.includes('node_modules/vue') || id.includes('node_modules/@vue')) return 'vendor-vue'
+  if (id.includes('node_modules/pinia')) return 'vendor-vue'
+  if (id.includes('node_modules/vue-router')) return 'vendor-vue'
+  if (id.includes('node_modules/axios')) return 'vendor-http'
+  if (id.includes('node_modules/marked')) return 'vendor-markdown'
+  if (id.includes('node_modules/dompurify')) return 'vendor-markdown'
+  if (id.includes('node_modules/radix-vue')) return 'vendor-ui'
+  if (id.includes('node_modules/lucide-vue-next')) return 'vendor-icons'
+  if (id.includes('node_modules/tailwind-merge') || id.includes('node_modules/class-variance-authority') || id.includes('node_modules/clsx')) return 'vendor-ui'
+  // 其余 node_modules 依赖统一归并，避免碎片化
+  return 'vendor-misc'
+}
+
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks,
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

@@ -31,6 +31,32 @@ scrape_configs:
           service: java-backend
     scrape_interval: 10s
 
+  # MySQL exporter (deploy/docker-compose.monitoring.yml -> mysqld-exporter)
+  - job_name: "hfusionhub-mysql"
+    static_configs:
+      - targets: ["mysqld-exporter:9104"]
+        labels:
+          service: mysql
+    scrape_interval: 15s
+
+  # Redis exporter (deploy/docker-compose.monitoring.yml -> redis-exporter)
+  - job_name: "hfusionhub-redis"
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+        labels:
+          service: redis
+    scrape_interval: 15s
+
+  # Milvus ships its own Prometheus endpoint on the metrics port (9091),
+  # so no exporter is needed — scrape it directly.
+  - job_name: "hfusionhub-milvus"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["milvus:9091"]
+        labels:
+          service: milvus
+    scrape_interval: 15s
+
   - job_name: "prometheus"
     static_configs:
       - targets: ["localhost:9090"]

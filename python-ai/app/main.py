@@ -205,6 +205,13 @@ async def shutdown_event() -> None:
         await get_mcp_client_manager().shutdown()
     except Exception:
         pass
+    # Close the shared LLM HTTP clients so keepalive connections are released
+    # cleanly on shutdown (best-effort, like the other subsystems above).
+    try:
+        from app.core.llm.http_client import aclose_shared_clients
+        await aclose_shared_clients()
+    except Exception:
+        pass
 
 
 def main():

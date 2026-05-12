@@ -23,7 +23,7 @@ import tempfile
 from collections import defaultdict
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 
 _LATIN_TERM = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{1,}")
@@ -82,15 +82,32 @@ class ScopedGraphStore:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self._lock = Lock()
+        # Read-through cache keyed by (mtime_ns, size).  All callers of
+        # ``_read`` hold ``self._lock``, so the cache fields need no extra
+        # locking of their own.  ``_write`` clears it explicitly so the
+        # same-mtime edge case cannot serve stale data.
+        self._cache_key: Optional[Tuple[int, int]] = None
+        self._cache_payload: Optional[Dict[str, List[Dict[str, Any]]]] = None
 
     def _read(self) -> Dict[str, List[Dict[str, Any]]]:
         try:
+            st = self.path.stat()
+            key = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            key = None
+        if key is not None and key == self._cache_key and self._cache_payload is not None:
+            return self._cache_payload
+        try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
             if isinstance(payload, dict) and isinstance(payload.get("nodes"), list) and isinstance(payload.get("edges"), list):
-                return {"nodes": payload["nodes"], "edges": payload["edges"]}
+                result: Dict[str, List[Dict[str, Any]]] = {"nodes": payload["nodes"], "edges": payload["edges"]}
+            else:
+                result = {"nodes": [], "edges": []}
         except (OSError, TypeError, ValueError):
-            pass
-        return {"nodes": [], "edges": []}
+            result = {"nodes": [], "edges": []}
+        self._cache_key = key
+        self._cache_payload = result
+        return result
 
     def _write(self, payload: Dict[str, List[Dict[str, Any]]]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -99,6 +116,10 @@ class ScopedGraphStore:
             with os.fdopen(descriptor, "w", encoding="utf-8") as output:
                 json.dump(payload, output, ensure_ascii=False, separators=(",", ":"))
             os.replace(temporary, self.path)
+            # Invalidate the read cache: the file has been replaced in place
+            # (same path), so force the next _read to reload.
+            self._cache_key = None
+            self._cache_payload = None
         except Exception:
             try:
                 os.unlink(temporary)

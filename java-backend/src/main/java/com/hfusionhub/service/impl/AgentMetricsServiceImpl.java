@@ -222,11 +222,12 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
         // MyBatis Plus pagination via LIMIT
         List<AgentRun> runs = runMapper.selectList(query.last("LIMIT " + offset + "," + pageSize));
 
-        // Build task lookup for query text
+        // Build task lookup for query text (batch query instead of N+1 selectById)
         Map<Long, AgentTask> taskMap = new HashMap<>();
-        for (AgentRun run : runs) {
-            if (!taskMap.containsKey(run.getTaskId())) {
-                taskMap.put(run.getTaskId(), taskMapper.selectById(run.getTaskId()));
+        List<Long> taskIds = runs.stream().map(AgentRun::getTaskId).distinct().toList();
+        if (!taskIds.isEmpty()) {
+            for (AgentTask task : taskMapper.selectBatchIds(taskIds)) {
+                taskMap.put(task.getId(), task);
             }
         }
 

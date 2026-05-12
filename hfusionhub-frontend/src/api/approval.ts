@@ -1,6 +1,7 @@
 import { get, post } from './request'
 import type { ApiResponse } from './types'
 import { useUserStore } from '@/stores/user'
+import { consumeSseJsonStream } from '@/utils/sse'
 
 export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired' | 'executed' | 'failed'
 
@@ -65,50 +66,21 @@ export function subscribeApprovalStream(handlers: {
   const token = userStore.token
   const controller = new AbortController()
 
-  async function run() {
-    try {
-      const res = await fetch('/api/agent-task/approvals/stream', {
-        headers: token ? { satoken: token } : {},
-        signal: controller.signal,
-      })
-      if (!res.ok || !res.body) throw new Error(`审批流连接失败 (${res.status})`)
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder('utf-8')
-      let buffer = ''
-
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-        for (const raw of lines) {
-          const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw
-          if (!line.startsWith('data:')) continue
-          const data = line.slice(5).trim()
-          if (!data) continue
-          let parsed: { type?: string; data?: AgentApproval[] | AgentApproval }
-          try {
-            parsed = JSON.parse(data)
-          } catch {
-            continue
-          }
-          if (parsed.type === 'snapshot' && Array.isArray(parsed.data)) {
-            handlers.onSnapshot(parsed.data as AgentApproval[])
-          } else if (parsed.type === 'approval' && parsed.data) {
-            handlers.onApproval(parsed.data as AgentApproval)
-          }
-        }
+  // 解析统一收敛到 utils/sse.ts 的 consumeSseJsonStream（内部复用 SseDataParser）
+  void consumeSseJsonStream<AgentApproval[] | AgentApproval>('/api/agent-task/approvals/stream', {
+    headers: token ? { satoken: token } : {},
+    signal: controller.signal,
+    onData: (parsed) => {
+      if (parsed.type === 'snapshot' && Array.isArray(parsed.data)) {
+        handlers.onSnapshot(parsed.data as AgentApproval[])
+      } else if (parsed.type === 'approval' && parsed.data) {
+        handlers.onApproval(parsed.data as AgentApproval)
       }
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        handlers.onError?.(error instanceof Error ? error : new Error('审批流连接中断'))
-      }
-    }
-  }
-
-  run()
+    },
+    onError: (error) => {
+      handlers.onError?.(error instanceof Error ? error : new Error('审批流连接中断'))
+    },
+  })
 
   return () => controller.abort()
 }

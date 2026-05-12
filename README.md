@@ -367,6 +367,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 | 文档 | 作用 |
 |------|------|
 | [docs/ROADMAP.md](docs/ROADMAP.md) | **路线图**（原 ROADMAP + PROJECT_ASSESSMENT 合并）：当前状态、Phase 0–6 完成情况、2026-08-18 评估快照存档 |
+| [docs/OPTIMIZATION_PLAN.md](docs/OPTIMIZATION_PLAN.md) | **逐功能后续优化方案**：三大模块（Java/Python/前端/基础设施）P0/P1/P2 优化清单，含文件路径、问题、方案、优先级 |
 | [docs/CI_GATES.md](docs/CI_GATES.md) | CI 门禁：Compose 校验、Python/Java/前端测试、离线评测门禁（PR 阻塞）、nightly 运行时评测 |
 | [docs/SECURITY_REGRESSION.md](docs/SECURITY_REGRESSION.md) | 安全回归清单：每日/每次发布必查的 5 条安全边界（租户隔离、HMAC 回调、插件沙箱、配额幂等、租户拒绝执行） |
 

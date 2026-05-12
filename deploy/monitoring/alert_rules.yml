@@ -9,10 +9,10 @@ groups:
       - alert: ChatAvailabilityBelowSLO
         expr: |
           (
-            sum(rate(hfusionhub_chat_requests_total_total[5m]))
-            - sum(rate(hfusionhub_chat_errors_total_total[5m]))
+            sum(rate(hfusionhub_chat_requests_total[5m]))
+            - sum(rate(hfusionhub_chat_errors_total[5m]))
           )
-          / sum(rate(hfusionhub_chat_requests_total_total[5m]))
+          / sum(rate(hfusionhub_chat_requests_total[5m]))
           < 0.999
         for: 5m
         labels:
@@ -25,8 +25,8 @@ groups:
 
       - alert: ChatErrorRateHigh
         expr: |
-          sum(rate(hfusionhub_chat_errors_total_total[5m]))
-          / sum(rate(hfusionhub_chat_requests_total_total[5m]))
+          sum(rate(hfusionhub_chat_errors_total[5m]))
+          / sum(rate(hfusionhub_chat_requests_total[5m]))
           > 0.05
         for: 3m
         labels:
@@ -41,9 +41,7 @@ groups:
     rules:
       - alert: ChatP95LatencyHigh
         expr: |
-          histogram_quantile(0.95,
-            sum(rate(hfusionhub_chat_latency_seconds_bucket[5m])) by (le)
-          ) > 20
+          hfusionhub_chat_latency_seconds{quantile="0.95"} > 20
         for: 5m
         labels:
           severity: warning
@@ -54,9 +52,7 @@ groups:
 
       - alert: FirstTokenP95LatencyHigh
         expr: |
-          histogram_quantile(0.95,
-            sum(rate(hfusionhub_http_latency_seconds_bucket[5m])) by (le)
-          ) > 3
+          hfusionhub_http_latency_seconds{quantile="0.95"} > 3
         for: 5m
         labels:
           severity: warning
@@ -67,9 +63,7 @@ groups:
 
       - alert: P95LatencyCritical
         expr: |
-          histogram_quantile(0.95,
-            sum(rate(hfusionhub_chat_latency_seconds_bucket[5m])) by (le)
-          ) > 60
+          hfusionhub_chat_latency_seconds{quantile="0.95"} > 60
         for: 3m
         labels:
           severity: critical
@@ -84,10 +78,10 @@ groups:
       - alert: ToolSuccessRateLow
         expr: |
           (
-            sum(hfusionhub_chat_requests_total_total)
-            - sum(hfusionhub_chat_errors_total_total)
+            sum(hfusionhub_chat_requests_total)
+            - sum(hfusionhub_chat_errors_total)
           )
-          / sum(hfusionhub_chat_requests_total_total)
+          / sum(hfusionhub_chat_requests_total)
           < 0.99
         for: 10m
         labels:
@@ -99,8 +93,8 @@ groups:
 
       - alert: ToolFailureRateHigh
         expr: |
-          sum(rate(hfusionhub_chat_errors_total_total[10m]))
-          / sum(rate(hfusionhub_chat_requests_total_total[10m]))
+          sum(rate(hfusionhub_chat_errors_total[10m]))
+          / sum(rate(hfusionhub_chat_requests_total[10m]))
           > 0.01
         for: 5m
         labels:
@@ -115,25 +109,14 @@ groups:
     rules:
       - alert: UnauthorizedAccessAttempt
         expr: |
-          sum(increase(http_requests_total{status="401"}[5m])) > 10
+          sum(increase(hfusionhub_http_status_4xx_total[5m])) > 10
         for: 1m
         labels:
           severity: critical
           slo: security
         annotations:
-          summary: "Multiple 401 Unauthorized responses detected"
-          description: "{{ $value }} unauthorized access attempts in the last 5 minutes. Possible credential stuffing or token leakage."
-
-      - alert: UnauthorizedToolAccess
-        expr: |
-          sum(increase(http_requests_total{status="403"}[5m])) > 5
-        for: 1m
-        labels:
-          severity: critical
-          slo: security
-        annotations:
-          summary: "Multiple 403 Forbidden responses detected"
-          description: "{{ $value }} forbidden access attempts in the last 5 minutes. Possible privilege escalation attempt."
+          summary: "Multiple 4xx responses detected"
+          description: "{{ $value }} unauthorized (4xx) responses in the last 5 minutes. Possible credential stuffing or token leakage."
 
   # ── SLO: Eval Quality Regression ──────────────────────────────────────────
   - name: hfusionhub_slo_quality
@@ -151,7 +134,7 @@ groups:
 
       - alert: CitationFaithfulnessLow
         expr: |
-          hfusionhub_citation_faithfulness < 0.60
+          hfusionhub_citation_faithfulness_current{quantile="0.5"} < 0.60
         for: 1h
         labels:
           severity: warning
@@ -165,7 +148,7 @@ groups:
     rules:
       - alert: DailyCostExceedsBudget
         expr: |
-          sum(increase(hfusionhub_chat_requests_total_total[24h]))
+          sum(increase(hfusionhub_chat_requests_total[24h]))
           * 0.001
           > 10.0
         for: 0m
@@ -201,6 +184,39 @@ groups:
           summary: "Java backend service is DOWN"
           description: "Java backend service has been unreachable for over 1 minute."
 
+      - alert: MySQLDown
+        expr: |
+          up{job="hfusionhub-mysql"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          slo: availability
+        annotations:
+          summary: "MySQL is DOWN"
+          description: "mysqld-exporter reports MySQL unreachable for over 1 minute."
+
+      - alert: RedisDown
+        expr: |
+          up{job="hfusionhub-redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          slo: availability
+        annotations:
+          summary: "Redis is DOWN"
+          description: "redis-exporter reports Redis unreachable for over 1 minute."
+
+      - alert: MilvusDown
+        expr: |
+          up{job="hfusionhub-milvus"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          slo: availability
+        annotations:
+          summary: "Milvus is DOWN"
+          description: "Milvus metrics endpoint unreachable for over 1 minute."
+
       - alert: HighMemoryUsage
         expr: |
           jvm_memory_used_bytes{area="heap"}
@@ -213,6 +229,31 @@ groups:
         annotations:
           summary: "Java heap usage above 90%"
           description: "Java heap memory usage is {{ $value | humanizePercentage }}."
+
+      - alert: MySQLConnectionsHigh
+        expr: |
+          mysql_global_status_threads_connected
+          / mysql_global_variables_max_connections
+          > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          slo: health
+        annotations:
+          summary: "MySQL connection usage above 80%"
+          description: "MySQL has {{ $value | humanizePercentage }} of its max connections in use."
+
+      - alert: RedisMemoryHigh
+        expr: |
+          redis_memory_used_bytes / (redis_memory_max_bytes > 0)
+          > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          slo: health
+        annotations:
+          summary: "Redis memory usage above 90%"
+          description: "Redis used {{ $value | humanizePercentage }} of its maxmemory."
 
   # ── SLO: Queue & Async Backlog ────────────────────────────────────────────
   - name: hfusionhub_slo_queue

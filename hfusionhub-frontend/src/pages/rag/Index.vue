@@ -69,9 +69,6 @@ const selectedKnowledgeBaseId = ref<number | undefined>()
 
 const selectedKnowledgeBase = computed(() => knowledgeBases.value.find(item => item.id === selectedKnowledgeBaseId.value))
 const hasObservabilityData = computed(() => stats.value.total_traces > 0 || totalTraces.value > 0)
-const sourceSummary = computed(() => Object.entries(stats.value.result_source_counts)
-  .map(([source, count]) => `${source} · ${count}`)
-  .join('  ') || '暂无来源数据')
 const hitRatePercent = computed(() => `${Math.round(stats.value.hit_rate * 100)}%`)
 const totalPages = computed(() => Math.max(1, Math.ceil(totalTraces.value / PAGE_SIZE)))
 const canGoPrevious = computed(() => currentPage.value > 1)
@@ -92,6 +89,9 @@ const buildFilters = (page = currentPage.value): TraceFilters => ({
   error_only: errorsOnly.value || undefined,
 })
 
+// 请求序号：快速切 KB / 狂点刷新时丢弃过期响应，防止旧响应覆盖新数据（F1）
+let loadSeq = 0
+
 const loadData = async (page = 1, showErrorToast = false) => {
   if (!selectedKnowledgeBaseId.value) {
     traces.value = []
@@ -102,6 +102,7 @@ const loadData = async (page = 1, showErrorToast = false) => {
     return
   }
 
+  const seq = ++loadSeq
   loading.value = true
   loadNotice.value = ''
   try {
@@ -111,6 +112,7 @@ const loadData = async (page = 1, showErrorToast = false) => {
       ragApi.getEvaluationRuns({ limit: 20, knowledge_base_id: requireKnowledgeBaseId() }),
     ])
 
+    if (seq !== loadSeq) return // 过期响应（已切换知识库或发起新请求）
     if (traceResult.status === 'rejected') throw traceResult.reason
     traces.value = traceResult.value.data.traces
     totalTraces.value = traceResult.value.data.total
@@ -127,11 +129,12 @@ const loadData = async (page = 1, showErrorToast = false) => {
     if (unavailable.length) loadNotice.value = `${unavailable.join('、')}暂时不可用；你仍可查看已有的检索记录。`
   } catch (error) {
     console.error('加载 RAG 数据失败:', error)
+    if (seq !== loadSeq) return
     const message = error instanceof Error ? error.message : 'RAG 调试服务暂时不可用'
     loadNotice.value = `暂时无法读取此知识库的观测数据：${message}`
     if (showErrorToast) toast.error(message)
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -328,7 +331,7 @@ onMounted(async () => {
               <button v-for="trace in traces" :key="trace.trace_id" class="mb-2 w-full rounded-xl border p-3.5 text-left transition-colors" :class="selectedTrace?.trace_id === trace.trace_id ? 'border-primary/45 bg-primary/[0.07]' : trace.error ? 'border-rose-400/20 bg-rose-400/[0.03] hover:bg-rose-400/[0.06]' : 'border-border bg-muted/20 hover:border-primary/25 hover:bg-muted/45'" @click="selectedTrace = trace"><div class="flex items-center justify-between gap-3"><span class="truncate text-sm font-medium">{{ trace.query }}</span><span class="shrink-0 text-xs text-muted-foreground">{{ trace.latency_ms }} ms</span></div><p class="mt-1.5 text-xs text-muted-foreground">{{ trace.results.length }} 条结果 · {{ trace.routes[0]?.selected_channels?.join(' / ') || '未记录通道' }} · {{ formatDate(trace.created_at) }}</p><p v-if="trace.error" class="mt-1.5 truncate text-xs text-rose-200/80">{{ trace.error }}</p></button>
               <div v-if="totalTraces > 0" class="mt-4 flex items-center justify-between gap-3 border-t border-border/70 pt-4"><Button variant="outline" size="sm" :disabled="loading || !canGoPrevious" @click="goToPage(currentPage - 1)"><ChevronLeft class="mr-1 h-3.5 w-3.5" />上一页</Button><span class="text-xs text-muted-foreground">{{ currentPage }} / {{ totalPages }}</span><Button variant="outline" size="sm" :disabled="loading || !canGoNext" @click="goToPage(currentPage + 1)">下一页<ChevronRight class="ml-1 h-3.5 w-3.5" /></Button></div>
             </div>
-            <div class="min-h-80 p-5"><div v-if="!selectedTrace" class="flex h-full min-h-60 flex-col items-center justify-center text-center"><CircleHelp class="h-8 w-8 text-muted-foreground/60" /><p class="mt-3 text-sm font-medium">选择左侧的一条记录</p><p class="mt-1 max-w-xs text-xs leading-5 text-muted-foreground">即可查看它的检索路线与命中文档片段。</p></div><div v-else class="space-y-4"><div><p class="text-xs font-medium tracking-[0.12em] text-primary">检索详情</p><h3 class="mt-1 break-words text-base font-semibold">{{ selectedTrace.query }}</h3></div><div class="grid gap-2 sm:grid-cols-3"><div class="rounded-lg bg-muted/45 p-3 text-xs"><p class="text-muted-foreground">检索耗时</p><p class="mt-1 font-medium">{{ selectedTrace.latency_ms }} ms</p></div><div class="rounded-lg bg-muted/45 p-3 text-xs"><p class="text-muted-foreground">查询改写</p><p class="mt-1 font-medium">{{ selectedTrace.rewrite_count }} 次</p></div><div class="rounded-lg bg-muted/45 p-3 text-xs"><p class="text-muted-foreground">返回结果</p><p class="mt-1 font-medium">{{ selectedTrace.results.length }} 条</p></div></div><div v-if="selectedTrace.error" class="rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-3 text-sm leading-6 text-rose-100/80"><strong class="text-rose-100">本次失败：</strong>{{ selectedTrace.error }}</div><div v-if="selectedTrace.routes.length" class="rounded-xl border border-border bg-muted/20 p-3 text-sm"><p class="font-medium">检索路线</p><p class="mt-1.5 text-muted-foreground">{{ selectedTrace.routes.map(route => `${route.query_type || '通用问题'} · ${route.strategy || '自适应策略'}`).join('；') }}</p></div><div class="space-y-2"><p class="text-sm font-medium">命中文档</p><div v-if="!selectedTrace.results.length" class="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">这次检索没有返回文档片段。</div><div v-for="(result, index) in selectedTrace.results" :key="`${result.document_id}-${index}`" class="rounded-xl border border-border bg-muted/20 p-3"><div class="flex justify-between gap-3 text-sm"><span class="truncate font-medium">{{ (result as any).document_name || `文档 ${result.document_id ?? '图谱实体'}` }}</span><span class="shrink-0 text-xs text-muted-foreground">{{ result.source }} · {{ result.score.toFixed(3) }}</span></div><p class="mt-1.5 text-sm leading-6 text-muted-foreground">{{ result.content_preview }}</p></div></div></div></div>
+            <div class="min-h-80 p-5"><div v-if="!selectedTrace" class="flex h-full min-h-60 flex-col items-center justify-center text-center"><CircleHelp class="h-8 w-8 text-muted-foreground/60" /><p class="mt-3 text-sm font-medium">选择左侧的一条记录</p><p class="mt-1 max-w-xs text-xs leading-5 text-muted-foreground">即可查看它的检索路线与命中文档片段。</p></div><div v-else class="space-y-4"><div><p class="text-xs font-medium tracking-[0.12em] text-primary">检索详情</p><h3 class="mt-1 break-words text-base font-semibold">{{ selectedTrace.query }}</h3></div><div class="grid gap-2 sm:grid-cols-3"><div class="rounded-lg bg-muted/45 p-3 text-xs"><p class="text-muted-foreground">检索耗时</p><p class="mt-1 font-medium">{{ selectedTrace.latency_ms }} ms</p></div><div class="rounded-lg bg-muted/45 p-3 text-xs"><p class="text-muted-foreground">查询改写</p><p class="mt-1 font-medium">{{ selectedTrace.rewrite_count }} 次</p></div><div class="rounded-lg bg-muted/45 p-3 text-xs"><p class="text-muted-foreground">返回结果</p><p class="mt-1 font-medium">{{ selectedTrace.results.length }} 条</p></div></div><div v-if="selectedTrace.error" class="rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-3 text-sm leading-6 text-rose-100/80"><strong class="text-rose-100">本次失败：</strong>{{ selectedTrace.error }}</div><div v-if="selectedTrace.routes.length" class="rounded-xl border border-border bg-muted/20 p-3 text-sm"><p class="font-medium">检索路线</p><p class="mt-1.5 text-muted-foreground">{{ selectedTrace.routes.map(route => `${route.query_type || '通用问题'} · ${route.strategy || '自适应策略'}`).join('；') }}</p></div><div class="space-y-2"><p class="text-sm font-medium">命中文档</p><div v-if="!selectedTrace.results.length" class="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">这次检索没有返回文档片段。</div><div v-for="(result, index) in selectedTrace.results" :key="`${result.document_id}-${index}`" class="rounded-xl border border-border bg-muted/20 p-3"><div class="flex justify-between gap-3 text-sm"><span class="truncate font-medium">{{ `文档 ${result.document_id ?? '图谱实体'}` }}</span><span class="shrink-0 text-xs text-muted-foreground">{{ result.source }} · {{ result.score.toFixed(3) }}</span></div><p class="mt-1.5 text-sm leading-6 text-muted-foreground">{{ result.content_preview }}</p></div></div></div></div>
           </div>
         </CardContent>
       </Card>

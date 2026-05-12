@@ -20,6 +20,7 @@ import math
 import re
 import time
 import logging
+from collections import defaultdict
 from enum import Enum
 from typing import Dict, List, Optional, Any, Set, Tuple
 from dataclasses import dataclass, field
@@ -195,7 +196,66 @@ class KeywordChannel(BaseChannel):
     local development. Building BM25 from that scoped corpus means the first
     hybrid-retrieval release has no Elasticsearch dependency and, crucially,
     applies exactly the same knowledge-base boundary as vector retrieval.
+
+    The expensive parts of BM25 — reading the corpus, tokenising every chunk,
+    and building the term→document inverted index — are cached per
+    ``(store, knowledge_base_id)`` so repeated queries do not re-parse the
+    whole corpus on every request.
     """
+
+    # 语料缓存：key = (id(store), knowledge_base_id)。value 同时持有 store
+    # 引用，防止其被 GC 后 id() 复用导致误命中。store 内容变化（文件 mtime
+    # 变化）会使 _load_chunks_store 返回新 dict → id 变化 → 缓存自动失效。
+    _corpus_cache: Dict[Tuple[int, int], Tuple[Dict, "_KeywordCorpus"]] = {}
+    _CORPUS_CACHE_MAX = 16
+
+    @dataclass
+    class _KeywordCorpus:
+        """预解析后的 BM25 语料（一次构建、多次查询复用）。"""
+        documents: List[Tuple[str, Dict, List[str]]]          # (document_id, chunk, tokens)
+        chunks_by_document: Dict[str, List[Dict]]              # 全量按文档分组排序
+        token_to_doc_idx: Dict[str, Set[int]]                  # term → 文档索引（df 来源）
+        average_length: float
+
+    @classmethod
+    def _corpus_for(cls, store: Dict[str, List[Dict]], knowledge_base_id: Optional[int]) -> "_KeywordCorpus":
+        key = (id(store), knowledge_base_id)
+        cached = cls._corpus_cache.get(key)
+        if cached is not None and cached[0] is store:
+            return cached[1]
+        documents: List[Tuple[str, Dict, List[str]]] = []
+        token_to_doc_idx: Dict[str, Set[int]] = defaultdict(set)
+        for document_id, chunks in store.items():
+            for chunk in chunks:
+                if (knowledge_base_id is not None and
+                        chunk.get("knowledge_base_id") != knowledge_base_id):
+                    continue
+                content = chunk.get("content", "")
+                tokens = cls._tokenize(content)
+                if content and tokens:
+                    index = len(documents)
+                    documents.append((document_id, chunk, tokens))
+                    for term in set(tokens):
+                        token_to_doc_idx[term].add(index)
+        chunks_by_document = {
+            str(document_id): sorted(chunks, key=cls._chunk_order)
+            for document_id, chunks in store.items()
+        }
+        average_length = (
+            sum(len(tokens) for _, _, tokens in documents) / len(documents)
+            if documents else 0.0
+        )
+        corpus = cls._KeywordCorpus(
+            documents=documents,
+            chunks_by_document=chunks_by_document,
+            token_to_doc_idx=dict(token_to_doc_idx),
+            average_length=average_length,
+        )
+        cls._corpus_cache[key] = (store, corpus)
+        if len(cls._corpus_cache) > cls._CORPUS_CACHE_MAX:
+            # Evict oldest by insertion order (dict preserves it).
+            cls._corpus_cache.pop(next(iter(cls._corpus_cache)))
+        return corpus
 
     async def search(
         self,
@@ -213,30 +273,20 @@ class KeywordChannel(BaseChannel):
             if not terms:
                 return []
 
-            documents: List[Tuple[str, Dict, List[str]]] = []
-            for document_id, chunks in store.items():
-                for chunk in chunks:
-                    if (knowledge_base_id is not None and
-                            chunk.get("knowledge_base_id") != knowledge_base_id):
-                        continue
-                    content = chunk.get("content", "")
-                    tokens = self._tokenize(content)
-                    if content and tokens:
-                        documents.append((document_id, chunk, tokens))
-
+            # 复用预解析语料（分词 + 倒排索引 + 文档分组），避免每次查询
+            # 重读整个 corpus + 全量重分词。
+            corpus = self._corpus_for(store, knowledge_base_id)
+            documents = corpus.documents
             if not documents:
                 return []
 
-            chunks_by_document = {
-                str(document_id): sorted(chunks, key=self._chunk_order)
-                for document_id, chunks in store.items()
-            }
+            chunks_by_document = corpus.chunks_by_document
 
             document_frequency = {
-                term: sum(1 for _, _, tokens in documents if term in set(tokens))
+                term: len(corpus.token_to_doc_idx.get(term, ()))
                 for term in terms
             }
-            average_length = sum(len(tokens) for _, _, tokens in documents) / len(documents)
+            average_length = corpus.average_length
             scored: List[Tuple[float, str, Dict]] = []
             for document_id, chunk, tokens in documents:
                 raw_score = self._bm25_score(

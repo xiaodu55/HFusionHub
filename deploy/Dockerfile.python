@@ -10,8 +10,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN sed 's/uvicorn\[standard\]/uvicorn/g' requirements.txt > /tmp/requirements.txt && \
-    pip install --no-cache-dir -r /tmp/requirements.txt
+# uvicorn[standard] installs uvloop + httptools for better streaming performance.
+# The sed workaround (3cd5303) was for --require-hashes mode, which is no longer
+# used. Restoring [standard] for production-grade event loop.
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ app/
 RUN mkdir -p /data/uploads /data \

@@ -21,7 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Search, FileText, Trash2, Upload, Play, Eye, Loader2, RefreshCw, RefreshCcw, Archive, CheckCircle2, Clock3, Files, FolderOpen } from 'lucide-vue-next'
+import { Search, FileText, Trash2, Upload, Play, Eye, Loader2, RefreshCw, RefreshCcw, Archive, Files, FolderOpen, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { formatDateTime } from '@/utils/date'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -56,6 +56,11 @@ const loading = ref(false)
 const loadError = ref(false)
 const searchQuery = ref('')
 const selectedKbId = ref<number>(0) // 0 = 全部
+// 服务端分页（后端 /document/my/{kbId} 支持 page/pageSize）
+const currentPage = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const isUploadDialogOpen = ref(false)
 const uploadForm = ref({
   kbId: 0,
@@ -81,31 +86,49 @@ const processingDocumentCount = computed(() => documents.value.filter(doc => doc
 const errorMessage = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? `${fallback}：${error.message}` : fallback
 
+// 请求序号：切换知识库 / 触发轮询时丢弃过期响应，防止旧响应覆盖新列表（F1）
+let loadSeq = 0
+
 const loadDocuments = async () => {
+  const seq = ++loadSeq
   loading.value = true
   loadError.value = false
   try {
     let res
     if (selectedKbId.value > 0) {
       res = await documentApi.getMyDocumentsByKbId(selectedKbId.value, {
-        page: 1,
-        pageSize: 100,
+        page: currentPage.value,
+        pageSize: pageSize.value,
       })
     } else {
       res = await documentApi.getMyDocumentsByKbId(0, {
-        page: 1,
-        pageSize: 100,
+        page: currentPage.value,
+        pageSize: pageSize.value,
       })
     }
+    if (seq !== loadSeq) return // 过期响应（用户已切换知识库/翻页）
     documents.value = res.data.records
+    total.value = res.data.total
+    // 删除后当前页可能为空：若总记录数仍大于 0，回退一页
+    if (documents.value.length === 0 && currentPage.value > 1 && total.value > 0) {
+      currentPage.value -= 1
+      await loadDocuments()
+    }
     trackProcessingDocuments(documents.value, () => loadDocuments())
   } catch (error) {
     console.error('加载文档失败:', error)
+    if (seq !== loadSeq) return
     loadError.value = true
     toast.error(errorMessage(error, '加载文档失败'))
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
+}
+
+const handlePageChange = (page: number) => {
+  if (page < 1 || page > totalPages.value || page === currentPage.value) return
+  currentPage.value = page
+  loadDocuments()
 }
 
 const loadKnowledgeBases = async () => {
@@ -288,6 +311,7 @@ const filteredDocuments = computed(() => {
 })
 
 watch(selectedKbId, () => {
+  currentPage.value = 1
   loadDocuments()
 })
 
@@ -303,9 +327,14 @@ onMounted(() => {
 
     <Card class="border-border bg-card/80"><CardContent class="grid gap-3 p-4 md:grid-cols-[13rem_minmax(0,1fr)]"><select v-model="selectedKbId" aria-label="按知识库筛选" class="h-10 rounded-md border border-input bg-background/70 px-3 text-sm outline-none focus:border-primary/50"><option :value="0">全部知识库</option><option v-for="kb in knowledgeBases" :key="kb.id" :value="kb.id">{{ kb.name }}</option></select><div class="relative"><Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input v-model="searchQuery" placeholder="搜索文档名称" class="pl-10" /></div></CardContent></Card>
 
-    <section class="grid gap-3 sm:grid-cols-3"><div class="rounded-xl border border-border bg-card/70 p-4"><p class="text-sm text-muted-foreground">文档总数</p><p class="mt-2 text-2xl font-semibold">{{ documents.length }}</p></div><div class="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] p-4"><p class="text-sm text-muted-foreground">正在处理</p><p class="mt-2 text-2xl font-semibold text-cyan-200">{{ processingDocumentCount }}</p></div><div class="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] p-4"><p class="text-sm text-muted-foreground">已可检索</p><p class="mt-2 text-2xl font-semibold text-emerald-200">{{ parsedDocumentCount }}</p></div></section>
+    <section class="grid gap-3 sm:grid-cols-3"><div class="rounded-xl border border-border bg-card/70 p-4"><p class="text-sm text-muted-foreground">文档总数</p><p class="mt-2 text-2xl font-semibold">{{ total }}</p></div><div class="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] p-4"><p class="text-sm text-muted-foreground">正在处理</p><p class="mt-2 text-2xl font-semibold text-cyan-200">{{ processingDocumentCount }}</p></div><div class="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] p-4"><p class="text-sm text-muted-foreground">已可检索</p><p class="mt-2 text-2xl font-semibold text-emerald-200">{{ parsedDocumentCount }}</p></div></section>
 
-    <Card class="overflow-hidden border-border bg-card/80"><CardHeader class="flex-row items-center justify-between border-b border-border/70 p-5"><div><CardTitle class="text-base">文档列表</CardTitle><CardDescription class="mt-1">选择文档开始解析，完成后即可在对话中被检索。</CardDescription></div><span class="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">{{ filteredDocuments.length }} 条</span></CardHeader><CardContent class="p-4 sm:p-5"><LoadingSkeleton v-if="loading" type="card" :count="3" /><ErrorState v-else-if="loadError" message="加载文档失败，请检查网络连接后重试" @retry="loadDocuments" /><EmptyState v-else-if="filteredDocuments.length === 0" :icon="searchQuery ? FolderOpen : FileText" :title="searchQuery ? '没有找到匹配的文档' : '还没有文档'" :description="searchQuery ? '尝试更换搜索关键词' : '上传一份资料，AI 才能在对话中引用其中的信息。'" :action="searchQuery ? undefined : '添加文档'" :show-action="!searchQuery && hasEnabledKnowledgeBase" @action="isUploadDialogOpen = true" /><div v-else class="space-y-3"><article v-for="doc in filteredDocuments" :key="doc.id" class="rounded-xl border border-border bg-muted/20 p-4 transition-colors hover:border-primary/25 hover:bg-muted/40"><div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between"><div class="flex min-w-0 gap-3.5"><div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><FileText class="h-5 w-5" /></div><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h3 class="truncate font-medium">{{ doc.title }}</h3><Badge :variant="getStatusBadge(doc.status).variant">{{ getStatusBadge(doc.status).text }}</Badge></div><p class="mt-1 text-sm text-muted-foreground">{{ doc.knowledgeBaseName || '未归属知识库' }} · {{ formatFileSize(doc.fileSize) }} · {{ formatDateTime(doc.createdAt) }}</p><p v-if="doc.username" class="mt-1 text-xs text-muted-foreground">上传者：{{ doc.username }}</p><p v-if="doc.status === 3 && doc.errorMessage" class="mt-2 max-w-xl text-xs leading-5 text-destructive">解析失败：{{ doc.errorMessage }}</p><div v-if="processingDocs.has(doc.id)" class="mt-3 max-w-xl space-y-1.5"><div class="h-1.5 overflow-hidden rounded-full bg-muted"><div class="h-full rounded-full bg-primary transition-all" :style="{ width: `${processingProgress(doc.id)}%` }" /></div><p class="text-xs text-muted-foreground">{{ getStageText(processingStatus[doc.id]?.stage) }} · {{ processingProgress(doc.id) }}% · 已用 {{ formatProcessingTime(processingStatus[doc.id]?.elapsedSeconds) }} · 预计剩余 {{ formatProcessingTime(processingStatus[doc.id]?.remainingSeconds) }}</p></div></div></div><div class="flex flex-wrap items-center gap-2 xl:justify-end"><Button v-if="doc.status === 0" variant="outline" size="sm" :disabled="!isKnowledgeBaseEnabled(doc) || processingDocs.has(doc.id)" @click="handleStartVectorization(doc)"><Play class="mr-1.5 h-3.5 w-3.5" />开始解析</Button><Button v-if="doc.status === 1 || doc.status === 3" variant="outline" size="sm" :disabled="!isKnowledgeBaseEnabled(doc)" @click="handleResetDocument(doc)"><RefreshCw class="mr-1.5 h-3.5 w-3.5" />重新解析</Button><Button v-if="doc.status === 2" variant="outline" size="sm" @click="handleViewChunks(doc)"><Eye class="mr-1.5 h-3.5 w-3.5" />查看分块</Button><Button v-if="doc.status === 2" variant="outline" size="sm" :disabled="!isKnowledgeBaseEnabled(doc) || processingDocs.has(doc.id)" @click="handleReparsen(doc)"><Loader2 v-if="processingDocs.has(doc.id)" class="mr-1.5 h-3.5 w-3.5 animate-spin" /><RefreshCw v-else class="mr-1.5 h-3.5 w-3.5" />重新解析</Button><Button variant="ghost" size="icon" :disabled="doc.status === 4" title="移入回收站" @click="handleDelete(doc)"><Loader2 v-if="doc.status === 4" class="h-4 w-4 animate-spin" /><Trash2 v-else class="h-4 w-4 text-destructive" /></Button></div></div></article></div></CardContent></Card>
+    <Card class="overflow-hidden border-border bg-card/80"><CardHeader class="flex-row items-center justify-between border-b border-border/70 p-5"><div><CardTitle class="text-base">文档列表</CardTitle><CardDescription class="mt-1">选择文档开始解析，完成后即可在对话中被检索。</CardDescription></div><span class="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">{{ filteredDocuments.length }} 条</span></CardHeader><CardContent class="p-4 sm:p-5"><LoadingSkeleton v-if="loading" type="card" :count="3" /><ErrorState v-else-if="loadError" message="加载文档失败，请检查网络连接后重试" @retry="loadDocuments" /><EmptyState v-else-if="filteredDocuments.length === 0" :icon="searchQuery ? FolderOpen : FileText" :title="searchQuery ? '没有找到匹配的文档' : '还没有文档'" :description="searchQuery ? '尝试更换搜索关键词' : '上传一份资料，AI 才能在对话中引用其中的信息。'" :action="searchQuery ? undefined : '添加文档'" :show-action="!searchQuery && hasEnabledKnowledgeBase" @action="isUploadDialogOpen = true" /><div v-else class="space-y-3"><article v-for="doc in filteredDocuments" :key="doc.id" class="rounded-xl border border-border bg-muted/20 p-4 transition-colors hover:border-primary/25 hover:bg-muted/40"><div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between"><div class="flex min-w-0 gap-3.5"><div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><FileText class="h-5 w-5" /></div><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h3 class="truncate font-medium">{{ doc.title }}</h3><Badge :variant="getStatusBadge(doc.status).variant">{{ getStatusBadge(doc.status).text }}</Badge></div><p class="mt-1 text-sm text-muted-foreground">{{ doc.knowledgeBaseName || '未归属知识库' }} · {{ formatFileSize(doc.fileSize) }} · {{ formatDateTime(doc.createdAt) }}</p><p v-if="doc.username" class="mt-1 text-xs text-muted-foreground">上传者：{{ doc.username }}</p><p v-if="doc.status === 3 && doc.errorMessage" class="mt-2 max-w-xl text-xs leading-5 text-destructive">解析失败：{{ doc.errorMessage }}</p><div v-if="processingDocs.has(doc.id)" class="mt-3 max-w-xl space-y-1.5"><div class="h-1.5 overflow-hidden rounded-full bg-muted"><div class="h-full rounded-full bg-primary transition-all" :style="{ width: `${processingProgress(doc.id)}%` }" /></div><p class="text-xs text-muted-foreground">{{ getStageText(processingStatus[doc.id]?.stage) }} · {{ processingProgress(doc.id) }}% · 已用 {{ formatProcessingTime(processingStatus[doc.id]?.elapsedSeconds) }} · 预计剩余 {{ formatProcessingTime(processingStatus[doc.id]?.remainingSeconds) }}</p></div></div></div><div class="flex flex-wrap items-center gap-2 xl:justify-end"><Button v-if="doc.status === 0" variant="outline" size="sm" :disabled="!isKnowledgeBaseEnabled(doc) || processingDocs.has(doc.id)" @click="handleStartVectorization(doc)"><Play class="mr-1.5 h-3.5 w-3.5" />开始解析</Button><Button v-if="doc.status === 1 || doc.status === 3" variant="outline" size="sm" :disabled="!isKnowledgeBaseEnabled(doc)" @click="handleResetDocument(doc)"><RefreshCw class="mr-1.5 h-3.5 w-3.5" />重新解析</Button><Button v-if="doc.status === 2" variant="outline" size="sm" @click="handleViewChunks(doc)"><Eye class="mr-1.5 h-3.5 w-3.5" />查看分块</Button><Button v-if="doc.status === 2" variant="outline" size="sm" :disabled="!isKnowledgeBaseEnabled(doc) || processingDocs.has(doc.id)" @click="handleReparsen(doc)"><Loader2 v-if="processingDocs.has(doc.id)" class="mr-1.5 h-3.5 w-3.5 animate-spin" /><RefreshCw v-else class="mr-1.5 h-3.5 w-3.5" />重新解析</Button><Button variant="ghost" size="icon" :disabled="doc.status === 4" title="移入回收站" @click="handleDelete(doc)"><Loader2 v-if="doc.status === 4" class="h-4 w-4 animate-spin" /><Trash2 v-else class="h-4 w-4 text-destructive" /></Button></div></div></article></div>
+    <div v-if="totalPages > 1" class="mt-4 flex items-center justify-center gap-3 border-t border-border/70 pt-4">
+      <Button variant="outline" size="sm" :disabled="loading || currentPage === 1" @click="handlePageChange(currentPage - 1)"><ChevronLeft class="mr-1 h-3.5 w-3.5" />上一页</Button>
+      <span class="text-xs text-muted-foreground">第 {{ currentPage }} / {{ totalPages }} 页 · 共 {{ total }} 条</span>
+      <Button variant="outline" size="sm" :disabled="loading || currentPage === totalPages" @click="handlePageChange(currentPage + 1)">下一页<ChevronRight class="ml-1 h-3.5 w-3.5" /></Button>
+    </div></CardContent></Card>
 
     <Dialog v-model:open="isUploadDialogOpen">
       <DialogContent>

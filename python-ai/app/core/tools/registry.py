@@ -13,6 +13,7 @@ V1 rules:
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -47,6 +48,34 @@ _remote_tool_cache: Dict[int, Dict[str, Any]] = {}
 _remote_tool_cache_lock = threading.Lock()
 _REMOTE_TOOL_CACHE_TTL = 10.0
 
+# Upstream Java round-trip timeout for tenant-scoped declarative tool specs.
+_REMOTE_FETCH_TIMEOUT = 3.0
+# Worker pool for the (synchronous) Java HTTP round-trip so building a
+# registry inside an async request handler never blocks the event loop (the
+# same pattern as the LLM availability probe in app/core/llm/__init__.py).
+_fetch_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="plugin-spec"
+)
+
+
+def _http_get_tool_specs(tenant_id: int) -> List[Dict[str, Any]]:
+    """Perform the synchronous Java round-trip. Runs in a worker thread."""
+    import httpx
+    from app.utils.config import config
+
+    response = httpx.get(
+        f"{config.JAVA_BACKEND_URL}/api/internal/plugin/tool-specs",
+        params={"tenantId": tenant_id},
+        headers={"X-Internal-Token": config.INTERNAL_API_TOKEN},
+        timeout=_REMOTE_FETCH_TIMEOUT,
+    )
+    response.raise_for_status()
+    envelope = response.json()
+    specs = envelope.get("data", []) if envelope.get("code") == 200 else []
+    if not isinstance(specs, list):
+        specs = []
+    return [dict(item) for item in specs if isinstance(item, dict)]
+
 
 def _fetch_remote_plugin_specs(tenant_id: Optional[int]) -> List[Dict[str, Any]]:
     """Fetch tenant-scoped declarative specs from Java with a short cache."""
@@ -58,26 +87,17 @@ def _fetch_remote_plugin_specs(tenant_id: Optional[int]) -> List[Dict[str, Any]]
         if cached and now - cached["time"] < _REMOTE_TOOL_CACHE_TTL:
             return [dict(item) for item in cached["specs"]]
     try:
-        import httpx
         from app.utils.config import config
 
         if not config.INTERNAL_API_TOKEN:
             return []
-        response = httpx.get(
-            f"{config.JAVA_BACKEND_URL}/api/internal/plugin/tool-specs",
-            params={"tenantId": tenant_id},
-            headers={"X-Internal-Token": config.INTERNAL_API_TOKEN},
-            timeout=3.0,
-        )
-        response.raise_for_status()
-        envelope = response.json()
-        specs = envelope.get("data", []) if envelope.get("code") == 200 else []
-        if not isinstance(specs, list):
-            specs = []
-        safe_specs = [dict(item) for item in specs if isinstance(item, dict)]
+        # Offload the blocking HTTP call to a worker thread; a cold miss must
+        # never stall the event loop for the full round-trip timeout.
+        future = _fetch_executor.submit(_http_get_tool_specs, tenant_id)
+        safe_specs = future.result(timeout=_REMOTE_FETCH_TIMEOUT + 0.5)
         with _remote_tool_cache_lock:
             _remote_tool_cache[tenant_id] = {"time": now, "specs": safe_specs}
-        return safe_specs
+        return [dict(item) for item in safe_specs]
     except Exception as exc:
         logger.warning("无法同步租户 %s 的低代码工具: %s", tenant_id, exc)
         return []

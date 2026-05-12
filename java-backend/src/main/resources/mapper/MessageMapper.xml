@@ -26,6 +26,9 @@
         FROM message
         WHERE conversation_id = #{conversationId}
         ORDER BY created_at ASC
+        <!-- 防无界返回：单对话历史上限 1000 条（对任何实际对话均足够），
+             避免超长对话时整表消息一次性返回 -->
+        LIMIT 1000
     </select>
 
     <!-- 批量聚合：一次查询获取每个对话的消息数量和最新消息 -->

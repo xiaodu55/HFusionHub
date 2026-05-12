@@ -8,6 +8,7 @@ Postprocessor - 后处理模块
 3. 结果排序 - 按相关性排序
 """
 
+import hashlib
 import re
 from typing import List, Dict, Optional, Set
 from dataclasses import dataclass, field
@@ -56,6 +57,66 @@ _OUTPUT_CONSTRAINT_TOKENS: Set[str] = {
     "简要", "简单", "简短", "直接", "准确", "精确", "确切", "解释",
     "说明", "描述", "啰嗦", "只需", "只要", "别", "不要", "不需要",
 }
+
+
+# ---- Near-duplicate detection (MinHash + LSH banding) ---------------------
+#
+# The dedup step used to compare every pair of accepted results with
+# character-set Jaccard — O(n^2) set constructions, and a measure that
+# over-estimates CJK overlap because common characters dominate the union.
+# Replaced by:
+#   1. shingle tokenization (words + CJK character bigrams) — far better
+#      discrimination for near-duplicate Chinese chunks;
+#   2. a 64-length MinHash signature computed once per result (O(|tokens|));
+#   3. LSH banding (8 bands x 8 rows) so Jaccard checks only run against
+#      genuine candidates — near-linear for retrieval-sized result lists.
+#
+# At the default 0.95 dedup threshold the band-collision probability is
+# 1 - (1 - 0.95^8)^8 ≈ 0.99985, so missing a true near-duplicate is
+# effectively impossible; unrelated chunks (sim < 0.7) rarely collide.
+_MINHASH_BANDS = 8
+_MINHASH_ROWS = 8
+_MINHASH_LENGTH = _MINHASH_BANDS * _MINHASH_ROWS  # 64
+_REHASH_PRIME = 2654435761  # Knuth multiplicative hash constant
+_HASH_SPACE = 1 << 128
+
+
+def _tokenize(text: str) -> List[str]:
+    """Tokenize into words + CJK 2-shingles (adjacent character bigrams)."""
+    normalized = text.lower()
+    tokens = re.findall(r"[a-z0-9_]+", normalized)
+    for run in re.findall(r"[\u4e00-\u9fff]+", normalized):
+        if len(run) == 1:
+            tokens.append(run)
+        else:
+            tokens.extend(run[i:i + 2] for i in range(len(run) - 1))
+    return tokens
+
+
+def _token_set(text: Optional[str]) -> Optional[frozenset]:
+    if not text:
+        return None
+    return frozenset(_tokenize(text))
+
+
+def _minhash_signature(tokens: frozenset) -> List[int]:
+    """64-length MinHash signature (one md5 digest per token + linear rehash)."""
+    signature = [_HASH_SPACE] * _MINHASH_LENGTH
+    for token in tokens:
+        digest = int.from_bytes(hashlib.md5(token.encode("utf-8")).digest(), "big")
+        for i in range(_MINHASH_LENGTH):
+            h = (digest + i * _REHASH_PRIME) % _HASH_SPACE
+            if h < signature[i]:
+                signature[i] = h
+    return signature
+
+
+def _band_keys(signature: List[int]) -> List[tuple]:
+    """Return one candidate-bucket key per LSH band."""
+    return [
+        tuple(signature[i * _MINHASH_ROWS:(i + 1) * _MINHASH_ROWS])
+        for i in range(_MINHASH_BANDS)
+    ]
 
 
 @dataclass
@@ -207,18 +268,42 @@ class Postprocessor:
                 decisions[index]["bypass_reason"] = "explicit_knowledge_base_summary"
                 evidence_accepted.append((result, index))
 
-        # 3. 去重
+        # 3. 去重 — token Jaccard via MinHash + LSH banding (near-linear).
+        # Signatures/token sets are computed once per result; exact duplicates
+        # hit the content-fingerprint dict; band buckets restrict Jaccard
+        # checks to genuine candidates instead of every accepted result.
         deduplicated: List[tuple[ProcessedResult, int]] = []
+        content_fingerprints: Dict[str, int] = {}  # md5(content) -> kept position
+        band_index: Dict[tuple, List[int]] = {}  # band key -> kept positions
+        kept: List[tuple] = []  # (result, index, token_set, signature)
+
         for result, index in evidence_accepted:
-            duplicate_of = next((
-                existing_index
-                for existing, existing_index in deduplicated
-                if self._calculate_similarity(result.content, existing.content) >= self.dedup_threshold
-            ), None)
-            if duplicate_of is not None:
+            content = result.content or ""
+            fingerprint = hashlib.md5(content.encode("utf-8")).hexdigest()
+            tokens = _token_set(content)
+            signature = _minhash_signature(tokens) if tokens else None
+            band_keys = _band_keys(signature) if signature is not None else []
+
+            duplicate_pos = content_fingerprints.get(fingerprint)
+            if duplicate_pos is None and signature is not None:
+                candidates: Set[int] = set()
+                for key in band_keys:
+                    candidates.update(band_index.get(key, ()))
+                for pos in sorted(candidates):
+                    if self._jaccard_sets(tokens, kept[pos][2]) >= self.dedup_threshold:
+                        duplicate_pos = pos
+                        break
+
+            if duplicate_pos is not None:
+                existing_index = kept[duplicate_pos][1]
                 decisions[index]["decision"] = "filtered_duplicate"
-                decisions[index]["duplicate_of_input_rank"] = duplicate_of + 1
+                decisions[index]["duplicate_of_input_rank"] = existing_index + 1
             else:
+                pos = len(kept)
+                kept.append((result, index, tokens, signature))
+                content_fingerprints[fingerprint] = pos
+                for key in band_keys:
+                    band_index.setdefault(key, []).append(pos)
                 deduplicated.append((result, index))
 
         # 4. 排序
@@ -274,19 +359,21 @@ class Postprocessor:
         return unique
 
     def _calculate_similarity(self, text1: str, text2: str) -> float:
-        """
-        计算文本相似度（简单实现）
-        实际项目中可以使用更好的算法
-        """
-        if not text1 or not text2:
-            return 0.0
+        """Token (word + CJK bigram) Jaccard similarity.
 
-        # 简单的字符重叠率
-        set1 = set(text1)
-        set2 = set(text2)
+        Character-set Jaccard over-estimates CJK overlap because common
+        characters dominate the union; shingles capture local ordering and
+        discriminate near-duplicate chunks far better.
+        """
+        return self._jaccard_sets(_token_set(text1), _token_set(text2))
+
+    @staticmethod
+    def _jaccard_sets(set1: Optional[frozenset], set2: Optional[frozenset]) -> float:
+        """Jaccard similarity between two precomputed token sets."""
+        if not set1 or not set2:
+            return 0.0
         intersection = len(set1 & set2)
         union = len(set1 | set2)
-
         return intersection / union if union > 0 else 0.0
 
     @staticmethod

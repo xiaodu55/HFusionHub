@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
@@ -22,6 +23,27 @@ from .workflow_runtime import (
     AgentRunStore,
     get_agent_run_store,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_stream_event(chunk: str) -> Optional[Dict[str, Any]]:
+    """Return a structured SSE event dict if ``chunk`` is one, else ``None``.
+
+    The delegate emits JSON-serialised ``{"event": ...}`` objects alongside
+    free-text deltas.  Only a JSON object carrying an ``event`` key is treated
+    as a structured event; anything else (including LLM text that merely starts
+    with a brace but is not a dict event) is a text chunk.
+    """
+    if not isinstance(chunk, str) or not chunk.strip().startswith("{"):
+        return None
+    try:
+        parsed = json.loads(chunk)
+    except (TypeError, ValueError):
+        return None
+    if isinstance(parsed, dict) and "event" in parsed:
+        return parsed
+    return None
 
 
 class BoundedMultiAgentWorkflow(Agent):
@@ -64,13 +86,11 @@ class BoundedMultiAgentWorkflow(Agent):
             error_code=error_code,
         ))
 
-    def _validate_evidence(self, response: AgentResponse) -> Tuple[bool, str]:
-        """Reject anything not backed by chunks from the authorised KB."""
-        if response.finish_reason == "insufficient_evidence":
-            return False, "insufficient_evidence"
-        if not response.sources:
+    def _validate_sources(self, sources: List[Dict[str, Any]]) -> Tuple[bool, str]:
+        """Reject a citation list not backed by chunks from the authorised KB."""
+        if not sources:
             return False, "missing_evidence"
-        for source in response.sources:
+        for source in sources:
             if not isinstance(source, dict):
                 return False, "invalid_citation"
             if source.get("knowledge_base_id") != self.knowledge_base_id:
@@ -78,6 +98,12 @@ class BoundedMultiAgentWorkflow(Agent):
             if source.get("document_id") is None or source.get("chunk_id") is None:
                 return False, "invalid_citation"
         return True, "accepted"
+
+    def _validate_evidence(self, response: AgentResponse) -> Tuple[bool, str]:
+        """Reject anything not backed by chunks from the authorised KB."""
+        if response.finish_reason == "insufficient_evidence":
+            return False, "insufficient_evidence"
+        return self._validate_sources(response.sources)
 
     def _insufficient(self, run: AgentRun, started: float, reason: str,
                       original: Optional[AgentResponse] = None) -> AgentResponse:
@@ -166,17 +192,48 @@ class BoundedMultiAgentWorkflow(Agent):
         history: List[Dict[str, str]] = None,
         **kwargs: Any,
     ) -> AsyncGenerator[str, None]:
-        """Stream delegate output incrementally (no P10 buffering).
+        """Stream delegate output incrementally with a streaming evidence gate.
 
-        The evidence critic only guards the non-streaming ``run()`` path.
-        Streaming forwards the delegate's chunks immediately so the user sees
-        token-by-token output instead of one delayed blob.  The delegate
-        (ReactAgent.run_stream) already applies its own groundedness and
-        insufficient-evidence gates before emitting final text, and emits
-        step_completed events during retrieval — the critic is a safety net
-        for the synchronous path only.
+        The delegate (ReactAgent.run_stream) emits a ``step_completed`` event
+        carrying its retrieval ``sources`` before any final text.  This wrapper
+        captures those sources and runs the same deterministic P10 critic as
+        the non-streaming path *before forwarding the first text chunk*, so the
+        streaming answer cannot silently bypass evidence review.  If the
+        delegate produced no usable sources it has already applied its own
+        insufficient-evidence / empty-KB gate, so it is passed through
+        untouched.  Rejected output is replaced with the generic refusal.
         """
+        if not self._has_selected_knowledge_base:
+            async for chunk in self.delegate.run_stream(query=query, history=history, **kwargs):
+                yield chunk
+            return
+
+        sources: List[Dict[str, Any]] = []
+        gated = False
         async for chunk in self.delegate.run_stream(query=query, history=history, **kwargs):
+            event = _parse_stream_event(chunk)
+            if event is not None:
+                # Structured SSE event — record retrieval sources and pass
+                # through.  Never gates on events themselves.
+                if event.get("event") == "step_completed":
+                    event_sources = event.get("sources") or []
+                    if event_sources:
+                        sources = event_sources
+                yield chunk
+                continue
+
+            # First free-text chunk: the retrieval event (if any) has already
+            # been seen, so run the deterministic critic on its sources now.
+            if not gated:
+                gated = True
+                if sources:
+                    accepted, reason = self._validate_sources(sources)
+                    if not accepted:
+                        logger.info(
+                            "[P10:stream] evidence gate rejected streaming answer (%s)", reason
+                        )
+                        yield NO_SUFFICIENT_EVIDENCE_REPLY
+                        return
             yield chunk
 
     def get_tools(self) -> List[Dict[str, Any]]:

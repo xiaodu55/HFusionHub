@@ -1,6 +1,7 @@
 """P10 tests for evidence-reviewed multi-agent collaboration."""
 
 import asyncio
+import json
 
 import pytest
 
@@ -114,3 +115,73 @@ async def test_no_selected_kb_delegates_without_collaboration():
 
     assert response.content == "ordinary chat"
     assert delegate.calls == 1
+
+
+class _StreamingDelegate(Agent):
+    """A delegate whose ``run_stream`` mirrors ReactAgent: emit a retrieval
+    ``step_completed`` event carrying ``sources``, then free-text chunks."""
+
+    def __init__(self, sources=None, text="answer"):
+        self.sources = sources or []
+        self.text = text
+
+    async def run(self, **kwargs):
+        return AgentResponse(content=self.text, sources=self.sources)
+
+    async def run_stream(self, **kwargs):
+        if self.sources:
+            yield json.dumps(
+                {"event": "step_completed", "step_type": "retrieval", "sources": self.sources},
+                ensure_ascii=False,
+            )
+        yield self.text
+
+    def get_tools(self):
+        return []
+
+
+@pytest.mark.asyncio
+async def test_stream_rejects_cross_kb_citation_before_text():
+    """The streaming path must gate on retrieval sources before text: a
+    cross-KB citation is replaced by the generic refusal, not forwarded."""
+    workflow = BoundedMultiAgentWorkflow(
+        _StreamingDelegate(sources=[_source(kb_id=8)]),
+        knowledge_base_id=7,
+        run_store=AgentRunStore(),
+    )
+
+    chunks = [chunk async for chunk in workflow.run_stream(query="q")]
+
+    # The retrieval event passes through, but the answer text is vetoed.
+    assert chunks[-1] == NO_SUFFICIENT_EVIDENCE_REPLY
+    assert "answer" not in chunks[-1]
+
+
+@pytest.mark.asyncio
+async def test_stream_passes_authorised_evidence():
+    """Authorised sources pass the streaming critic untouched."""
+    workflow = BoundedMultiAgentWorkflow(
+        _StreamingDelegate(sources=[_source(kb_id=7)]),
+        knowledge_base_id=7,
+        run_store=AgentRunStore(),
+    )
+
+    chunks = [chunk async for chunk in workflow.run_stream(query="q")]
+
+    assert chunks[-1] == "answer"
+
+
+@pytest.mark.asyncio
+async def test_stream_passes_through_when_delegate_has_no_sources():
+    """When the delegate produced no retrieval sources it has already applied
+    its own insufficient-evidence / empty-KB gate, so the stream is forwarded
+    unchanged rather than double-stamped with the generic refusal."""
+    workflow = BoundedMultiAgentWorkflow(
+        _StreamingDelegate(sources=[]),
+        knowledge_base_id=7,
+        run_store=AgentRunStore(),
+    )
+
+    chunks = [chunk async for chunk in workflow.run_stream(query="q")]
+
+    assert chunks == ["answer"]

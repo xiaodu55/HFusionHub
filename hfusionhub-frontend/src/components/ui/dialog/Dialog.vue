@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed, provide, ref, watch } from 'vue'
-import { cn } from '@/lib/utils'
+import { computed, provide } from 'vue'
 
 interface Props {
   open?: boolean

@@ -9,7 +9,6 @@ import {
   CirclePlus,
   Clock,
   Copy,
-  FileText,
   History,
   Layers3,
   LoaderCircle,

@@ -16,6 +16,7 @@ AgentWorkflow 模块
 - 工厂模式：统一创建实例
 """
 
+import asyncio
 import logging
 import time
 import uuid
@@ -713,47 +714,10 @@ class WorkflowEngine:
             if not is_valid:
                 raise ValueError(f"Invalid workflow: {message}")
 
-            # 从开始节点执行
-            current_node_id = workflow._start_node_id
-            visited_nodes: Set[str] = set()
-
-            while current_node_id:
-                # 检查是否已访问（防止无限循环）
-                if current_node_id in visited_nodes:
-                    logger.warning(f"Node {current_node_id} already visited, skipping")
-                    break
-
-                node = workflow.get_node(current_node_id)
-                if not node:
-                    raise ValueError(f"Node {current_node_id} not found")
-
-                # 执行节点
-                node_result = await self._execute_node(node, context, workflow)
-                result.node_results.append(node_result)
-
-                # 检查节点是否成功
-                if node_result.status == NodeStatus.FAILED:
-                    result.status = WorkflowStatus.FAILED
-                    result.error = node_result.error
-                    break
-
-                # 标记已访问
-                visited_nodes.add(current_node_id)
-
-                # 获取下一个节点
-                next_node_ids = await node.get_next_nodes(context)
-
-                if not next_node_ids:
-                    # 没有下一个节点，检查是否到达结束节点
-                    if current_node_id == workflow._end_node_id:
-                        result.status = WorkflowStatus.COMPLETED
-                    else:
-                        result.status = WorkflowStatus.FAILED
-                        result.error = f"Workflow ended at non-end node: {current_node_id}"
-                    break
-
-                # 选择下一个节点（简单实现：选择第一个）
-                current_node_id = next_node_ids[0]
+            # 从开始节点执行（_execute_chain 沿链推进，ParallelNode 分支真并行）
+            await self._execute_chain(
+                workflow, context, result, workflow._start_node_id, set()
+            )
 
             # 如果没有设置状态，设置为完成
             if result.status == WorkflowStatus.RUNNING:
@@ -798,7 +762,7 @@ class WorkflowEngine:
         context: WorkflowContext,
         workflow: Workflow
     ) -> NodeResult:
-        """执行单个节点"""
+        """执行单个节点（含重试与超时，由 WorkflowConfig 控制）"""
         node_result = NodeResult(
             node_id=node.node_id,
             status=NodeStatus.RUNNING,
@@ -817,8 +781,8 @@ class WorkflowEngine:
             # 设置节点状态
             node.status = NodeStatus.RUNNING
 
-            # 执行节点
-            output = await node.execute(context)
+            # 执行节点（含重试与超时）
+            output = await self._run_node_with_retry(node, context)
 
             # 设置节点状态
             node.status = NodeStatus.COMPLETED
@@ -834,6 +798,24 @@ class WorkflowEngine:
                 run_id=context.run_id,
                 node_id=node.node_id,
                 data={"output": output}
+            ))
+
+        except asyncio.TimeoutError:
+            logger.error(f"Node {node.node_id} timed out after {self.config.timeout_seconds}s")
+            node.status = NodeStatus.FAILED
+            node_result.status = NodeStatus.FAILED
+            node_result.error = (
+                f"Node {node.node_id} timed out after {self.config.timeout_seconds}s"
+            )
+            node_result.end_time = time.time()
+            node_result.duration_ms = (node_result.end_time - node_result.start_time) * 1000
+
+            workflow._emit_event(WorkflowEvent(
+                event_type=WorkflowEventType.NODE_FAILED,
+                workflow_id=workflow.workflow_id,
+                run_id=context.run_id,
+                node_id=node.node_id,
+                data={"error": node_result.error}
             ))
 
         except Exception as e:
@@ -854,6 +836,126 @@ class WorkflowEngine:
             ))
 
         return node_result
+
+    async def _run_node_with_retry(
+        self,
+        node: BaseWorkflowNode,
+        context: WorkflowContext
+    ) -> Any:
+        """带重试与超时地执行节点。
+
+        - 每次尝试受 WorkflowConfig.timeout_seconds 限制（asyncio.wait_for）。
+        - 瞬时异常按 WorkflowConfig.max_retries 重试，退避 0.2s * attempt。
+        - 超时不再重试（超时往往是稳态问题，重试只会拖长总时长）。
+        """
+        last_exc: Optional[Exception] = None
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                return await asyncio.wait_for(
+                    node.execute(context),
+                    timeout=self.config.timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                raise
+            except Exception as e:  # noqa: BLE001 — 由 _execute_node 统一兜底
+                last_exc = e
+                logger.warning(
+                    f"Node {node.node_id} attempt {attempt + 1} failed: {e}"
+                )
+                if attempt < self.config.max_retries:
+                    await asyncio.sleep(0.2 * (attempt + 1))
+        raise last_exc  # type: ignore[misc]
+
+    async def _execute_chain(
+        self,
+        workflow: Workflow,
+        context: WorkflowContext,
+        result: WorkflowResult,
+        node_id: str,
+        visited_nodes: Set[str],
+    ) -> bool:
+        """沿单链推进节点，直到结束、失败或无后继。
+
+        - visited_nodes 防止环形边（LoopNode 等）导致无限循环。
+        - ParallelNode 的多出边作为独立分支并发执行（asyncio.gather）。
+        - 其他节点的多出边保持向后兼容：仅沿第一条推进（ConditionNode /
+          LoopNode 通过 get_next_nodes 已自行筛选出唯一后继，多个出边中
+          后向边不应被当作并行分支执行）。
+
+        Returns:
+            True=本链正常结束；False=链上某节点失败。
+        """
+        while node_id:
+            if node_id in visited_nodes:
+                logger.warning(f"Node {node_id} already visited, skipping")
+                break
+
+            node = workflow.get_node(node_id)
+            if not node:
+                raise ValueError(f"Node {node_id} not found")
+
+            # 执行节点
+            node_result = await self._execute_node(node, context, workflow)
+            result.node_results.append(node_result)
+
+            # 检查节点是否成功
+            if node_result.status == NodeStatus.FAILED:
+                result.status = WorkflowStatus.FAILED
+                result.error = node_result.error
+                return False
+
+            # 标记已访问
+            visited_nodes.add(node_id)
+
+            # 获取下一个节点
+            next_node_ids = await node.get_next_nodes(context)
+
+            if not next_node_ids:
+                # 没有下一个节点，检查是否到达结束节点
+                if node_id == workflow._end_node_id:
+                    if result.status == WorkflowStatus.RUNNING:
+                        result.status = WorkflowStatus.COMPLETED
+                else:
+                    if result.status != WorkflowStatus.FAILED:
+                        result.status = WorkflowStatus.FAILED
+                        result.error = f"Workflow ended at non-end node: {node_id}"
+                    return False
+                return True
+
+            # ParallelNode：所有分支并发执行（修复原实现只取 next[0] 丢分支的 bug）
+            if isinstance(node, ParallelNode) and len(next_node_ids) > 1:
+                return await self._run_parallel_branches(
+                    workflow, context, result, next_node_ids, visited_nodes
+                )
+
+            # 其余节点向后兼容：沿第一条推进
+            node_id = next_node_ids[0]
+
+        return True
+
+    async def _run_parallel_branches(
+        self,
+        workflow: Workflow,
+        context: WorkflowContext,
+        result: WorkflowResult,
+        branch_ids: List[str],
+        visited_nodes: Set[str],
+    ) -> bool:
+        """并发执行多个分支链，任一分支失败则整个工作流失败。"""
+        async def run_branch(branch_id: str) -> bool:
+            return await self._execute_chain(
+                workflow, context, result, branch_id, set(visited_nodes)
+            )
+
+        outcomes = await asyncio.gather(
+            *(run_branch(b) for b in branch_ids)
+        )
+        if any(o is False for o in outcomes):
+            if result.status != WorkflowStatus.FAILED:
+                result.status = WorkflowStatus.FAILED
+                result.error = result.error or "One or more parallel branches failed"
+            return False
+        return True
 
     def _save_history(self, result: WorkflowResult, workflow: Workflow):
         """保存历史记录"""

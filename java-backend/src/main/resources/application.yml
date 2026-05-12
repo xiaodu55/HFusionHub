@@ -40,6 +40,15 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
+  # 文件上传大小限制 — 与应用内业务校验（Document 10MB / Plugin 50MB）对齐。
+  # 缺省时 Spring Boot 默认为 max-file-size=1MB / max-request-size=10MB，
+  # 会在 Tomcat 层直接拒绝大文件，使 DocumentServiceImpl / PluginController
+  # 的 10MB/50MB 业务校验永远执行不到。
+  servlet:
+    multipart:
+      max-file-size: ${MULTIPART_MAX_FILE_SIZE:20MB}
+      max-request-size: ${MULTIPART_MAX_REQUEST_SIZE:60MB}
+
   # Redis 配置 — 生产环境通过环境变量覆盖:
   #   SPRING_DATA_REDIS_HOST=redis7
   #   SPRING_DATA_REDIS_PASSWORD=your_redis_password
@@ -243,7 +252,9 @@ management:
         include: health,info,prometheus,metrics
   endpoint:
     health:
-      show-details: always
+      # when-authorized：仅登录用户可查看 DB/Redis/磁盘等健康细节，
+      # 避免 /health（鉴权白名单内）对未认证请求泄露内部组件状态
+      show-details: when-authorized
   metrics:
     export:
       prometheus:

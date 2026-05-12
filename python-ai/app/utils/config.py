@@ -88,6 +88,22 @@ class Config:
     # fail-closed when every real embedding provider is unavailable.
     EMBEDDING_ALLOW_FALLBACK = os.getenv("EMBEDDING_ALLOW_FALLBACK", "false").lower() == "true"
 
+    # LLM HTTP client (P3): shared connection pool + bounded retry/backoff.
+    # timeout = per-request upstream timeout; max_retries = additional attempts
+    # after the first call; retry_backoff = base seconds for exponential backoff
+    # (doubles per attempt, plus jitter).
+    LLM_HTTP_TIMEOUT_SECONDS = float(os.getenv("LLM_HTTP_TIMEOUT_SECONDS", "120"))
+    LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "3"))
+    LLM_RETRY_BACKOFF_SECONDS = float(os.getenv("LLM_RETRY_BACKOFF_SECONDS", "0.5"))
+
+    # Non-streaming LLM response cache (P2): exact-match on
+    # (model, temperature, max_tokens, normalized messages) reuses the answer
+    # within the TTL so repeated FAQ-style queries do not re-bill every time.
+    # Set to 0 to disable (never caches).
+    LLM_RESPONSE_CACHE_TTL_SECONDS = float(
+        os.getenv("LLM_RESPONSE_CACHE_TTL_SECONDS", "300")
+    )
+
     # Hybrid retrieval configuration.  RRF combines ranks rather than the
     # incomparable raw scores returned by vector and keyword search.
     RAG_HYBRID_ENABLED = os.getenv("RAG_HYBRID_ENABLED", "true").lower() == "true"
@@ -185,3 +201,27 @@ class Config:
 
 
 config = Config()
+
+
+def _validate_config() -> None:
+    """Fail fast on unsafe configuration in production / staging.
+
+    Development and tests are deliberately lenient (many tests build the
+    config without secrets), but a worker deployed to production/staging must
+    fail closed rather than silently serve with a missing internal token or a
+    vector-store mode that is only meant for single-process local runs.
+    """
+    if config.SERVER_ENV not in ("production", "staging"):
+        return
+    if not config.INTERNAL_API_TOKEN:
+        raise RuntimeError(
+            "PYTHON_AI_INTERNAL_TOKEN is required in production/staging; refusing to start."
+        )
+    if config.VECTOR_STORE_MODE != "cluster":
+        raise RuntimeError(
+            "VECTOR_STORE_MODE must be 'cluster' in production/staging; "
+            "'lite' is single-process only."
+        )
+
+
+_validate_config()

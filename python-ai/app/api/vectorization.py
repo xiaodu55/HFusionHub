@@ -385,22 +385,41 @@ async def _process_document_background(
         if await asyncio.to_thread(create_collection) is None:
             raise MilvusException("Vector store is unavailable; cannot initialise the document index")
 
-        # Step 4: Generate embeddings and store
+        # Step 4: Generate embeddings and store.
+        # 默认路径按批调用 EmbeddingService.generate_batch（一次网络往返生成
+        # 多条向量，Ollama /api/embed 原生支持），吞吐远高于逐条串行；
+        # 仅当调用方显式指定了单模型时回退逐条生成以保持行为兼容。
         chunks_with_embeddings = []
-        for i, chunk in enumerate(chunks):
-            embedding = await _generate_embedding(chunk.content, model=embedding_model)
-            chunk_dict = chunk.to_dict()
-            chunk_dict['embedding'] = embedding
-            chunks_with_embeddings.append(chunk_dict)
-            if (i + 1) % 5 == 0 or i + 1 == len(chunks):
-                logger.info(f"[Vectorization] Processed {i + 1}/{len(chunks)} chunks")
-                embedding_progress = 40 + int(((i + 1) / max(len(chunks), 1)) * 45)
+        batch_size = 16
+        service = get_embedding_service()
+        for start in range(0, len(chunks), batch_size):
+            batch = chunks[start:start + batch_size]
+            if embedding_model:
+                embeddings = [
+                    await service.generate(c.content, model=embedding_model)
+                    for c in batch
+                ]
+            else:
+                embeddings = await service.generate_batch([c.content for c in batch])
+            if len(embeddings) != len(batch):
+                raise MilvusException(
+                    f"Embedding provider returned {len(embeddings)} vectors for "
+                    f"{len(batch)} chunks"
+                )
+            for i, chunk in enumerate(batch):
+                chunk_dict = chunk.to_dict()
+                chunk_dict['embedding'] = embeddings[i]
+                chunks_with_embeddings.append(chunk_dict)
+            done = start + len(batch)
+            if done % 5 == 0 or done == len(chunks):
+                logger.info(f"[Vectorization] Processed {done}/{len(chunks)} chunks")
+                embedding_progress = 40 + int((done / max(len(chunks), 1)) * 45)
                 _update_status(
                     "PROCESSING",
-                    f"Generated {i + 1}/{len(chunks)} embeddings...",
+                    f"Generated {done}/{len(chunks)} embeddings...",
                     stage="embedding",
                     progress=embedding_progress,
-                    processed_chunks=i + 1,
+                    processed_chunks=done,
                     total_chunks=len(chunks),
                 )
 

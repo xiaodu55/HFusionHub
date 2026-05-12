@@ -3,10 +3,11 @@ Ollama LLM Implementation
 Uses local Ollama API for chat completion
 """
 
-import httpx
-from typing import List, AsyncGenerator
+import json
+from typing import List, AsyncGenerator, Optional
 
 from .base import BaseLLM, ChatMessage, LLMResponse
+from .http_client import get_shared_client, post_with_retry
 
 
 class OllamaLLM(BaseLLM):
@@ -15,10 +16,21 @@ class OllamaLLM(BaseLLM):
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
-        model: str = "qwen2.5:latest"
+        model: str = "qwen2.5:latest",
+        *,
+        timeout: Optional[float] = None,
+        max_retries: Optional[int] = None,
+        retry_backoff: Optional[float] = None,
     ):
+        from app.utils.config import config
+
         self.base_url = base_url
         self.model = model
+        # Connection/timeout/retry knobs default to the environment-config
+        # values; per-instance overrides let request-scoped providers tune.
+        self.timeout = timeout if timeout is not None else config.LLM_HTTP_TIMEOUT_SECONDS
+        self.max_retries = max_retries if max_retries is not None else config.LLM_MAX_RETRIES
+        self.retry_backoff = retry_backoff if retry_backoff is not None else config.LLM_RETRY_BACKOFF_SECONDS
         self._available = False
 
     async def chat(
@@ -45,13 +57,17 @@ class OllamaLLM(BaseLLM):
             }
         }
 
-        async with httpx.AsyncClient(timeout=120) as client:
-            response = await client.post(
-                f"{self.base_url}/api/chat",
-                json=payload
-            )
-            response.raise_for_status()
-            data = response.json()
+        client = get_shared_client(owner="ollama", timeout=self.timeout)
+        response = await post_with_retry(
+            client,
+            f"{self.base_url}/api/chat",
+            json=payload,
+            timeout=self.timeout,
+            max_retries=self.max_retries,
+            backoff=self.retry_backoff,
+        )
+        response.raise_for_status()
+        data = response.json()
 
         # Extract response
         content = data.get("message", {}).get("content", "")
@@ -88,31 +104,36 @@ class OllamaLLM(BaseLLM):
             }
         }
 
-        async with httpx.AsyncClient(timeout=120) as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/api/chat",
-                json=payload
-            ) as response:
-                response.raise_for_status()
+        # Streaming deliberately does not retry (see deepseek_llm.chat_stream);
+        # the shared client still gives connection reuse on the stream path.
+        client = get_shared_client(owner="ollama", timeout=self.timeout)
+        async with client.stream(
+            "POST",
+            f"{self.base_url}/api/chat",
+            json=payload,
+            timeout=self.timeout,
+        ) as response:
+            response.raise_for_status()
 
-                import json
-                async for line in response.aiter_lines():
-                    if line.strip():
-                        try:
-                            data = json.loads(line)
-                            content = data.get("message", {}).get("content", "")
-                            if content:
-                                yield content
-                        except json.JSONDecodeError:
-                            continue
+            async for line in response.aiter_lines():
+                if line.strip():
+                    try:
+                        data = json.loads(line)
+                        content = data.get("message", {}).get("content", "")
+                        if content:
+                            yield content
+                    except json.JSONDecodeError:
+                        continue
 
     def is_available(self) -> bool:
-        """Check if Ollama is available"""
-        try:
-            import httpx
-            response = httpx.get(f"{self.base_url}/api/tags", timeout=5)
-            self._available = response.status_code == 200
-        except Exception:
-            self._available = False
+        """Check if Ollama is available.
+
+        Delegates to the package-level thread-pooled, TTL-cached probe
+        (``app.core.llm._is_ollama_available``) so a probe never blocks the
+        event loop with a synchronous HTTP call. The late import avoids a
+        circular import between this module and the package ``__init__``.
+        """
+        from app.core.llm import _is_ollama_available
+
+        self._available = _is_ollama_available(self.base_url)
         return self._available

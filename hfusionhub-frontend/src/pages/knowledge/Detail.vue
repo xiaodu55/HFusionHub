@@ -24,7 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { ArrowLeft, Plus, FileText, Trash2, Upload, Play, Eye, Loader2, RefreshCw, RefreshCcw, Power, PowerOff, MessageSquare, Share2, Search, UserPlus, X } from 'lucide-vue-next'
+import { ArrowLeft, FileText, Trash2, Upload, Play, Eye, Loader2, RefreshCw, RefreshCcw, Power, PowerOff, MessageSquare, Share2, Search, UserPlus, X } from 'lucide-vue-next'
 import { formatDateTime } from '@/utils/date'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -45,7 +45,6 @@ const {
   loadingModels,
   processingStatus,
   openModelDialog,
-  pollDocumentStatus,
   startVectorization,
   resetDocument,
   trackProcessingDocuments,

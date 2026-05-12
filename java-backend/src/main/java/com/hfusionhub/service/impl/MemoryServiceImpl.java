@@ -54,13 +54,16 @@ public class MemoryServiceImpl implements MemoryService {
     @Override
     public List<MemoryEntry> listByUser(String type, Long conversationId) {
         Long userId = JwtUtils.getCurrentUserId();
+        // 上限 200 条：按重要性/时间排序后的记忆列表对个人用户已足够，
+        // 防止单用户记忆无限增长导致每次全量返回拖慢接口。
         return memoryEntryMapper.selectList(new LambdaQueryWrapper<MemoryEntry>()
                 .eq(MemoryEntry::getUserId, userId)
                 .eq(StringUtils.hasText(type), MemoryEntry::getType, type)
                 .eq(conversationId != null, MemoryEntry::getConversationId, conversationId)
                 .and(w -> w.isNull(MemoryEntry::getExpiresAt).or().gt(MemoryEntry::getExpiresAt, LocalDateTime.now()))
                 .orderByDesc(MemoryEntry::getImportance)
-                .orderByDesc(MemoryEntry::getCreatedAt));
+                .orderByDesc(MemoryEntry::getCreatedAt)
+                .last("LIMIT 200"));
     }
 
     @Override

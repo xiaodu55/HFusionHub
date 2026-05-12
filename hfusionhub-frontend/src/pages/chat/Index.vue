@@ -6,7 +6,7 @@ import * as knowledgeBaseApi from '@/api/knowledgeBase'
 import * as promptTemplateApi from '@/api/promptTemplate'
 import type { Conversation, KnowledgeBase } from '@/api/types'
 import type { PromptTemplate } from '@/api/promptTemplate'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -34,6 +34,7 @@ import {
 } from 'lucide-vue-next'
 import { formatDateTime } from '@/utils/date'
 import { useToast } from '@/composables/useToast'
+import { debounce } from '@/utils/async'
 import EmptyState from '@/components/EmptyState.vue'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -60,6 +61,9 @@ const total = ref(0)
 const selectedKbId = ref<number>(0) // 0 = 全部知识库
 
 const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
+
+// 请求序号：快速翻页/搜索时丢弃过期响应，防止旧响应覆盖新数据（F1）
+let loadSeq = 0
 const filteredConversations = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
   if (!keyword) return conversations.value
@@ -72,6 +76,7 @@ const filteredConversations = computed(() => {
 })
 
 const loadConversations = async () => {
+  const seq = ++loadSeq
   loading.value = true
   loadError.value = false
   try {
@@ -81,16 +86,21 @@ const loadConversations = async () => {
       title: searchQuery.value.trim() || undefined,
       knowledgeBaseId: selectedKbId.value > 0 ? selectedKbId.value : undefined,
     })
+    if (seq !== loadSeq) return // 过期响应（用户已翻页/改搜索词）
     conversations.value = res.data.records
     total.value = res.data.total
   } catch (error) {
     console.error('加载对话列表失败:', error)
+    if (seq !== loadSeq) return
     loadError.value = true
     toast.error('加载对话列表失败，请检查网络连接后重试')
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
+
+// 输入即搜索（300ms 防抖），避免每敲一个字符都发一次请求
+const debouncedFilterChange = debounce(() => handleFilterChange(), 300)
 
 const handleFilterChange = () => {
   currentPage.value = 1
@@ -235,6 +245,7 @@ onMounted(() => {
             v-model="searchQuery"
             placeholder="搜索对话名称、知识库或内容"
             class="pl-10"
+            @input="debouncedFilterChange"
             @keyup.enter="handleFilterChange"
           />
         </div>

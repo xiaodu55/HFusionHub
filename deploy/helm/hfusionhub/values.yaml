@@ -103,11 +103,27 @@ vectorStore:
   port: "19530"
   collection: hfusionhub_chunks
 
+# etcd is required by Milvus standalone (v2.4.6+). The embedded etcd in
+# v2.4.0 was deprecated; v2.6.6 requires an external etcd endpoint.
+etcd:
+  enabled: true
+  image: quay.io/coreos/etcd:v3.5.5
+  port: 2379
+  persistence:
+    size: 5Gi
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
 # Bundled Milvus standalone. Set milvus.enabled=false and point
 # vectorStore.host at an externally-managed Milvus service when required.
 milvus:
   enabled: true
-  image: milvusdb/milvus:v2.4.0
+  image: milvusdb/milvus:v2.6.6
   port: 19530
   persistence:
     size: 20Gi
