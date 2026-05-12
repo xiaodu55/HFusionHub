@@ -25,8 +25,14 @@
 | P3 | LLM 共享连接池 + 429/5xx 指数退避重试（`llm/http_client.py`，DeepSeek/Ollama 共用；**排除** OpenAI 兼容接线） | ✅ 已完成（+6 专项测试） |
 | P4 | `tools/registry.py` 远程插件规格同步 HTTP 卸载到线程池（不再阻塞事件循环） | ✅ 已完成 |
 | P5 | `postprocessor.py` 去重 O(n²)→近线性：MinHash + LSH banding + shingle token Jaccard（精确指纹 + 近邻验证） | ✅ 已完成（+4 专项测试） |
+| **P6** | **BM25 语料缓存**：`query_router.py` KeywordChannel 按 `(id(store), kb_id)` 缓存倒排索引 / 文档列表 / 平均长度（LRU 16 项），避免每次 search 重新分词全语料 | ✅ 已完成（2026-08-20） |
+| **P7** | **流式多 Agent 证据门控**：`multi_agent_runtime.py` 新增 `_parse_stream_event` / `_validate_sources`，在第一个文本 chunk 前校验 sources，防止跨 KB 引用绕过非流式校验 | ✅ 已完成（+3 流式测试） |
+| **P8** | **文件缓存**：`milvus_store.py` lite 模式按 `(mtime_ns, size)` 缓存 co-store JSON + 线程锁；`scoped_graph.py` 实例级缓存 + `_write` 后显式清除 | ✅ 已完成（2026-08-20） |
+| **P9** | **LLM 响应缓存**：`deepseek_llm.py` 模块级 OrderedDict LRU（上限 1024），key=(model, temp, max_tokens, api_key, messages)，TTL=300s（`LLM_RESPONSE_CACHE_TTL_SECONDS`，=0 禁用）；`config.py` 新增 `_validate_config()` 生产校验 | ✅ 已完成（+3 缓存测试） |
 | I1 | 生产/开发 compose 全服务资源限制（对齐 Helm limits）+ `minio:latest` 锁版本 | ✅ 已完成 |
+| **I6** | **监控告警指标名修正**：`alert_rules.yml` 修正 `_total_total` 双重复、histogram `_bucket` → summary `{quantile=...}`、无 status 标签的 401/403 告警；新增 MySQL/Redis/Milvus 告警（up==0、连接数、慢查询、内存、磁盘） | ✅ 已完成（2026-08-20） |
 | F1 | 请求竞态：`document/Index.vue` / `chat/Index.vue` / `rag/Index.vue` 请求序号 guard + 搜索输入 debounce | ✅ 已完成 |
+| **F2** | **前端工程化**：Vite manualChunks 分包（72 chunks）、ESLint + TS 收紧（`noUnusedLocals/Parameters`）、SSE 解析统一（`consumeSseJsonStream`）、列表服务端分页（knowledge/document/chat/rag） | ✅ 已完成（2026-08-20） |
 
 ---
 

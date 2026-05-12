@@ -230,6 +230,17 @@ groups:
           summary: "Java heap usage above 90%"
           description: "Java heap memory usage is {{ $value | humanizePercentage }}."
 
+      - alert: MySQLDown
+        expr: |
+          mysql_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          slo: health
+        annotations:
+          summary: "MySQL is DOWN"
+          description: "MySQL has been unreachable for over 1 minute."
+
       - alert: MySQLConnectionsHigh
         expr: |
           mysql_global_status_threads_connected
@@ -243,6 +254,28 @@ groups:
           summary: "MySQL connection usage above 80%"
           description: "MySQL has {{ $value | humanizePercentage }} of its max connections in use."
 
+      - alert: MySQLSlowQueries
+        expr: |
+          rate(mysql_global_status_slow_queries[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          slo: health
+        annotations:
+          summary: "MySQL slow query rate exceeds 5/s"
+          description: "Slow queries detected: {{ $value | printf \"%.1f\" }}/s over 5 minutes."
+
+      - alert: RedisDown
+        expr: |
+          redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          slo: health
+        annotations:
+          summary: "Redis is DOWN"
+          description: "Redis has been unreachable for over 1 minute."
+
       - alert: RedisMemoryHigh
         expr: |
           redis_memory_used_bytes / (redis_memory_max_bytes > 0)
@@ -254,6 +287,30 @@ groups:
         annotations:
           summary: "Redis memory usage above 90%"
           description: "Redis used {{ $value | humanizePercentage }} of its maxmemory."
+
+      - alert: RedisEvictedKeysHigh
+        expr: |
+          rate(redis_evicted_keys_total[5m]) > 10
+        for: 3m
+        labels:
+          severity: warning
+          slo: health
+        annotations:
+          summary: "Redis eviction rate exceeds 10 keys/s"
+          description: "Keys are being evicted at {{ $value | printf \"%.1f\" }}/s — consider increasing memory."
+
+      - alert: MilvusSearchLatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            rate(milvus_proxy_sq_latency_bucket{msg_type="Search"}[5m])
+          ) > 500
+        for: 5m
+        labels:
+          severity: warning
+          slo: health
+        annotations:
+          summary: "Milvus P95 search latency exceeds 500ms"
+          description: "Search P95 is {{ $value | humanizeDuration }} — RAG retrieval may be slow."
 
   # ── SLO: Queue & Async Backlog ────────────────────────────────────────────
   - name: hfusionhub_slo_queue
