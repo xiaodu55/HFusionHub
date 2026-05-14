@@ -65,7 +65,7 @@ public class VectorizationServiceImpl implements VectorizationService {
     private final ObjectMapper objectMapper;
     private final UsageLedgerService usageLedgerService;
 
-    @Value("${python-ai.engine.url:http://localhost:8001}")
+    @Value("${python-ai.engine.url:http://localhost:9000}")
     private String pythonEngineUrl;
 
     @Value("${python-ai.callback-base-url:http://localhost:8080/api}")

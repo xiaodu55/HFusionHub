@@ -47,6 +47,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -82,6 +83,10 @@ public class ConversationServiceImpl implements ConversationService {
     private static final int REQUEST_ID_MAX_LENGTH = 64;
     public static final String ASSISTANT_REQUEST_SUFFIX = ":assistant";
     private final ConcurrentMap<String, StreamCancellation> activeStreamRequests = new ConcurrentHashMap<>();
+
+    /** AI 服务健康检查地址（用于用户可见的错误提示，避免硬编码漂移） */
+    @Value("${ai-service.base-url:http://localhost:9000}")
+    private String aiBaseUrl;
 
     /**
      * C2: 知识库可读校验 — 所有者或已被共享（只读协作）。
@@ -781,7 +786,7 @@ public class ConversationServiceImpl implements ConversationService {
         }
         if (error instanceof org.springframework.web.client.ResourceAccessException
                 || (message != null && message.contains("AI service is unavailable"))) {
-            return "AI 服务暂时不可用：Python AI 服务未启动或无法连接。请确认 http://localhost:9000/health 可访问后重试。";
+            return "AI 服务暂时不可用：Python AI 服务未启动或无法连接。请确认 " + aiBaseUrl + "/health 可访问后重试。";
         }
         return "抱歉，AI 服务暂时不可用。请稍后重试；若问题持续，请检查 Java 后端日志中的 AI 服务调用错误。";
     }

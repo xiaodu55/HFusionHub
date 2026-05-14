@@ -103,8 +103,8 @@
 
 ### P2 — 卫生
 
-- **硬编码漂移**：`localhost:9000` vs `localhost:8001` 默认值不一致（`AiClient` / `VectorizationServiceImpl`）、[ConversationServiceImpl](../java-backend/src/main/java/com/hfusionhub/service/impl/ConversationServiceImpl.java#L784) 错误文案硬编码 `http://localhost:9000/health`、`uploads/documents` 相对路径 → 统一为配置项。
-- **空壳方法**：`OrphanCleanupScheduler.retryLongFailedDeletionTasks`（600_000 间隔的空实现）→ 移除或实现。
+- **硬编码漂移** ✅ 已处理（2026-08-20）：`VectorizationServiceImpl` `python-ai.engine.url` 默认值 `localhost:8001` → 统一为 `9000`（与 application.yml 一致）；[ConversationServiceImpl](../java-backend/src/main/java/com/hfusionhub/service/impl/ConversationServiceImpl.java#L784) 错误文案硬编码 `http://localhost:9000/health` → 改为读取 `ai-service.base-url` 配置。`uploads/documents` 相对路径暂保留（单实例部署语义）。
+- **空壳方法** ✅ 已处理（2026-08-20）：`OrphanCleanupScheduler.retryLongFailedDeletionTasks` 空实现已移除（重试逻辑已由 `DeletionTaskScheduler` + `DeletionService.markFailed` 的 RETRYING 状态覆盖）。
 
 ---
 

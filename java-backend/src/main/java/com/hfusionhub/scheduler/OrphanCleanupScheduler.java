@@ -92,13 +92,4 @@ public class OrphanCleanupScheduler {
         }
     }
 
-    /**
-     * 每10分钟重试可重试的删除任务（定时补偿）
-     * 注意：DeletionTaskScheduler 已每30秒处理待处理任务，此处处理长时间 FAILED 的重试
-     */
-    @Scheduled(fixedDelay = 600_000)
-    public void retryLongFailedDeletionTasks() {
-        // 重试逻辑已由 DeletionTaskScheduler + DeletionService.markFailed 的 RETRYING 状态覆盖
-        // 此方法保留用于未来扩展：如超长时间 FAILED 任务的人工介入告警
-    }
 }
