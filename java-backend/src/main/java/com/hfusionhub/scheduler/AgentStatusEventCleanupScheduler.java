@@ -1,5 +1,6 @@
 package com.hfusionhub.scheduler;
 
+import com.hfusionhub.common.lock.SchedulerLock;
 import com.hfusionhub.service.AgentStatusEventService;
 import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,7 @@ public class AgentStatusEventCleanupScheduler {
 
     private final AgentStatusEventService statusEventService;
 
+    @SchedulerLock("agent-status-event-cleanup")
     @Scheduled(cron = "0 30 3 * * ?")
     public void cleanupEvents() {
         try {

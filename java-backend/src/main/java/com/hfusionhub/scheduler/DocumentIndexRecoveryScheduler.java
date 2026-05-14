@@ -1,5 +1,6 @@
 package com.hfusionhub.scheduler;
 
+import com.hfusionhub.common.lock.SchedulerLock;
 import com.hfusionhub.service.VectorizationService;
 import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +16,7 @@ public class DocumentIndexRecoveryScheduler {
 
     private final VectorizationService vectorizationService;
 
+    @SchedulerLock("document-index-recovery")
     @Scheduled(fixedDelayString = "${rag.index.recovery-delay-ms:300000}")
     public void recoverStaleJobs() {
         int recovered = TenantContext.runAsSystem(() -> vectorizationService.recoverStaleIndexJobs());

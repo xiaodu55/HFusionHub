@@ -231,6 +231,15 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
             }
         }
 
+        // Batch-fetch all steps for the page's runs (instead of per-run selectByRunId N+1)
+        Map<Long, List<AgentStep>> stepsByRunId = new HashMap<>();
+        List<Long> runIds = runs.stream().map(AgentRun::getId).distinct().toList();
+        if (!runIds.isEmpty()) {
+            for (AgentStep step : stepMapper.selectByRunIds(runIds)) {
+                stepsByRunId.computeIfAbsent(step.getRunId(), k -> new ArrayList<>()).add(step);
+            }
+        }
+
         List<AgentMetricsSummaryDTO> summaries = runs.stream()
                 .map(run -> {
                     AgentTask task = taskMap.get(run.getTaskId());
@@ -245,7 +254,7 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
                     }
 
                     // count sources for this run
-                    List<AgentStep> steps = stepMapper.selectByRunId(run.getId());
+                    List<AgentStep> steps = stepsByRunId.getOrDefault(run.getId(), List.of());
                     int sourcesCount = steps.stream()
                             .filter(s -> s.getSources() != null)
                             .mapToInt(s -> s.getSources().size())

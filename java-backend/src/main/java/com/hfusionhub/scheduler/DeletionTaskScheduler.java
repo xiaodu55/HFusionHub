@@ -1,5 +1,6 @@
 package com.hfusionhub.scheduler;
 
+import com.hfusionhub.common.lock.SchedulerLock;
 import com.hfusionhub.entity.DeletionTask;
 import com.hfusionhub.service.DeletionService;
 import com.hfusionhub.tenant.TenantContext;
@@ -23,6 +24,7 @@ public class DeletionTaskScheduler {
 
     private final DeletionService deletionService;
 
+    @SchedulerLock("deletion-task")
     @Scheduled(fixedDelay = 30_000)
     public void processPendingTasks() {
         TenantContext.runAsSystem(() -> doProcessPendingTasks());

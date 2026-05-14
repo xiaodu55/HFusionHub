@@ -1,5 +1,6 @@
 package com.hfusionhub.scheduler;
 
+import com.hfusionhub.common.lock.SchedulerLock;
 import com.hfusionhub.entity.UsageReservation;
 import com.hfusionhub.mapper.UsageReservationMapper;
 import com.hfusionhub.quota.UsageMeter;
@@ -34,6 +35,7 @@ public class PluginQuotaReservationReaper {
     @Value("${hfusionhub.quota.plugin-reservation-timeout-seconds:300}")
     private long pluginReservationTimeoutSeconds;
 
+    @SchedulerLock("plugin-quota-reservation-reaper")
     @Scheduled(fixedDelayString = "${hfusionhub.quota.plugin-reservation-reaper-ms:60000}")
     public void releaseStaleReservations() {
         LocalDateTime staleBefore = LocalDateTime.now().minusSeconds(pluginReservationTimeoutSeconds);

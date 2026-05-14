@@ -1,5 +1,6 @@
 package com.hfusionhub.scheduler;
 
+import com.hfusionhub.common.lock.SchedulerLock;
 import com.hfusionhub.entity.Document;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.entity.PromptTemplate;
@@ -28,6 +29,7 @@ public class RecycleBinCleanupScheduler {
     private final PromptTemplateMapper promptTemplateMapper;
     private final DeletionService deletionService;
 
+    @SchedulerLock("recycle-bin-cleanup")
     @Scheduled(fixedDelayString = "${document.recycle.cleanup-delay-ms:3600000}")
     public void scheduleExpiredDocuments() {
         TenantContext.runAsSystem(() -> {

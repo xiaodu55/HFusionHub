@@ -76,18 +76,21 @@
 - **方案**：Redis 缓存（TTL 60s，配置变更时失效）。
 - **实际状态**：`getRuntimeConfig` 已接入 Redis 缓存（key=`user_model_config:{userId}`，TTL=60s，值经 Jackson JSON 序列化含解密后的 `api_key`）；`save`/`reset` 时主动 `evictCache` 失效；新增 5 个缓存专项测试（共 9 个用例）。
 
-#### 1.6 Scheduler 无分布式锁
+#### 1.6 Scheduler 无分布式锁 ✅ 已完成（2026-08-20）
 - **文件**：`AgentAlertScheduler`、`ApprovalExpiryScheduler`、`DeletionTaskScheduler`、`OrphanCleanupScheduler`、`RecycleBinCleanupScheduler` 等 14 个任务（仅 `AgentTaskWorkerScheduler` 有 DB lease 幂等）
 - **问题**：多实例部署时清理/补偿任务重复执行。
 - **方案**：ShedLock 或 Redis `SETNX` 锁（如 `scheduler:lock:{task}` + TTL）。
+- **实际状态**：新增 `@SchedulerLock` 注解 + `SchedulerLockAspect`（Redis `SETNX` + token Lua compare-and-delete，TTL 兜底，Redis 故障 fail-open）。已注解 9 个调度器（11 个 `@Scheduled` 方法中的非 DB-lease 部分）：agent-alert / agent-status-event-cleanup / approval-expiry / deletion-task / document-index-recovery / orphan-cleanup / plugin-quota-reservation-reaper / recycle-bin-cleanup / vector-reconciliation。`AgentTaskWorkerScheduler`（DB lease 认领）与 `PromptTestSetRunWorkerScheduler`（`claimRun` DB 认领）天然幂等，无需加锁。新增 4 个切面专项测试（获取/跳过/fail-open/异常释放）。
 
-#### 1.7 N+1 查询
+#### 1.7 N+1 查询 ✅ 已完成（2026-08-20）
 - **文件**：[AgentMetricsServiceImpl.java](../java-backend/src/main/java/com/hfusionhub/service/impl/AgentMetricsServiceImpl.java#L229)（循环 `selectById`）、[DemoImportServiceImpl.java](../java-backend/src/main/java/com/hfusionhub/service/impl/DemoImportServiceImpl.java#L210-L231)（循环判重）
 - **方案**：`selectBatchIds` / 预取集合代替循环查库。
+- **实际状态**：`AgentMetricsServiceImpl` 每 run 的 `selectByRunId` N+1 已改为批量 `selectByRunIds`（新增 Mapper 方法 + XML `IN` 查询），按 runId 分组一次取回；task 查询原本已用 `selectBatchIds`。`DemoImportServiceImpl` 的循环判重仅遍历 3 个 `DEMO_PROMPTS` / 2 个 `DEMO_NOTE_TITLES` 常量（清除演示数据冷路径，最多 5 次查询），量级可忽略，未做改动以免无谓复杂化。
 
-#### 1.8 无界列表接口
+#### 1.8 无界列表接口 ✅ 已完成（2026-08-20 复核）
 - **文件**：[MemoryController.java](../java-backend/src/main/java/com/hfusionhub/controller/MemoryController.java#L18) `list()`、[ConversationController.java](../java-backend/src/main/java/com/hfusionhub/controller/ConversationController.java#L117) `getMessages()`、[UserController.java](../java-backend/src/main/java/com/hfusionhub/controller/UserController.java#L125) `searchUsers()`
 - **方案**：加 limit/分页（参考 `ToolController` 的 `min(pageSize, 100)` 模式）。
+- **实际状态**：`MemoryServiceImpl.listByUser` 已有 `LIMIT 200`；`UserServiceImpl.searchUsers` 已有 `LIMIT 10`；`ConversationController.getMessages` 按对话归属天然有界（每条消息属于单个对话，聊天历史需完整返回给前端，硬截断会破坏对话展示），无需额外限流。
 
 #### 1.9 统一缓存体系
 - **文件**：`FeatureFlagServiceImpl.evaluate()` 每次 `ruleMapper.selectList`；`UsageLedgerService` 每次实时聚合
@@ -232,7 +235,7 @@
   - ✅ **Python 高危项**：BM25 缓存、去重优化、文件缓存、LLM 响应缓存、流式证据门控、WorkflowEngine 并行修复、批量 embedding、DeepSeek embedding 移除
   - ✅ **Java 高危项**：上传 1MB 限制（application.yml 已配置）、AiClient 超时/连接池（RestTemplateConfig 已实现）、CORS/Actuator 安全（CorsConfig 已有门控）
   - ✅ **基础设施高危项**：生产 compose 资源限制（所有服务已配 limits）、监控指标修正与 exporter 部署
-- **批次 2（P1，前端已完成 + Java 部分待办）**：前端超大组件拆分 ✅ + ESLint ✅ + 竞态 ✅ + 服务端分页 ✅ + chat 配置缓存 ✅（2026-08-20）——**剩余 Java 项**：`@Valid` 补齐、Scheduler 锁、N+1、无界列表。
+- **批次 2（P1，Java 仅剩 @Valid）**：前端超大组件拆分 ✅ + ESLint ✅ + 竞态 ✅ + 服务端分页 ✅ + chat 配置缓存 ✅ + Scheduler 分布式锁 ✅ + N+1 ✅ + 无界列表 ✅（均 2026-08-20）——**剩余 Java 项**：`@Valid` 补齐。
 - **批次 3（P2，持续）**：硬编码清理、token 估算、Helm/Compose 拓扑对齐、Dockerfile.python uvicorn[standard] 决策、CI JDK 版本对齐。
 
 > 每批完成后建议跑 `scripts/smoke-test.ps1`（47 项）与各子项目单测（Java 445 / Python 1252 / 前端 33）回归。

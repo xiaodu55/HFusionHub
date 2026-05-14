@@ -1,5 +1,6 @@
 package com.hfusionhub.scheduler;
 
+import com.hfusionhub.common.lock.SchedulerLock;
 import com.hfusionhub.entity.Document;
 import com.hfusionhub.mapper.DocumentMapper;
 import com.hfusionhub.tenant.TenantContext;
@@ -34,6 +35,7 @@ public class OrphanCleanupScheduler {
     /**
      * 每小时执行一次孤儿文件清理
      */
+    @SchedulerLock("orphan-cleanup")
     @Scheduled(fixedDelay = 3_600_000)
     public void cleanupOrphanFiles() {
         TenantContext.runAsSystem(() -> doCleanupOrphanFiles());

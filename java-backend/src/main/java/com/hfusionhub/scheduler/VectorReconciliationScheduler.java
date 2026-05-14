@@ -1,5 +1,6 @@
 package com.hfusionhub.scheduler;
 
+import com.hfusionhub.common.lock.SchedulerLock;
 import com.hfusionhub.service.VectorReconciliationService;
 import com.hfusionhub.tenant.TenantContext;
 import java.util.Map;
@@ -23,6 +24,7 @@ public class VectorReconciliationScheduler {
 
     private final VectorReconciliationService reconciliationService;
 
+    @SchedulerLock("vector-reconciliation")
     @Scheduled(cron = "${vector-reconciliation.cron:0 0 3 * * *}")
     public void runPeriodicReconciliation() {
         Map<String, Object> summary = TenantContext.runAsSystem(reconciliationService::reconcileAll);

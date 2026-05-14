@@ -21,6 +21,11 @@ public interface AgentStepMapper extends BaseMapper<AgentStep> {
     List<AgentStep> selectByRunId(@Param("runId") Long runId);
 
     /**
+     * 批量按多个运行ID查询所有步骤（避免每 run 一次查询的 N+1）
+     */
+    List<AgentStep> selectByRunIds(@Param("runIds") List<Long> runIds);
+
+    /**
      * 批量插入步骤（非流式场景）
      */
     int insertBatch(@Param("steps") List<AgentStep> steps);

@@ -29,6 +29,16 @@
         ORDER BY sequence ASC
     </select>
 
+    <select id="selectByRunIds" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM agent_step
+        WHERE run_id IN
+        <foreach collection="runIds" item="runId" open="(" separator="," close=")">
+            #{runId}
+        </foreach>
+        ORDER BY run_id ASC, sequence ASC
+    </select>
+
     <select id="countByRunId" resultType="int">
         SELECT COUNT(*) FROM agent_step WHERE run_id = #{runId}
     </select>

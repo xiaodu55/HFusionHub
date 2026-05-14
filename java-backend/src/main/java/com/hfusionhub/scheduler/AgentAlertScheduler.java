@@ -1,5 +1,6 @@
 package com.hfusionhub.scheduler;
 
+import com.hfusionhub.common.lock.SchedulerLock;
 import com.hfusionhub.service.AgentAlertService;
 import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +23,7 @@ public class AgentAlertScheduler {
     /**
      * 每 5 分钟执行一次告警检查。
      */
+    @SchedulerLock("agent-alert")
     @Scheduled(fixedRate = 300_000)
     public void runAlertChecks() {
         log.debug("Starting scheduled agent alert checks...");

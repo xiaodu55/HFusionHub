@@ -1,5 +1,6 @@
 package com.hfusionhub.scheduler;
 
+import com.hfusionhub.common.lock.SchedulerLock;
 import com.hfusionhub.service.AgentTaskService;
 import com.hfusionhub.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,7 @@ public class ApprovalExpiryScheduler {
 
     private final AgentTaskService agentTaskService;
 
+    @SchedulerLock("approval-expiry")
     @Scheduled(fixedDelay = 60_000)
     public void expireApprovals() {
         try {
