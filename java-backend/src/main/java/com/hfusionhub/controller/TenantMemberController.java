@@ -5,14 +5,17 @@ import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.common.utils.JwtUtils;
+import com.hfusionhub.dto.TenantMemberAddDTO;
 import com.hfusionhub.entity.TenantMember;
 import com.hfusionhub.service.TenantService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -61,10 +64,11 @@ public class TenantMemberController {
 
     @PostMapping
     @Operation(summary = "添加租户成员")
-    public R<TenantMember> addMember(@PathVariable Long tenantId, @RequestBody Map<String, Object> body) {
+    public R<TenantMember> addMember(
+            @PathVariable Long tenantId, @Valid @RequestBody TenantMemberAddDTO body) {
         requireTenantAdmin(tenantId);
-        Long userId = Long.valueOf(body.get("userId").toString());
-        String role = (String) body.getOrDefault("role", "member");
+        Long userId = body.getUserId();
+        String role = StringUtils.hasText(body.getRole()) ? body.getRole() : "member";
         if (!ALLOWED_ROLES.contains(role)) {
             throw new BusinessException(StatusCode.BAD_REQUEST, "无效的角色: " + role + "，允许值: " + ALLOWED_ROLES);
         }

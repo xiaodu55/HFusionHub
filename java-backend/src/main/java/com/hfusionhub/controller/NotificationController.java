@@ -6,6 +6,7 @@ import com.hfusionhub.common.result.R;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.entity.SystemNotice;
 import com.hfusionhub.mapper.SystemNoticeMapper;
+import jakarta.validation.Valid;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -98,7 +99,7 @@ public class NotificationController {
 
     @PostMapping("/admin")
     @SaCheckRole("admin")
-    public R<SystemNotice> adminCreate(@RequestBody SystemNotice notice) {
+    public R<SystemNotice> adminCreate(@Valid @RequestBody SystemNotice notice) {
         String level = notice.getLevel() == null ? "info" : notice.getLevel().toLowerCase();
         String scope = notice.getScope() == null ? "all" : notice.getScope().toLowerCase();
         if (!ALLOWED_LEVELS.contains(level)) {

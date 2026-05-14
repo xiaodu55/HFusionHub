@@ -1,6 +1,7 @@
 package com.hfusionhub.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import jakarta.validation.constraints.NotBlank;
 import java.time.LocalDateTime;
 import lombok.Data;
 
@@ -13,8 +14,10 @@ public class MemoryEntry {
     private Long userId;
 
     /** conversation_summary | entity_fact | user_preference */
+    @NotBlank(message = "记忆类型不能为空")
     private String type;
 
+    @NotBlank(message = "记忆内容不能为空")
     private String content;
 
     /** JSON array of entity names */

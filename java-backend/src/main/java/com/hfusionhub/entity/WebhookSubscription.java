@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.hfusionhub.handler.JsonListTypeHandler;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.Data;
@@ -35,9 +37,11 @@ public class WebhookSubscription extends BaseEntity {
     @Schema(description = "租户ID")
     private Long tenantId;
 
+    @NotBlank(message = "订阅名称不能为空")
     @Schema(description = "订阅名称")
     private String name;
 
+    @NotBlank(message = "回调 URL 不能为空")
     @Schema(description = "回调 URL")
     private String url;
 
@@ -45,6 +49,7 @@ public class WebhookSubscription extends BaseEntity {
     private String secret;
 
     @TableField(typeHandler = JsonListTypeHandler.class)
+    @NotEmpty(message = "至少订阅一个事件类型")
     @Schema(description = "订阅的事件类型列表（JSON 数组）")
     private List<String> events;
 

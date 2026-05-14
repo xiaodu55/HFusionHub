@@ -12,10 +12,11 @@ import com.hfusionhub.service.AgentTaskService;
 import com.hfusionhub.service.ApprovalEventSseManager;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import java.util.List;
-import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -105,16 +106,13 @@ public class AgentTaskController {
 
     @Operation(summary = "审批决定（批准/拒绝工具调用）")
     @PostMapping("/{taskId}/approve")
-    public R<AgentApproval> decideApproval(@PathVariable Long taskId, @RequestBody Map<String, String> body) {
+    public R<AgentApproval> decideApproval(@PathVariable Long taskId, @Valid @RequestBody ApprovalDecisionDTO body) {
         Long userId = JwtUtils.getCurrentUserId();
-        String approvalId = body.get("approvalId");
-        String decision = body.get("decision");
-        String reason = body.get("reason");
+        String approvalId = body.getApprovalId();
+        String decision = body.getDecision();
+        String reason = body.getReason();
 
-        if (approvalId == null || approvalId.isBlank()) return R.fail("approvalId 不能为空");
-        if (decision == null || (!"approved".equals(decision) && !"denied".equals(decision)))
-            return R.fail("decision 必须为 approved 或 denied");
-        if ("denied".equals(decision) && (reason == null || reason.isBlank())) {
+        if ("denied".equals(decision) && !StringUtils.hasText(reason)) {
             return R.fail("拒绝时必须填写原因");
         }
 

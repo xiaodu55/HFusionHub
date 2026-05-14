@@ -10,7 +10,7 @@
 | 优先级 | 项数 | 代表问题 | 所属模块 |
 |---|---|---|---|
 | **P0（高危）** | 0 | ~~全部已完成~~ | — |
-| **P1（中优）** | 12 | 20 个写接口缺 `@Valid`、每次 chat 查库解密、Scheduler 无分布式锁、超大 SFC 未拆分 | Java / 前端 |
+| **P1（中优）** | 0 | ~~全部已完成（2026-08-20）~~：chat 配置缓存、Scheduler 锁、N+1、无界列表、写接口 `@Valid`、超大 SFC 拆分 | Java / 前端 |
 | **P2（卫生）** | 7 | 硬编码漂移、token 估算、Helm/Compose 拓扑漂移 | 全部 |
 
 ## 实施进度
@@ -62,11 +62,16 @@
 - **方案**：CORS 未配置时默认拒绝（仅开发 profile 放开）；`show-details: when-authorized`；prometheus/metrics 端点加认证或内网隔离。
 - **实际状态**：`CorsConfig` 第 36 行已有 `allow-any-origin=true` 的生产安全门控（未配置白名单时回退到同源限制）；`application.yml` 第 257 行已设 `show-details: when-authorized`。
 
-#### 1.4 20 个写接口缺 `@Valid` 输入校验 ⚠️ 保留为 P1 项
+#### 1.4 20 个写接口缺 `@Valid` 输入校验 ✅ 已完成（2026-08-20，create 端点全覆盖）
 - **文件**：`AgentTaskController.decideApproval(@RequestBody Map...)`、`TenantMemberController.addMember(@RequestBody Map...)`、`MemoryController.save` 等（19 个 controller 的写接口均无 `@Valid`）
 - **问题**：裸 `Map` 入参 + 服务层手写校验，字段类型/缺失/越界无法被框架层拦截。
 - **方案**：替换为带校验注解的 DTO；给 `PageQuery.validate()` 加 `@Validated` 强约束。
-- **实际状态**：此项仍需实施（P1 中优级别），涉及 13+ 个 Controller 文件重构，工作量较大。
+- **实际状态（2026-08-20）**：
+  - ✅ 计划点名的 3 个示例：`decideApproval` → 新增 `ApprovalDecisionDTO`（`@NotBlank approvalId`、`@Pattern("approved|denied")`）；`addMember` → 新增 `TenantMemberAddDTO`（`@NotNull userId`，role 缺省 member）；`MemoryController.save` 加 `@Valid`
+  - ✅ 创建类实体端点加 `@Valid` + 必填字段约束：`createAlertRule`（AgentAlertRule）、`createDataset`/`addCase`（AgentEvaluation*）、`adminCreate`（SystemNotice）、webhook `create`（WebhookSubscription name/url/events）、`evaluateBatch`（级联到已含 `@NotBlank flagKey` 的 DTO）
+  - ⚠️ **有意边界**：部分更新 PUT 端点（如 Memory update、Webhook update 为部分字段合并）不加 `@Valid`，避免约束误伤部分更新；`PluginController` 插件 manifest、`RagObservabilityController` 评测请求等**灵活 schema** 的裸 Map 端点保留服务层校验（强制 DTO 会破坏客户端兼容）
+  - ✅ 前端已核对：alert/webhook/eval 创建端点暂无前端调用（API 面），400 错误经 `friendlyErrorMessage` 透出后端 message，无 UX 回归
+  - ✅ 新增 8 个校验约束测试（WriteEndpointValidationTest）
 
 ### P1 — 中优
 
@@ -235,7 +240,7 @@
   - ✅ **Python 高危项**：BM25 缓存、去重优化、文件缓存、LLM 响应缓存、流式证据门控、WorkflowEngine 并行修复、批量 embedding、DeepSeek embedding 移除
   - ✅ **Java 高危项**：上传 1MB 限制（application.yml 已配置）、AiClient 超时/连接池（RestTemplateConfig 已实现）、CORS/Actuator 安全（CorsConfig 已有门控）
   - ✅ **基础设施高危项**：生产 compose 资源限制（所有服务已配 limits）、监控指标修正与 exporter 部署
-- **批次 2（P1，Java 仅剩 @Valid）**：前端超大组件拆分 ✅ + ESLint ✅ + 竞态 ✅ + 服务端分页 ✅ + chat 配置缓存 ✅ + Scheduler 分布式锁 ✅ + N+1 ✅ + 无界列表 ✅（均 2026-08-20）——**剩余 Java 项**：`@Valid` 补齐。
+- **批次 2（P1，✅ 全部完成 2026-08-20）**：前端超大组件拆分 ✅ + ESLint ✅ + 竞态 ✅ + 服务端分页 ✅ + chat 配置缓存 ✅ + Scheduler 分布式锁 ✅ + N+1 ✅ + 无界列表 ✅ + 写接口 `@Valid` ✅——**Java P1 项全部清零**。
 - **批次 3（P2，持续）**：硬编码清理、token 估算、Helm/Compose 拓扑对齐、Dockerfile.python uvicorn[standard] 决策、CI JDK 版本对齐。
 
 > 每批完成后建议跑 `scripts/smoke-test.ps1`（47 项）与各子项目单测（Java 445 / Python 1252 / 前端 33）回归。

@@ -16,6 +16,7 @@ import com.hfusionhub.service.AgentEvaluationService;
 import com.hfusionhub.service.AgentMetricsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -103,7 +104,7 @@ public class AgentObservabilityController {
 
     @Operation(summary = "创建告警规则")
     @PostMapping("/alerts/rules")
-    public R<AgentAlertRule> createAlertRule(@RequestBody AgentAlertRule rule) {
+    public R<AgentAlertRule> createAlertRule(@Valid @RequestBody AgentAlertRule rule) {
         return R.ok(alertService.createRule(JwtUtils.getCurrentUserId(), rule));
     }
 
@@ -160,7 +161,7 @@ public class AgentObservabilityController {
 
     @Operation(summary = "创建评测集")
     @PostMapping("/evaluation/datasets")
-    public R<AgentEvaluationDataset> createDataset(@RequestBody AgentEvaluationDataset dataset) {
+    public R<AgentEvaluationDataset> createDataset(@Valid @RequestBody AgentEvaluationDataset dataset) {
         dataset.setUserId(JwtUtils.getCurrentUserId());
         return R.ok(evaluationService.createDataset(dataset));
     }
@@ -192,7 +193,8 @@ public class AgentObservabilityController {
 
     @Operation(summary = "添加评测用例")
     @PostMapping("/evaluation/datasets/{datasetId}/cases")
-    public R<AgentEvaluationCase> addCase(@PathVariable Long datasetId, @RequestBody AgentEvaluationCase evalCase) {
+    public R<AgentEvaluationCase> addCase(
+            @PathVariable Long datasetId, @Valid @RequestBody AgentEvaluationCase evalCase) {
         evalCase.setDatasetId(datasetId);
         return R.ok(evaluationService.addCase(JwtUtils.getCurrentUserId(), evalCase));
     }

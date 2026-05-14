@@ -3,6 +3,7 @@ package com.hfusionhub.entity;
 import com.baomidou.mybatisplus.annotation.*;
 import com.hfusionhub.handler.JsonListTypeHandler;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotBlank;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.Data;
@@ -21,6 +22,7 @@ public class AgentEvaluationDataset {
     @Schema(description = "评测集ID")
     private Long id;
 
+    @NotBlank(message = "评测集名称不能为空")
     @Schema(description = "评测集名称")
     private String name;
 

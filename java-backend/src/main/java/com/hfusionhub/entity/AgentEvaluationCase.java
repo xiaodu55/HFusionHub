@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.*;
 import com.hfusionhub.handler.JsonListTypeHandler;
 import com.hfusionhub.handler.JsonMapTypeHandler;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotBlank;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -26,9 +27,11 @@ public class AgentEvaluationCase {
     @Schema(description = "所属评测集ID")
     private Long datasetId;
 
+    @NotBlank(message = "测试查询不能为空")
     @Schema(description = "测试查询")
     private String query;
 
+    @NotBlank(message = "期望答案不能为空")
     @Schema(description = "期望答案(ground truth)")
     private String expectedAnswer;
 

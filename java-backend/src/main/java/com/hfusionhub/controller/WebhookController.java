@@ -8,6 +8,7 @@ import com.hfusionhub.entity.WebhookSubscription;
 import com.hfusionhub.service.WebhookSubscriptionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -43,7 +44,7 @@ public class WebhookController {
 
     @PostMapping
     @Operation(summary = "创建 Webhook 订阅")
-    public R<WebhookSubscription> create(@RequestBody WebhookSubscription subscription) {
+    public R<WebhookSubscription> create(@Valid @RequestBody WebhookSubscription subscription) {
         Long userId = JwtUtils.getCurrentUserId();
         return R.ok("订阅创建成功", subscriptionService.create(userId, subscription));
     }

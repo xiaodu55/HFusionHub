@@ -3,6 +3,7 @@ package com.hfusionhub.controller;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.entity.MemoryEntry;
 import com.hfusionhub.service.MemoryService;
+import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -21,7 +22,7 @@ public class MemoryController {
     }
 
     @PostMapping
-    public R<MemoryEntry> save(@RequestBody MemoryEntry entry) {
+    public R<MemoryEntry> save(@Valid @RequestBody MemoryEntry entry) {
         return R.ok(memoryService.save(entry));
     }
 
