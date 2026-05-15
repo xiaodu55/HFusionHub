@@ -230,7 +230,8 @@
 ### P1 — 中优
 
 - **Helm/Compose 拓扑漂移**：[values.yaml](../deploy/helm/hfusionhub/values.yaml) Milvus `v2.4.0`（嵌入式 etcd）vs compose `v2.6.6`（独立 etcd），helm 无 etcd/attu → 对齐版本与拓扑；`all.yaml` 单文件 1000+ 行建议拆分或补文档。
-- **Dockerfile.python**：恢复 `uvicorn[standard]`（uvloop/httptools 流式性能，当前用 sed 替换掉）；CI java job JDK17 vs Dockerfile temurin-21 版本统一。
+- **Dockerfile.python** ✅ 已处理（2026-08-20）：`requirements.txt` 已固定 `uvicorn[standard]==0.27.0`（uvloop/httptools 流式性能），无需改动。
+- **CI JDK 版本统一** ✅ 已处理（2026-08-20）：[e2e.yml](../.github/workflows/e2e.yml) 两处 `java-version: '17'` → `'21'`，与 [ci.yml](../.github/workflows/ci.yml)（已 21）及生产 Dockerfile temurin-21 一致；pom 保持 `java.version=17`（字节码目标，JDK 21 完全兼容）。
 
 ---
 
@@ -241,6 +242,6 @@
   - ✅ **Java 高危项**：上传 1MB 限制（application.yml 已配置）、AiClient 超时/连接池（RestTemplateConfig 已实现）、CORS/Actuator 安全（CorsConfig 已有门控）
   - ✅ **基础设施高危项**：生产 compose 资源限制（所有服务已配 limits）、监控指标修正与 exporter 部署
 - **批次 2（P1，✅ 全部完成 2026-08-20）**：前端超大组件拆分 ✅ + ESLint ✅ + 竞态 ✅ + 服务端分页 ✅ + chat 配置缓存 ✅ + Scheduler 分布式锁 ✅ + N+1 ✅ + 无界列表 ✅ + 写接口 `@Valid` ✅——**Java P1 项全部清零**。
-- **批次 3（P2，持续）**：硬编码清理、token 估算、Helm/Compose 拓扑对齐、Dockerfile.python uvicorn[standard] 决策、CI JDK 版本对齐。
+- **批次 3（P2，持续）**：硬编码清理 ✅、CI JDK 版本对齐 ✅、Dockerfile.python uvicorn[standard] 决策 ✅；剩余：token 估算、Helm/Compose 拓扑对齐。
 
 > 每批完成后建议跑 `scripts/smoke-test.ps1`（47 项）与各子项目单测（Java 445 / Python 1252 / 前端 33）回归。
