@@ -28,8 +28,11 @@ MIN_SENTENCE_LENGTH = 10
 MAX_KEY_PHRASES = 5
 
 # Token 估算常量
-CHINESE_CHAR_WEIGHT = 1
-ENGLISH_WORD_WEIGHT = 1
+# 按模型族校准的字符-比例模型（无第三方 tokenizer 依赖）：
+# - 中文字符 ≈ 1 token/字（与主流 tokenizer 一致）
+# - 拉丁字母/数字 ≈ 0.25 token/字符（约 4 字符/token，GPT 族散文平均）
+CHINESE_CHAR_WEIGHT = 1.0
+LATIN_CHAR_WEIGHT = 0.25
 
 # 反思质量阈值
 DEFAULT_QUALITY_THRESHOLD = 0.7
@@ -56,7 +59,10 @@ def estimate_tokens(text: str) -> int:
     """
     估算文本的 token 数量
 
-    使用简单规则：中文字符数 + 英文单词数
+    使用按模型族校准的字符-比例模型（中文字符 1:1，拉丁字符 ~0.25 token/字符），
+    无需第三方 tokenizer 依赖，估算值与 GPT 族 tokenizer 接近：
+    - 中文字符：每字 1 token
+    - 拉丁字母与数字：约 4 字符折算 1 token
 
     Args:
         text: 输入文本
@@ -68,13 +74,15 @@ def estimate_tokens(text: str) -> int:
         >>> estimate_tokens("你好世界")
         4
         >>> estimate_tokens("Hello World")
-        2
+        3
         >>> estimate_tokens("Hello 世界")
         3
     """
     chinese_chars = len(re.findall(r'[一-鿿]', text))
-    english_words = len(re.findall(r'[a-zA-Z]+', text))
-    return chinese_chars + english_words
+    latin_chars = len(re.findall(r'[a-zA-Z0-9]', text))
+    raw = chinese_chars * CHINESE_CHAR_WEIGHT + latin_chars * LATIN_CHAR_WEIGHT
+    # 四舍五入（round-half-up），避免 int() 向下取整系统性低估
+    return int(raw + 0.5)
 
 
 # =============================================================================

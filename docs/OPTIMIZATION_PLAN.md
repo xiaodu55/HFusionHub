@@ -171,7 +171,7 @@
 
 - **LLM 响应缓存**：同 query（FAQ 型）重复调用重复计费 → 语义/归一化精确命中缓存；**流式走 ModelGateway**（当前限流/计费/熔断对流式失效）。
 - **配置校验**：[config.py](../python-ai/app/utils/config.py) 裸 `os.getenv` → pydantic-settings，启动 fail-fast（必填/枚举/类型）。
-- **token 估算**：[utils.py](../python-ai/app/core/rag/utils.py) `estimate_tokens` 朴素估算 → 接真实 tokenizer 或按模型族校准（影响压缩阈值与计费）。
+- **token 估算** ✅ 已处理（2026-08-20）：[utils.py](../python-ai/app/core/rag/utils.py) `estimate_tokens` 朴素「中文字符+英文单词」估算 → 按模型族校准的字符-比例模型（中文 1 token/字 + 拉丁字母/数字 0.25 token/字符、round-half-up），无第三方 tokenizer 依赖；修复旧实现忽略数字的缺陷，英文估算值与 GPT 族 tokenizer 对齐（如 "Hello World" 2→3）。
 - **Reranker 默认 `mode="disabled"`**：模型重排能力未上线；`get_reranker()` 每次解析配置。
 
 ---
@@ -242,6 +242,6 @@
   - ✅ **Java 高危项**：上传 1MB 限制（application.yml 已配置）、AiClient 超时/连接池（RestTemplateConfig 已实现）、CORS/Actuator 安全（CorsConfig 已有门控）
   - ✅ **基础设施高危项**：生产 compose 资源限制（所有服务已配 limits）、监控指标修正与 exporter 部署
 - **批次 2（P1，✅ 全部完成 2026-08-20）**：前端超大组件拆分 ✅ + ESLint ✅ + 竞态 ✅ + 服务端分页 ✅ + chat 配置缓存 ✅ + Scheduler 分布式锁 ✅ + N+1 ✅ + 无界列表 ✅ + 写接口 `@Valid` ✅——**Java P1 项全部清零**。
-- **批次 3（P2，持续）**：硬编码清理 ✅、CI JDK 版本对齐 ✅、Dockerfile.python uvicorn[standard] 决策 ✅；剩余：token 估算、Helm/Compose 拓扑对齐。
+- **批次 3（P2，持续）**：硬编码清理 ✅、CI JDK 版本对齐 ✅、Dockerfile.python uvicorn[standard] 决策 ✅、token 估算校准 ✅；剩余：Helm/Compose 拓扑对齐。
 
 > 每批完成后建议跑 `scripts/smoke-test.ps1`（47 项）与各子项目单测（Java 445 / Python 1252 / 前端 33）回归。

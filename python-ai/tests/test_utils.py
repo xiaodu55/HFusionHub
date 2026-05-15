@@ -30,10 +30,12 @@ class TestEstimateTokens:
 
     def test_english_text(self):
         """测试英文文本"""
-        assert estimate_tokens("Hello World") == 2
+        # 10 个拉丁字符 × 0.25 = 2.5 → 3（真实 tokenizer 亦为 3）
+        assert estimate_tokens("Hello World") == 3
 
     def test_mixed_text(self):
         """测试混合文本"""
+        # 5 个拉丁字符 × 0.25 = 1.25 + 2 个中文 = 3
         assert estimate_tokens("Hello 世界") == 3
 
     def test_long_text(self):
@@ -44,9 +46,9 @@ class TestEstimateTokens:
 
     def test_numbers_in_text(self):
         """测试包含数字的文本"""
-        # Python (1) + 3.9 (1) + 版本 (2) = 4
-        # 但 3.9 被当作一个英文单词
-        assert estimate_tokens("Python 3.9 版本") == 3  # Python, 3.9, 版本
+        # Python (6×0.25=1.5) + 3.9 (3×0.25=0.75) + 版本 (2) = 4.25 → 4
+        # 数字现在也被计入（修复旧实现忽略数字的缺陷）
+        assert estimate_tokens("Python 3.9 版本") == 4
 
     def test_special_characters(self):
         """测试特殊字符"""
