@@ -114,6 +114,9 @@ MILVUS_PORT=19530
 $env:DB_USERNAME="hfusionhub"
 $env:DB_PASSWORD="<与 docker\.env 中 MYSQL_PASSWORD 相同>"
 
+# Redis（docker\.env 中 REDIS_PASSWORD 设了密码则必须注入，否则 Java 报 NOAUTH）
+$env:REDIS_PASSWORD="<与 docker\.env 中 REDIS_PASSWORD 相同>"
+
 # Java ↔ Python 互信令牌（自行生成随机值，两端必须一致）
 $env:CALLBACK_SECRET="<生成一个长随机字符串>"
 $env:PYTHON_AI_INTERNAL_TOKEN="<生成另一个长随机字符串>"
@@ -287,6 +290,7 @@ Vite 开发服务器会自动将 `/api` 请求代理到 `http://localhost:8080`�
 cd java-backend
 $env:DB_USERNAME="hfusionhub"
 $env:DB_PASSWORD="<与 MYSQL_PASSWORD 相同>"
+$env:REDIS_PASSWORD="<与 REDIS_PASSWORD 相同，Redis 设了密码则必填，否则 NOAUTH>"
 $env:CALLBACK_SECRET="<与 Python 相同>"
 $env:PYTHON_AI_INTERNAL_TOKEN="<与 Python 相同>"
 $env:ADMIN_PASSWORD="<管理员初始化密码>"
