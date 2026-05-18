@@ -568,6 +568,47 @@ spec:
 {{- end }}
 
 ---
+# --- Attu (Milvus web console, optional) ---
+{{- if .Values.attu.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-attu
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.attu.port }}
+      targetPort: {{ .Values.attu.port }}
+  selector:
+    app: {{ .Release.Name }}-attu
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-attu
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-attu
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-attu
+    spec:
+      containers:
+        - name: attu
+          image: {{ .Values.attu.image }}
+          ports:
+            - containerPort: {{ .Values.attu.port }}
+          env:
+            - name: MILVUS_URL
+              value: {{ .Values.attu.milvusUrl | quote }}
+          resources:
+            {{- toYaml .Values.attu.resources | nindent 12 }}
+{{- end }}
+
+---
 # --- Python AI HorizontalPodAutoscaler ---
 {{- if and .Values.pythonAi.enabled (gt (int .Values.pythonAi.minReplicas) 0) }}
 apiVersion: autoscaling/v2
