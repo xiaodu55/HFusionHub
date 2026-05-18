@@ -712,6 +712,16 @@ public class VectorizationServiceImpl implements VectorizationService {
         document.setChunkCount(0);
         document.setErrorMessage(message);
         documentMapper.updateById(document);
+        // 源文件缺失是确定性失败：把历史 PROCESSING 任务一并标记 FAILED，
+        // 否则 DocumentIndexRecoveryScheduler 会无限重试（job 永远留在 PROCESSING）。
+        documentIndexJobMapper.update(
+                null,
+                new LambdaUpdateWrapper<DocumentIndexJob>()
+                        .eq(DocumentIndexJob::getDocumentId, document.getId())
+                        .eq(DocumentIndexJob::getStatus, "PROCESSING")
+                        .set(DocumentIndexJob::getStatus, "FAILED")
+                        .set(DocumentIndexJob::getErrorMessage, truncate(message, 1000))
+                        .set(DocumentIndexJob::getCompletedAt, LocalDateTime.now()));
         throw new BusinessException(message);
     }
 

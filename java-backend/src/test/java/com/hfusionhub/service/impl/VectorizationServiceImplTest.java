@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -519,6 +520,33 @@ class VectorizationServiceImplTest {
         } finally {
             java.nio.file.Files.deleteIfExists(tempFile);
         }
+    }
+
+    @Test
+    void missingSourceFileMarksDocumentAndProcessingJobsFailed() {
+        // 源文件缺失是确定性失败：文档标记 FAILED，历史 PROCESSING job 也一并
+        // 标记 FAILED，否则 DocumentIndexRecoveryScheduler 无限重试（job 永不退出 PROCESSING）。
+        Document document = ownedDocument(DocumentStatus.PROCESSING);
+        document.setFilePath(null); // 源文件路径为空
+        KnowledgeBase kb = ownedKnowledgeBase();
+        when(documentMapper.selectById(10L)).thenReturn(document);
+        when(knowledgeBaseMapper.selectById(20L)).thenReturn(kb);
+
+        BusinessException ex =
+                assertThrows(BusinessException.class, () -> vectorizationService.startVectorization(10L, "ollama"));
+
+        // 文档被标记为 FAILED(3)
+        assertEquals(DocumentStatus.FAILED.getCode(), document.getStatus());
+        assertEquals(0, document.getChunkCount());
+        assertTrue(ex.getMessage().contains("源文件"));
+        // PROCESSING job 被更新为 FAILED
+        verify(documentIndexJobMapper).update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.argThat(wrapper -> {
+                    var update = new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<
+                            com.hfusionhub.entity.DocumentIndexJob>();
+                    return wrapper.getClass().isAssignableFrom(update.getClass());
+                }));
     }
 
     @Test
