@@ -19,8 +19,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1Gi
+          memory: 1g
           cpus: "0.5"
+          pids: 256
     restart: unless-stopped
     networks:
       - backend
@@ -43,7 +44,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256Mi
+          memory: 256m
           cpus: "0.2"
     restart: unless-stopped
     networks:
@@ -70,8 +71,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512Mi
+          memory: 512m
           cpus: "0.5"
+          pids: 256
     restart: unless-stopped
     networks:
       - backend
@@ -107,14 +109,14 @@ services:
       - ALL
     cap_add:
       - NET_RAW
-    pids_limit: 256
     security_opt:
       - no-new-privileges:true
     deploy:
       resources:
         limits:
-          memory: 512Mi
+          memory: 512m
           cpus: "0.5"
+          pids: 256
 
   # etcd — Milvus 2.6 standalone 的元数据存储（2.6 起不再支持嵌入式 etcd）
   etcd:
@@ -131,8 +133,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512Mi
+          memory: 512m
           cpus: "0.5"
+          pids: 256
     restart: unless-stopped
     networks:
       - backend
@@ -167,7 +170,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2Gi
+          memory: 2g
           cpus: "1.0"
     restart: unless-stopped
     networks:
@@ -188,7 +191,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256Mi
+          memory: 256m
           cpus: "0.2"
     restart: unless-stopped
     networks:
@@ -235,8 +238,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1Gi
+          memory: 1g
           cpus: "0.5"
+          pids: 256
     restart: unless-stopped
     networks:
       - backend
@@ -282,7 +286,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2Gi
+          memory: 2g
           cpus: "1.0"
     restart: unless-stopped
     networks:
@@ -309,7 +313,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 128Mi
+          memory: 128m
           cpus: "0.1"
     restart: unless-stopped
     networks:
