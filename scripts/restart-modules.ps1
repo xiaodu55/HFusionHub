@@ -36,8 +36,9 @@ $modulePorts = @{
     runner = 9100
 }
 
+# java 的 context-path 是 /api，actuator 实际在 /api/actuator/health
 $healthChecks = @{
-    java   = 'http://localhost:8080/actuator/health'
+    java   = 'http://localhost:8080/api/actuator/health'
     python = 'http://localhost:9000/health'
     runner = 'http://localhost:9100/health'
 }
@@ -54,6 +55,21 @@ function Load-EnvFile {
             if (-not [string]::IsNullOrWhiteSpace($key)) {
                 [Environment]::SetEnvironmentVariable($key, $val, 'Process')
             }
+        }
+    }
+    # compose 侧变量名 → Spring Boot 期望变量名（docker\.env 用 MYSQL_*/MINIO_ROOT_*，
+    # application.yml 读 DB_PASSWORD/MINIO_ACCESS_KEY/MINIO_SECRET_KEY）。
+    # 仅在目标变量未显式设置时回退映射，显式设置优先。
+    $map = @{
+        'MYSQL_PASSWORD'         = 'DB_PASSWORD'
+        'MINIO_ROOT_USER'        = 'MINIO_ACCESS_KEY'
+        'MINIO_ROOT_PASSWORD'    = 'MINIO_SECRET_KEY'
+    }
+    foreach ($k in $map.Keys) {
+        $src = [Environment]::GetEnvironmentVariable($k, 'Process')
+        $dst = $map[$k]
+        if ($src -and -not [Environment]::GetEnvironmentVariable($dst, 'Process')) {
+            [Environment]::SetEnvironmentVariable($dst, $src, 'Process')
         }
     }
 }
@@ -103,12 +119,12 @@ function Wait-Healthy {
     for ($i = 0; $i -lt 30; $i++) {
         try {
             $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
-            if ($resp.StatusCode -lt 500) {
+            if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) {
                 Write-Host "[ok] $Module healthy -> $url ($($resp.StatusCode))"
                 return $true
             }
         } catch {
-            # Not healthy yet (connection refused, 5xx, timeout) — keep polling.
+            # Not healthy yet (connection refused, 404, 5xx, timeout) — keep polling.
         }
         Start-Sleep -Seconds 1
     }
