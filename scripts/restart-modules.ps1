@@ -134,11 +134,22 @@ function Wait-Healthy {
 
 function Start-Module {
     param([string]$Module)
+    # 每个模块的 stdout/stderr 重定向到其所在目录下的 <module>-live.log / -err.log，
+    # 否则 Start-Process 最小化窗口里的启动失败日志会丢失，排障只能靠猜。
+    $logDirs = @{
+        java   = 'java-backend'
+        python = 'python-ai'
+        runner = 'docker\plugin-runner'
+    }
+    $logDir = Join-Path $RepoRoot $logDirs[$Module]
+    $outFile = Join-Path $logDir "$Module-live.log"
+    $errFile = Join-Path $logDir "$Module-live-err.log"
     switch ($Module) {
         'java' {
             Write-Host "[start] Java backend (mvn spring-boot:run, port 8080)"
             Start-Process -FilePath 'mvn' -ArgumentList 'spring-boot:run' `
-                -WorkingDirectory (Join-Path $RepoRoot 'java-backend') -WindowStyle Minimized
+                -WorkingDirectory (Join-Path $RepoRoot 'java-backend') -WindowStyle Minimized `
+                -RedirectStandardOutput $outFile -RedirectStandardError $errFile
         }
         'python' {
             Write-Host "[start] Python AI (.venv python -m app.main, port 9000)"
@@ -148,7 +159,8 @@ function Start-Module {
                 exit 1
             }
             Start-Process -FilePath $pyVenv -ArgumentList '-m', 'app.main' `
-                -WorkingDirectory (Join-Path $RepoRoot 'python-ai') -WindowStyle Minimized
+                -WorkingDirectory (Join-Path $RepoRoot 'python-ai') -WindowStyle Minimized `
+                -RedirectStandardOutput $outFile -RedirectStandardError $errFile
         }
         'runner' {
             Write-Host "[start] Plugin Runner (uvicorn app:app, port 9100)"
@@ -161,7 +173,8 @@ function Start-Module {
                 exit 1
             }
             Start-Process -FilePath $py -ArgumentList '-m', 'uvicorn', 'app:app', '--host', '127.0.0.1', '--port', '9100' `
-                -WorkingDirectory (Join-Path $RepoRoot 'docker\plugin-runner') -WindowStyle Minimized
+                -WorkingDirectory (Join-Path $RepoRoot 'docker\plugin-runner') -WindowStyle Minimized `
+                -RedirectStandardOutput $outFile -RedirectStandardError $errFile
         }
         default {
             Write-Warning "Unknown module '$Module' — ignored."
