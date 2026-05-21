@@ -111,6 +111,9 @@ class HealthResponse(BaseModel):
     status: str
     docker_connected: bool
     images_count: int
+    # 为什么不可用（如 dev 无 TLS Docker Engine）。有值即表示 503；
+    # 健康时为空字符串。让「unhealthy」一眼可读，而不是像启动失败。
+    reason: str = ""
 
 
 # ── Docker client ────────────────────────────────────────────────────
@@ -268,16 +271,24 @@ async def health(response: Response):
             images_count = len(images)
         except Exception:
             pass
+    reason = ""
     if not docker_ok:
         # A process that cannot reach its dedicated Docker Engine cannot
         # execute plugins. Report it as not ready so orchestrators do not
         # route work to a fail-closed runner that is effectively unavailable.
         response.status_code = 503
+        reason = (
+            "DOCKER_UNREACHABLE: cannot reach the TLS Docker Engine. In local "
+            "dev (no TLS Docker Engine) this is expected — Python AI executes "
+            "plugins in subprocess mode instead; container-mode plugins remain "
+            "fail-closed."
+        )
 
     return HealthResponse(
         status="healthy" if docker_ok else "unavailable",
         docker_connected=docker_ok,
         images_count=images_count,
+        reason=reason,
     )
 
 
