@@ -2,6 +2,7 @@
 Configuration management for HFusionHub Python AI Engine
 """
 
+import logging
 import os
 from dotenv import load_dotenv
 
@@ -210,8 +211,20 @@ def _validate_config() -> None:
     config without secrets), but a worker deployed to production/staging must
     fail closed rather than silently serve with a missing internal token or a
     vector-store mode that is only meant for single-process local runs.
+
+    Cluster-mode Milvus connectivity settings are validated the same way:
+    a prod worker pointing at ``localhost`` or with a blank host would
+    otherwise degrade silently into vector-query failures at request time.
     """
     if config.SERVER_ENV not in ("production", "staging"):
+        # Dev/test: still surface a missing internal token so a misconfigured
+        # local worker fails loudly (Java proxy gets 401s otherwise) instead of
+        # silently degrading — but never hard-fail, tests need leniency.
+        if not config.INTERNAL_API_TOKEN:
+            logging.getLogger(__name__).warning(
+                "PYTHON_AI_INTERNAL_TOKEN is not set; Java -> Python requests "
+                "will be rejected (401) until it matches the Java backend."
+            )
         return
     if not config.INTERNAL_API_TOKEN:
         raise RuntimeError(
@@ -221,6 +234,15 @@ def _validate_config() -> None:
         raise RuntimeError(
             "VECTOR_STORE_MODE must be 'cluster' in production/staging; "
             "'lite' is single-process only."
+        )
+    if config.VECTOR_STORE_MODE == "cluster" and (
+        not config.MILVUS_HOST or config.MILVUS_HOST.strip() == ""
+        or config.MILVUS_HOST in ("localhost", "127.0.0.1")
+    ):
+        raise RuntimeError(
+            "MILVUS_HOST must point to the remote Milvus in production/staging; "
+            f"got {config.MILVUS_HOST!r}. A worker must not silently fall back "
+            "to a local vector store."
         )
 
 
