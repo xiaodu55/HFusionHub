@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -539,6 +540,32 @@ class VectorizationServiceImplTest {
         assertEquals(DocumentStatus.FAILED.getCode(), document.getStatus());
         assertEquals(0, document.getChunkCount());
         assertTrue(ex.getMessage().contains("源文件"));
+        // PROCESSING job 被更新为 FAILED
+        verify(documentIndexJobMapper).update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.argThat(wrapper -> {
+                    var update = new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<
+                            com.hfusionhub.entity.DocumentIndexJob>();
+                    return wrapper.getClass().isAssignableFrom(update.getClass());
+                }));
+    }
+
+    @Test
+    void recoveryMarksDocumentAndProcessingJobsFailedWhenKnowledgeBaseDeleted() {
+        // 恢复路径（enforceRequestOwner=false）下知识库已删除（selectById 逻辑删除
+        // 过滤后返回 null）是确定性失败：文档 + PROCESSING job 一并标记 FAILED，
+        // 否则 DocumentIndexRecoveryScheduler 每 5 分钟无限重试，日志持续刷「恢复索引任务失败」。
+        Document document = ownedDocument(DocumentStatus.PROCESSING);
+        DocumentIndexJob staleJob = job("version-stale", "PROCESSING", 0);
+        when(documentMapper.selectById(10L)).thenReturn(document);
+        when(knowledgeBaseMapper.selectById(20L)).thenReturn(null); // KB 已逻辑删除
+        when(documentIndexJobMapper.selectStaleProcessingJobs(any(), anyInt())).thenReturn(List.of(staleJob));
+
+        vectorizationService.recoverStaleIndexJobs();
+
+        // 文档被标记为 FAILED(3)
+        assertEquals(DocumentStatus.FAILED.getCode(), document.getStatus());
+        assertEquals(0, document.getChunkCount());
         // PROCESSING job 被更新为 FAILED
         verify(documentIndexJobMapper).update(
                 org.mockito.ArgumentMatchers.isNull(),

@@ -104,7 +104,10 @@ public class VectorizationServiceImpl implements VectorizationService {
         if (knowledgeBase == null
                 || knowledgeBase.getStatus() == null
                 || knowledgeBase.getStatus() != CommonConstants.KB_STATUS_NORMAL) {
-            throw new BusinessException("知识库已禁用，无法解析文档");
+            // 知识库缺失（如已删除）或被禁用是确定性失败：文档 + 历史 PROCESSING job
+            // 一并标记 FAILED，否则 DocumentIndexRecoveryScheduler 每 5 分钟无限重试
+            // （job 永不退出 PROCESSING，日志持续刷「恢复索引任务失败」）。
+            failDocumentBeforeStart(document, "知识库已禁用，无法解析文档");
         }
 
         // 2. 检查状态 - 允许重新处理处于 PROCESSING 状态的文档（修复之前的卡住问题）
