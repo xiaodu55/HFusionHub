@@ -229,7 +229,7 @@
 
 ### P1 — 中优
 
-- **Helm/Compose 拓扑漂移** ✅ 已处理（2026-08-20）：[values.yaml](../deploy/helm/hfusionhub/values.yaml) 已与 compose 对齐——Milvus 统一 `v2.6.6` standalone + 外部 etcd（`ETCD_ENDPOINTS` 接线）；本次将 etcd 补丁版本对齐（`v3.5.5`→`v3.5.18`，与 [docker-compose.prod.yml](../deploy/docker-compose.prod.yml) 一致），并新增**可选 attu 组件**（`attu.enabled: false` 默认关闭，与 compose 的 attu 控制台拓扑对齐，生产按需开启）。`all.yaml` 当前 690 行，结构完整（13 个 if/range/with 全配对），CI helm lint + kubeconform 门禁持续校验。
+- **Helm/Compose 拓扑漂移** ✅ 已处理（2026-08-20）：[values.yaml](../deploy/helm/hfusionhub/values.yaml) 已与 compose 对齐——Milvus 统一 `v2.6.6` standalone + 外部 etcd（`ETCD_ENDPOINTS` 接线）；本次将 etcd 补丁版本对齐（`v3.5.5`→`v3.5.18`，与 [docker-compose.prod.yml](../deploy/docker-compose.prod.yml) 一致），并新增**可选 attu 组件**（`attu.enabled: false` 默认关闭，与 compose 的 attu 控制台拓扑对齐，生产按需开启）。`templates/` 已按组件拆分（原 703 行 `all.yaml` → 13 个文件：secret/mysql/redis/java/python/plugin-runner/uploads-pvc/etcd/milvus/attu/hpa/frontend/ingress，布局见 [README.md](../deploy/helm/hfusionhub/README.md)），逐行还原校验通过，CI helm lint + kubeconform 门禁持续校验。
 - **Dockerfile.python** ✅ 已处理（2026-08-20）：`requirements.txt` 已固定 `uvicorn[standard]==0.27.0`（uvloop/httptools 流式性能），无需改动。
 - **CI JDK 版本统一** ✅ 已处理（2026-08-20）：[e2e.yml](../.github/workflows/e2e.yml) 两处 `java-version: '17'` → `'21'`，与 [ci.yml](../.github/workflows/ci.yml)（已 21）及生产 Dockerfile temurin-21 一致；pom 保持 `java.version=17`（字节码目标，JDK 21 完全兼容）。
 

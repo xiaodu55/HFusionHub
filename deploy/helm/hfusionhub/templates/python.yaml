@@ -1,0 +1,102 @@
+# --- Python AI ---
+{{- if .Values.pythonAi.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-python
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.pythonAi.port }}
+      targetPort: {{ .Values.pythonAi.port }}
+  selector:
+    app: {{ .Release.Name }}-python
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-python
+spec:
+  replicas: {{ .Values.pythonAi.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-python
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-python
+    spec:
+      containers:
+        - name: python-ai
+          image: {{ .Values.pythonAi.image }}
+          ports:
+            - containerPort: {{ .Values.pythonAi.port }}
+          env:
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: deepseek-api-key
+            - name: PYTHON_AI_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: python-ai-internal-token
+            - name: CALLBACK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: callback-secret
+            - name: JAVA_BACKEND_URL
+              value: "http://{{ .Release.Name }}-java:{{ .Values.javaBackend.port }}"
+            - name: SERVER_HOST
+              value: "0.0.0.0"
+            - name: SERVER_PORT
+              value: {{ .Values.pythonAi.port | quote }}
+            - name: VECTOR_STORE_MODE
+              value: {{ .Values.vectorStore.mode | quote }}
+            - name: SERVER_ENV
+              value: {{ .Values.vectorStore.env | quote }}
+            - name: MILVUS_HOST
+              value: {{ tpl .Values.vectorStore.host $ | quote }}
+            - name: MILVUS_PORT
+              value: {{ .Values.vectorStore.port | quote }}
+            - name: MILVUS_COLLECTION
+              value: {{ .Values.vectorStore.collection | quote }}
+            - name: DOCUMENT_STORAGE_ROOT
+              value: /app/uploads/documents
+            {{- if .Values.pluginRunner.enabled }}
+            - name: PLUGIN_RUNNER_URL
+              value: "http://{{ .Release.Name }}-plugin-runner:{{ .Values.pluginRunner.port }}"
+            - name: PLUGIN_RUNNER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: plugin-runner-token
+            {{- end }}
+          resources:
+            {{- toYaml .Values.pythonAi.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.pythonAi.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: {{ .Values.pythonAi.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: shared-uploads
+              mountPath: /app/uploads
+      volumes:
+        - name: shared-uploads
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-uploads-pvc
+{{- end }}

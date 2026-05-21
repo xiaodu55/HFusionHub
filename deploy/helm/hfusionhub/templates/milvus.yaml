@@ -1,0 +1,64 @@
+# --- Milvus standalone (production vector store) ---
+{{- if .Values.milvus.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-milvus
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: {{ .Values.milvus.port }}
+      targetPort: {{ .Values.milvus.port }}
+  selector:
+    app: {{ .Release.Name }}-milvus
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-milvus
+spec:
+  serviceName: {{ .Release.Name }}-milvus
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-milvus
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-milvus
+    spec:
+      containers:
+        - name: milvus
+          image: {{ .Values.milvus.image }}
+          command: ["milvus", "run", "standalone"]
+          ports:
+            - containerPort: {{ .Values.milvus.port }}
+          env:
+            - name: ETCD_ENDPOINTS
+              value: "http://{{ .Release.Name }}-etcd:{{ .Values.etcd.port }}"
+            - name: COMMON_STORAGETYPE
+              value: "local"
+          resources:
+            {{- toYaml .Values.milvus.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9091
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/milvus
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.milvus.persistence.size }}
+{{- end }}

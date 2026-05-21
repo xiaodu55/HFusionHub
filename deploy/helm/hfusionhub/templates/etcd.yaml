@@ -1,0 +1,55 @@
+# --- etcd (required by Milvus v2.6.6 standalone) ---
+{{- if .Values.etcd.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-etcd
+spec:
+  type: ClusterIP
+  ports:
+    - name: client
+      port: {{ .Values.etcd.port }}
+      targetPort: {{ .Values.etcd.port }}
+  selector:
+    app: {{ .Release.Name }}-etcd
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-etcd
+spec:
+  serviceName: {{ .Release.Name }}-etcd
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-etcd
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-etcd
+    spec:
+      containers:
+        - name: etcd
+          image: {{ .Values.etcd.image }}
+          command:
+            - etcd
+            - --data-dir=/etcd-data
+            - --advertise-client-urls=http://0.0.0.0:2379
+            - --listen-client-urls=http://0.0.0.0:2379
+          ports:
+            - containerPort: {{ .Values.etcd.port }}
+          resources:
+            {{- toYaml .Values.etcd.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /etcd-data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.etcd.persistence.size }}
+{{- end }}

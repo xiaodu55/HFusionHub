@@ -1,0 +1,107 @@
+# --- Isolated Plugin Runner ---
+{{- if .Values.pluginRunner.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-plugin-runner
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.pluginRunner.port }}
+      targetPort: {{ .Values.pluginRunner.port }}
+  selector:
+    app: {{ .Release.Name }}-plugin-runner
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-plugin-runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-plugin-runner
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-plugin-runner
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: plugin-runner
+          image: {{ .Values.pluginRunner.image }}
+          ports:
+            - containerPort: {{ .Values.pluginRunner.port }}
+          env:
+            - name: PLUGIN_RUNNER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: plugin-runner-token
+            - name: PLUGIN_ARTIFACTS_DIR
+              value: /opt/plugin-artifacts
+            - name: DOCKER_HOST
+              value: {{ required "pluginRunner.dockerHost is required when pluginRunner.enabled" .Values.pluginRunner.dockerHost | quote }}
+            - name: DOCKER_TLS_VERIFY
+              value: "1"
+            - name: DOCKER_CERT_PATH
+              value: /certs/client
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            {{- toYaml .Values.pluginRunner.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.pluginRunner.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.pluginRunner.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: plugin-runner-tls
+              mountPath: /certs/client
+              readOnly: true
+            - name: plugin-artifacts
+              mountPath: /opt/plugin-artifacts
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: plugin-runner-tls
+          secret:
+            secretName: {{ required "pluginRunner.tlsSecretName is required when pluginRunner.enabled" .Values.pluginRunner.tlsSecretName }}
+        - name: plugin-artifacts
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-plugin-artifacts-pvc
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-plugin-artifacts-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.pluginRunner.artifactsSize }}
+{{- end }}

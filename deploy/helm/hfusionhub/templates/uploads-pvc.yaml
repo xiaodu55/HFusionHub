@@ -1,0 +1,11 @@
+# Shared Java/Python document storage. Requires an RWX-capable storage class.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-uploads-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: {{ .Values.sharedStorage.uploadsSize }}

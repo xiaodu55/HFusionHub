@@ -1,0 +1,90 @@
+# --- Java Backend ---
+{{- if .Values.javaBackend.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-java
+spec:
+  type: {{ .Values.javaBackend.service.type }}
+  ports:
+    - port: {{ .Values.javaBackend.service.port }}
+      targetPort: {{ .Values.javaBackend.port }}
+  selector:
+    app: {{ .Release.Name }}-java
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-java
+spec:
+  replicas: {{ .Values.javaBackend.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-java
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-java
+    spec:
+      containers:
+        - name: java-backend
+          image: {{ .Values.javaBackend.image }}
+          ports:
+            - containerPort: {{ .Values.javaBackend.port }}
+          env:
+            - name: DB_USERNAME
+              value: {{ .Values.mysql.username | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: mysql-password
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:mysql://{{ .Release.Name }}-mysql:{{ .Values.mysql.port }}/{{ .Values.mysql.database }}?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
+            - name: SPRING_DATA_REDIS_HOST
+              value: "{{ .Release.Name }}-redis"
+            - name: PYTHON_AI_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: python-ai-internal-token
+            - name: CALLBACK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: callback-secret
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-secrets
+                  key: admin-password
+            - name: AI_SERVICE_URL
+              value: "http://{{ .Release.Name }}-python:{{ .Values.pythonAi.port }}"
+            - name: JAVA_OPTS
+              value: {{ .Values.javaBackend.javaOpts | quote }}
+          resources:
+            {{- toYaml .Values.javaBackend.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.javaBackend.port }}
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.javaBackend.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: shared-uploads
+              mountPath: /app/uploads
+      volumes:
+        - name: shared-uploads
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-uploads-pvc
+{{- end }}

@@ -69,9 +69,10 @@ jobs:
         run: helm lint deploy/helm/hfusionhub
       - name: Render chart with minimal valid values
         # Enable the Opt-in pluginRunner path (TLS + isolated Docker Engine)
-        # and provide every Secret so secrets.required checks pass.  All
-        # templates live in templates/all.yaml, so helm renders every Kind into
-        # a single multi-document YAML stream.
+        # and provide every Secret so secrets.required checks pass.  Templates
+        # are split per component under templates/ (see templates/README notes
+        # in deploy/helm/hfusionhub/README.md); helm renders every file into a
+        # single multi-document YAML stream.
         run: |
           helm template hfusionhub deploy/helm/hfusionhub \
             --set secrets.mysqlRootPassword=ci-root \
