@@ -26,7 +26,7 @@ Copy `docker/.env.example` to `docker/.env`:
 |----------|---------|-------------|
 | `MYSQL_ROOT_PASSWORD` | `root123456` | MySQL root password |
 | `MYSQL_PASSWORD` | `hfusionhub123` | MySQL app user password |
-| `REDIS_PASSWORD` | `your_redis_password` | Reserved placeholder; current compose config does not enable Redis password auth |
+| `REDIS_PASSWORD` | `your_redis_password` | Redis `requirepass`。dev compose（`docker/docker-compose.yml`）已通过 `--requirepass` 启用；**设置后 Java 必须注入同名 `REDIS_PASSWORD`**，否则启动报 `NOAUTH Authentication required`（见 2026-08-21 修复 cf07937） |
 | `ADMIN_PASSWORD` | `changeme` | Bootstrap admin password |
 | `MINIO_ROOT_USER` | `minioadmin` | MinIO object storage username |
 | `MINIO_ROOT_PASSWORD` | `minioadmin` | MinIO object storage password |
@@ -69,7 +69,7 @@ Copy `deploy/.env.example` to `deploy/.env` for production Docker Compose:
 | `RAG_INDEX_MAX_ATTEMPTS` | No | `3` | Max indexing retries |
 | `TRUSTED_PROXY_HEADERS` | No | `false` | Enable X-Forwarded-For (reverse proxy only) |
 
-Current Redis password support is incomplete: `docker/redis.conf` and `application.yml` do not wire password authentication end to end. If production Redis requires `requirepass`, add the matching Spring Redis password configuration before relying on `REDIS_PASSWORD` or `SPRING_DATA_REDIS_PASSWORD`.
+> Redis 密码：dev compose 已在 `docker/docker-compose.yml` 通过 `redis-server ... --requirepass "$REDIS_PASSWORD"` 启用（2026-08-21 起生效）。Java 侧 `application.yml` 读取 `REDIS_PASSWORD`，**两端必须一致**，否则 Java 启动报 NOAUTH。生产若 Redis 关闭 requirepass，将 `REDIS_PASSWORD` 留空即可。
 
 ## Python AI (`python-ai/.env`)
 

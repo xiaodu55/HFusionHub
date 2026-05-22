@@ -246,6 +246,7 @@ Vite 开发服务器会自动将 `/api` 请求代理到 `http://localhost:8080`�
 | Java API | http://localhost:8080/api | `Invoke-WebRequest http://localhost:8080/api/actuator/health` |
 | API 文档 | http://localhost:8080/api/doc.html | 浏览器打开 Knife4j / Swagger UI |
 | Python AI | http://localhost:9000/health | 返回 `{"status": "healthy"}` |
+| Python API 文档 | http://localhost:9000/docs | 浏览器打开 FastAPI Swagger UI（或 /redoc） |
 | MySQL | `localhost:3306` | `docker compose ps`（docker 目录下），状态 healthy |
 | Redis | `localhost:6379` | `docker compose ps`，状态 healthy |
 | MinIO 控制台 | http://localhost:9001 | 浏览器打开，用 `docker/.env` 中配置的凭证登录 |
@@ -278,11 +279,17 @@ Vite 开发服务器会自动将 `/api` 请求代理到 `http://localhost:8080`�
 | 顺序 | 服务 | 命令 |
 | :--- | :--- | :--- |
 | 1 | Docker 基础设施 | `cd docker && docker compose up -d` |
-| 2 | Java 后端 | `cd java-backend && mvn spring-boot:run` |
-| 3 | Python AI | `cd python-ai && .\.venv\Scripts\Activate.ps1 && python -m app.main` |
-| 4 | 前端 | `cd hfusionhub-frontend && npm run dev` |
+| 2 | Java + Python 一键 | `powershell -ExecutionPolicy Bypass -File scripts/restart-modules.ps1 -Modules java,python` |
+| 3 | 前端 | `cd hfusionhub-frontend && npm run dev` |
 
-> 也可以直接使用 `.\scripts\restart-modules.ps1 -Modules java,python` 热重启 Java/Python。
+> **推荐用 `restart-modules.ps1` 一键启动 Java/Python**，它自动：
+> 1. 读取 `docker\.env` 并注入 `DB_PASSWORD`/`REDIS_PASSWORD`/`MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` 等变量（无需手动 export）；
+> 2. 启动后轮询健康检查，非 healthy 会退出非零；
+> 3. 日志落盘到模块目录下的 `<module>-live.log` / `<module>-live-err.log`（如 `java-backend/java-live.log`），方便排障。
+>
+> ⚠️ 注意：`-Modules java,python` 的逗号写法在 PowerShell 5.1 的 `-File` 模式下会被绑定成单个字符串，脚本内部已做归一化处理（2026-08-21 修复）；`runner` 由 docker compose 容器管理，重启 runner 请用 `docker compose restart plugin-runner`。
+>
+> 也可以手动逐个启动（见 2.2–2.4），或仅热重启某个模块：`.\scripts\restart-modules.ps1 -Modules python`。
 
 ### 2.2 Java 后端（快速启动）
 
@@ -387,11 +394,35 @@ Helm 模板已包含等价的 Java 环境覆盖项，可直接用于生产部署
 | 前端 `npm ci` 失败 | Node.js 版本不满足 | 使用 `nvm` 切换至 Node.js 20.19+ 或 22.12+ |
 | Docker 容器未全部 healthy | 启动顺序或资源不足 | 等待 30 秒后 `docker compose ps` 检查；必要时 `docker compose restart` |
 | `.env` 文件未找到 | 首次克隆后未创建 | 执行 `copy docker\.env.example docker\.env` 和 `copy python-ai\.env.example python-ai\.env`，或直接运行 `scripts/init-env.ps1` |
+| Java 调 Python 报 `400 Invalid HTTP request received.` | **JDK HttpClient 默认 HTTP/2**，对明文 `http://` 发 `Upgrade: h2c` 探测，uvicorn/h11 不支持 | 已修复（[RestTemplateConfig.java](../java-backend/src/main/java/com/hfusionhub/config/RestTemplateConfig.java) 显式 `.version(HTTP_1_1)`）。若升级依赖后复现，确认 RestTemplate 底层仍是 JDK HttpClient 且锁定 HTTP/1.1 |
+| `restart-modules.ps1` 报 healthy 但服务没起来 | PowerShell 5.1 `-File` 模式下 `-Modules java,python` 被绑定成单个字符串，ContainsKey 全 miss | 已修复（脚本内 `-split ','` 归一化）。升级到新版脚本后重试；若自定义脚本，注意 `-Command` 才拆逗号 |
+| 检索到 0 条来源（Retrieved 0 sources） | 向量库（Milvus）或本地源文件被清空，MySQL 元数据残留 | 见下方「RAG 空库恢复」 |
+
+---
+
+### 6.1 RAG 空库恢复
+
+**症状**：聊天检索返回 0 条来源，但知识库显示文档状态 COMPLETED。
+
+**判断**：Milvus 集合 `hfusionhub_chunks` 实体数为 0（`num_entities=0`）但 MySQL `document_chunk` 有数据，说明向量库被清空（容器重建/卷漂移），源文件也可能已丢失。
+
+**恢复流程**：
+
+1. 检查向量库：Attu（http://localhost:8000）查看 `hfusionhub_chunks` 集合，或 Python 直接查询：
+   ```python
+   from pymilvus import connections, utility
+   connections.connect(alias="default", host="127.0.0.1", port="19530")
+   print(utility.get_collection_stats("hfusionhub_chunks"))
+   ```
+2. 源文件缺失时重新上传：`POST /api/document/upload`（multipart），然后触发 `POST /api/vectorize/{id}` 重新解析/向量化。
+3. 失效文档先软删（`DELETE /api/document/{id}`，进回收站可恢复）再 `purge`（物理删除，不可逆，会被权限校验拦截）。
+4. 参考 [docs/ACCESS_MAP.md](ACCESS_MAP.md) 访问地图定位各服务。
 
 ---
 
 ## 7. 参考文档
 
+- [docs/ACCESS_MAP.md](ACCESS_MAP.md) — 已启动服务全量访问地图（网址/账号/API 文档/接口清单）
 - [docs/ENVIRONMENT.md](ENVIRONMENT.md) — 所有环境变量与特性开关详细说明
 - [docs/ARCHITECTURE.md](ARCHITECTURE.md) — 架构全景图
 - [docs/java-backend.md](java-backend.md) — Java 后端开发指南
@@ -634,6 +665,7 @@ The Vite dev server automatically proxies `/api` requests to `http://localhost:8
 | Java API | http://localhost:8080/api | `Invoke-WebRequest http://localhost:8080/api/actuator/health` |
 | API Docs | http://localhost:8080/api/doc.html | Open Knife4j / Swagger UI in browser |
 | Python AI | http://localhost:9000/health | Returns `{"status": "healthy"}` |
+| Python API Docs | http://localhost:9000/docs | Open FastAPI Swagger UI in browser (or /redoc) |
 | MySQL | `localhost:3306` | `docker compose ps` (in `docker/` directory), status healthy |
 | Redis | `localhost:6379` | `docker compose ps`, status healthy |
 | MinIO Console | http://localhost:9001 | Open in browser, log in with credentials from `docker/.env` |
@@ -656,11 +688,17 @@ Assumes Docker containers are running and virtual environment/dependencies are a
 | Order | Service | Command |
 | :--- | :--- | :--- |
 | 1 | Docker infra | `cd docker && docker compose up -d` |
-| 2 | Java backend | `cd java-backend && mvn spring-boot:run` |
-| 3 | Python AI | `cd python-ai && .\.venv\Scripts\Activate.ps1 && python -m app.main` |
-| 4 | Frontend | `cd hfusionhub-frontend && npm run dev` |
+| 2 | Java + Python (one command) | `powershell -ExecutionPolicy Bypass -File scripts/restart-modules.ps1 -Modules java,python` |
+| 3 | Frontend | `cd hfusionhub-frontend && npm run dev` |
 
-> Alternatively use `.\scripts\restart-modules.ps1 -Modules java,python` to hot-restart Java/Python.
+> **Recommended: use `restart-modules.ps1` to start Java/Python in one shot.** It:
+> 1. Loads `docker\.env` and injects `DB_PASSWORD`/`REDIS_PASSWORD`/`MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` etc. (no manual `export` needed);
+> 2. Polls health endpoints and exits non-zero if a module never becomes healthy;
+> 3. Redirects stdout/stderr to `<module>-live.log` / `<module>-live-err.log` in each module dir (e.g. `java-backend/java-live.log`) for easy debugging.
+>
+> ⚠️ The comma syntax `-Modules java,python` is bound as a SINGLE string under PowerShell 5.1 `-File` mode (only `-Command` splits on commas); the script normalizes with `-split ','` internally (fixed 2026-08-21). `runner` is managed by the docker compose container — restart it with `docker compose restart plugin-runner`.
+>
+> You may also start modules individually (see §2.2–2.4) or hot-restart a single module: `.\scripts\restart-modules.ps1 -Modules python`.
 
 ### 2.2 Java Backend (Quick Start)
 
@@ -764,11 +802,35 @@ The Helm template already includes equivalent Java environment overrides and is 
 | `npm ci` fails | Node.js version too old/new | Use `nvm` to switch to Node.js 20.19+ or 22.12+ |
 | Docker containers not all healthy | Startup order or resource contention | Wait 30s and `docker compose ps`; `docker compose restart` if needed |
 | `.env` file not found | Not created after fresh clone | Run `copy docker\.env.example docker\.env` and `copy python-ai\.env.example python-ai\.env`, or run `scripts/init-env.ps1` |
+| Java → Python returns `400 Invalid HTTP request received.` | **JDK HttpClient defaults to HTTP/2**, sending an `Upgrade: h2c` probe on plaintext `http://`; uvicorn/h11 rejects h2c | Fixed in [RestTemplateConfig.java](../java-backend/src/main/java/com/hfusionhub/config/RestTemplateConfig.java) by forcing `.version(HTTP_1_1)`. If it recurs after a dependency upgrade, confirm the RestTemplate still uses a JDK HttpClient locked to HTTP/1.1 |
+| `restart-modules.ps1` reports healthy but nothing started | PowerShell 5.1 `-File` binds `-Modules java,python` as a single string (only `-Command` splits on commas) so all `ContainsKey` checks miss | Fixed via `-split ','` normalization inside the script. Upgrade to the new script and retry |
+| 0 sources retrieved | Vector store (Milvus) or local source files were wiped, leaving stale MySQL metadata | See "RAG empty-store recovery" below |
+
+---
+
+### 6.1 RAG Empty-Store Recovery
+
+**Symptom**: Chat retrieval returns 0 sources, but knowledge-base documents show status COMPLETED.
+
+**Diagnosis**: Milvus collection `hfusionhub_chunks` has 0 entities (`num_entities=0`) while MySQL `document_chunk` still has rows — the vector store was wiped (container rebuild/volume drift) and source files may also be gone.
+
+**Recovery**:
+
+1. Inspect the vector store via Attu (http://localhost:8000) or query directly:
+   ```python
+   from pymilvus import connections, utility
+   connections.connect(alias="default", host="127.0.0.1", port="19530")
+   print(utility.get_collection_stats("hfusionhub_chunks"))
+   ```
+2. If source files are gone, re-upload via `POST /api/document/upload` (multipart), then trigger `POST /api/vectorize/{id}` to re-parse/embed.
+3. Soft-delete broken docs first (`DELETE /api/document/{id}`, recoverable via recycle bin) before `purge` (physical, irreversible, gated by permission checks).
+4. See [docs/ACCESS_MAP.md](ACCESS_MAP.md) for the full access map.
 
 ---
 
 ## 7. Reference Docs
 
+- [docs/ACCESS_MAP.md](ACCESS_MAP.md) — Full access map of running services (URLs / credentials / API docs / endpoint lists)
 - [docs/ENVIRONMENT.md](ENVIRONMENT.md) — Complete environment variable & feature-flag reference
 - [docs/ARCHITECTURE.md](ARCHITECTURE.md) — Architecture overview
 - [docs/java-backend.md](java-backend.md) — Java backend dev guide

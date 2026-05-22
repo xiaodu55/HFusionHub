@@ -2,14 +2,15 @@
 
 ## 当前状态
 
-HFusionHub 已集成 Swagger UI（基于 SpringDoc OpenAPI 3），提供完整的 REST API 文档和交互式测试界面。
+HFusionHub 已集成 **Knife4j**（基于 SpringDoc OpenAPI 3 的增强版 Swagger UI），提供完整的 REST API 文档和交互式测试界面。
 
 ## 访问地址
 
-### 开发环境
-- **Swagger UI**：http://localhost:8080/swagger-ui/index.html
-- **OpenAPI JSON**：http://localhost:8080/v3/api-docs
-- **OpenAPI YAML**：http://localhost:8080/v3/api-docs.yaml
+### 开发环境（注意 context-path 是 `/api`）
+- **Knife4j 主入口**（推荐）：http://localhost:8080/api/doc.html
+- **Swagger UI 备用**：http://localhost:8080/api/swagger-ui/index.html
+- **OpenAPI JSON**：http://localhost:8080/api/v3/api-docs
+- **OpenAPI YAML**：http://localhost:8080/api/v3/api-docs.yaml
 
 ### 生产环境
 ⚠️ **安全建议**：生产环境应关闭 Swagger UI 或限制访问
@@ -59,14 +60,22 @@ java -jar hfusionhub-backend.jar --spring.profiles.active=prod
 通过 Nginx 反向代理限制访问（示例 `deploy/nginx.conf`）：
 
 ```nginx
-location /swagger-ui {
+# 注意：Java 的 context-path 是 /api，URL 前缀要带上
+location /api/swagger-ui {
     allow 10.0.0.0/8;        # 内网
     allow 192.168.0.0/16;    # 内网
     deny all;
     proxy_pass http://java-backend:8080;
 }
 
-location /v3/api-docs {
+location /api/doc.html {
+    allow 10.0.0.0/8;
+    allow 192.168.0.0/16;
+    deny all;
+    proxy_pass http://java-backend:8080;
+}
+
+location /api/v3/api-docs {
     allow 10.0.0.0/8;
     allow 192.168.0.0/16;
     deny all;
@@ -188,9 +197,9 @@ springdoc:
    cd java-backend && mvn spring-boot:run
    ```
 
-2. **访问 Swagger UI**
+2. **访问 Knife4j / Swagger UI**
    ```
-   http://localhost:8080/swagger-ui/index.html
+   http://localhost:8080/api/doc.html
    ```
 
 3. **测试接口**
@@ -217,5 +226,5 @@ springdoc:
 
 ---
 
-**最后更新**：2026-08-19  
-**相关文档**：[api.md](api.md)（API 参考）、[java-backend.md](java-backend.md)（Java 后端开发指南）
+**最后更新**：2026-08-21  
+**相关文档**：[api.md](api.md)（API 参考）、[java-backend.md](java-backend.md)（Java 后端开发指南）、[ACCESS_MAP.md](ACCESS_MAP.md)（已启动服务全量访问地图）

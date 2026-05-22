@@ -10,19 +10,19 @@
 
 2. **查看服务日志**
    ```bash
-   # Java 后端
-   cd java-backend && tail -f logs/spring.log
-   
+   # Java 后端（restart-modules.ps1 启动时重定向到模块目录的 <module>-live.log）
+   cd java-backend && tail -f java-live.log
+
    # Python AI
-   cd python-ai && tail -f logs/app.log
-   
+   cd python-ai && tail -f python-live.log
+
    # 前端（开发模式）
    cd hfusionhub-frontend && npm run dev
-   
+
    # Docker 服务
-   docker logs -f hfusionhub-mysql
-   docker logs -f hfusionhub-redis
-   docker logs -f hfusionhub-milvus
+   docker logs -f mysql8
+   docker logs -f redis7
+   docker logs -f milvus
    ```
 
 3. **运行健康检查**
@@ -80,13 +80,13 @@ Could not open JDBC Connection for transaction
 docker ps | grep mysql
 
 # 测试连接
-docker exec hfusionhub-mysql mysql -uroot -p<密码> -e "SELECT 1"
+docker exec mysql8 mysql -uroot -p<密码> -e "SELECT 1"
 ```
 
 **解决**：
 ```bash
 # 重启 MySQL
-docker restart hfusionhub-mysql
+docker restart mysql8
 
 # 检查密码是否匹配 docker/.env 中的 MYSQL_ROOT_PASSWORD
 ```
@@ -99,18 +99,18 @@ Migration V57__user_theme_preference.sql failed
 **诊断**：
 ```sql
 -- 查看迁移历史
-docker exec hfusionhub-mysql mysql -uhfusionhub -p<密码> hfusionhub \
+docker exec mysql8 mysql -uhfusionhub -p<密码> hfusionhub \
   -e "SELECT * FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 5"
 ```
 
 **解决**：
 ```sql
 -- 如果迁移卡住，手动标记为成功（谨慎！）
-docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub \
+docker exec mysql8 mysql -uroot -p<密码> hfusionhub \
   -e "UPDATE flyway_schema_history SET success=1 WHERE version='57'"
 
 -- 或删除失败记录后重启
-docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub \
+docker exec mysql8 mysql -uroot -p<密码> hfusionhub \
   -e "DELETE FROM flyway_schema_history WHERE version='57' AND success=0"
 ```
 
@@ -142,7 +142,7 @@ ConnectionError: Error 111 connecting to localhost:6379
 
 **解决**：
 ```bash
-docker restart hfusionhub-redis
+docker restart redis7
 
 # 检查 REDIS_PASSWORD 是否匹配 docker/.env
 ```
@@ -155,18 +155,18 @@ MilvusException: <MilvusException: (code=1, message=Fail connecting to server)>
 **诊断**：
 ```bash
 # 检查 Milvus 是否运行
-docker logs hfusionhub-milvus | tail -20
+docker logs milvus | tail -20
 
 # 检查 etcd 是否健康
-docker exec hfusionhub-etcd etcdctl endpoint health
+docker exec etcd etcdctl endpoint health
 ```
 
 **解决**：
 ```bash
 # 重启 Milvus 栈
-docker restart hfusionhub-etcd
+docker restart etcd
 sleep 5
-docker restart hfusionhub-milvus
+docker restart milvus
 
 # 如果仍失败，重建容器
 cd docker && docker compose down milvus etcd
@@ -235,11 +235,11 @@ npm ci
 **解决**：
 ```sql
 -- 查看当前 admin 密码哈希
-docker exec hfusionhub-mysql mysql -uhfusionhub -p<密码> hfusionhub \
+docker exec mysql8 mysql -uhfusionhub -p<密码> hfusionhub \
   -e "SELECT username, password FROM sys_user WHERE username='admin'"
 
 -- 重置密码（BCrypt 哈希，对应 'admin123'）
-docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub \
+docker exec mysql8 mysql -uroot -p<密码> hfusionhub \
   -e "UPDATE sys_user SET password='\$2a\$10\$N9qo8uLOickgx2ZMRZoMye3K7i6M/xbJvbP3lIkRVwB2Y1V8VdYR2' WHERE username='admin'"
 ```
 
@@ -254,20 +254,21 @@ docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub \
 **诊断**：
 ```bash
 # 查看 Python AI 日志
-cd python-ai && tail -f logs/app.log | grep "parse"
+cd python-ai && tail -f python-live.log | grep "parse"
 
 # 检查 document_index_job 表
-docker exec hfusionhub-mysql mysql -uhfusionhub -p<密码> hfusionhub \
+docker exec mysql8 mysql -uhfusionhub -p<密码> hfusionhub \
   -e "SELECT id, document_id, status, error_message FROM document_index_job ORDER BY id DESC LIMIT 5"
 ```
 
 **解决**：
 ```bash
 # 手动触发恢复调度器（或等待 5 分钟自动运行）
-curl -X POST http://localhost:8080/actuator/scheduledtasks
+# 观察 DocumentIndexRecovery 等调度器是否在跑（注意 context-path 是 /api）
+curl http://localhost:8080/api/actuator/health
 
 # 如果 Milvus 有问题，重启后重新解析
-docker restart hfusionhub-milvus
+docker restart milvus
 # 前端点击"重新解析"按钮
 ```
 
@@ -332,6 +333,24 @@ RAG_RERANK_TOP_N=5        # 重排后保留 5 个
 # 重启 Python 服务
 ```
 
+#### 8.1 Java 调 Python 报 `400 Invalid HTTP request received.`（关键）
+
+**症状**：文档解析、聊天、向量化全部失败；Python 日志显示 `400 Invalid HTTP request received.`
+
+**根因**：Java 的 [RestTemplateConfig.java](../java-backend/src/main/java/com/hfusionhub/config/RestTemplateConfig.java) 使用 `JdkClientHttpRequestFactory`（JDK HttpClient），其**默认 HTTP/2**。对明文 `http://` 地址，JDK HttpClient 会发送 `Connection: Upgrade, HTTP2-Settings` + `Upgrade: h2c` 探测头；uvicorn 的 h11 解析器不支持 h2c，直接返回 400。仅 JDK HttpClient 有此行为（`HttpURLConnection` 无此问题）。
+
+**解决**：已显式锁定 `.version(HttpClient.Version.HTTP_1_1)`（2026-08-21 修复，提交 05751c5）。若升级依赖后复现，检查 RestTemplate 底层是否仍是 JDK HttpClient 且锁定 HTTP/1.1。
+
+---
+
+#### 8.2 `restart-modules.ps1` 报 healthy 但服务没起来
+
+**症状**：脚本输出 `[ok] java healthy`、`All requested modules restarted and healthy.`，但实际 8080/9000 没服务。
+
+**根因**：PowerShell 5.1 的 `-File` 模式下，`-Modules java,python` 被绑定成**单个字符串** `'java,python'` 而非数组（只有 `-Command` 模式才按逗号拆成数组），导致 `ContainsKey` 全部 miss、所有模块被静默跳过。
+
+**解决**：已修复（脚本内 `-split ','` 归一化，2026-08-21，提交 1aa868b）。升级脚本后重试。注意 `-Modules runner` 与 compose 容器端口冲突，重启 runner 用 `docker compose restart plugin-runner`。
+
 ---
 
 ### 🟡 P2 — 性能问题
@@ -346,10 +365,10 @@ RAG_RERANK_TOP_N=5        # 重排后保留 5 个
 **诊断**：
 ```bash
 # 查看 Python AI 日志中的耗时
-cd python-ai && grep "parse_document took" logs/app.log
+cd python-ai && grep "parse_document took" python-live.log
 
 # 检查 Milvus CPU/内存占用
-docker stats hfusionhub-milvus
+docker stats milvus
 ```
 
 **解决**：
@@ -397,11 +416,11 @@ LLM_PROVIDER=ollama
 **诊断**：
 ```sql
 -- 查看慢查询
-docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub \
+docker exec mysql8 mysql -uroot -p<密码> hfusionhub \
   -e "SHOW FULL PROCESSLIST"
 
 -- 查看表大小
-docker exec hfusionhub-mysql mysql -uroot -p<密码> hfusionhub \
+docker exec mysql8 mysql -uroot -p<密码> hfusionhub \
   -e "SELECT table_name, ROUND((data_length + index_length) / 1024 / 1024, 2) AS 'Size (MB)' FROM information_schema.TABLES WHERE table_schema='hfusionhub' ORDER BY (data_length + index_length) DESC"
 ```
 
@@ -420,9 +439,9 @@ DELETE FROM model_usage_record WHERE created_at < DATE_SUB(NOW(), INTERVAL 90 DA
 
 #### 12. Swagger UI 无法访问
 
-**症状**：`http://localhost:8080/swagger-ui/index.html` 404
+**症状**：`http://localhost:8080/api/swagger-ui/index.html` 404
 
-**原因**：依赖未添加或 profile 禁用了
+**原因**：依赖未添加或 profile 禁用了（注意 Java 的 context-path 是 `/api`，项目用的是 Knife4j，主入口是 `http://localhost:8080/api/doc.html`）
 
 **解决**：
 ```xml
@@ -470,7 +489,7 @@ CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 
 **解决**：
 ```bash
-docker restart hfusionhub-attu
+docker restart attu
 
 # 或重新创建
 cd docker && docker compose up -d attu
@@ -484,12 +503,12 @@ cd docker && docker compose up -d attu
 
 **备份**：
 ```bash
-docker exec hfusionhub-mysql mysqldump -uroot -p<密码> hfusionhub > backup-$(date +%Y%m%d).sql
+docker exec mysql8 mysqldump -uroot -p<密码> hfusionhub > backup-$(date +%Y%m%d).sql
 ```
 
 **恢复**：
 ```bash
-docker exec -i hfusionhub-mysql mysql -uroot -p<密码> hfusionhub < backup-20260819.sql
+docker exec -i mysql8 mysql -uroot -p<密码> hfusionhub < backup-20260819.sql
 ```
 
 ### Milvus 数据重建
@@ -508,6 +527,23 @@ docker compose up -d milvus
 # 前端批量重新解析所有文档（设置页 → 系统维护 → 重建索引）
 ```
 
+### RAG 空库恢复（向量库被清，检索 0 sources）
+
+**症状**：聊天 `Retrieved 0 sources`，但文档状态显示 COMPLETED。
+
+**判断**：Milvus 集合 `hfusionhub_chunks` 实体数 = 0，MySQL `document_chunk` 仍有数据 → 向量库/源文件被清空（容器重建、卷漂移）。
+
+**恢复**：
+1. 检查向量库（Attu http://localhost:8000 或 Python）：
+   ```python
+   from pymilvus import connections, utility
+   connections.connect(alias="default", host="127.0.0.1", port="19530")
+   print(utility.get_collection_stats("hfusionhub_chunks"))
+   ```
+2. 源文件缺失 → 重新上传 `POST /api/document/upload`（multipart），再触发 `POST /api/vectorize/{id}` 重新解析/向量化。
+3. 失效文档先软删 `DELETE /api/document/{id}`（进回收站可恢复），再 `purge`（物理删除，不可逆，会被权限校验拦截）。
+4. 完整访问路径见 [ACCESS_MAP.md](ACCESS_MAP.md)。
+
 ---
 
 ## 日志收集
@@ -524,10 +560,10 @@ docker ps -a > docker-ps.txt
 docker compose logs --tail=500 > docker-logs.txt
 
 # Java 日志
-cp ../java-backend/logs/spring.log java-backend.log
+cp ../java-backend/java-live.log java-backend.log
 
 # Python 日志
-cp ../python-ai/logs/app.log python-ai.log
+cp ../python-ai/python-live.log python-ai.log
 
 # 系统信息
 systeminfo > systeminfo.txt  # Windows
@@ -550,6 +586,6 @@ tar -czf diagnostics-$(date +%Y%m%d-%H%M%S).tar.gz *
 
 ---
 
-**最后更新**：2026-08-19  
-**版本**：v1.0  
+**最后更新**：2026-08-21  
+**版本**：v1.1  
 **维护者**：HFusionHub Team

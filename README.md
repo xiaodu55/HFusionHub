@@ -313,6 +313,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 
 详细启动步骤请参阅：
 - [docs/startup-guide.md](docs/startup-guide.md) — 中英双语启动、重启和排障指南（原 启动重启1.md 已合并）
+- [docs/ACCESS_MAP.md](docs/ACCESS_MAP.md) — 已启动服务的全部访问网址、登录账号密码、API 文档入口
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — 所有必需环境变量清单
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 架构全景图
 - 快速开始：按上方「启动步骤」依次启动 Docker → Java → Python → 前端
@@ -356,6 +357,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 
 | 文档 | 作用 |
 |------|------|
+| [docs/ACCESS_MAP.md](docs/ACCESS_MAP.md) | **已启动服务全量访问地图**：浏览器网址、登录凭据、API 文档（Knife4j/FastAPI）、Java 238 接口分组、Python 67 路由、前端 36 页面 |
 | [docs/startup-guide.md](docs/startup-guide.md) | **启动/重启/排障双语指南**（中英对照）：首次安装、一键启动、日常启动顺序、重启决策表、数据库重置、生产部署注意 |
 | [docs/PRODUCTION_OPS.md](docs/PRODUCTION_OPS.md) | **生产运维手册**（原 PRODUCTION_OPS + PRODUCTION_CHECKLIST + DR_VECTORS 合并）：上线检查清单、Runner TLS、插件 digest、配额账本、Agent 故障定位、向量库容灾、Staging 演练 |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 故障排查手册：P0 服务不可用 / P1 功能异常 / P2 性能 / P3 非关键，含数据恢复与日志收集 |
