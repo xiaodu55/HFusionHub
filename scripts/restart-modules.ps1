@@ -29,6 +29,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# -File 模式下 `-Modules java,python` 会被绑定成单个字符串 'java,python'
+# （PowerShell 5.1 不会像 -Command 那样把逗号拆成数组），导致 ContainsKey
+# 全 miss、模块被静默跳过还误报 healthy。这里统一归一化成数组。
+$Modules = $Modules | ForEach-Object { $_ -split ',' } | Where-Object { $_ }
+
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $modulePorts = @{
     java   = 8080
