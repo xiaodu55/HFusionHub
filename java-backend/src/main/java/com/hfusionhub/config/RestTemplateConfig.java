@@ -43,7 +43,11 @@ public class RestTemplateConfig {
     public RestTemplate restTemplate(
             RestTemplateBuilder builder,
             @Value("${ai-service.timeout:120000}") long readTimeoutMs) {
+        // 关键：JDK HttpClient 默认 HTTP_2，对明文 http:// 会发 `Upgrade: h2c`
+        // 升级请求；uvicorn/h11 不支持 h2c，直接拒绝 400 "Invalid HTTP request
+        // received."。必须显式锁定 HTTP/1.1 才能正常对话（Python AI 仅 HTTP/1.1）。
         HttpClient httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofMillis(DEFAULT_CONNECT_TIMEOUT_MS))
                 .build();
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
