@@ -14,6 +14,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 全局异常处理器
@@ -119,6 +120,19 @@ public class GlobalExceptionHandler {
     public R<?> handleIllegalArgumentException(IllegalArgumentException e) {
         log.warn("参数非法: {}", e.getMessage());
         return R.fail(400, "请求参数不合法，请检查后重试");
+    }
+
+    /**
+     * 资源不存在异常 — 不存在的请求路径应返回 404 而非 500。
+     * <p>Spring 6.1+ 对匹配不到任何 handler/静态资源的路径抛出
+     * {@link NoResourceFoundException}；此前被兜底 {@link #handleException}
+     * 误归为 500，接口语义不标准且误导排查。404 语义遵循 HTTP 标准：缺失
+     * 资源属客户端错误，响应体仍保持统一 R 结构。</p>
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<R<?>> handleNoResourceFoundException(NoResourceFoundException e) {
+        log.warn("请求路径不存在: method={} path={}", e.getHttpMethod(), e.getResourcePath());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(R.fail(404, "请求的资源不存在"));
     }
 
     /**

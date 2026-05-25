@@ -6,8 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.result.R;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 class GlobalExceptionHandlerTest {
 
@@ -40,5 +42,16 @@ class GlobalExceptionHandlerTest {
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertNotNull(response.getBody());
         assertEquals(StatusCode.LOGIN_ERROR, response.getBody().getCode());
+    }
+
+    @Test
+    void mapsNoResourceFoundExceptionTo404() {
+        ResponseEntity<R<?>> response = handler.handleNoResourceFoundException(
+                new NoResourceFoundException(HttpMethod.GET, "/api/does-not-exist"));
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(404, response.getBody().getCode());
+        assertNotNull(response.getBody().getMessage());
     }
 }
