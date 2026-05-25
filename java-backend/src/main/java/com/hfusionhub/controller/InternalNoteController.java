@@ -66,9 +66,7 @@ public class InternalNoteController {
                     content,
                     text(body.get("source")) != null ? text(body.get("source")) : "agent_write_note");
             log.info("Internal note created by agent: userId={} noteId={}", userId, note.getId());
-            return R.ok(Map.of(
-                    "note_id", note.getId(),
-                    "title", note.getTitle() != null ? note.getTitle() : ""));
+            return R.ok(Map.of("note_id", note.getId(), "title", note.getTitle() != null ? note.getTitle() : ""));
         } catch (Exception e) {
             log.warn("Internal note creation failed: {}", e.getMessage());
             return R.fail(500, "note creation failed: " + e.getMessage());

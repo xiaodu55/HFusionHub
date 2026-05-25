@@ -108,8 +108,7 @@ public class FeatureFlagController {
 
     @PostMapping("/evaluate/batch")
     @Operation(summary = "Evaluate multiple flags in one call")
-    public R<List<FeatureFlagEvaluateResultDTO>> evaluateBatch(
-            @Valid @RequestBody List<FeatureFlagEvaluateDTO> dtos) {
+    public R<List<FeatureFlagEvaluateResultDTO>> evaluateBatch(@Valid @RequestBody List<FeatureFlagEvaluateDTO> dtos) {
         return R.ok(dtos.stream().map(featureFlagService::evaluate).toList());
     }
 }

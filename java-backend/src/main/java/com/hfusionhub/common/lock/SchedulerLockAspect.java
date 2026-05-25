@@ -41,9 +41,8 @@ public class SchedulerLockAspect {
         String token = UUID.randomUUID().toString();
         boolean locked = false;
         try {
-            Boolean acquired = redisTemplate
-                    .opsForValue()
-                    .setIfAbsent(key, token, schedulerLock.ttlSeconds(), TimeUnit.SECONDS);
+            Boolean acquired =
+                    redisTemplate.opsForValue().setIfAbsent(key, token, schedulerLock.ttlSeconds(), TimeUnit.SECONDS);
             if (Boolean.TRUE.equals(acquired)) {
                 locked = true;
                 log.trace("Scheduler lock '{}' acquired by this instance", schedulerLock.value());
@@ -53,8 +52,10 @@ public class SchedulerLockAspect {
             }
         } catch (Exception e) {
             // Redis 不可用 → fail-open，退化为无锁执行
-            log.warn("Scheduler lock '{}' unavailable (Redis error), executing without lock: {}",
-                    schedulerLock.value(), e.getMessage());
+            log.warn(
+                    "Scheduler lock '{}' unavailable (Redis error), executing without lock: {}",
+                    schedulerLock.value(),
+                    e.getMessage());
             return joinPoint.proceed();
         }
 

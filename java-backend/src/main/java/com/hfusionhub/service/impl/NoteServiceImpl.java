@@ -125,7 +125,8 @@ public class NoteServiceImpl implements NoteService {
         if (StringUtils.hasText(title)) {
             return title.length() > MAX_TITLE_LENGTH ? title.substring(0, MAX_TITLE_LENGTH) : title;
         }
-        String plain = content.replaceAll("(?s)#+\\s*", "").replaceAll("\\s+", " ").trim();
+        String plain =
+                content.replaceAll("(?s)#+\\s*", "").replaceAll("\\s+", " ").trim();
         if (plain.length() > 30) {
             plain = plain.substring(0, 30) + "…";
         }

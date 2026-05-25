@@ -174,10 +174,10 @@ public class DemoImportServiceImpl implements DemoImportService {
         sections.add(clearApp(userId));
         sections.add(clearNotice());
 
-        int total = sections.stream().mapToInt(DemoImportResultDTO.SectionResult::getImportedCount).sum();
-        String message = total > 0
-                ? "演示数据已清除（知识库与回答方案进入回收站，7 天内可恢复）"
-                : "未发现需要清除的演示数据";
+        int total = sections.stream()
+                .mapToInt(DemoImportResultDTO.SectionResult::getImportedCount)
+                .sum();
+        String message = total > 0 ? "演示数据已清除（知识库与回答方案进入回收站，7 天内可恢复）" : "未发现需要清除的演示数据";
         log.info("演示数据清除完成: userId={}, sections={}", userId, sections);
         return DemoImportResultDTO.builder()
                 .knowledgeBaseId(null)
@@ -338,8 +338,7 @@ public class DemoImportServiceImpl implements DemoImportService {
                     vectorizationService.startVectorization(docId, null);
                 } catch (Exception e) {
                     parseFailed++;
-                    log.warn("演示文档触发解析失败: docId={}, title={}, 原因={}（AI 服务不可用时可在文档页稍后重试）",
-                            docId, title, e.getMessage());
+                    log.warn("演示文档触发解析失败: docId={}, title={}, 原因={}（AI 服务不可用时可在文档页稍后重试）", docId, title, e.getMessage());
                 }
             } catch (IOException e) {
                 log.error("演示文档写入失败: {}", title, e);
@@ -356,8 +355,9 @@ public class DemoImportServiceImpl implements DemoImportService {
         int skipped = 0;
         for (DemoPrompt demo : DEMO_PROMPTS) {
             boolean exists = promptTemplateMapper.selectCount(new LambdaQueryWrapper<PromptTemplate>()
-                    .eq(PromptTemplate::getUserId, userId)
-                    .eq(PromptTemplate::getName, demo.name())) > 0;
+                            .eq(PromptTemplate::getUserId, userId)
+                            .eq(PromptTemplate::getName, demo.name()))
+                    > 0;
             if (exists) {
                 skipped++;
                 continue;
@@ -392,8 +392,9 @@ public class DemoImportServiceImpl implements DemoImportService {
         for (Resource resource : loadResources(DEMO_NOTE_RESOURCE_DIR, "示例笔记")) {
             String title = DEMO_NOTE_TITLES.getOrDefault(resource.getFilename(), resource.getFilename());
             boolean exists = noteMapper.selectCount(new LambdaQueryWrapper<Note>()
-                    .eq(Note::getUserId, userId)
-                    .eq(Note::getTitle, title)) > 0;
+                            .eq(Note::getUserId, userId)
+                            .eq(Note::getTitle, title))
+                    > 0;
             if (exists) {
                 skipped++;
                 continue;
@@ -437,9 +438,10 @@ public class DemoImportServiceImpl implements DemoImportService {
 
         for (MemoryEntry entry : List.of(preference, fact)) {
             boolean exists = memoryEntryMapper.selectCount(new LambdaQueryWrapper<MemoryEntry>()
-                    .eq(MemoryEntry::getUserId, userId)
-                    .eq(MemoryEntry::getType, entry.getType())
-                    .eq(MemoryEntry::getContent, entry.getContent())) > 0;
+                            .eq(MemoryEntry::getUserId, userId)
+                            .eq(MemoryEntry::getType, entry.getType())
+                            .eq(MemoryEntry::getContent, entry.getContent()))
+                    > 0;
             if (exists) {
                 skipped++;
                 continue;
@@ -453,9 +455,9 @@ public class DemoImportServiceImpl implements DemoImportService {
     // ── 应用发布 ────────────────────────────────────────────────────────
 
     private DemoImportResultDTO.SectionResult importApp(Long userId, Long tenantId, Long kbId, Long templateId) {
-        boolean exists = appMapper.selectCount(new LambdaQueryWrapper<App>()
-                .eq(App::getUserId, userId)
-                .eq(App::getName, DEMO_APP_NAME)) > 0;
+        boolean exists = appMapper.selectCount(
+                        new LambdaQueryWrapper<App>().eq(App::getUserId, userId).eq(App::getName, DEMO_APP_NAME))
+                > 0;
         if (exists) {
             return section("apps", "应用发布", 0, 1);
         }
@@ -475,15 +477,15 @@ public class DemoImportServiceImpl implements DemoImportService {
     // ── 系统公告 ────────────────────────────────────────────────────────
 
     private DemoImportResultDTO.SectionResult importNotice() {
-        boolean exists = systemNoticeMapper.selectCount(new LambdaQueryWrapper<SystemNotice>()
-                .eq(SystemNotice::getTitle, DEMO_NOTICE_TITLE)) > 0;
+        boolean exists = systemNoticeMapper.selectCount(
+                        new LambdaQueryWrapper<SystemNotice>().eq(SystemNotice::getTitle, DEMO_NOTICE_TITLE))
+                > 0;
         if (exists) {
             return section("notices", "公告管理", 0, 1);
         }
         SystemNotice notice = new SystemNotice();
         notice.setTitle(DEMO_NOTICE_TITLE);
-        notice.setContent("演示数据已就绪：可以打开「知识库」查看演示知识库，在「智能对话」中绑定它提问，"
-                + "或到「回答方案」「我的笔记」「应用发布」体验各菜单的示例数据。");
+        notice.setContent("演示数据已就绪：可以打开「知识库」查看演示知识库，在「智能对话」中绑定它提问，" + "或到「回答方案」「我的笔记」「应用发布」体验各菜单的示例数据。");
         notice.setLevel("info");
         notice.setPublisher("admin");
         notice.setScope("all");
@@ -509,8 +511,12 @@ public class DemoImportServiceImpl implements DemoImportService {
 
     private String buildMessage(List<DemoImportResultDTO.SectionResult> sections, int parseFailed) {
         StringBuilder sb = new StringBuilder("演示数据已就绪");
-        int totalImported = sections.stream().mapToInt(DemoImportResultDTO.SectionResult::getImportedCount).sum();
-        int totalSkipped = sections.stream().mapToInt(DemoImportResultDTO.SectionResult::getSkippedCount).sum();
+        int totalImported = sections.stream()
+                .mapToInt(DemoImportResultDTO.SectionResult::getImportedCount)
+                .sum();
+        int totalSkipped = sections.stream()
+                .mapToInt(DemoImportResultDTO.SectionResult::getSkippedCount)
+                .sum();
         if (totalImported > 0) {
             sb.append("，新导入 ").append(totalImported).append(" 项");
         }

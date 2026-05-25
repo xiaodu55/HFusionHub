@@ -541,9 +541,8 @@ class VectorizationServiceImplTest {
         assertEquals(0, document.getChunkCount());
         assertTrue(ex.getMessage().contains("源文件"));
         // PROCESSING job 被更新为 FAILED
-        verify(documentIndexJobMapper).update(
-                org.mockito.ArgumentMatchers.isNull(),
-                org.mockito.ArgumentMatchers.argThat(wrapper -> {
+        verify(documentIndexJobMapper)
+                .update(org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.argThat(wrapper -> {
                     var update = new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<
                             com.hfusionhub.entity.DocumentIndexJob>();
                     return wrapper.getClass().isAssignableFrom(update.getClass());
@@ -567,9 +566,8 @@ class VectorizationServiceImplTest {
         assertEquals(DocumentStatus.FAILED.getCode(), document.getStatus());
         assertEquals(0, document.getChunkCount());
         // PROCESSING job 被更新为 FAILED
-        verify(documentIndexJobMapper).update(
-                org.mockito.ArgumentMatchers.isNull(),
-                org.mockito.ArgumentMatchers.argThat(wrapper -> {
+        verify(documentIndexJobMapper)
+                .update(org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.argThat(wrapper -> {
                     var update = new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<
                             com.hfusionhub.entity.DocumentIndexJob>();
                     return wrapper.getClass().isAssignableFrom(update.getClass());

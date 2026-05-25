@@ -236,7 +236,9 @@ public class AgentMetricsServiceImpl implements AgentMetricsService {
         List<Long> runIds = runs.stream().map(AgentRun::getId).distinct().toList();
         if (!runIds.isEmpty()) {
             for (AgentStep step : stepMapper.selectByRunIds(runIds)) {
-                stepsByRunId.computeIfAbsent(step.getRunId(), k -> new ArrayList<>()).add(step);
+                stepsByRunId
+                        .computeIfAbsent(step.getRunId(), k -> new ArrayList<>())
+                        .add(step);
             }
         }
 

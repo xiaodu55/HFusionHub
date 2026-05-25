@@ -107,7 +107,8 @@ public class UserModelConfigServiceImpl implements UserModelConfigService {
         // Try cache first
         String cacheKey = CACHE_KEY_PREFIX + userId;
         @SuppressWarnings("unchecked")
-        Map<String, Object> cached = (Map<String, Object>) redisTemplate.opsForValue().get(cacheKey);
+        Map<String, Object> cached =
+                (Map<String, Object>) redisTemplate.opsForValue().get(cacheKey);
         if (cached != null) {
             return cached;
         }

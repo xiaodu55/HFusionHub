@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.hfusionhub.entity.MemoryEntry;
 import com.hfusionhub.entity.SystemNotice;
 import com.hfusionhub.entity.WebhookSubscription;
-import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import java.util.List;
@@ -19,7 +18,8 @@ import org.junit.jupiter.api.Test;
  */
 class WriteEndpointValidationTest {
 
-    private static final Validator VALIDATOR = Validation.buildDefaultValidatorFactory().getValidator();
+    private static final Validator VALIDATOR =
+            Validation.buildDefaultValidatorFactory().getValidator();
 
     private static Set<String> violations(Object bean) {
         return VALIDATOR.validate(bean).stream()

@@ -158,8 +158,8 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
 
     @Override
     public int countQueuedRuns() {
-        return Math.toIntExact(runMapper.selectCount(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentRun>()
+        return Math.toIntExact(
+                runMapper.selectCount(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentRun>()
                         .eq(AgentRun::getStatus, AgentConstants.STATUS_PENDING)
                         .and(w -> w.isNull(AgentRun::getScheduledAt)
                                 .or()

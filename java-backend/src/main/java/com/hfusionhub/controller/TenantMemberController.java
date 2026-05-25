@@ -64,8 +64,7 @@ public class TenantMemberController {
 
     @PostMapping
     @Operation(summary = "添加租户成员")
-    public R<TenantMember> addMember(
-            @PathVariable Long tenantId, @Valid @RequestBody TenantMemberAddDTO body) {
+    public R<TenantMember> addMember(@PathVariable Long tenantId, @Valid @RequestBody TenantMemberAddDTO body) {
         requireTenantAdmin(tenantId);
         Long userId = body.getUserId();
         String role = StringUtils.hasText(body.getRole()) ? body.getRole() : "member";

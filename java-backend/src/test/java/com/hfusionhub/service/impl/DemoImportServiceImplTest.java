@@ -83,9 +83,17 @@ class DemoImportServiceImplTest {
         systemNoticeMapper = mock(SystemNoticeMapper.class);
         knowledgeBaseService = mock(KnowledgeBaseService.class);
         promptTemplateService = mock(PromptTemplateService.class);
-        service = new DemoImportServiceImpl(knowledgeBaseMapper, documentMapper, vectorizationService,
-                promptTemplateMapper, noteMapper, memoryEntryMapper, appMapper, systemNoticeMapper,
-                knowledgeBaseService, promptTemplateService);
+        service = new DemoImportServiceImpl(
+                knowledgeBaseMapper,
+                documentMapper,
+                vectorizationService,
+                promptTemplateMapper,
+                noteMapper,
+                memoryEntryMapper,
+                appMapper,
+                systemNoticeMapper,
+                knowledgeBaseService,
+                promptTemplateService);
         // 演示文档写入临时目录，避免污染工作区
         ReflectionTestUtils.setField(service, "uploadDir", tempDir.toString());
         StpUtil.login(1L);
