@@ -142,6 +142,15 @@ def delete_chunk_ids(chunk_ids: List[str]) -> bool:
     return _get_store().delete_chunk_ids(chunk_ids)
 
 
+def count_chunks(knowledge_base_id: Optional[int] = None) -> int:
+    """Count vector entities, optionally scoped to a knowledge base.
+
+    Used by the reconciliation endpoint that compares Milvus entity counts
+    against the Java side's durable ``document_chunk`` table.
+    """
+    return _get_store().count_chunks(knowledge_base_id)
+
+
 # ── Chunk corpus accessors — used by query_router / citation ────────────────
 
 # Chunk-corpus cache for the lite co-store.  Without it every retrieval

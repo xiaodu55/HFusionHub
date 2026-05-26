@@ -57,6 +57,16 @@ public interface VectorizationService {
     int recoverStaleIndexJobs();
 
     /**
+     * 向量库对账：对比 {@code document_chunk} 表与 Milvus 实体数，失配时显式告警。
+     *
+     * <p>覆盖"容器重建 → 向量库清空但 MySQL 残留"这类卷漂移隐患：不再静默
+     * 检索到 0 个 sources，而是通过日志显式暴露失配的知识库。</p>
+     *
+     * @return 失配的知识库数量（Milvus 不可达等无法对账场景不计入）
+     */
+    int reconcileVectorCounts();
+
+    /**
      * 同步文档状态：从Python引擎查询实际分块数，更新数据库状态
      *
      * @param documentId 文档ID

@@ -3,6 +3,7 @@ package com.hfusionhub.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.hfusionhub.entity.DocumentChunk;
 import java.util.List;
+import java.util.Map;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -46,4 +47,14 @@ public interface DocumentChunkMapper extends BaseMapper<DocumentChunk> {
             + "embedding_model, embedding_dimension, embedding_version "
             + "FROM document_chunk WHERE chunk_id = #{chunkId}")
     DocumentChunk selectByChunkId(@Param("chunkId") String chunkId);
+
+    /**
+     * 按 (租户, 知识库) 分组统计分块数，供向量库对账健康检查使用。
+     *
+     * <p>必须在 {@code TenantContext.runAsSystem} 中执行以跨越租户边界，
+     * 否则租户拦截器会把查询收缩到当前租户。</p>
+     */
+    @Select("SELECT tenant_id, knowledge_base_id, COUNT(*) AS cnt FROM document_chunk "
+            + "WHERE knowledge_base_id IS NOT NULL GROUP BY tenant_id, knowledge_base_id")
+    List<Map<String, Object>> countGroupByTenantAndKnowledgeBase();
 }

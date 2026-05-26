@@ -32,8 +32,10 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -386,6 +388,108 @@ public class VectorizationServiceImpl implements VectorizationService {
             }
         }
         return recovered;
+    }
+
+    @Override
+    public int reconcileVectorCounts() {
+        // 全局统计需跨租户：runAsSystem 下租户拦截器不注入 tenant_id 条件。
+        List<Map<String, Object>> globalCounts =
+                TenantContext.runAsSystem(() -> documentChunkMapper.countGroupByTenantAndKnowledgeBase());
+        if (globalCounts.isEmpty()) {
+            return 0;
+        }
+        Map<Long, Map<Long, Long>> byTenant = new LinkedHashMap<>();
+        for (Map<String, Object> row : globalCounts) {
+            Long tenantId = toLong(row.get("tenant_id"));
+            Long kbId = toLong(row.get("knowledge_base_id"));
+            Long count = toLong(row.get("cnt"));
+            if (tenantId == null || kbId == null || count == null) {
+                continue;
+            }
+            byTenant.computeIfAbsent(tenantId, k -> new HashMap<>()).put(kbId, count);
+        }
+        int mismatches = 0;
+        for (Map.Entry<Long, Map<Long, Long>> entry : byTenant.entrySet()) {
+            mismatches += TenantContext.runAs(entry.getKey(), () -> reconcileTenant(entry.getKey(), entry.getValue()));
+        }
+        return mismatches;
+    }
+
+    /**
+     * 单个租户的对账：文档分块持久化计数 vs Python 返回的 Milvus 实体数。
+     * Milvus 不可达或查询失败（-1）时跳过该 KB，不误报。
+     */
+    private int reconcileTenant(Long tenantId, Map<Long, Long> kbCounts) {
+        Map<Long, Long> milvusCounts = fetchMilvusCounts(kbCounts.keySet());
+        int mismatches = 0;
+        for (Map.Entry<Long, Long> entry : kbCounts.entrySet()) {
+            Long kbId = entry.getKey();
+            long dbCount = entry.getValue();
+            Long milvus = milvusCounts.get(kbId);
+            if (milvus == null || milvus < 0) {
+                continue;
+            }
+            if (dbCount != milvus) {
+                mismatches++;
+                log.error(
+                        "向量库对账失配: tenantId={}, knowledgeBaseId={}, document_chunk={}, milvus={} — "
+                                + "疑似向量库卷重建/数据漂移，该知识库检索将静默返回 0 sources，请核对卷挂载与数据一致性",
+                        tenantId,
+                        kbId,
+                        dbCount,
+                        milvus);
+            }
+        }
+        return mismatches;
+    }
+
+    private Map<Long, Long> fetchMilvusCounts(Collection<Long> kbIds) {
+        Map<Long, Long> result = new HashMap<>();
+        if (kbIds.isEmpty()) {
+            return result;
+        }
+        try {
+            Map<String, Object> body = new HashMap<>();
+            body.put("knowledge_base_ids", kbIds);
+            ResponseEntity<String> response = restTemplate.exchange(
+                    pythonEngineUrl + "/api/stats/vector-counts",
+                    HttpMethod.POST,
+                    new HttpEntity<>(body, internalHeaders()),
+                    String.class);
+            if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+                log.warn("向量库对账: Python 统计返回状态 {}，跳过本轮", response.getStatusCode());
+                return result;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> payload = objectMapper.readValue(response.getBody(), Map.class);
+            Object countsNode = payload.get("counts");
+            if (countsNode instanceof Map<?, ?> counts) {
+                for (Map.Entry<?, ?> entry : counts.entrySet()) {
+                    Long kbId = toLong(entry.getKey());
+                    Long value = toLong(entry.getValue());
+                    if (kbId != null && value != null) {
+                        result.put(kbId, value);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("向量库对账: 调用 Python 统计失败，跳过本轮", e);
+        }
+        return result;
+    }
+
+    private Long toLong(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        try {
+            return Long.parseLong(String.valueOf(value).trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @Override

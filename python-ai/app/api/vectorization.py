@@ -21,7 +21,8 @@ from app.models.document import (
     SearchResponse,
     SearchResult,
     CallbackRequest,
-    VectorChunk
+    VectorChunk,
+    VectorCountsRequest
 )
 from app.core.parser.base import BaseParser
 from app.core.chunker.text_chunker import chunk_blocks
@@ -617,6 +618,27 @@ async def search_chunks(request: SearchRequest):
 
     except Exception as e:
         raise VectorizationException(str(e))
+
+
+@router.post("/api/stats/vector-counts")
+async def vector_counts(request: VectorCountsRequest):
+    """Return Milvus entity counts per knowledge base for reconciliation.
+
+    Called by the Java backend's vector-store health check.  Each count is
+    scoped to the active tenant (fail-closed), matching the Java side's
+    per-tenant comparison.  A per-KB ``-1`` marks an individual count failure
+    (e.g. transient Milvus outage) so the Java side does not raise a false
+    drift alarm from an unreadable store.
+    """
+    from app.core.vectorstore.milvus_store import count_chunks
+    counts: Dict[str, int] = {}
+    for kb_id in request.knowledge_base_ids:
+        try:
+            counts[str(kb_id)] = await asyncio.to_thread(count_chunks, knowledge_base_id=kb_id)
+        except Exception as exc:
+            logger.warning("[Vectorization] Vector count failed for kb=%s: %s", kb_id, exc)
+            counts[str(kb_id)] = -1
+    return {"counts": counts}
 
 
 @router.delete("/api/documents/{document_id}/chunks")

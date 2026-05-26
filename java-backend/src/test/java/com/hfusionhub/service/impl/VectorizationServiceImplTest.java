@@ -676,4 +676,47 @@ class VectorizationServiceImplTest {
         entity.setMetadata("{}");
         return entity;
     }
+
+    // ── 向量库对账 ─────────────────────────────────────────────────────────
+
+    private java.util.Map<String, Object> globalCountRow(Long tenantId, Long kbId, Long cnt) {
+        return java.util.Map.of("tenant_id", tenantId, "knowledge_base_id", kbId, "cnt", cnt);
+    }
+
+    @Test
+    void reconcileReturnsZeroWhenNoChunkData() {
+        when(documentChunkMapper.countGroupByTenantAndKnowledgeBase()).thenReturn(List.of());
+
+        assertEquals(0, vectorizationService.reconcileVectorCounts());
+        org.mockito.Mockito.verifyNoInteractions(restTemplate);
+    }
+
+    @Test
+    void reconcileReportsNoMismatchWhenCountsAgree() {
+        when(documentChunkMapper.countGroupByTenantAndKnowledgeBase()).thenReturn(List.of(globalCountRow(7L, 20L, 3L)));
+        when(restTemplate.exchange(any(String.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(new ResponseEntity<>("{\"counts\":{\"20\":3}}", HttpStatus.OK));
+
+        assertEquals(0, vectorizationService.reconcileVectorCounts());
+    }
+
+    @Test
+    void reconcileReportsMismatchWhenMilvusEmptyButChunksPersisted() {
+        // 容器重建 → 向量库清空但 MySQL 残留 chunk 元数据 —— 必须显式告警。
+        when(documentChunkMapper.countGroupByTenantAndKnowledgeBase()).thenReturn(List.of(globalCountRow(7L, 20L, 3L)));
+        when(restTemplate.exchange(any(String.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(new ResponseEntity<>("{\"counts\":{\"20\":0}}", HttpStatus.OK));
+
+        assertEquals(1, vectorizationService.reconcileVectorCounts());
+    }
+
+    @Test
+    void reconcileSkipsKbWhenPythonMarkedUnavailable() {
+        // Milvus 查询失败标记 -1 —— 不误报为失配。
+        when(documentChunkMapper.countGroupByTenantAndKnowledgeBase()).thenReturn(List.of(globalCountRow(7L, 20L, 3L)));
+        when(restTemplate.exchange(any(String.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(new ResponseEntity<>("{\"counts\":{\"20\":-1}}", HttpStatus.OK));
+
+        assertEquals(0, vectorizationService.reconcileVectorCounts());
+    }
 }

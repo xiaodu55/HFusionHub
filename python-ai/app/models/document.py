@@ -109,3 +109,14 @@ class CallbackRequest(BaseModel):
     success: bool = Field(..., description="Processing success status")
     message: str = Field(..., description="Status message")
     chunks_count: int = Field(0, description="Number of chunks processed")
+
+
+class VectorCountsRequest(BaseModel):
+    """Request for vector-store entity counts grouped by knowledge base.
+
+    Used by the Java backend's reconciliation health check: the Java side
+    compares these Milvus counts against its durable ``document_chunk`` table
+    and raises an explicit alarm when they drift (e.g. after a vector-store
+    volume is recreated while MySQL still holds chunk metadata).
+    """
+    knowledge_base_ids: List[int] = Field(..., description="Knowledge base IDs to count entities for")
