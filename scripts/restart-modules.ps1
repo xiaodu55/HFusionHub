@@ -92,8 +92,21 @@ function Test-ProcessBelongsToRepo {
     return $false
 }
 
+function Test-DockerManagedProcess {
+    param($Process)
+    # Docker Desktop 的端口映射监听进程。命中即视为「端口由 compose 容器占用」，
+    # 提示跳过而不是误判为未知进程后保守退出。
+    $dockerNames = @('com.docker.backend', 'vpnkit', 'docker-desktop', 'com.docker.service')
+    foreach ($name in $dockerNames) {
+        if ($Process.ProcessName -like "$name*") { return $true }
+    }
+    return $false
+}
+
 function Stop-PortProcess {
     param([int]$Port)
+    # Returns $true if the port is free (or was released) and safe to start on;
+    # $false if it is held by an external process and this module should be skipped.
     $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     foreach ($c in $conns) {
         $procId = $c.OwningProcess
@@ -110,11 +123,19 @@ function Stop-PortProcess {
             Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
             Start-Sleep -Milliseconds 500
         }
+        elseif (Test-DockerManagedProcess -Process $proc) {
+            # 端口被 Docker compose 容器占用（如 runner 由 compose 管理）。
+            # 显式提示并跳过该模块，而不是报错退出整个脚本。
+            Write-Host "[skip] port $Port 由 Docker compose 容器占用（$($proc.ProcessName), PID $procId）。"
+            Write-Host "       若该模块由 compose 管理，本机无需再启动；如需本机进程，请先 'docker compose stop' 对应服务。"
+            return $false
+        }
         else {
             Write-Output "[skip] port $Port -> PID $procId ($($proc.ProcessName)) is NOT owned by $RepoRoot. Pass -Force to kill it anyway."
             exit 1
         }
     }
+    return $true
 }
 
 function Wait-Healthy {
@@ -137,6 +158,24 @@ function Wait-Healthy {
     return $false
 }
 
+function Rotate-LogFile {
+    param([string]$Path, [long]$MaxBytes = 100MB, [int]$Keep = 5)
+    # -live.log / -live-err.log 由 Start-Process 重定向生成，无限增长。
+    # 启动前检查大小：超阈值则归档为 <name>.log.<时间戳>，仅保留最近 $Keep 个归档。
+    if (-not (Test-Path $Path)) { return }
+    $size = (Get-Item $Path).Length
+    if ($size -lt $MaxBytes) { return }
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $archive = "$Path.$stamp"
+    Move-Item -Path $Path -Destination $archive -Force
+    Write-Host "[rotate] $Path ($size bytes) -> $(Split-Path $archive -Leaf)"
+    $leaf = Split-Path $Path -Leaf
+    Get-ChildItem -Path (Split-Path $Path) -Filter "$leaf.*" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -Skip $Keep |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+}
+
 function Start-Module {
     param([string]$Module)
     # 每个模块的 stdout/stderr 重定向到其所在目录下的 <module>-live.log / -err.log，
@@ -149,6 +188,8 @@ function Start-Module {
     $logDir = Join-Path $RepoRoot $logDirs[$Module]
     $outFile = Join-Path $logDir "$Module-live.log"
     $errFile = Join-Path $logDir "$Module-live-err.log"
+    Rotate-LogFile -Path $outFile
+    Rotate-LogFile -Path $errFile
     switch ($Module) {
         'java' {
             Write-Host "[start] Java backend (mvn spring-boot:run, port 8080)"
@@ -189,9 +230,13 @@ function Start-Module {
 
 Load-EnvFile
 
+# 端口被 Docker compose 容器占用的模块会被标记跳过：不 kill、不启动、不健康检查。
+$skipModules = @()
 foreach ($m in $Modules) {
     if ($modulePorts.ContainsKey($m)) {
-        Stop-PortProcess -Port $modulePorts[$m]
+        if (-not (Stop-PortProcess -Port $modulePorts[$m])) {
+            $skipModules += $m
+        }
     }
 }
 
@@ -200,14 +245,19 @@ if ($NoStart) {
     exit 0
 }
 
+$activeModules = @($Modules | Where-Object { $_ -notin $skipModules })
+if ($skipModules.Count -gt 0) {
+    Write-Host "跳过被外部占用端口的模块: $($skipModules -join ', ')"
+}
+
 $allHealthy = $true
-foreach ($m in $Modules) {
+foreach ($m in $activeModules) {
     if ($modulePorts.ContainsKey($m)) {
         Start-Module -Module $m
     }
 }
 
-foreach ($m in $Modules) {
+foreach ($m in $activeModules) {
     if (-not $healthChecks.ContainsKey($m)) { continue }
     if (-not (Wait-Healthy -Module $m)) {
         $allHealthy = $false

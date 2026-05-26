@@ -111,3 +111,6 @@ test_response.json
 
 # --- Runner TLS 私钥（绝不提交；由 scripts/generate-runner-tls.sh 生成） ---
 deploy/runner-tls/
+
+# --- Data backups (scripts/backup-data.ps1 output) ---
+backup/

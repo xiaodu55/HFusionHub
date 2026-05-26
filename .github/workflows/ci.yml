@@ -262,6 +262,34 @@ jobs:
         run: mvn --batch-mode spotless:check
       - name: Run unit tests (H2, no external services needed)
         run: mvn --batch-mode test
+      # ─── Java→Python 集成冒烟 ───
+      # 防 h2c 盲区复发：JDK HttpClient 默认 HTTP_2 对明文 http 发 Upgrade:
+      # h2c，uvicorn 拒绝回 400 "Invalid HTTP request"。Java 侧已显式锁定
+      # HTTP/1.1，但该链路从未被 CI 验证过。这里起真实 Python AI 服务，
+      # 用生产 RestTemplate（与 RestTemplateConfig 同源）POST /api/stats/
+      # vector-counts 探测。测试由 CI_SMOKE_PYTHON_URL 门控，本地跳过。
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Start Python AI service (smoke target)
+        working-directory: python-ai
+        env:
+          PYTHON_AI_INTERNAL_TOKEN: test-internal-token
+        run: |
+          pip install -r requirements.txt -q
+          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 9000 > /tmp/python-ai-smoke.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:9000/health > /dev/null 2>&1; then
+              echo "Python AI smoke service healthy (attempt $i)"
+              break
+            fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:9000/health > /dev/null || { echo "::error::Python AI failed to start for smoke test"; tail -50 /tmp/python-ai-smoke.log; exit 1; }
+      - name: Run Java→Python integration smoke
+        env:
+          CI_SMOKE_PYTHON_URL: http://127.0.0.1:9000
+        run: mvn --batch-mode test -Dtest=PythonEngineSmokeTest
       - name: Validate Flyway migrations against MySQL
         run: |
           mvn --batch-mode flyway:migrate \
