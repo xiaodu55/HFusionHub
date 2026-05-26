@@ -53,8 +53,15 @@ public interface DocumentChunkMapper extends BaseMapper<DocumentChunk> {
      *
      * <p>必须在 {@code TenantContext.runAsSystem} 中执行以跨越租户边界，
      * 否则租户拦截器会把查询收缩到当前租户。</p>
+     *
+     * <p>{@code document_chunk} 是 tenant 隔离前遗留的资源表（在
+     * {@code TENANT_IGNORE_TABLES} 中，无 {@code tenant_id} 列），因此租户
+     * 维度通过 JOIN {@code knowledge_base}（有 {@code tenant_id}）取得。</p>
      */
-    @Select("SELECT tenant_id, knowledge_base_id, COUNT(*) AS cnt FROM document_chunk "
-            + "WHERE knowledge_base_id IS NOT NULL GROUP BY tenant_id, knowledge_base_id")
+    @Select("SELECT kb.tenant_id AS tenant_id, dc.knowledge_base_id AS knowledge_base_id, COUNT(*) AS cnt "
+            + "FROM document_chunk dc "
+            + "JOIN knowledge_base kb ON kb.id = dc.knowledge_base_id "
+            + "WHERE dc.knowledge_base_id IS NOT NULL "
+            + "GROUP BY kb.tenant_id, dc.knowledge_base_id")
     List<Map<String, Object>> countGroupByTenantAndKnowledgeBase();
 }
