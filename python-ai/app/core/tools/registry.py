@@ -281,6 +281,10 @@ class ToolRegistry:
         # get_tools(), so non-V1 tools exist internally but are never exposed
         # to V1 agents.
         self._register_all()
+        # Register tools from connected external MCP servers (best-effort).
+        # Mirrors the plugin pattern: specs carry _mcp_server_id metadata and
+        # execution routes through the MCP client manager.
+        self._register_mcp_tools()
 
     # ── Registration ──────────────────────────────────────────────────
 
@@ -427,6 +431,52 @@ class ToolRegistry:
 
         if count:
             logger.info("已注册 %d 个插件工具到 ToolRegistry", count)
+        return count
+
+    def _register_mcp_tools(self) -> int:
+        """Register tools from connected external MCP servers.
+
+        Best-effort and idempotent: pulls specs from the global MCP client
+        manager (connected at startup) and injects them with
+        ``_mcp_server_id`` / ``_mcp_tool_name`` metadata.  Execution routes
+        through ``_execute_mcp_tool`` (see ``execute()``).  MCP tools are
+        registered at ``agent_version="1.0"`` so V1 agents can see them, but
+        they carry ``risk_level=EXTERNAL`` and are therefore still governed by
+        the policy engine (read-only mode denies them, approval may be
+        required) — the same default as ``web_search``.
+        """
+        try:
+            from app.core.tools.mcp_client import get_mcp_client_manager
+            from .spec import ToolSpec as TS, RiskLevel, Permissions
+
+            specs = get_mcp_client_manager().get_all_tools()
+        except Exception as exc:
+            logger.debug("MCP tool registration skipped: %s", exc)
+            return 0
+
+        count = 0
+        for mspec in specs:
+            name = mspec.name
+            if name in self._specs:
+                continue
+            spec = TS(
+                name=name,
+                description=mspec.description,
+                input_schema=mspec.input_schema,
+                output_schema={"type": "object"},
+                risk_level=RiskLevel.EXTERNAL,
+                timeout_seconds=30.0,
+                required_permissions=[Permissions.EXTERNAL_HTTP],
+                agent_version="1.0",
+            )
+            # Attach MCP routing metadata (plugin-style pattern).
+            object.__setattr__(spec, "_mcp_server_id", mspec.server_id)
+            object.__setattr__(spec, "_mcp_tool_name", mspec.name.split(":", 2)[-1])
+            self._specs[name] = spec
+            self._instances[name] = None  # type: ignore — routed via manager
+            count += 1
+        if count:
+            logger.info("已注册 %d 个 MCP 工具到 ToolRegistry", count)
         return count
 
     # ── Tool discovery ────────────────────────────────────────────────
@@ -669,6 +719,19 @@ class ToolRegistry:
                 context=context,
             )
 
+        # ── MCP tool routing ─────────────────────────────────────────
+        # Specs registered by _register_mcp_tools carry _mcp_server_id;
+        # execution goes out to the external MCP server via the client
+        # manager instead of a local instance.
+        mcp_server_id = getattr(spec, "_mcp_server_id", None)
+        if mcp_server_id is not None:
+            return await self._execute_mcp_tool(
+                server_id=mcp_server_id,
+                spec=spec,
+                safe_input=safe_input,
+                timeout_seconds=timeout_seconds or spec.timeout_seconds,
+            )
+
         instance = self._instances.get(tool_name)
         if instance is None:
             return ToolResult.failure(
@@ -856,6 +919,50 @@ class ToolRegistry:
         except Exception as exc:
             logger.warning("低代码工具 %s 执行失败: %s", spec.name, exc)
             return ToolResult.failure(spec.name, ErrorCode.INTERNAL, f"接口请求失败: {exc}")
+
+    async def _execute_mcp_tool(
+        self,
+        server_id: str,
+        spec: ToolSpec,
+        safe_input: Dict[str, Any],
+        timeout_seconds: float,
+    ) -> ToolResult:
+        """Execute an external MCP tool through the MCP client manager.
+
+        The tool runs on the remote MCP server's side; local policy,
+        input-validation and guardrail checks have already run in
+        ``execute()`` before this branch is reached.
+        """
+        try:
+            from app.core.tools.mcp_client import get_mcp_client_manager
+        except ImportError as exc:
+            return ToolResult.failure(spec.name, ErrorCode.INTERNAL, f"MCP 客户端不可用: {exc}")
+        manager = get_mcp_client_manager()
+        started = time.monotonic()
+        try:
+            result = await asyncio.wait_for(
+                manager.call_tool(
+                    server_id,
+                    getattr(spec, "_mcp_tool_name", spec.name),
+                    safe_input,
+                    timeout=timeout_seconds,
+                ),
+                timeout=max(0.1, timeout_seconds),
+            )
+        except asyncio.TimeoutError:
+            return ToolResult.failure(spec.name, ErrorCode.TIMEOUT, "MCP 工具调用超时")
+        except Exception as exc:
+            logger.warning("MCP 工具 %s 执行失败: %s", spec.name, exc)
+            return ToolResult.failure(spec.name, ErrorCode.INTERNAL, f"MCP 工具执行失败: {exc}")
+        elapsed = round((time.monotonic() - started) * 1000, 2)
+        if isinstance(result, dict) and result.get("error"):
+            return ToolResult.failure(
+                spec.name,
+                ErrorCode.INTERNAL,
+                str(result["error"]),
+                duration_ms=elapsed,
+            )
+        return ToolResult.success(spec.name, result, duration_ms=elapsed)
 
     # ── Input validation ──────────────────────────────────────────────
 

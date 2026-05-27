@@ -39,6 +39,8 @@ MCP_CONFIG_ENV = "MCP_SERVERS_CONFIG"
 MCP_HEARTBEAT_INTERVAL = 30  # seconds
 MCP_CONNECT_TIMEOUT = 10.0
 MCP_CALL_TIMEOUT = 60.0
+# Latest MCP Streamable HTTP protocol revision this client negotiates.
+MCP_PROTOCOL_VERSION = "2025-06-18"
 
 
 class TransportType(str, Enum):
@@ -66,6 +68,8 @@ class MCPServerConnection:
     last_heartbeat: float = 0.0
     error_message: str = ""
     consecutive_failures: int = 0
+    # Echoed on every subsequent request for stateful MCP servers.
+    session_id: Optional[str] = None
 
 
 @dataclass
@@ -212,26 +216,48 @@ class MCPClientManager:
             return False
         conn.status = ConnectionStatus.CONNECTING
         try:
-            client = await self._get_client()
-            resp = await client.post(
-                f"{conn.url}/tools/list",
-                json={},
-                headers=self._headers(conn),
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                conn.tools = data.get("tools", [])
-                conn.status = ConnectionStatus.CONNECTED
-                conn.consecutive_failures = 0
-                conn.error_message = ""
-                conn.last_heartbeat = time.monotonic()
-                logger.info("MCP server '%s' connected with %d tools", conn.name, len(conn.tools))
-                return True
-            else:
-                conn.status = ConnectionStatus.ERROR
-                conn.error_message = f"HTTP {resp.status_code}: {resp.text[:200]}"
-                conn.consecutive_failures += 1
-                logger.warning("MCP server '%s' returned %d on tools/list", conn.name, resp.status_code)
+            # MCP Streamable HTTP lifecycle:
+            #   initialize → notifications/initialized → tools/list
+            # All JSON-RPC messages go to the server's base URL (never to a
+            # REST-style /tools/list path), matching the MCP spec.
+            init_resp = await self._post_jsonrpc(conn, {
+                "jsonrpc": "2.0",
+                "id": "hfusionhub-init",
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": MCP_PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {"name": "HFusionHub", "version": "1.0.0"},
+                },
+            })
+            if "error" in init_resp:
+                raise ValueError(f"MCP initialize error: {init_resp['error']}")
+            if "result" not in init_resp:
+                raise ValueError("MCP initialize response missing result")
+
+            # Notifications carry no id and are not answered by the server.
+            await self._post_jsonrpc(conn, {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+            })
+
+            list_resp = await self._post_jsonrpc(conn, {
+                "jsonrpc": "2.0",
+                "id": "hfusionhub-tools-list",
+                "method": "tools/list",
+            })
+            if "error" in list_resp:
+                raise ValueError(f"MCP tools/list error: {list_resp['error']}")
+            tools = (list_resp.get("result") or {}).get("tools", [])
+            if not isinstance(tools, list):
+                tools = []
+            conn.tools = tools
+            conn.status = ConnectionStatus.CONNECTED
+            conn.consecutive_failures = 0
+            conn.error_message = ""
+            conn.last_heartbeat = time.monotonic()
+            logger.info("MCP server '%s' connected with %d tools", conn.name, len(conn.tools))
+            return True
         except Exception as e:
             conn.status = ConnectionStatus.ERROR
             conn.error_message = str(e)[:200]
@@ -244,6 +270,62 @@ class MCPClientManager:
         if conn:
             conn.status = ConnectionStatus.DISCONNECTED
             conn.tools.clear()
+
+    # ── JSON-RPC transport (MCP Streamable HTTP) ─────────────────────
+
+    @staticmethod
+    def _parse_sse_json(text: str) -> Any:
+        """Extract the last JSON payload from an SSE (text/event-stream) body.
+
+        Streamable HTTP servers may answer with ``data: {json}`` lines; the
+        last parseable payload is the response to our request (intermediate
+        events are progress pings).
+        """
+        data_parts: List[str] = []
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("data:"):
+                data_parts.append(line[len("data:"):].strip())
+        if not data_parts:
+            raise ValueError("SSE response contained no data payload")
+        return json.loads("\n".join(data_parts))
+
+    async def _post_jsonrpc(
+        self,
+        conn: MCPServerConnection,
+        payload: Dict[str, Any],
+        *,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """POST one JSON-RPC message to the server's base URL.
+
+        Handles ``application/json`` and ``text/event-stream`` responses,
+        captures ``Mcp-Session-Id`` for stateful servers, and raises on
+        non-2xx HTTP status (the raw text is preserved in the message so
+        auth failures like Notion's 401 are surfaced to the UI).
+        """
+        client = await self._get_client()
+        headers = self._headers(conn)
+        headers["Accept"] = "application/json, text/event-stream"
+        if conn.session_id:
+            headers["Mcp-Session-Id"] = conn.session_id
+        kwargs: Dict[str, Any] = {"headers": headers}
+        if timeout is not None:
+            kwargs["timeout"] = httpx.Timeout(timeout, connect=MCP_CONNECT_TIMEOUT)
+
+        resp = await client.post(conn.url, json=payload, **kwargs)
+        sess = resp.headers.get("Mcp-Session-Id")
+        if sess:
+            conn.session_id = sess
+        if resp.status_code >= 400:
+            raise ValueError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        content_type = resp.headers.get("Content-Type", "")
+        if "text/event-stream" in content_type:
+            return self._parse_sse_json(resp.text)
+        if resp.content.strip():
+            return resp.json()
+        # Notifications are answered with an empty 2xx body — treat as no-op.
+        return {}
 
     async def refresh_tools(self, server_id: str) -> bool:
         """Re-discover tools from a connected server."""
@@ -289,26 +371,39 @@ class MCPClientManager:
         *,
         timeout: float = MCP_CALL_TIMEOUT,
     ) -> Dict[str, Any]:
-        """Execute a tool on a remote MCP server."""
+        """Execute a tool on a remote MCP server (JSON-RPC ``tools/call``)."""
         conn = self._servers.get(server_id)
         if not conn or conn.status != ConnectionStatus.CONNECTED:
             return {"error": f"MCP server '{server_id}' is not connected"}
 
-        client = await self._get_client()
         try:
-            resp = await client.post(
-                f"{conn.url}/tools/call",
-                json={"name": tool_name, "arguments": arguments},
-                headers=self._headers(conn),
-                timeout=httpx.Timeout(timeout, connect=MCP_CONNECT_TIMEOUT),
-            )
-            if resp.status_code == 200:
-                conn.consecutive_failures = 0
-                conn.last_heartbeat = time.monotonic()
-                return resp.json()
-            else:
+            resp = await self._post_jsonrpc(conn, {
+                "jsonrpc": "2.0",
+                "id": "hfusionhub-tools-call",
+                "method": "tools/call",
+                "params": {"name": tool_name, "arguments": arguments},
+            }, timeout=timeout)
+            if "error" in resp:
                 conn.consecutive_failures += 1
-                return {"error": f"MCP server returned {resp.status_code}: {resp.text[:300]}"}
+                return {"error": f"MCP tools/call error: {resp['error']}"}
+            conn.consecutive_failures = 0
+            conn.last_heartbeat = time.monotonic()
+            result = resp.get("result") or {}
+            # Normalise MCP ``content`` text blocks for downstream consumers:
+            # return the list of text payloads when the server only produced
+            # text content; otherwise hand back the raw result.
+            content = result.get("content")
+            if isinstance(content, list):
+                texts = [
+                    c.get("text", "")
+                    for c in content
+                    if isinstance(c, dict) and c.get("type") == "text"
+                ]
+                if texts:
+                    normalized = dict(result)
+                    normalized["content"] = texts
+                    return normalized
+            return result
         except Exception as e:
             conn.consecutive_failures += 1
             return {"error": f"MCP call failed: {e}"}
@@ -357,33 +452,19 @@ def get_mcp_client_manager() -> MCPClientManager:
 
 
 async def register_mcp_tools_with_registry(registry: Any) -> int:
-    """Register MCP tools into a ToolRegistry instance. Returns count registered."""
-    manager = get_mcp_client_manager()
-    specs = manager.get_all_tools()
-    count = 0
-    for mspec in specs:
-        try:
-            from app.core.tools.spec import ToolSpec as TS, RiskLevel, Permissions
-            ts = TS(
-                name=mspec.name,
-                description=mspec.description,
-                input_schema=mspec.input_schema,
-                output_schema={"type": "object"},
-                risk_level=RiskLevel.EXTERNAL,
-                timeout_seconds=30.0,
-                required_permissions=[Permissions.EXTERNAL_HTTP],
-                agent_version="1.0",
-            )
-            ts._mcp_server_id = mspec.server_id
-            ts._mcp_tool_name = mspec.name.split(":", 2)[-1]
-            registry._specs[mspec.name] = ts
-            registry._instances[mspec.name] = None
-            count += 1
-        except Exception as e:
-            logger.warning("Failed to register MCP tool %s: %s", mspec.name, e)
-    if count:
-        logger.info("Registered %d MCP tools with ToolRegistry", count)
-    return count
+    """Register MCP tools into a ToolRegistry instance. Returns count registered.
+
+    Delegates to the canonical ``ToolRegistry._register_mcp_tools`` so the
+    injection logic lives in exactly one place (kept as an async wrapper for
+    callers that expect the legacy signature).
+    """
+    try:
+        from app.core.tools.registry import ToolRegistry
+        if isinstance(registry, ToolRegistry):
+            return registry._register_mcp_tools()
+    except Exception as e:
+        logger.warning("Failed to register MCP tools: %s", e)
+    return 0
 
 
 __all__ = [
