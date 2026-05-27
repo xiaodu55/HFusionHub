@@ -107,14 +107,27 @@ def _get_configured_reranker(mode: str, model_name: str) -> Reranker:
     return DisabledReranker(reason=f"unsupported_mode:{mode}")
 
 
+@lru_cache(maxsize=8)
+def _resolve_reranker(flag_enabled: bool, mode: str, model_name: str) -> Reranker:
+    """Resolve the active reranker once per (flag, mode, model) combination.
+
+    The feature flag's cached boolean is stable within its TTL, so keying on
+    the evaluated value (rather than the flag key) is safe and lets a UI
+    toggle take effect on the next retrieval.
+    """
+    if not flag_enabled:
+        return DisabledReranker(reason="rag.reranker.enabled is OFF via feature flag")
+    if mode in {"", "disabled", "off", "none"}:
+        mode = "lexical"
+    return _get_configured_reranker(mode, model_name)
+
+
 def get_reranker() -> Reranker:
     from app.utils.config import config
     from app.utils.feature_flag import feature_flags
 
-    if not feature_flags.is_enabled("rag.reranker.enabled"):
-        return DisabledReranker(reason="rag.reranker.enabled is OFF via feature flag")
-
-    mode = config.RAG_RERANKER_MODE.lower().strip()
-    if mode in {"", "disabled", "off", "none"}:
-        mode = "lexical"
-    return _get_configured_reranker(mode, config.RAG_RERANKER_MODEL)
+    return _resolve_reranker(
+        feature_flags.is_enabled("rag.reranker.enabled"),
+        config.RAG_RERANKER_MODE.lower().strip(),
+        config.RAG_RERANKER_MODEL,
+    )

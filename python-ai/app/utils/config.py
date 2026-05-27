@@ -132,7 +132,7 @@ class Config:
     # Second-stage reranking is opt-in. ``lexical`` is a deterministic local
     # baseline; ``cross_encoder`` needs sentence-transformers and an explicitly
     # configured model name.
-    RAG_RERANKER_MODE = os.getenv("RAG_RERANKER_MODE", "disabled")
+    RAG_RERANKER_MODE = os.getenv("RAG_RERANKER_MODE", "lexical")
     RAG_RERANKER_MODEL = os.getenv("RAG_RERANKER_MODEL", "BAAI/bge-reranker-base")
     RAG_RERANK_CANDIDATE_COUNT = int(os.getenv("RAG_RERANK_CANDIDATE_COUNT", "20"))
 

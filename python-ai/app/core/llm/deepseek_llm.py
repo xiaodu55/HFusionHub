@@ -216,7 +216,22 @@ class DeepSeekLLM(BaseLLM):
         max_tokens: int = 2048,
         **kwargs
     ) -> AsyncGenerator[str, None]:
-        """Chat completion with streaming via DeepSeek API"""
+        """Chat completion with streaming via DeepSeek API.
+
+        The exact-match response cache (same key space as ``chat``) is
+        consulted before the upstream call and populated on completion, so
+        repeated FAQ-style prompts do not re-bill even on the streaming path.
+        A cache hit is yielded as a single chunk to preserve SSE semantics.
+        """
+        from app.utils.config import config
+
+        key = _cache_key(self.model, temperature, max_tokens, self.api_key, messages)
+        if config.LLM_RESPONSE_CACHE_TTL_SECONDS > 0:
+            cached = _cache_get(key)
+            if cached is not None:
+                yield cached.content
+                return
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -251,6 +266,7 @@ class DeepSeekLLM(BaseLLM):
         ) as response:
             self._ensure_success(response)
 
+            parts: List[str] = []
             async for line in response.aiter_lines():
                 if line.startswith("data: "):
                     data_str = line[6:]
@@ -262,9 +278,18 @@ class DeepSeekLLM(BaseLLM):
                         delta = data["choices"][0].get("delta", {})
                         content = delta.get("content", "")
                         if content:
+                            parts.append(content)
                             yield content
                     except json.JSONDecodeError:
                         continue
+
+            if config.LLM_RESPONSE_CACHE_TTL_SECONDS > 0 and parts:
+                from .base import LLMResponse
+                _cache_put(key, LLMResponse(
+                    content="".join(parts),
+                    model=self.model,
+                    finish_reason="stop",
+                ))
 
     def is_available(self) -> bool:
         """Check if DeepSeek API is available"""

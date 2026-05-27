@@ -10,12 +10,13 @@ from typing import Dict, Tuple
 from .base import BaseLLM, ChatMessage, LLMResponse
 from .deepseek_llm import DeepSeekLLM, _is_placeholder_key
 from .failover_llm import FailoverLLM
+from .gateway_llm import GatewayLLM
 from .mock_llm import MockLLM
 from .ollama_llm import OllamaLLM
 
 __all__ = [
     "BaseLLM", "ChatMessage", "LLMResponse", "DeepSeekLLM", "OllamaLLM",
-    "MockLLM", "FailoverLLM", "get_llm",
+    "MockLLM", "FailoverLLM", "GatewayLLM", "get_llm",
 ]
 
 logger = logging.getLogger(__name__)
@@ -81,8 +82,52 @@ def _is_ollama_available(base_url: str) -> bool:
     return available
 
 
+def _gateway_stream_enabled() -> bool:
+    """Whether agent/chat streaming routes through the ModelGateway.
+
+    Controlled by ``MODEL_GATEWAY_STREAM_ENABLED`` (default ON in production so
+    streaming gets rate limiting, circuit breaking, cost tracking and the
+    response cache). Tests set it to ``false`` in conftest so the suite keeps
+    exercising the legacy FailoverLLM / monkeypatched paths deterministically.
+    """
+    return os.getenv("MODEL_GATEWAY_STREAM_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+
+
 def get_llm(model: str = None) -> BaseLLM:
-    """Select configured providers; runtime failures use a bounded failover."""
+    """Select the LLM for agent/chat use.
+
+    When ``MODEL_GATEWAY_STREAM_ENABLED`` (default ON) and the gateway can
+    route, returns a :class:`GatewayLLM` facade so streaming and non-streaming
+    calls get rate limiting, circuit breaking, cost tracking and the exact-match
+    response cache. Otherwise falls back to the concrete provider chain
+    (mock / DeepSeek / Ollama / failover) — the same result ``get_llm()``
+    produced before the gateway existed.
+    """
+    # Explicit test/development mock mode wins over everything — it must never
+    # touch configured providers (including the gateway's).
+    if os.getenv("LLM_ALLOW_MOCK", "false").lower() in ("true", "1", "yes"):
+        logger.info("Using Mock LLM because LLM_ALLOW_MOCK=true")
+        return MockLLM()
+
+    if _gateway_stream_enabled():
+        from .model_gateway import get_model_gateway
+
+        gateway = get_model_gateway()
+        if gateway._can_route():
+            logger.info("Using GatewayLLM (ModelGateway) for model=%s", model or "<default>")
+            return GatewayLLM(gateway, model=model)
+    return _build_providers(model)
+
+
+def _build_providers(model: str = None) -> BaseLLM:
+    """Build the concrete provider chain (mock / DeepSeek / Ollama / failover).
+
+    This is exactly what ``get_llm()`` returned before the ModelGateway branch
+    existed. Kept separate so the gateway's own graceful-degradation path
+    (``_legacy_chat`` / ``_legacy_stream``) can call it directly — re-entering
+    ``get_llm()`` there would hit the gateway branch again and recurse forever
+    on a resolve failure.
+    """
     from app.utils.config import config
 
     # Explicit test/development mock mode must not call configured providers.

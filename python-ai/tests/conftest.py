@@ -26,6 +26,12 @@ config.EMBEDDING_ALLOW_FALLBACK = True
 # flags don't override env-var-based config (preserves existing test behavior).
 os.environ.setdefault("FEATURE_FLAG_DEGRADATION", "transparent")
 
+# get_llm() routes through the ModelGateway when MODEL_GATEWAY_STREAM_ENABLED
+# (default ON in production).  Force it OFF in the test session so the suite
+# keeps exercising the legacy FailoverLLM / mock / monkeypatched-get_llm paths
+# deterministically (e.g. test_llm_failover.py asserts FailoverLLM).
+os.environ["MODEL_GATEWAY_STREAM_ENABLED"] = "false"
+
 from app.core.tenant.context import set_tenant_id, clear_tenant_id
 
 

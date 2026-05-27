@@ -6,6 +6,7 @@ import os
 import random
 import logging
 import asyncio
+import concurrent.futures
 from typing import List, Optional
 
 from app.core.embedding.ollama import OllamaEmbedding
@@ -13,6 +14,15 @@ from app.core.exceptions import EmbeddingException
 from app.utils.config import config
 
 logger = logging.getLogger(__name__)
+
+# Shared thread-pool for the synchronous embedding wrappers. Creating a fresh
+# ThreadPoolExecutor() per call (each wrapping a fresh asyncio.run loop) churned
+# threads and event loops on every query embedding; a module-level pool is
+# reused across calls, matching the llm-probe executor pattern in
+# app.core.llm.
+_embedding_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="embedding-sync"
+)
 
 
 class EmbeddingService:
@@ -91,10 +101,9 @@ class EmbeddingService:
             # 尝试获取当前事件循环
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # 如果循环正在运行，使用 run_until_complete
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    return pool.submit(asyncio.run, self.generate(text)).result()
+                # 如果循环正在运行，在共享线程池中跑一个新事件循环，避免阻塞
+                # 正在运行的 loop（线程池模块级复用，不再每次新建）。
+                return _embedding_executor.submit(asyncio.run, self.generate(text)).result()
             else:
                 return loop.run_until_complete(self.generate(text))
         except RuntimeError:
@@ -114,9 +123,7 @@ class EmbeddingService:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    return pool.submit(asyncio.run, self.generate_batch(texts)).result()
+                return _embedding_executor.submit(asyncio.run, self.generate_batch(texts)).result()
             else:
                 return loop.run_until_complete(self.generate_batch(texts))
         except RuntimeError:

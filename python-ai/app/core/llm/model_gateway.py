@@ -9,11 +9,13 @@ usage/cost into a thread-safe accumulator that can be flushed to the Java
 backend.
 
 Graceful degradation: when ``MODEL_GATEWAY_ENABLED=false``, no provider is
-usable, or a model cannot be resolved, ``ModelGateway.chat`` delegates to the
-legacy ``get_llm()`` path so existing callers keep working unchanged.
+usable, or a model cannot be resolved, ``ModelGateway.chat`` / ``chat_stream``
+delegate to the legacy ``get_llm()`` path so existing callers keep working
+unchanged.
 
-Streaming is intentionally not routed through the gateway yet; stream callers
-should continue to use ``get_llm()`` directly.
+Streaming (``chat_stream``) applies the same rate limiting, circuit breaking,
+cost tracking and exact-match response cache as the non-streaming path, so the
+agent/chat streaming paths are no longer outside the governance layer.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Deque, Dict, Iterable, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Deque, Dict, Iterable, List, Optional, Tuple
 
 import httpx
 
@@ -492,7 +494,231 @@ class ModelGateway:
             "All model providers failed: " + ("; ".join(errors) or "no candidates")
         )
 
+    async def chat_stream(
+        self,
+        model: str,
+        messages: List[ChatMessage],
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        fallbacks: Optional[List[str]] = None,
+        **kwargs,
+    ) -> AsyncGenerator[str, None]:
+        """Stream a chat response through the provider chain (async generator).
+
+        Applies the same rate limiting, circuit breaking, cost tracking and
+        failover as :meth:`chat`, but yields content chunks. Streaming also
+        honours the exact-match LLM response cache: an identical prompt that
+        was answered recently (by any gateway-routed request) streams the
+        cached answer back without re-billing or consuming rate-limit tokens.
+
+        Failover happens only before the first chunk is emitted — once content
+        has started flowing the generator cannot transparently restart, so an
+        upstream error at that point is raised to the caller.
+
+        Yields:
+            Content chunks (str).
+        """
+        from .deepseek_llm import (
+            _cache_get as _response_cache_get,
+            _cache_key as _response_cache_key,
+            _cache_put as _response_cache_put,
+        )
+        from app.utils.config import config
+
+        if not self._can_route():
+            async for chunk in self._legacy_stream(messages, temperature, max_tokens, kwargs):
+                yield chunk
+            return
+
+        try:
+            provider_name, resolved_model = self.resolve(model)
+        except GatewayError as exc:
+            logger.warning("Model %r could not be resolved; using legacy stream: %s", model, exc)
+            async for chunk in self._legacy_stream(messages, temperature, max_tokens, kwargs):
+                yield chunk
+            return
+
+        # Cache-hit fast path, keyed on the RESOLVED model so an alias or
+        # provider name hits the entry the stream was stored under. Runs before
+        # the limiter consume so a hit never bills or rate-limits.
+        if config.LLM_RESPONSE_CACHE_TTL_SECONDS > 0:
+            cache_key = _response_cache_key(resolved_model, temperature, max_tokens, "", messages)
+            cached = _response_cache_get(cache_key)
+            if cached is not None:
+                yield cached.content
+                return
+
+        start = time.perf_counter()
+        errors: List[str] = []
+        for candidate, candidate_model in self._build_chain(provider_name, resolved_model, fallbacks):
+            if self._circuit_open(candidate):
+                errors.append(f"{candidate}: circuit open")
+                continue
+
+            limiter = self._limiters.get(candidate)
+            estimated_tokens = self._estimate_tokens(messages)
+            if limiter is not None and not limiter.try_consume(estimated_tokens):
+                errors.append(f"{candidate}: rate limited")
+                continue
+
+            provider = self._providers[candidate]
+            parts: List[str] = []
+            emitted_first = False
+            try:
+                async for chunk in self._stream_provider(
+                    provider, candidate_model, messages, temperature, max_tokens, kwargs
+                ):
+                    emitted_first = True
+                    parts.append(chunk)
+                    yield chunk
+            except Exception as exc:
+                if emitted_first:
+                    # Cannot transparently restart once content flowed.
+                    self._record_failure(candidate, exc)
+                    raise RuntimeError(
+                        f"Provider {candidate} stream failed after first chunk: {exc}"
+                    ) from exc
+                self._record_failure(candidate, exc)
+                errors.append(f"{candidate}: {exc}")
+                continue
+
+            self._record_success(candidate)
+            content = "".join(parts)
+            raw_usage = {
+                "prompt_tokens": estimated_tokens,
+                "completion_tokens": self._estimate_completion(content),
+                "total_tokens": estimated_tokens + self._estimate_completion(content),
+            }
+            usage = self._build_usage(provider, candidate_model, raw_usage, start)
+            if self._cost_tracking_enabled:
+                self.usage_accumulator.record(usage)
+
+            if config.LLM_RESPONSE_CACHE_TTL_SECONDS > 0 and content:
+                from .base import LLMResponse
+                _response_cache_put(
+                    _response_cache_key(candidate_model, temperature, max_tokens, "", messages),
+                    LLMResponse(content=content, model=candidate_model, finish_reason="stop"),
+                )
+            return
+
+        raise GatewayError(
+            "All model providers failed to stream: " + ("; ".join(errors) or "no candidates")
+        )
+
     # -- provider calls -----------------------------------------------------
+
+    async def _stream_provider(
+        self,
+        provider: ProviderConfig,
+        model: str,
+        messages: List[ChatMessage],
+        temperature: float,
+        max_tokens: int,
+        kwargs: Dict[str, Any],
+    ) -> AsyncGenerator[str, None]:
+        """Yield content chunks from one provider's streaming endpoint."""
+        if provider.provider_type == "ollama":
+            return self._stream_ollama(provider, model, messages, temperature, max_tokens)
+        return self._stream_openai_compatible(provider, model, messages, temperature, max_tokens, kwargs)
+
+    @staticmethod
+    async def _stream_openai_compatible(
+        provider: ProviderConfig,
+        model: str,
+        messages: List[ChatMessage],
+        temperature: float,
+        max_tokens: int,
+        kwargs: Dict[str, Any],
+    ) -> AsyncGenerator[str, None]:
+        """SSE chat-completions stream (DeepSeek, OpenAI-compatible endpoints)."""
+        from .http_client import get_shared_client
+
+        headers = {"Content-Type": "application/json"}
+        if provider.api_key:
+            headers["Authorization"] = f"Bearer {provider.api_key}"
+
+        payload = {
+            "model": model,
+            "messages": [{"role": msg.role, "content": msg.content} for msg in messages],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+            **kwargs,
+        }
+
+        client = get_shared_client(owner=f"gateway:{provider.name}")
+        async with client.stream(
+            "POST",
+            f"{provider.base_url.rstrip('/')}/v1/chat/completions",
+            headers=headers,
+            json=payload,
+        ) as response:
+            if response.is_error:
+                detail = response.text[:1000]
+                try:
+                    detail = (response.json().get("error", {}).get("message") or detail)[:1000]
+                except ValueError:
+                    pass
+                raise RuntimeError(
+                    f"Provider {provider.name} stream request failed ({response.status_code}): {detail}"
+                )
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    data_str = line[6:]
+                    if data_str.strip() == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(data_str)
+                        delta = data["choices"][0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            yield content
+                    except (json.JSONDecodeError, IndexError, KeyError):
+                        continue
+
+    @staticmethod
+    async def _stream_ollama(
+        provider: ProviderConfig,
+        model: str,
+        messages: List[ChatMessage],
+        temperature: float,
+        max_tokens: int,
+    ) -> AsyncGenerator[str, None]:
+        """Native Ollama ``/api/chat`` stream (JSON lines)."""
+        from .http_client import get_shared_client
+
+        payload = {
+            "model": model,
+            "messages": [{"role": msg.role, "content": msg.content} for msg in messages],
+            "stream": True,
+            "options": {"temperature": temperature, "num_predict": max_tokens},
+        }
+
+        client = get_shared_client(owner=f"gateway:{provider.name}")
+        async with client.stream(
+            "POST",
+            f"{provider.base_url.rstrip('/')}/api/chat",
+            json=payload,
+        ) as response:
+            if response.is_error:
+                raise RuntimeError(
+                    f"Provider {provider.name} stream request failed ({response.status_code}): {response.text[:1000]}"
+                )
+            async for line in response.aiter_lines():
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                chunk = (data.get("message") or {}).get("content")
+                if chunk:
+                    yield chunk
+
+    @staticmethod
+    def _estimate_completion(content: str) -> int:
+        """Rough post-hoc completion-token estimate for streamed output."""
+        return max(0, len(content or "") // 4)
 
     async def _call_provider(
         self,
@@ -519,7 +745,13 @@ class ModelGateway:
         max_tokens: int,
         kwargs: Dict[str, Any],
     ) -> Tuple[str, str, Dict[str, Any]]:
-        """Chat-completions protocol (DeepSeek, OpenAI-compatible endpoints)."""
+        """Chat-completions protocol (DeepSeek, OpenAI-compatible endpoints).
+
+        Uses the shared connection pool and P3 bounded retry (429/5xx + jitter)
+        so the gateway path keeps the same transport quality as the LLM layer.
+        """
+        from .http_client import get_shared_client, post_with_retry
+
         headers = {"Content-Type": "application/json"}
         if provider.api_key:
             headers["Authorization"] = f"Bearer {provider.api_key}"
@@ -532,22 +764,23 @@ class ModelGateway:
             **kwargs,
         }
 
-        async with httpx.AsyncClient(timeout=120) as client:
-            response = await client.post(
-                f"{provider.base_url.rstrip('/')}/v1/chat/completions",
-                headers=headers,
-                json=payload,
+        client = get_shared_client(owner=f"gateway:{provider.name}")
+        response = await post_with_retry(
+            client,
+            f"{provider.base_url.rstrip('/')}/v1/chat/completions",
+            headers=headers,
+            json=payload,
+        )
+        if response.is_error:
+            detail = response.text[:1000]
+            try:
+                detail = (response.json().get("error", {}).get("message") or detail)[:1000]
+            except ValueError:
+                pass
+            raise RuntimeError(
+                f"Provider {provider.name} request failed ({response.status_code}): {detail}"
             )
-            if response.is_error:
-                detail = response.text[:1000]
-                try:
-                    detail = (response.json().get("error", {}).get("message") or detail)[:1000]
-                except ValueError:
-                    pass
-                raise RuntimeError(
-                    f"Provider {provider.name} request failed ({response.status_code}): {detail}"
-                )
-            data = response.json()
+        data = response.json()
 
         choice = data["choices"][0]
         content = choice["message"].get("content") or ""
@@ -563,7 +796,9 @@ class ModelGateway:
         temperature: float,
         max_tokens: int,
     ) -> Tuple[str, str, Dict[str, Any]]:
-        """Native Ollama ``/api/chat`` protocol."""
+        """Native Ollama ``/api/chat`` protocol (shared client, bounded retry)."""
+        from .http_client import get_shared_client, post_with_retry
+
         payload = {
             "model": model,
             "messages": [{"role": msg.role, "content": msg.content} for msg in messages],
@@ -571,15 +806,17 @@ class ModelGateway:
             "options": {"temperature": temperature, "num_predict": max_tokens},
         }
 
-        async with httpx.AsyncClient(timeout=120) as client:
-            response = await client.post(
-                f"{provider.base_url.rstrip('/')}/api/chat", json=payload
+        client = get_shared_client(owner=f"gateway:{provider.name}")
+        response = await post_with_retry(
+            client,
+            f"{provider.base_url.rstrip('/')}/api/chat",
+            json=payload,
+        )
+        if response.is_error:
+            raise RuntimeError(
+                f"Provider {provider.name} request failed ({response.status_code}): {response.text[:1000]}"
             )
-            if response.is_error:
-                raise RuntimeError(
-                    f"Provider {provider.name} request failed ({response.status_code}): {response.text[:1000]}"
-                )
-            data = response.json()
+        data = response.json()
 
         content = data.get("message", {}).get("content") or ""
         usage = {
@@ -692,6 +929,12 @@ class ModelGateway:
     @staticmethod
     def _provider_default_model(provider: ProviderConfig) -> str:
         return provider.models[0] if provider.models else provider.name
+
+    def _default_model(self) -> str:
+        """Model name of the default (first enabled) provider — used by the
+        GatewayLLM facade when the caller did not pin a model."""
+        provider = self._default_provider()
+        return self._provider_default_model(provider) if provider else ""
 
     def available_models(self) -> List[Dict[str, Any]]:
         """Catalogue of routable models with alias, provider and per-1K pricing."""
@@ -821,10 +1064,15 @@ class ModelGateway:
         max_tokens: int,
         kwargs: Dict[str, Any],
     ) -> GatewayResult:
-        """Graceful degradation: delegate to the existing ``get_llm()`` path."""
-        from . import get_llm
+        """Graceful degradation: delegate to the concrete provider chain.
 
-        llm = get_llm()
+        Uses ``_build_providers()`` (not ``get_llm()``) so this fallback can
+        never re-enter the gateway branch — otherwise a resolve failure would
+        recurse through GatewayLLM forever.
+        """
+        from . import _build_providers
+
+        llm = _build_providers()
         response = await llm.chat(messages=messages, temperature=temperature, max_tokens=max_tokens, **kwargs)
         return GatewayResult(
             content=response.content,
@@ -833,6 +1081,22 @@ class ModelGateway:
             finish_reason=response.finish_reason,
             degraded=True,
         )
+
+    async def _legacy_stream(
+        self,
+        messages: List[ChatMessage],
+        temperature: float,
+        max_tokens: int,
+        kwargs: Dict[str, Any],
+    ) -> AsyncGenerator[str, None]:
+        """Graceful degradation for streaming: delegate to the concrete chain."""
+        from . import _build_providers
+
+        llm = _build_providers()
+        async for chunk in llm.chat_stream(
+            messages=messages, temperature=temperature, max_tokens=max_tokens, **kwargs
+        ):
+            yield chunk
 
 
 # ---------------------------------------------------------------------------
