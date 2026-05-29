@@ -12,7 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
-import { AlertTriangle, ArrowLeft, FileSearch, Loader2, RefreshCw, ShieldCheck } from 'lucide-vue-next'
+import { AlertTriangle, ArrowLeft, CheckCircle2, FileSearch, Loader2, PenLine, RefreshCw, ShieldCheck } from 'lucide-vue-next'
 import { formatDateTime } from '@/utils/date'
 import { useToast } from '@/composables/useToast'
 import EmptyState from '@/components/EmptyState.vue'
@@ -197,6 +197,21 @@ onMounted(loadDetail)
 
 <template>
   <div class="container mx-auto max-w-6xl px-4 py-6">
+    <!-- 步骤导航：解读 → 需求确认 → 撰写 / 自检 -->
+    <nav class="mb-6 flex flex-wrap items-center gap-2 text-sm">
+      <span class="inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1 font-medium text-primary-foreground">
+        <FileSearch class="h-4 w-4" /> 解读
+      </span>
+      <span class="text-muted-foreground">→</span>
+      <Button variant="ghost" size="sm" @click="router.push(`/bid/projects/${projectId}/requirements`)">
+        <CheckCircle2 class="mr-1 h-4 w-4" /> 需求确认
+      </Button>
+      <span class="text-muted-foreground">→</span>
+      <Button variant="ghost" size="sm" @click="router.push(`/bid/projects/${projectId}/draft`)">
+        <PenLine class="mr-1 h-4 w-4" /> 撰写 / 自检
+      </Button>
+    </nav>
+
     <!-- 项目头部 -->
     <div v-if="project" class="mb-6">
       <div class="flex flex-wrap items-start justify-between gap-3">

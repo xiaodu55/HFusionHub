@@ -255,6 +255,8 @@ hfusionhub:
         plugin-executions: 100
         bid-projects: 10
         tender-elements: 500
+        bid-draft-chars: 100000
+        bid-check-reports: 50
       pro:
         chat-tokens: 1000000
         agent-tokens: 1000000
@@ -262,6 +264,8 @@ hfusionhub:
         plugin-executions: 1000
         bid-projects: 100
         tender-elements: 5000
+        bid-draft-chars: 1000000
+        bid-check-reports: 500
       enterprise:
         chat-tokens: 10000000
         agent-tokens: 10000000
@@ -269,6 +273,8 @@ hfusionhub:
         plugin-executions: 10000
         bid-projects: 1000
         tender-elements: 50000
+        bid-draft-chars: 10000000
+        bid-check-reports: 5000
 
 management:
   endpoints:

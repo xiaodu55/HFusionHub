@@ -982,6 +982,157 @@ public class AiClient {
     }
 
     /**
+     * 标书撰写（P1）— 调用 Python 撰写工作流，按分节生成标书草稿。
+     *
+     * <p>请求 POST /api/bid/write，返回：
+     * {@code {status, sections:[{section_key, section_title, content, evidence_chunk_ids}]}}。
+     * 与 bidInterpret 一致：AI 服务不可用时返回降级 map，不抛网关异常。</p>
+     *
+     * @param projectId         投标项目 ID
+     * @param title             项目名称
+     * @param tenderNumber      招标编号（可空）
+     * @param knowledgeBaseIds  招标库(+资质库/历史标书库) ID 列表
+     * @param requirements      已确认需求清单 [{category, requirement, source_clause}]
+     * @param sectionDefs       分节定义 [{key, title}]（可空=默认四节）
+     * @return 撰写结果 map（含 status）
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> bidWrite(
+            Long projectId,
+            String title,
+            String tenderNumber,
+            List<Long> knowledgeBaseIds,
+            List<Map<String, Object>> requirements,
+            List<Map<String, Object>> sectionDefs) {
+        try {
+            String url = baseUrl + "/api/bid/write";
+            Map<String, Object> body = new HashMap<>();
+            body.put("project_id", projectId);
+            body.put("title", title);
+            if (tenderNumber != null && !tenderNumber.isBlank()) {
+                body.put("tender_number", tenderNumber);
+            }
+            body.put("knowledge_base_ids", knowledgeBaseIds == null ? List.of() : knowledgeBaseIds);
+            body.put("requirements", requirements == null ? List.of() : requirements);
+            if (sectionDefs != null && !sectionDefs.isEmpty()) {
+                body.put("section_defs", sectionDefs);
+            }
+            HttpHeaders headers = internalHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            ResponseEntity<Map> response =
+                    restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            return response.getBody() == null
+                    ? Map.of("status", "error", "message", "AI 服务没有返回撰写结果")
+                    : new HashMap<>(response.getBody());
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("Bid write failed: {}", e.getMessage());
+            return Map.of("status", "error", "message", "撰写服务不可用，请稍后重试");
+        }
+    }
+
+    /**
+     * 废标风险自检（P1）— 调用 Python 自检工作流，核对标书草稿。
+     *
+     * <p>请求 POST /api/bid/check，返回：
+     * {@code {status, findings:[{severity, category, section_key, finding, evidence_chunk_ids, suggested_fix}], summary}}。</p>
+     *
+     * @param projectId        投标项目 ID
+     * @param title            项目名称
+     * @param tenderNumber     招标编号（可空）
+     * @param knowledgeBaseIds 招标文件知识库 ID 列表
+     * @param sections         待自检标书分节 [{section_key, section_title, content}]
+     * @param requirements     需求清单（可空）
+     * @return 自检结果 map（含 status）
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> bidCheck(
+            Long projectId,
+            String title,
+            String tenderNumber,
+            List<Long> knowledgeBaseIds,
+            List<Map<String, Object>> sections,
+            List<Map<String, Object>> requirements) {
+        try {
+            String url = baseUrl + "/api/bid/check";
+            Map<String, Object> body = new HashMap<>();
+            body.put("project_id", projectId);
+            body.put("title", title);
+            if (tenderNumber != null && !tenderNumber.isBlank()) {
+                body.put("tender_number", tenderNumber);
+            }
+            body.put("knowledge_base_ids", knowledgeBaseIds == null ? List.of() : knowledgeBaseIds);
+            body.put("sections", sections == null ? List.of() : sections);
+            if (requirements != null && !requirements.isEmpty()) {
+                body.put("requirements", requirements);
+            }
+            HttpHeaders headers = internalHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            ResponseEntity<Map> response =
+                    restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            return response.getBody() == null
+                    ? Map.of("status", "error", "message", "AI 服务没有返回自检结果")
+                    : new HashMap<>(response.getBody());
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("Bid check failed: {}", e.getMessage());
+            return Map.of("status", "error", "message", "自检服务不可用，请稍后重试");
+        }
+    }
+
+    /**
+     * 标书撰写（流式，P1）— 调用 Python SSE 撰写工作流。
+     *
+     * <p>请求 POST /api/bid/write/stream，返回 Flux of raw SSE data lines。
+     * 事件契约（与 Python 侧一致）：
+     * {@code run_started → (bid_section_started / bid_section_completed)×N → run_completed → [DONE]}。
+     * 服务层订阅后转发到 SseEmitter，并在 run_completed 时统一落库。</p>
+     *
+     * @return Flux of raw SSE lines
+     */
+    public reactor.core.publisher.Flux<String> bidWriteStream(
+            Long projectId,
+            String title,
+            String tenderNumber,
+            List<Long> knowledgeBaseIds,
+            List<Map<String, Object>> requirements,
+            List<Map<String, Object>> sectionDefs) {
+        String url = baseUrl + "/api/bid/write/stream";
+        Map<String, Object> request = new HashMap<>();
+        request.put("project_id", projectId);
+        request.put("title", title);
+        if (tenderNumber != null && !tenderNumber.isBlank()) {
+            request.put("tender_number", tenderNumber);
+        }
+        request.put("knowledge_base_ids", knowledgeBaseIds == null ? List.of() : knowledgeBaseIds);
+        request.put("requirements", requirements == null ? List.of() : requirements);
+        if (sectionDefs != null && !sectionDefs.isEmpty()) {
+            request.put("section_defs", sectionDefs);
+        }
+        // 捕获内部鉴权头，避免在 Netty 事件循环线程上访问请求线程上下文
+        final HttpHeaders capturedHeaders = internalHeaders();
+        return webClient.post()
+                .uri(url)
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .headers(h -> h.addAll(capturedHeaders))
+                .bodyValue(request)
+                .retrieve()
+                .onStatus(status -> status.isError(), clientResponse -> clientResponse
+                        .bodyToMono(String.class)
+                        .flatMap(body -> reactor.core.publisher.Mono.error(new BusinessException(
+                                StatusCode.SERVICE_UNAVAILABLE,
+                                "Python AI returned status "
+                                        + clientResponse.statusCode().value() + ": " + body))))
+                .bodyToFlux(String.class)
+                .doOnError(ResourceAccessException.class, e -> {
+                    log.error("AI service connection failed during bid write streaming: {}", e.getMessage());
+                });
+    }
+
+    /**
      * Cancel an ongoing chat request
      *
      * @param requestId Request ID to cancel

@@ -62,6 +62,8 @@ public class QuotaController {
             case PLUGIN_EXECUTIONS -> "插件执行";
             case BID_PROJECTS -> "投标项目";
             case TENDER_ELEMENTS -> "招标解读要素";
+            case BID_DRAFT_CHARS -> "标书撰写字符";
+            case BID_CHECK_REPORTS -> "废标自检报告";
         };
     }
 
@@ -70,6 +72,8 @@ public class QuotaController {
             case PLUGIN_EXECUTIONS -> "次";
             case BID_PROJECTS -> "个";
             case TENDER_ELEMENTS -> "项";
+            case BID_DRAFT_CHARS -> "字符";
+            case BID_CHECK_REPORTS -> "份";
             default -> "Token";
         };
     }

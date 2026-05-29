@@ -58,12 +58,33 @@ public class BidDemoImportServiceImpl implements BidDemoImportService {
     private static final String DEMO_KB_CATEGORY = "tender";
     private static final String DEMO_RESOURCE_DIR = "demo/bid/";
 
+    /** 资质库（P1-6：撰写时自动复用资质/人员/业绩） */
+    private static final String DEMO_QUALIFICATION_KB_NAME = "招投标演示·企业资质库";
+    private static final String DEMO_QUALIFICATION_KB_DESC = "一键导入的企业资质库（营业执照、资质证书、人员证书、业绩证明），撰写资质文件/商务标时自动检索复用";
+    private static final String DEMO_QUALIFICATION_KB_CATEGORY = "qualification";
+    private static final String DEMO_QUALIFICATION_RESOURCE_DIR = "demo/bid/qualification/";
+
+    /** 历史标书库（P1-6：撰写商务/技术标时复用成熟范文） */
+    private static final String DEMO_HISTORY_KB_NAME = "招投标演示·历史标书库";
+    private static final String DEMO_HISTORY_KB_DESC = "一键导入的历史标书库（成熟商务标/技术方案范文），撰写时检索命中复用其表述与结构";
+    private static final String DEMO_HISTORY_KB_CATEGORY = "bid_history";
+    private static final String DEMO_HISTORY_RESOURCE_DIR = "demo/bid/history/";
+
     /** 示例招标文档文件名 -> 展示标题 */
     private static final Map<String, String> DEMO_TITLES = Map.of(
             "tender-notice.md", "滨海园区智能化改造项目招标公告（演示）",
             "bidder-instructions.md", "投标人须知（演示）",
             "evaluation-method.md", "评标办法（演示）",
             "contract-terms.md", "合同主要条款（演示）");
+
+    /** 示例资质库文档文件名 -> 展示标题 */
+    private static final Map<String, String> DEMO_QUALIFICATION_TITLES = Map.of(
+            "qualifications.md", "企业资质文件库（演示）");
+
+    /** 示例历史标书文档文件名 -> 展示标题 */
+    private static final Map<String, String> DEMO_HISTORY_TITLES = Map.of(
+            "history-bid-commercial.md", "历史标书·商务标范文（演示）",
+            "history-bid-technical.md", "历史标书·技术方案范文（演示）");
 
     /** 示例投标项目（可直接触发解读，演示「项目→解读→需求清单」闭环） */
     private static final String DEMO_PROJECT_TITLE = "示例：滨海园区智能化改造项目";
@@ -77,23 +98,38 @@ public class BidDemoImportServiceImpl implements BidDemoImportService {
     public DemoImportResultDTO importBidDemoData() {
         Long userId = JwtUtils.getCurrentUserId();
 
-        KnowledgeBase kb = importTenderKnowledgeBase(userId);
-        DocumentImport docs = importTenderDocuments(kb);
+        // 三类知识库：招标文件 + 资质库 + 历史标书库（撰写时自动检索复用）
+        KnowledgeBase kb = importKnowledgeBase(userId, DEMO_KB_NAME, DEMO_KB_DESC, DEMO_KB_CATEGORY);
+        DocumentImport docs = importDocuments(kb, DEMO_RESOURCE_DIR, DEMO_TITLES);
+        KnowledgeBase qualificationKb = importKnowledgeBase(userId, DEMO_QUALIFICATION_KB_NAME,
+                DEMO_QUALIFICATION_KB_DESC, DEMO_QUALIFICATION_KB_CATEGORY);
+        DocumentImport qualificationDocs = importDocuments(qualificationKb,
+                DEMO_QUALIFICATION_RESOURCE_DIR, DEMO_QUALIFICATION_TITLES);
+        KnowledgeBase historyKb = importKnowledgeBase(userId, DEMO_HISTORY_KB_NAME,
+                DEMO_HISTORY_KB_DESC, DEMO_HISTORY_KB_CATEGORY);
+        DocumentImport historyDocs = importDocuments(historyKb,
+                DEMO_HISTORY_RESOURCE_DIR, DEMO_HISTORY_TITLES);
         int projectImported = importDemoProject(userId, kb.getId());
 
         List<DemoImportResultDTO.SectionResult> sections = new ArrayList<>();
         sections.add(section("bid_kb", "招标文件知识库", docs.imported(), docs.skipped()));
+        sections.add(section("bid_qualification", "企业资质库", qualificationDocs.imported(), qualificationDocs.skipped()));
+        sections.add(section("bid_history", "历史标书库", historyDocs.imported(), historyDocs.skipped()));
         sections.add(section("bid_project", "示例投标项目", projectImported, projectImported == 0 ? 1 : 0));
 
-        String message = buildMessage(docs, projectImported);
-        log.info("招投标演示数据导入完成: kbId={}, importedDocs={}, skippedDocs={}, projectImported={}",
-                kb.getId(), docs.imported(), docs.skipped(), projectImported);
+        String message = buildMessage(docs, qualificationDocs, historyDocs, projectImported);
+        log.info("招投标演示数据导入完成: tenderKbId={}, qualKbId={}, histKbId={}, "
+                        + "tenderDocs={}/{}, qualDocs={}/{}, histDocs={}/{}, projectImported={}",
+                kb.getId(), qualificationKb.getId(), historyKb.getId(),
+                docs.imported(), docs.skipped(),
+                qualificationDocs.imported(), qualificationDocs.skipped(),
+                historyDocs.imported(), historyDocs.skipped(), projectImported);
         return DemoImportResultDTO.builder()
                 .knowledgeBaseId(kb.getId())
                 .knowledgeBaseName(kb.getName())
-                .importedCount(docs.imported())
-                .skippedCount(docs.skipped())
-                .parseFailedCount(docs.parseFailed())
+                .importedCount(docs.imported() + qualificationDocs.imported() + historyDocs.imported())
+                .skippedCount(docs.skipped() + qualificationDocs.skipped() + historyDocs.skipped())
+                .parseFailedCount(docs.parseFailed() + qualificationDocs.parseFailed() + historyDocs.parseFailed())
                 .sections(sections)
                 .message(message)
                 .build();
@@ -104,26 +140,32 @@ public class BidDemoImportServiceImpl implements BidDemoImportService {
         Long userId = JwtUtils.getCurrentUserId();
 
         int projectsRemoved = clearDemoProjects(userId);
-        KnowledgeBase kb = findTenderKb(userId);
-        int kbRemoved = 0;
-        if (kb != null) {
-            try {
-                // 知识库移入回收站（保留文档与索引，7 天内可恢复）
-                knowledgeBaseService.delete(kb.getId());
-                kbRemoved = 1;
-            } catch (Exception e) {
-                log.warn("清除招投标演示知识库失败: kbId={}, 原因={}", kb.getId(), e.getMessage());
-            }
-        }
-
+        int kbRemovedTotal = 0;
+        String[] kbNames = {DEMO_KB_NAME, DEMO_QUALIFICATION_KB_NAME, DEMO_HISTORY_KB_NAME};
+        String[] kbLabels = {"招标文件知识库", "企业资质库", "历史标书库"};
         List<DemoImportResultDTO.SectionResult> sections = new ArrayList<>();
-        sections.add(section("bid_kb", "招标文件知识库", kbRemoved, 0));
+        for (int i = 0; i < kbNames.length; i++) {
+            int removed = 0;
+            KnowledgeBase kb = findKbByName(userId, kbNames[i]);
+            if (kb != null) {
+                try {
+                    // 知识库移入回收站（保留文档与索引，7 天内可恢复）
+                    knowledgeBaseService.delete(kb.getId());
+                    removed = 1;
+                    kbRemovedTotal++;
+                } catch (Exception e) {
+                    log.warn("清除招投标演示知识库失败: name={}, kbId={}, 原因={}",
+                            kbNames[i], kb.getId(), e.getMessage());
+                }
+            }
+            sections.add(section("bid_kb_" + i, kbLabels[i], removed, 0));
+        }
         sections.add(section("bid_project", "示例投标项目", projectsRemoved, 0));
 
-        String message = (projectsRemoved + kbRemoved) > 0
+        String message = (projectsRemoved + kbRemovedTotal) > 0
                 ? "招投标演示数据已清除（知识库进入回收站，7 天内可恢复）"
                 : "未发现需要清除的招投标演示数据";
-        log.info("招投标演示数据清除完成: userId={}, projects={}, kb={}", userId, projectsRemoved, kbRemoved);
+        log.info("招投标演示数据清除完成: userId={}, projects={}, kbs={}", userId, projectsRemoved, kbRemovedTotal);
         return DemoImportResultDTO.builder()
                 .sections(sections)
                 .message(message)
@@ -132,30 +174,32 @@ public class BidDemoImportServiceImpl implements BidDemoImportService {
 
     // ── 知识库 + 文档 ────────────────────────────────────────────────────
 
-    private KnowledgeBase importTenderKnowledgeBase(Long userId) {
-        KnowledgeBase kb = findTenderKb(userId);
+    /** 按名称 + 用户判重幂等创建知识库（tender / qualification / bid_history 共用） */
+    private KnowledgeBase importKnowledgeBase(Long userId, String name, String description, String category) {
+        KnowledgeBase kb = findKbByName(userId, name);
         if (kb != null) {
             return kb;
         }
         kb = new KnowledgeBase();
-        kb.setName(DEMO_KB_NAME);
-        kb.setDescription(DEMO_KB_DESC);
-        kb.setCategory(DEMO_KB_CATEGORY);
+        kb.setName(name);
+        kb.setDescription(description);
+        kb.setCategory(category);
         kb.setUserId(userId);
         kb.setStatus(CommonConstants.KB_STATUS_NORMAL);
         knowledgeBaseMapper.insert(kb);
-        log.info("招投标演示知识库已创建: kbId={}, userId={}", kb.getId(), userId);
+        log.info("招投标演示知识库已创建: name={}, kbId={}, userId={}", name, kb.getId(), userId);
         return kb;
     }
 
-    private DocumentImport importTenderDocuments(KnowledgeBase kb) {
-        List<Resource> resources = loadResources(DEMO_RESOURCE_DIR);
+    /** 按资源目录 + 标题映射导入文档并触发向量化（各演示知识库共用） */
+    private DocumentImport importDocuments(KnowledgeBase kb, String resourceDir, Map<String, String> titles) {
+        List<Resource> resources = loadResources(resourceDir);
         int imported = 0;
         int skipped = 0;
         int parseFailed = 0;
         for (Resource resource : resources) {
             String fileName = resource.getFilename();
-            String title = DEMO_TITLES.getOrDefault(fileName, fileName);
+            String title = titles.getOrDefault(fileName, fileName);
 
             if (documentExists(kb.getId(), title)) {
                 skipped++;
@@ -231,27 +275,34 @@ public class BidDemoImportServiceImpl implements BidDemoImportService {
                 .build();
     }
 
-    private String buildMessage(DocumentImport docs, int projectImported) {
+    private String buildMessage(DocumentImport docs, DocumentImport qualificationDocs,
+                                DocumentImport historyDocs, int projectImported) {
         StringBuilder sb = new StringBuilder("招投标演示环境已就绪");
-        if (docs.imported() > 0) {
-            sb.append("，新导入 ").append(docs.imported()).append(" 篇招标文件");
+        int importedTotal = docs.imported() + qualificationDocs.imported() + historyDocs.imported();
+        int skippedTotal = docs.skipped() + qualificationDocs.skipped() + historyDocs.skipped();
+        int parseFailedTotal = docs.parseFailed() + qualificationDocs.parseFailed() + historyDocs.parseFailed();
+        if (importedTotal > 0) {
+            sb.append("，新导入 ").append(importedTotal).append(" 篇文档（招标文件 ")
+                    .append(docs.imported()).append("、资质库 ").append(qualificationDocs.imported())
+                    .append("、历史标书 ").append(historyDocs.imported()).append("）");
         }
         if (projectImported > 0) {
             sb.append("，并创建示例投标项目「").append(DEMO_PROJECT_TITLE).append("」");
         }
-        if (docs.skipped() > 0) {
-            sb.append("，跳过已存在的 ").append(docs.skipped()).append(" 篇");
+        if (skippedTotal > 0) {
+            sb.append("，跳过已存在的 ").append(skippedTotal).append(" 篇");
         }
-        if (docs.parseFailed() > 0) {
-            sb.append("；有 ").append(docs.parseFailed()).append(" 篇文档触发解析失败（AI 服务不可用？可稍后在文档页重试）");
+        if (parseFailedTotal > 0) {
+            sb.append("；有 ").append(parseFailedTotal).append(" 篇文档触发解析失败（AI 服务不可用？可稍后在文档页重试）");
         }
-        sb.append("。可到「投标项目」打开示例项目，点击「解读」体验完整流程。");
+        sb.append("。可到「投标项目」打开示例项目，点击「解读」体验完整流程；"
+                + "撰写标书时会自动复用企业资质库与历史标书库。");
         return sb.toString();
     }
 
-    private KnowledgeBase findTenderKb(Long userId) {
+    private KnowledgeBase findKbByName(Long userId, String name) {
         return knowledgeBaseMapper.selectOne(new LambdaQueryWrapper<KnowledgeBase>()
-                .eq(KnowledgeBase::getName, DEMO_KB_NAME)
+                .eq(KnowledgeBase::getName, name)
                 .eq(KnowledgeBase::getUserId, userId)
                 .last("LIMIT 1"));
     }

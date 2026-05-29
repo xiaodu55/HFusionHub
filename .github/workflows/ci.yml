@@ -227,6 +227,9 @@ jobs:
           --minimum-scoring-point-accuracy 0.9 \
           --minimum-bid-terminology-accuracy 0.9 \
           --fail-on-regression
+      # ─── 招投标撰写/自检工作流门禁（P1-4：bid_* 改动必须过此门禁）───
+      - name: Run bid workflow gate (write + check, hermetic)
+        run: python scripts/eval_bid_workflow.py
       - name: Upload evaluation report
         if: always()
         uses: actions/upload-artifact@v4

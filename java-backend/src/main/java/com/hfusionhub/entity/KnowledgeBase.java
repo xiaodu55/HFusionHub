@@ -20,6 +20,16 @@ import lombok.EqualsAndHashCode;
 @Schema(description = "知识库实体")
 public class KnowledgeBase extends BaseEntity {
 
+    /** 知识库分类（招投标垂直化） */
+    public static final String CATEGORY_GENERAL = "general";
+    public static final String CATEGORY_TENDER = "tender";
+    public static final String CATEGORY_QUALIFICATION = "qualification";
+    public static final String CATEGORY_BID_HISTORY = "bid_history";
+
+    /** 状态：0-正常，1-禁用 */
+    public static final Integer STATUS_NORMAL = 0;
+    public static final Integer STATUS_DISABLED = 1;
+
     /**
      * 知识库ID
      */

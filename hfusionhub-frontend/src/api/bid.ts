@@ -117,3 +117,78 @@ export const updateBidRequirementStatus = (
   status: BidRequirement['satisfiedStatus'],
 ): Promise<ApiResponse<void>> =>
   put(`/bid/project/${projectId}/requirements/${requirementId}/status`, null, { params: { status } })
+
+// ── P1：标书撰写 + 废标自检 ───────────────────────────────────────
+
+/** 标书分节草稿 */
+export interface BidDraft {
+  id: number
+  projectId: number
+  sectionKey: 'commercial' | 'technical' | 'qualification' | 'format'
+  sectionTitle: string
+  content?: string
+  status: 'drafting' | 'approved' | 'rejected'
+  version: number
+  approvedBy?: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** 废标自检报告 */
+export interface BidCheckReport {
+  id: number
+  projectId: number
+  sectionKey?: string | null
+  severity: 'critical' | 'warning' | 'info'
+  category: string
+  finding: string
+  evidence?: string | null
+  suggestedFix?: string | null
+  status: 'open' | 'confirmed' | 'fixed'
+  createdAt: string
+}
+
+/** 自检统计 */
+export interface BidCheckSummary {
+  total: number
+  critical: number
+  warning: number
+  info: number
+}
+
+export const BID_SECTION_LABELS: Record<string, string> = {
+  commercial: '商务标',
+  technical: '技术方案',
+  qualification: '资质文件',
+  format: '格式文件',
+}
+
+/** 同步撰写标书（落库） */
+export const writeBidDraft = (projectId: number): Promise<ApiResponse<BidDraft[]>> =>
+  post(`/bid/write/${projectId}`)
+
+/** 查询标书分节 */
+export const listBidDrafts = (projectId: number): Promise<ApiResponse<BidDraft[]>> =>
+  get(`/bid/write/${projectId}/drafts`)
+
+/** 分节人工审批（approved|rejected） */
+export const updateBidDraftStatus = (
+  draftId: number,
+  status: BidDraft['status'],
+): Promise<ApiResponse<void>> =>
+  put(`/bid/write/${draftId}/status`, null, { params: { status } })
+
+/** 执行废标自检 */
+export const runBidCheck = (projectId: number): Promise<ApiResponse<BidCheckSummary>> =>
+  post(`/bid/check/${projectId}`)
+
+/** 查询自检报告 */
+export const listBidCheckReports = (projectId: number): Promise<ApiResponse<BidCheckReport[]>> =>
+  get(`/bid/check/${projectId}/reports`)
+
+/** 处理自检报告（confirmed|fixed） */
+export const updateBidCheckReportStatus = (
+  reportId: number,
+  status: BidCheckReport['status'],
+): Promise<ApiResponse<void>> =>
+  put(`/bid/check/report/${reportId}/status`, null, { params: { status } })

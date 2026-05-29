@@ -23,7 +23,13 @@ public enum UsageMeter {
     BID_PROJECTS("bid_projects"),
 
     /** 招标解读产出要素/需求项数（招投标垂直化） */
-    TENDER_ELEMENTS("tender_elements");
+    TENDER_ELEMENTS("tender_elements"),
+
+    /** 标书撰写产出字符数（招投标垂直化 · P1） */
+    BID_DRAFT_CHARS("bid_draft_chars"),
+
+    /** 废标自检报告份数（招投标垂直化 · P1） */
+    BID_CHECK_REPORTS("bid_check_reports");
 
     private final String code;
 

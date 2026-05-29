@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第十三轮 · 招投标垂直化 P1（2026-08-25）：标书撰写 + 废标自检全链路
+
+> P0 解读闭环之上，P1 打通「撰写 → 逐节审批 → 自检 → critical 确认」闭环。领域层全部复用既有多租户 / Agent 运行时 / RAG / 评测 / 配额基座，新增撰写/自检工作流、分节流式 SSE、强制人工审批、确定性评测门禁。
+
+#### Added
+- **P1-1 数据模型扩展**：Flyway V66–V68 新增 `bid_draft`（分节长文 + 状态 drafting/approved/rejected + version 幂等重写 + approved_by 审批人）、`bid_template`（tenant_id 可空 = 平台模板）、`bid_check_report`（严重度 critical/warning/info + evidence + suggested_fix）；`extractor.py` 支持多文件合并（主招标文件 + 澄清/补遗，来源标签可追溯）与 XLSX 评分表解析（openpyxl 可选依赖，缺失时降级）
+- **P1-2 撰写 + 自检多智能体**：`write_workflow.py`（商务/技术/资质/格式分节生成，每节以 `bid_requirement` 为输入、三 KB 检索并产出 `[N]` 证据引用 → chunk_id）+ `check_workflow.py`（确定性规则：保证金/截止开标 critical、废标条款 warning、评分点 info + LLM 语义复核）；SSE 新增 `bid_section_started/completed` 事件（`POST /api/bid/write/stream` 流式逐节生成）；Java `AiClient.bidWriteStream` + `BidWriteServiceImpl.writeStream`（请求线程捕获租户上下文，Reactor 回调经 `TenantContext.runAs` 落库）
+- **P1-4 评测深化**：新增免 LLM 的确定性工作流门禁 `app/core/bid/eval_gate.py`（9 项指标：requirement_coverage / section_routing_accuracy / section_completeness / citation_faithfulness / bond_recall / deadline_recall / disqualification_recall / substantive_recall / false_positive_free，阈值全 1.0）+ `scripts/eval_bid_workflow.py` CLI 出 JSON 报告；CI `eval-offline` job 新增「招投标撰写/自检工作流门禁」（`bid_*` 改动必须过此门禁）
+- **P1-5 前端**：新增 `/bid/projects/:id/requirements` 需求确认页（按类别分组 + manual_review 低置信琥珀标记 + 逐项确认）、`/bid/projects/:id/draft` 撰写工作台（分节流式生成 + 逐节通过/驳回审批 + 全部通过便捷入口 + 自检 tab 内嵌）、`CheckReport.vue`（严重度分组 + 确认风险/已修复 + 定位章节 + 修复建议）
+- **P1-6 冷启动扩展**：`/demo/import-bid` 一键导入三类知识库共 7 篇种子（招标文件 4 + 企业资质库 1 + 历史标书库 2）+ 示例投标项目；撰写自动并入项目创建者的资质库/历史标书库（`BidWriteServiceImpl.loadKnowledgeBaseIds` 按 userId + category + status 过滤），演示「历史标书复用撰写」
+- **P1-7 计费补全**：`UsageMeter` 新增 `BID_DRAFT_CHARS`（撰写产出字符）/ `BID_CHECK_REPORTS`，走 V35 幂等账本 reserve+settle，超额抛 `QUOTA_EXCEEDED` 回滚本次撰写/自检
+- **P1-8 合规**：撰写每节强制审批（记录 approved_by）+ 自检 critical 级强制人工确认 + 三处免责 Banner + 证据引用追溯；新增 `docs/BID_COMPLIANCE.md`（机密性 / 准确性 / 审计 / 私有部署四节）
+
+#### Changed
+- 撰写检索范围由单知识库扩展为「招标文件库 + 本人资质库/历史标书库」多 KB（Python 侧按 chunk 去重）
+- `docs/ACCESS_MAP.md`：Java 接口 246→252（+6 撰写/自检）、Python 路由 67→70（+3 bid 路由）、前端路由 38→40；README 文档索引新增 [docs/BID_COMPLIANCE.md](docs/BID_COMPLIANCE.md)
+
+#### Testing
+- Java 全量 `mvn test`：**505 passed / 0 failures / 1 skipped**（本轮新增 `BidWriteServiceImplTest`(6) + `BidCheckServiceImplTest`(5)，`BidDemoImportServiceImplTest` 扩展至 3KB/7 文档）
+- Python 全量：**1347 passed / 21 failed（与第十一轮基线同清单，均为既有安全/观测类环境依赖用例）/ 8 skipped，零新增失败**（已核验：同 8 个失败用例文件在含/不含本轮改动下失败数一致 17/17；full-suite 独有 4 例可单独通过，属测试并发干扰）。bid 领域单测 **27 passed**（本轮新增 `test_bid_write_check`(11) + `test_eval_bid_gate`(6)）；`scripts/eval_bid_workflow.py` 9 项指标全 1.0 通过
+- 前端：`npm run build` 成功 + vitest **39 passed**
+
 ### 第十二轮 · 招投标垂直化 P0（2026-08-25）：招标文件智能解读 MVP 落地
 
 > 方向性里程碑：HFusionHub 由横向通用 AI Agent 平台垂直化为**招投标智能助手 SaaS**（B 端多租户）。P0 跑通「招标入库 → 要素解读 → 需求清单」闭环，全部复用既有多租户 / Agent 运行时 / RAG / 评测 / 配额五大基座，仅新增领域层（`python-ai/app/core/bid/`、`java-backend/…/bid/`、`hfusionhub-frontend/src/pages/bid/`）。

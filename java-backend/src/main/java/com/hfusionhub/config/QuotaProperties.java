@@ -37,6 +37,12 @@ public class QuotaProperties {
     @Value("${hfusionhub.quota.defaults.free.tender-elements:500}")
     private long freeTenderElements;
 
+    @Value("${hfusionhub.quota.defaults.free.bid-draft-chars:100000}")
+    private long freeBidDraftChars;
+
+    @Value("${hfusionhub.quota.defaults.free.bid-check-reports:50}")
+    private long freeBidCheckReports;
+
     @Value("${hfusionhub.quota.defaults.pro.chat-tokens:1000000}")
     private long proChatTokens;
 
@@ -55,6 +61,12 @@ public class QuotaProperties {
     @Value("${hfusionhub.quota.defaults.pro.tender-elements:5000}")
     private long proTenderElements;
 
+    @Value("${hfusionhub.quota.defaults.pro.bid-draft-chars:1000000}")
+    private long proBidDraftChars;
+
+    @Value("${hfusionhub.quota.defaults.pro.bid-check-reports:500}")
+    private long proBidCheckReports;
+
     @Value("${hfusionhub.quota.defaults.enterprise.chat-tokens:10000000}")
     private long enterpriseChatTokens;
 
@@ -72,6 +84,12 @@ public class QuotaProperties {
 
     @Value("${hfusionhub.quota.defaults.enterprise.tender-elements:50000}")
     private long enterpriseTenderElements;
+
+    @Value("${hfusionhub.quota.defaults.enterprise.bid-draft-chars:10000000}")
+    private long enterpriseBidDraftChars;
+
+    @Value("${hfusionhub.quota.defaults.enterprise.bid-check-reports:5000}")
+    private long enterpriseBidCheckReports;
 
     /**
      * 按 plan_tier + 计量项取默认日限额。
@@ -135,6 +153,24 @@ public class QuotaProperties {
                         return enterpriseTenderElements;
                     default:
                         return freeTenderElements;
+                }
+            case "bid_draft_chars":
+                switch (planTier) {
+                    case "pro":
+                        return proBidDraftChars;
+                    case "enterprise":
+                        return enterpriseBidDraftChars;
+                    default:
+                        return freeBidDraftChars;
+                }
+            case "bid_check_reports":
+                switch (planTier) {
+                    case "pro":
+                        return proBidCheckReports;
+                    case "enterprise":
+                        return enterpriseBidCheckReports;
+                    default:
+                        return freeBidCheckReports;
                 }
             default:
                 return freeChatTokens;

@@ -112,7 +112,8 @@ class BidDemoImportServiceImplTest {
 
         DemoImportResultDTO result = service.importBidDemoData();
 
-        assertEquals(4, result.getImportedCount(), "应导入 4 篇招标文件");
+        // P1-6：三类知识库共 7 篇文档（招标文件 4 + 资质库 1 + 历史标书 2）
+        assertEquals(7, result.getImportedCount(), "应导入 7 篇演示文档");
         assertEquals(0, result.getSkippedCount());
         assertEquals(0, result.getParseFailedCount());
         assertEquals(201L, result.getKnowledgeBaseId());
@@ -120,19 +121,23 @@ class BidDemoImportServiceImplTest {
         // 知识库分类应为 tender（供投标项目解读工作流识别）
         org.mockito.ArgumentCaptor<KnowledgeBase> kbCaptor =
                 org.mockito.ArgumentCaptor.forClass(KnowledgeBase.class);
-        verify(knowledgeBaseMapper, times(1)).insert(kbCaptor.capture());
-        assertEquals("tender", kbCaptor.getValue().getCategory());
-        verify(vectorizationService, times(4)).startVectorization(anyLong(), isNull());
+        verify(knowledgeBaseMapper, times(3)).insert(kbCaptor.capture());
+        assertEquals("tender", kbCaptor.getAllValues().get(0).getCategory());
+        assertEquals("qualification", kbCaptor.getAllValues().get(1).getCategory());
+        assertEquals("bid_history", kbCaptor.getAllValues().get(2).getCategory());
+        verify(vectorizationService, times(7)).startVectorization(anyLong(), isNull());
         // 示例文档文件已写入上传目录
         long fileCount;
         try (var stream = Files.list(tempDir)) {
             fileCount = stream.count();
         }
-        assertEquals(4, fileCount, "应写入 4 个招标文档文件");
+        assertEquals(7, fileCount, "应写入 7 个演示文档文件");
         // 示例投标项目已创建
         verify(bidProjectMapper, times(1)).insert(any(BidProject.class));
         assertEquals(1, sectionOf(result, "bid_project").getImportedCount());
         assertEquals(4, sectionOf(result, "bid_kb").getImportedCount());
+        assertEquals(1, sectionOf(result, "bid_qualification").getImportedCount());
+        assertEquals(2, sectionOf(result, "bid_history").getImportedCount());
         assertTrue(result.getMessage().contains("解读"), "提示信息应引导到投标项目解读");
     }
 
@@ -149,13 +154,14 @@ class BidDemoImportServiceImplTest {
         DemoImportResultDTO result = service.importBidDemoData();
 
         assertEquals(0, result.getImportedCount());
-        assertEquals(4, result.getSkippedCount());
+        assertEquals(7, result.getSkippedCount());
         verify(knowledgeBaseMapper, never()).insert(any(KnowledgeBase.class));
         verify(documentMapper, never()).insert(any(Document.class));
         verify(vectorizationService, never()).startVectorization(anyLong(), any());
         verify(bidProjectMapper, never()).insert(any(BidProject.class));
         assertEquals(0, sectionOf(result, "bid_project").getImportedCount());
         assertEquals(1, sectionOf(result, "bid_project").getSkippedCount());
+        assertEquals(4, sectionOf(result, "bid_kb").getSkippedCount());
     }
 
     @Test
@@ -178,8 +184,8 @@ class BidDemoImportServiceImplTest {
 
         DemoImportResultDTO result = service.importBidDemoData();
 
-        assertEquals(4, result.getImportedCount(), "文档仍应导入成功");
-        assertEquals(4, result.getParseFailedCount(), "解析失败应被计数而非中断导入");
+        assertEquals(7, result.getImportedCount(), "文档仍应导入成功");
+        assertEquals(7, result.getParseFailedCount(), "解析失败应被计数而非中断导入");
         assertTrue(result.getMessage().contains("重试"), "提示信息应包含重试指引");
         // 示例投标项目不受解析失败影响
         assertEquals(1, sectionOf(result, "bid_project").getImportedCount());
@@ -198,9 +204,12 @@ class BidDemoImportServiceImplTest {
         DemoImportResultDTO result = service.clearBidDemoData();
 
         verify(bidProjectMapper, times(1)).deleteById(30L);
-        verify(knowledgeBaseService, times(1)).delete(5L);
+        // P1-6：三个演示知识库（招标/资质/历史标书）全部移入回收站
+        verify(knowledgeBaseService, times(3)).delete(5L);
         assertEquals(1, sectionOf(result, "bid_project").getImportedCount());
-        assertEquals(1, sectionOf(result, "bid_kb").getImportedCount());
+        assertEquals(1, sectionOf(result, "bid_kb_0").getImportedCount());
+        assertEquals(1, sectionOf(result, "bid_kb_1").getImportedCount());
+        assertEquals(1, sectionOf(result, "bid_kb_2").getImportedCount());
         assertTrue(result.getMessage().contains("已清除"), "提示信息应包含清除说明");
     }
 

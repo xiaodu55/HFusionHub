@@ -1264,3 +1264,54 @@ CREATE TABLE IF NOT EXISTS bid_requirement (
     PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_bid_requirement_project ON bid_requirement (project_id);
+
+-- V66: 标书分节草稿
+CREATE TABLE IF NOT EXISTS bid_draft (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    section_key VARCHAR(32) NOT NULL,
+    section_title VARCHAR(128) NOT NULL,
+    content CLOB DEFAULT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'drafting',
+    version INT NOT NULL DEFAULT 1,
+    approved_by BIGINT DEFAULT NULL,
+    created_by BIGINT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_bid_draft_project ON bid_draft (project_id);
+
+-- V67: 标书模板
+CREATE TABLE IF NOT EXISTS bid_template (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    name VARCHAR(128) NOT NULL,
+    description VARCHAR(512) DEFAULT NULL,
+    industry VARCHAR(64) DEFAULT NULL,
+    section_defs CLOB NOT NULL,
+    is_active TINYINT NOT NULL DEFAULT 1,
+    created_by BIGINT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+
+-- V68: 废标风险自检报告
+CREATE TABLE IF NOT EXISTS bid_check_report (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    section_key VARCHAR(32) DEFAULT NULL,
+    severity VARCHAR(16) NOT NULL DEFAULT 'warning',
+    category VARCHAR(32) NOT NULL,
+    finding CLOB NOT NULL,
+    evidence CLOB DEFAULT NULL,
+    suggested_fix CLOB DEFAULT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'open',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_bid_check_project ON bid_check_report (project_id);

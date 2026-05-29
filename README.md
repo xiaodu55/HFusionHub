@@ -372,6 +372,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 | [docs/OPTIMIZATION_PLAN.md](docs/OPTIMIZATION_PLAN.md) | **逐功能后续优化方案**：三大模块（Java/Python/前端/基础设施）P0/P1/P2 优化清单，含文件路径、问题、方案、优先级 |
 | [docs/CI_GATES.md](docs/CI_GATES.md) | CI 门禁：Compose 校验、Python/Java/前端测试、离线评测门禁（PR 阻塞）、nightly 运行时评测 |
 | [docs/SECURITY_REGRESSION.md](docs/SECURITY_REGRESSION.md) | 安全回归清单：每日/每次发布必查的 5 条安全边界（租户隔离、HMAC 回调、插件沙箱、配额幂等、租户拒绝执行） |
+| [docs/BID_COMPLIANCE.md](docs/BID_COMPLIANCE.md) | **招投标合规与责任边界（P1-8）**：机密性（tenant_id 隔离/SSE 同租户/知识库边界）、准确性（逐节强制审批/critical 人工确认/引用追溯）、审计与私有部署 |
 
 ## 🧩 高级功能矩阵
 
