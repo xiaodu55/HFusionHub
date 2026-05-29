@@ -63,7 +63,7 @@
 - [x] **Dynamic feature flags** — DB 驱动 `feature_flag` + 规则；Java→Python snapshot 同步 8 flags（`agent.enabled` / `write_tools` / `web_search` 等）
 - [x] **E2E tests** — Playwright 覆盖登录/知识库/文档/对话/审批/写笔记等关键路径（`e2e/write-note.spec.ts` 3 项）
 - [x] **Theme system** — light/dark/system 三档 + 服务端偏好同步（`sys_user.theme_preference` V57；登录时 `getUserInfo()` 远端优先，换设备自动应用）
-- [ ] **SSO/OIDC** — 需要外部 IdP 与 sa-token OAuth2 集成，暂缓（会话体系已具备扩展点）
+- [x] **SSO/OIDC** — 通用 OIDC 客户端（授权码流程：`/user/sso/authorize`+`callback`、V60 绑定列、前端按钮与落地页，见 [docs/OIDC.md](OIDC.md)）；默认关闭，经 `app.oidc.*` 对接外部 IdP 启用
 
 ## Phase 5 — 写笔记闭环 + 工程化补课（2026-08-18）✅
 
@@ -93,9 +93,9 @@
 ### 待排期
 
 - [ ] **逐功能后续优化方案** — [docs/OPTIMIZATION_PLAN.md](OPTIMIZATION_PLAN.md)：三大模块 P0/P1/P2 优化清单（含上传 1MB 限制 bug、AiClient 超时治理、生产 CORS/Actuator 收口、Python 批量 embedding、WorkflowEngine 并行 bug 等，详见文档）
-- [ ] **Plugin Runner TLS** — 主机级 Docker daemon TLS 配置（`docs/PLUGIN_RUNNER_TLS.md`）
-- [ ] **eval-nightly 启用** — GitHub 配置 `vars.EVAL_BASE_URL` + `secrets.EVAL_INTERNAL_TOKEN`
-- [ ] **多 Agent 协作** — `agent.multi_agent.enabled`（当前冻结，收益待验证）
+- [x] **Plugin Runner TLS** — 主机级 Docker daemon TLS 配置 + `scripts/generate-runner-tls.sh`（见 `docs/PLUGIN_RUNNER_TLS.md`）
+- [x] **eval-nightly 启用** — GitHub `vars.EVAL_BASE_URL` + `secrets.EVAL_INTERNAL_TOKEN` 已配置；⚠️ 免费版 cpolar 隧道每次重启随机子域名（需 `scripts/get-tunnel-url.ps1` 刷新 URL），且隧道须在 nightly 定时（02:00 UTC）时在线——建议升级固定子域名或把隧道注册为 Windows 服务
+- [x] **多 Agent 协作解锁** — `agent.multi_agent.enabled` 默认开启（Flyway V59），前端「能力开关」页解冻为实验态，「复杂任务」预设同步开启；收益验证见 nightly 评测
 - [x] **租户配额计费展示** — `/api/quota/summary`（QuotaController + QuotaSummaryDTO）→ /cost 页配额面板（用量条 70%/90% 分级告警）
 
 ---

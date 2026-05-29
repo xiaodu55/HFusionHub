@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第十一轮优化（2026-08-24）：Reranker 上线 + 流式治理 + 多 Agent 解锁
+
+#### Added
+- **Reranker 二级重排上线**：`RAG_RERANKER_MODE=lexical` 默认启用（零依赖确定性），Flyway V58 将 `rag.reranker.enabled` 默认置 TRUE，前端「能力开关」页可关
+- **LLM 响应缓存流式走 ModelGateway**：agent/chat 的 LLM 调用（含流式）经 `get_llm()` → `GatewayLLM`，限流/熔断/计费/响应缓存对流式同样生效（`MODEL_GATEWAY_STREAM_ENABLED=true` 默认）；新增 `tests/test_llm_gateway_stream.py` 15 项回归（缓存命中不重复计费、限流拒绝、熔断、流中首 chunk 前 failover、legacy 降级无递归等）
+- **事件循环阻塞清理**：`embedding/__init__.py` 同步包装改用模块级共享线程池（不再每次 `asyncio.run` 新建），Ollama `is_available` 已线程池 + TTL 缓存
+- **多 Agent 协作解锁**：Flyway V59 将 `agent.multi_agent.enabled` 默认置 TRUE；前端「能力开关」页由冻结改为实验态，「复杂任务」预设同步开启
+- **Plugin Runner TLS**：`scripts/generate-runner-tls.{sh,py}` + `deploy/runner-tls/` 证书链 + `docs/PLUGIN_RUNNER_TLS.md`（主机级 Docker daemon TLS 为文档化手动步骤）
+- **SSO/OIDC 单点登录**：通用 OIDC 客户端（授权码流程）`/user/sso/authorize` + `/callback`（Redis 一次性 state 防 CSRF → code 换 token → userinfo → 按 (provider,subject) 查找/邮箱关联/自动开户 → Sa-Token 登录）；`sys_user` 增 `oauth_provider/oauth_subject` 唯一绑定列（V60）；登录页 SSO 按钮 + `/sso/callback` 落地页；`docs/OIDC.md` 接入指南；`OidcServiceTest`(9) + `SsoControllerTest`(4) 全绿。默认关闭，经 `app.oidc.*` 对接外部 IdP 启用
+- **eval-nightly 启用（进行中）**：cpolar 内网穿透暴露 Python AI（`/health` 200、`/api/chat` 鉴权生效），`vars.EVAL_BASE_URL` 已设；`secrets.EVAL_INTERNAL_TOKEN` 待用户在 GitHub UI 填入
+
+#### Changed
+- **docs/ENVIRONMENT.md**：新增 `MODEL_GATEWAY_STREAM_ENABLED`；P10 状态由冻结改 Beta；`RAG_MULTI_AGENT_ENABLED` 行注明 V59 默认开启
+
+#### Testing
+- Python 全量回归：21 失败（基线同清单）+ 1319 passed（基线 1298 + 新增 21），**零新增失败**
+
 ### 第十轮优化（2026-08-19）：文档体系整合
 
 #### Documentation
