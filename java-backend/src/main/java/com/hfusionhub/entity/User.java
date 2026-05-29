@@ -103,4 +103,16 @@ public class User extends BaseEntity {
      */
     @Schema(description = "平台管理员标记")
     private Boolean platformAdmin;
+
+    /**
+     * SSO/OIDC 提供方标识（如 generic / wecom），非空表示该账号由外部 IdP 建立
+     */
+    @Schema(description = "SSO/OIDC 提供方标识")
+    private String oauthProvider;
+
+    /**
+     * SSO/OIDC 主体标识（IdP 下发的 sub 声明），与 oauth_provider 联合唯一
+     */
+    @Schema(description = "SSO/OIDC 主体标识")
+    private String oauthSubject;
 }

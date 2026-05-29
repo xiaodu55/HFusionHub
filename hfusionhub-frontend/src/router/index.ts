@@ -20,6 +20,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false },
   },
   {
+    path: '/sso/callback',
+    name: 'SsoCallback',
+    component: () => import('@/pages/auth/SsoCallback.vue'),
+    meta: { requiresAuth: false },
+  },
+  {
     path: '/pending-approval',
     name: 'PendingApproval',
     component: () => import('@/pages/auth/PendingApproval.vue'),

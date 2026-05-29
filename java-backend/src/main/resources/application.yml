@@ -157,6 +157,25 @@ app:
   admin:
     username: ${ADMIN_USERNAME:admin}
     password: ${ADMIN_PASSWORD:}
+  # SSO/OIDC 通用客户端（app.oidc.*）— 默认关闭。
+  # 生产通过环境变量启用并覆盖端点/凭据（见 docs/OIDC.md 与 ENVIRONMENT.md）。
+  # 流程：/user/sso/authorize → IdP 授权 → /user/sso/callback → userinfo → 建号/关联 → satoken 回前端。
+  oidc:
+    enabled: ${OIDC_ENABLED:false}
+    provider-name: ${OIDC_PROVIDER_NAME:generic}
+    authorization-endpoint: ${OIDC_AUTHORIZATION_ENDPOINT:}
+    token-endpoint: ${OIDC_TOKEN_ENDPOINT:}
+    user-info-endpoint: ${OIDC_USERINFO_ENDPOINT:}
+    client-id: ${OIDC_CLIENT_ID:}
+    client-secret: ${OIDC_CLIENT_SECRET:}
+    redirect-uri: ${OIDC_REDIRECT_URI:}
+    frontend-redirect-uri: ${OIDC_FRONTEND_REDIRECT_URI:}
+    scopes: ${OIDC_SCOPES:openid profile email}
+    username-claim: ${OIDC_USERNAME_CLAIM:preferred_username}
+    email-claim: ${OIDC_EMAIL_CLAIM:email}
+    name-claim: ${OIDC_NAME_CLAIM:name}
+    auto-provision: ${OIDC_AUTO_PROVISION:true}
+    link-by-email: ${OIDC_LINK_BY_EMAIL:true}
 
 # =====================================================
 # Agent 异步任务调度与可靠恢复（V13）

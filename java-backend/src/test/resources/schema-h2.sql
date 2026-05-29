@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS sys_user (
     phone VARCHAR(20) DEFAULT NULL,
     avatar VARCHAR(500) DEFAULT NULL,
     theme_preference VARCHAR(16) DEFAULT NULL,
+    oauth_provider VARCHAR(32) DEFAULT NULL,
+    oauth_subject VARCHAR(255) DEFAULT NULL,
     role VARCHAR(20) NOT NULL DEFAULT 'user',
     status SMALLINT NOT NULL DEFAULT 0,
     last_login_time TIMESTAMP DEFAULT NULL,

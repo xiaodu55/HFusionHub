@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { getSsoProviders } from '@/api/user'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -19,6 +20,26 @@ const showPassword = ref(false)
 const loading = ref(false)
 const error = ref('')
 const registered = computed(() => route.query.registered === '1')
+
+// SSO/OIDC —— 后端未启用或不可达时静默隐藏入口
+const ssoEnabled = ref(false)
+const ssoProviderName = ref('')
+
+onMounted(async () => {
+  try {
+    const res = await getSsoProviders()
+    ssoEnabled.value = Boolean(res.data?.enabled)
+    ssoProviderName.value = res.data?.providerName || ''
+  } catch {
+    ssoEnabled.value = false
+  }
+})
+
+const startSso = () => {
+  // 整页跳转到后端 /user/sso/authorize（经 Vite/网关代理到 Java），
+  // 由后端 302 至 IdP；登录完成后再回跳 /sso/callback?token=...
+  window.location.href = '/api/user/sso/authorize'
+}
 
 const handleLogin = async () => {
   if (!form.value.username || !form.value.password) {
@@ -122,6 +143,17 @@ const goToRegister = () => {
             {{ loading ? '登录中...' : '登录' }}
           </Button>
         </form>
+
+        <div v-if="ssoEnabled" class="mt-4">
+          <div class="mb-3 flex items-center gap-3 text-xs text-muted-foreground">
+            <span class="h-px flex-1 bg-border" />
+            或使用 SSO 登录
+            <span class="h-px flex-1 bg-border" />
+          </div>
+          <Button type="button" variant="outline" class="w-full" :disabled="loading" @click="startSso">
+            {{ ssoProviderName || '企业身份' }} 单点登录
+          </Button>
+        </div>
 
         <div class="mt-6 text-center text-sm text-muted-foreground">
           还没有账号？

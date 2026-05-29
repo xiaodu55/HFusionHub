@@ -16,6 +16,17 @@ export const logout = (): Promise<ApiResponse<void>> => {
   return post('/user/logout')
 }
 
+/** SSO/OIDC 提供方信息（前端据此决定是否展示 SSO 登录按钮） */
+export interface SsoProviderInfo {
+  enabled: boolean
+  providerName: string
+}
+
+/** 获取 SSO/OIDC 提供方信息 */
+export const getSsoProviders = (): Promise<ApiResponse<SsoProviderInfo>> => {
+  return get('/user/sso/providers')
+}
+
 // 获取当前用户信息
 export const getUserInfo = (): Promise<ApiResponse<UserInfo>> => {
   return get('/user/info')
