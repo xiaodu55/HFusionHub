@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第十二轮 · 招投标垂直化 P0（2026-08-25）：招标文件智能解读 MVP 落地
+
+> 方向性里程碑：HFusionHub 由横向通用 AI Agent 平台垂直化为**招投标智能助手 SaaS**（B 端多租户）。P0 跑通「招标入库 → 要素解读 → 需求清单」闭环，全部复用既有多租户 / Agent 运行时 / RAG / 评测 / 配额五大基座，仅新增领域层（`python-ai/app/core/bid/`、`java-backend/…/bid/`、`hfusionhub-frontend/src/pages/bid/`）。
+
+#### Added
+- **P0-1 领域数据模型**：Flyway V61–V65 新增 `bid_project`（状态机 interpreting→requirements→drafting→checking→submitted/archived）、`tender_element`（evidence_chunk_ids 证据引用 + confidence）、`bid_scoring_method`（综合评分法/最低价法 + points_json）、`bid_requirement`（需求清单 + satisfied_status）、`knowledge_base.category`（tender/qualification/bid_history/general 三类私有库）；全表含 `tenant_id`
+- **P0-2 领域多智能体解读**：`BidInterpretWorkflow`（要素抽取/评分办法/废标条款/需求清单专家并行 + 合成），Python 产出 JSON + 证据 → Java `BidProjectServiceImpl.interpret()` 幂等落三表；`BidProjectController` 8 个 `/bid/project/*` 接口
+- **P0-3 领域内建工具**：`app/core/bid/tools.py` 注册 `bid_calc_scoring`/`bid_list_requirements`/`bid_render_template`（确定性、可评测；插件化留 P1）
+- **P0-4 领域评测与门禁**：种子语料 `evaluation/kb_bid/` + `suite_bid/`；新增 `qualification_recall`/`disqualification_clause_recall`/`scoring_point_accuracy`/`bid_terminology_accuracy` 指标并冻结基线（当前全 1.0），CI `eval-offline` 对 `bid_*` 改动回归
+- **P0-5 前端领域化**：`/bid/projects` 投标项目工作台 + `/bid/projects/:id/interpret` 解读看板（要素卡片/评分办法/需求清单/证据引用），`api/bid.ts` 7 个接口，MainLayout 新增「投标项目」菜单
+- **P0-6 冷启动种子**：`BidDemoImportService` 内置 4 份脱敏招标文件 + 示例项目，`POST /demo/import-bid` 一键建库建索引导入、`POST /demo/clear-bid` 清理；`scripts/smoke-bid.ps1` 冒烟脚本（LLM 可用性门控解读步骤）
+- **P0-7 商业化骨架**：`UsageMeter` 新增 `BID_PROJECTS`/`TENDER_ELEMENTS`，创建项目/解读按量计量（reserve+settle 幂等账本，超额抛 QUOTA_EXCEEDED 回滚），前端 `/cost` 自动出现
+- **P0-8 风险合规**：解读看板免责声明 + 每要素 `evidence_chunk_ids` 引用；低置信（<0.6）需求强制 `manual_review` 人工确认兜底
+
+#### Testing
+- Java 全量 `mvn test`：**494 passed / 0 failures / 1 skipped**（新增 `BidProjectServiceImplTest`(6) + `BidDemoImportServiceImplTest`(5)）
+- Python：bid 领域单测 **36 passed**；离线评测门禁 4 项 bid 指标全 1.0、无回归、无 gate_failures（exit 0）
+- 前端：`npm run build` + vitest **39 passed**
+
 ### 第十一轮优化（2026-08-24）：Reranker 上线 + 流式治理 + 多 Agent 解锁
 
 #### Added

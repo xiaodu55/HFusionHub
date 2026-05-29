@@ -55,7 +55,7 @@
 
 **内部互信令牌**（Java ↔ Python 调用，不用于登录；值在 `docker/.env`）：`PYTHON_AI_INTERNAL_TOKEN`、`CALLBACK_SECRET`、`PLUGIN_RUNNER_TOKEN`
 
-## 4. Java 后端接口（238 个）
+## 4. Java 后端接口（246 个）
 
 - **完整接口列表与请求/响应结构**：浏览器打开 http://localhost:8080/api/doc.html（Knife4j，含 Try it out）。
 - **分组概览**（均以 `/api` 为前缀）：
@@ -83,7 +83,8 @@
 | 记忆/笔记 | MemoryController + NoteController | 9 | `/memory/*` `/note/*` |
 | 通知/Webhook | NotificationController + WebhookController | 14 | `/notifications/*` `/webhook/*` |
 | 模型配置/成本/系统 | UserModelConfigController + CostController + SystemController | 10 | `/model-config` `/cost/*` `/system/*` |
-| 管理/其他 | AuditController + VectorReconciliationController + EvaluationGateController + DemoController + HealthController | 9 | `/admin/*` `/evaluation/*` `/demo/*` `/health` |
+| 管理/其他 | AuditController + VectorReconciliationController + EvaluationGateController + DemoController + HealthController | 11 | `/admin/*` `/evaluation/*` `/demo/*` `/health` |
+| 投标项目 | BidProjectController | 8 | `/bid/project/*` |
 
 - **内部接口**（Java→Java 或内网，不对浏览器开放）：`AgentApprovalInternalController`、`AgentTaskEventController`、`FeatureFlagInternalController`、`InternalNoteController`、`InternalPluginController`、`InternalPluginQuotaController`。
 - 认证：登录 `POST /api/user/login` 拿 `data`（Sa-Token），后续请求带 header `satoken: <token>`。无 token 访问受保护接口返回 401。
@@ -97,7 +98,7 @@
   - 解析：`POST /api/parse`；检索：`POST /api/search`；调试检索：`POST /api/rag/debug/search`
 - 全部路由经 Java 代理访问（Java 带 `X-Internal-Token`）；直连需带 `X-Internal-Token: <PYTHON_AI_INTERNAL_TOKEN>` 头，否则 401/403。
 
-## 6. 前端页面（36 个路由）
+## 6. 前端页面（38 个路由）
 
 | 分组 | 路径 |
 | :--- | :--- |
@@ -109,6 +110,7 @@
 | Agent | `/agent` `/approvals` |
 | 构建器 | `/builder/prompts` `/builder/prompts/recycle-bin` `/builder/models` `/builder/tools` `/builder/plugins` `/builder/test-bench` `/builder/test-sets` `/builder/apps` `/builder/mcp` |
 | 成本/记忆/笔记/RAG | `/cost` `/memory` `/notes` `/rag` |
+| 投标项目 | `/bid/projects` `/bid/projects/:id/interpret` |
 | 个人/设置 | `/profile` `/settings` |
 | 管理 | `/admin/flags` `/admin/intent-tree` `/admin/users` `/admin/notices` `/admin/audit-logs` |
 

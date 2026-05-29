@@ -213,6 +213,20 @@ jobs:
         run: python -c "from app.core.rag.eval_baseline import verify_suite_integrity; verify_suite_integrity('evaluation/suite/cases.jsonl','evaluation/suite/suite_manifest.json'); print('frozen suite OK')"
       - name: Run offline evaluation gate
         run: python scripts/eval_offline.py --fail-on-regression
+      # ─── 招投标领域评测门禁（B2 垂直化）───
+      - name: Verify frozen bid suite integrity (SHA-256)
+        run: python -c "from app.core.rag.eval_baseline import verify_suite_integrity; verify_suite_integrity('evaluation/suite_bid/cases.jsonl','evaluation/suite_bid/suite_manifest.json'); print('frozen bid suite OK')"
+      - name: Run bid offline evaluation gate
+        run: python scripts/eval_offline.py \
+          --cases evaluation/suite_bid/cases.jsonl \
+          --suite-manifest evaluation/suite_bid/suite_manifest.json \
+          --kb-manifest evaluation/kb_bid/kb_manifest.json \
+          --baseline evaluation/baseline/bid_baseline.json \
+          --minimum-qualification-recall 0.9 \
+          --minimum-disqualification-clause-recall 0.9 \
+          --minimum-scoring-point-accuracy 0.9 \
+          --minimum-bid-terminology-accuracy 0.9 \
+          --fail-on-regression
       - name: Upload evaluation report
         if: always()
         uses: actions/upload-artifact@v4

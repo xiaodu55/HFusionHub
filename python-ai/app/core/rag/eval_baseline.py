@@ -41,6 +41,11 @@ METRIC_LABELS: dict[str, str] = {
     "cost_usd_per_task": "单任务成本 (USD)",
     "error_rate": "错误率",
     "scope_violations": "越界检索数",
+    # 招投标领域指标（B2 垂直化）
+    "qualification_recall": "资质要求召回率 (qualification recall)",
+    "disqualification_clause_recall": "废标条款召回率 (disqualification recall)",
+    "scoring_point_accuracy": "评分点命中率 (scoring point accuracy)",
+    "bid_terminology_accuracy": "招标术语命中率 (terminology accuracy)",
 }
 
 
@@ -58,6 +63,9 @@ class EvalCase:
     refusal: str
     risk_labels: tuple[str, ...]
     tool: Optional[dict[str, Any]] = None
+    # 招投标领域事实（B2）：{metric_key: [期望事实子串, ...]}，用于确定性
+    # 领域指标（在检索命中内容中做子串匹配，无需 LLM，保持离线轨密闭）。
+    bid_facts: Optional[dict[str, Any]] = None
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "EvalCase":
@@ -77,6 +85,7 @@ class EvalCase:
             refusal=str(value.get("refusal", "none")),
             risk_labels=tuple(map(str, value.get("risk_labels", []))),
             tool=value.get("tool"),
+            bid_facts=value.get("bid_facts"),
         )
 
 
@@ -146,6 +155,8 @@ class CaseOutcome:
     cost_usd: Optional[float] = None
     tool_success: Optional[bool] = None
     error: Optional[str] = None
+    # 招投标领域指标：{metric_key: 命中率(0-1)}，按 case 聚合为套件指标。
+    bid: Optional[dict[str, float]] = None
 
     @property
     def has_expected(self) -> bool:
@@ -171,6 +182,11 @@ class Metrics:
     cost_usd_per_task: Optional[float] = None
     error_rate: float = 0.0
     scope_violations: int = 0
+    # 招投标领域指标（B2 垂直化，离线轨确定性产出）
+    qualification_recall: Optional[float] = None
+    disqualification_clause_recall: Optional[float] = None
+    scoring_point_accuracy: Optional[float] = None
+    bid_terminology_accuracy: Optional[float] = None
 
     def to_dict(self) -> dict[str, Optional[float]]:
         return asdict(self)
@@ -248,6 +264,12 @@ def aggregate_metrics(outcomes: Sequence[CaseOutcome], top_k: int = 10,
     token_values = [o.tokens for o in valid if o.tokens is not None]
     cost_values = [o.cost_usd for o in valid if o.cost_usd is not None]
 
+    # 招投标领域指标：按 case 的 bid 命中率取均值（无该指标的 case 跳过）
+    def _bid_average(metric_key: str) -> Optional[float]:
+        values = [o.bid[metric_key] for o in valid
+                  if o.bid is not None and o.bid.get(metric_key) is not None]
+        return (sum(values) / len(values)) if values else None
+
     return Metrics(
         recall_at_5=(recall_numerator / total_expected) if total_expected else None,
         ndcg_at_10=(sum(ndcg_values) / len(ndcg_values)) if ndcg_values else None,
@@ -262,6 +284,10 @@ def aggregate_metrics(outcomes: Sequence[CaseOutcome], top_k: int = 10,
         cost_usd_per_task=(sum(cost_values) / len(cost_values)) if cost_values else None,
         error_rate=sum(1 for o in outcomes if o.error is not None) / len(outcomes),
         scope_violations=sum(o.scope_violations for o in valid),
+        qualification_recall=_bid_average("qualification_recall"),
+        disqualification_clause_recall=_bid_average("disqualification_clause_recall"),
+        scoring_point_accuracy=_bid_average("scoring_point_accuracy"),
+        bid_terminology_accuracy=_bid_average("bid_terminology_accuracy"),
     )
 
 
@@ -392,6 +418,10 @@ GATE_ORDER = [
     "citation_faithfulness",
     "refusal_correctness",
     "tool_success_rate",
+    "qualification_recall",
+    "disqualification_clause_recall",
+    "scoring_point_accuracy",
+    "bid_terminology_accuracy",
     "p95_latency_ms",
     "error_rate",
     "scope_violations",

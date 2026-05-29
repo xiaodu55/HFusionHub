@@ -253,16 +253,22 @@ hfusionhub:
         agent-tokens: 100000
         index-chunks: 5000
         plugin-executions: 100
+        bid-projects: 10
+        tender-elements: 500
       pro:
         chat-tokens: 1000000
         agent-tokens: 1000000
         index-chunks: 50000
         plugin-executions: 1000
+        bid-projects: 100
+        tender-elements: 5000
       enterprise:
         chat-tokens: 10000000
         agent-tokens: 10000000
         index-chunks: 500000
         plugin-executions: 10000
+        bid-projects: 1000
+        tender-elements: 50000
 
 management:
   endpoints:

@@ -940,6 +940,48 @@ public class AiClient {
     }
 
     /**
+     * 招投标解读（B2）— 调用 Python 解读工作流，抽取招标文件结构化要素。
+     *
+     * <p>请求 POST /api/bid/interpret，返回结构化 JSON：
+     * {@code {status, elements:[{element_key, element_value, confidence, source_clause, evidence_chunk_ids}],
+     * scoring_methods:[{method_type, total_score, points_json}],
+     * requirements:[{category, requirement, source_clause, confidence}]}}。
+     * 与 judgeAnswer 一致：AI 服务不可用时返回降级 map，不抛网关异常。</p>
+     *
+     * @param projectId       投标项目 ID
+     * @param knowledgeBaseId 招标文件知识库 ID
+     * @param title           项目名称
+     * @param tenderNumber    招标编号（可空）
+     * @return 解读结果 map（含 status）
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> bidInterpret(
+            Long projectId, Long knowledgeBaseId, String title, String tenderNumber) {
+        try {
+            String url = baseUrl + "/api/bid/interpret";
+            Map<String, Object> body = new HashMap<>();
+            body.put("project_id", projectId);
+            body.put("knowledge_base_id", knowledgeBaseId);
+            body.put("title", title);
+            if (tenderNumber != null && !tenderNumber.isBlank()) {
+                body.put("tender_number", tenderNumber);
+            }
+            HttpHeaders headers = internalHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            ResponseEntity<Map> response =
+                    restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            return response.getBody() == null
+                    ? Map.of("status", "error", "message", "AI 服务没有返回解读结果")
+                    : new HashMap<>(response.getBody());
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("Bid interpret failed: {}", e.getMessage());
+            return Map.of("status", "error", "message", "解读服务不可用，请稍后重试");
+        }
+    }
+
+    /**
      * Cancel an ongoing chat request
      *
      * @param requestId Request ID to cancel

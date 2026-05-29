@@ -82,6 +82,16 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/chat/Detail.vue'),
       },
       {
+        path: 'bid/projects',
+        name: 'BidProjects',
+        component: () => import('@/pages/bid/Projects.vue'),
+      },
+      {
+        path: 'bid/projects/:id/interpret',
+        name: 'BidInterpret',
+        component: () => import('@/pages/bid/Interpret.vue'),
+      },
+      {
         path: 'agent',
         name: 'AgentTasks',
         component: () => import('@/pages/agent/Index.vue'),

@@ -3,6 +3,7 @@ package com.hfusionhub.controller;
 import cn.dev33.satoken.annotation.SaCheckRole;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.dto.DemoImportResultDTO;
+import com.hfusionhub.service.BidDemoImportService;
 import com.hfusionhub.service.DemoImportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class DemoController {
 
     private final DemoImportService demoImportService;
+    private final BidDemoImportService bidDemoImportService;
 
     @Operation(summary = "导入演示数据", description = "一键导入各菜单示例数据：知识库文档、回答方案、我的笔记、我的记忆、应用发布、公告（幂等，仅管理员可用）")
     @PostMapping("/import")
@@ -36,5 +38,19 @@ public class DemoController {
     @SaCheckRole("admin")
     public R<DemoImportResultDTO> clearDemo() {
         return R.ok(demoImportService.clearDemoData());
+    }
+
+    @Operation(summary = "导入招投标演示环境", description = "一键导入招投标演示：招标文件知识库（4 篇脱敏招标文件）+ 示例投标项目（可直接触发解读，幂等，仅管理员可用）")
+    @PostMapping("/import-bid")
+    @SaCheckRole("admin")
+    public R<DemoImportResultDTO> importBidDemo() {
+        return R.ok(bidDemoImportService.importBidDemoData());
+    }
+
+    @Operation(summary = "清除招投标演示环境", description = "清除招投标演示数据：示例投标项目删除、招标文件知识库移入回收站（7 天保留，仅管理员可用）")
+    @PostMapping("/clear-bid")
+    @SaCheckRole("admin")
+    public R<DemoImportResultDTO> clearBidDemo() {
+        return R.ok(bidDemoImportService.clearBidDemoData());
     }
 }

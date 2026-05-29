@@ -31,6 +31,12 @@ public class QuotaProperties {
     @Value("${hfusionhub.quota.defaults.free.plugin-executions:100}")
     private long freePluginExecutions;
 
+    @Value("${hfusionhub.quota.defaults.free.bid-projects:10}")
+    private long freeBidProjects;
+
+    @Value("${hfusionhub.quota.defaults.free.tender-elements:500}")
+    private long freeTenderElements;
+
     @Value("${hfusionhub.quota.defaults.pro.chat-tokens:1000000}")
     private long proChatTokens;
 
@@ -43,6 +49,12 @@ public class QuotaProperties {
     @Value("${hfusionhub.quota.defaults.pro.plugin-executions:1000}")
     private long proPluginExecutions;
 
+    @Value("${hfusionhub.quota.defaults.pro.bid-projects:100}")
+    private long proBidProjects;
+
+    @Value("${hfusionhub.quota.defaults.pro.tender-elements:5000}")
+    private long proTenderElements;
+
     @Value("${hfusionhub.quota.defaults.enterprise.chat-tokens:10000000}")
     private long enterpriseChatTokens;
 
@@ -54,6 +66,12 @@ public class QuotaProperties {
 
     @Value("${hfusionhub.quota.defaults.enterprise.plugin-executions:10000}")
     private long enterprisePluginExecutions;
+
+    @Value("${hfusionhub.quota.defaults.enterprise.bid-projects:1000}")
+    private long enterpriseBidProjects;
+
+    @Value("${hfusionhub.quota.defaults.enterprise.tender-elements:50000}")
+    private long enterpriseTenderElements;
 
     /**
      * 按 plan_tier + 计量项取默认日限额。
@@ -99,6 +117,24 @@ public class QuotaProperties {
                         return enterprisePluginExecutions;
                     default:
                         return freePluginExecutions;
+                }
+            case "bid_projects":
+                switch (planTier) {
+                    case "pro":
+                        return proBidProjects;
+                    case "enterprise":
+                        return enterpriseBidProjects;
+                    default:
+                        return freeBidProjects;
+                }
+            case "tender_elements":
+                switch (planTier) {
+                    case "pro":
+                        return proTenderElements;
+                    case "enterprise":
+                        return enterpriseTenderElements;
+                    default:
+                        return freeTenderElements;
                 }
             default:
                 return freeChatTokens;

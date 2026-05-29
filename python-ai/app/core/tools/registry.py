@@ -370,6 +370,25 @@ class ToolRegistry:
         self._register(time_spec, TimeTool())
         self._register(web_spec, WebSearchTool())
 
+        # ── 招投标领域内建工具（B2 垂直化）────────────────────────────
+        # P0 全为确定性 Python 内建工具（插件沙箱被 TLS 阻塞）。agent_version
+        # "0.0" → 不进 V1 白名单，仅内部/非 V1 调用方（如 bid 工作流、MCP）可见。
+        # 领域层为可裁剪扩展：注册失败不影响平台基座。
+        try:
+            from app.core.bid.tools import (
+                BID_CALC_SCORING_SPEC,
+                BID_LIST_REQUIREMENTS_SPEC,
+                BID_RENDER_TEMPLATE_SPEC,
+                BidCalcScoringTool,
+                BidListRequirementsTool,
+                BidRenderTemplateTool,
+            )
+            self._register(BID_CALC_SCORING_SPEC, BidCalcScoringTool())
+            self._register(BID_LIST_REQUIREMENTS_SPEC, BidListRequirementsTool())
+            self._register(BID_RENDER_TEMPLATE_SPEC, BidRenderTemplateTool())
+        except Exception as exc:  # pragma: no cover — 领域层可选
+            logger.warning("bid tools registration skipped: %s", exc)
+
         # Register plugin tools (sandboxed subprocess execution)
         self.register_plugin_tools()
 

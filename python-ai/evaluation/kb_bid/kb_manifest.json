@@ -1,0 +1,117 @@
+{
+  "kb_id": 201,
+  "version": "1.0.0",
+  "name": "synthetic-bid-kb",
+  "document_count": 4,
+  "section_count": 20,
+  "documents": [
+    {
+      "doc_id": "bidder-instructions",
+      "title": "投标人须知",
+      "filename": "docs/bidder-instructions.md",
+      "sections": [
+        {
+          "section_id": "qualifications",
+          "title": "资质要求"
+        },
+        {
+          "section_id": "financial",
+          "title": "财务要求"
+        },
+        {
+          "section_id": "performance",
+          "title": "业绩要求"
+        },
+        {
+          "section_id": "bid-preparation",
+          "title": "投标文件编制"
+        },
+        {
+          "section_id": "seal-requirements",
+          "title": "密封与签署"
+        }
+      ]
+    },
+    {
+      "doc_id": "contract-terms",
+      "title": "合同主要条款",
+      "filename": "docs/contract-terms.md",
+      "sections": [
+        {
+          "section_id": "delivery-period",
+          "title": "工期要求"
+        },
+        {
+          "section_id": "quality-standard",
+          "title": "质量标准"
+        },
+        {
+          "section_id": "payment",
+          "title": "付款方式"
+        },
+        {
+          "section_id": "warranty",
+          "title": "质保与售后"
+        },
+        {
+          "section_id": "penalties",
+          "title": "违约责任"
+        }
+      ]
+    },
+    {
+      "doc_id": "evaluation-method",
+      "title": "评标办法",
+      "filename": "docs/evaluation-method.md",
+      "sections": [
+        {
+          "section_id": "scoring-method",
+          "title": "评分方式"
+        },
+        {
+          "section_id": "scoring-points",
+          "title": "评分标准"
+        },
+        {
+          "section_id": "disqualification",
+          "title": "废标条款"
+        },
+        {
+          "section_id": "substantive-response",
+          "title": "实质性响应要求"
+        },
+        {
+          "section_id": "tie-breaking",
+          "title": "得分相同处理"
+        }
+      ]
+    },
+    {
+      "doc_id": "tender-notice",
+      "title": "滨海园区智能化改造项目招标公告",
+      "filename": "docs/tender-notice.md",
+      "sections": [
+        {
+          "section_id": "overview",
+          "title": "项目概况"
+        },
+        {
+          "section_id": "eligibility",
+          "title": "投标资格要求"
+        },
+        {
+          "section_id": "bidding-docs",
+          "title": "招标文件获取"
+        },
+        {
+          "section_id": "timeline",
+          "title": "投标与开标时间"
+        },
+        {
+          "section_id": "bid-bond",
+          "title": "投标保证金"
+        }
+      ]
+    }
+  ]
+}

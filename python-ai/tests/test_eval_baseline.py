@@ -173,7 +173,7 @@ def test_known_queries_retrieve_their_ground_truth():
 def _outcome(case_id="c1", category="normal", retrieved=None, expected=None,
              cited=None, faithfulness=None, refusal_expected=False,
              refusal_correct=None, tool=None, tool_success=None,
-             latency=None, tokens=None, cost=None, error=None):
+             latency=None, tokens=None, cost=None, error=None, bid=None):
     return CaseOutcome(
         case_id=case_id,
         category=category,
@@ -191,6 +191,7 @@ def _outcome(case_id="c1", category="normal", retrieved=None, expected=None,
         cost_usd=cost,
         tool_success=tool_success,
         error=error,
+        bid=bid,
     )
 
 
@@ -218,6 +219,24 @@ def test_aggregate_metrics_computes_fixed_format_fields():
     assert metrics.tokens_per_task == pytest.approx(500)
     assert metrics.cost_usd_per_task == pytest.approx((0.001 + 0.002 + 0.001) / 3)
     assert metrics.error_rate == 0.0
+
+
+def test_aggregate_metrics_bid_domain_fields():
+    """招投标领域指标按 case 的 bid 命中率取均值，缺省 case 跳过（B2）。"""
+    outcomes = [
+        _outcome("a", bid={"qualification_recall": 1.0,
+                           "disqualification_clause_recall": 0.5,
+                           "scoring_point_accuracy": 1.0}),
+        _outcome("b", bid={"qualification_recall": 0.5,
+                           "disqualification_clause_recall": 1.0}),
+        _outcome("c"),  # 无领域指标
+    ]
+    metrics = aggregate_metrics(outcomes, top_k=10)
+
+    assert metrics.qualification_recall == pytest.approx(0.75)  # (1.0+0.5)/2
+    assert metrics.disqualification_clause_recall == pytest.approx(0.75)  # (0.5+1.0)/2
+    assert metrics.scoring_point_accuracy == pytest.approx(1.0)  # 仅 a 有值
+    assert metrics.bid_terminology_accuracy is None  # 无该维度
 
 
 def test_aggregate_metrics_refusal_and_tool():

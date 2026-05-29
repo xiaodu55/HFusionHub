@@ -58,6 +58,12 @@ public class KnowledgeBase extends BaseEntity {
     private LocalDateTime recycleExpiresAt;
 
     /**
+     * 知识库分类（招投标垂直化）：general|tender|qualification|bid_history
+     */
+    @Schema(description = "知识库分类：general|tender|qualification|bid_history")
+    private String category;
+
+    /**
      * 文档数量（非数据库字段）
      */
     @TableField(exist = false)

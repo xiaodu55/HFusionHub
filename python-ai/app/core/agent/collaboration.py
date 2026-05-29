@@ -16,6 +16,14 @@ class ExpertRole(str, Enum):
     CRITIC = "critic"
     SYNTHESIS = "synthesis"
 
+    # ── 招投标领域专家角色（B2 垂直化扩展）──────────────────────────
+    # MultiAgentCoordinator 以 role 作为专家索引键，业务专家必须使用
+    # 各自唯一的领域角色，避免 ANALYSIS 等通用角色相互覆盖。
+    ELEMENT_EXTRACTION = "element_extraction"
+    SCORING_METHOD = "scoring_method"
+    CLAUSE_EXTRACTION = "clause_extraction"
+    REQUIREMENT_SYNTHESIS = "requirement_synthesis"
+
 
 @dataclass
 class CollaborationTask:

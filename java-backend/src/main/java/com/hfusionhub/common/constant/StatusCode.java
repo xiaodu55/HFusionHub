@@ -101,6 +101,11 @@ public interface StatusCode {
      */
     int FILE_SIZE_EXCEEDED = 2005;
 
+    /**
+     * 投标项目不存在（招投标垂直化）
+     */
+    int BID_PROJECT_NOT_FOUND = 2006;
+
     // ==================== 对话错误码 (3000-3999) ====================
 
     /**

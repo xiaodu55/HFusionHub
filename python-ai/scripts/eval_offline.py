@@ -46,6 +46,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", type=Path, default=SUITE_DIR / "cases.jsonl")
     parser.add_argument("--suite-manifest", type=Path, default=SUITE_DIR / "suite_manifest.json")
+    parser.add_argument("--kb-manifest", type=Path, default=None,
+                        help="synthetic KB manifest path (default evaluation/kb/kb_manifest.json; "
+                             "bid suite uses evaluation/kb_bid/kb_manifest.json)")
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--citation-top-k", type=int, default=3,
                         help="how many retrieved chunks the extractive answer model cites")
@@ -64,9 +67,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--minimum-citation-accuracy", type=float, default=0.85)
     parser.add_argument("--minimum-citation-faithfulness", type=float, default=0.30)
     parser.add_argument("--maximum-scope-violations", type=int, default=0)
+    # 招投标领域门槛（B2 垂直化）：默认不设限，bid 套件显式传入
+    parser.add_argument("--minimum-qualification-recall", type=float, default=0.0)
+    parser.add_argument("--minimum-disqualification-clause-recall", type=float, default=0.0)
+    parser.add_argument("--minimum-scoring-point-accuracy", type=float, default=0.0)
+    parser.add_argument("--minimum-bid-terminology-accuracy", type=float, default=0.0)
     parser.add_argument("--fail-on-regression", action="store_true",
                         help="fail the gate when a baseline regression is detected")
     return parser.parse_args()
+
+
+def _compute_bid_metrics(case, retrieved_chunk_ids: list[str], router) -> Optional[dict[str, float]]:
+    """招投标领域指标：对每条期望事实子串，在检索命中的 chunk 内容中做
+    确定性子串匹配（无需 LLM，保持离线轨密闭）。返回 {metric_key: 命中率}。
+    """
+    facts = getattr(case, "bid_facts", None)
+    if not facts:
+        return None
+    content_by_chunk = getattr(getattr(router, "index", None), "get_chunk_content", None)
+    if content_by_chunk is None:
+        return None
+    corpus = "".join(
+        content_by_chunk(str(chunk_id)) or "" for chunk_id in retrieved_chunk_ids
+    )
+    bid: dict[str, float] = {}
+    for metric_key, expected_facts in facts.items():
+        if not isinstance(expected_facts, list) or not expected_facts:
+            continue
+        hit = sum(1 for fact in expected_facts if str(fact) in corpus)
+        bid[metric_key] = hit / len(expected_facts)
+    return bid or None
 
 
 async def evaluate_offline(router, cases, top_k: int, citation_top_k: int = 3) -> list:
@@ -98,6 +128,7 @@ async def evaluate_offline(router, cases, top_k: int, citation_top_k: int = 3) -
                 "refusal_correct": None,
                 "tool": case.tool,
                 "cited_chunk_ids": cited,
+                "bid": _compute_bid_metrics(case, seen, router),
             }
         )
     return outcomes
@@ -112,7 +143,11 @@ def main() -> int:
         return 1
     cases = load_cases(args.cases)
 
-    router = SyntheticRouter(min_score=args.min_score)
+    # 支持领域套件（如 suite_bid）指向独立合成 KB 清单
+    from app.core.rag.synthetic_index import SyntheticIndex
+    kb_manifest = args.kb_manifest or (PROJECT_ROOT / "evaluation" / "kb" / "kb_manifest.json")
+    router = SyntheticRouter(index=SyntheticIndex(manifest_path=kb_manifest),
+                             min_score=args.min_score)
     raw_outcomes = asyncio.run(
         evaluate_offline(router, cases, args.top_k, args.citation_top_k)
     )
@@ -128,6 +163,10 @@ def main() -> int:
         "citation_accuracy": args.minimum_citation_accuracy,
         "citation_faithfulness": args.minimum_citation_faithfulness,
         "scope_violations": args.maximum_scope_violations,
+        "qualification_recall": args.minimum_qualification_recall,
+        "disqualification_clause_recall": args.minimum_disqualification_clause_recall,
+        "scoring_point_accuracy": args.minimum_scoring_point_accuracy,
+        "bid_terminology_accuracy": args.minimum_bid_terminology_accuracy,
     }
     gate_failures = check_gates(metrics, thresholds)
 

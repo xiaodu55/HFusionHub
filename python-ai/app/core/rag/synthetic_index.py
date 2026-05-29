@@ -154,6 +154,11 @@ class SyntheticIndex:
                 )
         self.chunks = chunks
         self.bm25 = _Bm25Index.build(chunk.tokens for chunk in chunks)
+        self._content_by_chunk = {chunk.chunk_id: chunk.content for chunk in chunks}
+
+    def get_chunk_content(self, chunk_id: str) -> Optional[str]:
+        """返回某 chunk 的原始内容（领域指标做确定性子串匹配用）。"""
+        return self._content_by_chunk.get(chunk_id)
 
     def search_ranked(
         self, query: str, knowledge_base_id: int, top_k: int

@@ -60,10 +60,17 @@ public class QuotaController {
             case AGENT_TOKENS -> "Agent Token";
             case INDEX_CHUNKS -> "文档索引分块";
             case PLUGIN_EXECUTIONS -> "插件执行";
+            case BID_PROJECTS -> "投标项目";
+            case TENDER_ELEMENTS -> "招标解读要素";
         };
     }
 
     private String unitOf(UsageMeter meter) {
-        return meter == UsageMeter.PLUGIN_EXECUTIONS ? "次" : "Token";
+        return switch (meter) {
+            case PLUGIN_EXECUTIONS -> "次";
+            case BID_PROJECTS -> "个";
+            case TENDER_ELEMENTS -> "项";
+            default -> "Token";
+        };
     }
 }

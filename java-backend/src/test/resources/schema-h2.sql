@@ -1193,3 +1193,74 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_audit_operator ON audit_log (operator_id, created_at);
+
+-- =====================================================
+-- 招投标垂直化 (V61-V65)
+-- =====================================================
+-- V65: 知识库分类
+ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS category VARCHAR(32) DEFAULT 'general';
+
+-- V61: 投标项目
+CREATE TABLE IF NOT EXISTS bid_project (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    knowledge_base_id BIGINT NOT NULL,
+    tender_number VARCHAR(128) DEFAULT NULL,
+    title VARCHAR(255) NOT NULL,
+    budget DECIMAL(18,2) DEFAULT NULL,
+    deadline VARCHAR(64) DEFAULT NULL,
+    bid_bond VARCHAR(64) DEFAULT NULL,
+    opening_date TIMESTAMP DEFAULT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'interpreting',
+    created_by BIGINT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_bid_project_kb ON bid_project (knowledge_base_id);
+
+-- V62: 招标结构化要素
+CREATE TABLE IF NOT EXISTS tender_element (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    element_key VARCHAR(64) NOT NULL,
+    element_value CLOB DEFAULT NULL,
+    evidence_chunk_ids CLOB DEFAULT NULL,
+    confidence DECIMAL(5,4) DEFAULT NULL,
+    source_clause CLOB DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    UNIQUE (project_id, element_key)
+);
+CREATE INDEX IF NOT EXISTS idx_tender_element_project ON tender_element (project_id);
+
+-- V63: 招标评分办法
+CREATE TABLE IF NOT EXISTS bid_scoring_method (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    method_type VARCHAR(32) NOT NULL,
+    points_json CLOB DEFAULT NULL,
+    total_score DECIMAL(8,2) DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_bid_scoring_project ON bid_scoring_method (project_id);
+
+-- V64: 投标需求清单
+CREATE TABLE IF NOT EXISTS bid_requirement (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    category VARCHAR(32) NOT NULL,
+    requirement CLOB NOT NULL,
+    source_clause CLOB DEFAULT NULL,
+    satisfied_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_bid_requirement_project ON bid_requirement (project_id);

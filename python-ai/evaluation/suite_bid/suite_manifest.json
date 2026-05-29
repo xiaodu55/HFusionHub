@@ -1,0 +1,11 @@
+{
+  "suite_version": "1.0.0",
+  "kb_id": 201,
+  "kb_version": "1.0.0",
+  "kb_name": "synthetic-bid-kb",
+  "total_cases": 27,
+  "category_counts": {
+    "normal": 27
+  },
+  "cases_sha256": "3676f5867479476469e841bb3d6c94f1866273cee2451b86e99995ad60248892"
+}
