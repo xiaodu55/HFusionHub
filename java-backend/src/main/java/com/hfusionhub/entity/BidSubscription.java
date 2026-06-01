@@ -35,6 +35,10 @@ public class BidSubscription extends BaseEntity {
     public static final String MODULE_DOCX = "docx";
     public static final String MODULE_OPENAPI = "openapi";
 
+    /** 全部可售模块（P2-2 平台开关 + 前端套餐状态枚举） */
+    public static final java.util.Set<String> MODULE_KEYS =
+            java.util.Set.of(MODULE_DRAFT, MODULE_CHECK, MODULE_DOCX, MODULE_OPENAPI);
+
     @TableId(type = IdType.AUTO)
     @Schema(description = "套餐ID")
     private Long id;

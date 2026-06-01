@@ -9,12 +9,14 @@ import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.entity.BidDraft;
 import com.hfusionhub.entity.BidProject;
 import com.hfusionhub.entity.BidRequirement;
+import com.hfusionhub.entity.BidSubscription;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.mapper.BidDraftMapper;
 import com.hfusionhub.mapper.BidProjectMapper;
 import com.hfusionhub.mapper.BidRequirementMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.quota.UsageMeter;
+import com.hfusionhub.service.BidPlanGateService;
 import com.hfusionhub.service.BidWriteService;
 import com.hfusionhub.service.UsageLedgerService;
 import com.hfusionhub.tenant.TenantContext;
@@ -52,11 +54,14 @@ public class BidWriteServiceImpl implements BidWriteService {
     private final AiClient aiClient;
     private final UsageLedgerService usageLedgerService;
     private final ObjectMapper objectMapper;
+    private final BidPlanGateService bidPlanGateService;
 
     @Override
     @Transactional
     public List<BidDraft> write(Long projectId) {
         BidProject project = requireOwnedProject(projectId);
+        bidPlanGateService.requireModule(
+                TenantContext.requireTenantId(), BidSubscription.MODULE_DRAFT, "标书撰写");
 
         List<Map<String, Object>> requirements = loadRequirements(projectId);
         List<Long> kbIds = loadKnowledgeBaseIds(project);
@@ -81,6 +86,7 @@ public class BidWriteServiceImpl implements BidWriteService {
     public void writeStream(Long projectId, SseEmitter emitter) {
         BidProject project = requireOwnedProject(projectId);
         final Long streamTenantId = TenantContext.requireTenantId();
+        bidPlanGateService.requireModule(streamTenantId, BidSubscription.MODULE_DRAFT, "标书撰写");
 
         List<Map<String, Object>> requirements = loadRequirements(projectId);
         List<Long> kbIds = loadKnowledgeBaseIds(project);

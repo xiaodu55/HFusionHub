@@ -10,13 +10,16 @@ import com.hfusionhub.entity.BidCheckReport;
 import com.hfusionhub.entity.BidDraft;
 import com.hfusionhub.entity.BidProject;
 import com.hfusionhub.entity.BidRequirement;
+import com.hfusionhub.entity.BidSubscription;
 import com.hfusionhub.mapper.BidCheckReportMapper;
 import com.hfusionhub.mapper.BidDraftMapper;
 import com.hfusionhub.mapper.BidProjectMapper;
 import com.hfusionhub.mapper.BidRequirementMapper;
 import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.service.BidCheckService;
+import com.hfusionhub.service.BidPlanGateService;
 import com.hfusionhub.service.UsageLedgerService;
+import com.hfusionhub.tenant.TenantContext;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -53,11 +56,14 @@ public class BidCheckServiceImpl implements BidCheckService {
     private final AiClient aiClient;
     private final UsageLedgerService usageLedgerService;
     private final ObjectMapper objectMapper;
+    private final BidPlanGateService bidPlanGateService;
 
     @Override
     @Transactional
     public Map<String, Object> check(Long projectId) {
         BidProject project = requireOwnedProject(projectId);
+        bidPlanGateService.requireModule(
+                TenantContext.requireTenantId(), BidSubscription.MODULE_CHECK, "废标自检");
 
         List<BidDraft> drafts = bidDraftMapper.selectList(new LambdaQueryWrapper<BidDraft>()
                 .eq(BidDraft::getProjectId, projectId));

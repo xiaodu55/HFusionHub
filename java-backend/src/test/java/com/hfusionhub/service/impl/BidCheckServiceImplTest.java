@@ -21,7 +21,9 @@ import com.hfusionhub.mapper.BidDraftMapper;
 import com.hfusionhub.mapper.BidProjectMapper;
 import com.hfusionhub.mapper.BidRequirementMapper;
 import com.hfusionhub.quota.UsageMeter;
+import com.hfusionhub.service.BidPlanGateService;
 import com.hfusionhub.service.UsageLedgerService;
+import com.hfusionhub.tenant.TenantContext;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -48,6 +50,7 @@ class BidCheckServiceImplTest {
     @Mock private JwtUtils jwtUtils;
     @Mock private AiClient aiClient;
     @Mock private UsageLedgerService usageLedgerService;
+    @Mock private BidPlanGateService bidPlanGateService;
 
     private BidCheckServiceImpl service;
     private MockedStatic<JwtUtils> jwtUtilsMock;
@@ -62,14 +65,17 @@ class BidCheckServiceImplTest {
                 jwtUtils,
                 aiClient,
                 usageLedgerService,
-                new ObjectMapper());
+                new ObjectMapper(),
+                bidPlanGateService);
         jwtUtilsMock = org.mockito.Mockito.mockStatic(JwtUtils.class);
         jwtUtilsMock.when(JwtUtils::getCurrentUserId).thenReturn(7L);
+        TenantContext.setTenantId(7L);
     }
 
     @AfterEach
     void tearDown() {
         jwtUtilsMock.close();
+        TenantContext.clear();
     }
 
     private BidProject project(Long id, Long userId) {
@@ -95,6 +101,19 @@ class BidCheckServiceImplTest {
     void checkRejectsProjectNotOwned() {
         when(bidProjectMapper.selectById(1L)).thenReturn(project(1L, 99L));
         assertThrows(BusinessException.class, () -> service.check(1L));
+        verify(bidCheckReportMapper, never()).insert(any());
+    }
+
+    @Test
+    void checkBlockedWhenCheckModuleNotGranted() {
+        when(bidProjectMapper.selectById(1L)).thenReturn(project(1L, 7L));
+        org.mockito.Mockito.doThrow(new BusinessException(
+                        com.hfusionhub.common.constant.StatusCode.FORBIDDEN, "废标自检需要开通「废标自检」模块"))
+                .when(bidPlanGateService).requireModule(anyLong(), any(), any());
+
+        assertThrows(BusinessException.class, () -> service.check(1L));
+        // 模块未开通时不调用 Python 自检，也不落库
+        verify(aiClient, never()).bidCheck(anyLong(), any(), any(), any(), any(), any());
         verify(bidCheckReportMapper, never()).insert(any());
     }
 
