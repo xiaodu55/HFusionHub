@@ -67,7 +67,10 @@ public class MybatisPlusConfig {
             "webhook_delivery",
             // Evaluation gate results — no tenant_id column; access is gated by
             // dataset ownership, same pattern as agent_evaluation_run.
-            "evaluation_gate_result");
+            "evaluation_gate_result",
+            // 订阅套餐目录（V69）——平台级目录，tenant_id 可空；租户查询须可见全目录，
+            // 由服务层自行过滤租户自定义套餐，不走租户行拦截器。
+            "bid_subscription");
 
     /**
      * 分页 + 多租户插件

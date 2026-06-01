@@ -1315,3 +1315,40 @@ CREATE TABLE IF NOT EXISTS bid_check_report (
     PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_bid_check_project ON bid_check_report (project_id);
+
+-- V69: 订阅套餐目录（平台级，tenant_id 可空）
+CREATE TABLE IF NOT EXISTS bid_subscription (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    tenant_id BIGINT DEFAULT NULL,
+    plan_code VARCHAR(32) NOT NULL,
+    plan_name VARCHAR(64) NOT NULL,
+    plan_type VARCHAR(16) NOT NULL DEFAULT 'tier',
+    price_cents BIGINT NOT NULL DEFAULT 0,
+    max_projects INT NOT NULL DEFAULT 5,
+    max_seats INT NOT NULL DEFAULT 5,
+    char_quota BIGINT NOT NULL DEFAULT 100000,
+    module_flags CLOB NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'active',
+    created_by BIGINT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_subscription_code UNIQUE (plan_code)
+);
+
+-- V70: 租户套餐绑定（租户私有）
+CREATE TABLE IF NOT EXISTS tenant_plan_binding (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    tenant_id BIGINT NOT NULL,
+    subscription_id BIGINT NOT NULL,
+    start_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    end_at TIMESTAMP DEFAULT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'active',
+    created_by BIGINT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_binding_tenant_plan UNIQUE (tenant_id, subscription_id)
+);
