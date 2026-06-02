@@ -102,6 +102,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/bid/DraftEditor.vue'),
       },
       {
+        path: 'bid/billing',
+        name: 'BidBilling',
+        component: () => import('@/pages/bid/Billing.vue'),
+      },
+      {
         path: 'agent',
         name: 'AgentTasks',
         component: () => import('@/pages/agent/Index.vue'),
@@ -222,6 +227,12 @@ const routes: RouteRecordRaw[] = [
         path: 'admin/audit-logs',
         name: 'AuditLogs',
         component: () => import('@/pages/admin/AuditLogs.vue'),
+        meta: { roles: ADMIN_ROLES },
+      },
+      {
+        path: 'admin/plans',
+        name: 'Plans',
+        component: () => import('@/pages/admin/Plans.vue'),
         meta: { roles: ADMIN_ROLES },
       },
     ],

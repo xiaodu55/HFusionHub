@@ -33,3 +33,12 @@ export const importDemoData = (): Promise<ApiResponse<DemoImportResult>> =>
  */
 export const clearDemoData = (): Promise<ApiResponse<DemoImportResult>> =>
   post('/demo/clear')
+
+/**
+ * 导入行业免费试用样例（管理员）：
+ * 建行业样例知识库（3 篇脱敏招标文件）+ 示例投标项目，与行业方案包离线评测语料同源。
+ *
+ * @param industry 行业 code：construction（工程施工）/ it（IT 集成）
+ */
+export const importBidIndustrySamples = (industry: string): Promise<ApiResponse<DemoImportResult>> =>
+  post('/demo/import-bid-industry', null, { params: { industry } })

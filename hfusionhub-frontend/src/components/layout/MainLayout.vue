@@ -17,6 +17,7 @@ import {
   BookOpen,
   Cable,
   Cpu,
+  CreditCard,
   DollarSign,
   FileSearch,
   FileText,
@@ -83,6 +84,7 @@ const menuItems: Array<{
   { path: '/document', label: '文档', description: '上传、解析和恢复', icon: FileText, group: 'use', keywords: ['文档', '文件', '索引', 'doc'] },
   { path: '/chat', label: '智能对话', description: '提问并引用知识', icon: MessageSquare, group: 'use', keywords: ['对话', '聊天', 'chat'] },
   { path: '/bid/projects', label: '投标项目', description: '招标解读与标书工作台', icon: FileSearch, group: 'use', keywords: ['投标', '招标', '解读', '标书', 'bid'] },
+  { path: '/bid/billing', label: '套餐中心', description: '选择套餐与行业标书模板', icon: CreditCard, group: 'use', keywords: ['套餐', '订阅', '计费', '方案包', 'billing', '模板商城'] },
   { path: '/builder/models', label: '我的模型', description: '选择供应商和模型', icon: Cpu, group: 'personal', keywords: ['model', '模型', 'llm', 'embedding', '向量'] },
   { path: '/builder/tools', label: 'AI 能力', description: '查看和创建可用工具', icon: Wrench, group: 'personal', keywords: ['工具', 'tool', 'mcp', '能力'] },
   { path: '/agent', label: '运行记录', description: '查看执行和失败原因', icon: Sparkles, group: 'personal', keywords: ['运行', '任务', 'agent', '失败'] },
@@ -102,6 +104,7 @@ const menuItems: Array<{
   { path: '/admin/users', label: '账号权限', description: '给新用户分配身份', icon: Users, roles: ['admin'], group: 'admin', keywords: ['用户', '权限', '身份', '角色'] },
   { path: '/admin/notices', label: '公告管理', description: '发布和删除系统公告', icon: Megaphone, roles: ['admin'], group: 'admin', keywords: ['公告', '通知', 'notice', '发布'] },
   { path: '/admin/audit-logs', label: '审计日志', description: '敏感操作与跨租户审计', icon: ScrollText, roles: ['admin'], group: 'admin', keywords: ['审计', 'audit', '日志', '跨租户'] },
+  { path: '/admin/plans', label: '套餐管理', description: '维护平台套餐目录', icon: Package, roles: ['admin'], group: 'admin', keywords: ['套餐', '订阅', '目录', '方案包', 'plan'] },
 ]
 
 const visibleMenuItems = computed(() => menuItems.filter(item => !item.roles || userStore.hasAnyRole(item.roles)))
