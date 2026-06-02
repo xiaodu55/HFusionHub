@@ -70,7 +70,10 @@ public class MybatisPlusConfig {
             "evaluation_gate_result",
             // 订阅套餐目录（V69）——平台级目录，tenant_id 可空；租户查询须可见全目录，
             // 由服务层自行过滤租户自定义套餐，不走租户行拦截器。
-            "bid_subscription");
+            "bid_subscription",
+            // 标书模板（V67）——tenant_id 可空 = 平台级模板（P2 行业方案包的基础）；
+            // 租户查询须同时可见平台模板 + 自有模板，由服务层过滤，不走租户行拦截器。
+            "bid_template");
 
     /**
      * 分页 + 多租户插件

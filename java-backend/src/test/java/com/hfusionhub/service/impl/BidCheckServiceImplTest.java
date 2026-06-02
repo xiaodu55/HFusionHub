@@ -118,6 +118,39 @@ class BidCheckServiceImplTest {
     }
 
     @Test
+    void checkForApiBlockedWhenOpenApiModuleNotGranted() {
+        org.mockito.Mockito.doThrow(new BusinessException(
+                        com.hfusionhub.common.constant.StatusCode.FORBIDDEN, "投标开放 API 需要开通「投标开放 API」模块"))
+                .when(bidPlanGateService).requireModule(7L, "openapi", "投标开放 API");
+
+        assertThrows(BusinessException.class, () -> service.checkForApi(1L, 7L));
+        verify(aiClient, never()).bidCheck(anyLong(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void checkForApiRunsUnderTenantScope() {
+        // openapi 路径按租户过滤项目（调用方置于 app 租户上下文），不校验 createdBy
+        when(bidProjectMapper.selectById(1L)).thenReturn(project(1L, 99L));
+        when(bidDraftMapper.selectList(any())).thenReturn(List.of());
+        when(bidRequirementMapper.selectList(any())).thenReturn(List.of());
+        when(aiClient.bidCheck(anyLong(), any(), any(), any(), any(), any())).thenReturn(Map.of(
+                "status", "ok",
+                "findings", List.of(),
+                "summary", Map.of("total", 0, "critical", 0, "warning", 0, "info", 0)));
+
+        Map<String, Object> summary = service.checkForApi(1L, 7L);
+
+        assertEquals(0, summary.get("total"));
+        verify(bidProjectMapper).updateById(any());
+    }
+
+    @Test
+    void checkForApiRejectsProjectNotFound() {
+        when(bidProjectMapper.selectById(99L)).thenReturn(null);
+        assertThrows(BusinessException.class, () -> service.checkForApi(99L, 7L));
+    }
+
+    @Test
     void checkPersistsFindingsAndMetersReports() {
         when(bidProjectMapper.selectById(1L)).thenReturn(project(1L, 7L));
         when(bidDraftMapper.selectList(any())).thenReturn(List.of(draft("technical")));

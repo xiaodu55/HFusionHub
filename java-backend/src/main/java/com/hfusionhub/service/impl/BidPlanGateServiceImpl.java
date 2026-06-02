@@ -1,12 +1,17 @@
 package com.hfusionhub.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
+import com.hfusionhub.dto.PlanBindingDTO;
 import com.hfusionhub.entity.BidSubscription;
+import com.hfusionhub.entity.TenantMember;
+import com.hfusionhub.mapper.TenantMemberMapper;
 import com.hfusionhub.service.BidPlanGateService;
 import com.hfusionhub.service.FeatureFlagService;
 import com.hfusionhub.service.TenantPlanBindingService;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +36,7 @@ public class BidPlanGateServiceImpl implements BidPlanGateService {
 
     private final TenantPlanBindingService bindingService;
     private final FeatureFlagService featureFlagService;
+    private final TenantMemberMapper tenantMemberMapper;
 
     /** 功能开关求值环境（默认 prod），V71 预置开关为全局开 */
     @Value("${hfusionhub.env:prod}")
@@ -64,6 +70,30 @@ public class BidPlanGateServiceImpl implements BidPlanGateService {
             status.put(module, isModuleEnabled(tenantId, module));
         }
         return status;
+    }
+
+    @Override
+    public void requireSeatAvailable(Long tenantId) {
+        List<PlanBindingDTO> bindings = bindingService.listActiveBindings(tenantId);
+        Integer maxSeats = null;
+        for (PlanBindingDTO binding : bindings) {
+            if (BidSubscription.PLAN_TYPE_TIER.equals(binding.getPlanType())
+                    && binding.getMaxSeats() != null
+                    && (maxSeats == null || binding.getMaxSeats() > maxSeats)) {
+                maxSeats = binding.getMaxSeats();
+            }
+        }
+        if (maxSeats == null) {
+            return; // 未绑定 tier 套餐或无坐席上限，放行
+        }
+        Long seatsUsed = tenantMemberMapper.selectCount(new LambdaQueryWrapper<TenantMember>()
+                .eq(TenantMember::getTenantId, tenantId));
+        if (seatsUsed != null && seatsUsed >= maxSeats) {
+            log.warn("套餐坐席已满被拦截: tenantId={}, seatsUsed={}, maxSeats={}",
+                    tenantId, seatsUsed, maxSeats);
+            throw new BusinessException(StatusCode.FORBIDDEN,
+                    "当前套餐坐席已满（" + maxSeats + " 席），请升级套餐增加坐席");
+        }
     }
 
     private String moduleLabel(String module) {

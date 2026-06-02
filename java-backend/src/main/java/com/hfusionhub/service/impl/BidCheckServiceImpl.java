@@ -64,6 +64,23 @@ public class BidCheckServiceImpl implements BidCheckService {
         BidProject project = requireOwnedProject(projectId);
         bidPlanGateService.requireModule(
                 TenantContext.requireTenantId(), BidSubscription.MODULE_CHECK, "废标自检");
+        return runCheck(project);
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> checkForApi(Long projectId, Long tenantId) {
+        // 开放 API 路径（P2-7）：调用方已置于 app 所属租户上下文，租户行拦截器按 tenantId 过滤 selectById
+        bidPlanGateService.requireModule(tenantId, BidSubscription.MODULE_OPENAPI, "投标开放 API");
+        BidProject project = bidProjectMapper.selectById(projectId);
+        if (project == null) {
+            throw new BusinessException(StatusCode.BID_PROJECT_NOT_FOUND, "投标项目不存在");
+        }
+        return runCheck(project);
+    }
+
+    private Map<String, Object> runCheck(BidProject project) {
+        Long projectId = project.getId();
 
         List<BidDraft> drafts = bidDraftMapper.selectList(new LambdaQueryWrapper<BidDraft>()
                 .eq(BidDraft::getProjectId, projectId));

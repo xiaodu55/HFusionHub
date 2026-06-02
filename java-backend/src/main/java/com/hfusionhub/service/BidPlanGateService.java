@@ -25,4 +25,10 @@ public interface BidPlanGateService {
 
     /** 全部模块开关状态（供前端按模块禁用入口） */
     Map<String, Boolean> moduleStatus(Long tenantId);
+
+    /**
+     * 坐席校验（P2-7 三档计费 · 按坐席）：活跃 tier 套餐存在 max_seats 时，
+     * 当前租户成员数不得超出；未绑定 tier 套餐或未设上限则放行。
+     */
+    void requireSeatAvailable(Long tenantId);
 }

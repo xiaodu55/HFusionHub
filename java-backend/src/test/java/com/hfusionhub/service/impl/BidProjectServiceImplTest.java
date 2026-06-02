@@ -23,7 +23,9 @@ import com.hfusionhub.mapper.BidScoringMethodMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.TenderElementMapper;
 import com.hfusionhub.quota.UsageMeter;
+import com.hfusionhub.service.BidPlanGateService;
 import com.hfusionhub.service.UsageLedgerService;
+import com.hfusionhub.tenant.TenantContext;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
@@ -51,6 +53,7 @@ class BidProjectServiceImplTest {
     @Mock private JwtUtils jwtUtils;
     @Mock private AiClient aiClient;
     @Mock private UsageLedgerService usageLedgerService;
+    @Mock private BidPlanGateService bidPlanGateService;
 
     private BidProjectServiceImpl service;
     private MockedStatic<JwtUtils> jwtUtilsMock;
@@ -66,14 +69,17 @@ class BidProjectServiceImplTest {
                 jwtUtils,
                 aiClient,
                 new ObjectMapper(),
-                usageLedgerService);
+                usageLedgerService,
+                bidPlanGateService);
         jwtUtilsMock = org.mockito.Mockito.mockStatic(JwtUtils.class);
         jwtUtilsMock.when(JwtUtils::getCurrentUserId).thenReturn(7L);
+        TenantContext.setTenantId(7L);
     }
 
     @AfterEach
     void tearDown() {
         jwtUtilsMock.close();
+        TenantContext.clear();
     }
 
     private KnowledgeBase kb(Long id, Long userId) {

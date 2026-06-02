@@ -1,5 +1,7 @@
 package com.hfusionhub.controller;
 
+import com.hfusionhub.dto.OpenApiBidCheckRequest;
+import com.hfusionhub.dto.OpenApiBidCheckResponse;
 import com.hfusionhub.dto.OpenApiChatRequest;
 import com.hfusionhub.dto.OpenApiChatResponse;
 import com.hfusionhub.service.OpenApiService;
@@ -32,6 +34,16 @@ public class OpenApiController {
             @RequestBody OpenApiChatRequest request) {
         String apiKey = extractApiKey(authorization, apiKeyHeader);
         return openApiService.chat(apiKey, request);
+    }
+
+    @Operation(summary = "投标废标自检", description = "使用已发布应用的 API Key 对租户投标项目执行废标自检（P2-7，需开通 openapi 模块）")
+    @PostMapping("/bid/check")
+    public OpenApiBidCheckResponse bidCheck(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestHeader(value = "X-API-Key", required = false) String apiKeyHeader,
+            @RequestBody OpenApiBidCheckRequest request) {
+        String apiKey = extractApiKey(authorization, apiKeyHeader);
+        return openApiService.bidCheck(apiKey, request.getProjectId());
     }
 
     private String extractApiKey(String authorization, String apiKeyHeader) {

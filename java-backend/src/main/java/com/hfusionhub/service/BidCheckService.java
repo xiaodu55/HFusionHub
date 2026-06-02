@@ -20,6 +20,18 @@ public interface BidCheckService {
     Map<String, Object> check(Long projectId);
 
     /**
+     * 开放 API 路径的废标自检（P2-7 /openapi/bid/check）。
+     *
+     * <p>调用方须已置于 app 所属租户上下文（{@code TenantContext.runAs(tenantId)}），
+     * 租户行拦截器据此过滤项目归属；此处按 tenantId 校验 openapi 模块开关。</p>
+     *
+     * @param projectId 投标项目 ID
+     * @param tenantId  app 所属租户
+     * @return 本次自检统计 {total, critical, warning, info}
+     */
+    Map<String, Object> checkForApi(Long projectId, Long tenantId);
+
+    /**
      * 查询项目的自检报告（按严重度 critical→warning→info 排序）。
      */
     List<BidCheckReport> listReports(Long projectId);

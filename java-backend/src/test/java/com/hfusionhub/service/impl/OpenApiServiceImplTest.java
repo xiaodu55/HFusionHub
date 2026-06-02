@@ -9,6 +9,7 @@ import static org.mockito.Mockito.*;
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.RedisUtils;
+import com.hfusionhub.dto.OpenApiBidCheckResponse;
 import com.hfusionhub.dto.OpenApiChatRequest;
 import com.hfusionhub.dto.OpenApiChatResponse;
 import com.hfusionhub.entity.App;
@@ -16,6 +17,7 @@ import com.hfusionhub.entity.AppApiKey;
 import com.hfusionhub.mapper.AppApiKeyMapper;
 import com.hfusionhub.mapper.AppCallLogMapper;
 import com.hfusionhub.mapper.AppMapper;
+import com.hfusionhub.service.BidCheckService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
@@ -43,6 +45,9 @@ class OpenApiServiceImplTest {
 
     @Mock
     private RedisUtils redisUtils;
+
+    @Mock
+    private BidCheckService bidCheckService;
 
     @InjectMocks
     private OpenApiServiceImpl openApiService;
@@ -171,5 +176,47 @@ class OpenApiServiceImplTest {
                         any(),
                         any());
         verify(callLogMapper).insert(any());
+    }
+
+    // ── /openapi/bid/check（P2-7）──────────────────────────────
+
+    @Test
+    void bidCheckRunsUnderAppTenantAndReturnsSummary() {
+        String secret = "***REMOVED-BY-REWRITE***";
+        when(apiKeyMapper.selectOne(any())).thenReturn(enabledKey(secret, 2L, 1L));
+        when(appMapper.selectById(1L)).thenReturn(publishedApp(1L));
+        when(redisUtils.increment(anyString(), anyLong())).thenReturn(1L);
+        when(bidCheckService.checkForApi(anyLong(), eq(1L)))
+                .thenReturn(Map.of("total", 3, "critical", 1, "warning", 1, "info", 1));
+
+        OpenApiBidCheckResponse response = openApiService.bidCheck(secret, 5L);
+
+        assertEquals("ok", response.getStatus());
+        assertEquals(5L, response.getProjectId());
+        assertEquals(1, response.getSummary().get("critical"));
+        // 以应用所属租户 1 执行自检
+        verify(bidCheckService).checkForApi(5L, 1L);
+        verify(callLogMapper).insert(any());
+    }
+
+    @Test
+    void bidCheckMissingProjectIdRejected() {
+        BusinessException ex = assertThrows(BusinessException.class, () -> openApiService.bidCheck("hf_xxx", null));
+        assertEquals(400, ex.getCode());
+    }
+
+    @Test
+    void bidCheckPropagatesModuleGateForbidden() {
+        String secret = "***REMOVED-BY-REWRITE***";
+        when(apiKeyMapper.selectOne(any())).thenReturn(enabledKey(secret, 2L, 1L));
+        when(appMapper.selectById(1L)).thenReturn(publishedApp(1L));
+        when(redisUtils.increment(anyString(), anyLong())).thenReturn(1L);
+        doThrow(new BusinessException(403, "投标开放 API 需要开通「投标开放 API」模块，请在套餐中心升级后重试"))
+                .when(bidCheckService).checkForApi(5L, 1L);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> openApiService.bidCheck(secret, 5L));
+
+        assertEquals(403, ex.getCode());
+        verify(callLogMapper).insert(any()); // 失败也记录调用
     }
 }

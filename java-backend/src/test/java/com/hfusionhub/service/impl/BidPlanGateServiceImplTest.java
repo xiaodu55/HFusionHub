@@ -12,9 +12,12 @@ import static org.mockito.Mockito.when;
 
 import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
+import com.hfusionhub.dto.PlanBindingDTO;
+import com.hfusionhub.mapper.TenantMemberMapper;
 import com.hfusionhub.service.BidPlanGateService;
 import com.hfusionhub.service.FeatureFlagService;
 import com.hfusionhub.service.TenantPlanBindingService;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,12 +37,13 @@ class BidPlanGateServiceImplTest {
 
     @Mock private TenantPlanBindingService bindingService;
     @Mock private FeatureFlagService featureFlagService;
+    @Mock private TenantMemberMapper tenantMemberMapper;
 
     private BidPlanGateService service;
 
     @BeforeEach
     void setUp() {
-        service = new BidPlanGateServiceImpl(bindingService, featureFlagService);
+        service = new BidPlanGateServiceImpl(bindingService, featureFlagService, tenantMemberMapper);
     }
 
     @Test
@@ -105,5 +109,47 @@ class BidPlanGateServiceImplTest {
         assertFalse(status.get("check"));
         assertFalse(status.get("docx"));
         assertFalse(status.get("openapi"));
+    }
+
+    // ── 三档计费 · 按坐席（P2-7）────────────────────────────────
+
+    private PlanBindingDTO tierBinding(Integer maxSeats) {
+        PlanBindingDTO dto = new PlanBindingDTO();
+        dto.setPlanType("tier");
+        dto.setMaxSeats(maxSeats);
+        return dto;
+    }
+
+    @Test
+    void seatPassesWhenNoTierBinding() {
+        when(bindingService.listActiveBindings(7L)).thenReturn(List.of());
+        service.requireSeatAvailable(7L); // 未绑定 tier 套餐 → 放行
+    }
+
+    @Test
+    void seatPassesWhenUnderLimit() {
+        when(bindingService.listActiveBindings(7L)).thenReturn(List.of(tierBinding(10)));
+        when(tenantMemberMapper.selectCount(any())).thenReturn(5L);
+        service.requireSeatAvailable(7L);
+    }
+
+    @Test
+    void seatBlockedWhenAtLimit() {
+        when(bindingService.listActiveBindings(7L)).thenReturn(List.of(tierBinding(5)));
+        when(tenantMemberMapper.selectCount(any())).thenReturn(5L);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.requireSeatAvailable(7L));
+
+        assertEquals(StatusCode.FORBIDDEN, ex.getCode());
+        assertTrue(ex.getMessage().contains("坐席已满"));
+    }
+
+    @Test
+    void seatIgnoresIndustryPackageWithoutTier() {
+        PlanBindingDTO industry = new PlanBindingDTO();
+        industry.setPlanType("industry");
+        industry.setMaxSeats(1);
+        when(bindingService.listActiveBindings(7L)).thenReturn(List.of(industry));
+        service.requireSeatAvailable(7L); // 仅行业方案包不限坐席
     }
 }

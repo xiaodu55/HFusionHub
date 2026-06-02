@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.RedisUtils;
+import com.hfusionhub.dto.OpenApiBidCheckResponse;
 import com.hfusionhub.dto.OpenApiChatRequest;
 import com.hfusionhub.dto.OpenApiChatResponse;
 import com.hfusionhub.entity.App;
@@ -13,8 +14,10 @@ import com.hfusionhub.entity.ModelUsageRecord;
 import com.hfusionhub.mapper.AppApiKeyMapper;
 import com.hfusionhub.mapper.AppCallLogMapper;
 import com.hfusionhub.mapper.AppMapper;
+import com.hfusionhub.service.BidCheckService;
 import com.hfusionhub.service.CostTrackingService;
 import com.hfusionhub.service.OpenApiService;
+import com.hfusionhub.tenant.TenantContext;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
@@ -40,6 +43,7 @@ public class OpenApiServiceImpl implements OpenApiService {
     private final AiClient aiClient;
     private final RedisUtils redisUtils;
     private final CostTrackingService costTrackingService;
+    private final BidCheckService bidCheckService;
 
     /** 每 Key 每分钟最大调用次数（C4 限流） */
     private static final int RATE_LIMIT_PER_MINUTE = 60;
@@ -48,9 +52,6 @@ public class OpenApiServiceImpl implements OpenApiService {
 
     @Override
     public OpenApiChatResponse chat(String apiKey, OpenApiChatRequest request) {
-        if (apiKey == null || apiKey.isBlank()) {
-            throw new BusinessException(401, "缺少 API Key（Authorization: Bearer <key> 或 X-API-Key）");
-        }
         if (request.getQuery() == null || request.getQuery().isBlank()) {
             throw new BusinessException(400, "query 不能为空");
         }
@@ -59,17 +60,9 @@ public class OpenApiServiceImpl implements OpenApiService {
         }
 
         // 1. 解析 Key → 应用
-        String hash = sha256Hex(apiKey.trim());
-        AppApiKey key = apiKeyMapper.selectOne(new LambdaQueryWrapper<AppApiKey>()
-                .eq(AppApiKey::getKeyHash, hash)
-                .eq(AppApiKey::getEnabled, 1));
-        if (key == null) {
-            throw new BusinessException(401, "API Key 无效或已停用");
-        }
-        App app = appMapper.selectById(key.getAppId());
-        if (app == null || app.getStatus() == null || app.getStatus() != 1) {
-            throw new BusinessException(403, "应用未发布或已停用");
-        }
+        ResolvedKey resolved = resolvePublishedApp(apiKey);
+        App app = resolved.app();
+        AppApiKey key = resolved.key();
 
         // 2. 限流（Redis 固定窗口，失败放行并记录日志）
         if (!allow(key.getId())) {
@@ -123,6 +116,65 @@ public class OpenApiServiceImpl implements OpenApiService {
 
         recordCall(app, key, "ok", promptTokens, completionTokens, totalTokens);
         return response;
+    }
+
+    @Override
+    public OpenApiBidCheckResponse bidCheck(String apiKey, Long projectId) {
+        if (projectId == null) {
+            throw new BusinessException(400, "project_id 不能为空");
+        }
+
+        // 1. 解析 Key → 应用
+        ResolvedKey resolved = resolvePublishedApp(apiKey);
+        App app = resolved.app();
+        AppApiKey key = resolved.key();
+
+        // 2. 限流（Redis 固定窗口，失败放行并记录日志）
+        if (!allow(key.getId())) {
+            recordCall(app, key, "rate_limited", 0, 0, 0);
+            throw new BusinessException(429, "调用频率超限，请稍后重试");
+        }
+
+        // 3. 以应用所有者租户上下文执行废标自检（openapi 模块开关在 checkForApi 内校验）
+        Long tenantId = app.getTenantId();
+        if (tenantId == null) {
+            recordCall(app, key, "error", 0, 0, 0);
+            throw new BusinessException(403, "应用未归属租户，无法调用投标自检");
+        }
+        try {
+            Map<String, Object> summary = TenantContext.runAs(tenantId,
+                    () -> bidCheckService.checkForApi(projectId, tenantId));
+            OpenApiBidCheckResponse response = new OpenApiBidCheckResponse();
+            response.setStatus("ok");
+            response.setProjectId(projectId);
+            response.setSummary(summary);
+            recordCall(app, key, "ok", 0, 0, 0);
+            return response;
+        } catch (BusinessException e) {
+            recordCall(app, key, "error", 0, 0, 0);
+            throw e;
+        }
+    }
+
+    private record ResolvedKey(App app, AppApiKey key) {}
+
+    /** 解析 API Key → 已发布应用（401 无效 / 403 未发布） */
+    private ResolvedKey resolvePublishedApp(String apiKey) {
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new BusinessException(401, "缺少 API Key（Authorization: Bearer <key> 或 X-API-Key）");
+        }
+        String hash = sha256Hex(apiKey.trim());
+        AppApiKey key = apiKeyMapper.selectOne(new LambdaQueryWrapper<AppApiKey>()
+                .eq(AppApiKey::getKeyHash, hash)
+                .eq(AppApiKey::getEnabled, 1));
+        if (key == null) {
+            throw new BusinessException(401, "API Key 无效或已停用");
+        }
+        App app = appMapper.selectById(key.getAppId());
+        if (app == null || app.getStatus() == null || app.getStatus() != 1) {
+            throw new BusinessException(403, "应用未发布或已停用");
+        }
+        return new ResolvedKey(app, key);
     }
 
     private boolean allow(Long keyId) {

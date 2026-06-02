@@ -23,8 +23,10 @@ import com.hfusionhub.mapper.BidScoringMethodMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.TenderElementMapper;
 import com.hfusionhub.quota.UsageMeter;
+import com.hfusionhub.service.BidPlanGateService;
 import com.hfusionhub.service.BidProjectService;
 import com.hfusionhub.service.UsageLedgerService;
+import com.hfusionhub.tenant.TenantContext;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
@@ -74,6 +76,7 @@ public class BidProjectServiceImpl implements BidProjectService {
     private final AiClient aiClient;
     private final ObjectMapper objectMapper;
     private final UsageLedgerService usageLedgerService;
+    private final BidPlanGateService bidPlanGateService;
 
     @Override
     @Transactional
@@ -88,6 +91,9 @@ public class BidProjectServiceImpl implements BidProjectService {
         if (!kb.getUserId().equals(userId)) {
             throw new BusinessException(StatusCode.FORBIDDEN, "无权使用该知识库");
         }
+
+        // 商业化：三档计费之一「按坐席」——套餐 max_seats 上限校验（P2-7）
+        bidPlanGateService.requireSeatAvailable(TenantContext.requireTenantId());
 
         BidProject project = new BidProject();
         project.setKnowledgeBaseId(createDTO.getKnowledgeBaseId());
