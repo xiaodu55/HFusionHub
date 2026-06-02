@@ -25,4 +25,13 @@ public interface BidDemoImportService {
      * @return 清除结果
      */
     DemoImportResultDTO clearBidDemoData();
+
+    /**
+     * 导入指定行业的免费试用样例（P2-6）：建行业样例知识库 + 导入 3 篇脱敏招标文件
+     * + 建对应示例投标项目（与行业方案包的离线评测语料同源，试用即体验售卖质量）。
+     *
+     * @param industry 行业 code（construction 工程施工 / it IT 集成），对应行业方案包
+     * @return 导入结果（知识库 ID/名称、文档导入计数、分项结果、提示信息）
+     */
+    DemoImportResultDTO importBidIndustrySamples(String industry);
 }

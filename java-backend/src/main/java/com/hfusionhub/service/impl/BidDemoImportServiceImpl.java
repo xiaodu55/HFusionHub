@@ -2,6 +2,7 @@ package com.hfusionhub.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.hfusionhub.common.constant.CommonConstants;
+import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.dto.DemoImportResultDTO;
@@ -91,6 +92,29 @@ public class BidDemoImportServiceImpl implements BidDemoImportService {
     private static final String DEMO_PROJECT_TENDER_NUMBER = "BH-2026-0618";
     private static final BigDecimal DEMO_PROJECT_BUDGET = new BigDecimal("12600000");
 
+    /** 行业免费试用样例（P2-6）：与离线评测语料同源的脱敏招标文件 + 示例项目 */
+    private static final Map<String, IndustrySample> INDUSTRY_SAMPLES = Map.of(
+            "construction", new IndustrySample(
+                    "construction", "工程施工",
+                    "招投标演示·工程施工行业样例库",
+                    "工程施工行业方案包免费试用样例：蓉城市政道路提升改造工程脱敏招标文件（招标公告、投标人须知、评标办法），与行业方案包离线评测语料同源",
+                    "demo/bid/industry/construction/",
+                    Map.of(
+                            "tender-notice.md", "蓉城市政道路提升改造工程招标公告（样例）",
+                            "bidder-instructions.md", "投标人须知（样例）",
+                            "evaluation-method.md", "评标办法（样例）"),
+                    "示例：蓉城市政道路提升改造工程", "CJ-2026-0721", new BigDecimal("86000000")),
+            "it", new IndustrySample(
+                    "it", "IT 集成",
+                    "招投标演示·IT 集成行业样例库",
+                    "IT 集成行业方案包免费试用样例：云谷智慧园区数据中心建设项目脱敏招标文件（招标公告、投标人须知、评标办法），与行业方案包离线评测语料同源",
+                    "demo/bid/industry/it/",
+                    Map.of(
+                            "tender-notice.md", "云谷智慧园区数据中心建设项目招标公告（样例）",
+                            "bidder-instructions.md", "投标人须知（样例）",
+                            "evaluation-method.md", "评标办法（样例）"),
+                    "示例：云谷智慧园区数据中心建设项目", "YG-2026-0908", new BigDecimal("58000000")));
+
     @Value("${demo.upload-dir:uploads/documents}")
     private String uploadDir;
 
@@ -109,7 +133,8 @@ public class BidDemoImportServiceImpl implements BidDemoImportService {
                 DEMO_HISTORY_KB_DESC, DEMO_HISTORY_KB_CATEGORY);
         DocumentImport historyDocs = importDocuments(historyKb,
                 DEMO_HISTORY_RESOURCE_DIR, DEMO_HISTORY_TITLES);
-        int projectImported = importDemoProject(userId, kb.getId());
+        int projectImported = importDemoProject(userId, kb.getId(),
+                DEMO_PROJECT_TITLE, DEMO_PROJECT_TENDER_NUMBER, DEMO_PROJECT_BUDGET);
 
         List<DemoImportResultDTO.SectionResult> sections = new ArrayList<>();
         sections.add(section("bid_kb", "招标文件知识库", docs.imported(), docs.skipped()));
@@ -225,24 +250,75 @@ public class BidDemoImportServiceImpl implements BidDemoImportService {
 
     // ── 示例投标项目 ─────────────────────────────────────────────────────
 
-    private int importDemoProject(Long userId, Long kbId) {
+    private int importDemoProject(Long userId, Long kbId, String title,
+                                  String tenderNumber, BigDecimal budget) {
         boolean exists = bidProjectMapper.selectCount(new LambdaQueryWrapper<BidProject>()
                         .eq(BidProject::getCreatedBy, userId)
-                        .eq(BidProject::getTitle, DEMO_PROJECT_TITLE))
+                        .eq(BidProject::getTitle, title))
                 > 0;
         if (exists) {
             return 0;
         }
         BidProject project = new BidProject();
         project.setKnowledgeBaseId(kbId);
-        project.setTitle(DEMO_PROJECT_TITLE);
-        project.setTenderNumber(DEMO_PROJECT_TENDER_NUMBER);
-        project.setBudget(DEMO_PROJECT_BUDGET);
+        project.setTitle(title);
+        project.setTenderNumber(tenderNumber);
+        project.setBudget(budget);
         project.setStatus(BidProject.STATUS_INTERPRETING);
         project.setCreatedBy(userId);
         bidProjectMapper.insert(project);
         log.info("示例投标项目已创建: id={}, kbId={}, userId={}", project.getId(), kbId, userId);
         return 1;
+    }
+
+    @Override
+    public DemoImportResultDTO importBidIndustrySamples(String industry) {
+        IndustrySample def = INDUSTRY_SAMPLES.get(industry);
+        if (def == null) {
+            throw new BusinessException(StatusCode.BAD_REQUEST,
+                    "不支持的行业: " + industry + "（可选 construction / it，对应行业方案包）");
+        }
+        Long userId = JwtUtils.getCurrentUserId();
+
+        KnowledgeBase kb = importKnowledgeBase(userId, def.kbName(), def.kbDesc(), "tender");
+        DocumentImport docs = importDocuments(kb, def.resourceDir(), def.titles());
+        int projectImported = importDemoProject(userId, kb.getId(),
+                def.projectTitle(), def.tenderNumber(), def.budget());
+
+        List<DemoImportResultDTO.SectionResult> sections = new ArrayList<>();
+        sections.add(section("bid_industry_" + def.code(), def.kbName() + "（样例文档）",
+                docs.imported(), docs.skipped()));
+        sections.add(section("bid_industry_project_" + def.code(), "示例投标项目",
+                projectImported, projectImported == 0 ? 1 : 0));
+
+        StringBuilder msg = new StringBuilder("「").append(def.label())
+                .append("」行业免费试用样例已就绪");
+        if (docs.imported() > 0) {
+            msg.append("，新导入 ").append(docs.imported()).append(" 篇脱敏招标文件");
+        }
+        if (projectImported > 0) {
+            msg.append("，并创建示例投标项目「").append(def.projectTitle()).append("」");
+        }
+        if (docs.skipped() > 0) {
+            msg.append("，跳过已存在的 ").append(docs.skipped()).append(" 篇");
+        }
+        if (docs.parseFailed() > 0) {
+            msg.append("；有 ").append(docs.parseFailed())
+                    .append(" 篇文档触发解析失败（AI 服务不可用？可稍后在文档页重试）");
+        }
+        msg.append("。该样例与「").append(def.label())
+                .append("行业方案包」的离线评测语料同源，可到「投标项目」打开示例项目体验解读→撰写→废标自检闭环。");
+        log.info("招投标行业免费试用样例导入完成: industry={}, kbId={}, docs={}/{}, project={}",
+                def.code(), kb.getId(), docs.imported(), docs.skipped(), projectImported);
+        return DemoImportResultDTO.builder()
+                .knowledgeBaseId(kb.getId())
+                .knowledgeBaseName(kb.getName())
+                .importedCount(docs.imported())
+                .skippedCount(docs.skipped())
+                .parseFailedCount(docs.parseFailed())
+                .sections(sections)
+                .message(msg.toString())
+                .build();
     }
 
     private int clearDemoProjects(Long userId) {
@@ -265,6 +341,11 @@ public class BidDemoImportServiceImpl implements BidDemoImportService {
 
     /** 文档导入计数 */
     private record DocumentImport(int imported, int skipped, int parseFailed) {}
+
+    /** 行业免费试用样例定义（P2-6）：知识库元信息 + 资源目录 + 示例项目 */
+    private record IndustrySample(String code, String label, String kbName, String kbDesc,
+                                  String resourceDir, Map<String, String> titles,
+                                  String projectTitle, String tenderNumber, BigDecimal budget) {}
 
     private DemoImportResultDTO.SectionResult section(String section, String label, int imported, int skipped) {
         return DemoImportResultDTO.SectionResult.builder()

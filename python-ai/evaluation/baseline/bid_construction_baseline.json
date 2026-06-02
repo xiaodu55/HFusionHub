@@ -1,0 +1,26 @@
+{
+  "track": "offline",
+  "suite_version": "1.0.0",
+  "kb_version": "1.0.0",
+  "suite_sha256": "31d868549ab21bc1adf786feb4765807aa0e8011a3e4709378f8e44a4688f322",
+  "generated_at": "2026-08-25T12:26:24Z",
+  "metrics": {
+    "recall_at_5": 0.9642857142857143,
+    "ndcg_at_10": 0.9468476620957498,
+    "citation_accuracy": 1.0,
+    "citation_faithfulness": 0.37499999999999994,
+    "refusal_correctness": null,
+    "tool_success_rate": null,
+    "p95_latency_ms": null,
+    "avg_latency_ms": null,
+    "p50_latency_ms": null,
+    "tokens_per_task": null,
+    "cost_usd_per_task": null,
+    "error_rate": 0.0,
+    "scope_violations": 0,
+    "qualification_recall": 1.0,
+    "disqualification_clause_recall": 1.0,
+    "scoring_point_accuracy": 1.0,
+    "bid_terminology_accuracy": 1.0
+  }
+}

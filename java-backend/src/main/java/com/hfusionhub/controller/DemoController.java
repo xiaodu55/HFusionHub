@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -52,5 +53,12 @@ public class DemoController {
     @SaCheckRole("admin")
     public R<DemoImportResultDTO> clearBidDemo() {
         return R.ok(bidDemoImportService.clearBidDemoData());
+    }
+
+    @Operation(summary = "导入行业免费试用样例", description = "导入指定行业方案包的免费试用样例：行业样例知识库（3 篇脱敏招标文件）+ 示例投标项目，与行业方案包离线评测语料同源（幂等，仅管理员可用）")
+    @PostMapping("/import-bid-industry")
+    @SaCheckRole("admin")
+    public R<DemoImportResultDTO> importBidIndustrySamples(@RequestParam String industry) {
+        return R.ok(bidDemoImportService.importBidIndustrySamples(industry));
     }
 }

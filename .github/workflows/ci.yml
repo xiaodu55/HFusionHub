@@ -227,6 +227,33 @@ jobs:
           --minimum-scoring-point-accuracy 0.9 \
           --minimum-bid-terminology-accuracy 0.9 \
           --fail-on-regression
+      # ─── 行业方案包评测门禁（P2-4：工程施工 / IT 集成，售卖质量凭证）───
+      - name: Verify frozen construction suite integrity (SHA-256)
+        run: python -c "from app.core.rag.eval_baseline import verify_suite_integrity; verify_suite_integrity('evaluation/suite_bid_construction/cases.jsonl','evaluation/suite_bid_construction/suite_manifest.json'); print('frozen construction suite OK')"
+      - name: Run construction offline evaluation gate
+        run: python scripts/eval_offline.py \
+          --cases evaluation/suite_bid_construction/cases.jsonl \
+          --suite-manifest evaluation/suite_bid_construction/suite_manifest.json \
+          --kb-manifest evaluation/kb_bid_construction/kb_manifest.json \
+          --baseline evaluation/baseline/bid_construction_baseline.json \
+          --minimum-qualification-recall 0.9 \
+          --minimum-disqualification-clause-recall 0.9 \
+          --minimum-scoring-point-accuracy 0.9 \
+          --minimum-bid-terminology-accuracy 0.9 \
+          --fail-on-regression
+      - name: Verify frozen IT suite integrity (SHA-256)
+        run: python -c "from app.core.rag.eval_baseline import verify_suite_integrity; verify_suite_integrity('evaluation/suite_bid_it/cases.jsonl','evaluation/suite_bid_it/suite_manifest.json'); print('frozen IT suite OK')"
+      - name: Run IT offline evaluation gate
+        run: python scripts/eval_offline.py \
+          --cases evaluation/suite_bid_it/cases.jsonl \
+          --suite-manifest evaluation/suite_bid_it/suite_manifest.json \
+          --kb-manifest evaluation/kb_bid_it/kb_manifest.json \
+          --baseline evaluation/baseline/bid_it_baseline.json \
+          --minimum-qualification-recall 0.9 \
+          --minimum-disqualification-clause-recall 0.9 \
+          --minimum-scoring-point-accuracy 0.9 \
+          --minimum-bid-terminology-accuracy 0.9 \
+          --fail-on-regression
       # ─── 招投标撰写/自检工作流门禁（P1-4：bid_* 改动必须过此门禁）───
       - name: Run bid workflow gate (write + check, hermetic)
         run: python scripts/eval_bid_workflow.py

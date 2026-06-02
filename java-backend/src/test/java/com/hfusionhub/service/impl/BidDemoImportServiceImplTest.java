@@ -225,6 +225,80 @@ class BidDemoImportServiceImplTest {
         assertTrue(result.getMessage().contains("未发现"), "未导入时应提示无需清除");
     }
 
+    // ── P2-6 行业免费试用样例导入 ─────────────────────────────────────────
+
+    @Test
+    void industryImportCreatesKbDocsAndProject() throws Exception {
+        when(knowledgeBaseMapper.selectOne(any())).thenReturn(null);
+        when(knowledgeBaseMapper.insert(any(KnowledgeBase.class))).thenAnswer(inv -> {
+            KnowledgeBase kb = inv.getArgument(0);
+            kb.setId(301L);
+            return 1;
+        });
+        when(documentMapper.selectCount(any())).thenReturn(0L);
+        when(bidProjectMapper.selectCount(any())).thenReturn(0L);
+        AtomicLong idSeq = new AtomicLong(10);
+        when(documentMapper.insert(any(Document.class))).thenAnswer(inv -> {
+            Document doc = inv.getArgument(0);
+            doc.setId(idSeq.getAndIncrement());
+            return 1;
+        });
+
+        DemoImportResultDTO result = service.importBidIndustrySamples("construction");
+
+        assertEquals(3, result.getImportedCount(), "应导入 3 篇工程施工行业样例文档");
+        assertEquals(0, result.getSkippedCount());
+        assertEquals(0, result.getParseFailedCount());
+        assertEquals(301L, result.getKnowledgeBaseId());
+        assertEquals("招投标演示·工程施工行业样例库", result.getKnowledgeBaseName());
+        // 行业样例库分类为 tender（供投标项目解读工作流识别）
+        org.mockito.ArgumentCaptor<KnowledgeBase> kbCaptor =
+                org.mockito.ArgumentCaptor.forClass(KnowledgeBase.class);
+        verify(knowledgeBaseMapper, times(1)).insert(kbCaptor.capture());
+        assertEquals("tender", kbCaptor.getValue().getCategory());
+        verify(vectorizationService, times(3)).startVectorization(anyLong(), isNull());
+        // 示例投标项目（工程施工）
+        org.mockito.ArgumentCaptor<BidProject> projectCaptor =
+                org.mockito.ArgumentCaptor.forClass(BidProject.class);
+        verify(bidProjectMapper, times(1)).insert(projectCaptor.capture());
+        BidProject project = projectCaptor.getValue();
+        assertEquals("示例：蓉城市政道路提升改造工程", project.getTitle());
+        assertEquals("CJ-2026-0721", project.getTenderNumber());
+        assertEquals(0, new java.math.BigDecimal("86000000").compareTo(project.getBudget()));
+        assertEquals(3, sectionOf(result, "bid_industry_construction").getImportedCount());
+        assertEquals(1, sectionOf(result, "bid_industry_project_construction").getImportedCount());
+        assertTrue(result.getMessage().contains("免费试用"), "提示信息应包含免费试用说明");
+    }
+
+    @Test
+    void industryImportIsIdempotentAndSkipsExisting() {
+        KnowledgeBase existing = new KnowledgeBase();
+        existing.setId(8L);
+        existing.setName("招投标演示·IT 集成行业样例库");
+        existing.setCategory("tender");
+        when(knowledgeBaseMapper.selectOne(any())).thenReturn(existing);
+        when(documentMapper.selectCount(any())).thenReturn(1L);
+        when(bidProjectMapper.selectCount(any())).thenReturn(1L);
+
+        DemoImportResultDTO result = service.importBidIndustrySamples("it");
+
+        assertEquals(0, result.getImportedCount());
+        assertEquals(3, result.getSkippedCount());
+        verify(knowledgeBaseMapper, never()).insert(any(KnowledgeBase.class));
+        verify(documentMapper, never()).insert(any(Document.class));
+        verify(bidProjectMapper, never()).insert(any(BidProject.class));
+        assertEquals(3, sectionOf(result, "bid_industry_it").getSkippedCount());
+        assertEquals(1, sectionOf(result, "bid_industry_project_it").getSkippedCount());
+    }
+
+    @Test
+    void industryImportRejectsUnknownIndustry() {
+        BusinessException ex = org.junit.jupiter.api.Assertions.assertThrows(
+                BusinessException.class, () -> service.importBidIndustrySamples("nonsense"));
+        assertTrue(ex.getMessage().contains("construction"), "错误提示应列出可用行业");
+        verify(knowledgeBaseMapper, never()).insert(any(KnowledgeBase.class));
+    }
+
     /** Minimal in-memory SaTokenContext for unit tests without a servlet container. */
     private static class MockSaTokenContext implements SaTokenContext {
         private final Map<String, Object> storage = new HashMap<>();
