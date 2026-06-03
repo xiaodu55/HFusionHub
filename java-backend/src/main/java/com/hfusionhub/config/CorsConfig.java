@@ -1,5 +1,6 @@
 package com.hfusionhub.config;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,6 +22,7 @@ import org.springframework.web.filter.CorsFilter;
  * @author HFusionHub Team
  */
 @Configuration
+@Slf4j
 public class CorsConfig {
 
     /**
@@ -30,10 +32,11 @@ public class CorsConfig {
     private String allowedOrigins;
 
     /**
-     * 未配置白名单时是否放行任意 Origin（默认 true = 开发/内网穿透）。
-     * 生产环境应设为 false 并配置 allowed-origins 白名单。
+     * 未配置白名单时是否放行任意 Origin（第十五轮 P0-8 起默认 false：通配
+     * Origin + allowCredentials 组合是生产安全隐患）。开发/内网穿透场景需
+     * 显式设置 app.cors.allow-any-origin=true；生产配置 allowed-origins 白名单。
      */
-    @Value("${app.cors.allow-any-origin:true}")
+    @Value("${app.cors.allow-any-origin:false}")
     private boolean allowAnyOrigin;
 
     /**
@@ -80,7 +83,11 @@ public class CorsConfig {
                 }
             }
         } else if (allowAnyOrigin) {
-            // 开发/内网穿透（cpolar 动态域名）：放行任意 Origin
+            // 开发/内网穿透（cpolar 动态域名）：显式选择放行任意 Origin。
+            // 通配 Origin + allowCredentials=true 会允许任意站点带凭据跨域调用，
+            // 生产环境必须改用 allowed-origins 白名单——此处大声告警以便审计。
+            log.warn("CORS allow-any-origin=true：任意 Origin 均可携带凭据跨域调用，"
+                    + "生产环境请配置 app.cors.allowed-origins 白名单并关闭该项");
             config.addAllowedOriginPattern("*");
         } else {
             // 生产未配置白名单：注册空配置（仅放行同源），不放开任何跨域

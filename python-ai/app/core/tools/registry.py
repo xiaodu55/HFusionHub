@@ -872,7 +872,12 @@ class ToolRegistry:
 
         started = time.monotonic()
         try:
-            result = execute_plugin_tool(
+            # execute_plugin_tool 是同步入口（子进程等待 / 容器 runner HTTP 轮询），
+            # 必须卸载到工作线程：container 模式内部要起自己的事件循环，
+            # 在当前循环线程直接调用必然 RuntimeError（见 sandbox_runner），
+            # 且子进程模式最长阻塞本循环 timeout_seconds。
+            result = await asyncio.to_thread(
+                execute_plugin_tool,
                 plugin_id=plugin_id,
                 tool_name=tool_name,
                 tool_input=safe_input,

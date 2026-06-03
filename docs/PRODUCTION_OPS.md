@@ -39,7 +39,7 @@
 - [ ] **Prometheus + Grafana** — 导入 `deploy/monitoring/grafana/` 目录下的 dashboard；配置告警规则（CPU > 80%、内存 > 90%、磁盘 > 85%）
 - [ ] **关键指标监控** — 文档解析成功率（目标 > 95%）、RAG 检索 P95 延迟（目标 < 500ms）、Agent 任务超时率（目标 < 5%）、用量配额告警（> 90%）
 - [ ] **日志聚合** — ELK Stack 或 Loki + Grafana；关键错误日志告警（Slack/邮件/钉钉）
-- [ ] **健康检查** — Java：`GET /api/actuator/health`；Python：`GET /health`；配置 Docker healthcheck 或 K8s liveness/readiness
+- [ ] **健康检查** — Java：`GET :9092/actuator/health`（独立管理端口，第十五轮 P0-8）；Python：`GET /health`；配置 Docker healthcheck 或 K8s liveness/readiness
 
 ### 🧪 测试验证
 
@@ -270,7 +270,7 @@ bash scripts/staging-rehearsal.sh
 bash scripts/staging-rehearsal.sh --no-dind   # 无嵌套虚拟化时 runner 预期 503
 
 # 健康端点
-curl -fsS http://127.0.0.1:8080/api/actuator/health   # Java
+curl -fsS http://127.0.0.1:9092/actuator/health   # Java（独立管理端口）
 curl -fsS http://127.0.0.1:9000/health                # Python
 curl -fsS http://127.0.0.1:9100/health                # Runner（503=Engine 不可达）
 ```

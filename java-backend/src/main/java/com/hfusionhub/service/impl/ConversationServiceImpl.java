@@ -1249,9 +1249,20 @@ public class ConversationServiceImpl implements ConversationService {
                         }
 
                         if (!content.isEmpty()) {
+                            // 内容安全守卫矫正事件（content_replace=true，第十五轮 P0-5）：
+                            // Python 流式守卫命中违规后整段替换——重置已累计的持久化
+                            // 内容并向前端转发 replace 语义，而非继续追加。
+                            boolean replace = jsonNode.has("content_replace")
+                                    && jsonNode.get("content_replace").asBoolean();
+                            if (replace) {
+                                responseBuilder.setLength(0);
+                            }
                             responseBuilder.append(content);
                             Map<String, String> eventData = new HashMap<>();
                             eventData.put("content", content);
+                            if (replace) {
+                                eventData.put("replace", "true");
+                            }
                             emitter.send(SseEmitter.event().data(eventData, MediaType.APPLICATION_JSON));
                         }
                     } catch (Exception e) {

@@ -41,9 +41,9 @@ $modulePorts = @{
     runner = 9100
 }
 
-# java 的 context-path 是 /api，actuator 实际在 /api/actuator/health
+# java 的 actuator 已移至独立管理端口 9092（第十五轮 P0-8，/api 上下文之外）
 $healthChecks = @{
-    java   = 'http://localhost:8080/api/actuator/health'
+    java   = 'http://localhost:9092/actuator/health'
     python = 'http://localhost:9000/health'
     runner = 'http://localhost:9100/health'
 }

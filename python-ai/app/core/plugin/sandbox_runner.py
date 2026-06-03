@@ -79,8 +79,13 @@ def _apply_subprocess_limits(config: SubprocessConfig) -> None:
         import resource
         cpu_secs = int(config.cpu_seconds)
         resource.setrlimit(resource.RLIMIT_CPU, (cpu_secs, cpu_secs))
-    except (ImportError, ValueError, OSError):
+    except (ValueError, OSError):
         pass
+    except ImportError:
+        logger.warning(
+            "Subprocess resource limits unavailable (no `resource` module, e.g. Windows): "
+            "CPU/memory/fd limits are NOT enforced for this plugin execution"
+        )
 
     # Memory limit
     try:
@@ -98,32 +103,52 @@ def _apply_subprocess_limits(config: SubprocessConfig) -> None:
         pass
 
 
-def _install_network_guard(config: SubprocessConfig) -> None:
-    """Monkey-patch socket/httpx/urllib to enforce domain restrictions.
+def _make_domain_check(allowed: List[str], blocked: List[str]) -> Callable[[str], None]:
+    """Build the domain policy checker shared by all network guards.
 
-    This runs inside the subprocess — blocks ALL network access that
-    doesn't go through the allowed domains list.
+    - allowed 非空：白名单模式，未匹配一律拒绝；
+    - allowed 为空：default-DENY，全部网络访问拒绝
+      （需要联网的插件必须在 manifest 中显式声明 allowed_domains）。
     """
     import fnmatch
 
-    allowed = set(config.allowed_domains)
-    blocked = set(config.blocked_domains)
+    allowed_set = set(allowed)
+    blocked_set = set(blocked)
 
     def _check_url(url: str) -> None:
         parsed = urlparse(url)
         host = (parsed.hostname or "").lower()
         if not host:
+            # 无 host 的连接目标同样按策略处理：白名单模式下直接拒绝
+            if not allowed_set:
+                raise OSError(
+                    "SANDBOX VIOLATION: network access denied (no allowed_domains configured)"
+                )
             return
 
-        for pattern in blocked:
+        for pattern in blocked_set:
             if fnmatch.fnmatch(host, pattern):
                 raise OSError(f"SANDBOX VIOLATION: domain blocked: {host}")
 
-        if allowed:
-            for pattern in allowed:
-                if fnmatch.fnmatch(host, pattern):
-                    return
-            raise OSError(f"SANDBOX VIOLATION: domain not in whitelist: {host}")
+        if not allowed_set:
+            raise OSError(
+                f"SANDBOX VIOLATION: network access denied (no allowed_domains configured): {host}"
+            )
+        for pattern in allowed_set:
+            if fnmatch.fnmatch(host, pattern):
+                return
+        raise OSError(f"SANDBOX VIOLATION: domain not in whitelist: {host}")
+
+    return _check_url
+
+
+def _install_network_guard(config: SubprocessConfig) -> None:
+    """Monkey-patch socket/httpx/urllib to enforce domain restrictions.
+
+    This runs inside the subprocess — enforces the domain policy
+    (see :func:`_make_domain_check` for allowlist / default-deny semantics).
+    """
+    _check_url = _make_domain_check(config.allowed_domains, config.blocked_domains)
 
     # Patch socket.create_connection
     try:
@@ -169,11 +194,18 @@ def _install_network_guard(config: SubprocessConfig) -> None:
         pass
 
 
-def _install_filesystem_guard(config: SubprocessConfig) -> None:
-    """Monkey-patch builtins.open and os module to enforce path restrictions."""
+def _install_filesystem_guard(config: SubprocessConfig, default_allowed: Optional[List[str]] = None) -> None:
+    """Monkey-patch builtins.open and os module to enforce path restrictions.
+
+    default-deny 基线：manifest 未声明 allowed_paths 时，仅放行
+    ``default_allowed``（调用方传入插件自身目录 + 系统临时目录），
+    其余路径一律拒绝。
+    """
     import fnmatch
 
-    allowed = config.allowed_paths
+    allowed = list(config.allowed_paths)
+    if not allowed and default_allowed:
+        allowed = list(default_allowed)
     blocked = config.blocked_paths
 
     def _check_path(path: str) -> str:
@@ -280,11 +312,17 @@ def _subprocess_worker(
         # Step 1: Apply resource limits FIRST (before any imports)
         _apply_subprocess_limits(config)
 
-        # Step 2: Install security guards
-        if config.allowed_domains or config.blocked_domains:
-            _install_network_guard(config)
-        if config.allowed_paths or config.blocked_paths:
-            _install_filesystem_guard(config)
+        # Step 2: Install security guards — ALWAYS（default-deny）。
+        # 空白名单 = 拒绝全部网络；文件系统未声明时仅放行插件目录 + 系统临时目录
+        # （fnmatch 无 ** 跨层语义，用 "<dir>*" 匹配目录子树全部路径）。
+        _install_network_guard(config)
+        _install_filesystem_guard(
+            config,
+            default_allowed=[
+                os.path.join(plugin_dir, "*"),
+                os.path.join(tempfile.gettempdir(), "*"),
+            ],
+        )
 
         # Step 3: Import plugin module in isolated sys.path
         import importlib.util
@@ -343,6 +381,25 @@ def _subprocess_worker(
         conn.close()
 
 
+def _run_container_coroutine(coro: Any) -> Any:
+    """Run a container-runner coroutine to completion from sync code.
+
+    正常调用方是 ``execute_plugin_tool`` 的工作线程（asyncio.to_thread 派发），
+    该线程没有运行中的事件循环，直接 ``asyncio.run`` 即可。若本线程已有
+    运行中的循环（直接在 async 上下文里调用的防御路径），裸跑
+    ``run_until_complete`` 必然 RuntimeError——卸载到一次性单线程执行器。
+    """
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="container-runner") as ex:
+        return ex.submit(asyncio.run, coro).result()
+
+
 def execute_in_sandbox(
     plugin_dir: str,
     plugin_name: str,
@@ -370,7 +427,6 @@ def execute_in_sandbox(
                 execute_with_canary,
                 ContainerConfig,
             )
-            import asyncio
 
             container_config = ContainerConfig(
                 cpu_limit=config.cpu_seconds / 10.0 if config.cpu_seconds > 0 else 1.0,
@@ -387,50 +443,46 @@ def execute_in_sandbox(
                 "INTERNAL_API_TOKEN", ""
             )
 
-            loop = asyncio.new_event_loop()
-            try:
-                # Use canary routing when plugin_id and user_id are available
-                if config.plugin_id and config.user_id:
-                    result = loop.run_until_complete(
-                        execute_with_canary(
-                            plugin_id=config.plugin_id,
-                            tool_name=tool_name,
-                            tool_input=tool_input,
-                            user_id=config.user_id,
-                            config=container_config,
-                            java_backend_url=java_backend_url,
-                            internal_token=internal_token,
-                        )
+            # Use canary routing when plugin_id and user_id are available
+            if config.plugin_id and config.user_id:
+                result = _run_container_coroutine(
+                    execute_with_canary(
+                        plugin_id=config.plugin_id,
+                        tool_name=tool_name,
+                        tool_input=tool_input,
+                        user_id=config.user_id,
+                        config=container_config,
+                        java_backend_url=java_backend_url,
+                        internal_token=internal_token,
                     )
-                elif config.container_image:
-                    result = loop.run_until_complete(
-                        execute_in_container(
-                            image_tag=config.container_image,
-                            tool_name=tool_name,
-                            tool_input=tool_input,
-                            config=container_config,
-                            plugin_id=config.plugin_id,
-                            user_id=config.user_id,
-                            image_digest=config.container_digest,
-                        )
-                    )
-                else:
-                    return SubprocessResult(
-                        success=False,
-                        error="Container mode requires plugin_id+user_id (canary) or container_image (direct)",
-                        error_code="container_config_incomplete",
-                        duration_ms=0.0,
-                    )
-                return SubprocessResult(
-                    success=result.success,
-                    data=result.data,
-                    error=result.error,
-                    error_code=result.error_code,
-                    duration_ms=result.duration_ms,
-                    resource_usage=result.resource_usage,
                 )
-            finally:
-                loop.close()
+            elif config.container_image:
+                result = _run_container_coroutine(
+                    execute_in_container(
+                        image_tag=config.container_image,
+                        tool_name=tool_name,
+                        tool_input=tool_input,
+                        config=container_config,
+                        plugin_id=config.plugin_id,
+                        user_id=config.user_id,
+                        image_digest=config.container_digest,
+                    )
+                )
+            else:
+                return SubprocessResult(
+                    success=False,
+                    error="Container mode requires plugin_id+user_id (canary) or container_image (direct)",
+                    error_code="container_config_incomplete",
+                    duration_ms=0.0,
+                )
+            return SubprocessResult(
+                success=result.success,
+                data=result.data,
+                error=result.error,
+                error_code=result.error_code,
+                duration_ms=result.duration_ms,
+                resource_usage=result.resource_usage,
+            )
         except Exception as e:
             # Container mode is fail-CLOSED: NEVER fall back to subprocess.
             # Subprocess execution must be chosen explicitly via runner_mode="subprocess".

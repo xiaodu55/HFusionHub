@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第十五轮 · 全面复审优化（2026-08-28）：P0 正确性/安全批次 + 四层优化路线图
+
+> P0–P2 十四轮交付后的三路全面复审（文档路线图 / Java 后端 / Python AI）发现一批**真实缺陷**。本轮实施 P0 批次全部 9 项；P1 性能 / P2 可维护性 / P3 文档运维共 21 项写入 [docs/OPTIMIZATION_PLAN.md](docs/OPTIMIZATION_PLAN.md) 第十五轮章节（R15-1~30）供后续排期。
+
+#### Fixed（P0 批次，R15-1~9）
+- **容器插件 agent 链路不可用（R15-1）**：`registry.py` 在 async 方法内同步调 `execute_plugin_tool`，container 模式在已有事件循环的线程里 `run_until_complete` → RuntimeError 被 fail-closed 吞掉，静默返回 `container_runner_unavailable`。改为 `asyncio.to_thread` 派发 + `_run_container_coroutine` 双路径（无循环线程 `asyncio.run`/有循环线程单线程执行器）；补 registry 级 container-mode 回归测试
+- **跨租户语料缓存泄漏（R15-2）**：lite co-store 缓存 key 只含 `(mtime_ns, size)` 而值是租户作用域语料，双租户交替读取时后到租户命中前租户数据。改为按租户分键 LRU（上限 8）；补双租户隔离/签名失效/无租户上下文 4 例测试
+- **OpenAPI key 解析租户 bug（R15-3）**：`/openapi/**` 无会话租户，行拦截器把查询缺省填 `tenant_id=1`，非 1 租户 key 永远 401。`resolvePublishedApp` 改 `TenantContext.runAsSystem`（key hash 全局唯一），业务仍按 `runAs(app.tenantId)`；补跨租户解析测试
+- **内部插件审计租户错标（R15-4）**：审计回调无租户上下文，行全落 tenant_id=1 且去重查询漏跨租户行。整体系统作用域 + 从插件解析结果显式写 `tenant_id` 列（`PluginAuditLog` 补实体字段；平台内建插件归 1）
+- **流式聊天绕过输出守卫（R15-5）**：SSE 路径此前明确不做 `guard_model_output`。新增 `_content_guarded_sse` 包装全部 4 条流式端点（增量透传 + 流末对累计回答守卫），命中时在 [DONE] 前发 `content_replace` 矫正事件；Java 桥接（重置 responseBuilder + 转发 replace）与前端（Detail.vue 替换语义）同步支持；补 4 例守卫测试
+- **插件子进程沙箱 fail-open（R15-6）**：manifest 无 sandbox 段 = 无网络/文件限制。改为 default-deny：网络空白名单 = 全部拒绝，文件系统未声明仅放行插件目录 + 系统临时目录；Windows 资源限制跳过改为显式 warning；补真实子进程沙箱拒绝测试 3 例
+- **plugin-runner 阻塞与 fail-open 解析（R15-7）**：async 处理器内同步 Docker SDK 调用冻结事件循环串行化全部执行 → 全部 `asyncio.to_thread`；容器正常退出但输出不符契约 JSON 时旧实现报 `success=True` raw_output → 改 fail-closed `tool_output_unparseable`
+- **密钥与暴露面治理（R15-8）**：`MODEL_CREDENTIAL_ENCRYPTION_KEY` 不再回退复用 `PYTHON_AI_INTERNAL_TOKEN`（未配置 fail-fast；曾以内部令牌加密的历史数据需重新录入）；`PLUGIN_RUNNER_TOKEN` 移除弱默认值；CORS `allow-any-origin` 默认翻转 false（显式开启时 loud warning）；Actuator 移独立管理端口 `:9092`（移出 Sa-Token 覆盖，Prometheus 抓取目标同步改 `java-backend:9092/actuator/prometheus`，compose 仅 expose 不发布宿主机，`restart-modules.ps1` 健康检查 URL 同步）
+- **feature_flag 降级语义（R15-9）**：后端不可达时可用性旗标直接返回 True 但注释声称「保留 env 配置」——改为按旗标回退 env 派生值（hybrid/graph/reranker/multi-agent），无映射旗标保持原默认
+
+#### Testing
+- Java 全量 `mvn test`：**555 passed / 0 failures**（+OpenApiServiceImplTest 跨租户解析 1 例）
+- Python 全量 `pytest -q tests`：全过（新增 `test_plugin_sandbox_runner.py` 11 例、`test_co_store_tenant_cache.py` 4 例、`test_chat_stream_guard.py` 4 例、feature_flag env 降级 2 例）
+- 前端：`npm run build` 成功 + vitest **45 passed**
+- e2e：`scripts/plugin-builtins-e2e.ps1` **17 项全过**（验证 to_thread 重构后 runner 全链路）；`scripts/static-checks.py` 全绿；dev/prod compose 校验通过
+
 ### 第十四轮 · 招投标商业化 P2（2026-08-28）：计费套餐 + 行业方案售卖 + 开放 API
 
 > P0/P1 领域闭环之上，P2 完成商业化骨架：订阅数据模型（套餐目录 + 租户绑定）、工作流 plan 模块开关、三档计费坐席校验、行业方案包评测与免费试用样例、前端套餐中心/套餐管理/模板商城、开放 API 结算。全链路复用既有租户/配额/幂等账本/评测基座。

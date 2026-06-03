@@ -89,6 +89,11 @@ public class InternalPluginController {
      * Receive audit log entries from Python AI service.
      * Idempotent: uses the entry's UUID as a natural dedup key.
      * Batch endpoint: accepts a list of entries for efficiency.
+     *
+     * <p>第十五轮 P0-4：内部回调无会话租户，若不显式处理，租户行拦截器会把
+     * 查询/插入缺省填充 tenant_id=1——去重查询漏掉其他租户的同 eventId 行
+     * （幂等失效），审计行也全部错标到租户 1。整体以系统作用域执行，
+     * 租户归属从插件解析结果显式写入 tenant_id 列（平台内建插件归 1）。
      */
     @PostMapping("/audit-logs")
     @Transactional
@@ -105,8 +110,9 @@ public class InternalPluginController {
                 // Idempotency: check for eventId to prevent duplicate inserts
                 String eventId = (String) entry.get("eventId");
                 if (eventId != null) {
-                    // Skip if event already exists (idempotent retry)
-                    if (pluginAuditLogMapper.selectByEventId(eventId) != null) {
+                    // Skip if event already exists (idempotent retry) — 全局去重需系统作用域
+                    if (TenantContext.runAsSystem(
+                            () -> pluginAuditLogMapper.selectByEventId(eventId) != null)) {
                         skipped++;
                         continue;
                     }
@@ -123,9 +129,12 @@ public class InternalPluginController {
                 // Resolve plugin_id from pluginId (UUID) to database ID
                 String pluginUuid = (String) entry.get("pluginId");
                 if (pluginUuid != null) {
-                    var plugin = pluginService.getByPluginId(pluginUuid);
+                    var plugin = TenantContext.runAsSystem(
+                            () -> pluginService.getByPluginId(pluginUuid));
                     if (plugin != null) {
                         log.setPluginId(plugin.getId());
+                        // 审计行归属插件租户；平台内建插件（tenant_id NULL）归平台租户 1
+                        log.setTenantId(plugin.getTenantId() != null ? plugin.getTenantId() : 1L);
                     }
                 }
 
@@ -135,7 +144,7 @@ public class InternalPluginController {
                     log.setOperatorId(((Number) operatorId).longValue());
                 }
 
-                pluginAuditLogMapper.insert(log);
+                TenantContext.runAsSystem(() -> pluginAuditLogMapper.insert(log));
                 inserted++;
             } catch (Exception e) {
                 log.warn("Failed to insert audit log entry: {}", e.getMessage());

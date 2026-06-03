@@ -19,6 +19,9 @@ public class PluginAuditLog {
     @Schema(description = "日志ID")
     private Long id;
 
+    @Schema(description = "归属租户ID（内部回调显式写入；平台内建插件归平台租户）")
+    private Long tenantId;
+
     @Schema(description = "事件UUID（幂等键，来自 Python AI）")
     private String eventId;
 

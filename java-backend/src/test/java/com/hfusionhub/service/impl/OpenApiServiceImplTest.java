@@ -18,10 +18,12 @@ import com.hfusionhub.mapper.AppApiKeyMapper;
 import com.hfusionhub.mapper.AppCallLogMapper;
 import com.hfusionhub.mapper.AppMapper;
 import com.hfusionhub.service.BidCheckService;
+import com.hfusionhub.tenant.TenantContext;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -218,5 +220,37 @@ class OpenApiServiceImplTest {
 
         assertEquals(403, ex.getCode());
         verify(callLogMapper).insert(any()); // 失败也记录调用
+    }
+
+    // ── 第十五轮 P0-3：/openapi 无会话租户，key 解析必须系统作用域 ──
+
+    @Test
+    void bidCheckResolvesKeyUnderSystemScopeAndRunsUnderAppTenant() {
+        String secret = "hf_crosssecret1234567890";
+        AtomicReference<Boolean> systemScopeAtLookup = new AtomicReference<>();
+        when(apiKeyMapper.selectOne(any())).thenAnswer(inv -> {
+            // 旧实现缺会话租户时行拦截器把 tenant_id 缺省成 1，非 1 租户 key 永远 401；
+            // 修复后 key 查找必须发生在系统作用域。
+            systemScopeAtLookup.set(TenantContext.isSystemScope());
+            return enabledKey(secret, 9L, 1L);
+        });
+        App app = publishedApp(1L);
+        app.setTenantId(42L);
+        when(appMapper.selectById(1L)).thenReturn(app);
+        when(redisUtils.increment(anyString(), anyLong())).thenReturn(1L);
+        AtomicReference<Long> tenantAtCheck = new AtomicReference<>();
+        when(bidCheckService.checkForApi(eq(7L), eq(42L)))
+                .thenAnswer(inv -> {
+                    tenantAtCheck.set(TenantContext.getTenantId());
+                    return Map.of("total", 0);
+                });
+
+        OpenApiBidCheckResponse response = openApiService.bidCheck(secret, 7L);
+
+        assertEquals("ok", response.getStatus());
+        assertEquals(Boolean.TRUE, systemScopeAtLookup.get(), "key 解析必须以系统作用域执行");
+        assertEquals(42L, tenantAtCheck.get(), "业务必须落在应用所属租户上下文");
+        assertNull(TenantContext.getTenantId(), "调用结束后租户上下文应恢复");
+        verify(bidCheckService).checkForApi(7L, 42L);
     }
 }

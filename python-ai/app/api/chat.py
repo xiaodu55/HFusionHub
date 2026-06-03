@@ -428,6 +428,62 @@ def _build_chat_response(response, style: str, extra_step_events: Optional[List[
     )
 
 
+async def _content_guarded_sse(
+    inner,
+    knowledge_base_id: Optional[int],
+):
+    """流式输出的内容安全守卫（第十五轮 P0-5）。
+
+    增量事件原样透传（保留流式体验）；流结束后对「累计最终回答」执行与
+    非流式一致的 guard_model_output——此前本文件只把非流式路径当作唯一
+    守卫咽喉，流式通道可绕过输出守卫。命中违规时在 [DONE] 前补发矫正
+    事件：消费方（Java 桥接 / 前端）收到 ``content_replace=true`` 时须用
+    该文本整段替换已累计内容，而非追加。
+    """
+    accumulated: List[str] = []
+    done_sentinel = "data: [DONE]\n\n"
+    done_seen = False
+    async for event in inner:
+        if event == done_sentinel:
+            # [DONE] 由本包装器在守卫处理后补发，保证矫正事件先于哨兵
+            done_seen = True
+            break
+        if event.startswith("data: "):
+            try:
+                payload = json.loads(event[len("data: "):])
+            except (json.JSONDecodeError, ValueError):
+                payload = None
+            if isinstance(payload, dict):
+                content = payload.get("content")
+                if (
+                    isinstance(content, str)
+                    and content
+                    and not payload.get("cancelled")
+                    and not payload.get("error")
+                ):
+                    accumulated.append(content)
+        yield event
+
+    final_text = "".join(accumulated)
+    if final_text.strip():
+        safe_text, guard_verdict = _GUARD_POLICY_ENGINE.guard_model_output(
+            final_text,
+            PolicyContext(
+                user_id=0,
+                knowledge_base_id=knowledge_base_id or 0,
+                environment=config.SERVER_ENV,
+            ),
+        )
+        if guard_verdict is not None:
+            logger.warning("Streamed AI response blocked by guardrails: %s", guard_verdict.reason)
+            yield "data: " + json.dumps(
+                {"content": _GUARDED_RESPONSE, "content_replace": True},
+                ensure_ascii=False,
+            ) + "\n\n"
+    if done_seen:
+        yield done_sentinel
+
+
 # ── Routes ──────────────────────────────────────────────────────────────
 
 @router.post("/api/chat")
@@ -490,7 +546,10 @@ async def chat(request: ChatRequest):
                 finally:
                     yield "data: [DONE]\n\n"
 
-            return StreamingResponse(sse_generator(), media_type="text/event-stream")
+            return StreamingResponse(
+                _content_guarded_sse(sse_generator(), routed_knowledge_base_id),
+                media_type="text/event-stream",
+            )
 
         response = await agent.run(
             query=request.message,
@@ -575,7 +634,10 @@ async def agent_v1_chat(request: AgentV1Request):
                 finally:
                     yield "data: [DONE]\n\n"
 
-            return StreamingResponse(sse_generator(), media_type="text/event-stream")
+            return StreamingResponse(
+                _content_guarded_sse(sse_generator(), request.knowledge_base_id),
+                media_type="text/event-stream",
+            )
 
         response = await agent.run(
             query=request.message,
@@ -715,7 +777,7 @@ async def agent_v1_chat_stream(request: AgentV1Request):
                     active_requests.pop(request_id, None)
 
         return StreamingResponse(
-            event_generator(),
+            _content_guarded_sse(event_generator(), request.knowledge_base_id),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -785,7 +847,7 @@ async def chat_stream(request: ChatRequest):
                     active_requests.pop(request_id, None)
 
         return StreamingResponse(
-            event_generator(),
+            _content_guarded_sse(event_generator(), routed_knowledge_base_id),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",

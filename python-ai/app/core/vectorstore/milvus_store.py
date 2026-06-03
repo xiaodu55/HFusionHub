@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import threading
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.utils.config import config
@@ -155,11 +156,16 @@ def count_chunks(knowledge_base_id: Optional[int] = None) -> int:
 
 # Chunk-corpus cache for the lite co-store.  Without it every retrieval
 # (BM25, graph, observability) re-reads + re-parses the whole corpus JSON on
-# each request.  Keyed by (mtime_ns, size); writes go through the store's
-# atomic ``os.replace`` so a changed mtime/size naturally invalidates the
-# entry.  Cluster mode reads straight from Milvus and is never cached.
-_co_store_cache: Optional[Dict[str, List[Dict]]] = None
-_co_store_key: Optional[Tuple[int, int]] = None
+# each request.  Keyed by (tenant_id → (mtime_ns, size)); writes go through
+# the store's atomic ``os.replace`` so a changed mtime/size naturally
+# invalidates the entry.  Cluster mode reads straight from Milvus and is
+# never cached.
+#
+# 租户隔离（第十五轮 P0-2）：缓存值是「单个租户」的作用域语料，因此必须
+# 按租户分键——单键缓存在双租户交替读取（期间无写入）时会把 A 租户语料
+# 返回给 B 租户。按租户各持一份 (file_sig, scoped) 条目，LRU 上限封顶。
+_co_store_cache: "OrderedDict[str, Tuple[Tuple[int, int], Dict[str, List[Dict]]]]" = OrderedDict()
+_CO_STORE_CACHE_MAX = 8
 _co_store_lock = threading.Lock()
 
 
@@ -169,54 +175,54 @@ def _load_chunks_store() -> Dict[str, List[Dict]]:
     In cluster mode the corpus is read from Milvus (no per-pod JSON co-store).
     In lite mode it is read from the local JSON co-store, filtered to the
     current tenant.  The module-level ``CHUNKS_STORE_PATH`` is honoured in lite
-    mode so that tests may patch it.  Lite reads are cached by file mtime+size
-    so hot retrieval paths do not re-read + re-parse the whole corpus per
-    request; the cache is invalidated automatically when the file changes.
+    mode so that tests may patch it.  Lite reads are cached per-tenant by file
+    mtime+size so hot retrieval paths do not re-read + re-parse the whole
+    corpus per request; the cache is invalidated automatically when the file
+    changes.
     """
-    global _co_store_cache, _co_store_key
     store = _get_store()
     if config.VECTOR_STORE_MODE == "cluster":
         return store.all_chunks() or {}
     import json as _json
     from pathlib import Path
     try:
+        try:
+            from app.core.tenant.context import require_tenant_id
+            tid = str(require_tenant_id())
+        except Exception:
+            # 无租户上下文：不读文件也不动缓存（无法定位应失效的条目）
+            return {}
         p = Path(CHUNKS_STORE_PATH)
         if not p.exists():
-            _co_store_cache = None
-            _co_store_key = None
+            with _co_store_lock:
+                _co_store_cache.pop(tid, None)
             return {}
         st = p.stat()
         key = (st.st_mtime_ns, st.st_size)
         with _co_store_lock:
-            if _co_store_cache is not None and key == _co_store_key:
-                return _co_store_cache
+            entry = _co_store_cache.get(tid)
+            if entry is not None and entry[0] == key:
+                return entry[1]
             with p.open("r", encoding="utf-8") as f:
                 val = _json.load(f)
             if not isinstance(val, dict):
-                _co_store_cache = None
-                _co_store_key = None
+                _co_store_cache.pop(tid, None)
                 return {}
             # Tenant isolation: normalize to the tenant-keyed physical
             # layout, then return ONLY the active tenant's document root.
             val = _migrate_co_store_layout(val)
-            try:
-                from app.core.tenant.context import require_tenant_id
-                tid = str(require_tenant_id())
-            except Exception:
-                _co_store_cache = None
-                _co_store_key = None
-                return {}
             tenant_root = val.get(tid, {})
             if not isinstance(tenant_root, dict):
-                _co_store_cache = None
-                _co_store_key = None
+                _co_store_cache.pop(tid, None)
                 return {}
             scoped: Dict[str, List[Dict]] = {}
             for doc_id, chunks in tenant_root.items():
                 for c in chunks:
                     scoped.setdefault(str(c.get("document_id", doc_id)), []).append(c)
-            _co_store_cache = scoped
-            _co_store_key = key
+            _co_store_cache[tid] = (key, scoped)
+            _co_store_cache.move_to_end(tid)
+            while len(_co_store_cache) > _CO_STORE_CACHE_MAX:
+                _co_store_cache.popitem(last=False)
             return scoped
     except Exception as exc:
         logger.error("Co-store load error: %s", exc)

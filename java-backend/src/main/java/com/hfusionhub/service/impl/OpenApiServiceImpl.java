@@ -164,17 +164,23 @@ public class OpenApiServiceImpl implements OpenApiService {
             throw new BusinessException(401, "缺少 API Key（Authorization: Bearer <key> 或 X-API-Key）");
         }
         String hash = sha256Hex(apiKey.trim());
-        AppApiKey key = apiKeyMapper.selectOne(new LambdaQueryWrapper<AppApiKey>()
-                .eq(AppApiKey::getKeyHash, hash)
-                .eq(AppApiKey::getEnabled, 1));
-        if (key == null) {
-            throw new BusinessException(401, "API Key 无效或已停用");
-        }
-        App app = appMapper.selectById(key.getAppId());
-        if (app == null || app.getStatus() == null || app.getStatus() != 1) {
-            throw new BusinessException(403, "应用未发布或已停用");
-        }
-        return new ResolvedKey(app, key);
+        // /openapi/** 不经过租户拦截器（外部调用无会话租户），此时租户行拦截器会把
+        // tenant_id 缺省填充为 1，导致非 1 租户的 key 永远查不到（401）。
+        // key_hash 全局唯一，解析属平台级查找 —— 以系统作用域执行，
+        // 后续业务再按 app.tenantId 走 runAs（见 chat/bidCheck）。
+        return TenantContext.runAsSystem(() -> {
+            AppApiKey key = apiKeyMapper.selectOne(new LambdaQueryWrapper<AppApiKey>()
+                    .eq(AppApiKey::getKeyHash, hash)
+                    .eq(AppApiKey::getEnabled, 1));
+            if (key == null) {
+                throw new BusinessException(401, "API Key 无效或已停用");
+            }
+            App app = appMapper.selectById(key.getAppId());
+            if (app == null || app.getStatus() == null || app.getStatus() != 1) {
+                throw new BusinessException(403, "应用未发布或已停用");
+            }
+            return new ResolvedKey(app, key);
+        });
     }
 
     private boolean allow(Long keyId) {

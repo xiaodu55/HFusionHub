@@ -1,5 +1,5 @@
 # Prometheus configuration for HFusionHub monitoring stack
-# Scrapes Python AI metrics (/metrics) and Java Actuator (/api/actuator/prometheus)
+# Scrapes Python AI metrics (/metrics) and Java Actuator (management port 9092)
 
 global:
   scrape_interval: 15s
@@ -24,9 +24,11 @@ scrape_configs:
     scrape_interval: 10s
 
   - job_name: "hfusionhub-java-backend"
-    metrics_path: "/api/actuator/prometheus"
+    # Actuator 独立管理端口（第十五轮 P0-8）：/api/actuator/** 曾被 Sa-Token
+    # 登录拦截器覆盖，无会话抓取实际 401；现改抓 9092 管理端口。
+    metrics_path: "/actuator/prometheus"
     static_configs:
-      - targets: ["java-backend:8080"]
+      - targets: ["java-backend:9092"]
         labels:
           service: java-backend
     scrape_interval: 10s

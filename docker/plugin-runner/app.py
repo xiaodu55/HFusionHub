@@ -313,13 +313,16 @@ async def execute_tool(
                 detail="image_digest is required and must be a full sha256:<64 hex> digest"
             )
 
+        # Docker SDK 调用是同步阻塞的；本处理器是 async —— 全部卸载到
+        # 线程（第十五轮 P0-7），否则一个插件执行会冻结整个事件循环，
+        # 串行化 runner 的所有请求。
         # Resolve image: try local first, then pull from registry
         try:
-            pulled_image = docker_client.images.get(req.image_tag)
+            pulled_image = await asyncio.to_thread(docker_client.images.get, req.image_tag)
             logger.info("Using local image: %s", req.image_tag)
         except Exception:
             logger.info("Pulling image: %s", req.image_tag)
-            pulled_image = docker_client.images.pull(req.image_tag)
+            pulled_image = await asyncio.to_thread(docker_client.images.pull, req.image_tag)
 
         # Verify digest against actual image via constant-time comparison.
         # Prefer the registry RepoDigest (manifest digest); fall back to the
@@ -366,14 +369,15 @@ async def execute_tool(
         # rules, so connectivity isolation does not depend on a custom network.
         network_name = req.config.network
         try:
-            docker_client.networks.get(network_name)
+            await asyncio.to_thread(docker_client.networks.get, network_name)
         except Exception:
             logger.warning(
                 "Network '%s' not found — falling back to default bridge", network_name
             )
             network_name = None
 
-        container = docker_client.containers.run(
+        container = await asyncio.to_thread(
+            docker_client.containers.run,
             image=pulled_image.id,
             detach=True,
             network=network_name,
@@ -401,7 +405,7 @@ async def execute_tool(
         deadline = time.monotonic() + req.config.timeout
         while True:
             try:
-                container.reload()
+                await asyncio.to_thread(container.reload)
                 state = container.attrs.get("State", {})
                 if state.get("Status") in {"exited", "dead"}:
                     break
@@ -411,11 +415,11 @@ async def execute_tool(
 
             if time.monotonic() >= deadline:
                 try:
-                    container.kill()
+                    await asyncio.to_thread(container.kill)
                 except Exception as e:
                     logger.warning("Failed to kill timed out plugin container: %s", e)
                 try:
-                    container.wait(timeout=5)
+                    await asyncio.to_thread(container.wait, timeout=5)
                 except Exception:
                     pass
                 try:
@@ -434,7 +438,7 @@ async def execute_tool(
             await asyncio.sleep(0.2)
 
         try:
-            result = container.wait(timeout=5)
+            result = await asyncio.to_thread(container.wait, timeout=5)
             exit_code = result.get("StatusCode", -1)
         except Exception as e:
             try:
@@ -450,13 +454,21 @@ async def execute_tool(
                 container_id=container.short_id,
             )
 
-        logs = container.logs(stdout=True, stderr=False).decode("utf-8", errors="replace")
-        stderr = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace")
+        def _read_logs():
+            return (
+                container.logs(stdout=True, stderr=False).decode("utf-8", errors="replace"),
+                container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace"),
+            )
+
+        logs, stderr = await asyncio.to_thread(_read_logs)
         elapsed_ms = round((time.monotonic() - start_time) * 1000, 2)
+
+        def _read_stats():
+            return container.stats(stream=False)
 
         resource_usage = {}
         try:
-            stats = container.stats(stream=False)
+            stats = await asyncio.to_thread(_read_stats)
             cpu_delta = stats["cpu_stats"]["cpu_usage"]["total_usage"] - \
                         stats["precpu_stats"]["cpu_usage"]["total_usage"]
             system_delta = stats["cpu_stats"]["system_cpu_usage"] - \
@@ -504,11 +516,17 @@ async def execute_tool(
         # The fixed entry point (run_tool.py) emits a single JSON object:
         # {"success": bool, "data": ..., "error": ...}. Unwrap it so the
         # plugin's actual tool result lands in ExecuteResponse.data.
+        #
+        # Fail-closed 解析（第十五轮 P0-7）：容器正常退出但最后一行不是可解析
+        # 的契约 JSON 时，一律按失败上报——旧实现对这种输出报告 success=True
+        # 并把原文塞进 raw_output，会让调用方把不可信输出当成功结果。
+        logs_stripped = logs.strip()
         tool_result = None
-        try:
-            tool_result = json.loads(logs.strip().split("\n")[-1]) if logs.strip() else None
-        except (json.JSONDecodeError, IndexError):
-            tool_result = {"raw_output": logs}
+        if logs_stripped:
+            try:
+                tool_result = json.loads(logs_stripped.split("\n")[-1])
+            except (json.JSONDecodeError, IndexError):
+                tool_result = None
 
         if isinstance(tool_result, dict) and "success" in tool_result:
             tool_success = bool(tool_result.get("success"))
@@ -526,8 +544,12 @@ async def execute_tool(
             )
 
         return ExecuteResponse(
-            success=True,
-            data=tool_result,
+            success=False,
+            error=(
+                (logs_stripped[-2000:] if logs_stripped else "容器未输出任何结果")
+                + " （输出不符合插件契约 JSON：{\"success\": ...}）"
+            ),
+            error_code="tool_output_unparseable",
             duration_ms=elapsed_ms,
             resource_usage=resource_usage,
             resource_limits=resource_limits,
@@ -548,7 +570,7 @@ async def execute_tool(
     finally:
         if container:
             try:
-                container.remove(force=True)
+                await asyncio.to_thread(container.remove, force=True)
             except Exception:
                 pass
 

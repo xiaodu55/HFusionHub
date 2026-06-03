@@ -163,6 +163,9 @@ services:
     container_name: hfusionhub-java
     ports:
       - "127.0.0.1:8080:8080"
+    expose:
+      # Actuator 独立管理端口（Prometheus 抓取），不映射宿主机
+      - "9092"
     environment:
       DB_USERNAME: hfusionhub
       DB_PASSWORD: ${MYSQL_PASSWORD}

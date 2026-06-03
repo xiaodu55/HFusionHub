@@ -221,7 +221,17 @@ const handleSend = async () => {
             hasContent = true
             const msg = messages.value.find(m => m.id === pendingId)
             if (msg) {
-              msg.content += contentDelta
+              // 内容安全守卫矫正事件：整段替换已累计内容，而非追加
+              // （Java 桥接转发 replace:"true"；直连 Python 时为 content_replace:true）
+              const isReplace =
+                parsed.content_replace === true ||
+                parsed.replace === true ||
+                parsed.replace === 'true'
+              if (isReplace) {
+                msg.content = contentDelta
+              } else {
+                msg.content += contentDelta
+              }
             }
             await scrollToBottom()
           }

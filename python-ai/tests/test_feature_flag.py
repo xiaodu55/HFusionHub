@@ -198,10 +198,29 @@ class TestCacheAndDegradation:
 
     @patch("app.utils.feature_flag.DEGRADATION_MODE", "fail_closed")
     def test_fail_closed_availability_flag(self):
+        """无缓存降级：有 env 映射的旗标回退 env 派生值，其余放行（第十五轮 P0-9）。"""
+        from app.utils.config import config as _config
         client = FeatureFlagClient(cache_ttl=999)
-        # No cache → permissive for availability flags
+        env_expectations = {
+            "rag.hybrid.enabled": _config.RAG_HYBRID_ENABLED,
+            "rag.graph.enabled": _config.RAG_GRAPH_ENABLED,
+            "rag.reranker.enabled": _config.RAG_RERANKER_MODE != "disabled",
+            "agent.multi_agent.enabled": _config.RAG_MULTI_AGENT_ENABLED,
+        }
         for flag in AVAILABILITY_FLAGS:
-            assert client.is_enabled(flag) is True
+            expected = env_expectations.get(flag, True)
+            assert client.is_enabled(flag) is expected
+
+    @patch("app.utils.feature_flag.DEGRADATION_MODE", "fail_closed")
+    def test_availability_degradation_honours_env_false(self, monkeypatch):
+        """env 显式关闭的旗标在后端不可达时不得被静默打开。"""
+        import app.utils.feature_flag as ff
+        monkeypatch.setattr(ff._env_fallback_value, "__defaults__", (), raising=False)
+        client = FeatureFlagClient(cache_ttl=999)
+        with patch.object(ff, "_env_fallback_value", lambda key: False if key == "agent.multi_agent.enabled" else None):
+            assert client.is_enabled("agent.multi_agent.enabled") is False
+            # 无映射旗标保持原放行默认
+            assert client.is_enabled("agent.enabled") is True
 
     @patch("app.utils.feature_flag.DEGRADATION_MODE", "transparent")
     def test_transparent_all_true(self):

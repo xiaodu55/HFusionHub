@@ -46,6 +46,25 @@ AVAILABILITY_FLAGS = frozenset({
     "agent.enabled",
 })
 
+
+def _env_fallback_value(flag_key: str):
+    """降级时回退到进程启动时读取的 env 配置（第十五轮 P0-9）。
+
+    旧行为对可用性旗标直接返回 True，注释声称「保留 env 配置」但实际从未
+    读 env——例如 RAG_MULTI_AGENT_ENABLED=false 的部署在后端短暂不可达时
+    会被静默打开。按旗标映射到 config 已有的 env 派生值；无对应配置项的
+    旗标返回 None，由调用方沿用原默认（True）。
+    """
+    from app.utils.config import config as _config
+    mapping = {
+        "rag.hybrid.enabled": lambda: _config.RAG_HYBRID_ENABLED,
+        "rag.graph.enabled": lambda: _config.RAG_GRAPH_ENABLED,
+        "rag.reranker.enabled": lambda: _config.RAG_RERANKER_MODE != "disabled",
+        "agent.multi_agent.enabled": lambda: _config.RAG_MULTI_AGENT_ENABLED,
+    }
+    factory = mapping.get(flag_key)
+    return factory() if factory else None
+
 # Degradation modes (controlled by FEATURE_FLAG_DEGRADATION env var):
 #   "fail_closed" — security flags → False, availability → True (production default)
 #   "transparent" — all flags → True, preserve env-var config (tests / dev)
@@ -103,7 +122,11 @@ class FeatureFlagClient:
                 logger.warning(f"Feature flag '{flag_key}' degraded to FAIL-CLOSED (no cache)")
                 return False
             if flag_key in AVAILABILITY_FLAGS:
-                logger.info(f"Feature flag '{flag_key}' degraded to permissive (preserve env config)")
+                fallback = _env_fallback_value(flag_key)
+                if fallback is not None:
+                    logger.info(f"Feature flag '{flag_key}' degraded to env-config value: {fallback}")
+                    return fallback
+                logger.info(f"Feature flag '{flag_key}' degraded to permissive (no env mapping)")
                 return True
             logger.warning(f"Feature flag '{flag_key}' degraded to FAIL-CLOSED (unknown flag, no cache)")
             return False

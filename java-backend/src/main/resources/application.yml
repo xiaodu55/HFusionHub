@@ -142,7 +142,9 @@ minio:
 # Plugin Runner 配置
 plugin-runner:
   base-url: ${PLUGIN_RUNNER_URL:http://localhost:9100}
-  token: ${PLUGIN_RUNNER_TOKEN:plugin-runner-secret}
+  # 必须显式配置（第十五轮 P0-8 移除弱默认值「plugin-runner-secret」）；
+  # docker/.env 与 deploy/.env 均已生成随机值。未配置时 runner 调用 403 fail-closed。
+  token: ${PLUGIN_RUNNER_TOKEN:}
   timeout: ${PLUGIN_RUNNER_TIMEOUT:60000}
 
 # 管理员初始化配置
@@ -151,9 +153,11 @@ plugin-runner:
 app:
   trusted-proxy-headers: ${TRUSTED_PROXY_HEADERS:false}
   model-credentials:
-    # Production should set a long random value. Development falls back to the
-    # existing internal token so the feature works without another local secret.
-    encryption-key: ${MODEL_CREDENTIAL_ENCRYPTION_KEY:${PYTHON_AI_INTERNAL_TOKEN:}}
+    # 用于加密用户提供的模型 API Key（AES-GCM）。必须是独立于其它内部令牌的
+    # 长随机值——第十五轮 P0-8 起不再回退复用 PYTHON_AI_INTERNAL_TOKEN，
+    # 避免轮换内部令牌时静默毁掉全部已存凭据。未配置时保存/读取 API Key
+    # 直接报错（fail-fast）。若历史数据曾以内部令牌加密，需重新录入。
+    encryption-key: ${MODEL_CREDENTIAL_ENCRYPTION_KEY:}
   admin:
     username: ${ADMIN_USERNAME:admin}
     password: ${ADMIN_PASSWORD:}
@@ -277,6 +281,13 @@ hfusionhub:
         bid-check-reports: 5000
 
 management:
+  server:
+    # Actuator 独立管理端口（第十五轮 P0-8）：
+    # 1. 移出 /api 上下文后不再被 Sa-Token 登录拦截器覆盖（此前 Prometheus
+    #    无会话抓取 /api/actuator/prometheus 实际 401）；
+    # 2. 该端口不得向公网发布——compose 仅 expose，不映射宿主机；
+    # 3. 监控抓取目标随之改为 java-backend:9092/actuator/prometheus。
+    port: ${MANAGEMENT_PORT:9092}
   endpoints:
     web:
       exposure:
