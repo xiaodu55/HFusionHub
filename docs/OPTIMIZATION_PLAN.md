@@ -244,4 +244,63 @@
 - **批次 2（P1，✅ 全部完成 2026-08-20）**：前端超大组件拆分 ✅ + ESLint ✅ + 竞态 ✅ + 服务端分页 ✅ + chat 配置缓存 ✅ + Scheduler 分布式锁 ✅ + N+1 ✅ + 无界列表 ✅ + 写接口 `@Valid` ✅——**Java P1 项全部清零**。
 - **批次 3（P2，✅ 全部完成 2026-08-20）**：硬编码清理 ✅、CI JDK 版本对齐 ✅、Dockerfile.python uvicorn[standard] 决策 ✅、token 估算校准 ✅、Helm/Compose 拓扑对齐 ✅——**P2 全部清零**。
 
-> 每批完成后建议跑 `scripts/smoke-test.ps1`（47 项）与各子项目单测（Java 445 / Python 1252 / 前端 33）回归。
+> 每批完成后建议跑 `scripts/smoke-test.ps1`（47 项）与各子项目单测（Java 554 / Python 1380+ / 前端 45）回归。
+
+---
+
+# 第十五轮优化方案（2026-08-28 全面复审：P0–P14 交付后）
+
+> **复审方式**：文档路线图 / Java 后端 / Python AI 三路并行深度探索。
+> **结论**：十四轮交付后发现一批**真实缺陷**（非单纯优化），按「P0 正确性/安全 → P1 性能 → P2 可维护性/测试 → P3 文档/运维」四层排期。
+> **本轮实施范围**：P0 批次全部 9 项（见 §R15-P0）；P1–P3 供后续排期。
+> **冻结项不动**：GraphRAG / 多模态 OCR / cross_encoder reranker（已明确不投入）；租户隔离、HMAC 回调、幂等账本、熔断网关等已验证机制不改设计。
+
+## R15-P0 正确性 / 安全（本轮实施 ✅）
+
+| 编号 | 问题 | 证据 | 修法 | 验收 |
+|---|---|---|---|---|
+| R15-1 | **容器插件 agent 链路不可用**：async 方法内同步调 `execute_plugin_tool`；container 模式在已有事件循环的线程里 `new_event_loop().run_until_complete()` → RuntimeError 被吞，静默返回 `container_runner_unavailable`。P2-3 e2e 只覆盖 runner 直连 | `app/core/tools/registry.py:875`、`app/core/plugin/sandbox_runner.py:390-434` | registry 改 `await asyncio.to_thread(...)`；container 分支在工作线程内用 `asyncio.run` | 新增 registry 级 container-mode 测试；bid_docx/bid_quote 经 `execute()` 真实可达 |
+| R15-2 | **跨租户语料缓存泄漏**：BM25/citation co-store 缓存 key 只含 `(mtime_ns, size)` 不含 tenant_id | `app/core/vectorstore/milvus_store.py:188-219` | `_co_store_key` 加入 tenant_id | 双租户读写测试证明互不可见 |
+| R15-3 | **OpenAPI key 解析租户 bug**：`/openapi/**` 不走租户拦截器，key 查询被行拦截器默认填 `tenant_id=1`，非 1 租户的 key 全部 401 | `config/SaTokenConfig.java:110`、`OpenApiServiceImpl.java:162-178`、`MybatisPlusConfig.java:102-106` | key 解析包 `TenantContext.runAsSystem`（key hash 全局唯一），后续业务 `runAs(app.tenantId)`（对齐 bidCheck 既有模式） | 非 1 租户 key 认证测试 |
+| R15-4 | **内部插件审计租户错标**：回调插入 `plugin_audit_log` 无 TenantContext，行全落 `tenant_id=1` | `InternalPluginController.java:89-130` | 解析 plugin 后 `runAs(plugin.tenantId)` 包插入 | 审计行 tenant 与插件一致 |
+| R15-5 | **流式聊天绕过输出守卫**：SSE 路径明确不做 `guard_model_output`，非流式被拦内容可从流式通道流出 | `app/api/chat.py:363-366, 475-493, 732-799` | 流式累积最终输出后过守卫，命中发矫正事件（复用现有事件协议）+ 审计 | 守卫命中测试（流式与非流式行为一致） |
+| R15-6 | **插件子进程沙箱 fail-open**：manifest 无 sandbox 段 = 无网络/文件限制；Windows 资源限制静默跳过 | `sandbox_runner.py:284-287, 75-98` | 无声明时 default-deny（禁网+限写）；资源限制跳过显式 warning | 默认拒绝测试 |
+| R15-7 | **plugin-runner 事件循环阻塞 + 结果解析 fail-open**：async 处理器内同步 Docker SDK 调用串行化全部执行；末行非 JSON 时 `success=True` 返回 raw_output | `docker/plugin-runner/app.py:295-553, 507-511` | 阻塞调用包 `asyncio.to_thread`；结果解析改 fail-closed（非 JSON → success=False） | runner 现有验收（e2e 17 项）回归通过 |
+| R15-8 | **密钥与暴露面**：`MODEL_CREDENTIAL_ENCRYPTION_KEY` 回退复用 `PYTHON_AI_INTERNAL_TOKEN`（轮换一个毁掉全部已存用户 key）；CORS 默认通配源+凭据；actuator 无显式认证策略 | `application.yml:138-156`、`ModelCredentialCipher.java:38-43`、`CorsConfig.java:38` | 加密 key 取消回退 fail-fast；CORS 默认 false+显式 origin；actuator 独立 management port 移出 `/api` 上下文 | 配置校验测试；dev 默认行为有日志警示 |
+| R15-9 | **feature_flag 降级语义不符**：后端不可达时 AVAILABILITY_FLAGS 直接返回 True，注释声称「保留 env 配置」实际未读 env | `app/utils/feature_flag.py:105-107` | 降级先回退对应 env 再默认值 | 后端不可达 + env=false 的降级测试 |
+
+## R15-P1 性能（规划）
+
+| 编号 | 问题 | 证据 | 方案 |
+|---|---|---|---|
+| R15-10 | 招投标撰写检索串行：最多 21 次串行检索往返（每 KB×每查询） | `app/core/bid/write_workflow.py:154-181`、`workflow.py:242-256` | 检索阶段 `asyncio.gather` + 信号量并发（分节生成保持串行语义不变） |
+| R15-11 | 同步 LLM 调用持有数据库事务，并发撰写耗尽连接池 | `BidWriteServiceImpl.java:59-83` | 事务拆分，对齐 `ConversationServiceImpl.java:259-349` 的「事务外调 AI」模式 |
+| R15-12 | V32 遗漏 tenant_id 索引：plugin/plugin_audit_log/agent_approval/agent_run/agent_step/prompt_test_set/prompt_test_set_run/agent_evaluation_dataset | `V32__tenant_org_model.sql:89-147` | V74 迁移补 `idx_*_tenant`（对齐 V61-V68 做法） |
+| R15-13 | JSON co-store 全量读改写且写路径无锁（并发索引可丢文档）；BM25/citation 全语料线性扫描 | `milvus_lite.py:39-44, 649-654`、`query_router.py:486-496` | SQLite（或 Milvus 查询回源）+ 每租户锁；扫描路径索引化 |
+| R15-14 | httpx 客户端每调用新建（7 处） | `model_gateway.py:298,1042`、`plugin/quota.py:47`、`container_runner.py:99,180,201`、`declarative_http_tool.py:43`、`execution_token.py:66` | 收敛到 `llm/http_client.py::get_shared_client` |
+| R15-15 | Milvus 每查询 load_collection；embedding 探活一次性同步；sync 嵌入全局 2 线程漏斗 | `milvus_lite.py:506`、`milvus_cluster.py:354`、`embedding/__init__.py:191-213, 23-25` | 启动时 load 一次 + 出错重载；探活 TTL 异步化；检索路径走 async embedding |
+| R15-16 | Java 统一缓存体系（旧 §1.9 遗留，唯一未清 Java 项）：零 `@Cacheable`，FeatureFlag 每调用查规则 | `docs/OPTIMIZATION_PLAN.md §1.9`、`FeatureFlagServiceImpl` | Caffeine 本地 + Redis 失效的两级缓存，先覆盖 FeatureFlag / chat 配置 / 订阅档位 |
+| R15-17 | N+1 与全表扫描：expireApprovals 逐条 3 读 3 写；审计回调逐条 dedup；向量对账全表载入内存 | `AgentTaskServiceImpl.java:1145-1168`、`InternalPluginController.java:110-113`、`VectorReconciliationService.java:91` | 批量 selectBatchIds / JOIN；对账按 id 分页 |
+| R15-18 | milvus 16384 行静默上限；document.content LONGTEXT 随列表全量拉取；插件审计 flush 逐条 POST | `milvus_cluster.py:412-481`、`V1__initial_schema.sql:63`、`plugin/audit.py:301-307` | queryIterator 分页 + `num_entities`；列表列裁剪或 1:1 详情表；flush 批量化 |
+| R15-19 | 声明式插件端点 SSRF：拦了 localhost 但未拦私网/link-local 段与 DNS 解析到内网的域名 | `PluginServiceImpl.java:535-550` | 安装时解析 DNS 并拒绝保留网段 |
+
+## R15-P2 可维护性 / 测试（规划）
+
+| 编号 | 问题 | 证据 | 方案 |
+|---|---|---|---|
+| R15-20 | react.py 1648 行，run / run_stream / _run_stream_react 三份重复检索/压缩/组装/容错循环 | `app/core/agent/react.py:790, 1087, 1433` | 抽取共享管线，stream/非 stream 单循环 |
+| R15-21 | API 层几乎零测试：bid/ingest/rag/mcp/tools/gateway/guardrails 等约 10 个路由无任何测试 | `python-ai/tests/` 对照 `app/api/` | FastAPI TestClient 契约测试（对齐 `tests/test_chat_api.py` 模式） |
+| R15-22 | 测试基座漂移：H2 schema 手维护停在 V70、Flyway 关闭、tenant 拦截器在测试中关闭（核心隔离机制未被测试覆盖） | `application-test.yml`、`schema-h2.sql` | Testcontainers-MySQL（依赖已在 pom）抽样集成 + 至少一条 tenant 拦截器真实链路 |
+| R15-23 | 内部 token guard 复制粘贴 6 份；`allow-circular-references: true` 掩盖循环依赖；manifest hash 拼接歧义 | 6 个 Internal*Controller、`application.yml:8`、`PluginServiceImpl.java:628-644` | 收敛为 servlet filter；解循环；规范化 JSON 重算 |
+| R15-24 | God classes：ConversationServiceImpl 1647 / AgentTaskServiceImpl 1412 / VectorizationServiceImpl 1222 | java-backend service/impl | 按职责拆分（渐进，随触碰随拆） |
+
+## R15-P3 文档 / 运维（规划，含生产安全清单）
+
+| 编号 | 问题 | 证据 | 方案 |
+|---|---|---|---|
+| R15-25 | 文档失真 10 处：README/ROADMAP 测试计数（445/1220+）、database.md Flyway「V1–V57」、CI_GATES 分支保护自相矛盾 + eval-nightly 描述过时、ARCHITECTURE flag 表（2026-08-19）、TODO.md 停在 08-19、CHANGELOG 三个 `## [Unreleased]`、P1-3 编号缺位、ACCESS_MAP/TODO runner 状态过时、本文档旧脚注计数 | 各对应文档 | 一次性对账清理（合并 Unreleased、统一计数源为 CI 实际值） |
+| R15-26 | **生产安全上线阻断清单（TODO.md P0 五项全未勾）**：默认密码轮换、HTTPS+Nginx/Let's Encrypt、CORS 收紧（去 `*`）、prod 关 Swagger、MySQL 每日备份 + Milvus 快照 | `TODO.md` P0 1-5、`docs/PRODUCTION_OPS.md §0` | 产出轮换脚本 + HTTPS 反代样例 + 备份 cron 脚本 + 告警启用文档（不在真实环境直接执行） |
+| R15-27 | eval-nightly 依赖 cpolar 免费隧道随机子域名且需 02:00 在线 | `docs/ROADMAP.md:97` | 固定子域名或注册为 Windows 服务 |
+| R15-28 | P2-8 私有部署加固未做：MinIO per-tenant bucket 隔离、敏感标书禁外部 LLM-as-judge | `docs/BID_COMPLIANCE.md:31, 81` | 私有化部署模式开关 + 存储隔离 |
+| R15-29 | 前端 chat 断线重连遗留（幂等 requestId 自动重试；scrollToBottom 改 rAF） | 本文 §3 P2 遗留项 | F2 模式收尾 |
+| R15-30 | staging 真机验证缺口：隔离 Docker Engine / K8s runner 未在 staging 机器演练 | CHANGELOG 验收记录、`docs/PRODUCTION_OPS.md §9` | staging 机器跑 dind rehearsal + `plugin-e2e-acceptance.ps1` |
