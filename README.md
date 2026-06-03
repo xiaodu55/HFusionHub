@@ -362,7 +362,8 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 | [docs/PRODUCTION_OPS.md](docs/PRODUCTION_OPS.md) | **生产运维手册**（原 PRODUCTION_OPS + PRODUCTION_CHECKLIST + DR_VECTORS 合并）：上线检查清单、Runner TLS、插件 digest、配额账本、Agent 故障定位、向量库容灾、Staging 演练 |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 故障排查手册：P0 服务不可用 / P1 功能异常 / P2 性能 / P3 非关键，含数据恢复与日志收集 |
 | [docs/SCALING.md](docs/SCALING.md) | **扩容与性能手册**（原 SCALING + PERFORMANCE_BASELINE 合并）：扩容决策矩阵、垂直/水平扩容、K8s/Helm、性能基线测试、监控告警、成本优化 |
-| [docs/PLUGIN_RUNNER_TLS.md](docs/PLUGIN_RUNNER_TLS.md) | Plugin Runner 主机级 Docker daemon TLS 配置指引（当前环境阻塞项） |
+| [docs/PLUGIN_BUILTINS.md](docs/PLUGIN_BUILTINS.md) | **平台内建插件**（P2-3 bid_docx/bid_quote）：provision 管线（wheel→签名→镜像→dind→digest 回填）、dev 沙箱解锁、租户可见性、e2e 验收、与 MCP 第三方工具路径对比 |
+| [docs/PLUGIN_RUNNER_TLS.md](docs/PLUGIN_RUNNER_TLS.md) | Plugin Runner TLS 配置指引（dev compose dind sidecar 默认解锁 + rehearsal/宿主 daemon 备选路径） |
 
 ### 治理类
 

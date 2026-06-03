@@ -204,6 +204,17 @@ function Start-Module {
                 Write-Output "[fail] $Module venv interpreter missing: $pyVenv"
                 exit 1
             }
+            # 平台内建插件 wheel 目录（P2-3 bid_docx/bid_quote）。docker\.env
+            # 已显式设置时以其为准，否则默认指向 provision 脚本的构建产物目录。
+            if (-not [Environment]::GetEnvironmentVariable('PLUGIN_BUILTIN_WHEELS_DIR', 'Process')) {
+                [Environment]::SetEnvironmentVariable(
+                    'PLUGIN_BUILTIN_WHEELS_DIR', (Join-Path $RepoRoot 'python-ai\plugins\dist'), 'Process')
+            }
+            # 插件签名信任策略目录（与 scripts/plugin-provision.sh 的注册落点一致）。
+            if (-not [Environment]::GetEnvironmentVariable('HFUSIONHUB_PLUGIN_TRUST_DIR', 'Process')) {
+                [Environment]::SetEnvironmentVariable(
+                    'HFUSIONHUB_PLUGIN_TRUST_DIR', (Join-Path $RepoRoot 'python-ai\plugins\trust'), 'Process')
+            }
             Start-Process -FilePath $pyVenv -ArgumentList '-m', 'app.main' `
                 -WorkingDirectory (Join-Path $RepoRoot 'python-ai') -WindowStyle Minimized `
                 -RedirectStandardOutput $outFile -RedirectStandardError $errFile

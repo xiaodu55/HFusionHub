@@ -1,0 +1,65 @@
+{
+  "name": "bid_docx",
+  "version": "1.0.0",
+  "description": "标书 docx 导出插件：把已审批的标书分节草稿渲染为 .docx 文件（平台内建，容器沙箱执行）。",
+  "author": "HFusionHub Platform",
+  "license": "Apache-2.0",
+  "plugin_kind": "declarative",
+  "permissions": ["bid:draft:read"],
+  "sandbox": {
+    "network": {
+      "allowed_domains": [],
+      "blocked_domains": [],
+      "timeout_seconds": 30
+    },
+    "filesystem": {
+      "read_only_paths": [],
+      "blocked_paths": []
+    },
+    "resources": {
+      "cpu_seconds": 10,
+      "memory_mb": 256
+    },
+    "runner": {
+      "mode": "container",
+      "fail_closed": true
+    }
+  },
+  "tool_specs": [
+    {
+      "name": "bid_export_docx",
+      "description": "将标书分节草稿渲染为 .docx 投标文件，返回 base64 字节与文件元信息（filename/size_bytes/chars）。输入 sections 为 [{key,title,content}] 分节数组。",
+      "read_only": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": { "type": "string", "description": "分节标识" },
+                "title": { "type": "string", "description": "分节标题" },
+                "content": { "type": "string", "description": "分节正文" }
+              }
+            },
+            "description": "标书分节数组"
+          },
+          "title": { "type": "string", "description": "投标文件标题" },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "tender_number": { "type": "string" },
+              "project_title": { "type": "string" },
+              "bidder_name": { "type": "string" },
+              "deadline": { "type": "string" },
+              "budget": { "type": "string" }
+            },
+            "description": "封面元信息"
+          }
+        },
+        "required": ["sections"]
+      }
+    }
+  ]
+}

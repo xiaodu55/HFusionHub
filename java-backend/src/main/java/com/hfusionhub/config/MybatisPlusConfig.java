@@ -73,7 +73,10 @@ public class MybatisPlusConfig {
             "bid_subscription",
             // 标书模板（V67）——tenant_id 可空 = 平台级模板（P2 行业方案包的基础）；
             // 租户查询须同时可见平台模板 + 自有模板，由服务层过滤，不走租户行拦截器。
-            "bid_template");
+            "bid_template",
+            // 插件（V29+）——tenant_id 可空 = 平台内建插件（P2-3 bid_docx/bid_quote 上架基础）；
+            // 租户查询须同时可见平台内建插件 + 自有插件，由服务层过滤，不走租户行拦截器。
+            "plugin");
 
     /**
      * 分页 + 多租户插件

@@ -12,6 +12,7 @@ import com.hfusionhub.mapper.PluginDependencyMapper;
 import com.hfusionhub.mapper.PluginMapper;
 import com.hfusionhub.service.PluginService;
 import com.hfusionhub.storage.MinioArtifactStore;
+import com.hfusionhub.tenant.TenantContext;
 import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.net.URI;
@@ -236,7 +237,8 @@ public class PluginServiceImpl implements PluginService {
 
     @Override
     public Plugin getByPluginId(String pluginId) {
-        return pluginMapper.selectByPluginId(pluginId);
+        Plugin plugin = pluginMapper.selectByPluginId(pluginId);
+        return plugin != null && visibleToTenant(plugin) ? plugin : null;
     }
 
     @Override
@@ -245,6 +247,12 @@ public class PluginServiceImpl implements PluginService {
         if (status != null && !status.isBlank() && !"all".equals(status)) {
             wrapper.eq(Plugin::getStatus, status);
         }
+        // plugin 表不走租户行拦截器（平台内建插件 tenant_id 可空）；
+        // 租户查询须同时可见平台内建插件 + 自有插件。
+        if (TenantContext.getTenantId() != null) {
+            Long tenantId = TenantContext.getTenantId();
+            wrapper.and(w -> w.isNull(Plugin::getTenantId).or().eq(Plugin::getTenantId, tenantId));
+        }
         wrapper.orderByDesc(Plugin::getInstalledAt);
         Page<Plugin> pageResult = pluginMapper.selectPage(new Page<>(page, pageSize), wrapper);
         return PageResult.of(page, pageSize, pageResult.getTotal(), pageResult.getRecords());
@@ -252,7 +260,9 @@ public class PluginServiceImpl implements PluginService {
 
     @Override
     public List<Plugin> listEnabled() {
-        return pluginMapper.selectEnabledPlugins();
+        return pluginMapper.selectEnabledPlugins().stream()
+                .filter(this::visibleToTenant)
+                .collect(java.util.stream.Collectors.toList());
     }
 
     @Override
@@ -463,7 +473,9 @@ public class PluginServiceImpl implements PluginService {
 
     @Override
     public List<Map<String, Object>> getPluginToolSpecs() {
-        List<Plugin> enabled = pluginMapper.selectEnabledPlugins();
+        List<Plugin> enabled = pluginMapper.selectEnabledPlugins().stream()
+                .filter(this::visibleToTenant)
+                .collect(java.util.stream.Collectors.toList());
         List<Map<String, Object>> specs = new ArrayList<>();
         for (Plugin p : enabled) {
             if ("declarative".equals(p.getPluginKind()) && p.getToolSpecsJson() != null) {
@@ -576,7 +588,22 @@ public class PluginServiceImpl implements PluginService {
         if (plugin == null) {
             throw new NoSuchElementException("插件不存在: " + pluginId);
         }
+        if (!visibleToTenant(plugin)) {
+            throw new NoSuchElementException("插件不存在: " + pluginId);
+        }
         return plugin;
+    }
+
+    /**
+     * 插件租户可见性：平台内建插件（tenant_id 为 NULL）对所有租户可见；
+     * 租户自有插件仅对所属租户可见。系统作用域（管理后台）下全量可见。
+     */
+    private boolean visibleToTenant(Plugin plugin) {
+        if (TenantContext.isSystemScope() || TenantContext.getTenantId() == null) {
+            return true;
+        }
+        Long tenantId = TenantContext.getTenantId();
+        return plugin.getTenantId() == null || tenantId.equals(plugin.getTenantId());
     }
 
     private void writeAuditLog(

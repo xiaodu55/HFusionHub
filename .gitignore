@@ -114,3 +114,9 @@ deploy/runner-tls/
 
 # --- Data backups (scripts/backup-data.ps1 output) ---
 backup/
+
+# --- 平台内建插件签名私钥（绝不提交；scripts/plugin-provision.sh 首次运行时生成） ---
+deploy/plugin-signing/
+
+# --- 插件信任策略（仅含平台公钥，随部署环境生成） ---
+python-ai/plugins/trust/

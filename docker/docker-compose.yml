@@ -89,18 +89,25 @@ services:
       PLUGIN_RUNNER_TOKEN: ${PLUGIN_RUNNER_TOKEN:?PLUGIN_RUNNER_TOKEN must be set}
       PLUGIN_RUNNER_HOST: "0.0.0.0"
       PLUGIN_RUNNER_PORT: "9100"
-      DOCKER_HOST: ${DOCKER_HOST:-tcp://host.docker.internal:2376}
-      DOCKER_TLS_CERTDIR: "/certs"
+      # 默认连 compose 内的 dind sidecar；也可指向外部隔离引擎
+      # （如 staging-rehearsal.sh 的独立 dind：tcp://host.docker.internal:2376）
+      DOCKER_HOST: ${PLUGIN_RUNNER_DOCKER_HOST:-tcp://dind:2376}
       DOCKER_CERT_PATH: "/certs/client"
       DOCKER_TLS_VERIFY: "1"
     volumes:
-      - plugin-runner-certs:/certs:ro
+      # dind TLS 客户端证书（generate-runner-tls.sh --dind-layout 预生成，与 dind server 证书同 CA）
+      - ../deploy/runner-tls/dind-certs/client:/certs/client:ro
       - plugin-artifacts:/opt/plugin-artifacts
+    depends_on:
+      dind:
+        condition: service_started
     healthcheck:
+      # /health 仅在已连上隔离引擎时返回 2xx —— runner healthy 即「沙箱已解锁」
       test: ["CMD", "curl", "-f", "http://localhost:9100/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 15s
     restart: unless-stopped
     networks:
       - backend
@@ -117,6 +124,31 @@ services:
           memory: 512m
           cpus: "0.5"
           pids: 256
+
+  # dind sidecar —— dev 插件沙箱的隔离 Docker Engine（P2-3：bid_docx/bid_quote 容器插件的执行目标）。
+  # 证书由 scripts/generate-runner-tls.sh deploy/runner-tls --dind-layout 预生成：
+  #   server/ 本服务使用（entrypoint 检测到既有证书则跳过自签生成），client/ 给 plugin-runner。
+  # 与 staging-rehearsal.sh 的独立 dind（hfusionhub-rehearsal-dind）同占 127.0.0.1:2376，勿同时运行。
+  dind:
+    image: docker:27-dind
+    container_name: dind
+    privileged: true
+    ports:
+      - "127.0.0.1:2376:2376"
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+    volumes:
+      - ../deploy/runner-tls/dind-certs:/certs:ro
+      - dind-data:/var/lib/docker
+    restart: unless-stopped
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.0"
+          pids: 1024
 
   # etcd — Milvus 2.6 standalone 的元数据存储（2.6 起不再支持嵌入式 etcd）
   etcd:
@@ -270,8 +302,15 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       RAG_HYBRID_ENABLED: "true"
       LLM_ALLOW_MOCK: "false"
+      # 平台内建插件（P2-3 bid_docx/bid_quote）wheel 目录——启动时经 .sha256
+      # sidecar 校验加载进本地 registry（app/core/plugin/builtins.py）
+      PLUGIN_BUILTIN_WHEELS_DIR: /plugin-wheels
+      # 插件签名信任策略（scripts/plugin-provision.sh 注册的平台公钥）
+      HFUSIONHUB_PLUGIN_TRUST_DIR: /plugin-trust
     volumes:
       - python-data:/data
+      - ../python-ai/plugins/dist:/plugin-wheels:ro
+      - ../python-ai/plugins/trust:/plugin-trust:ro
     depends_on:
       java-backend:
         condition: service_healthy
@@ -329,7 +368,7 @@ networks:
 volumes:
   mysql-data:
   minio-data:
-  plugin-runner-certs:
+  dind-data:
   plugin-artifacts:
   uploads-data:
   python-data:

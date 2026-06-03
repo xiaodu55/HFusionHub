@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 #### Added
 - **P2-1 订阅数据模型**：Flyway `V69__bid_subscription.sql`（plan_code/plan_type tier|industry/max_projects/max_seats/char_quota/module_flags JSON 0/1 + status active|archived，平台目录）+ `V70__tenant_plan_binding.sql`（租户绑定，多套餐叠加授权）；`BidSubscriptionService.getCurrent` 聚合出当前档位与已绑定套餐，`tier` 对齐既有 `tenant.plan_tier` 驱动每日限额引擎
 - **P2-2 工作流 plan 模块开关**：`BidPlanGateService` 组合门禁 `module_enabled = tenant_plan_binding.module_flags（套餐授权）AND feature_flag（bid.module.{draft/check/docx/openapi} 运营开关）`；未授权模块抛 `PLAN_MODULE_DISABLED`，撰写/自检/开放 API 全链路生效；坐席门禁 = 有效 tier 绑定 maxSeats 最大值 vs `tenant_member` 在职成员数
+- **P2-3 平台内建插件上架**：Flyway `V73__bid_plugin_builtins.sql`（`plugin.tenant_id` 改可空 = 平台内建，种子注册 `bid_docx@1.0.0` / `bid_quote@1.0.0`，含 sandbox_config + tool_specs + container_image）+ 插件租户可见性服务层过滤（`plugin` 入 `TENANT_IGNORE_TABLES`，平台内建全租户可见 / 自有仅本租户 / 跨租户按不存在处理）；`python-ai/plugins/` 插件源码（bid_quote 复用 `bid_calc_scoring` 确定性评分）+ `build_wheel.py` 确定性 wheel 构建（`.sha256` sidecar）+ `sign_wheels.py` 平台 Ed25519 签名（`.sig` + 信任策略注册，加载器强制校验）+ `app/core/plugin/builtins.py` 启动加载；dev 沙箱解锁：compose `dind` sidecar（TLS 证书卷 + `dind-data` 持久化）+ runner `tcp://dind:2376` + python-ai `PLUGIN_BUILTIN_WHEELS_DIR`/`HFUSIONHUB_PLUGIN_TRUST_DIR` 接线（compose 与 `restart-modules.ps1` 双路径）；`scripts/plugin-provision.sh` 一键上架（构建→签名→镜像→dind 载入→`image_digest` 回填）+ `scripts/plugin-builtins-e2e.ps1` e2e 验收（17 项：docx/xlsx 真实渲染、报价/评分数学、digest fail-closed）；MCP 第三方工具路径核验（`mcp_client.call_tool` 独立于插件沙箱路径，不受本轮改动影响）
 - **P2-7 商业化核心**：三档计费（按项目 `bid_projects` / 按字符 `bid_draft_chars` / 按坐席 `tenant_member`）全走 V35 幂等账本，超额抛 `QUOTA_EXCEEDED`；**行业方案包** = 平台级 `bid_template` + 预置行业知识（只读授权）+ 专属评测报告，按 `tenant_plan_binding` 授权售卖；开放 API 新增 `POST /openapi/bid/check`（复用 App/AppApiKey key-auth：sha256(key_hash) → 发布 App → Redis 限流 → AppCallLog + ModelUsageRecord 结算）
 - **P2-4 行业方案包评测**：`evaluation/kb_bid_construction/`（蓉城市政道路提升改造 CJ-2026-0721，预算 8600 万）+ `evaluation/kb_bid_it/`（云谷智慧园区数据中心 YG-2026-0908，预算 5800 万）两套行业语料（KB_ID 202/203）+ 各 24 用例 `suite_bid_{industry}`；冻结 `bid_construction_baseline.json` / `bid_it_baseline.json`（四项领域指标全 1.0）；CI `eval-offline` 并行「构造门禁 + IT 门禁」（SHA-256 完整性 + 0.9 阈值 + fail-on-regression）作为行业方案售卖质量凭证
 - **P2-6 免费试用样例**：每行业包内置 3 份脱敏公开招标样例（`demo/bid/industry/{construction,it}/`，与评测语料同源）；`POST /demo/import-bid-industry`（admin，幂等）一键建库（KB category=tender）+ 导入 3 文档 + 建示例投标项目
@@ -20,9 +21,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Changed
 - `docs/ACCESS_MAP.md`：Java 接口 252→267（+8 套餐 +5 模板 +1 开放 API +1 demo）、前端路由 40→42（+套餐中心 +套餐管理）；Python 路由保持 70
+- `docs/PLUGIN_RUNNER_TLS.md` 重写（dev compose dind sidecar 默认解锁，宿主 daemon TLS 降级为备选）+ 新增 `docs/PLUGIN_BUILTINS.md`（内建插件 provision 管线 / 租户可见性 / MCP 第三方工具路径对比）；README 文档索引同步
 
 #### Testing
-- Java 全量 `mvn test`：**551 passed / 0 failures / 1 skipped**（本轮新增 `BidPlanGateServiceImplTest` 等，`BidDemoImportServiceImplTest` 扩展至行业导入用例）
+- Java 全量 `mvn test`：**554 passed / 0 failures / 1 skipped**（本轮新增 `BidPlanGateServiceImplTest` 等 + P2-3 `PluginServiceImplTenantVisibilityTest` 3 例，`BidDemoImportServiceImplTest` 扩展至行业导入用例）
+- Python 全量 `pytest -q tests`：**1382 collected 全过**（P2-3 新增 `test_plugin_builtins.py` 6 例；MCP client/server/auth 27 例通过，核验第三方工具路径不受插件改动影响）
+- e2e 验收：`scripts/plugin-builtins-e2e.ps1` **17 项全过**（bid_docx .docx / bid_quote .xlsx 真实沙箱渲染、报价/评分数学、错误与缺失 digest fail-closed）；`scripts/static-checks.py` 全绿（含 plugin 入 TENANT_IGNORE_TABLES 后的租户列完整性）
 - 前端：`npm run build` 成功 + vitest **45 passed**（新增 `api/__tests__/plan.spec.ts` 6 例）
 - 评测门禁：`scripts/eval_offline.py` 三个门禁全绿 —— 构造/IT 行业包（四项领域指标 1.0）+ bid 撰写/自检工作流（9 项指标 1.0），--fail-on-regression 无回归
 

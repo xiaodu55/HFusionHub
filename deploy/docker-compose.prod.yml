@@ -230,9 +230,17 @@ services:
       # internal service and must fail closed if it is unavailable.
       PLUGIN_RUNNER_URL: http://plugin-runner:9100
       PLUGIN_RUNNER_TOKEN: ${PLUGIN_RUNNER_TOKEN:?required}
+      # 平台内建插件（P2-3 bid_docx/bid_quote）wheel 目录：由
+      # scripts/plugin-provision.sh 构建并放置（wheel + .sha256 sidecar）。
+      # 目录缺失/为空时启动加载器按 best-effort 跳过，不影响其余服务。
+      PLUGIN_BUILTIN_WHEELS_DIR: /plugin-wheels
+      # 插件签名信任策略（provision 脚本注册的平台公钥；须与签名方一致）
+      HFUSIONHUB_PLUGIN_TRUST_DIR: /plugin-trust
     volumes:
       - python-data:/data
       - uploads-data:/app/uploads
+      - ./plugin-wheels:/plugin-wheels:ro
+      - ./plugin-trust:/plugin-trust:ro
     depends_on:
       java-backend:
         condition: service_healthy

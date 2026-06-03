@@ -189,6 +189,15 @@ async def startup_event() -> None:
     except Exception:
         pass  # MCP is best-effort on startup
 
+    # ── 平台内建插件（P2-3：bid_docx/bid_quote 容器插件）──
+    # wheel 由 scripts/plugin-provision.sh 构建到 PLUGIN_BUILTIN_WHEELS_DIR，
+    # 带 .sha256 sidecar 校验后加载进本地 registry，供容器沙箱执行。
+    try:
+        from app.core.plugin.builtins import load_builtin_wheels
+        load_builtin_wheels()
+    except Exception:
+        pass  # 平台内建插件加载尽力而为，不阻断启动
+
     # ── Model Gateway ─────────────────────────────────────────────────
     try:
         from app.core.llm.model_gateway import get_model_gateway

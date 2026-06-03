@@ -1,0 +1,93 @@
+{
+  "name": "bid_quote",
+  "version": "1.0.0",
+  "description": "投标报价表导出插件：把报价明细渲染为 .xlsx 报价表，内嵌评分点计算（复用 bid_calc_scoring 确定性逻辑），供报价表上架/下发（平台内建，容器沙箱执行）。",
+  "author": "HFusionHub Platform",
+  "license": "Apache-2.0",
+  "plugin_kind": "declarative",
+  "permissions": ["bid:quote:write"],
+  "sandbox": {
+    "network": {
+      "allowed_domains": [],
+      "blocked_domains": [],
+      "timeout_seconds": 30
+    },
+    "filesystem": {
+      "read_only_paths": [],
+      "blocked_paths": []
+    },
+    "resources": {
+      "cpu_seconds": 10,
+      "memory_mb": 256
+    },
+    "runner": {
+      "mode": "container",
+      "fail_closed": true
+    }
+  },
+  "tool_specs": [
+    {
+      "name": "bid_export_quote",
+      "description": "将投标报价明细渲染为 .xlsx 报价表，返回 base64 字节与文件元信息（filename/size_bytes/totals/lines/scoring）。输入 items 为 [{name,spec,unit,qty,unit_price,tax_rate}] 报价明细数组；可选 points/scores 内嵌评分点计算。",
+      "read_only": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string", "description": "品名/条目名" },
+                "spec": { "type": "string", "description": "规格型号" },
+                "unit": { "type": "string", "description": "单位" },
+                "qty": { "type": "number", "description": "数量" },
+                "unit_price": { "type": "number", "description": "单价（未税）" },
+                "tax_rate": { "type": "number", "description": "税率（0.06 = 6%）" }
+              },
+              "required": ["name", "qty", "unit_price"]
+            },
+            "description": "报价明细数组"
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "tender_number": { "type": "string" },
+              "project_title": { "type": "string" },
+              "bidder_name": { "type": "string" },
+              "deadline": { "type": "string" },
+              "currency": { "type": "string" }
+            },
+            "description": "报价元信息"
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "max_score": { "type": "number" },
+                "weight": { "type": "number" }
+              },
+              "required": ["name", "max_score"]
+            },
+            "description": "评分点（可选，内嵌评分计算）"
+          },
+          "scores": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "score": { "type": "number" }
+              },
+              "required": ["name", "score"]
+            },
+            "description": "实得分（可选）"
+          }
+        },
+        "required": ["items"]
+      }
+    }
+  ]
+}
