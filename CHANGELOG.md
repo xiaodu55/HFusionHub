@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第十四轮 · 招投标商业化 P2（2026-08-28）：计费套餐 + 行业方案售卖 + 开放 API
+
+> P0/P1 领域闭环之上，P2 完成商业化骨架：订阅数据模型（套餐目录 + 租户绑定）、工作流 plan 模块开关、三档计费坐席校验、行业方案包评测与免费试用样例、前端套餐中心/套餐管理/模板商城、开放 API 结算。全链路复用既有租户/配额/幂等账本/评测基座。
+
+#### Added
+- **P2-1 订阅数据模型**：Flyway `V69__bid_subscription.sql`（plan_code/plan_type tier|industry/max_projects/max_seats/char_quota/module_flags JSON 0/1 + status active|archived，平台目录）+ `V70__tenant_plan_binding.sql`（租户绑定，多套餐叠加授权）；`BidSubscriptionService.getCurrent` 聚合出当前档位与已绑定套餐，`tier` 对齐既有 `tenant.plan_tier` 驱动每日限额引擎
+- **P2-2 工作流 plan 模块开关**：`BidPlanGateService` 组合门禁 `module_enabled = tenant_plan_binding.module_flags（套餐授权）AND feature_flag（bid.module.{draft/check/docx/openapi} 运营开关）`；未授权模块抛 `PLAN_MODULE_DISABLED`，撰写/自检/开放 API 全链路生效；坐席门禁 = 有效 tier 绑定 maxSeats 最大值 vs `tenant_member` 在职成员数
+- **P2-7 商业化核心**：三档计费（按项目 `bid_projects` / 按字符 `bid_draft_chars` / 按坐席 `tenant_member`）全走 V35 幂等账本，超额抛 `QUOTA_EXCEEDED`；**行业方案包** = 平台级 `bid_template` + 预置行业知识（只读授权）+ 专属评测报告，按 `tenant_plan_binding` 授权售卖；开放 API 新增 `POST /openapi/bid/check`（复用 App/AppApiKey key-auth：sha256(key_hash) → 发布 App → Redis 限流 → AppCallLog + ModelUsageRecord 结算）
+- **P2-4 行业方案包评测**：`evaluation/kb_bid_construction/`（蓉城市政道路提升改造 CJ-2026-0721，预算 8600 万）+ `evaluation/kb_bid_it/`（云谷智慧园区数据中心 YG-2026-0908，预算 5800 万）两套行业语料（KB_ID 202/203）+ 各 24 用例 `suite_bid_{industry}`；冻结 `bid_construction_baseline.json` / `bid_it_baseline.json`（四项领域指标全 1.0）；CI `eval-offline` 并行「构造门禁 + IT 门禁」（SHA-256 完整性 + 0.9 阈值 + fail-on-regression）作为行业方案售卖质量凭证
+- **P2-6 免费试用样例**：每行业包内置 3 份脱敏公开招标样例（`demo/bid/industry/{construction,it}/`，与评测语料同源）；`POST /demo/import-bid-industry`（admin，幂等）一键建库（KB category=tender）+ 导入 3 文档 + 建示例投标项目
+- **P2-5 前端**：`/bid/billing` 套餐中心（当前档位/模块生效徽标/已绑定套餐解绑/今日用量配额条/套餐目录与模板商城双 tab，套餐卡含绑定 + admin 免费试用样例导入）+ `/admin/plans` 套餐管理（平台目录 CRUD + 模块开关 + 归档 ConfirmDialog）；`api/plan.ts`（parseModuleFlags/formatCents/listPlatformPlans/getPlanCurrent/bind/unbind/admin CRUD/template 市场）+ `api/demo.ts` 新增 `importBidIndustrySamples`
+
+#### Changed
+- `docs/ACCESS_MAP.md`：Java 接口 252→267（+8 套餐 +5 模板 +1 开放 API +1 demo）、前端路由 40→42（+套餐中心 +套餐管理）；Python 路由保持 70
+
+#### Testing
+- Java 全量 `mvn test`：**551 passed / 0 failures / 1 skipped**（本轮新增 `BidPlanGateServiceImplTest` 等，`BidDemoImportServiceImplTest` 扩展至行业导入用例）
+- 前端：`npm run build` 成功 + vitest **45 passed**（新增 `api/__tests__/plan.spec.ts` 6 例）
+- 评测门禁：`scripts/eval_offline.py` 三个门禁全绿 —— 构造/IT 行业包（四项领域指标 1.0）+ bid 撰写/自检工作流（9 项指标 1.0），--fail-on-regression 无回归
+
 ### 第十三轮 · 招投标垂直化 P1（2026-08-25）：标书撰写 + 废标自检全链路
 
 > P0 解读闭环之上，P1 打通「撰写 → 逐节审批 → 自检 → critical 确认」闭环。领域层全部复用既有多租户 / Agent 运行时 / RAG / 评测 / 配额基座，新增撰写/自检工作流、分节流式 SSE、强制人工审批、确定性评测门禁。
