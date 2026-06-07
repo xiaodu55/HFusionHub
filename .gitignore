@@ -120,3 +120,6 @@ deploy/plugin-signing/
 
 # --- 插件信任策略（仅含平台公钥，随部署环境生成） ---
 python-ai/plugins/trust/
+
+# --- ZCode 会话产物 ---
+.zcode/
