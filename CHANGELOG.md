@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第十五轮 · P2/P3 批次（2026-08-28）：可维护性/测试 + 文档/运维（R15-20~30）
+
+#### Maintainability / Testing（R15-20~24）
+- **R15-20 react.py 保守抽取**：三份复制的 sources 去重实现收敛为 `_dedupe_sources`（行为一致）；三管线大重构按方案标注渐进，不做一次性重写
+- **R15-21 API 层契约测试**：新增 `tests/test_api_contract.py` 9 例覆盖此前零测试的 bid/rag 路由（422 校验、错误包装、成功回传）；**抓到并修复真实不一致**——bid 三个端点失败分支响应缺 `project_id`（成功分支有），已补齐
+- **R15-22 真实链路集成测试**：新增 `TenantInterceptorIsolationIT`（Testcontainers mysql:8.0，手动生命周期支持外部 MySQL）——真实 MySQL + Flyway 全链 75 迁移 + 生产租户拦截器装配，验证「租户 A 数据对 B 不可见 / 系统作用域跨租户可见」；本地经 mysql8 外部库验证通过（Windows 上 Testcontainers 与新 Docker Desktop 管道探测不兼容，CI Linux 正常）；Testcontainers 依赖 1.19.3→1.20.6
+- **R15-23 Java 收敛**：5 处复制粘贴的内部令牌常量时间比较收敛为 `common/utils/InternalTokenGuard`（行为不变，测试无需改）；`allow-circular-references` 关闭验证通过（Spring 上下文可正常启动）；`computeManifestHash` 从歧义的 `key:value` 拼接改为键递归排序的规范化 JSON（值含 ":"/"," 不再碰撞，嵌套 Map 顺序稳定）
+- **R15-24 God classes**：ConversationServiceImpl/AgentTaskServiceImpl 等按「随触碰随拆」原则处理（本轮 AgentTaskServiceImpl 批量化、BidWriteServiceImpl 事务拆分均已缩小职责）；整体拆分列为持续项
+
+#### Docs / Ops（R15-25~30）
+- **R15-25 文档对账**：README badge/正文/ROADMAP 测试计数（445/1220+/33→554/1380+/45）、database.md 与 README 的 Flyway V57→V74、CI_GATES 分支保护自相矛盾与 eval-nightly 描述、ARCHITECTURE flag 表（2026-08-19 过时值）、ACCESS_MAP/TODO runner 状态、CHANGELOG 三重 `[Unreleased]` 合并、P1-3 编号缺位说明
+- **R15-26 生产安全脚本**：新增 `scripts/rotate-secrets.sh`（全套密钥生成 + 两侧同步清单 + 重启顺序 + 弱默认值 `--check` 扫描）与 `deploy/nginx-https.conf.example`（Let's Encrypt 全流程 + SSE 透传 + HSTS + 内部端口不对外清单）；PRODUCTION_OPS §0 与 TODO P0 项旁注接上脚本
+- **R15-27 eval-nightly 隧道**：ROADMAP 补固定子域名/Windows 服务注册落地指引
+- **R15-28 P2-8 最小落地**：新增 `app/core/llm/judge_gate.py`——`MODEL_GATEWAY_NO_EXTERNAL_JUDGE=true`（私有部署）时 LLM-as-judge 一律强制走 `MODEL_GATEWAY_INTERNAL_JUDGE_MODEL` 内网模型，未配置则 fail-closed 拒绝评测；接入 answer_quality_evaluator 两条 LLM 评测策略；+4 例单测
+- **R15-29 前端遗留**：chat 流式断线自动重试（无内容 + 网络错误时同一 requestId 幂等重发一次）；scrollToBottom 100ms sleep 改 requestAnimationFrame
+- **R15-30 staging 真机验证**：TODO 补执行清单（rehearsal + 两套 e2e 脚本），待 staging 机器执行
+
+#### Testing
+- Java：全量过 + `TenantInterceptorIsolationIT` 2 例（真实 MySQL 全链）；Python：全量过 + API 契约 9 例 + judge_gate 4 例；前端 build + vitest 45
+
 ### 第十五轮 · P1 性能批次（2026-08-28）：检索并行化 + 索引补齐 + 连接治理（R15-10~19）
 
 > P0 缺陷批次之上的 P1 性能批次，9 项全部落地。方案与验收标准见 [docs/OPTIMIZATION_PLAN.md](docs/OPTIMIZATION_PLAN.md) 第十五轮章节。
@@ -78,6 +98,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 > P0 解读闭环之上，P1 打通「撰写 → 逐节审批 → 自检 → critical 确认」闭环。领域层全部复用既有多租户 / Agent 运行时 / RAG / 评测 / 配额基座，新增撰写/自检工作流、分节流式 SSE、强制人工审批、确定性评测门禁。
 
 #### Added
+- *（编号说明：第十三轮规划含 P1-3，实施时未单独立项，编号保留空缺；相关内容见 P1-4 评测深化。）*
 - **P1-1 数据模型扩展**：Flyway V66–V68 新增 `bid_draft`（分节长文 + 状态 drafting/approved/rejected + version 幂等重写 + approved_by 审批人）、`bid_template`（tenant_id 可空 = 平台模板）、`bid_check_report`（严重度 critical/warning/info + evidence + suggested_fix）；`extractor.py` 支持多文件合并（主招标文件 + 澄清/补遗，来源标签可追溯）与 XLSX 评分表解析（openpyxl 可选依赖，缺失时降级）
 - **P1-2 撰写 + 自检多智能体**：`write_workflow.py`（商务/技术/资质/格式分节生成，每节以 `bid_requirement` 为输入、三 KB 检索并产出 `[N]` 证据引用 → chunk_id）+ `check_workflow.py`（确定性规则：保证金/截止开标 critical、废标条款 warning、评分点 info + LLM 语义复核）；SSE 新增 `bid_section_started/completed` 事件（`POST /api/bid/write/stream` 流式逐节生成）；Java `AiClient.bidWriteStream` + `BidWriteServiceImpl.writeStream`（请求线程捕获租户上下文，Reactor 回调经 `TenantContext.runAs` 落库）
 - **P1-4 评测深化**：新增免 LLM 的确定性工作流门禁 `app/core/bid/eval_gate.py`（9 项指标：requirement_coverage / section_routing_accuracy / section_completeness / citation_faithfulness / bond_recall / deadline_recall / disqualification_recall / substantive_recall / false_positive_free，阈值全 1.0）+ `scripts/eval_bid_workflow.py` CLI 出 JSON 报告；CI `eval-offline` job 新增「招投标撰写/自检工作流门禁」（`bid_*` 改动必须过此门禁）
@@ -216,8 +237,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `DEEPSEEK_API_KEY` 已配置真实 key（2026-08-19 配置后聊天默认 DeepSeek 优先，流式实测通过）
 - Plugin Runner 在本机仍 unhealthy（Docker daemon TLS 需主机级配置，见 `docs/PLUGIN_RUNNER_TLS.md`）
 
-## [Unreleased]
-
 ### 第六轮优化（2026-08-17）：应用化发布 + 知识摄入扩展 + 治理收口
 
 #### Added
@@ -238,8 +257,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Fixed
 - Java 测试环境与本地 `.env`（VECTOR_STORE_MODE=cluster）冲突导致的 4 个环境相关失败已定位为环境差异（CI 无 .env 时通过），非代码回归
-
-## [Unreleased]
 
 ### 第五轮优化（2026-08-16）：发布就绪 + Milvus 数据库化 + 仓库清理
 

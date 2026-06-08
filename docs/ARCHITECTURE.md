@@ -201,15 +201,15 @@ P6-P10 features are gated by environment variables, not code paths. This means:
 
 ## Feature Flag Architecture
 
-Advanced features are gated via environment variables in Python `.env`. **Frozen statuses as of 2026-08-19**:
+Advanced features are gated via environment variables in Python `.env`. **Statuses updated 2026-08-28**（第十一轮 V58/V59 起 reranker 与 multi-agent 已默认解锁）:
 
 ```
 RAG_HYBRID_ENABLED=true          # P5 Stable: Vector + BM25 hybrid
 RAG_GRAPH_ENABLED=false          # P7 Beta: Scoped GraphRAG
-RAG_RERANKER_MODE=disabled       # P6 Beta: Second-stage reranking
+RAG_RERANKER_MODE=lexical        # P6 Beta: Second-stage reranking (lexical 默认；V58 起 cross_encoder 冻结不投入)
 RAG_MULTIMODAL_ENABLED=false     # P8 Experimental: OCR/images
 RAG_AGENT_WORKFLOW_ENABLED=true  # P9 Beta: Bounded single-agent (当前已启用)
-RAG_MULTI_AGENT_ENABLED=false    # P10 Experimental: Multi-agent
+RAG_MULTI_AGENT_ENABLED=true     # P10 Beta: Multi-agent (V59 起默认开启)
 ```
 
 See [ENVIRONMENT.md](ENVIRONMENT.md#feature-flags-python-ai) for details on each flag's dependencies and limitations.

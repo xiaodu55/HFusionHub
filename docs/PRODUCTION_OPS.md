@@ -13,18 +13,18 @@
 
 ### 🔐 安全配置（必需项，上线前必须完成）
 
-- [ ] **修改所有默认密码** — `docker/.env` 中的 `ADMIN_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`REDIS_PASSWORD`、`MINIO_ROOT_PASSWORD` 全部替换为强随机值（`scripts/init-env.ps1` 自动生成）
+- [ ] **修改所有默认密码** — 运行 `bash scripts/rotate-secrets.sh` 生成全部密钥并按指引同步两侧 `.env`（第十五轮 R15-26 落地脚本；`--check` 可扫描弱默认值与缺失的 `MODEL_CREDENTIAL_ENCRYPTION_KEY`）
 - [ ] **配置真实 DeepSeek API Key** — `python-ai/.env` → `DEEPSEEK_API_KEY`（当前已配置真实 key，聊天默认 DeepSeek 优先，Ollama 降级为 embedding/离线）
 - [ ] **更新内部通信令牌** — `docker/.env` → `PYTHON_AI_INTERNAL_TOKEN`、`PLUGIN_RUNNER_SECRET_KEY`（32 字符随机字符串，两端一致）
-- [ ] **启用 HTTPS** — 配置 Nginx 反向代理（示例：`deploy/nginx.conf`）、申请 SSL 证书（Let's Encrypt 推荐）、强制 HTTP → HTTPS 重定向
-- [ ] **CORS 白名单** — `docker/.env` → `CORS_ALLOWED_ORIGINS=https://your-domain.com`，移除 `*` 通配符（开发/穿透默认放行，生产收紧）
+- [ ] **启用 HTTPS** — 参考落地样例 `deploy/nginx-https.conf.example`（第十五轮 R15-26：Let's Encrypt certbot 全流程 + SSE 透传 + HSTS + 管理端口/runner 端口不对外清单）
+- [ ] **CORS 白名单** — `app.cors.allow-any-origin=false`（第十五轮起代码默认值即为 false）并配置 `app.cors.allowed-origins=https://your-domain.com`；开发/内网穿透需显式开启 any-origin（启动日志会大声告警）
 - [ ] **Sa-Token JWT 密钥** — `docker/.env` → `SA_TOKEN_JWT_SECRET_KEY`（建议 64 字符）
 - [ ] **关闭或限制 Swagger UI** — 生产 `springdoc.swagger-ui.enabled=false` 或 IP 白名单（详见 [SWAGGER_UI.md](SWAGGER_UI.md)）
 
 ### 🗄️ 数据库与持久化
 
-- [ ] **Flyway 迁移验证** — 确保 V1–V57 全部成功应用；检查 `flyway_schema_history` 表状态
-- [ ] **备份策略** — MySQL 每日备份（推荐 3AM cron + mysqldump）、Milvus 数据卷定期快照、MinIO 文件桶备份（mc mirror）
+- [ ] **Flyway 迁移验证** — 确保 V1–V74 全部成功应用；检查 `flyway_schema_history` 表状态
+- [ ] **备份策略** — 脚本已就绪：`scripts/backup-data.ps1`（MySQL mysqldump）+ `scripts/backup_milvus.sh`（Milvus 卷快照）；cron 示例 `0 3 * * * cd /opt/hfusionhub && ./scripts/backup_milvus.sh /backups/milvus`；恢复演练见下文「备份恢复演练」
 - [ ] **Redis 持久化** — AOF 已启用（`appendonly yes`）；RDB 每小时备份（`save 3600 1`）
 
 ### 🚀 性能与扩展性

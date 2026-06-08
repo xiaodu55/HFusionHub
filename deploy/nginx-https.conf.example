@@ -1,0 +1,70 @@
+# =============================================================================
+# nginx-https.conf.example — 生产 HTTPS 反向代理样例（R15-26）
+#
+# 用途：把 HFusionHub 前端/Java/Python 收敛到 443 单入口，TLS 由 Let's
+# Encrypt（certbot）签发。这是 TODO.md P0-2 上线阻断项的落地样例。
+#
+# 前置：
+#   DNS A 记录指向本机；80/443 可达；nginx 与 certbot 已安装。
+# 步骤：
+#   1) 先用 HTTP-only 配置启动 nginx（把 443 server 块注释掉）
+#   2) certbot certonly --webroot -w /var/www/certbot -d your-domain.com
+#   3) 启用 443 块并 nginx -s reload
+#   4) 续期：certbot renew --deploy-hook "nginx -s reload"（systemd timer）
+# =============================================================================
+
+# ── HTTP：仅用于 ACME 挑战 + 跳转 HTTPS ────────────────────────────────────
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ── HTTPS 主入口 ───────────────────────────────────────────────────────────
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name your-domain.com;
+
+    ssl_certificate     /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    # 安全响应头
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+
+    # 上传体积与 Java multipart（20MB 文件 + 开销）对齐
+    client_max_body_size 60m;
+
+    # 前端（静态资源）
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # Java 后端（含 SSE：关闭缓冲）
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;          # SSE 流式透传
+        proxy_read_timeout 600s;      # 撰写/解读长事务
+    }
+
+    # ── 明确不对外发布 ─────────────────────────────────────────────────
+    # :9092 actuator 管理端口 / :9100 plugin-runner / :9000 python-ai
+    # 只在内部网络可达；如需 Grafana（:9090 走 monitoring 栈）请另加
+    # basic-auth 或 VPN 限制，不要裸露。
+}

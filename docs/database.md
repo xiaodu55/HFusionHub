@@ -4,9 +4,9 @@
 
 ## 概述
 
-数据库 `hfusionhub` 由 Flyway 管理，迁移脚本位于 `java-backend/src/main/resources/db/migration/`，当前已应用到 **V57**。
+数据库 `hfusionhub` 由 Flyway 管理，迁移脚本位于 `java-backend/src/main/resources/db/migration/`，当前已应用到 **V74**。
 
-## 迁移历史（V1–V57）
+## 迁移历史（V1–V74）
 
 | 版本 | 文件 | 说明 |
 |------|------|------|

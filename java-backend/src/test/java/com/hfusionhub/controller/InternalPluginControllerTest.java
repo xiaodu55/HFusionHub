@@ -36,6 +36,13 @@ class InternalPluginControllerTest {
         pluginAuditLogMapper = mock(PluginAuditLogMapper.class);
         controller = new InternalPluginController(pluginService, pluginAuditLogMapper);
         ReflectionTestUtils.setField(controller, "expectedToken", VALID_TOKEN);
+        // R15-17：审计去重改用 LambdaQueryWrapper（IN 查询），纯 mock 环境
+        // 需手动注册实体的 TableInfo 元数据
+        com.baomidou.mybatisplus.core.MybatisConfiguration configuration =
+                new com.baomidou.mybatisplus.core.MybatisConfiguration();
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(configuration, ""),
+                com.hfusionhub.entity.PluginAuditLog.class);
     }
 
     @AfterEach
@@ -211,10 +218,10 @@ class InternalPluginControllerTest {
 
     @Test
     void auditLogsSkipsDuplicateEventId() {
-        // First entry with eventId "evt-1" — should be inserted
+        // R15-17：去重改批量 IN 查询——mock selectList 返回已存在的 evt-1 行
         var existingLog = new com.hfusionhub.entity.PluginAuditLog();
         existingLog.setEventId("evt-1");
-        when(pluginAuditLogMapper.selectByEventId("evt-1")).thenReturn(existingLog);
+        when(pluginAuditLogMapper.selectList(any())).thenReturn(List.of(existingLog));
 
         List<Map<String, Object>> entries =
                 List.of(Map.of("pluginName", "web_search", "action", "install", "eventId", "evt-1"));
@@ -229,7 +236,8 @@ class InternalPluginControllerTest {
 
     @Test
     void auditLogsInsertsNewEventId() {
-        when(pluginAuditLogMapper.selectByEventId("evt-new")).thenReturn(null);
+        // R15-17：批量去重查询返回空 = 无已存在事件
+        when(pluginAuditLogMapper.selectList(any())).thenReturn(List.of());
 
         List<Map<String, Object>> entries =
                 List.of(Map.of("pluginName", "web_search", "action", "install", "eventId", "evt-new"));

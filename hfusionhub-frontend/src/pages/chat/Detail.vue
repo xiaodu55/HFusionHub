@@ -176,21 +176,41 @@ const handleSend = async () => {
     await scrollToBottom()
 
     // 3. 使用 fetch API 处理流式响应
-    const response = await fetch('/api/conversation/message/stream', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'satoken': userStore.token || '',
-      },
-      body: JSON.stringify({
-        conversationId: Number(route.params.id),
-        content,
-        requestId,
-        // KB 会话启用写能力：模型可见 write_note（写工具），调用前会请求人工审批
-        capabilityProfile: conversation.value?.knowledgeBaseId ? 'approval_write' : undefined,
-      }),
-      signal: abortController.signal,
-    })
+    // R15-29：断线自动重试——尚未收到任何内容且错误是网络类（fetch 在
+    // 连接建立/传输中断开抛 TypeError）时，用同一 requestId 重发（后端
+    // 按 requestId 幂等，不会产生重复消息）；已有内容时保持既有
+    // 「回复中断，请重试」语义，避免部分内容重复拼接。
+    let response: Response | null = null
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        response = await fetch('/api/conversation/message/stream', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'satoken': userStore.token || '',
+          },
+          body: JSON.stringify({
+            conversationId: Number(route.params.id),
+            content,
+            requestId,
+            // KB 会话启用写能力：模型可见 write_note（写工具），调用前会请求人工审批
+            capabilityProfile: conversation.value?.knowledgeBaseId ? 'approval_write' : undefined,
+          }),
+          signal: abortController.signal,
+        })
+        break
+      } catch (err: any) {
+        const isNetworkError = err instanceof TypeError || err?.name === 'TypeError'
+        if (isNetworkError && attempt < 1 && !abortController.signal.aborted) {
+          await new Promise(r => setTimeout(r, 800))
+          continue
+        }
+        throw err
+      }
+    }
+    if (!response) {
+      throw new Error('Stream request failed')
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)
@@ -353,7 +373,9 @@ const handleSend = async () => {
 const scrollToBottom = async () => {
   await nextTick()
   await nextTick()
-  await new Promise(resolve => setTimeout(resolve, 100))
+  // R15-29：用 rAF 等待下一帧渲染完成，替代固定 100ms sleep——
+  // 帧率正常时更快、渲染被节流（后台标签页）时也不会提前滚动
+  await new Promise(resolve => requestAnimationFrame(() => resolve(null)))
   if (messagesContainer.value) {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
   }

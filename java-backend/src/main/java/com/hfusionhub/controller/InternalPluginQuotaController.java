@@ -2,6 +2,7 @@ package com.hfusionhub.controller;
 
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.result.R;
+import com.hfusionhub.common.utils.InternalTokenGuard;
 import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.quota.UsageMeter;
@@ -39,7 +40,7 @@ public class InternalPluginQuotaController {
 
     @PostMapping("/quota")
     public R<Map<String, Object>> transition(@RequestBody Map<String, Object> body, HttpServletRequest request) {
-        if (!constantTimeEquals(expectedToken, request.getHeader("X-Internal-Token"))) {
+        if (!InternalTokenGuard.isAuthorized(expectedToken, request.getHeader("X-Internal-Token"))) {
             return R.fail(403, "Forbidden: invalid or missing X-Internal-Token");
         }
 
@@ -115,26 +116,4 @@ public class InternalPluginQuotaController {
         return value.isEmpty() ? null : value;
     }
 
-    private static boolean constantTimeEquals(String expected, String provided) {
-        if (expected == null || expected.isEmpty() || provided == null) {
-            return false;
-        }
-        byte[] a = expected.getBytes(StandardCharsets.UTF_8);
-        byte[] b = provided.getBytes(StandardCharsets.UTF_8);
-        if (a.length != b.length) {
-            int diff = 0;
-            for (byte ignored : a) {
-                diff |= ignored;
-            }
-            for (byte ignored : b) {
-                diff |= ignored;
-            }
-            return false;
-        }
-        int diff = 0;
-        for (int i = 0; i < a.length; i++) {
-            diff |= a[i] ^ b[i];
-        }
-        return diff == 0;
-    }
 }

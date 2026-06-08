@@ -164,34 +164,30 @@
             <artifactId>reactor-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Testcontainers（R15-22 真实链路集成测试）：全局 test 依赖，
+             保证 TenantInterceptorIsolationIT 在默认 profile 也能编译；
+             无 Docker 环境时测试内部 assume 跳过 -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>1.20.6</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mysql</artifactId>
+            <version>1.20.6</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>1.20.6</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
-    <profiles>
-        <!-- Optional: run integration tests against real MySQL + Redis via Testcontainers -->
-        <profile>
-            <id>itest</id>
-            <dependencies>
-                <dependency>
-                    <groupId>org.testcontainers</groupId>
-                    <artifactId>testcontainers</artifactId>
-                    <version>1.19.3</version>
-                    <scope>test</scope>
-                </dependency>
-                <dependency>
-                    <groupId>org.testcontainers</groupId>
-                    <artifactId>mysql</artifactId>
-                    <version>1.19.3</version>
-                    <scope>test</scope>
-                </dependency>
-                <dependency>
-                    <groupId>org.testcontainers</groupId>
-                    <artifactId>junit-jupiter</artifactId>
-                    <version>1.19.3</version>
-                    <scope>test</scope>
-                </dependency>
-            </dependencies>
-        </profile>
-    </profiles>
+
 
     <build>
         <plugins>

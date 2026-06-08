@@ -479,7 +479,9 @@ class LLMEvaluationStrategy(BaseEvaluationStrategy):
         Args:
             model: LLM 模型名称
         """
-        self.model = model
+        # P2-8/R15-28：敏感部署模式下 judge 强制内网模型（见 judge_gate）
+        from ..llm.judge_gate import resolve_judge_model
+        self.model = resolve_judge_model(model)
 
     def get_strategy_type(self) -> EvaluationStrategyType:
         return EvaluationStrategyType.LLM_BASED

@@ -284,7 +284,7 @@
 | R15-18 | milvus 16384 行静默上限；document.content LONGTEXT 随列表全量拉取；插件审计 flush 逐条 POST | `milvus_cluster.py:412-481`、`V1__initial_schema.sql:63`、`plugin/audit.py:301-307` | queryIterator 分页 + `num_entities`；列表列裁剪或 1:1 详情表；flush 批量化 |
 | R15-19 | 声明式插件端点 SSRF：拦了 localhost 但未拦私网/link-local 段与 DNS 解析到内网的域名 | `PluginServiceImpl.java:535-550` | 安装时解析 DNS 并拒绝保留网段 |
 
-## R15-P2 可维护性 / 测试（规划）
+## R15-P2 可维护性 / 测试（✅ 已完成 2026-08-28；R15-24 为持续项）
 
 | 编号 | 问题 | 证据 | 方案 |
 |---|---|---|---|
@@ -294,7 +294,7 @@
 | R15-23 | 内部 token guard 复制粘贴 6 份；`allow-circular-references: true` 掩盖循环依赖；manifest hash 拼接歧义 | 6 个 Internal*Controller、`application.yml:8`、`PluginServiceImpl.java:628-644` | 收敛为 servlet filter；解循环；规范化 JSON 重算 |
 | R15-24 | God classes：ConversationServiceImpl 1647 / AgentTaskServiceImpl 1412 / VectorizationServiceImpl 1222 | java-backend service/impl | 按职责拆分（渐进，随触碰随拆） |
 
-## R15-P3 文档 / 运维（规划，含生产安全清单）
+## R15-P3 文档 / 运维（✅ 已完成 2026-08-28；R15-28 以最小落地实现，R15-27/30 已文档化待真机执行）
 
 | 编号 | 问题 | 证据 | 方案 |
 |---|---|---|---|

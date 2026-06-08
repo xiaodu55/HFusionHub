@@ -635,6 +635,23 @@ class ReactAgent(Agent):
             return match.group(1).strip()
         return None
 
+    @staticmethod
+    def _dedupe_sources(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """按 chunk_id（或 document_id:excerpt 回退键）去重 sources。
+
+        R15-20：run / run_stream / _run_stream_react 三条管线此前各有一份
+        复制粘贴的相同实现，收敛于此（行为完全一致：首见优先）。
+        """
+        unique: Dict[str, Dict[str, Any]] = {}
+        for source in sources:
+            source_key = (
+                source.get("chunk_id")
+                or f"{source.get('document_id')}:{source.get('excerpt', '')[:80]}"
+            )
+            if source_key not in unique:
+                unique[source_key] = source
+        return list(unique.values())
+
     def _public_answer_or_fallback(self, text: Optional[str]) -> str:
         """Return user-facing answer text without exposing ReAct internals."""
         if not text or not text.strip():
@@ -992,12 +1009,7 @@ class ReactAgent(Agent):
             final_answer = self._public_answer_or_fallback(assistant_text)
 
         # Deduplicate sources by chunk_id.
-        unique_sources: Dict[str, Dict[str, Any]] = {}
-        for source in sources:
-            source_key = source.get("chunk_id") or f"{source.get('document_id')}:{source.get('excerpt', '')[:80]}"
-            if source_key not in unique_sources:
-                unique_sources[source_key] = source
-        deduped_sources = list(unique_sources.values())
+        deduped_sources = self._dedupe_sources(sources)
         self._last_sources = deduped_sources
 
         # ── Groundedness check ──
@@ -1617,12 +1629,7 @@ class ReactAgent(Agent):
             yield final_answer
 
             # Deduplicate sources
-            unique_sources: Dict[str, Dict[str, Any]] = {}
-            for source in sources:
-                source_key = source.get("chunk_id") or f"{source.get('document_id')}:{source.get('excerpt', '')[:80]}"
-                if source_key not in unique_sources:
-                    unique_sources[source_key] = source
-            deduped_sources = list(unique_sources.values())
+            deduped_sources = self._dedupe_sources(sources)
             self._last_sources = deduped_sources
 
             if deduped_sources:

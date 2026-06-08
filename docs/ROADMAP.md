@@ -13,7 +13,7 @@
 - **Notifications**: System notice table + read tracking (V9)
 - **Production**: Docker Compose prod (MySQL/Redis/MinIO/Milvus/etcd/Attu/Java/Python/Plugin Runner), Helm chart, GHCR 镜像发布流水线（`v*` tag 自动构建推送）
 - **Release**: 版本 1.0.0；`scripts/setup.ps1/.sh` 一键启动 + `init-env` 自动生成随机密钥；演示数据一键导入；Setup 引导清单
-- **Tests**: Python 1220+ ✅ | Java 445 ✅ | Frontend 33 ✅
+- **Tests**: Python 1380+ ✅ | Java 554 ✅ | Frontend 45 ✅
 - **Security**: SECURITY.md / CODE_OF_CONDUCT / NOTICE / dependabot / gitleaks / ruff+pip-audit CI 门禁
 - **Frontend**: P0-P4 completed — dashboard cleanup, RAG trend chart, notification stub, SetupChecklist, 能力开关设置页
 
@@ -94,7 +94,7 @@
 
 - [ ] **逐功能后续优化方案** — [docs/OPTIMIZATION_PLAN.md](OPTIMIZATION_PLAN.md)：三大模块 P0/P1/P2 优化清单（含上传 1MB 限制 bug、AiClient 超时治理、生产 CORS/Actuator 收口、Python 批量 embedding、WorkflowEngine 并行 bug 等，详见文档）
 - [x] **Plugin Runner TLS** — 主机级 Docker daemon TLS 配置 + `scripts/generate-runner-tls.sh`（见 `docs/PLUGIN_RUNNER_TLS.md`）
-- [x] **eval-nightly 启用** — GitHub `vars.EVAL_BASE_URL` + `secrets.EVAL_INTERNAL_TOKEN` 已配置；⚠️ 免费版 cpolar 隧道每次重启随机子域名（需 `scripts/get-tunnel-url.ps1` 刷新 URL），且隧道须在 nightly 定时（02:00 UTC）时在线——建议升级固定子域名或把隧道注册为 Windows 服务
+- [x] **eval-nightly 启用** — GitHub `vars.EVAL_BASE_URL` + `secrets.EVAL_INTERNAL_TOKEN` 已配置；⚠️ 免费版 cpolar 隧道每次重启随机子域名（需 `scripts/get-tunnel-url.ps1` 刷新 URL），且隧道须在 nightly 定时（02:00 UTC）时在线——落地指引（R15-27）：cpolar 面板升级保留隧道获得固定子域名，或注册为 Windows 服务 `sc create cpolar binPath= "...cpolar.exe http 9000" start= auto`；固定的 EVAL_BASE_URL 填入 GitHub Actions Variables 后 nightly 不再依赖人工在线
 - [x] **多 Agent 协作解锁** — `agent.multi_agent.enabled` 默认开启（Flyway V59），前端「能力开关」页解冻为实验态，「复杂任务」预设同步开启；收益验证见 nightly 评测
 - [x] **租户配额计费展示** — `/api/quota/summary`（QuotaController + QuotaSummaryDTO）→ /cost 页配额面板（用量条 70%/90% 分级告警）
 

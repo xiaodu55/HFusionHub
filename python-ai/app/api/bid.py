@@ -117,7 +117,7 @@ async def bid_interpret(request: BidInterpretRequest):
         )
     except Exception as exc:  # 工作流整体失败 → 服务不可用
         logger.exception("bid interpret failed for project=%s", request.project_id)
-        return {"status": "error", "message": f"解读服务不可用: {exc}"}
+        return {"status": "error", "message": f"解读服务不可用: {exc}", "project_id": request.project_id}
     payload["project_id"] = request.project_id
     return payload
 
@@ -140,7 +140,7 @@ async def bid_write(request: BidWriteRequest):
         )
     except Exception as exc:  # 工作流整体失败 → 服务不可用
         logger.exception("bid write failed for project=%s", request.project_id)
-        return {"status": "error", "message": f"撰写服务不可用: {exc}"}
+        return {"status": "error", "message": f"撰写服务不可用: {exc}", "project_id": request.project_id}
     payload["project_id"] = request.project_id
     return payload
 
@@ -218,6 +218,6 @@ async def bid_check(request: BidCheckRequest):
         )
     except Exception as exc:  # 工作流整体失败 → 服务不可用
         logger.exception("bid check failed for project=%s", request.project_id)
-        return {"status": "error", "message": f"自检服务不可用: {exc}"}
+        return {"status": "error", "message": f"自检服务不可用: {exc}", "project_id": request.project_id}
     payload["project_id"] = request.project_id
     return payload

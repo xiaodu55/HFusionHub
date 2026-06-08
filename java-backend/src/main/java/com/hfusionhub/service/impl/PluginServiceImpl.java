@@ -687,14 +687,40 @@ public class PluginServiceImpl implements PluginService {
         auditLogMapper.insert(logEntry);
     }
 
+    /**
+     * 规范化 JSON 序列化（键递归排序），供 manifest hash 使用。
+     * R15-23：旧实现按 {@code key:value,key:value} 拼接——值含 ":" / "," /
+     * "=" 时会产生碰撞，且嵌套 Map 的 toString 顺序不保证稳定，导致同一
+     * manifest 可能算出不同 hash（供应链校验锚点失效）。
+     */
+    private static final com.fasterxml.jackson.databind.ObjectMapper CANONICAL_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper()
+                    .enable(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
+
+    @SuppressWarnings("unchecked")
+    private static String canonicalJson(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            java.util.TreeMap<String, Object> sorted = new java.util.TreeMap<>();
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                sorted.put(String.valueOf(e.getKey()), canonicalJson(e.getValue()));
+            }
+            return CANONICAL_MAPPER.valueToTree(sorted).toString();
+        }
+        if (value instanceof List<?> list) {
+            java.util.List<Object> out = new java.util.ArrayList<>(list.size());
+            for (Object item : list) {
+                out.add(canonicalJson(item));
+            }
+            return CANONICAL_MAPPER.valueToTree(out).toString();
+        }
+        return String.valueOf(value);
+    }
+
     private String computeManifestHash(Map<String, Object> manifest) {
-        String canonical = manifest.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .map(e -> e.getKey() + ":" + e.getValue())
-                .collect(Collectors.joining(","));
         try {
             java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            byte[] hash = digest.digest(
+                    canonicalJson(manifest).getBytes(java.nio.charset.StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder();
             for (byte b : hash) {
                 sb.append(String.format("%02x", b));

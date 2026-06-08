@@ -38,7 +38,7 @@
 | http://localhost:9000/ready | Python 就绪检查 |
 | http://localhost:9000/metrics | Python 指标 |
 | http://localhost:9091/healthz | Milvus HTTP 健康检查 |
-| http://localhost:9100/health | Plugin Runner（dev 下 503 = 设计行为，见 reason 字段） |
+| http://localhost:9100/health | Plugin Runner（dev compose dind sidecar 下 healthy；引擎不可用时 503 = fail-closed 设计行为） |
 
 ## 3. 登录凭据
 
@@ -127,7 +127,7 @@
 | etcd | 2379 | healthy |
 | milvus | 19530（gRPC）/ 9091（HTTP） | healthy |
 | attu | 8000 | healthy |
-| plugin-runner | 9100 | dev 下 unhealthy（503，设计行为） |
+| plugin-runner | 9100 | dev compose dind sidecar 下 healthy（引擎不可用时 503 = fail-closed 设计行为） |
 
 ## 8. 相关文档
 
