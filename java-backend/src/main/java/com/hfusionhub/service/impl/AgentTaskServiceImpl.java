@@ -1143,15 +1143,33 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     public int expireApprovals() {
         String nowStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
         List<AgentApproval> expired = approvalMapper.selectExpiredPending(nowStr);
+        if (expired.isEmpty()) {
+            return 0;
+        }
+
+        // R15-17：批量读取 task/run（旧实现每条审批 2 次单查）；更新仍逐条。
+        java.util.Set<Long> taskIds = new java.util.HashSet<>();
+        java.util.Set<Long> runIds = new java.util.HashSet<>();
+        for (AgentApproval a : expired) {
+            if (a.getTaskId() != null) taskIds.add(a.getTaskId());
+            if (a.getRunId() != null) runIds.add(a.getRunId());
+        }
+        java.util.Map<Long, AgentTask> taskMap = taskIds.isEmpty() ? java.util.Map.of()
+                : taskMapper.selectBatchIds(taskIds).stream()
+                        .collect(java.util.stream.Collectors.toMap(AgentTask::getId, t -> t));
+        java.util.Map<Long, AgentRun> runMap = runIds.isEmpty() ? java.util.Map.of()
+                : runMapper.selectBatchIds(runIds).stream()
+                        .collect(java.util.stream.Collectors.toMap(AgentRun::getId, r -> r));
+
         for (AgentApproval a : expired) {
             approvalMapper.updateDecision(a.getId(), "expired", null, nowStr, "审批超时自动拒绝");
             // 更新 task → failed
-            AgentTask task = taskMapper.selectById(a.getTaskId());
+            AgentTask task = taskMap.get(a.getTaskId());
             if (task != null && AgentConstants.STATUS_WAITING_APPROVAL.equals(task.getStatus())) {
                 task.setStatus(AgentConstants.STATUS_FAILED);
                 taskMapper.updateById(task);
             }
-            AgentRun run = runMapper.selectById(a.getRunId());
+            AgentRun run = runMap.get(a.getRunId());
             if (run != null) {
                 run.setStatus(AgentConstants.STATUS_FAILED);
                 run.setErrorCode(AgentConstants.ERR_APPROVAL_EXPIRED);
@@ -1168,9 +1186,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                     AgentConstants.STATUS_FAILED,
                     Map.of("errorCode", AgentConstants.ERR_APPROVAL_EXPIRED, "errorDetail", "审批超时（5分钟未响应）"));
         }
-        if (!expired.isEmpty()) {
-            log.info("Expired {} pending approvals", expired.size());
-        }
+        log.info("Expired {} pending approvals", expired.size());
         return expired.size();
     }
 

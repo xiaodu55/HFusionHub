@@ -292,11 +292,24 @@ def _flush_worker() -> None:
 
 
 def _do_flush() -> int:
-    """Flush unsynced entries to Java backend with retry."""
+    """Flush unsynced entries to Java backend with retry.
+
+    R15-18：单次批量 POST（Java 端点本身接受 List），替代旧实现的逐条
+    POST——50 条积压时从 50 次 HTTP 往返降为 1 次。整批失败时逐条重试
+    计数（保留既有 dead-letter 语义）。
+    """
     entries = _get_unsynced_entries(limit=50)
     if not entries:
         return 0
 
+    if _post_to_java_backend_batch(entries):
+        for entry in entries:
+            _mark_synced(entry.id)
+        logger.info("审计日志已同步到 Java 后端: %d 条", len(entries))
+        _cleanup_synced()
+        return len(entries)
+
+    # 批量失败：回退逐条（旧路径），便于定位坏条目并保留 dead-letter 语义
     flushed = 0
     for entry in entries:
         success = _post_to_java_backend(entry)
@@ -317,6 +330,32 @@ def _do_flush() -> int:
 
     _cleanup_synced()
     return flushed
+
+
+def _post_to_java_backend_batch(entries: list) -> bool:
+    """POST all entries in one request. Returns True iff the whole batch synced."""
+    try:
+        import httpx
+        java_url = os.environ.get("JAVA_BASE_URL", "http://localhost:8080")
+        internal_token = os.environ.get("HFUSIONHUB_INTERNAL_TOKEN", "")
+
+        if not internal_token:
+            logger.warning("HFUSIONHUB_INTERNAL_TOKEN 未设置，跳过审计同步")
+            return False
+
+        resp = httpx.post(
+            f"{java_url}{_JAVA_AUDIT_ENDPOINT}",
+            json=[entry.to_wire() for entry in entries],
+            headers={"X-Internal-Token": internal_token},
+            timeout=30.0,
+        )
+        if resp.status_code == 200:
+            return True
+        logger.warning("Java 审计后端批量返回 %d: %s", resp.status_code, resp.text[:200])
+        return False
+    except Exception as e:
+        logger.warning("审计批量同步到 Java 后端失败: %s", e)
+        return False
 
 
 def _post_to_java_backend(entry: AuditEntry) -> bool:

@@ -269,7 +269,7 @@
 | R15-8 | **密钥与暴露面**：`MODEL_CREDENTIAL_ENCRYPTION_KEY` 回退复用 `PYTHON_AI_INTERNAL_TOKEN`（轮换一个毁掉全部已存用户 key）；CORS 默认通配源+凭据；actuator 无显式认证策略 | `application.yml:138-156`、`ModelCredentialCipher.java:38-43`、`CorsConfig.java:38` | 加密 key 取消回退 fail-fast；CORS 默认 false+显式 origin；actuator 独立 management port 移出 `/api` 上下文 | 配置校验测试；dev 默认行为有日志警示 |
 | R15-9 | **feature_flag 降级语义不符**：后端不可达时 AVAILABILITY_FLAGS 直接返回 True，注释声称「保留 env 配置」实际未读 env | `app/utils/feature_flag.py:105-107` | 降级先回退对应 env 再默认值 | 后端不可达 + env=false 的降级测试 |
 
-## R15-P1 性能（规划）
+## R15-P1 性能（✅ 已完成 2026-08-28，R15-16 以最小落地实现）
 
 | 编号 | 问题 | 证据 | 方案 |
 |---|---|---|---|

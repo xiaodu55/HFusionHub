@@ -87,15 +87,36 @@ public class VectorReconciliationService {
      * Global reconciliation across all documents with persisted chunks.
      */
     public Map<String, Object> reconcileAll() {
-        // Get all distinct document IDs that have chunks in MySQL
-        List<DocumentChunk> allChunks = documentChunkMapper.selectList(null);
-        Set<Long> docIds = allChunks.stream().map(DocumentChunk::getDocumentId).collect(Collectors.toSet());
-
-        int totalMysqlChunks = allChunks.size();
+        // Get all distinct document IDs that have chunks in MySQL.
+        // R15-17：旧实现 selectList(null) 把全表实体拉进内存；改为 chunk_id
+        // 游标分页、只取两列（docIds 只需 distinct document_id，计数走页累加）。
+        Set<Long> docIds = new java.util.HashSet<>();
+        int totalMysqlChunks = 0;
         List<String> allOrphans = new ArrayList<>();
         List<Long> allMissing = new ArrayList<>();
         int healthyDocs = 0;
         int unhealthyDocs = 0;
+        String lastChunkId = "";
+        final int PAGE_SIZE = 1000;
+        while (true) {
+            List<DocumentChunk> page = documentChunkMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<DocumentChunk>()
+                            .select(DocumentChunk::getChunkId, DocumentChunk::getDocumentId)
+                            .gt(DocumentChunk::getChunkId, lastChunkId)
+                            .orderByAsc(DocumentChunk::getChunkId)
+                            .last("LIMIT " + PAGE_SIZE));
+            if (page.isEmpty()) {
+                break;
+            }
+            for (DocumentChunk c : page) {
+                docIds.add(c.getDocumentId());
+            }
+            totalMysqlChunks += page.size();
+            lastChunkId = page.get(page.size() - 1).getChunkId();
+            if (page.size() < PAGE_SIZE) {
+                break;
+            }
+        }
 
         for (Long docId : docIds) {
             ReconciliationResult result = reconcileDocument(docId);

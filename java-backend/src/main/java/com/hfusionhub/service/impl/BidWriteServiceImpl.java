@@ -30,7 +30,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
@@ -55,16 +57,25 @@ public class BidWriteServiceImpl implements BidWriteService {
     private final UsageLedgerService usageLedgerService;
     private final ObjectMapper objectMapper;
     private final BidPlanGateService bidPlanGateService;
+    private final PlatformTransactionManager transactionManager;
 
+    /**
+     * 第十五轮 P1（R15-11）：不再整个方法 @Transactional——此前同步 AI 调用
+     * （超时 120s）在事务内执行，长事务占住 Hikari 连接，少量并发撰写即耗尽
+     * 连接池。拆为三段：读取（自动提交）→ 事务外调 AI → 短事务落库
+     * （与 ConversationServiceImpl.sendMessage 的阶段划分同模式）。
+     */
     @Override
-    @Transactional
     public List<BidDraft> write(Long projectId) {
+        // ── 阶段 1：读取与门禁（自动提交，短连接）──
         BidProject project = requireOwnedProject(projectId);
         bidPlanGateService.requireModule(
                 TenantContext.requireTenantId(), BidSubscription.MODULE_DRAFT, "标书撰写");
 
         List<Map<String, Object>> requirements = loadRequirements(projectId);
         List<Long> kbIds = loadKnowledgeBaseIds(project);
+
+        // ── 阶段 2：事务外调用 AI ──
         Map<String, Object> result = aiClient.bidWrite(
                 projectId, project.getTitle(), project.getTenderNumber(), kbIds, requirements, null);
         if (!"ok".equals(result.get("status"))) {
@@ -73,13 +84,21 @@ public class BidWriteServiceImpl implements BidWriteService {
                     result.get("message") != null ? String.valueOf(result.get("message")) : "撰写失败，请稍后重试");
         }
 
+        // ── 阶段 3：短事务落库（多分节原子写 + 计量 + 状态推进）──
         Long userId = jwtUtils.getCurrentUserId();
-        List<BidDraft> drafts = persistSections(projectId, result.get("sections"), userId);
-        meterDraftChars(projectId, drafts);
-        project.setStatus(BidProject.STATUS_DRAFTING);
-        bidProjectMapper.updateById(project);
-        log.info("标书撰写完成（同步），projectId: {}, 分节数: {}", projectId, drafts.size());
-        return drafts;
+        TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
+        List<BidDraft> drafts = txTemplate.execute(status -> {
+            List<BidDraft> sections = persistSections(projectId, result.get("sections"), userId);
+            meterDraftChars(projectId, sections);
+            BidProject fresh = bidProjectMapper.selectById(projectId);
+            if (fresh != null) {
+                fresh.setStatus(BidProject.STATUS_DRAFTING);
+                bidProjectMapper.updateById(fresh);
+            }
+            return sections;
+        });
+        log.info("标书撰写完成（同步），projectId: {}, 分节数: {}", projectId, drafts == null ? 0 : drafts.size());
+        return drafts == null ? List.of() : drafts;
     }
 
     @Override

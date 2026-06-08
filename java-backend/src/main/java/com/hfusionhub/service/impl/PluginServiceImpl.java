@@ -541,11 +541,73 @@ public class PluginServiceImpl implements PluginService {
                     || host.isBlank()
                     || uri.getUserInfo() != null
                     || host.equalsIgnoreCase("localhost")
-                    || host.endsWith(".local")) {
+                    || host.endsWith(".local")
+                    || isPrivateHost(host)) {
                 throw new IllegalArgumentException("接口地址必须是可公开访问的 HTTPS 地址");
             }
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("接口地址必须是可公开访问的 HTTPS 地址");
+        }
+    }
+
+    /**
+     * SSRF 防护（R15-19）：拒绝字面量私网/链路本地/保留地址，以及解析到
+     * 这些地址的域名。安装时解析 DNS——运行时解析结果可能变化（DNS
+     * rebinding），由调用方网络策略兜底；这里阻断的是把服务作为内网跳板
+     * 的最直接路径。
+     */
+    private boolean isPrivateHost(String host) {
+        // IPv4 字面量私网/保留段
+        if (host.matches("\\d{1,3}(\\.\\d{1,3}){3}")) {
+            return isPrivateIPv4(host);
+        }
+        // IPv6 字面量（含 [::1] 已被 getHost 剥离方括号）
+        if (host.contains(":")) {
+            String lower = host.toLowerCase();
+            return lower.equals("::1") || lower.equals("::")
+                    || lower.startsWith("fc") || lower.startsWith("fd")  // ULA fc00::/7
+                    || lower.startsWith("fe80")                          // link-local
+                    || lower.startsWith("::ffff:");                      // IPv4-mapped
+        }
+        // 域名：解析后校验全部地址
+        try {
+            java.net.InetAddress[] addresses = java.net.InetAddress.getAllByName(host);
+            if (addresses.length == 0) {
+                return true;
+            }
+            for (java.net.InetAddress address : addresses) {
+                if (address.isLoopbackAddress()
+                        || address.isLinkLocalAddress()
+                        || address.isSiteLocalAddress()
+                        || address.isAnyLocalAddress()
+                        || isPrivateIPv4(address.getHostAddress())) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (java.net.UnknownHostException e) {
+            // 无法解析的域名同样拒绝（不可公开访问）
+            return true;
+        }
+    }
+
+    private boolean isPrivateIPv4(String host) {
+        try {
+            String[] parts = host.split("\\.");
+            if (parts.length != 4) {
+                return true;
+            }
+            int a = Integer.parseInt(parts[0]);
+            int b = Integer.parseInt(parts[1]);
+            if (a == 10 || a == 127 || a == 0) return true;                  // 10/8, loopback, 0/8
+            if (a == 172 && b >= 16 && b <= 31) return true;                 // 172.16/12
+            if (a == 192 && b == 168) return true;                           // 192.168/16
+            if (a == 169 && b == 254) return true;                           // link-local (含云元数据 169.254.169.254)
+            if (a == 100 && b >= 64 && b <= 127) return true;                // CGNAT 100.64/10
+            if (a >= 224) return true;                                       // multicast + reserved
+            return false;
+        } catch (NumberFormatException e) {
+            return true;
         }
     }
 

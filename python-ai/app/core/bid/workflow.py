@@ -13,6 +13,7 @@ CallableExpertAgent）与 RAG 多路检索；每条要素携带 evidence_chunk_i
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any, Dict, List, Optional
@@ -41,6 +42,9 @@ RETRIEVE_QUERIES = (
     "废标 否决投标 无效投标 条款",
     "工期 交货期 保证金 预算 开标",
 )
+
+# 并发检索深度（R15-10）
+_RETRIEVAL_CONCURRENCY = 5
 
 # ── JSON Schema（generate_structured 校验）─────────────────────────
 
@@ -237,15 +241,27 @@ class BidInterpretWorkflow:
         queries = list(RETRIEVE_QUERIES)
         if title:
             queries.append(title)
+
+        # 第十五轮 P1（R15-10）：检索相互独立，并发执行 + 按任务顺序合并——
+        # 去重（首见优先）与 MAX_CHUNKS 截断语义与旧串行实现完全一致。
+        semaphore = asyncio.Semaphore(_RETRIEVAL_CONCURRENCY)
+
+        async def _retrieve_one(query: str):
+            async with semaphore:
+                try:
+                    return await self.retriever.retrieve(
+                        query, knowledge_base_id=knowledge_base_id, top_k=RETRIEVE_TOP_K, enable_rewrite=False
+                    )
+                except Exception as exc:  # 单次检索失败不影响整体
+                    logger.warning("bid retrieval failed for query=%r: %s", query, exc)
+                    return None
+
+        results = await asyncio.gather(*(_retrieve_one(query) for query in queries))
+
         seen: Dict[str, str] = {}
         merged: List[Dict[str, str]] = []
-        for query in queries:
-            try:
-                result = await self.retriever.retrieve(
-                    query, knowledge_base_id=knowledge_base_id, top_k=RETRIEVE_TOP_K, enable_rewrite=False
-                )
-            except Exception as exc:  # 单次检索失败不影响整体
-                logger.warning("bid retrieval failed for query=%r: %s", query, exc)
+        for result in results:
+            if result is None:
                 continue
             for item in result.results:
                 chunk_id = str(item.metadata.get("chunk_id") or item.document_id)

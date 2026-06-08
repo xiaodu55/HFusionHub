@@ -62,9 +62,9 @@ async def consume_execution_token(
         if http_client is not None:
             resp = await http_client.post(url, json=payload, headers=headers, timeout=5.0)
         else:
-            import httpx
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(url, json=payload, headers=headers, timeout=5.0)
+            from app.core.llm.http_client import get_shared_client
+            client = get_shared_client("execution-token", timeout=5.0)
+            resp = await client.post(url, json=payload, headers=headers, timeout=5.0)
 
         if resp.status_code != 200:
             logger.error(

@@ -130,7 +130,8 @@ services:
   #   server/ 本服务使用（entrypoint 检测到既有证书则跳过自签生成），client/ 给 plugin-runner。
   # 与 staging-rehearsal.sh 的独立 dind（hfusionhub-rehearsal-dind）同占 127.0.0.1:2376，勿同时运行。
   dind:
-    image: docker:27-dind
+    # 与 staging-rehearsal.sh 使用同一本地镜像（离线可用，避免依赖代理拉取）
+    image: docker:dind
     container_name: dind
     privileged: true
     ports:

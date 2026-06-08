@@ -57,6 +57,13 @@ class BidWriteServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        // R15-11：write() 内部用 TransactionTemplate 做短事务落库；
+        // 测试用桩事务管理器（getTransaction 返回空状态、commit 空操作）。
+        org.springframework.transaction.PlatformTransactionManager txManager =
+                org.mockito.Mockito.mock(org.springframework.transaction.PlatformTransactionManager.class);
+        // 部分用例在到达事务阶段前即抛出，桩必须 lenient
+        org.mockito.Mockito.lenient().when(txManager.getTransaction(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());
         service = new BidWriteServiceImpl(
                 bidProjectMapper,
                 bidRequirementMapper,
@@ -66,7 +73,8 @@ class BidWriteServiceImplTest {
                 aiClient,
                 usageLedgerService,
                 new ObjectMapper(),
-                bidPlanGateService);
+                bidPlanGateService,
+                txManager);
         jwtUtilsMock = org.mockito.Mockito.mockStatic(JwtUtils.class);
         jwtUtilsMock.when(JwtUtils::getCurrentUserId).thenReturn(7L);
         TenantContext.setTenantId(7L);

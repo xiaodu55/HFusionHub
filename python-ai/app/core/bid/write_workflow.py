@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -30,6 +31,10 @@ logger = logging.getLogger(__name__)
 MAX_CHUNKS = 20
 CHUNK_MAX_CHARS = 1500
 RETRIEVE_TOP_K = 4
+
+# 并发检索深度（R15-10）：6 个固定查询 × N KB 场景下限制同时进行的
+# 检索数，避免打爆 embedding/Milvus 连接
+_RETRIEVAL_CONCURRENCY = 6
 
 # 默认分节结构（可被租户模板 section_defs 覆盖）
 DEFAULT_SECTIONS: List[Dict[str, str]] = [
@@ -161,23 +166,39 @@ class BidWriteWorkflow:
             "保证金 截止时间 开标",
             "商务 付款 履约 保修",
         ]
-        seen: Dict[str, str] = {}
-        merged: List[Dict[str, str]] = []
-        for kb_id in knowledge_base_ids or []:
-            for query in queries:
+        pairs = [(kb_id, query) for kb_id in knowledge_base_ids or [] for query in queries]
+        if not pairs:
+            return []
+
+        # 第十五轮 P1（R15-10）：检索之间相互独立，串行执行会把延迟放大为
+        # 「查询数 × KB 数 × 单次检索耗时」（最多 7×N 次串行往返）。
+        # 并发检索后按任务顺序合并——去重（首见优先）与 MAX_CHUNKS 截断
+        # 语义与旧串行实现完全一致；信号量限制并发检索深度。
+        semaphore = asyncio.Semaphore(_RETRIEVAL_CONCURRENCY)
+
+        async def _retrieve_one(kb_id: int, query: str):
+            async with semaphore:
                 try:
-                    result = await self.retriever.retrieve(
+                    return await self.retriever.retrieve(
                         query, knowledge_base_id=kb_id, top_k=RETRIEVE_TOP_K, enable_rewrite=False
                     )
                 except Exception as exc:
                     logger.warning("bid write retrieval failed kb=%s query=%r: %s", kb_id, query, exc)
+                    return None
+
+        results = await asyncio.gather(*(_retrieve_one(kb_id, query) for kb_id, query in pairs))
+
+        seen: Dict[str, str] = {}
+        merged: List[Dict[str, str]] = []
+        for result in results:
+            if result is None:
+                continue
+            for item in result.results:
+                chunk_id = str(item.metadata.get("chunk_id") or item.document_id)
+                if chunk_id in seen or len(merged) >= MAX_CHUNKS:
                     continue
-                for item in result.results:
-                    chunk_id = str(item.metadata.get("chunk_id") or item.document_id)
-                    if chunk_id in seen or len(merged) >= MAX_CHUNKS:
-                        continue
-                    seen[chunk_id] = chunk_id
-                    merged.append({"chunk_id": chunk_id, "content": item.content[:CHUNK_MAX_CHARS]})
+                seen[chunk_id] = chunk_id
+                merged.append({"chunk_id": chunk_id, "content": item.content[:CHUNK_MAX_CHARS]})
         return merged
 
     @staticmethod

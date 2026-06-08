@@ -451,9 +451,11 @@ class MilvusLiteStore(VectorStoreProtocol):
                     collection_name=self._collection_name,
                     filter=self._tenant_filter(document_id=document_id),
                 )
-            store = self._load_co_store()
-            store.setdefault(str(tenant_id), {}).pop(str(document_id), None)
-            self._write_co_store(store)
+            with self._lock:
+                # R15-13：与 _save_to_co_store 同锁，防并发删/插互相覆盖
+                store = self._load_co_store()
+                store.setdefault(str(tenant_id), {}).pop(str(document_id), None)
+                self._write_co_store(store)
             return True
         except Exception as exc:
             logger.exception("Failed to delete document chunks")
@@ -503,45 +505,66 @@ class MilvusLiteStore(VectorStoreProtocol):
             if query_embedding is None:
                 return []
 
-            client.load_collection(self._collection_name)
-
-            # Tenant isolation: always scope retrieval to the active tenant.
-            filter_expr = self._tenant_filter(
-                knowledge_base_id=knowledge_base_id, document_id=document_id
-            )
-
-            results = client.search(
-                collection_name=self._collection_name,
-                data=[query_embedding],
-                limit=top_k,
-                search_params={"metric_type": "COSINE", "params": {"nprobe": 16}},
-                output_fields=["chunk_id", "document_id", "knowledge_base_id", "tenant_id", "content", "block_type", "outline_path", "metadata"],
-                filter=filter_expr,
-            )
-
-            formatted = []
-            for hits in results:
-                for hit in hits:
-                    outline_path = hit.get("outline_path", "[]")
-                    if isinstance(outline_path, str):
-                        try:
-                            outline_path = json.loads(outline_path)
-                        except Exception:
-                            outline_path = []
-                    formatted.append({
-                        "chunk_id": hit.get("chunk_id"),
-                        "document_id": hit.get("document_id"),
-                        "knowledge_base_id": hit.get("knowledge_base_id"),
-                        "content": hit.get("content"),
-                        "block_type": hit.get("block_type"),
-                        "outline_path": outline_path,
-                        "metadata": json.loads(hit.get("metadata", "{}")),
-                        "score": hit.get("distance"),
-                    })
-            return formatted
+            # R15-15：不再每次查询 load_collection（冗余 RPC）。集合通常在
+            # ensure/迁移阶段已 load；若被驱逐（not loaded 错误），在 except
+            # 中 load 后重试一次。
+            try:
+                return self._search_client(
+                    client, query_embedding, top_k, knowledge_base_id, document_id
+                )
+            except Exception as exc:
+                if "not loaded" in str(exc).lower() or "not exist" in str(exc).lower():
+                    client.load_collection(self._collection_name)
+                    return self._search_client(
+                        client, query_embedding, top_k, knowledge_base_id, document_id
+                    )
+                raise
         except Exception as exc:
             logger.exception("Failed to search")
             return []
+
+    def _search_client(
+        self,
+        client,
+        query_embedding: List[float],
+        top_k: int,
+        knowledge_base_id: Optional[int],
+        document_id: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        # Tenant isolation: always scope retrieval to the active tenant.
+        filter_expr = self._tenant_filter(
+            knowledge_base_id=knowledge_base_id, document_id=document_id
+        )
+
+        results = client.search(
+            collection_name=self._collection_name,
+            data=[query_embedding],
+            limit=top_k,
+            search_params={"metric_type": "COSINE", "params": {"nprobe": 16}},
+            output_fields=["chunk_id", "document_id", "knowledge_base_id", "tenant_id", "content", "block_type", "outline_path", "metadata"],
+            filter=filter_expr,
+        )
+
+        formatted = []
+        for hits in results:
+            for hit in hits:
+                outline_path = hit.get("outline_path", "[]")
+                if isinstance(outline_path, str):
+                    try:
+                        outline_path = json.loads(outline_path)
+                    except Exception:
+                        outline_path = []
+                formatted.append({
+                    "chunk_id": hit.get("chunk_id"),
+                    "document_id": hit.get("document_id"),
+                    "knowledge_base_id": hit.get("knowledge_base_id"),
+                    "content": hit.get("content"),
+                    "block_type": hit.get("block_type"),
+                    "outline_path": outline_path,
+                    "metadata": json.loads(hit.get("metadata", "{}")),
+                    "score": hit.get("distance"),
+                })
+        return formatted
 
     def get_document_chunks(
         self, document_id: str, page: int = 1, size: int = 20, block_type: Optional[str] = None,
@@ -647,8 +670,12 @@ class MilvusLiteStore(VectorStoreProtocol):
             logger.error("Co-store save error: %s", exc)
 
     def _save_to_co_store(self, document_id: str, chunks: List[Dict]) -> None:
-        store = self._load_co_store()
-        tenant_key = self._tenant_co_store_key()
-        tenant_root = _co_store_tenant_root(store, tenant_key)
-        tenant_root[str(document_id)] = chunks
-        self._write_co_store(store)
+        # R15-13：读-改-写必须持锁——两个并发索引（或索引与删除）各自
+        # load→modify→replace 会互相覆盖丢文档。锁只包 co-store 事务，
+        # 不包 Milvus 客户端写入（已在锁外完成）。
+        with self._lock:
+            store = self._load_co_store()
+            tenant_key = self._tenant_co_store_key()
+            tenant_root = _co_store_tenant_root(store, tenant_key)
+            tenant_root[str(document_id)] = chunks
+            self._write_co_store(store)

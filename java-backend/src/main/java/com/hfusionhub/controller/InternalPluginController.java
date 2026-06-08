@@ -105,17 +105,32 @@ public class InternalPluginController {
 
         int inserted = 0;
         int skipped = 0;
+        // R15-17：批量去重——旧实现每条一次 selectByEventId（N 次查询）；
+        // 一次 IN 查询取回已存在的 eventId 集合（全局去重需系统作用域）。
+        java.util.Set<String> existingEventIds = TenantContext.runAsSystem(() -> {
+            java.util.List<String> ids = entries.stream()
+                    .map(e -> (String) e.get("eventId"))
+                    .filter(java.util.Objects::nonNull)
+                    .distinct()
+                    .toList();
+            if (ids.isEmpty()) {
+                return java.util.Set.<String>of();
+            }
+            return pluginAuditLogMapper.selectList(
+                            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PluginAuditLog>()
+                                    .in(PluginAuditLog::getEventId, ids)
+                                    .select(PluginAuditLog::getEventId))
+                    .stream()
+                    .map(PluginAuditLog::getEventId)
+                    .collect(java.util.stream.Collectors.toSet());
+        });
         for (Map<String, Object> entry : entries) {
             try {
-                // Idempotency: check for eventId to prevent duplicate inserts
+                // Idempotency: skip events that already exist (idempotent retry)
                 String eventId = (String) entry.get("eventId");
-                if (eventId != null) {
-                    // Skip if event already exists (idempotent retry) — 全局去重需系统作用域
-                    if (TenantContext.runAsSystem(
-                            () -> pluginAuditLogMapper.selectByEventId(eventId) != null)) {
-                        skipped++;
-                        continue;
-                    }
+                if (eventId != null && existingEventIds.contains(eventId)) {
+                    skipped++;
+                    continue;
                 }
 
                 PluginAuditLog log = new PluginAuditLog();

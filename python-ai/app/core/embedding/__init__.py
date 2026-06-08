@@ -4,6 +4,7 @@ Embedding 模块 - 支持 Ollama Embedding 服务
 """
 import os
 import random
+import time
 import logging
 import asyncio
 import concurrent.futures
@@ -171,11 +172,39 @@ class EmbeddingService:
 
 # 全局 Embedding 服务实例
 _embedding_service: Optional[EmbeddingService] = None
+_last_probe_at: float = 0.0
+_PROBE_TTL_SECONDS = 60.0
+
+
+def _probe_ollama_once(service: EmbeddingService) -> None:
+    """单次可用性探测（get_embedding_service 复用）。"""
+    import httpx
+    try:
+        response = httpx.get(f"{service._ollama.base_url}/api/tags", timeout=5.0)
+        if response.status_code == 200:
+            models = response.json().get("models", [])
+            model_names = [m["name"] for m in models]
+            # Check if the configured model exists
+            if service._ollama.model in model_names:
+                service._ollama.set_available(True)
+                logger.info(f"Ollama embedding available with model: {service._ollama.model}")
+            elif any("embedding" in name.lower() for name in model_names):
+                # Use the first embedding model found
+                embedding_model = next(name for name in model_names if "embedding" in name.lower())
+                service._ollama.model = embedding_model
+                service._ollama.set_available(True)
+                logger.info(f"Ollama embedding available with model: {embedding_model}")
+            else:
+                logger.warning(f"Ollama available but no embedding models found: {model_names}")
+        else:
+            logger.warning(f"Ollama not available: {response.status_code}")
+    except Exception as e:
+        logger.warning(f"Ollama connection failed: {e}")
 
 
 def get_embedding_service() -> EmbeddingService:
     """获取全局 Embedding 服务"""
-    global _embedding_service
+    global _embedding_service, _last_probe_at
     if _embedding_service is None:
         from app.utils.config import config
 
@@ -189,28 +218,16 @@ def get_embedding_service() -> EmbeddingService:
         )
 
         # Check if Ollama is available
-        import httpx
-        try:
-            response = httpx.get(f"{_embedding_service._ollama.base_url}/api/tags", timeout=5.0)
-            if response.status_code == 200:
-                models = response.json().get("models", [])
-                model_names = [m["name"] for m in models]
-                # Check if the configured model exists
-                if _embedding_service._ollama.model in model_names:
-                    _embedding_service._ollama.set_available(True)
-                    logger.info(f"Ollama embedding available with model: {_embedding_service._ollama.model}")
-                elif any("embedding" in name.lower() for name in model_names):
-                    # Use the first embedding model found
-                    embedding_model = next(name for name in model_names if "embedding" in name.lower())
-                    _embedding_service._ollama.model = embedding_model
-                    _embedding_service._ollama.set_available(True)
-                    logger.info(f"Ollama embedding available with model: {embedding_model}")
-                else:
-                    logger.warning(f"Ollama available but no embedding models found: {model_names}")
-            else:
-                logger.warning(f"Ollama not available: {response.status_code}")
-        except Exception as e:
-            logger.warning(f"Ollama connection failed: {e}")
+        _probe_ollama_once(_embedding_service)
+        _last_probe_at = time.monotonic()
+
+    # R15-15：探活 TTL 化——旧实现只在进程首次取单例时探测一次，Ollama
+    # 若当时不可用则 is_available 永久为 False（即使服务随后恢复也一直
+    # 拒绝/降级）。不可用状态下每 TTL 秒重探一次（成功即恢复）。
+    if not _embedding_service._ollama.is_available:
+        if time.monotonic() - _last_probe_at > _PROBE_TTL_SECONDS:
+            _last_probe_at = time.monotonic()
+            _probe_ollama_once(_embedding_service)
 
     return _embedding_service
 

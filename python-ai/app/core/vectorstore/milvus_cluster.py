@@ -351,21 +351,30 @@ class MilvusClusterStore(VectorStoreProtocol):
             if query_embedding is None:
                 return []
 
-            client.load_collection(self._collection_name)
-
             # Tenant isolation: always scope retrieval to the active tenant.
             filter_expr = self._tenant_filter(
                 knowledge_base_id=knowledge_base_id, document_id=document_id
             )
 
-            results = client.search(
-                collection_name=self._collection_name,
-                data=[query_embedding],
-                limit=top_k,
-                search_params={"metric_type": "COSINE", "params": {"nprobe": 16}},
-                output_fields=["chunk_id", "document_id", "knowledge_base_id", "tenant_id", "content", "block_type", "outline_path", "metadata"],
-                filter=filter_expr,
-            )
+            # R15-15：不再每次查询 load_collection（冗余 RPC）。集合在
+            # ensure/启动阶段已 load；若被驱逐，load 后重试一次。
+            def _do_search():
+                return client.search(
+                    collection_name=self._collection_name,
+                    data=[query_embedding],
+                    limit=top_k,
+                    search_params={"metric_type": "COSINE", "params": {"nprobe": 16}},
+                    output_fields=["chunk_id", "document_id", "knowledge_base_id", "tenant_id", "content", "block_type", "outline_path", "metadata"],
+                    filter=filter_expr,
+                )
+
+            try:
+                results = _do_search()
+            except Exception as exc:
+                if "not loaded" not in str(exc).lower():
+                    raise
+                client.load_collection(self._collection_name)
+                results = _do_search()
 
             formatted = []
             for hits in results:

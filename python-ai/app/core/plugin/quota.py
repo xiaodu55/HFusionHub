@@ -43,9 +43,9 @@ async def transition_plugin_execution(
             if http_client is not None:
                 response = await http_client.post(url, json=payload, headers=headers, timeout=5.0)
             else:
-                import httpx
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(url, json=payload, headers=headers, timeout=5.0)
+                from app.core.llm.http_client import get_shared_client
+                client = get_shared_client("plugin-quota", timeout=5.0)
+                response = await client.post(url, json=payload, headers=headers, timeout=5.0)
             envelope = response.json() if response.status_code == 200 else {}
             if (
                 response.status_code == 200 and isinstance(envelope, dict)

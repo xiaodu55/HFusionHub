@@ -40,12 +40,17 @@ class DeclarativeHttpTool(BaseTool):
     async def execute(self, **kwargs: Any) -> Dict[str, Any]:
         self._validate_public_https(self.endpoint_url)
         params = {key: str(value) for key, value in kwargs.items() if value is not None}
-        async with httpx.AsyncClient(
+        # R15-14：复用共享连接池；SSRF 相关语义（禁跟随重定向）以请求级
+        # 参数保留，与原独立 client 行为一致。
+        from app.core.llm.http_client import get_shared_client
+        client = get_shared_client("declarative-tool", timeout=self.timeout_seconds)
+        response = await client.get(
+            self.endpoint_url,
+            params=params,
             timeout=self.timeout_seconds,
             follow_redirects=False,
             headers={"Accept": "application/json, text/plain;q=0.9"},
-        ) as client:
-            response = await client.get(self.endpoint_url, params=params)
+        )
         response.raise_for_status()
         if len(response.content) > self._MAX_RESPONSE_BYTES:
             raise ValueError("接口响应超过 256 KB 限制")

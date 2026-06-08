@@ -41,6 +41,21 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
     private static final int SCOPE_PRIORITY_TENANT = 2;
     private static final int SCOPE_PRIORITY_GLOBAL = 1;
 
+    // ──────────── Evaluate-path cache（R15-16 最小落地）────────────
+    // evaluate() 每次调用触发 selectByKey + loadRules 两次查询；evaluate 在
+    // 每次 agent/工具调用都会命中。flags/rules 变更频率极低且全部写路径
+    // （create/update/delete*）都会失效缓存，因此 15s TTL + 写失效足够安全。
+    private static final long EVAL_CACHE_TTL_MS = 15_000L;
+    private final java.util.concurrent.ConcurrentHashMap<String,
+            java.util.AbstractMap.SimpleEntry<FeatureFlag, Long>> flagCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentHashMap<Long,
+            java.util.AbstractMap.SimpleEntry<List<FeatureFlagRule>, Long>> ruleCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private void invalidateEvalCache() {
+        flagCache.clear();
+        ruleCache.clear();
+    }
+
     // High-risk flags that require a reason for modification
     private static final java.util.Set<String> HIGH_RISK_FLAGS =
             java.util.Set.of("agent.write_tools.enabled", "agent.web_search.enabled", "approval.required_for_write");
@@ -101,6 +116,7 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
         if (dto.getStartTime() != null) flag.setStartTime(dto.getStartTime());
         if (dto.getEndTime() != null) flag.setEndTime(dto.getEndTime());
         flagMapper.updateById(flag);
+        invalidateEvalCache();
 
         audit(
                 flag.getId(),
@@ -126,6 +142,7 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
 
         String oldJson = toJson(flag);
         flagMapper.deleteById(id);
+        invalidateEvalCache();
         audit(id, flag.getFlagKey(), "delete", oldJson, null, "deleted", currentUserId(), "api");
     }
 
@@ -185,6 +202,7 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
         rule.setWhitelist(dto.getWhitelist());
         rule.setBlacklist(dto.getBlacklist());
         ruleMapper.insert(rule);
+        invalidateEvalCache();
 
         auditRule(rule.getId(), flag.getFlagKey(), "rule_create", null, toJson(rule), currentUserId(), "api");
         return toRuleInfoDTO(rule);
@@ -205,6 +223,7 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
         if (dto.getWhitelist() != null) rule.setWhitelist(dto.getWhitelist());
         if (dto.getBlacklist() != null) rule.setBlacklist(dto.getBlacklist());
         ruleMapper.updateById(rule);
+        invalidateEvalCache();
 
         FeatureFlag flag = flagMapper.selectById(rule.getFlagId());
         auditRule(
@@ -226,6 +245,7 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
 
         String oldJson = toJson(rule);
         ruleMapper.deleteById(ruleId);
+        invalidateEvalCache();
 
         FeatureFlag flag = flagMapper.selectById(rule.getFlagId());
         auditRule(
@@ -304,15 +324,29 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
     // ──────────── Helpers ────────────
 
     private FeatureFlag selectByKey(String flagKey) {
-        return flagMapper.selectOne(new LambdaQueryWrapper<FeatureFlag>()
+        long now = System.currentTimeMillis();
+        var cached = flagCache.get(flagKey);
+        if (cached != null && now - cached.getValue() < EVAL_CACHE_TTL_MS) {
+            return cached.getKey();
+        }
+        FeatureFlag flag = flagMapper.selectOne(new LambdaQueryWrapper<FeatureFlag>()
                 .eq(FeatureFlag::getFlagKey, flagKey)
                 .last("LIMIT 1"));
+        flagCache.put(flagKey, new java.util.AbstractMap.SimpleEntry<>(flag, now));
+        return flag;
     }
 
     private List<FeatureFlagRule> loadRules(Long flagId) {
-        return ruleMapper.selectList(new LambdaQueryWrapper<FeatureFlagRule>()
+        long now = System.currentTimeMillis();
+        var cached = ruleCache.get(flagId);
+        if (cached != null && now - cached.getValue() < EVAL_CACHE_TTL_MS) {
+            return cached.getKey();
+        }
+        List<FeatureFlagRule> rules = ruleMapper.selectList(new LambdaQueryWrapper<FeatureFlagRule>()
                 .eq(FeatureFlagRule::getFlagId, flagId)
                 .orderByAsc(FeatureFlagRule::getScope));
+        ruleCache.put(flagId, new java.util.AbstractMap.SimpleEntry<>(rules, now));
+        return rules;
     }
 
     private boolean scopeMatches(FeatureFlagRule rule, FeatureFlagEvaluateDTO ctx) {

@@ -33,6 +33,8 @@ from typing import Any, AsyncGenerator, Deque, Dict, Iterable, List, Optional, T
 
 import httpx
 
+from .http_client import get_shared_client
+
 from app.utils.config import config
 from .base import ChatMessage
 
@@ -295,8 +297,9 @@ class UsageAccumulator:
             "X-Internal-Token": config.INTERNAL_API_TOKEN,
         }
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.post(url, headers=headers, json=payload)
+            # R15-14：复用共享连接池，替代每次新建 AsyncClient
+            client = get_shared_client("usage", timeout=10.0)
+            response = await client.post(url, headers=headers, json=payload, timeout=10.0)
             if response.is_error:
                 raise RuntimeError(f"Java backend returned {response.status_code}")
             logger.info("Flushed %d model-usage records to Java backend", len(batch))
@@ -1039,16 +1042,16 @@ class ModelGateway:
             if not provider.enabled:
                 return provider.name, False
             try:
-                async with httpx.AsyncClient(timeout=1.5) as client:
-                    if provider.provider_type == "ollama":
-                        response = await client.get(f"{provider.base_url.rstrip('/')}/api/tags")
-                    else:
-                        headers = {"Authorization": f"Bearer {provider.api_key}"} \
-                            if provider.api_key else {}
-                        response = await client.get(
-                            f"{provider.base_url.rstrip('/')}/v1/models", headers=headers
-                        )
-                    return provider.name, response.status_code == 200
+                client = get_shared_client("probe", timeout=1.5)
+                if provider.provider_type == "ollama":
+                    response = await client.get(f"{provider.base_url.rstrip('/')}/api/tags")
+                else:
+                    headers = {"Authorization": f"Bearer {provider.api_key}"} \
+                        if provider.api_key else {}
+                    response = await client.get(
+                        f"{provider.base_url.rstrip('/')}/v1/models", headers=headers
+                    )
+                return provider.name, response.status_code == 200
             except Exception:
                 return provider.name, False
 

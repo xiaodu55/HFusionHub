@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第十五轮 · P1 性能批次（2026-08-28）：检索并行化 + 索引补齐 + 连接治理（R15-10~19）
+
+> P0 缺陷批次之上的 P1 性能批次，9 项全部落地。方案与验收标准见 [docs/OPTIMIZATION_PLAN.md](docs/OPTIMIZATION_PLAN.md) 第十五轮章节。
+
+#### Performance（R15-10~19）
+- **R15-10 招投标检索并行化**：撰写（最多 7×N 次串行检索）与解读工作流的语料检索改 `asyncio.gather` + 信号量并发（深度 6/5），有序合并保持去重（首见优先）与 MAX_CHUNKS 截断语义不变——分节生成的串行语义有意保留
+- **R15-11 撰写事务拆分**：`BidWriteServiceImpl.write` 不再整个方法 `@Transactional`（旧实现同步 AI 调用 120s 超时占住 Hikari 连接，少量并发撰写耗尽连接池）——拆为读取（自动提交）→ 事务外调 AI → `TransactionTemplate` 短事务落库，对齐 ConversationServiceImpl 阶段划分
+- **R15-12 V74 迁移**：补齐 10 张表的 `tenant_id` 前导索引（agent_alert_rule/agent_alert_event/agent_evaluation_dataset/prompt_test_set/prompt_test_set_run/app_call_log/audit_log/note/webhook_subscription；本地库验证全部就位）；核查发现 app_api_key/kb_share/rag_intent_node/user_model_config 已有索引、feature_flag_rule 无 tenant_id 列（scope_value 语义），均不在范围
+- **R15-13 co-store 写锁**：`_save_to_co_store`/`delete_document_chunks` 的读-改-写持 `self._lock`——旧实现写路径无锁，并发索引/删除互相覆盖丢文档
+- **R15-14 httpx 连接池收敛**：9 处散建 `AsyncClient`（用量 flush/探活/插件配额/容器 runner×4/声明式工具/执行令牌）收敛到 `get_shared_client` 按属主分池；声明式工具的 SSRF 语义（禁跟随重定向）以请求级参数保留
+- **R15-15 Milvus/embedding 治理**：search 热路径去掉每查询 `load_collection`（lite+cluster，改为「not loaded」异常时 load 重试一次）；embedding 探活 TTL 化（60s，Ollama 启动后恢复可用不再需要重启进程）
+- **R15-16 FeatureFlag 评估缓存（最小落地）**：evaluate 路径的 selectByKey/loadRules 加 15s TTL 缓存 + 全部写路径失效钩子（5 处）；每 agent/工具调用省 2 次 DB 查询
+- **R15-17 N+1 批量化**：`expireApprovals` 批量读取 task/run（旧实现每条审批 2 次单查）；插件审计回调 eventId 去重改单次 IN 查询；`VectorReconciliationService.reconcileAll` 全表实体载入改 chunk_id 游标分页（只取两列）
+- **R15-18 审计 flush 批量化**：单次批量 POST 替代逐条（50 条积压 50 次往返→1 次）；批量失败回退逐条保留 dead-letter 语义
+- **R15-19 声明式插件端点 SSRF 加固**：安装时校验从「仅拦 localhost/.local」扩展到 IPv4 私网/CGNAT/保留段、IPv6 ULA/link-local/IPv4-mapped、域名解析后全地址校验（无法解析一律拒绝 fail-closed）；+5 例字面量单测
+
+#### Testing
+- Java 全量 `mvn test`：**555+ passed / 0 failures**（+`PluginServiceImplSsrfTest` 5 例）
+- Python 全量 `pytest -q tests`：全过（bid_workflow 检索并行语义 11 例、milvus 28 例、审计/配额/网关/容器相关全绿）
+- e2e：`scripts/plugin-builtins-e2e.ps1` **17 项全过**（新 dind sidecar 引擎全链路）；`scripts/static-checks.py` 全绿；V74 经 Flyway 干净重放验证（success=1，索引就位）
+- 运维注意：本地 dind sidecar 镜像改用 `docker:dind`（与 rehearsal 同镜像，避免代理依赖）；代理软件未运行时 `docker compose up dind` 无法拉取新镜像属预期
+
 ### 第十五轮 · 全面复审优化（2026-08-28）：P0 正确性/安全批次 + 四层优化路线图
 
 > P0–P2 十四轮交付后的三路全面复审（文档路线图 / Java 后端 / Python AI）发现一批**真实缺陷**。本轮实施 P0 批次全部 9 项；P1 性能 / P2 可维护性 / P3 文档运维共 21 项写入 [docs/OPTIMIZATION_PLAN.md](docs/OPTIMIZATION_PLAN.md) 第十五轮章节（R15-1~30）供后续排期。

@@ -22,6 +22,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from app.core.llm.http_client import get_shared_client
+
 logger = logging.getLogger(__name__)
 
 PLUGIN_RUNNER_URL = os.environ.get("PLUGIN_RUNNER_URL", "http://localhost:9100")
@@ -95,44 +97,45 @@ async def execute_in_container(
 
     start_time = time.monotonic()
 
+    # R15-14：复用共享连接池（长超时用于整段插件执行），替代每次新建 AsyncClient
+    client = get_shared_client("plugin-runner", timeout=config.timeout + 5.0)
     try:
-        async with httpx.AsyncClient(timeout=config.timeout + 5.0) as client:
-            resp = await client.post(
-                f"{PLUGIN_RUNNER_URL}/execute",
-                json={
-                    "image_tag": image_tag,
-                    "tool_name": tool_name,
-                    "tool_input": tool_input,
-                    "config": {
-                        "cpu_limit": config.cpu_limit,
-                        "memory_limit": config.memory_limit,
-                        "timeout": config.timeout,
-                        "network": config.network,
-                        "read_only_rootfs": config.read_only_rootfs,
-                        "allowed_domains": config.allowed_domains,
-                        "blocked_domains": config.blocked_domains,
-                        "tmpfs_size": config.tmpfs_size,
-                        "pids_limit": config.pids_limit,
-                    },
-                    "plugin_id": plugin_id,
-                    "user_id": user_id,
-                    "image_digest": image_digest,
+        resp = await client.post(
+            f"{PLUGIN_RUNNER_URL}/execute",
+            json={
+                "image_tag": image_tag,
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+                "config": {
+                    "cpu_limit": config.cpu_limit,
+                    "memory_limit": config.memory_limit,
+                    "timeout": config.timeout,
+                    "network": config.network,
+                    "read_only_rootfs": config.read_only_rootfs,
+                    "allowed_domains": config.allowed_domains,
+                    "blocked_domains": config.blocked_domains,
+                    "tmpfs_size": config.tmpfs_size,
+                    "pids_limit": config.pids_limit,
                 },
-                headers={"X-Runner-Token": PLUGIN_RUNNER_TOKEN},
-            )
-            resp.raise_for_status()
-            result = resp.json()
-            elapsed_ms = round((time.monotonic() - start_time) * 1000, 2)
+                "plugin_id": plugin_id,
+                "user_id": user_id,
+                "image_digest": image_digest,
+            },
+            headers={"X-Runner-Token": PLUGIN_RUNNER_TOKEN},
+        )
+        resp.raise_for_status()
+        result = resp.json()
+        elapsed_ms = round((time.monotonic() - start_time) * 1000, 2)
 
-            return ContainerResult(
-                success=result.get("success", False),
-                data=result.get("data"),
-                error=result.get("error"),
-                error_code=result.get("error_code"),
-                duration_ms=elapsed_ms,
-                resource_usage=result.get("resource_usage"),
-                container_id=result.get("container_id"),
-            )
+        return ContainerResult(
+            success=result.get("success", False),
+            data=result.get("data"),
+            error=result.get("error"),
+            error_code=result.get("error_code"),
+            duration_ms=elapsed_ms,
+            resource_usage=result.get("resource_usage"),
+            container_id=result.get("container_id"),
+        )
     except httpx.ConnectError:
         elapsed_ms = round((time.monotonic() - start_time) * 1000, 2)
         logger.error("Plugin runner unreachable at %s", PLUGIN_RUNNER_URL)
@@ -177,35 +180,35 @@ async def execute_in_container(
 
 async def list_container_images() -> List[Dict[str, Any]]:
     """List all plugin Docker images."""
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(
-            f"{PLUGIN_RUNNER_URL}/images",
-            headers={"X-Runner-Token": PLUGIN_RUNNER_TOKEN},
-        )
-        resp.raise_for_status()
-        return resp.json().get("images", [])
+    client = get_shared_client("plugin-runner", timeout=10.0)
+    resp = await client.get(
+        f"{PLUGIN_RUNNER_URL}/images",
+        headers={"X-Runner-Token": PLUGIN_RUNNER_TOKEN},
+    )
+    resp.raise_for_status()
+    return resp.json().get("images", [])
 
 
 async def remove_container_image(image_tag: str) -> bool:
     """Remove a plugin Docker image."""
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.delete(
-            f"{PLUGIN_RUNNER_URL}/images/{image_tag}",
-            headers={"X-Runner-Token": PLUGIN_RUNNER_TOKEN},
-        )
-        return resp.status_code == 200
+    client = get_shared_client("plugin-runner", timeout=10.0)
+    resp = await client.delete(
+        f"{PLUGIN_RUNNER_URL}/images/{image_tag}",
+        headers={"X-Runner-Token": PLUGIN_RUNNER_TOKEN},
+    )
+    return resp.status_code == 200
 
 
 async def fetch_plugin_versions(plugin_id: str, java_backend_url: str, internal_token: str) -> List[PluginVersionInfo]:
     """Fetch all versions of a plugin from Java backend for canary routing."""
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(
-            f"{java_backend_url}/api/internal/plugin/{plugin_id}/versions",
-            headers={"X-Internal-Token": internal_token},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return [
+    client = get_shared_client("plugin-versions", timeout=10.0)
+    resp = await client.get(
+        f"{java_backend_url}/api/internal/plugin/{plugin_id}/versions",
+        headers={"X-Internal-Token": internal_token},
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return [
             PluginVersionInfo(
                 version=v["version"],
                 container_image=v["container_image"],
