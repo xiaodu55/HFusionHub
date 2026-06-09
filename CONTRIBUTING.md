@@ -63,7 +63,7 @@ npm ci && npm run dev
 # Java
 cd java-backend && mvn test
 
-# Python (1220+ tests)
+# Python (1380+ tests)
 cd python-ai && pytest -q tests
 
 # Frontend (unit tests + type check + build)
@@ -72,8 +72,8 @@ cd hfusionhub-frontend && npm run test && npm run build
 
 ## Flyway Migrations
 
-- **Never modify** existing migration files (V1–V57)
-- Create new `V58+` scripts for schema changes
+- **Never modify** existing migration files (V1–V74)
+- Create new `V75+` scripts for schema changes
 - See [docs/database.md](docs/database.md) for migration rules
 
 ## Documentation

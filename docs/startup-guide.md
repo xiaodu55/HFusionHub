@@ -172,7 +172,7 @@ $env:ADMIN_PASSWORD="<管理员密码>"
 mvn spring-boot:run
 ```
 
-首次启动时 Flyway 会自动执行 `V1` ~ `V57+` 数据库迁移脚本，创建所有表结构。
+首次启动时 Flyway 会自动执行 `V1` ~ `V74` 数据库迁移脚本，创建所有表结构。
 
 验证：
 
@@ -350,9 +350,9 @@ docker compose down -v
 docker compose up -d
 ```
 
-重置后重新启动 Java，Flyway 会按 `V1` ~ `V57+` 自动重建 schema。
+重置后重新启动 Java，Flyway 会按 `V1` ~ `V74` 自动重建 schema。
 
-> ⚠️ 以后新增表结构必须创建新的 `V58+` 迁移文件，**不要修改已有的迁移文件**，否则会导致 Flyway checksum mismatch。
+> ⚠️ 以后新增表结构必须创建新的 `V75+` 迁移文件，**不要修改已有的迁移文件**，否则会导致 Flyway checksum mismatch。
 > 提示：`down -v` 也会删除 Milvus 向量卷（`<project>_milvus-data`）；如需保留向量数据，改用 `docker compose down`（不带 `-v`），或先执行 `scripts/backup_milvus.sh`。
 
 ---
@@ -592,7 +592,7 @@ $env:ADMIN_PASSWORD="<admin password>"
 mvn spring-boot:run
 ```
 
-On first launch, Flyway automatically runs `V1`–`V57+` migration scripts to create all tables.
+On first launch, Flyway automatically runs `V1`–`V74` migration scripts to create all tables.
 
 Verify:
 
@@ -758,9 +758,9 @@ docker compose down -v
 docker compose up -d
 ```
 
-After reset, restart Java so Flyway can recreate the schema (`V1`–`V57+`).
+After reset, restart Java so Flyway can recreate the schema (`V1`–`V74`).
 
-> ⚠️ For future schema changes, create new `V58+` migration files. **Do not modify existing migrations**, or Flyway will report a checksum mismatch.
+> ⚠️ For future schema changes, create new `V75+` migration files. **Do not modify existing migrations**, or Flyway will report a checksum mismatch.
 > Note: `down -v` also deletes the Milvus vector volume (`<project>_milvus-data`). To keep vector data, use `docker compose down` (without `-v`), or run `scripts/backup_milvus.sh` first.
 
 ---
