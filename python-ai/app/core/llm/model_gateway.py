@@ -1073,6 +1073,9 @@ class ModelGateway:
         never re-enter the gateway branch — otherwise a resolve failure would
         recurse through GatewayLLM forever.
         """
+        # legacy 路径访问日志：为退役收集流量证据（见 OPTIMIZATION_PLAN R15）
+        logger.warning("Legacy LLM chat path used (gateway routing unavailable) — deprecation candidate")
+
         from . import _build_providers
 
         llm = _build_providers()
@@ -1093,6 +1096,9 @@ class ModelGateway:
         kwargs: Dict[str, Any],
     ) -> AsyncGenerator[str, None]:
         """Graceful degradation for streaming: delegate to the concrete chain."""
+        # legacy 路径访问日志：为退役收集流量证据（见 OPTIMIZATION_PLAN R15）
+        logger.warning("Legacy LLM stream path used (gateway routing unavailable) — deprecation candidate")
+
         from . import _build_providers
 
         llm = _build_providers()

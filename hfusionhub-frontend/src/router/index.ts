@@ -235,6 +235,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/admin/Plans.vue'),
         meta: { roles: ADMIN_ROLES },
       },
+      {
+        path: ':pathMatch(.*)*',
+        name: 'NotFound',
+        component: () => import('@/pages/NotFound.vue'),
+      },
     ],
   },
 ]

@@ -14,6 +14,11 @@ import { useToast } from '@/composables/useToast'
 import { formatDateTime, formatTime } from '@/utils/date'
 import { friendlyErrorMessage } from '@/utils/errorMessage'
 import { SseDataParser, type SseDataEvent } from '@/utils/sse'
+import {
+  CHAT_APPROVAL_CHECK_INTERVAL_MS,
+  CHAT_RELOAD_DELAY_MS,
+  CHAT_RETRY_DELAY_MS,
+} from '@/constants/timing'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 
@@ -77,7 +82,7 @@ const handleApprovalDecision = async (decision: 'approved' | 'denied') => {
     approvalPrompt.value = null
     // 批准后 Agent 恢复执行，稍后刷新消息
     if (decision === 'approved') {
-      setTimeout(() => loadMessages(true), 2500)
+      setTimeout(() => loadMessages(true), CHAT_RELOAD_DELAY_MS)
     }
   } catch (e) {
     toast.error(friendlyErrorMessage(e, '审批操作失败，请稍后重试'))
@@ -199,10 +204,10 @@ const handleSend = async () => {
           signal: abortController.signal,
         })
         break
-      } catch (err: any) {
-        const isNetworkError = err instanceof TypeError || err?.name === 'TypeError'
+      } catch (err) {
+        const isNetworkError = err instanceof TypeError || (err instanceof Error && err.name === 'TypeError')
         if (isNetworkError && attempt < 1 && !abortController.signal.aborted) {
-          await new Promise(r => setTimeout(r, 800))
+          await new Promise(r => setTimeout(r, CHAT_RETRY_DELAY_MS))
           continue
         }
         throw err
@@ -294,14 +299,14 @@ const handleSend = async () => {
     // SSE uses a temporary client ID; reload once so feedback targets the persisted assistant message.
     await loadMessages(true)
 
-  } catch (error: any) {
+  } catch (error) {
     // 如果是用户取消，不显示错误
-    if (error.name === 'AbortError') {
+    const errorName = error instanceof Error ? error.name : ''
+    if (errorName === 'AbortError') {
       const index = pendingId === null ? -1 : messages.value.findIndex(m => m.id === pendingId)
       if (index !== -1 && !messages.value[index].content) {
         messages.value.splice(index, 1)
       }
-      console.log('Stream request cancelled')
       return
     }
 
@@ -366,7 +371,7 @@ const handleSend = async () => {
       activeRequestId = null
     }
     // 工具调用可能已产生待审批（如 write_note），延迟检查并弹出确认卡片
-    setTimeout(maybeCheckApproval, 1500)
+    setTimeout(maybeCheckApproval, CHAT_APPROVAL_CHECK_INTERVAL_MS)
   }
 }
 

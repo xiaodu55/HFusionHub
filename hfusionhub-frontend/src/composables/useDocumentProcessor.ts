@@ -1,6 +1,7 @@
 import { ref, onBeforeUnmount } from 'vue'
 import * as vectorizationApi from '@/api/vectorization'
 import type { Document } from '@/api/types'
+import { DOCUMENT_PARSE_POLL_INTERVAL_MS } from '@/constants/timing'
 
 export interface ProcessingStatus {
   status?: string
@@ -31,7 +32,7 @@ export function useDocumentProcessor() {
   // 模型选择相关
   const isModelDialogOpen = ref(false)
   const selectedDocForVectorize = ref<Document | null>(null)
-  const availableModels = ref<Array<{ id: string; name: string; type: string; dimension: number; description: string }>>([])
+  const availableModels = ref<Array<{ id: string; name: string; type: string; dimension: number; description?: string }>>([])
   const selectedModel = ref('ollama')
   const loadingModels = ref(false)
 
@@ -202,7 +203,7 @@ export function useDocumentProcessor() {
         }
 
         attempts++
-        const timer = setTimeout(checkStatus, 2000)
+        const timer = setTimeout(checkStatus, DOCUMENT_PARSE_POLL_INTERVAL_MS)
         pollingTimers.add(timer)
       } catch (error) {
         console.error('查询状态失败:', error)

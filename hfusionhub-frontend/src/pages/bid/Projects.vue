@@ -5,6 +5,7 @@ import * as bidApi from '@/api/bid'
 import type { BidProjectInfo, BidProjectStatus } from '@/api/bid'
 import * as knowledgeBaseApi from '@/api/knowledgeBase'
 import type { KnowledgeBase } from '@/api/types'
+import { BID_PROJECT_STATUS_LABELS, bidProjectStatusClass } from '@/utils/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -60,28 +61,10 @@ const createForm = ref({
   budget: '',
 })
 
-const STATUS_LABELS: Record<BidProjectStatus, string> = {
-  interpreting: '解读中',
-  requirements: '需求清单',
-  drafting: '撰写中',
-  checking: '自检中',
-  submitted: '已投标',
-  archived: '已归档',
-}
+const STATUS_LABELS = BID_PROJECT_STATUS_LABELS
 
 const STATUS_OPTIONS = Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label }))
 const FILTER_OPTIONS = [{ value: '', label: '全部状态' }, ...STATUS_OPTIONS]
-
-const statusBadgeClass = (status: BidProjectStatus) => {
-  switch (status) {
-    case 'interpreting': return 'bg-blue-100 text-blue-700'
-    case 'requirements': return 'bg-amber-100 text-amber-700'
-    case 'drafting': return 'bg-purple-100 text-purple-700'
-    case 'checking': return 'bg-orange-100 text-orange-700'
-    case 'submitted': return 'bg-emerald-100 text-emerald-700'
-    case 'archived': return 'bg-slate-100 text-slate-600'
-  }
-}
 
 const loadProjects = async () => {
   const seq = ++loadSeq
@@ -226,7 +209,7 @@ onMounted(loadProjects)
       >
         <CardContent class="p-5">
           <div class="mb-2 flex items-start justify-between gap-2">
-            <Badge :class="statusBadgeClass(project.status)">
+            <Badge :class="bidProjectStatusClass(project.status)">
               {{ STATUS_LABELS[project.status] }}
             </Badge>
             <button

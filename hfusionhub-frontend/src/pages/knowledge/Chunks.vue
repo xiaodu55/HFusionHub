@@ -66,7 +66,7 @@ const loadChunks = async () => {
     const res = await vectorizationApi.getDocumentChunks(documentId.value, params)
     let chunksData = res.data
     if (typeof chunksData === 'string') {
-      chunksData = JSON.parse(chunksData)
+      chunksData = JSON.parse(chunksData) as vectorizationApi.ChunkPage
     }
     if (chunksData && chunksData.chunks) {
       chunks.value = chunksData.chunks || []

@@ -56,8 +56,8 @@ const handleUpdate = async () => {
       phone: phone || undefined,
     })
     successMessage.value = '更新成功'
-  } catch (e: any) {
-    errorMessage.value = e.message || '更新失败'
+  } catch (e) {
+    errorMessage.value = e instanceof Error ? e.message : '更新失败'
   } finally {
     loading.value = false
   }
@@ -89,8 +89,8 @@ const handleChangePassword = async () => {
     passwordForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
     passwordMessage.value = '密码已更新，下次登录请使用新密码'
     toast.success('密码已更新')
-  } catch (e: any) {
-    toast.error(e.message || '密码修改失败')
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : '密码修改失败')
   } finally {
     passwordLoading.value = false
   }

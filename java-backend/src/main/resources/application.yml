@@ -152,6 +152,10 @@ plugin-runner:
 # 未设置时跳过创建，已设置时创建/更新 admin 账户的密码
 app:
   trusted-proxy-headers: ${TRUSTED_PROXY_HEADERS:false}
+  # 演示数据端点（/demo/*）总开关 — 开发/演示默认开启；
+  # 生产部署通过 deploy/.env 的 DEMO_ENDPOINTS_ENABLED 默认关闭（/clear 有数据破坏性）
+  demo:
+    endpoints-enabled: ${DEMO_ENDPOINTS_ENABLED:true}
   model-credentials:
     # 用于加密用户提供的模型 API Key（AES-GCM）。必须是独立于其它内部令牌的
     # 长随机值——第十五轮 P0-8 起不再回退复用 PYTHON_AI_INTERNAL_TOKEN，

@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as bidApi from '@/api/bid'
-import type { BidDraft, BidProjectStatus } from '@/api/bid'
+import type { BidDraft } from '@/api/bid'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -21,6 +21,7 @@ import {
 import { SseDataParser, type SseDataEvent } from '@/utils/sse'
 import { useUserStore } from '@/stores/user'
 import { formatDateTime } from '@/utils/date'
+import { BID_PROJECT_STATUS_LABELS, bidProjectStatusClass } from '@/utils/badge'
 import { useToast } from '@/composables/useToast'
 import EmptyState from '@/components/EmptyState.vue'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
@@ -45,14 +46,7 @@ const streamingSection = ref('')
 const streamError = ref('')
 let abortController: AbortController | null = null
 
-const STATUS_LABELS: Record<BidProjectStatus, string> = {
-  interpreting: '解读中',
-  requirements: '需求清单',
-  drafting: '撰写中',
-  checking: '自检中',
-  submitted: '已投标',
-  archived: '已归档',
-}
+const STATUS_LABELS = BID_PROJECT_STATUS_LABELS
 
 const DRAFT_STATUS_LABELS: Record<BidDraft['status'], string> = {
   drafting: '待审批',
@@ -64,17 +58,6 @@ const DRAFT_STATUS_CLASS: Record<BidDraft['status'], string> = {
   drafting: 'bg-amber-100 text-amber-700',
   approved: 'bg-emerald-100 text-emerald-700',
   rejected: 'bg-red-100 text-red-700',
-}
-
-const statusBadgeClass = (status: BidProjectStatus) => {
-  switch (status) {
-    case 'interpreting': return 'bg-blue-100 text-blue-700'
-    case 'requirements': return 'bg-amber-100 text-amber-700'
-    case 'drafting': return 'bg-purple-100 text-purple-700'
-    case 'checking': return 'bg-orange-100 text-orange-700'
-    case 'submitted': return 'bg-emerald-100 text-emerald-700'
-    case 'archived': return 'bg-slate-100 text-slate-600'
-  }
 }
 
 const approvedCount = computed(() => drafts.value.filter(d => d.status === 'approved').length)
@@ -266,7 +249,7 @@ onBeforeUnmount(() => abortController?.abort())
             <Button variant="ghost" size="sm" class="-ml-2" @click="router.push('/bid/projects')">
               <ArrowLeft class="mr-1 h-4 w-4" /> 返回列表
             </Button>
-            <Badge :class="statusBadgeClass(project.status)">{{ STATUS_LABELS[project.status] }}</Badge>
+            <Badge :class="bidProjectStatusClass(project.status)">{{ STATUS_LABELS[project.status] }}</Badge>
           </div>
           <h1 class="mt-2 text-2xl font-bold">{{ project.title }}</h1>
           <p class="mt-1 text-sm text-muted-foreground">

@@ -105,6 +105,50 @@ satoken: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ### Health
 - `GET /api/health` — Service health check
 
+## Open API（应用发布 · 外部系统对接）
+
+通过「应用发布」创建应用并生成 API Key（`hf_` 前缀，在 `builder/apps` 页面管理）后，外部系统无需登录即可调用。鉴权支持两种头（二选一）：
+
+- `Authorization: Bearer hf_xxx`
+- `X-API-Key: hf_xxx`
+
+计量计费（token 用量计入租户 usage ledger）与限流对开放 API 同样生效。
+
+### 应用对话 (`POST /api/openapi/chat`)
+
+```bash
+curl -X POST http://localhost:8080/api/openapi/chat \
+  -H "Authorization: Bearer ***REMOVED-BY-REWRITE***" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "介绍一下产品的主要特点",
+    "history": [{"role": "user", "content": "你好"}, {"role": "assistant", "content": "你好，有什么可以帮你？"}]
+  }'
+```
+
+响应：
+
+```json
+{
+  "content": "根据知识库内容，产品的主要特点包括……",
+  "sources": [{"document_name": "产品手册.pdf", "score": 0.87}],
+  "model": "deepseek-v4-flash",
+  "status": "success",
+  "tokenUsage": {"inputTokens": 120, "outputTokens": 356}
+}
+```
+
+### 投标废标自检 (`POST /api/openapi/bid/check`)
+
+```bash
+curl -X POST http://localhost:8080/api/openapi/bid/check \
+  -H "X-API-Key: ***REMOVED-BY-REWRITE***" \
+  -H "Content-Type: application/json" \
+  -d '{"projectId": 42}'
+```
+
+需应用所在租户开通 openapi 模块；响应为废标自检报告（severity/status/issues 列表等）。
+
 ## Python AI Public Endpoints
 
 ### MCP (`/mcp`) — No internal token required for discovery

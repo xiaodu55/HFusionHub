@@ -31,8 +31,9 @@ import { Input } from '@/components/ui/input'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import { useToast } from '@/composables/useToast'
+import { BADGE_TONE_CLASS, type BadgeTone } from '@/utils/badge'
 
-type StatusTone = 'success' | 'danger' | 'warning' | 'progress' | 'neutral'
+type StatusTone = BadgeTone
 
 const router = useRouter()
 const toast = useToast()
@@ -60,16 +61,7 @@ const statusMeta = (status?: string) => {
   return { label: status || '未知状态', tone: 'neutral' as StatusTone }
 }
 
-const statusBadgeClass = (status?: string) => {
-  const tone = statusMeta(status).tone
-  return {
-    success: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300',
-    danger: 'border-rose-400/25 bg-rose-400/10 text-rose-300',
-    warning: 'border-amber-400/25 bg-amber-400/10 text-amber-200',
-    progress: 'border-cyan-400/25 bg-cyan-400/10 text-cyan-200',
-    neutral: 'border-white/10 bg-white/5 text-muted-foreground',
-  }[tone]
-}
+const statusBadgeClass = (status?: string) => BADGE_TONE_CLASS[statusMeta(status).tone]
 
 const completedCount = computed(() => tasks.value.filter(task => statusMeta(task.status).tone === 'success').length)
 const runningCount = computed(() => tasks.value.filter(task => ['progress', 'warning'].includes(statusMeta(task.status).tone)).length)

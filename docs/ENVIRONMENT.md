@@ -68,6 +68,7 @@ Copy `deploy/.env.example` to `deploy/.env` for production Docker Compose:
 | `RAG_INDEX_STALE_AFTER_MINUTES` | No | `30` | Index job recovery threshold |
 | `RAG_INDEX_MAX_ATTEMPTS` | No | `3` | Max indexing retries |
 | `TRUSTED_PROXY_HEADERS` | No | `false` | Enable X-Forwarded-For (reverse proxy only) |
+| `DEMO_ENDPOINTS_ENABLED` | No | `true`（dev）/ `false`（prod compose） | `/demo/*` 演示数据端点总开关（import/clear/import-bid 等）；关闭时返回 403。生产默认关闭——`/demo/clear` 有数据破坏性；生产 compose 与 `deploy/.env.example` 已默认 `false` |
 
 > Redis 密码：dev compose 已在 `docker/docker-compose.yml` 通过 `redis-server ... --requirepass "$REDIS_PASSWORD"` 启用（2026-08-21 起生效）。Java 侧 `application.yml` 读取 `REDIS_PASSWORD`，**两端必须一致**，否则 Java 启动报 NOAUTH。生产若 Redis 关闭 requirepass，将 `REDIS_PASSWORD` 留空即可。
 

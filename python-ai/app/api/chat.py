@@ -1104,14 +1104,28 @@ async def agent_v1_decide(request: AgentResumeRequest):
 
 # ── Legacy agent-runs (kept for backward compat) ──────────────────────────
 
+# 现仓库内（Java/前端）已无 /api/chat/agent-runs 调用方，仅保留兼容外部集成；
+# 首次访问告警一次，用于退役流量评估（见 OPTIMIZATION_PLAN R15）
+_legacy_agent_runs_warned = False
+
+
+def _warn_legacy_agent_runs() -> None:
+    global _legacy_agent_runs_warned
+    if not _legacy_agent_runs_warned:
+        _legacy_agent_runs_warned = True
+        logger.warning("Legacy /api/chat/agent-runs endpoint accessed — deprecation candidate (logged once per process)")
+
+
 @router.get("/api/chat/agent-runs")
 async def list_agent_runs(limit: int = 50, knowledge_base_id: Optional[int] = None):
     """Operational metadata only; prompts and retrieved text are never stored."""
+    _warn_legacy_agent_runs()
     return {"items": get_agent_run_store().list(limit=limit, knowledge_base_id=knowledge_base_id)}
 
 
 @router.get("/api/chat/agent-runs/{run_id}")
 async def get_agent_run(run_id: str):
+    _warn_legacy_agent_runs()
     run = get_agent_run_store().get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Agent run not found")

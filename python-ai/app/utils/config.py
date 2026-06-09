@@ -247,3 +247,20 @@ def _validate_config() -> None:
 
 
 _validate_config()
+
+
+def _warn_deprecated_ollama_model() -> None:
+    """OLLAMA_MODEL 已废弃用于嵌入 — 嵌入模型统一走 OLLAMA_EMBEDDING_MODEL。
+
+    该变量现仅影响 Ollama 对话兜底供应商的默认模型名（llm/__init__.py），
+    设置了它的部署容易误以为它仍控制嵌入。启动时提示一次，辅助迁移。
+    """
+    if os.getenv("OLLAMA_MODEL"):
+        logging.getLogger(__name__).warning(
+            "OLLAMA_MODEL is set but deprecated for embeddings — Ollama embeddings use "
+            "OLLAMA_EMBEDDING_MODEL instead. OLLAMA_MODEL now only affects the Ollama "
+            "chat fallback provider (default model name)."
+        )
+
+
+_warn_deprecated_ollama_model()

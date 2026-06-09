@@ -45,6 +45,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { useToast } from '@/composables/useToast'
+import { TEST_RUN_POLL_INTERVAL_MS } from '@/constants/timing'
 
 // ── State ──────────────────────────────────────────────────────────
 
@@ -460,7 +461,7 @@ const runAll = async () => {
 
 const startPolling = (runId: number) => {
   stopPolling()
-  pollTimer = window.setInterval(() => pollRunStatus(runId), 1500)
+  pollTimer = window.setInterval(() => pollRunStatus(runId), TEST_RUN_POLL_INTERVAL_MS)
   pollRunStatus(runId)
 }
 

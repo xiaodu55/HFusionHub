@@ -14,6 +14,13 @@ import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
 import { AlertTriangle, ArrowLeft, CheckCircle2, FileSearch, Loader2, PenLine, RefreshCw, ShieldCheck } from 'lucide-vue-next'
 import { formatDateTime } from '@/utils/date'
+import {
+  BID_PROJECT_STATUS_LABELS,
+  BID_REQUIREMENT_CATEGORY_LABELS,
+  BID_REQUIREMENT_STATUS_CLASS,
+  BID_REQUIREMENT_STATUS_LABELS,
+  bidProjectStatusClass,
+} from '@/utils/badge'
 import { useToast } from '@/composables/useToast'
 import EmptyState from '@/components/EmptyState.vue'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
@@ -30,14 +37,7 @@ const loading = ref(false)
 const loadError = ref(false)
 const interpreting = ref(false)
 
-const STATUS_LABELS: Record<BidProjectStatus, string> = {
-  interpreting: '解读中',
-  requirements: '需求清单',
-  drafting: '撰写中',
-  checking: '自检中',
-  submitted: '已投标',
-  archived: '已归档',
-}
+const STATUS_LABELS = BID_PROJECT_STATUS_LABELS
 
 const STATUS_OPTIONS = Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label }))
 
@@ -51,39 +51,9 @@ const ELEMENT_LABELS: Record<string, string> = {
   contact: '联系方式',
 }
 
-const REQUIREMENT_CATEGORY_LABELS: Record<string, string> = {
-  qualification: '资质要求',
-  performance: '业绩要求',
-  technical: '技术需求',
-  commercial: '商务需求',
-  format: '格式要求',
-  disqualification_risk: '废标风险',
-}
+const REQUIREMENT_CATEGORY_LABELS = BID_REQUIREMENT_CATEGORY_LABELS
 
-const REQUIREMENT_STATUS_LABELS: Record<BidRequirement['satisfiedStatus'], string> = {
-  pending: '待处理',
-  drafting: '撰写中',
-  checked: '已确认',
-  manual_review: '需人工复核',
-}
-
-const REQUIREMENT_STATUS_CLASS: Record<BidRequirement['satisfiedStatus'], string> = {
-  pending: 'bg-slate-100 text-slate-600',
-  drafting: 'bg-blue-100 text-blue-700',
-  checked: 'bg-emerald-100 text-emerald-700',
-  manual_review: 'bg-amber-100 text-amber-700',
-}
-
-const statusBadgeClass = (status: BidProjectStatus) => {
-  switch (status) {
-    case 'interpreting': return 'bg-blue-100 text-blue-700'
-    case 'requirements': return 'bg-amber-100 text-amber-700'
-    case 'drafting': return 'bg-purple-100 text-purple-700'
-    case 'checking': return 'bg-orange-100 text-orange-700'
-    case 'submitted': return 'bg-emerald-100 text-emerald-700'
-    case 'archived': return 'bg-slate-100 text-slate-600'
-  }
-}
+const REQUIREMENT_STATUS_LABELS = BID_REQUIREMENT_STATUS_LABELS
 
 const project = computed(() => detail.value?.project ?? null)
 const elements = computed(() => detail.value?.elements ?? [])
@@ -220,7 +190,7 @@ onMounted(loadDetail)
             <Button variant="ghost" size="sm" class="-ml-2" @click="router.push('/bid/projects')">
               <ArrowLeft class="mr-1 h-4 w-4" /> 返回列表
             </Button>
-            <Badge :class="statusBadgeClass(project.status)">{{ STATUS_LABELS[project.status] }}</Badge>
+            <Badge :class="bidProjectStatusClass(project.status)">{{ STATUS_LABELS[project.status] }}</Badge>
           </div>
           <h1 class="mt-2 text-2xl font-bold">{{ project.title }}</h1>
           <p class="mt-1 text-sm text-muted-foreground">
@@ -389,7 +359,7 @@ onMounted(loadDetail)
                   >
                     <AlertTriangle class="h-3 w-3" /> 低置信
                   </span>
-                  <Badge :class="REQUIREMENT_STATUS_CLASS[requirement.satisfiedStatus]">
+                  <Badge :class="BID_REQUIREMENT_STATUS_CLASS[requirement.satisfiedStatus]">
                     {{ REQUIREMENT_STATUS_LABELS[requirement.satisfiedStatus] }}
                   </Badge>
                   <Button

@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useTheme } from '@/composables/useTheme'
 import { useToast } from '@/composables/useToast'
+import { levelBadgeClass } from '@/utils/badge'
+import { APPROVAL_POLL_INTERVAL_MS, NOTICE_POLL_INTERVAL_MS } from '@/constants/timing'
 import {
   Activity,
   Bell,
@@ -208,11 +210,7 @@ const markNoticeRead = async (noticeId: number) => {
 }
 
 const noticeLevelLabel = (level?: string) => ({ info: '提示', warning: '重要', error: '紧急' }[level || ''] || '提示')
-const noticeLevelClass = (level?: string) => ({
-  error: 'border-rose-400/25 bg-rose-400/10 text-rose-200',
-  warning: 'border-amber-400/25 bg-amber-400/10 text-amber-200',
-  info: 'border-cyan-400/25 bg-cyan-400/10 text-cyan-200',
-}[level || ''] || 'border-border bg-muted text-muted-foreground')
+const noticeLevelClass = (level?: string) => levelBadgeClass(level)
 
 const resolveNotification = async (alertId: number) => {
   try {
@@ -225,27 +223,38 @@ const resolveNotification = async (alertId: number) => {
 
 const pendingApprovals = ref(0)
 let approvalPollTimer: ReturnType<typeof setInterval> | null = null
-let noticePollTimer: ReturnType<typeof setInterval> | null = null
+let pollTickCount = 0
 const loadPendingApprovals = async () => {
   try {
     const res = (await get('/agent-task/approvals/pending')) as ApiResponse<unknown[]>
     pendingApprovals.value = Array.isArray(res.data) ? res.data.length : 0
-  } catch (error) {
+  } catch {
     pendingApprovals.value = 0
   }
 }
-const pollPendingApprovals = () => {
+const refreshUnreadNoticeCount = () => {
+  notificationApi.getUnreadNoticeCount().then(res => {
+    unreadNoticeCount.value = res.data?.count ?? unreadNoticeCount.value
+  }).catch(() => {})
+}
+
+// 审批与公告原本各有一个独立轮询，合并为单一定时器：
+// 每 30s 刷新待审批数，每 60s（第 2 个周期）顺带刷新未读公告数
+const pollLayoutCounters = () => {
   loadPendingApprovals()
-  approvalPollTimer = setInterval(loadPendingApprovals, 30000)
+  refreshUnreadNoticeCount()
+  approvalPollTimer = setInterval(() => {
+    pollTickCount += 1
+    loadPendingApprovals()
+    if ((pollTickCount * APPROVAL_POLL_INTERVAL_MS) % NOTICE_POLL_INTERVAL_MS === 0) {
+      refreshUnreadNoticeCount()
+    }
+  }, APPROVAL_POLL_INTERVAL_MS)
 }
 
 const formatDateTime = (value?: string) => value ? value.replace('T', ' ').slice(0, 16) : '刚刚'
 const severityLabel = (severity?: string) => ({ critical: '需要立即处理', warning: '需要关注', info: '提示' }[severity || ''] || '提示')
-const severityClass = (severity?: string) => ({
-  critical: 'border-rose-400/25 bg-rose-400/10 text-rose-200',
-  warning: 'border-amber-400/25 bg-amber-400/10 text-amber-200',
-  info: 'border-cyan-400/25 bg-cyan-400/10 text-cyan-200',
-}[severity || ''] || 'border-border bg-muted text-muted-foreground')
+const severityClass = (severity?: string) => levelBadgeClass(severity)
 
 const alertContent = (alert: agentApi.AgentAlertEvent) => {
   const current = alert.currentValue ?? 0
@@ -312,17 +321,11 @@ onMounted(() => {
   void refreshServiceHealth()
   void loadNotifications()
   void loadNotices()
-  pollPendingApprovals()
-  noticePollTimer = setInterval(() => {
-    notificationApi.getUnreadNoticeCount().then(res => {
-      unreadNoticeCount.value = res.data?.count ?? unreadNoticeCount.value
-    }).catch(() => {})
-  }, 60000)
+  pollLayoutCounters()
 })
 
 onBeforeUnmount(() => {
   if (approvalPollTimer) clearInterval(approvalPollTimer)
-  if (noticePollTimer) clearInterval(noticePollTimer)
 })
 </script>
 

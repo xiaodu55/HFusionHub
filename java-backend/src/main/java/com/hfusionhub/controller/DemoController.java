@@ -8,6 +8,7 @@ import com.hfusionhub.service.DemoImportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -15,6 +16,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 演示数据控制器 — 一键导入各菜单示例数据，帮助新用户快速上手
+ *
+ * <p>所有端点受 {@code DEMO_ENDPOINTS_ENABLED} 门控（application.yml {@code app.demo.endpoints-enabled}，
+ * 默认 true 便于开发/演示；生产部署通过 deploy/.env 默认关闭）。/clear 系列具有数据破坏性，
+ * 生产环境保持关闭可避免误触发。
  *
  * @author HFusionHub Team
  */
@@ -27,10 +32,23 @@ public class DemoController {
     private final DemoImportService demoImportService;
     private final BidDemoImportService bidDemoImportService;
 
+    /** 演示数据端点总开关（生产默认关闭，见 deploy/.env.example） */
+    @Value("${app.demo.endpoints-enabled:true}")
+    private boolean demoEndpointsEnabled;
+
+    private <T> R<T> checkEnabled() {
+        if (!demoEndpointsEnabled) {
+            return R.fail(403, "演示数据功能已关闭（DEMO_ENDPOINTS_ENABLED=false），如需使用请在环境配置中开启");
+        }
+        return null;
+    }
+
     @Operation(summary = "导入演示数据", description = "一键导入各菜单示例数据：知识库文档、回答方案、我的笔记、我的记忆、应用发布、公告（幂等，仅管理员可用）")
     @PostMapping("/import")
     @SaCheckRole("admin")
     public R<DemoImportResultDTO> importDemo() {
+        R<DemoImportResultDTO> denied = checkEnabled();
+        if (denied != null) return denied;
         return R.ok(demoImportService.importDemoData());
     }
 
@@ -38,6 +56,8 @@ public class DemoController {
     @PostMapping("/clear")
     @SaCheckRole("admin")
     public R<DemoImportResultDTO> clearDemo() {
+        R<DemoImportResultDTO> denied = checkEnabled();
+        if (denied != null) return denied;
         return R.ok(demoImportService.clearDemoData());
     }
 
@@ -45,6 +65,8 @@ public class DemoController {
     @PostMapping("/import-bid")
     @SaCheckRole("admin")
     public R<DemoImportResultDTO> importBidDemo() {
+        R<DemoImportResultDTO> denied = checkEnabled();
+        if (denied != null) return denied;
         return R.ok(bidDemoImportService.importBidDemoData());
     }
 
@@ -52,6 +74,8 @@ public class DemoController {
     @PostMapping("/clear-bid")
     @SaCheckRole("admin")
     public R<DemoImportResultDTO> clearBidDemo() {
+        R<DemoImportResultDTO> denied = checkEnabled();
+        if (denied != null) return denied;
         return R.ok(bidDemoImportService.clearBidDemoData());
     }
 
@@ -59,6 +83,8 @@ public class DemoController {
     @PostMapping("/import-bid-industry")
     @SaCheckRole("admin")
     public R<DemoImportResultDTO> importBidIndustrySamples(@RequestParam String industry) {
+        R<DemoImportResultDTO> denied = checkEnabled();
+        if (denied != null) return denied;
         return R.ok(bidDemoImportService.importBidIndustrySamples(industry));
     }
 }

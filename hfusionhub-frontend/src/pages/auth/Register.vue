@@ -69,8 +69,8 @@ const handleRegister = async () => {
       phone: phone || undefined,
     })
     router.replace({ path: '/login', query: { registered: '1' } })
-  } catch (e: any) {
-    error.value = e.message || '注册失败'
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '注册失败'
   } finally {
     loading.value = false
   }

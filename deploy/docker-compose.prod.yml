@@ -175,6 +175,8 @@ services:
       PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?required}
       CALLBACK_SECRET: ${CALLBACK_SECRET:?required}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?required}
+      # 演示数据端点总开关 — 生产默认关闭（/demo/clear 有数据破坏性），需要时在 deploy/.env 显式开启
+      DEMO_ENDPOINTS_ENABLED: ${DEMO_ENDPOINTS_ENABLED:-false}
       AI_SERVICE_URL: http://python-ai:9000
       PYTHON_AI_CALLBACK_BASE_URL: http://java-backend:8080/api
       JAVA_OPTS: "-Xmx512m -Xms256m"

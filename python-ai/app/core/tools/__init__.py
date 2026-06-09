@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Set
 import json
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 from .base import BaseTool
 from .search_tool import SearchTool
@@ -52,6 +55,20 @@ AGENT_V1_TOOL_NAMES: Set[str] = {
     "read_chunk",
     "list_document_chunks",
 }
+
+# legacy 入口的「每进程一次」告警标记：execute_tool 是 ReAct Agent 的活跃热路径，
+# 逐次告警会淹没日志，仅在首次调用时记录用于退役流量评估
+_LEGACY_WARNED: Set[str] = set()
+
+
+def _warn_legacy_once(entry: str) -> None:
+    if entry not in _LEGACY_WARNED:
+        _LEGACY_WARNED.add(entry)
+        logger.warning(
+            "Legacy tools entry point %s() used — prefer ToolRegistry (deprecation candidate, "
+            "see OPTIMIZATION_PLAN R15; logged once per process)",
+            entry,
+        )
 
 
 class ToolPolicyError(ValueError):
@@ -146,6 +163,8 @@ def get_tools(
     back-reference so ``execute_tool`` routes through the Registry.
     For backward compat, also attaches the ``instance`` key used by MCP.
     """
+    _warn_legacy_once("get_tools")
+
     if v1_only and knowledge_base_id:
         registry = create_v1_registry(knowledge_base_id)
     else:
@@ -180,6 +199,8 @@ async def execute_tool(
     When *context* is provided, the Registry enforces mode gates,
     permission checks, and KB-scope isolation before execution.
     """
+    _warn_legacy_once("execute_tool")
+
     # Try to find the registry from the tools list (attached at registration)
     # or fall back to policy-based execution.
     registry: Optional[ToolRegistry] = None

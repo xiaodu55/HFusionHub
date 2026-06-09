@@ -254,6 +254,13 @@
 > **结论**：十四轮交付后发现一批**真实缺陷**（非单纯优化），按「P0 正确性/安全 → P1 性能 → P2 可维护性/测试 → P3 文档/运维」四层排期。
 > **本轮实施范围**：P0 批次全部 9 项（见 §R15-P0）；P1–P3 供后续排期。
 > **冻结项不动**：GraphRAG / 多模态 OCR / cross_encoder reranker（已明确不投入）；租户隔离、HMAC 回调、幂等账本、熔断网关等已验证机制不改设计。
+>
+> **冻结路线重启条件**（2026-08-29 评审补充，避免后续重复评估）：
+> - `RAG_GRAPH_ENABLED`（GraphRAG）：仅当出现「需要跨文档多跳关联推理」的真实业务场景、且官方 GraphRAG 实现稳定支持持久化图索引（消除重启重建成本）时重启。
+> - `RAG_MULTIMODAL_ENABLED`（多模态 OCR）：仅当切换到 vision-LLM 抽取路线（替代系统级 Tesseract 依赖）且离线评测证明收益时重启；当前维持冻结。
+> - `cross_encoder` reranker 模式：仅当离线基准（`evaluation/` 套件）证明其相对 lexical 重排有稳定召回/排序增益时重启。
+>
+> **legacy 兼容层退役评估（2026-08-29）**：以下入口已加访问日志（Python 侧每进程告警一次），运行一个版本后确认零流量即可随大版本移除：`model_gateway._legacy_chat/_legacy_stream`（降级路径）、`core/tools` 旧 `get_tools()/execute_tool()`（ReAct/MCP 兼容）、`/api/chat/agent-runs`（仓库内已无调用方）、Java `AiClient.chatStream()`。
 
 ## R15-P0 正确性 / 安全（本轮实施 ✅）
 

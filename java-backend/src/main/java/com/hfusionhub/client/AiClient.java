@@ -616,6 +616,8 @@ public class AiClient {
     @Deprecated
     public StreamResponse chatStream(
             String message, Long conversationId, Long knowledgeBaseId, List<Map<String, String>> history) {
+        // legacy 入口访问日志：仓库内已无调用方，仅保留兼容；为退役收集流量证据
+        log.warn("Deprecated AiClient.chatStream() invoked — use streamChat() (deprecation candidate)");
         // Delegate to the synchronous chat() method for backward compatibility.
         // New code should use streamChat() with Flux for true SSE streaming.
         String requestId = java.util.UUID.randomUUID().toString();

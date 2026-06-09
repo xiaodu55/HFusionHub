@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 评审落地批次（2026-08-29）：前端体验 + 演示门控 + legacy 退役评估
+
+#### Frontend
+- **404 兜底路由**：新增 `src/pages/NotFound.vue` + catch-all 路由（主布局内渲染，保留导航），未知路径不再空白
+- **index.html 本地化**：`lang="zh-CN"`、标题改「HFusionHub - 企业级 AI Agent 平台」
+- **共享徽章工具**：新增 `src/utils/badge.ts`（色调/等级/投标状态映射），替换 bid 四页、agent、approval、MainLayout 中 10+ 处重复的 `*_LABELS`/`*_CLASS` 实现；+4 例 Vitest
+- **时序常量**：新增 `src/constants/timing.ts`，收敛 MainLayout/chat Detail/TestSet/useDocumentProcessor 的 6 处轮询与延时魔法数字
+- **主布局轮询合并**：待审批（30s）与未读公告（60s）双定时器合并为单一定时器，公告每 2 个周期刷新一次
+- **类型与清理**：`api/vectorization.ts` 全量补返回类型（EmbeddingModel/DocumentChunk/ChunkPage）；移除 chat console.log 残留；`catch (e: any)` 全部改为窄化判断
+
+#### Backend
+- **演示数据端点门控**：`/demo/*` 全部端点受 `DEMO_ENDPOINTS_ENABLED`（`app.demo.endpoints-enabled`，默认 true 便于开发）门控，关闭时 403；生产 compose（`deploy/docker-compose.prod.yml`）与 `deploy/.env.example` 默认关闭——`/demo/clear` 有数据破坏性
+- **legacy 兼容层访问日志**：`model_gateway._legacy_chat/_legacy_stream`（降级路径逐次告警）、`core/tools` 旧 `get_tools()/execute_tool()` 与 `/api/chat/agent-runs`（每进程告警一次，ReAct 热路径防刷屏）、Java `AiClient.chatStream()`——运行一个版本收集流量证据后择大版本移除（见 OPTIMIZATION_PLAN R15 legacy 退役评估）
+- **OLLAMA_MODEL 启动告警**：设置该废弃变量时启动提示「仅影响 Ollama 对话兜底，嵌入走 OLLAMA_EMBEDDING_MODEL」；`python-ai/.env.example` 注释说明
+
+#### Docs
+- OPTIMIZATION_PLAN 补冻结路线（GraphRAG/多模态 OCR/cross_encoder）重启条件；ENVIRONMENT.md 登记 `DEMO_ENDPOINTS_ENABLED`；api.md 补开放 API 对接示例
+
 ### 第十五轮 · P2/P3 批次（2026-08-28）：可维护性/测试 + 文档/运维（R15-20~30）
 
 #### Maintainability / Testing（R15-20~24）

@@ -329,7 +329,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 
 > 所有文档位于 [docs/](docs/) 目录。按用途分四类：**入口**、**开发**、**运维**、**治理**。
 > 2026-08-19 已做文档体系整合：合并 5 份为 3 份权威，删除 1 份冗余，统一关键事实基线
-> （Java 554 测试 / Python 1380+ / 前端 45 / Flyway V74 / DeepSeek 已配置）。
+> （Java 554 测试 / Python 1380+ / 前端 49 / Flyway V74 / DeepSeek 已配置）。
 
 ### 入口类
 
