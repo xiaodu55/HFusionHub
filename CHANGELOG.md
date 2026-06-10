@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Added
 - **管理员重置用户密码**：`PUT /api/user/{userId}/password`（仅 admin，不可用于自己）+ 前端「账号权限」页「重置密码」入口与对话框——忘记密码不再需要改库
+- **Webhook 管理界面**：设置页新增「Webhook 推送」卡片——订阅 CRUD（名称/回调地址/HMAC 签名密钥/5 类事件勾选）、启停、同步测试投递、投递历史查看；此前该子系统仅有 REST API 无任何前端入口
 
 ### 评审落地批次（2026-08-29）：前端体验 + 演示门控 + legacy 退役评估
 

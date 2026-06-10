@@ -26,6 +26,7 @@ import { useTheme } from '@/composables/useTheme'
 import { useUserStore } from '@/stores/user'
 import * as userApi from '@/api/user'
 import * as systemApi from '@/api/system'
+import WebhookSettings from '@/components/settings/WebhookSettings.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -281,6 +282,9 @@ onMounted(() => {
           </div>
         </CardContent>
       </Card>
+
+      <!-- Webhook 事件推送（每个用户自己的订阅） -->
+      <WebhookSettings />
     </div>
   </div>
 </template>
