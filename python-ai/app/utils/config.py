@@ -65,6 +65,8 @@ class Config:
     # not read environment variables directly.
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:latest")
+    # Ollama embedding model — the deprecated OLLAMA_MODEL must not be used here.
+    OLLAMA_EMBEDDING_MODEL = os.getenv("OLLAMA_EMBEDDING_MODEL", "qwen3-embedding:8b-fp16")
 
     # Required shared secret for Java -> Python requests.  Do not provide a
     # development default: an accidentally exposed worker must fail closed.

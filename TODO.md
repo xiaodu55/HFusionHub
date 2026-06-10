@@ -16,6 +16,7 @@
 
 ### P0 — 上线安全（生产环境必需）
 
+0. **【紧急】恢复 CI 运行** — GitHub Actions 因「recent account payments have failed or your spending limit needs to be increased」全部 job 3 秒即失败（2026-08-29 确认，main 分支 CI/E2E 连续红）。需到 GitHub Settings → Billing & plans 处理账单或提高 Spending limit。在恢复前，PR 门禁（含 eval-offline 阻断）实际失效，合并需本地跑全量测试兜底
 1. **修改默认密码** — `docker/.env` 中 `ADMIN_PASSWORD` / `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` / `REDIS_PASSWORD` / `MINIO_ROOT_PASSWORD` 替换为强随机值（可用 `openssl rand -base64 24` 或 `scripts/init-env.ps1` 重新生成），修改后 `docker compose down && docker compose up -d`
 2. **配置 HTTPS** — 按 [docs/PRODUCTION_OPS.md](docs/PRODUCTION_OPS.md) 第 0 节配置 Nginx + Let's Encrypt，强制 HTTP→HTTPS
 3. **收紧 CORS** — `CORS_ALLOWED_ORIGINS` 移除 `*`，仅保留真实域名

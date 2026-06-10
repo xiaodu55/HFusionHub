@@ -75,3 +75,17 @@ jobs:
           name: eval-runtime-report
           path: python-ai/evaluation/reports/*
           if-no-files-found: warn
+      # 失败告警（可选）：评测红了不再只依赖 CI 红灯/邮件轮询。
+      # 在仓库 secrets 配置 ALERT_WEBHOOK_URL（钉钉/企微/Slack 等群机器人）即启用。
+      - name: Notify failure via webhook
+        if: ${{ failure() }}
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+        run: |
+          if [ -z "$ALERT_WEBHOOK_URL" ]; then
+            echo "ALERT_WEBHOOK_URL not configured — skip failure notification"
+            exit 0
+          fi
+          payload=$(jq -n --arg text "[HFusionHub] eval-nightly FAILED — ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            '{msgtype: "text", text: {content: $text}}')
+          curl -sS --max-time 10 -X POST -H 'Content-Type: application/json' -d "$payload" "$ALERT_WEBHOOK_URL"

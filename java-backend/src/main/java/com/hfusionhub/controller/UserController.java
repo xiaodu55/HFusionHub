@@ -3,6 +3,7 @@ package com.hfusionhub.controller;
 import cn.dev33.satoken.annotation.SaCheckRole;
 import com.hfusionhub.common.dto.PageResult;
 import com.hfusionhub.common.result.R;
+import com.hfusionhub.dto.AdminPasswordResetDTO;
 import com.hfusionhub.dto.PasswordChangeDTO;
 import com.hfusionhub.dto.ThemePreferenceUpdateDTO;
 import com.hfusionhub.dto.UserInfoDTO;
@@ -131,6 +132,14 @@ public class UserController {
     public R<Void> changePassword(@Valid @RequestBody PasswordChangeDTO dto) {
         userService.changePassword(dto);
         return R.ok("密码已更新", null);
+    }
+
+    @SaCheckRole("admin")
+    @PutMapping("/{userId}/password")
+    @Operation(summary = "重置用户密码", description = "管理员为忘记密码的用户设置临时新密码（无需旧密码；不可用于自己，自己走「修改密码」）")
+    public R<UserInfoDTO> resetUserPassword(@PathVariable Long userId,
+                                            @Valid @RequestBody AdminPasswordResetDTO dto) {
+        return R.ok("密码已重置，请将临时密码通过线下渠道告知用户", userService.resetUserPassword(userId, dto));
     }
 
     @SaCheckRole("admin")

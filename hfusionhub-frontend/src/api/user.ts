@@ -71,3 +71,8 @@ export const searchUsers = (keyword: string): Promise<ApiResponse<UserSearchResu
 export const changePassword = (data: { oldPassword: string; newPassword: string }): Promise<ApiResponse<void>> => {
   return post('/user/password', data)
 }
+
+/** 管理员重置用户密码（忘记密码场景；仅 admin，不可用于自己） */
+export const resetUserPassword = (userId: number, data: { newPassword: string }): Promise<ApiResponse<UserInfo>> => {
+  return put(`/user/${userId}/password`, data)
+}

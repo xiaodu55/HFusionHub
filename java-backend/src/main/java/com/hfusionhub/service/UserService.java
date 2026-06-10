@@ -1,6 +1,7 @@
 package com.hfusionhub.service;
 
 import com.hfusionhub.common.dto.PageResult;
+import com.hfusionhub.dto.AdminPasswordResetDTO;
 import com.hfusionhub.dto.PasswordChangeDTO;
 import com.hfusionhub.dto.UserInfoDTO;
 import com.hfusionhub.dto.UserLoginDTO;
@@ -84,6 +85,15 @@ public interface UserService {
      * @param dto 旧密码 + 新密码
      */
     void changePassword(PasswordChangeDTO dto);
+
+    /**
+     * 管理员重置用户密码（无需旧密码；用于忘记密码场景）
+     *
+     * @param userId 目标用户 ID
+     * @param dto 临时新密码
+     * @return 更新后的用户信息
+     */
+    UserInfoDTO resetUserPassword(Long userId, AdminPasswordResetDTO dto);
 
     UserInfoDTO updateUserRole(Long userId, String role);
 

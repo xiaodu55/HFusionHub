@@ -235,11 +235,18 @@ class TestWriteNoteKBEnforcement(unittest.IsolatedAsyncioTestCase):
         self.assertIn("error", result2)
 
     async def test_valid_kb_id_succeeds(self):
-        """write_note with valid positive KB ID → returns written status."""
+        """write_note with valid KB ID + user_id → persists via Java backend."""
+        from tests.conftest import mock_java_note_backend
+
         tool = WriteNoteTool()
-        result = await tool.execute(content="Valid note", knowledge_base_id=42)
-        self.assertIn("error", result)
-        self.assertIn("durable note persistence", result["error"])
+        with mock_java_note_backend():
+            result = await tool.execute(
+                content="Valid note", knowledge_base_id=42, user_id=1,
+            )
+        # P5 起持久化走 Java /api/internal/notes（mock 后应成功）
+        self.assertNotIn("error", result)
+        self.assertTrue(result.get("success"))
+        self.assertEqual(result.get("note_id"), 101)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -291,15 +298,19 @@ class TestRegistryKBInjection(unittest.IsolatedAsyncioTestCase):
         # Register a scoped grant so the tool passes the approval gate.
         register_scoped_grant("write_note", {"content": "KB test"}, user_id=1, knowledge_base_id=77)
 
-        result = await registry.execute(
-            tool_name="write_note",
-            tool_input={"content": "KB test"},
-            context=context,
-        )
+        # P5 起持久化走 Java /api/internal/notes；mock 后 registry 注入的
+        # knowledge_base_id/user_id 应随请求成功落库。
+        from tests.conftest import mock_java_note_backend
 
-        self.assertFalse(result.ok)
-        self.assertEqual(result.error_code, "internal_error")
-        self.assertIn("durable note persistence", result.message)
+        with mock_java_note_backend():
+            result = await registry.execute(
+                tool_name="write_note",
+                tool_input={"content": "KB test"},
+                context=context,
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data.get("note_id"), 101)
 
     async def test_write_note_without_grant_returns_approval_required(self):
         """Without a scoped grant, write_note returns approval_required."""

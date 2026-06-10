@@ -15,6 +15,14 @@ sys.path.insert(0, str(project_root))
 # 配置 pytest-asyncio
 pytest_plugins = ['pytest_asyncio']
 
+# ── 测试环境隔离（必须在导入 app.utils.config 之前设置）────────────────
+# 本地开发 .env 常为 VECTOR_STORE_MODE=cluster（容器 Milvus），会让一批
+# 依赖 lite co-store JSON 语义的测试在本地失败而在 CI（无 .env）通过——
+# 测试必须 hermetic：默认强制 lite，需要 cluster 语义的测试自行显式设置。
+os.environ["VECTOR_STORE_MODE"] = "lite"
+# MODEL_GATEWAY 同理由 conftest 统一关闭（下方 env 设置），避免 .env 差异。
+os.environ["MODEL_GATEWAY_STREAM_ENABLED"] = "false"
+
 # HTTP route tests emulate the Java application service.  Production has no
 # fallback token; the test process supplies an explicit, non-secret value.
 from app.utils.config import config
@@ -31,6 +39,36 @@ os.environ.setdefault("FEATURE_FLAG_DEGRADATION", "transparent")
 # keeps exercising the legacy FailoverLLM / mock / monkeypatched-get_llm paths
 # deterministically (e.g. test_llm_failover.py asserts FailoverLLM).
 os.environ["MODEL_GATEWAY_STREAM_ENABLED"] = "false"
+
+
+class FakeInternalNoteResponse:
+    """httpx.Response 替身 — 模拟 Java /api/internal/notes 成功响应。"""
+
+    status_code = 200
+    is_error = False
+
+    def __init__(self, payload=None):
+        self._payload = payload or {"code": 200, "data": {"note_id": 101, "title": "测试笔记"}}
+
+    def json(self):
+        return self._payload
+
+
+def mock_java_note_backend():
+    """把 write_note 的 Java 持久化调用替换为成功响应。
+
+    返回 ``unittest.mock.patch`` 上下文管理器，pytest 与 unittest 用例通用：
+
+        with mock_java_note_backend():
+            result = await tool.execute(...)
+    """
+    from unittest.mock import AsyncMock, patch
+
+    async def _fake_post(url, **kwargs):
+        # patch 类属性后实例调用不会传 self；第一个位置参数是 url
+        return FakeInternalNoteResponse()
+
+    return patch("httpx.AsyncClient.post", new=AsyncMock(side_effect=_fake_post))
 
 from app.core.tenant.context import set_tenant_id, clear_tenant_id
 

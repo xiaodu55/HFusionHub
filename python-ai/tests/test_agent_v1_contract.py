@@ -1052,8 +1052,13 @@ class TestWriteCapabilityGating:
             mode="read_write",
         )
         agent = get_agent(knowledge_base_id=1, execution_context=ctx)
-        # The agent should have access to write_note via its registry
-        tools = agent._get_tools()
+        # 本用例验证 registry 版本门控（V1.1 for read_write）：解包 P9/P10
+        # workflow 委托到内层 ReactAgent，绕过包装层的 allowed_tools 过滤
+        # （该 ctx 无 approval_write profile，write_note 会被包装层过滤）。
+        inner = agent
+        while hasattr(inner, "delegate"):
+            inner = inner.delegate
+        tools = inner.get_tools()
         names = {t["name"] for t in tools}
         assert "write_note" in names
         assert "search_knowledge_base" in names
@@ -1071,7 +1076,7 @@ class TestWriteCapabilityGating:
             mode="read_only",
         )
         agent = get_agent(knowledge_base_id=1, execution_context=ctx)
-        tools = agent._get_tools()
+        tools = agent.get_tools()
         names = {t["name"] for t in tools}
         assert "write_note" not in names
         assert names == {"search_knowledge_base", "read_chunk", "list_document_chunks"}
@@ -1848,6 +1853,7 @@ def _make_stub_llm(answer_text: str = "测试回答"):
     class _StubResponse:
         content = answer_text
         token_count = 0
+        model = "stub-model"
 
     class _StubLLM:
         model = "stub-model"
@@ -1947,7 +1953,7 @@ class TestCapabilityProfileApi:
             capability_profile="approval_write",
         )
         agent = get_agent(knowledge_base_id=1, execution_context=ctx)
-        tools = agent._get_tools()
+        tools = agent.get_tools()
         names = {t["name"] for t in tools}
         assert "write_note" in names, (
             f"Expected write_note in V1.1 tools, got: {names}"
@@ -2037,14 +2043,18 @@ class TestApprovalWriteToolVisibility:
             agent_run_id="test-grant-exec",
             mode="read_write",
         )
-        result = await reg.execute(
-            "write_note",
-            {"content": "approved note", "knowledge_base_id": 1},
-            context=ctx,
-        )
-        # Should succeed — scoped grant bypasses permission checks.
-        assert result.ok is False
-        assert "durable note persistence" in result.message
+        # P5 起 write_note 通过 Java /api/internal/notes 持久化；测试环境无
+        # Java 后端，mock 该 HTTP 调用后应成功落库（返回 note_id）。
+        from tests.conftest import mock_java_note_backend
+
+        with mock_java_note_backend():
+            result = await reg.execute(
+                "write_note",
+                {"content": "approved note", "knowledge_base_id": 1},
+                context=ctx,
+            )
+        assert result.ok is True, f"write_note should persist via mocked Java backend, got: {result.message}"
+        assert result.data.get("note_id") == 101
 
     @pytest.mark.asyncio
     async def test_scoped_grant_once_only(self):
@@ -2359,6 +2369,7 @@ def _make_stub_llm_react(responses: list):
         def __init__(self, text):
             self.content = text
             self.token_count = 0
+            self.model = "stub-react-model"
 
     class _StubLLM:
         model = "stub-react-model"

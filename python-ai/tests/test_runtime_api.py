@@ -20,6 +20,9 @@ def test_runtime_overview_is_safe_and_reports_runtime_state(monkeypatch):
     monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "test-key")
     monkeypatch.setattr(config, "DEEPSEEK_MODEL", "deepseek-test")
     monkeypatch.setattr(config, "EMBEDDING_ALLOW_FALLBACK", False)
+    # Hermetic: 本地 .env 可能配置 bge-m3 等真实模型名，固定为探针集合内的模型
+    monkeypatch.setattr(config, "OLLAMA_MODEL", "qwen2.5:latest")
+    monkeypatch.setattr(config, "OLLAMA_EMBEDDING_MODEL", "qwen3-embedding:8b-fp16")
     monkeypatch.setattr(runtime, "_probe_ollama", _fake_probe_ollama)
     monkeypatch.setattr(
         runtime,

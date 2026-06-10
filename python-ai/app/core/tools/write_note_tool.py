@@ -65,7 +65,9 @@ class WriteNoteTool(BaseTool):
         try:
             import httpx
 
-            from app.utils import config
+            # 注意：必须从 app.utils.config 导入 Config 实例（config = Config()），
+            # 而非 app.utils.config 模块本身——模块上没有 JAVA_BACKEND_URL 等属性
+            from app.utils.config import config
 
             url = f"{config.JAVA_BACKEND_URL}/api/internal/notes"
             payload = {

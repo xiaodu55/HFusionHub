@@ -17,6 +17,7 @@ import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.limiter.LoginRateLimiter;
 import com.hfusionhub.common.utils.JwtUtils;
+import com.hfusionhub.dto.AdminPasswordResetDTO;
 import com.hfusionhub.dto.UserInfoDTO;
 import com.hfusionhub.dto.UserLoginDTO;
 import com.hfusionhub.dto.UserRegisterDTO;
@@ -271,6 +272,47 @@ class UserServiceImplTest {
 
         assertEquals(StatusCode.USER_EXISTS, error.getCode());
         verify(userMapper, never()).updateById(current);
+    }
+
+    @Test
+    void adminResetHashesTemporaryPassword() {
+        User target = user(2L, "bob");
+        jwtUtilsMock.when(JwtUtils::getCurrentUserId).thenReturn(1L);
+        when(userMapper.selectById(2L)).thenReturn(target);
+        AdminPasswordResetDTO dto = new AdminPasswordResetDTO();
+        dto.setNewPassword("temp-pass-123");
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+
+        UserInfoDTO result = userService.resetUserPassword(2L, dto);
+
+        assertEquals(2L, result.getId());
+        verify(userMapper).updateById(captor.capture());
+        assertTrue(BCrypt.checkpw("temp-pass-123", captor.getValue().getPassword()));
+    }
+
+    @Test
+    void adminResetRejectsSelfReset() {
+        jwtUtilsMock.when(JwtUtils::getCurrentUserId).thenReturn(1L);
+        AdminPasswordResetDTO dto = new AdminPasswordResetDTO();
+        dto.setNewPassword("temp-pass-123");
+
+        BusinessException error = assertThrows(BusinessException.class, () -> userService.resetUserPassword(1L, dto));
+
+        assertEquals(StatusCode.BAD_REQUEST, error.getCode());
+        verify(userMapper, never()).updateById(any(User.class));
+    }
+
+    @Test
+    void adminResetRejectsMissingUser() {
+        jwtUtilsMock.when(JwtUtils::getCurrentUserId).thenReturn(1L);
+        when(userMapper.selectById(404L)).thenReturn(null);
+        AdminPasswordResetDTO dto = new AdminPasswordResetDTO();
+        dto.setNewPassword("temp-pass-123");
+
+        BusinessException error = assertThrows(BusinessException.class, () -> userService.resetUserPassword(404L, dto));
+
+        assertEquals(StatusCode.NOT_FOUND, error.getCode());
+        verify(userMapper, never()).updateById(any(User.class));
     }
 
     private UserLoginDTO login(String username, String password) {

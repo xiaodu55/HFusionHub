@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.core.agent.react import NO_SUFFICIENT_EVIDENCE_REPLY, ReactAgent
+from app.core.agent.react import ReactAgent
 from app.core.rag.postprocessor import Postprocessor
 
 
@@ -45,16 +45,17 @@ async def test_selected_knowledge_base_requires_retrieved_evidence(monkeypatch):
     import app.core.rag as rag_module
 
     retriever = _EmptyRetriever()
-    monkeypatch.setattr(react_module, "get_retriever", lambda: retriever)
-    monkeypatch.setattr(rag_module, "get_query_decomposer", lambda: _NoDecomposition())
+    monkeypatch.setattr(react_module, "get_retriever", lambda *args, **kwargs: retriever)
+    monkeypatch.setattr(rag_module, "get_query_decomposer", lambda *args, **kwargs: _NoDecomposition())
 
     agent = ReactAgent(knowledge_base_id=7)
     chunks = [chunk async for chunk in agent.run_stream("文档里的发布日期是什么？")]
 
     # The streaming protocol now emits a retrieval lifecycle event before the
-    # final plain-text evidence warning.  The warning remains the only answer
-    # content and the LLM must still not be called.
-    assert chunks[-1] == NO_SUFFICIENT_EVIDENCE_REPLY
+    # final plain-text warning.  The warning remains the only answer content and
+    # the LLM must still not be called.  空知识库（0 索引分块）会给出更具体的
+    # 「还没有可检索内容」提示，与「有库但证据不足」区分。
+    assert chunks[-1].startswith("当前知识库还没有可检索的内容")
     assert len(chunks) == 2
     import json
     event = json.loads(chunks[0])
@@ -69,9 +70,9 @@ async def test_general_chat_never_calls_retriever_without_a_selected_kb(monkeypa
     import app.core.rag as rag_module
 
     retriever = _EmptyRetriever()
-    monkeypatch.setattr(react_module, "get_retriever", lambda: retriever)
-    monkeypatch.setattr(rag_module, "get_intent_classifier", lambda: _ChitchatClassifier())
-    monkeypatch.setattr(react_module, "get_llm", lambda: _StreamingLlm())
+    monkeypatch.setattr(react_module, "get_retriever", lambda *args, **kwargs: retriever)
+    monkeypatch.setattr(rag_module, "get_intent_classifier", lambda *args, **kwargs: _ChitchatClassifier())
+    monkeypatch.setattr(react_module, "get_llm", lambda *args, **kwargs: _StreamingLlm())
 
     agent = ReactAgent()
     chunks = [chunk async for chunk in agent.run_stream("你好")]

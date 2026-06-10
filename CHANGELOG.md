@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 修复计划 P0/P1 批次（2026-08-29）：测试基线清零 + 管理员密码重置
+
+#### Fixed（正确性）
+- **write_note_tool 配置导入 bug（P0）**：`write_note_tool.py:68` 误用 `from app.utils import config`（模块）访问 `config.JAVA_BACKEND_URL`/`INTERNAL_API_TOKEN`（实为 `Config` 实例属性）→ 笔记持久化必然 AttributeError。改为 `from app.utils.config import config`；write_note 全链路（含 scoped grant、registry 注入）补 mock Java 后端的成功路径回归测试
+- **postprocessor 证据门控 × reranker 冲突（P0）**：V58 默认启用 lexical reranker 后，reranker 把 `score` 覆写为覆盖率排序信号，postprocessor 证据门控误用它导致强通道分（0.92）结果被 `filtered_low_evidence` 丢弃——违背「使用原始通道分」的设计注释。新增 `_evidence_score_of`：`metadata.evidence_score` → `metadata.pre_rerank_score` → `score` 回退链
+- **runtime.py 绕过 Config 边界**：直读 `os.getenv("OLLAMA_MODEL"/"OLLAMA_EMBEDDING_MODEL")` 与 config.py 的「不在别处直读环境变量」约定冲突；`OLLAMA_EMBEDDING_MODEL` 补入 Config 统一管理
+
+#### Tests（20 个存量失败全部清零：1387 → 1407 通过）
+- **测试隔离（P0 复盘）**：①`test_config_validation._restore_config` 硬编码重置 `INTERNAL_API_TOKEN=""`，覆盖 conftest 设定并污染后续 internal/mcp 鉴权测试（4 例）→ 改保存-恢复；②本地 `.env` 的 `VECTOR_STORE_MODE=cluster` 泄漏进测试（CI 无 .env 故未复现）→ conftest 强制 `VECTOR_STORE_MODE=lite` hermetic（约 8 例）；③conftest 统一关闭 MODEL_GATEWAY
+- **测试漂移修复（14 例）**：agent_v1 契约测试适配 P9/P10 workflow 包装类（`_get_tools` → 公共 `get_tools()`/解包委托）；`_StubResponse` 补 `model` 属性；write_note 断言从「本地持久化失败」改为「mock Java 后端成功」；rag_access stub lambda 兼容 `model` kwarg；runtime overview 测试固定 Ollama 模型名；空知识库文案断言更新
+- **CI 根因**：GitHub Actions 账单扣款失败导致全部 job 未启动（3 秒即失败）——20 个失败长期未被发现的根本原因；TODO.md P0-0 登记账单修复；eval-nightly 增加 `ALERT_WEBHOOK_URL` 失败告警（可选 secrets）
+
+#### Added
+- **管理员重置用户密码**：`PUT /api/user/{userId}/password`（仅 admin，不可用于自己）+ 前端「账号权限」页「重置密码」入口与对话框——忘记密码不再需要改库
+
 ### 评审落地批次（2026-08-29）：前端体验 + 演示门控 + legacy 退役评估
 
 #### Frontend

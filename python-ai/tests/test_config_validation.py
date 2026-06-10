@@ -8,12 +8,21 @@ from app.utils.config import config
 
 @pytest.fixture(autouse=True)
 def _restore_config():
-    """每个用例后恢复 config 单例，避免串扰其它测试。"""
+    """每个用例后恢复 config 单例，避免串扰其它测试。
+
+    注意必须「保存-恢复」而非硬编码重置值：conftest 在进程启动时把
+    INTERNAL_API_TOKEN 设为 test-internal-token，硬编码 "" 会让排在
+    本文件之后的 internal/mcp 鉴权测试拿到空 token 而 503。
+    """
+    saved = {
+        "SERVER_ENV": config.SERVER_ENV,
+        "VECTOR_STORE_MODE": config.VECTOR_STORE_MODE,
+        "INTERNAL_API_TOKEN": config.INTERNAL_API_TOKEN,
+        "MILVUS_HOST": config.MILVUS_HOST,
+    }
     yield
-    config.SERVER_ENV = "development"
-    config.VECTOR_STORE_MODE = "lite"
-    config.INTERNAL_API_TOKEN = ""
-    config.MILVUS_HOST = "localhost"
+    for key, value in saved.items():
+        setattr(config, key, value)
 
 
 def _call() -> None:

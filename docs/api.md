@@ -149,6 +149,10 @@ curl -X POST http://localhost:8080/api/openapi/bid/check \
 
 需应用所在租户开通 openapi 模块；响应为废标自检报告（severity/status/issues 列表等）。
 
+### 管理接口补充（会话鉴权，非开放 API）
+
+- `PUT /api/user/{userId}/password` — 管理员重置用户密码（仅 admin；不可用于自己；body: `{"newPassword": "6-64位临时密码"}`）
+
 ## Python AI Public Endpoints
 
 ### MCP (`/mcp`) — No internal token required for discovery

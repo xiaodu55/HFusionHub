@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Check, Clock3, RefreshCw, Search, ShieldCheck, UserCog, Users } from 'lucide-vue-next'
+import { Check, Clock3, KeyRound, RefreshCw, Search, ShieldCheck, UserCog, Users } from 'lucide-vue-next'
 import * as userApi from '@/api/user'
 import type { PageResult, UserInfo, UserRole } from '@/api/types'
 import { useUserStore } from '@/stores/user'
@@ -8,6 +8,7 @@ import { useToast } from '@/composables/useToast'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 
 const userStore = useUserStore()
@@ -91,6 +92,43 @@ function resetFilters() {
   keyword.value = ''
   roleFilter.value = ''
   void load(1)
+}
+
+// ── 管理员重置用户密码（忘记密码场景） ──
+const resetDialogOpen = ref(false)
+const resetTarget = ref<UserInfo | null>(null)
+const resetPassword = ref('')
+const resetting = ref(false)
+
+const resetTargetLabel = computed(() => {
+  const user = resetTarget.value
+  return user ? (user.nickname || user.username) : ''
+})
+
+function openResetDialog(user: UserInfo) {
+  resetTarget.value = user
+  resetPassword.value = ''
+  resetDialogOpen.value = true
+}
+
+async function submitResetPassword() {
+  const target = resetTarget.value
+  if (!target) return
+  const newPassword = resetPassword.value.trim()
+  if (newPassword.length < 6 || newPassword.length > 64) {
+    toast.error('临时密码长度需在 6-64 位之间')
+    return
+  }
+  resetting.value = true
+  try {
+    await userApi.resetUserPassword(target.id, { newPassword })
+    resetDialogOpen.value = false
+    toast.success(`已重置 ${resetTargetLabel.value} 的密码，请将临时密码线下告知对方`)
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '重置密码失败')
+  } finally {
+    resetting.value = false
+  }
 }
 
 onMounted(() => load(1))
@@ -218,6 +256,9 @@ onMounted(() => load(1))
                   <Button size="sm" class="min-w-16 gap-1.5" :disabled="user.id === currentUserId || pendingRoles[user.id] === user.role || savingId === user.id" @click="saveRole(user)">
                     <Check class="h-3.5 w-3.5" />{{ savingId === user.id ? '保存中' : '保存' }}
                   </Button>
+                  <Button size="sm" variant="outline" class="gap-1.5" title="为忘记密码的用户设置临时新密码" @click="openResetDialog(user)">
+                    <KeyRound class="h-3.5 w-3.5" />重置密码
+                  </Button>
                 </div>
               </td>
             </tr>
@@ -233,5 +274,33 @@ onMounted(() => load(1))
         </div>
       </div>
     </section>
+
+    <Dialog v-model:open="resetDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>重置「{{ resetTargetLabel }}」的密码</DialogTitle>
+          <DialogDescription>
+            设置一个临时新密码，用户下次登录时使用它。请通过线下渠道把临时密码告知对方，并提醒其登录后在「个人中心」自行修改。
+          </DialogDescription>
+        </DialogHeader>
+        <div class="space-y-2">
+          <label class="text-sm font-medium" for="reset-password">临时新密码（6-64 位）</label>
+          <Input
+            id="reset-password"
+            v-model="resetPassword"
+            type="text"
+            maxlength="64"
+            placeholder="例如：Hf-2026-temp"
+            @keydown.enter="submitResetPassword"
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="resetDialogOpen = false">取消</Button>
+          <Button :disabled="resetting" @click="submitResetPassword">
+            {{ resetting ? '重置中…' : '确认重置' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

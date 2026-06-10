@@ -172,6 +172,21 @@ class Postprocessor:
         processed, _ = self.process_with_debug(results, top_k=top_k)
         return processed
 
+    @staticmethod
+    def _evidence_score_of(result: "ProcessedResult") -> float:
+        """证据分解析：metadata.evidence_score → 重排前原始通道分 → 当前 score。
+
+        重排器（V58 默认 lexical）会把 ``score`` 覆写为覆盖率主导的排序信号，
+        它不是置信度。证据门控应使用原始通道分——优先 metadata.evidence_score
+        （混合检索管线注入），其次重排器保留的 pre_rerank_score。
+        """
+        metadata = result.metadata or {}
+        for key in ("evidence_score", "pre_rerank_score"):
+            value = metadata.get(key)
+            if value is not None:
+                return float(value)
+        return result.score
+
     def process_with_debug(
         self,
         results: List[Dict],
@@ -201,7 +216,7 @@ class Postprocessor:
                 "document_id": result.document_id,
                 "source": result.source,
                 "score": round(result.score, 6),
-                "evidence_score": round(result.metadata.get("evidence_score", result.score), 6),
+                "evidence_score": round(self._evidence_score_of(result), 6),
                 "query_coverage": round(self._query_coverage(query_terms, result.content), 6)
                 if query_terms else None,
                 "decision": "pending",
@@ -215,7 +230,7 @@ class Postprocessor:
         # intact while allowing rank fusion to decide result order.
         evidence_accepted: List[tuple[ProcessedResult, int]] = []
         for index, result in enumerate(processed):
-            evidence_score = result.metadata.get("evidence_score", result.score)
+            evidence_score = self._evidence_score_of(result)
             chunk_id = result.metadata.get("chunk_id")
 
             # ---- 三级证据门控 ----
@@ -260,7 +275,7 @@ class Postprocessor:
         if allow_scoped_summary and not evidence_accepted:
             summary_min_score = max(0.1, min(self.min_score, 0.15))
             for index, result in enumerate(processed):
-                evidence_score = result.metadata.get("evidence_score", result.score)
+                evidence_score = self._evidence_score_of(result)
                 compact_content = re.sub(r"\s+", "", result.content or "")
                 if evidence_score < summary_min_score or len(compact_content) < 40:
                     continue

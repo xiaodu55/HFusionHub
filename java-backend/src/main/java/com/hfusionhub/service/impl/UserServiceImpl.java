@@ -10,6 +10,7 @@ import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.limiter.LoginRateLimiter;
 import com.hfusionhub.common.utils.IpUtils;
 import com.hfusionhub.common.utils.JwtUtils;
+import com.hfusionhub.dto.AdminPasswordResetDTO;
 import com.hfusionhub.dto.PasswordChangeDTO;
 import com.hfusionhub.dto.UserInfoDTO;
 import com.hfusionhub.dto.UserLoginDTO;
@@ -234,6 +235,32 @@ public class UserServiceImpl implements UserService {
         update.setId(userId);
         update.setPassword(BCrypt.hashpw(dto.getNewPassword()));
         userMapper.updateById(update);
+    }
+
+    /**
+     * 管理员重置用户密码（忘记密码场景；无需旧密码）
+     *
+     * @param userId 目标用户 ID
+     * @param dto 临时新密码
+     * @return 更新后的用户信息
+     */
+    @Override
+    public UserInfoDTO resetUserPassword(Long userId, AdminPasswordResetDTO dto) {
+        Long operatorId = jwtUtils.getCurrentUserId();
+        if (operatorId != null && operatorId.equals(userId)) {
+            // 自己的密码走 changePassword（需旧密码），避免绕过本人验证
+            throw new BusinessException(StatusCode.BAD_REQUEST, "不能通过管理员重置修改自己的密码，请使用「修改密码」");
+        }
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(StatusCode.NOT_FOUND, "用户不存在");
+        }
+        User update = new User();
+        update.setId(userId);
+        update.setPassword(BCrypt.hashpw(dto.getNewPassword()));
+        userMapper.updateById(update);
+        log.info("管理员 {} 重置了用户 {} 的密码", operatorId, userId);
+        return convertToUserInfoDTO(userMapper.selectById(userId));
     }
 
     /**

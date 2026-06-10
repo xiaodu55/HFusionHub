@@ -87,8 +87,9 @@ def _model_available(configured: str, models: set[str]) -> bool:
 
 async def _status_payload() -> dict[str, Any]:
     ollama_reachable, ollama_models = await _probe_ollama()
-    ollama_chat_model = os.getenv("OLLAMA_MODEL", "qwen2.5:latest")
-    ollama_embedding_model = os.getenv("OLLAMA_EMBEDDING_MODEL", "qwen3-embedding:8b-fp16")
+    # 统一走 Config 边界（config.py 注释约定：不在别处直读环境变量）
+    ollama_chat_model = config.OLLAMA_MODEL
+    ollama_embedding_model = config.OLLAMA_EMBEDDING_MODEL
     deepseek_configured = bool(config.DEEPSEEK_API_KEY)
     mock_enabled = _environment_enabled("LLM_ALLOW_MOCK")
 
