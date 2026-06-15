@@ -55,8 +55,8 @@ const DRAFT_STATUS_LABELS: Record<BidDraft['status'], string> = {
 }
 
 const DRAFT_STATUS_CLASS: Record<BidDraft['status'], string> = {
-  drafting: 'bg-amber-100 text-amber-700',
-  approved: 'bg-emerald-100 text-emerald-700',
+  drafting: 'bg-amber-50 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300',
+  approved: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300',
   rejected: 'bg-red-100 text-red-700',
 }
 
@@ -334,7 +334,7 @@ onBeforeUnmount(() => abortController?.abort())
           <Card
             v-for="draft in drafts"
             :key="draft.id"
-            :class="draft.status === 'approved' ? 'border-emerald-200' : ''"
+            :class="draft.status === 'approved' ? 'border-emerald-400' : ''"
           >
             <CardHeader class="flex flex-row items-center justify-between pb-2">
               <div class="flex items-center gap-2">
@@ -378,7 +378,7 @@ onBeforeUnmount(() => abortController?.abort())
         </div>
 
         <!-- 合规提示 -->
-        <div class="mt-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+        <div class="mt-6 flex items-start gap-3 rounded-lg border border-amber-400/60 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-200">
           <ShieldCheck class="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             <p class="font-medium">提交前合规提醒</p>

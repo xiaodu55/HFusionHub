@@ -54,7 +54,7 @@ const stats = ref<StatCard[]>([
     path: '/knowledge-base',
     icon: BookOpen,
     dotClass: 'bg-emerald-400',
-    iconClass: 'text-emerald-300',
+    iconClass: 'text-emerald-700 dark:text-emerald-700 dark:text-emerald-300',
     progressClass: 'bg-emerald-400',
   },
   {
@@ -65,7 +65,7 @@ const stats = ref<StatCard[]>([
     path: '/document',
     icon: FileText,
     dotClass: 'bg-cyan-400',
-    iconClass: 'text-cyan-300',
+    iconClass: 'text-cyan-700 dark:text-cyan-300',
     progressClass: 'bg-cyan-400',
   },
   {
@@ -76,7 +76,7 @@ const stats = ref<StatCard[]>([
     path: '/chat',
     icon: MessageSquare,
     dotClass: 'bg-violet-400',
-    iconClass: 'text-violet-300',
+    iconClass: 'text-violet-700 dark:text-violet-300',
     progressClass: 'bg-violet-400',
   },
   {
@@ -87,7 +87,7 @@ const stats = ref<StatCard[]>([
     path: '/rag',
     icon: Activity,
     dotClass: 'bg-amber-400',
-    iconClass: 'text-amber-300',
+    iconClass: 'text-amber-700 dark:text-amber-300',
     progressClass: 'bg-amber-400',
   },
 ])
@@ -105,25 +105,25 @@ const healthItems = computed(() => [
     label: 'AI 服务',
     value: aiReady.value === null ? '检测中…' : aiReady.value ? '已连接' : '未连接',
     icon: Sparkles,
-    tone: aiReady.value === true ? 'text-emerald-300' : aiReady.value === false ? 'text-amber-300' : 'text-zinc-400',
+    tone: aiReady.value === true ? 'text-emerald-700 dark:text-emerald-700 dark:text-emerald-300' : aiReady.value === false ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground',
   },
   {
     label: '知识资产',
     value: stats.value[0].value > 0 ? '已接入' : '待接入',
     icon: Database,
-    tone: 'text-emerald-300',
+    tone: 'text-emerald-700 dark:text-emerald-700 dark:text-emerald-300',
   },
   {
     label: '文档索引',
     value: stats.value[1].value > 0 ? '可检索' : '待上传',
     icon: FileText,
-    tone: 'text-cyan-300',
+    tone: 'text-cyan-700 dark:text-cyan-300',
   },
   {
     label: '问答通道',
     value: stats.value[2].value > 0 ? '有会话' : '待开始',
     icon: MessageSquare,
-    tone: 'text-violet-300',
+    tone: 'text-violet-700 dark:text-violet-300',
   },
 ])
 
@@ -204,12 +204,12 @@ onMounted(async () => {
 
     <section class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
       <div class="min-w-0">
-        <div class="mb-3 inline-flex items-center gap-2 rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-3 py-1.5 text-xs font-medium text-emerald-300">
+        <div class="mb-3 inline-flex items-center gap-2 rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-3 py-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
           <Sparkles class="h-3.5 w-3.5" />
           AI 工作台
         </div>
-        <h2 class="text-3xl font-semibold text-zinc-50 sm:text-4xl">欢迎回来，{{ userName }}</h2>
-        <p class="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">
+        <h2 class="text-3xl font-semibold text-foreground sm:text-4xl">欢迎回来，{{ userName }}</h2>
+        <p class="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
           {{ todayLabel }}。从资料管理开始，让 AI 更准确地理解和回答你的问题。
         </p>
       </div>
@@ -218,7 +218,7 @@ onMounted(async () => {
         <Button
           v-for="action in quickActions"
           :key="action.label"
-          class="h-10 rounded-lg border border-white/10 bg-white/[0.06] px-3 text-zinc-100 hover:bg-white/[0.1]"
+          class="h-10 rounded-lg border border-border bg-card px-3 text-foreground hover:bg-accent"
           @click="router.push(action.path)"
         >
           <component :is="action.icon" class="mr-2 h-4 w-4" />
@@ -236,20 +236,20 @@ onMounted(async () => {
         @click="router.push(stat.path)"
       >
         <span class="flex items-center justify-between">
-          <span class="flex items-center gap-2 text-sm text-zinc-400">
+          <span class="flex items-center gap-2 text-sm text-muted-foreground">
             <span :class="['h-2 w-2 rounded-full shadow-lg', stat.dotClass]" />
             {{ stat.title }}
           </span>
           <component :is="stat.icon" :class="['h-5 w-5', stat.iconClass]" />
         </span>
-        <span class="mt-5 block text-3xl font-semibold text-zinc-50">
+        <span class="mt-5 block text-3xl font-semibold text-foreground">
           {{ loading ? '--' : stat.value.toLocaleString() }}
         </span>
-        <span class="mt-2 flex items-center justify-between text-xs text-zinc-500">
+        <span class="mt-2 flex items-center justify-between text-xs text-muted-foreground">
           <span>{{ stat.caption }}</span>
-          <span class="text-emerald-300">{{ stat.trend }}</span>
+          <span class="text-emerald-700 dark:text-emerald-300">{{ stat.trend }}</span>
         </span>
-        <span class="mt-4 block h-1.5 overflow-hidden rounded-full bg-white/10">
+        <span class="mt-4 block h-1.5 overflow-hidden rounded-full bg-foreground/10">
           <span
             :class="['block h-full rounded-full transition-all duration-700', stat.progressClass]"
             :style="{ width: `${clamp(28 + stat.value * 8)}%` }"
@@ -258,24 +258,24 @@ onMounted(async () => {
       </button>
     </section>
 
-    <section v-if="loadError" class="glass-panel flex flex-col gap-3 p-4 text-sm text-amber-200 sm:flex-row sm:items-center sm:justify-between">
+    <section v-if="loadError" class="glass-panel flex flex-col gap-3 p-4 text-sm text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
       <div class="min-w-0">
         <p>统计数据读取失败，下方数字可能不是最新的。</p>
-        <p v-if="loadErrorMessage" class="mt-1 truncate text-xs text-amber-200/70">原因：{{ loadErrorMessage }}</p>
+        <p v-if="loadErrorMessage" class="mt-1 truncate text-xs text-amber-800/70 dark:text-amber-200/70">原因：{{ loadErrorMessage }}</p>
       </div>
-      <Button class="shrink-0 rounded-lg border border-amber-300/20 bg-amber-300/10 text-amber-100 hover:bg-amber-300/20" :disabled="loading" @click="loadStats">
+      <Button class="shrink-0 rounded-lg border border-amber-300/20 bg-amber-300/10 text-amber-800 hover:bg-amber-300/20 dark:text-amber-100" :disabled="loading" @click="loadStats">
         {{ loading ? '正在重试…' : '重试' }}
       </Button>
     </section>
 
     <section class="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_23rem]">
       <div class="glass-panel p-5 sm:p-6">
-        <div class="flex flex-col gap-2 border-b border-white/10 pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <div class="flex flex-col gap-2 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p class="text-xs font-medium uppercase tracking-[0.16em] text-emerald-300/80">Getting started</p>
-            <h3 class="mt-1 text-xl font-semibold text-zinc-50">三步开始使用</h3>
+            <p class="text-xs font-medium uppercase tracking-[0.16em] text-emerald-700/80 dark:text-emerald-300/80">Getting started</p>
+            <h3 class="mt-1 text-xl font-semibold text-foreground">三步开始使用</h3>
           </div>
-          <p class="text-sm text-zinc-500">把资料接入后，就可以开始问答。</p>
+          <p class="text-sm text-muted-foreground">把资料接入后，就可以开始问答。</p>
         </div>
 
         <div class="grid gap-3 py-5 md:grid-cols-3">
@@ -289,11 +289,11 @@ onMounted(async () => {
             <span class="flex items-center justify-between">
               <span class="onboarding-icon"><component :is="step.icon" class="h-5 w-5" /></span>
               <span v-if="step.done" class="onboarding-check"><Check class="h-3.5 w-3.5" /></span>
-              <span v-else class="text-xs font-semibold tracking-widest text-zinc-600">{{ step.number }}</span>
+              <span v-else class="text-xs font-semibold tracking-widest text-muted-foreground/70">{{ step.number }}</span>
             </span>
-            <span class="mt-6 block text-left text-base font-semibold text-zinc-100">{{ step.title }}</span>
-            <span class="mt-2 block text-left text-xs leading-5 text-zinc-500">{{ step.description }}</span>
-            <span class="mt-5 block text-left text-xs font-medium" :class="step.done ? 'text-emerald-300' : 'text-zinc-400'">
+            <span class="mt-6 block text-left text-base font-semibold text-foreground">{{ step.title }}</span>
+            <span class="mt-2 block text-left text-xs leading-5 text-muted-foreground">{{ step.description }}</span>
+            <span class="mt-5 block text-left text-xs font-medium" :class="step.done ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'">
               {{ step.done ? '已完成 · 查看' : '开始设置' }}
             </span>
           </button>
@@ -303,9 +303,9 @@ onMounted(async () => {
           <div class="flex items-start gap-3">
             <span class="next-step-icon"><Search class="h-5 w-5" /></span>
             <div>
-              <p class="text-xs text-zinc-500">推荐下一步</p>
-              <p class="mt-1 text-sm font-semibold text-zinc-100">{{ nextStep.title }}</p>
-              <p class="mt-1 text-xs text-zinc-500">{{ nextStep.description }}</p>
+              <p class="text-xs text-muted-foreground">推荐下一步</p>
+              <p class="mt-1 text-sm font-semibold text-foreground">{{ nextStep.title }}</p>
+              <p class="mt-1 text-xs text-muted-foreground">{{ nextStep.description }}</p>
             </div>
           </div>
           <Button class="shrink-0 rounded-lg bg-emerald-400 text-black hover:bg-emerald-300" @click="router.push(nextStep.path)">
@@ -318,27 +318,27 @@ onMounted(async () => {
         <section class="glass-panel p-5">
           <div class="flex items-center justify-between">
             <div>
-              <p class="text-xs text-zinc-500">资料准备情况</p>
-              <h3 class="mt-1 text-lg font-semibold text-zinc-50">当前概况</h3>
+              <p class="text-xs text-muted-foreground">资料准备情况</p>
+              <h3 class="mt-1 text-lg font-semibold text-foreground">当前概况</h3>
             </div>
-            <CheckCircle2 class="h-5 w-5 text-emerald-300" />
+            <CheckCircle2 class="h-5 w-5 text-emerald-700 dark:text-emerald-300" />
           </div>
           <div class="mt-5 space-y-2">
             <div v-for="item in healthItems" :key="item.label" class="health-row">
-              <span class="flex items-center gap-3 text-sm text-zinc-400">
+              <span class="flex items-center gap-3 text-sm text-muted-foreground">
                 <component :is="item.icon" :class="['h-4 w-4', item.tone]" />
                 {{ item.label }}
               </span>
-              <span class="text-sm text-zinc-100">{{ item.value }}</span>
+              <span class="text-sm text-foreground">{{ item.value }}</span>
             </div>
           </div>
         </section>
 
         <section class="glass-panel p-5">
-          <p class="text-xs text-zinc-500">你可以做什么</p>
-          <h3 class="mt-1 text-lg font-semibold text-zinc-50">从资料到答案</h3>
-          <p class="mt-3 text-sm leading-6 text-zinc-500">上传资料后，系统会自动解析并建立索引。你可以在对话中追问，并查看答案引用来源。</p>
-          <button type="button" class="mt-4 inline-flex items-center text-sm font-medium text-emerald-300 hover:text-emerald-200" @click="router.push('/chat')">
+          <p class="text-xs text-muted-foreground">你可以做什么</p>
+          <h3 class="mt-1 text-lg font-semibold text-foreground">从资料到答案</h3>
+          <p class="mt-3 text-sm leading-6 text-muted-foreground">上传资料后，系统会自动解析并建立索引。你可以在对话中追问，并查看答案引用来源。</p>
+          <button type="button" class="mt-4 inline-flex items-center text-sm font-medium text-emerald-700 hover:text-emerald-600 dark:text-emerald-300 dark:hover:text-emerald-200" @click="router.push('/chat')">
             去提问 <span class="ml-1" aria-hidden="true">→</span>
           </button>
         </section>

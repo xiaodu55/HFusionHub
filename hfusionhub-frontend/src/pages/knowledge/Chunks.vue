@@ -117,8 +117,8 @@ const getBlockTypeLabel = (type: string) => {
 const getBlockTypeBadgeClass = (type: string) => {
   switch (type) {
     case 'CODE': return 'bg-red-100 text-red-700'
-    case 'HEADING': return 'bg-blue-100 text-blue-700'
-    case 'TABLE': return 'bg-purple-100 text-purple-700'
+    case 'HEADING': return 'bg-blue-50 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300'
+    case 'TABLE': return 'bg-purple-50 text-purple-700 dark:bg-purple-400/15 dark:text-purple-300'
     default: return 'bg-gray-100 text-gray-700'
   }
 }

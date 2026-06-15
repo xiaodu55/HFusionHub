@@ -27,8 +27,8 @@ const SEVERITY_LABELS: Record<BidCheckReport['severity'], string> = {
 
 const SEVERITY_CLASS: Record<BidCheckReport['severity'], string> = {
   critical: 'bg-red-100 text-red-700',
-  warning: 'bg-amber-100 text-amber-700',
-  info: 'bg-slate-100 text-slate-600',
+  warning: 'bg-amber-50 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300',
+  info: 'bg-slate-50 text-slate-600 dark:bg-slate-400/15 dark:text-slate-300',
 }
 
 const STATUS_LABELS: Record<BidCheckReport['status'], string> = {
@@ -136,11 +136,11 @@ onMounted(loadReports)
         <p class="text-2xl font-bold">{{ summary.total }}</p>
         <p class="text-xs text-muted-foreground">发现项</p>
       </div>
-      <div class="rounded-lg border border-red-200 bg-red-50 p-4 text-center">
+      <div class="rounded-lg border border-red-400/60 bg-red-50 p-4 text-center dark:border-red-400/25 dark:bg-red-400/10">
         <p class="text-2xl font-bold text-red-600">{{ summary.critical }}</p>
         <p class="text-xs text-red-500">严重</p>
       </div>
-      <div class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
+      <div class="rounded-lg border border-amber-400/60 bg-amber-50 p-4 text-center dark:border-amber-400/25 dark:bg-amber-400/10">
         <p class="text-2xl font-bold text-amber-600">{{ summary.warning }}</p>
         <p class="text-xs text-amber-500">警告</p>
       </div>
@@ -172,8 +172,8 @@ onMounted(loadReports)
           :key="report.id"
           class="rounded-lg border p-4"
           :class="{
-            'border-red-200 bg-red-50/40': severity === 'critical',
-            'border-amber-200 bg-amber-50/40': severity === 'warning',
+            'border-red-400/60 bg-red-50/40': severity === 'critical',
+            'border-amber-400/60 bg-amber-50/40': severity === 'warning',
             'border-border bg-card': severity === 'info',
           }"
         >

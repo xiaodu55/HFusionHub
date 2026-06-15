@@ -151,19 +151,19 @@ onMounted(refresh)
   <section v-if="show" class="setup-checklist glass-panel p-4 sm:p-5">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="flex items-start gap-3">
-        <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-400/15 text-emerald-300">
+        <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-400/15 text-emerald-700 dark:text-emerald-300">
           <Rocket class="h-4 w-4" />
         </span>
         <div>
-          <p class="text-sm font-semibold text-zinc-50">完成设置，开始使用</p>
-          <p class="mt-1 text-xs text-zinc-500">
+          <p class="text-sm font-semibold text-foreground">完成设置，开始使用</p>
+          <p class="mt-1 text-xs text-muted-foreground">
             {{ loading ? '正在检查环境…' : `已完成 ${doneCount} / ${items.length} 项` }}
           </p>
         </div>
       </div>
       <button
         type="button"
-        class="rounded-md p-1.5 text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
+        class="rounded-md p-1.5 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground"
         title="稍后再说"
         @click="dismiss"
       >
@@ -179,20 +179,20 @@ onMounted(refresh)
         class="flex items-start gap-2.5 rounded-lg border p-3 text-left transition"
         :class="item.done
           ? 'border-emerald-400/20 bg-emerald-400/5 hover:bg-emerald-400/10'
-          : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'"
+          : 'border-border bg-foreground/[0.03] hover:bg-foreground/[0.07]'"
         @click="router.push(item.path)"
       >
         <span
           class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-          :class="item.done ? 'bg-emerald-400 text-black' : 'bg-white/10 text-zinc-400'"
+          :class="item.done ? 'bg-emerald-400 text-black' : 'bg-foreground/10 text-muted-foreground'"
         >
           <Check v-if="item.done" class="h-3 w-3" />
           <CircleAlert v-else class="h-3 w-3" />
         </span>
         <span class="min-w-0">
-          <span class="block truncate text-sm font-medium text-zinc-100">{{ item.label }}</span>
-          <span class="mt-1 block text-xs leading-5 text-zinc-500">{{ item.hint }}</span>
-          <span class="mt-1.5 block text-xs font-medium text-emerald-300">{{ item.cta }} →</span>
+          <span class="block truncate text-sm font-medium text-foreground">{{ item.label }}</span>
+          <span class="mt-1 block text-xs leading-5 text-muted-foreground">{{ item.hint }}</span>
+          <span class="mt-1.5 block text-xs font-medium text-emerald-700 dark:text-emerald-300">{{ item.cta }} →</span>
         </span>
       </button>
     </div>
@@ -202,17 +202,17 @@ onMounted(refresh)
       class="mt-4 rounded-lg border border-emerald-400/15 bg-emerald-400/5 p-3"
     >
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div class="flex items-start gap-2.5 text-sm text-zinc-300">
-          <MessageSquare class="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+        <div class="flex items-start gap-2.5 text-sm text-foreground/80">
+          <MessageSquare class="mt-0.5 h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-300" />
           <span>
-            想快速体验？<span class="text-zinc-100">一键导入演示数据</span>
+            想快速体验？<span class="text-foreground">一键导入演示数据</span>
             （知识库文档、回答方案、我的笔记、我的记忆、应用发布、公告），导入后即可直接提问。
           </span>
         </div>
         <div class="flex shrink-0 gap-2">
           <Button
             variant="outline"
-            class="rounded-lg border-white/15 text-zinc-300 hover:bg-white/10 disabled:opacity-60"
+            class="rounded-lg border-border text-foreground/80 hover:bg-foreground/10 disabled:opacity-60"
             :disabled="importing || clearing"
             title="知识库与回答方案移入回收站，7 天内可恢复"
             @click="handleClearDemo"
@@ -232,10 +232,10 @@ onMounted(refresh)
       </div>
 
       <!-- 分项结果：让管理员看清每个菜单导入了多少 -->
-      <ul v-if="lastSections.length" class="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-white/10 pt-3 text-xs text-zinc-400">
+      <ul v-if="lastSections.length" class="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-border pt-3 text-xs text-muted-foreground">
         <li v-for="section in lastSections" :key="section.section">
           {{ section.label }}：
-          <span v-if="section.importedCount" class="text-emerald-300">新增 {{ section.importedCount }}</span>
+          <span v-if="section.importedCount" class="text-emerald-700 dark:text-emerald-300">新增 {{ section.importedCount }}</span>
           <span v-if="section.importedCount && section.skippedCount"> · </span>
           <span v-if="section.skippedCount">已存在 {{ section.skippedCount }}</span>
         </li>

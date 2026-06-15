@@ -131,13 +131,13 @@ const userRoleLabel = computed(() => ({ pending: '等待分配', user: '普通�
 const unreadNotificationCount = computed(() => notifications.value.length + unreadNoticeCount.value)
 const serviceLabel = computed(() => ({ checking: '检查中', online: '服务在线', offline: '服务异常' }[serviceState.value]))
 const serviceClass = computed(() => ({
-  checking: 'border-amber-400/20 bg-amber-400/10 text-amber-200',
-  online: 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300',
-  offline: 'border-rose-400/20 bg-rose-400/10 text-rose-200',
+  checking: 'border-amber-400/20 bg-amber-400/10 text-amber-800 dark:text-amber-200',
+  online: 'border-emerald-400/20 bg-emerald-400/10 text-emerald-700 dark:text-emerald-300',
+  offline: 'border-rose-400/20 bg-rose-400/10 text-rose-700 dark:text-rose-200',
 }[serviceState.value]))
 const logoutButtonClass = computed(() =>
   [
-    'w-full rounded-lg text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100',
+    'w-full rounded-lg text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground',
     isSidebarOpen.value ? 'justify-start gap-3' : 'justify-center px-0',
   ].join(' ')
 )
@@ -353,15 +353,15 @@ onBeforeUnmount(() => {
         >
           <span class="brand-mark">HF</span>
           <span v-if="isSidebarOpen" class="min-w-0 text-left">
-            <span class="block truncate text-base font-semibold text-white">HFusionHub</span>
-            <span class="block truncate text-xs text-zinc-500">AI Knowledge OS</span>
+            <span class="block truncate text-base font-semibold text-foreground">HFusionHub</span>
+            <span class="block truncate text-xs text-muted-foreground">AI Knowledge OS</span>
           </span>
         </button>
 
         <Button
           variant="ghost"
           size="icon"
-          class="h-9 w-9 rounded-lg text-zinc-400 hover:bg-white/10 hover:text-white"
+          class="h-9 w-9 rounded-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
           title="折叠导航"
           @click="toggleSidebar"
         >
@@ -372,7 +372,7 @@ onBeforeUnmount(() => {
 
       <nav class="flex-1 space-y-5 overflow-y-auto px-3 py-4">
         <section v-for="group in menuGroups" :key="group.label" class="space-y-1.5">
-          <p v-if="isSidebarOpen" class="px-3 text-[11px] font-medium uppercase tracking-[0.12em] text-zinc-600">{{ group.label }}</p>
+          <p v-if="isSidebarOpen" class="px-3 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">{{ group.label }}</p>
           <router-link
             v-for="item in group.items"
             :key="item.path"
@@ -380,15 +380,15 @@ onBeforeUnmount(() => {
             :title="item.label"
             :class="[
               'nav-pill group flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium transition-all duration-200',
-              isActive(item.path) ? 'is-active text-white' : 'text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100',
+              isActive(item.path) ? 'is-active text-foreground' : 'text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground',
               !isSidebarOpen && 'justify-center px-0',
             ]"
           >
             <component :is="item.icon" class="h-5 w-5 shrink-0" />
-            <span v-if="isSidebarOpen" class="min-w-0"><span class="block truncate">{{ item.label }}</span><span class="block truncate text-xs font-normal text-zinc-600 group-hover:text-zinc-400">{{ item.description }}</span></span>
+            <span v-if="isSidebarOpen" class="min-w-0"><span class="block truncate">{{ item.label }}</span><span class="block truncate text-xs font-normal text-muted-foreground/70 group-hover:text-muted-foreground">{{ item.description }}</span></span>
             <span
               v-if="item.path === '/approvals' && pendingApprovals > 0"
-              class="ml-auto shrink-0 rounded-full bg-amber-400/20 px-2 py-0.5 text-xs font-semibold text-amber-300"
+              class="ml-auto shrink-0 rounded-full bg-amber-400/20 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-300"
               :title="`${pendingApprovals} 项待确认操作`"
             >
               {{ pendingApprovals }}
@@ -397,19 +397,19 @@ onBeforeUnmount(() => {
         </section>
       </nav>
 
-      <div class="space-y-3 border-t border-white/10 p-3">
+      <div class="space-y-3 border-t border-border p-3">
         <button
           type="button"
           :class="[
-            'user-chip flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-white/[0.06]',
+            'user-chip flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-foreground/[0.06]',
             !isSidebarOpen && 'justify-center',
           ]"
           @click="router.push('/profile')"
         >
           <span class="user-avatar">{{ userInitial }}</span>
           <span v-if="isSidebarOpen" class="min-w-0">
-            <span class="block truncate text-sm font-medium text-zinc-100">{{ userDisplayName }}</span>
-            <span class="block truncate text-xs text-emerald-400">{{ userRoleLabel }}</span>
+            <span class="block truncate text-sm font-medium text-foreground">{{ userDisplayName }}</span>
+            <span class="block truncate text-xs text-emerald-600 dark:text-emerald-400">{{ userRoleLabel }}</span>
           </span>
         </button>
 
@@ -432,35 +432,35 @@ onBeforeUnmount(() => {
           <Button
             variant="ghost"
             size="icon"
-            class="h-9 w-9 rounded-lg text-zinc-400 hover:bg-white/10 hover:text-white lg:hidden"
+            class="h-9 w-9 rounded-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground lg:hidden"
             title="展开导航"
             @click="toggleSidebar"
           >
             <Menu class="h-4 w-4" />
           </Button>
           <div class="min-w-0">
-            <p class="text-xs text-zinc-500">当前模块</p>
-            <h1 class="truncate text-lg font-semibold text-zinc-50">
+            <p class="text-xs text-muted-foreground">当前模块</p>
+            <h1 class="truncate text-lg font-semibold text-foreground">
               {{ currentItem?.label || 'HFusionHub' }}
             </h1>
           </div>
         </div>
 
         <form
-          class="command-bar hidden min-w-[18rem] max-w-xl flex-1 items-center gap-2 lg:flex"
+          class="command-bar hidden min-w-[18rem] max-w-xl flex-1 items-center gap-2 transition-colors focus-within:border-primary/40 lg:flex"
           @submit.prevent="handleGlobalSearch"
         >
-          <Search class="h-4 w-4 text-zinc-500" />
+          <Search class="h-4 w-4 text-muted-foreground" />
           <input
             v-model="globalSearchQuery"
-            class="min-w-0 flex-1 bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
+            class="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
             placeholder="搜索或跳转到知识库、文档、对话"
           >
         </form>
 
         <div class="flex shrink-0 items-center gap-2">
           <button
-            class="hidden items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors hover:bg-white/[0.08] sm:flex"
+            class="hidden items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors hover:bg-foreground/[0.08] sm:flex"
             :class="serviceClass"
             title="查看服务状态"
             @click="serviceDialogOpen = true; refreshServiceHealth()"
@@ -471,17 +471,17 @@ onBeforeUnmount(() => {
           <Button
             variant="ghost"
             size="icon"
-            class="relative h-9 w-9 rounded-lg text-zinc-400 hover:bg-white/10 hover:text-white"
+            class="relative h-9 w-9 rounded-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
             title="需要处理的事项"
             @click="openNotifications"
           >
             <Bell class="h-4 w-4" />
-            <span v-if="unreadNotificationCount" class="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-rose-400 ring-2 ring-[#111413]" />
+            <span v-if="unreadNotificationCount" class="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-rose-400 ring-2 ring-background" />
           </Button>
           <Button
             variant="ghost"
             size="icon"
-            class="h-9 w-9 rounded-lg text-zinc-400 hover:bg-white/10 hover:text-white"
+            class="h-9 w-9 rounded-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
             :title="isDarkMode ? '切换浅色主题' : '切换暗色主题'"
             @click="toggleTheme"
           >
@@ -491,7 +491,7 @@ onBeforeUnmount(() => {
           <Button
             variant="ghost"
             size="icon"
-            class="h-9 w-9 rounded-lg text-zinc-400 hover:bg-white/10 hover:text-white"
+            class="h-9 w-9 rounded-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
             title="个人中心"
             @click="router.push('/profile')"
           >
@@ -500,7 +500,7 @@ onBeforeUnmount(() => {
           <Button
             variant="ghost"
             size="icon"
-            class="hidden h-9 w-9 rounded-lg text-zinc-400 hover:bg-white/10 hover:text-white sm:inline-flex"
+            class="hidden h-9 w-9 rounded-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground sm:inline-flex"
             title="设置"
             @click="router.push('/settings')"
           >
@@ -515,7 +515,7 @@ onBeforeUnmount(() => {
         </div>
       </main>
 
-      <Sparkles class="pointer-events-none absolute right-8 top-28 h-5 w-5 text-emerald-300/40" />
+      <Sparkles class="pointer-events-none absolute right-8 top-28 h-5 w-5 text-emerald-600/40 dark:text-emerald-300/40" />
     </div>
 
     <Dialog v-model:open="serviceDialogOpen">
@@ -544,7 +544,7 @@ onBeforeUnmount(() => {
           <section v-if="noticesLoading || unreadNotices.length || noticesError" class="space-y-2">
             <p class="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">系统公告</p>
             <div v-if="noticesLoading" class="py-6 text-center text-sm text-muted-foreground">正在加载公告…</div>
-            <div v-else-if="noticesError" class="rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-4 text-sm text-rose-100/85">{{ noticesError }}</div>
+            <div v-else-if="noticesError" class="rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-4 text-sm text-rose-800 dark:text-rose-100/85">{{ noticesError }}</div>
             <template v-else>
               <article
                 v-for="notice in unreadNotices"
@@ -578,8 +578,8 @@ onBeforeUnmount(() => {
           <section class="space-y-2">
             <p class="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">需要处理的事项</p>
             <div v-if="notificationsLoading" class="py-6 text-center text-sm text-muted-foreground">正在加载通知…</div>
-            <div v-else-if="notificationsError" class="rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-4 text-sm text-rose-100/85">{{ notificationsError }}</div>
-            <div v-else-if="!notifications.length" class="flex flex-col items-center justify-center py-6 text-center"><Bell class="h-6 w-6 text-emerald-300" /><p class="mt-2 text-sm font-medium">暂时没有需要处理的事项</p><p class="mt-1 text-xs text-muted-foreground">系统发现异常时会在这里用易懂的方式提醒你。</p></div>
+            <div v-else-if="notificationsError" class="rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-4 text-sm text-rose-800 dark:text-rose-100/85">{{ notificationsError }}</div>
+            <div v-else-if="!notifications.length" class="flex flex-col items-center justify-center py-6 text-center"><Bell class="h-6 w-6 text-emerald-700 dark:text-emerald-300" /><p class="mt-2 text-sm font-medium">暂时没有需要处理的事项</p><p class="mt-1 text-xs text-muted-foreground">系统发现异常时会在这里用易懂的方式提醒你。</p></div>
             <article v-for="alert in notifications" :key="alert.id" class="rounded-xl border border-border bg-muted/30 p-3.5"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><span class="text-sm font-medium">{{ alertContent(alert).title }}</span><span class="rounded-full border px-2 py-0.5 text-[11px]" :class="severityClass(alert.severity)">{{ severityLabel(alert.severity) }}</span></div><p class="mt-2 break-words text-sm leading-5 text-muted-foreground">{{ alertContent(alert).description }}</p><p class="mt-2 rounded-lg bg-background/60 p-2.5 text-xs leading-5 text-foreground/80"><strong>建议：</strong>{{ alertContent(alert).advice }}</p><div class="mt-2 flex items-center justify-between gap-3"><span class="text-xs text-muted-foreground">{{ formatDateTime(alert.createdAt) }}</span><details class="text-xs text-muted-foreground"><summary class="cursor-pointer hover:text-foreground">技术详情</summary><p class="mt-1 max-w-56 break-all font-mono">{{ alert.metricName }} · 当前值 {{ alert.currentValue }} · 阈值 {{ alert.thresholdValue }}</p></details></div></div><Button variant="outline" size="sm" class="shrink-0" @click="resolveNotification(alert.id)">标记已处理</Button></div></article>
           </section>
         </div>

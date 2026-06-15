@@ -218,7 +218,7 @@ onMounted(loadDetail)
     <!-- 免责声明（P0-8 风险合规） -->
     <div
       v-if="project"
-      class="mb-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"
+      class="mb-6 flex items-start gap-3 rounded-lg border border-amber-400/60 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-200"
     >
       <ShieldCheck class="mt-0.5 h-4 w-4 shrink-0" />
       <div>
@@ -354,7 +354,7 @@ onMounted(loadDetail)
                 <div class="flex shrink-0 items-center gap-2">
                   <span
                     v-if="requirement.satisfiedStatus === 'manual_review'"
-                    class="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-700"
+                    class="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-400/15 dark:text-amber-300"
                     title="AI 置信度低于 60%，需人工复核"
                   >
                     <AlertTriangle class="h-3 w-3" /> 低置信

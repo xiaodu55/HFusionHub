@@ -6,7 +6,7 @@ import type { BidProjectStatus, BidRequirement } from '@/api/bid'
  * 避免文案或配色调整时需要同步多处。
  */
 
-/** 通用状态色调 → 徽章样式（暗色 UI） */
+/** 通用状态色调 → 徽章样式（text 浅色阶在浅色主题下由 style.css 调色板重映射自动加深） */
 export type BadgeTone = 'success' | 'danger' | 'warning' | 'progress' | 'neutral'
 
 export const BADGE_TONE_CLASS: Record<BadgeTone, string> = {
@@ -14,7 +14,7 @@ export const BADGE_TONE_CLASS: Record<BadgeTone, string> = {
   danger: 'border-rose-400/25 bg-rose-400/10 text-rose-300',
   warning: 'border-amber-400/25 bg-amber-400/10 text-amber-200',
   progress: 'border-cyan-400/25 bg-cyan-400/10 text-cyan-200',
-  neutral: 'border-white/10 bg-white/5 text-muted-foreground',
+  neutral: 'border-border bg-foreground/5 text-muted-foreground',
 }
 
 /** 告警/公告等级（critical|error → danger）→ 徽章样式 */
@@ -38,14 +38,14 @@ export const BID_PROJECT_STATUS_LABELS: Record<BidProjectStatus, string> = {
   archived: '已归档',
 }
 
-/** 投标项目状态 → 徽章样式（浅色底） */
+/** 投标项目状态 → 徽章样式（浅色为实色底深色字，暗色为半透明底浅色字） */
 export const BID_PROJECT_STATUS_CLASS: Record<BidProjectStatus, string> = {
-  interpreting: 'bg-blue-100 text-blue-700',
-  requirements: 'bg-amber-100 text-amber-700',
-  drafting: 'bg-purple-100 text-purple-700',
-  checking: 'bg-orange-100 text-orange-700',
-  submitted: 'bg-emerald-100 text-emerald-700',
-  archived: 'bg-slate-100 text-slate-600',
+  interpreting: 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300',
+  requirements: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
+  drafting: 'bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300',
+  checking: 'bg-orange-50 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300',
+  submitted: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
+  archived: 'bg-slate-50 text-slate-600 dark:bg-slate-500/15 dark:text-slate-300',
 }
 
 export const bidProjectStatusClass = (status: BidProjectStatus): string =>
@@ -60,10 +60,10 @@ export const BID_REQUIREMENT_STATUS_LABELS: Record<BidRequirement['satisfiedStat
 }
 
 export const BID_REQUIREMENT_STATUS_CLASS: Record<BidRequirement['satisfiedStatus'], string> = {
-  pending: 'bg-slate-100 text-slate-600',
-  drafting: 'bg-blue-100 text-blue-700',
-  checked: 'bg-emerald-100 text-emerald-700',
-  manual_review: 'bg-amber-100 text-amber-700',
+  pending: 'bg-slate-50 text-slate-600 dark:bg-slate-500/15 dark:text-slate-300',
+  drafting: 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300',
+  checked: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
+  manual_review: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
 }
 
 /** 投标需求分类文案 */

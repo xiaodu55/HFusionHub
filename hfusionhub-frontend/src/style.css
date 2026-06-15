@@ -63,7 +63,7 @@ body {
   margin: 0;
   background-color: var(--color-background);
   color: var(--color-foreground);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  font-family: "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Microsoft YaHei", sans-serif;
 }
 
 button,
@@ -74,8 +74,8 @@ select {
 }
 
 ::selection {
-  background: rgba(52, 211, 153, 0.32);
-  color: #f8fafc;
+  background: color-mix(in oklab, var(--color-primary) 30%, transparent);
+  color: var(--color-foreground);
 }
 
 .app-shell {
@@ -370,125 +370,37 @@ html:not(.dark) .user-chip {
   background: rgba(255, 255, 255, 0.5);
 }
 
-html:not(.dark) .glass-sidebar .text-white,
-html:not(.dark) .glass-header .text-zinc-50 {
-  color: #16231e;
-}
-
-html:not(.dark) .glass-sidebar .text-zinc-100,
-html:not(.dark) .glass-header .text-zinc-100 {
-  color: #25342e;
-}
-
-html:not(.dark) .glass-sidebar .text-zinc-400,
-html:not(.dark) .glass-header .text-zinc-400,
-html:not(.dark) .glass-sidebar .text-zinc-500,
-html:not(.dark) .glass-header .text-zinc-500,
-html:not(.dark) .glass-sidebar .text-zinc-600,
-html:not(.dark) .glass-header .text-zinc-600 {
-  color: #66756f;
-}
-
-html:not(.dark) .glass-sidebar .hover\:text-white:hover,
-html:not(.dark) .glass-header .hover\:text-white:hover {
-  color: #16231e;
-}
-
-html:not(.dark) .glass-sidebar .hover\:bg-white\/10:hover,
-html:not(.dark) .glass-header .hover\:bg-white\/10:hover {
-  background-color: rgba(15, 54, 41, 0.07);
-}
-
-/* The dashboard uses a few deliberate dark-surface treatments.  Re-map
-   those utility colors in light mode so text remains readable. */
-html:not(.dark) .dashboard-workbench .text-zinc-50,
-html:not(.dark) .dashboard-workbench .text-zinc-100,
-html:not(.dark) .dashboard-workbench .text-zinc-200,
-html:not(.dark) .dashboard-workbench .text-zinc-300 {
-  color: #1c2924 !important;
-}
-
-html:not(.dark) .dashboard-workbench .text-zinc-400,
-html:not(.dark) .dashboard-workbench .text-zinc-500 {
-  color: #63736c !important;
-}
-
-html:not(.dark) .dashboard-workbench .text-zinc-600 {
-  color: #788780 !important;
-}
-
-html:not(.dark) .dashboard-workbench .text-emerald-300 {
-  color: #047857 !important;
-}
-
-html:not(.dark) .dashboard-workbench .text-cyan-300 {
-  color: #0e7490 !important;
-}
-
-html:not(.dark) .dashboard-workbench .text-violet-300 {
-  color: #6d28d9 !important;
-}
-
-html:not(.dark) .dashboard-workbench .border-white\/10 {
-  border-color: rgba(15, 54, 41, 0.12) !important;
-}
-
-html:not(.dark) .dashboard-workbench .bg-white\/\[0\.06\],
-html:not(.dark) .dashboard-workbench .bg-white\/\[0\.04\] {
-  background-color: rgba(255, 255, 255, 0.72) !important;
-}
-
-html:not(.dark) .dashboard-workbench .bg-black\/20 {
-  background-color: rgba(15, 54, 41, 0.055) !important;
-}
-
-html:not(.dark) .dashboard-workbench .bg-white\/10 {
-  background-color: rgba(15, 54, 41, 0.1) !important;
-}
-
-html:not(.dark) .dashboard-workbench .hover\:text-zinc-200:hover {
-  color: #1c2924 !important;
-}
-
-/* 浅色主题下，把状态横幅/徽章上的近白文字映射为可读的深色（深色主题保持原样） */
-html:not(.dark) .text-rose-100,
-html:not(.dark) .text-rose-200 {
-  color: #be123c !important;
-}
-
-html:not(.dark) .text-amber-100,
-html:not(.dark) .text-amber-200 {
-  color: #b45309 !important;
-}
-
-html:not(.dark) .text-emerald-100,
-html:not(.dark) .text-emerald-200 {
-  color: #047857 !important;
-}
-
-html:not(.dark) .text-cyan-100,
-html:not(.dark) .text-cyan-200 {
-  color: #0e7490 !important;
-}
-
-html:not(.dark) .text-red-100,
-html:not(.dark) .text-red-200 {
-  color: #be123c !important;
-}
-
-html:not(.dark) .text-blue-100,
-html:not(.dark) .text-blue-200 {
-  color: #1d4ed8 !important;
-}
-
-html:not(.dark) .text-violet-100,
-html:not(.dark) .text-violet-200 {
-  color: #6d28d9 !important;
-}
-
-html:not(.dark) .text-orange-100,
-html:not(.dark) .text-orange-200 {
-  color: #c2410c !important;
+/* ── 浅色主题调色板重映射 ─────────────────────────────────────────
+   页面统一按暗色主题书写强调色文字（text-emerald-300 等）。
+   Tailwind v4 的工具类编译为 var(--color-*) 引用，这里在浅色模式下
+   重定义这些色阶变量，使所有页面（含 utils/badge.ts 的 tone 映射）
+   不用逐处写 dark: 变体即可保持可读性。
+   只重映射文字常用的浅色阶 100/200/300；bg-*-400 等底色不受影响。 */
+html:not(.dark) {
+  --color-zinc-300: var(--color-zinc-600);
+  --color-zinc-400: var(--color-zinc-500);
+  --color-rose-100: var(--color-rose-800);
+  --color-rose-200: var(--color-rose-700);
+  --color-rose-300: var(--color-rose-600);
+  --color-amber-100: var(--color-amber-700);
+  --color-amber-200: var(--color-amber-700);
+  --color-amber-300: var(--color-amber-600);
+  --color-emerald-100: var(--color-emerald-800);
+  --color-emerald-200: var(--color-emerald-700);
+  --color-emerald-300: var(--color-emerald-700);
+  --color-cyan-100: var(--color-cyan-800);
+  --color-cyan-200: var(--color-cyan-700);
+  --color-cyan-300: var(--color-cyan-700);
+  --color-violet-100: var(--color-violet-800);
+  --color-violet-200: var(--color-violet-700);
+  --color-violet-300: var(--color-violet-700);
+  --color-red-100: var(--color-red-800);
+  --color-red-200: var(--color-red-700);
+  --color-red-300: var(--color-red-600);
+  --color-blue-100: var(--color-blue-800);
+  --color-blue-200: var(--color-blue-700);
+  --color-orange-100: var(--color-orange-800);
+  --color-orange-200: var(--color-orange-700);
 }
 
 main::-webkit-scrollbar {
@@ -498,7 +410,7 @@ main::-webkit-scrollbar {
 main::-webkit-scrollbar-thumb {
   border: 0.18rem solid transparent;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
+  background: color-mix(in oklab, var(--color-foreground) 18%, transparent);
   background-clip: content-box;
 }
 

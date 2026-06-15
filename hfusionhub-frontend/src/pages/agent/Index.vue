@@ -403,7 +403,7 @@ onMounted(load)
                   <p class="mt-1 text-sm leading-6 text-rose-100/75">{{ failureHint }}</p>
                   <details v-if="failureDetail" class="mt-3">
                     <summary class="cursor-pointer text-xs text-rose-200/75 hover:text-rose-100">查看技术细节</summary>
-                    <p class="mt-2 break-words rounded-lg bg-black/15 p-2.5 font-mono text-xs leading-5 text-rose-100/75">{{ failureDetail }}</p>
+                    <p class="mt-2 break-words rounded-lg bg-foreground/10 p-2.5 font-mono text-xs leading-5 text-rose-100/75">{{ failureDetail }}</p>
                   </details>
                 </div>
               </div>
