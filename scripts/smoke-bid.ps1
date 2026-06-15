@@ -1,4 +1,4 @@
-# smoke-bid.ps1 — 招投标垂直化冒烟测试
+﻿# smoke-bid.ps1 — 招投标垂直化冒烟测试
 #
 # 覆盖：登录 → /demo/import-bid 一键导入招标文件知识库 + 示例投标项目 →
 #       投标项目列表/详情 → 状态推进 →（可选）触发解读（需 LLM 可用）。
@@ -76,7 +76,9 @@ $headers = @{ satoken = $login.data }
 $import = Invoke-Api 'POST' '/demo/import-bid' $headers
 Test-Ok '演示导入-import-bid' ($import -ne $null -and $import.code -eq 200 -and $import.data.knowledgeBaseId -gt 0)
 if ($import.code -eq 200) {
-    Test-Ok '演示导入-招标文件4篇' ($import.data.importedCount + $import.data.skippedCount -eq 4) "imported=$($import.data.importedCount), skipped=$($import.data.skippedCount)"
+    # 招标文件数取 bid_kb 分节：顶层 importedCount/skippedCount 含资质库与历史标书库
+    $kbSection = $import.data.sections | Where-Object { $_.section -eq 'bid_kb' } | Select-Object -First 1
+    Test-Ok '演示导入-招标文件4篇' ($null -ne $kbSection -and $kbSection.importedCount + $kbSection.skippedCount -eq 4) "imported=$($kbSection.importedCount), skipped=$($kbSection.skippedCount)"
     $bidSection = $import.data.sections | Where-Object { $_.section -eq 'bid_project' } | Select-Object -First 1
     Test-Ok '演示导入-示例投标项目' ($null -ne $bidSection -and $bidSection.importedCount -ge 0) "imported=$($bidSection.importedCount), skipped=$($bidSection.skippedCount)"
     Write-Host "  $($import.data.message)" -ForegroundColor DarkGray
