@@ -1081,32 +1081,6 @@ public class VectorizationServiceImpl implements VectorizationService {
         return null;
     }
 
-    /** @deprecated replaced by {@link #toChunkDTO(DocumentChunk)} with typed DTO output */
-    @Deprecated
-    private Map<String, Object> toChunkResponse(DocumentChunk chunk) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("chunk_id", chunk.getChunkId());
-        response.put("index", chunk.getChunkIndex());
-        response.put("content", chunk.getContentExcerpt());
-        response.put("block_type", chunk.getBlockType());
-        response.put("outline_path", fromJsonList(chunk.getOutlinePath()));
-        response.put("metadata", fromJsonMap(chunk.getMetadata()));
-        return response;
-    }
-
-    /** @deprecated replaced by {@link #fromJsonList(String)} and {@link #fromJsonMap(String)} */
-    @Deprecated
-    private Object fromJson(String value) {
-        if (value == null || value.isBlank()) {
-            return Collections.emptyMap();
-        }
-        try {
-            return objectMapper.readValue(value, Object.class);
-        } catch (JsonProcessingException e) {
-            return Collections.emptyMap();
-        }
-    }
-
     private String truncate(String value, int maxLength) {
         if (value == null) {
             return null;

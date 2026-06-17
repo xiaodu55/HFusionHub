@@ -132,17 +132,6 @@ class AiClientTest {
     }
 
     @Test
-    void deprecatedChatStreamShouldDelegateToChat() {
-        // The deprecated chatStream() now delegates to chat().
-        // Since chat() uses RestTemplate which isn't mocked for success,
-        // we verify it throws the expected unavailability error.
-        when(restTemplate.exchange(anyString(), any(), any(), any(Class.class)))
-                .thenThrow(new org.springframework.web.client.ResourceAccessException("Connection refused"));
-
-        assertThrows(BusinessException.class, () -> aiClient.chatStream("msg", 1L, null, List.of()));
-    }
-
-    @Test
     void isHealthyShouldReturnFalseWhenServiceUnavailable() {
         when(restTemplate.exchange(anyString(), any(), any(), any(Class.class)))
                 .thenThrow(new org.springframework.web.client.ResourceAccessException("Connection refused"));

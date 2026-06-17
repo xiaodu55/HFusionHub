@@ -346,7 +346,7 @@ def runtime_citation_faithfulness(
     Returns ``None`` when the case has no key facts, and ``0.0`` when nothing
     was cited.
     """
-    from .synthetic_index import tokenize
+    from app.core.rag.synthetic_index import tokenize
 
     facts = [fact for fact in key_facts if fact and tokenize(fact)]
     if not facts:

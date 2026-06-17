@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useTheme } from '@/composables/useTheme'
 import { useToast } from '@/composables/useToast'
 import { levelBadgeClass } from '@/utils/badge'
+import { formatDateTime } from '@/utils/date'
 import { APPROVAL_POLL_INTERVAL_MS, NOTICE_POLL_INTERVAL_MS } from '@/constants/timing'
 import {
   Activity,
@@ -252,7 +253,6 @@ const pollLayoutCounters = () => {
   }, APPROVAL_POLL_INTERVAL_MS)
 }
 
-const formatDateTime = (value?: string) => value ? value.replace('T', ' ').slice(0, 16) : '刚刚'
 const severityLabel = (severity?: string) => ({ critical: '需要立即处理', warning: '需要关注', info: '提示' }[severity || ''] || '提示')
 const severityClass = (severity?: string) => levelBadgeClass(severity)
 

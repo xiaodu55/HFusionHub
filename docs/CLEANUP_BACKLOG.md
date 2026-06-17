@@ -3,37 +3,36 @@
 > 2026-08-29 前端主题统一改造时盘点生成。本次**只登记不删除**，逐项评估后处理。
 > 删除前先确认测试基线（Java 563 · Python 1407 · 前端 49）仍全绿。
 
-## A. 已冻结的实验功能（代码+测试仍在维护，文档已宣布不再投入）
+## A. 冻结的实验功能（治理决策：保留代码，待后续补强）
 
 来源：[ENVIRONMENT.md](ENVIRONMENT.md) 冻结区块。
 
-| 功能 | Flag | 代码位置 | 建议 |
+| 功能 | Flag | 代码位置 | 治理决策（2026-08-29） |
 | --- | --- | --- | --- |
-| P7 ScopedGraphRAG | `RAG_GRAPH_ENABLED=false` | `python-ai/app/core/rag/scoped_graph.py`、`knowledge_graph.py` 及对应测试 | 确认无数据依赖后整体移除（含前端「检索能力」文案里的图谱通道描述） |
-| P8 多模态 OCR | `RAG_MULTIMODAL_ENABLED=false` | `python-ai/app/core/rag/multimodal_rag.py` | 移除；等 vision-LLM 路线重启时按新架构重写 |
-| cross_encoder 重排 | `RAG_RERANKER_MODE=cross_encoder` | 重排器分支 | 若离线基准长期无法证明收益，删除该分支并固化 lexical |
+| ~~P7 ScopedGraphRAG~~ | `RAG_GRAPH_ENABLED` | ~~scoped_graph.py / knowledge_graph.py~~ | ✅ **已移除（2026-08-29）**：代码、测试、`/api/rag/graph/status`、GraphChannel、配置项、前端「图谱检索」文案全部删除；检索通道收敛为向量+关键词 |
+| P8 多模态 OCR | `RAG_MULTIMODAL_ENABLED=false` | `python-ai/app/core/rag/multimodal_rag.py` | **保留 · 后续补充**：等 vision-LLM 路线（可选 C5）重启，届时替换 Tesseract 依赖重写 |
+| cross_encoder 重排 | `RAG_RERANKER_MODE=cross_encoder`（默认 lexical） | 重排器分支（P6 二阶段重排） | **保留 · 后续补充**：神经重排器，先跑离线基准证明收益（`requirements-reranker.txt`），达标后设为默认 |
 
-注意：`/rag` 页与 admin/Flags 的「冻结」标注 UI 依赖这些 flag 的展示逻辑，删除代码时需同步。
+注意：`/rag` 页与 admin/Flags 的「冻结」标注 UI 依赖这些 flag 的展示逻辑，若未来删除 GraphRAG 代码需同步。
 
-## B. 死代码（低风险，可直接删）
+## B. 死代码
 
-- `java-backend/.../client/AiClient.java:611-625` — `chatStream()` 标 `@Deprecated` 且注释明确"仓库内已无调用方"，每次调用打 warn。删除方法与流量日志。
-- `java-backend/.../service/impl/VectorizationServiceImpl.java:1084-1102` — 两个 `@Deprecated` 私有方法 `toChunkResponse()` / `fromJson()`，已被 `toChunkDTO` / `fromJsonList` / `fromJsonMap` 取代，无人可调。
-- `python-ai/app/core/agent/agent.py:46` — `agent_status` 字段注释 "deprecated — prefer `status`"；确认序列化输出无消费方后移除。
-- `OLLAMA_MODEL` 环境变量 — 已废弃用于 embedding（`python-ai/app/utils/config.py:254-265` 保留迁移告警）；观察一个发布周期后删除告警函数。
+- [x] ~~`AiClient.chatStream()`~~ — 已删除（含 `AiClientTest` 对应断言，2026-08-29）。
+- [x] ~~`VectorizationServiceImpl` 两个 `@Deprecated` 私有方法 `toChunkResponse()` / `fromJson()`~~ — 已删除（2026-08-29）。
+- [x] ~~`agent.py` 的 `agent_status` 字段~~ — 已退役（2026-08-29）：写入点全部改为 `status`，2 处直接断言的测试迁移完成；评测 API 的 `agent_call.agent_status` 为独立局部变量，不受影响。
 
 ## C. 新旧双轨实现（待稳定后收敛）
 
 - **LLM 调用链**：新 ModelGateway 与旧 `get_llm()` 并存，`MODEL_GATEWAY_STREAM_ENABLED` 切换。ModelGateway 稳定运行一个周期后删除旧链及其 fallback 分支。
-- **前端状态徽章**：`src/utils/badge.ts`（`levelBadgeClass`）与 `src/utils/format.ts`（`getStatusBadge`）职责重叠，合并到 badge.ts。
-- **前端日期格式化**：`MainLayout.vue` 内保留了一份本地 `formatDateTime`（截断式），与 `src/utils/date.ts` 的 `formatDateTime` 并存；统一引用 utils 版本。
+- **前端状态徽章**：`src/utils/badge.ts`（`levelBadgeClass`）与 `src/utils/format.ts`（`getStatusBadge`）职责重叠（后者仅 `document/Index.vue`、`knowledge/Detail.vue` 两处使用），合并到 badge.ts。
+- [x] ~~前端日期格式化重复~~ — `MainLayout.vue` 本地 `formatDateTime` 已删除，统一引用 `src/utils/date.ts`（2026-08-29）。
 
 ## D. 仓库卫生
 
-- 根目录日志文件（约 170KB）：`debug.log`、`frontend.log`、`java-backend.log`、`python-ai.log` — 加入 `.gitignore` 并 `git rm --cached`。
-- `notebooks/rag_evaluation.ipynb` — 临时评测产物，归档到 `python-ai/scripts/` 或移出仓库。
-- `python-ai/app/core/rag/eval_baseline.py`（641 行）— 运行时零引用，仅被 `python-ai/scripts/eval_offline.py` 与测试使用；移到 scripts 侧或标注为评测专用模块。
+- [x] ~~根目录日志文件~~（`debug.log`、`frontend.log`、`java-backend.log`、`python-ai.log`）— 已删除；`.gitignore` 的 `*.log` 规则此前已存在（2026-08-29）。
+- [x] ~~`notebooks/rag_evaluation.ipynb`~~ — 已 `git mv` 至 `python-ai/scripts/notebooks/`（2026-08-29）。
+- [x] ~~`python-ai/app/core/rag/eval_baseline.py`~~ — 已 `git mv` 至 `python-ai/scripts/eval_baseline.py`，引用（4 脚本 + 2 测试文件）已更新（2026-08-29）。
 
 ## E. 半成品
 
-- **统一缓存体系**（[OPTIMIZATION_PLAN.md](OPTIMIZATION_PLAN.md) 1.9，唯一未完成的 P0/P1/P2 项）：`FeatureFlagServiceImpl` 每次查库、`UsageLedger` 实时聚合，无 `@Cacheable`。
+- [x] ~~统一缓存体系（OPTIMIZATION_PLAN.md 1.9）~~ — **已结清（2026-08-29 复查）**：flag 求值缓存已在 R15-16 落地（15s TTL + 写失效，`FeatureFlagServiceImpl` 头部）；`UsageLedger` 为预占/结算型账本（原子 SQL 保证配额正确性），加缓存反而有害，维持实时。
