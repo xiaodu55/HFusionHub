@@ -48,7 +48,7 @@ async def test_multi_agent_preserves_authorised_evidence_and_records_roles():
 
     assert response.content == "grounded"
     assert response.sources == [_source()]
-    assert response.agent_status == "completed"
+    assert response.status == "completed"
     run = store.get(response.agent_run_id)
     assert [event["name"] for event in run["events"]] == [
         "retrieval_agent", "evidence_critic", "synthesis_agent",

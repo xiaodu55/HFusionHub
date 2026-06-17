@@ -11,6 +11,8 @@ import pytest
 # 添加项目根目录到 Python 路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+# 评测基建模块位于 scripts/（运行时包不依赖），测试需可导入
+sys.path.insert(0, str(project_root / 'scripts'))
 
 # 配置 pytest-asyncio
 pytest_plugins = ['pytest_asyncio']

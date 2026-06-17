@@ -4,9 +4,9 @@
 
 ## 概述
 
-数据库 `hfusionhub` 由 Flyway 管理，迁移脚本位于 `java-backend/src/main/resources/db/migration/`，当前已应用到 **V74**。
+数据库 `hfusionhub` 由 Flyway 管理，迁移脚本位于 `java-backend/src/main/resources/db/migration/`，当前已应用到 **V75**。
 
-## 迁移历史（V1–V74）
+## 迁移历史（V1–V75）
 
 | 版本 | 文件 | 说明 |
 |------|------|------|
@@ -50,11 +50,18 @@
 | V55 | `V55__note.sql` | **用户笔记（写笔记闭环）** |
 | V56 | `V56__fix_tenant_id_share_and_apikey.sql` | **修复 kb_share/app_api_key 缺 tenant_id 列** |
 | V57 | `V57__user_theme_preference.sql` | **用户主题偏好**（sys_user.theme_preference，light/dark/system） |
+| V58–V60 | `V58`–`V60` | lexical 重排默认开启 / Multi-Agent 默认开启 / OIDC 绑定 |
+| V61–V64 | `V61`–`V64` | **投标业务线**：bid_project（状态机）/ tender_element / bid_scoring_method / bid_requirement |
+| V65 | `V65__knowledge_base_category.sql` | 知识库分类（tender / qualification / bid_history） |
+| V66–V69 | `V66`–`V69` | bid_draft / bid_template / bid_check_report / bid_subscription |
+| V70–V73 | `V70`–`V73` | 租户套餐绑定 / 投标模块开关 flags / 行业方案包 / 内建投标插件 |
+| V74 | `V74__missing_tenant_indexes.sql` | 补齐缺失的 tenant_id 索引 |
+| V75 | `V75__drop_uk_tender_element.sql` | 移除 tender_element 的 (project_id, element_key) 唯一键（同类别多行是解读工作流的预期数据形态） |
 
 ## 迁移规则
 
-1. **历史迁移（V1–V74）不可修改**——修改会导致 Flyway checksum mismatch。
-2. **所有新表结构变更必须使用 V75+ 脚本**。
+1. **历史迁移（V1–V75）不可修改**——修改会导致 Flyway checksum mismatch。
+2. **所有新表结构变更必须使用 V76+ 脚本**。
 3. **新表必须包含 `tenant_id` 列**（除非加入 `MybatisPlusConfig.TENANT_IGNORE_TABLES`）——租户拦截器会对非忽略表自动注入 `WHERE tenant_id=?`，缺列会导致整表功能 500（V52/V53 曾因此出问题，`scripts/static-checks.py` 在 CI 中静态校验）。
 4. **生产环境**：禁止手动修改 `flyway_schema_history`。
 5. **本地重置**：`cd docker && docker compose down -v && docker compose up -d`。
@@ -91,6 +98,10 @@ docker compose up -d
 | `kb_share` | 知识库共享（V53，V56 补 tenant_id） |
 | `app` / `app_api_key` / `app_call_log` | 开放 API（V52，V56 补 tenant_id） |
 | `audit_log` / `tenant_audit_log` | 操作审计 / 跨租户审计 |
+| `bid_project` / `tender_element` / `bid_scoring_method` / `bid_requirement` | 投标项目与解读产物（V61–V64，状态机 interpreting→requirements→drafting→checking→submitted/archived） |
+| `bid_draft` / `bid_check_report` / `bid_template` | 标书草稿 / 自检报告 / 行业模板（V66–V68） |
+| `bid_subscription` / `tenant_plan_binding` / `bid_plan_module_flags` / `bid_industry_packages` / `bid_plugin_builtins` | 投标商业化：订阅 / 套餐绑定 / 模块开关 / 行业方案包 / 内建插件（V69–V73） |
+| `knowledge_base.category` | 知识库分类：tender（招标）/ qualification（资质）/ bid_history（历史标书），撰写标书时自动联动检索（V65） |
 
 ## 实体关系
 

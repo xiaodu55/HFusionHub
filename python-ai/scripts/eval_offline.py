@@ -24,7 +24,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.core.rag.eval_baseline import (  # noqa: E402
+from eval_baseline import (  # noqa: E402
     EvaluationReport,
     check_gates,
     compute_citation_faithfulness,
@@ -152,7 +152,7 @@ def main() -> int:
         evaluate_offline(router, cases, args.top_k, args.citation_top_k)
     )
 
-    from app.core.rag.eval_baseline import CaseOutcome, aggregate_metrics
+    from eval_baseline import CaseOutcome, aggregate_metrics
 
     outcomes = [CaseOutcome(**raw) for raw in raw_outcomes]
     metrics = aggregate_metrics(outcomes, top_k=args.top_k)

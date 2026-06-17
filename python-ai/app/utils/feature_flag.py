@@ -7,8 +7,8 @@ Evaluates flags using the same 5-layer override logic as Java.
 Usage:
     from app.utils.feature_flag import feature_flags
 
-    if feature_flags.is_enabled("rag.graph.enabled", user_id=1, kb_id=101):
-        ...  # graph retrieval on
+    if feature_flags.is_enabled("rag.hybrid.enabled", user_id=1, kb_id=101):
+        ...  # hybrid retrieval on
 """
 
 import json
@@ -40,7 +40,6 @@ SECURITY_FLAGS = frozenset({
 
 AVAILABILITY_FLAGS = frozenset({
     "rag.hybrid.enabled",
-    "rag.graph.enabled",
     "rag.reranker.enabled",
     "agent.multi_agent.enabled",
     "agent.enabled",
@@ -58,7 +57,6 @@ def _env_fallback_value(flag_key: str):
     from app.utils.config import config as _config
     mapping = {
         "rag.hybrid.enabled": lambda: _config.RAG_HYBRID_ENABLED,
-        "rag.graph.enabled": lambda: _config.RAG_GRAPH_ENABLED,
         "rag.reranker.enabled": lambda: _config.RAG_RERANKER_MODE != "disabled",
         "agent.multi_agent.enabled": lambda: _config.RAG_MULTI_AGENT_ENABLED,
     }

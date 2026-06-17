@@ -222,7 +222,6 @@ class SingleAgentWorkflow(Agent):
             content=content,
             answer=content,
             status=status,
-            agent_status=status,  # backward compat — prefer `status` in V1
             finish_reason=status,
             sources=sources or [],
             agent_run_id=agent_run_id,
@@ -280,7 +279,6 @@ class SingleAgentWorkflow(Agent):
                 self._finish(run, v1_status, response.finish_reason or v1_status, started)
                 self._record_trace(run, response)
                 response.agent_run_id = run.run_id
-                response.agent_status = v1_status
                 response.status = v1_status
                 response.answer = response.answer or response.content
                 return response

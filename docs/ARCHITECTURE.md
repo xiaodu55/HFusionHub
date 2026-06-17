@@ -205,7 +205,6 @@ Advanced features are gated via environment variables in Python `.env`. **Status
 
 ```
 RAG_HYBRID_ENABLED=true          # P5 Stable: Vector + BM25 hybrid
-RAG_GRAPH_ENABLED=false          # P7 Beta: Scoped GraphRAG
 RAG_RERANKER_MODE=lexical        # P6 Beta: Second-stage reranking (lexical 默认；V58 起 cross_encoder 冻结不投入)
 RAG_MULTIMODAL_ENABLED=false     # P8 Experimental: OCR/images
 RAG_AGENT_WORKFLOW_ENABLED=true  # P9 Beta: Bounded single-agent (当前已启用)

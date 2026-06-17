@@ -40,7 +40,7 @@ async def test_scoped_failure_returns_evidence_safe_reply_and_private_trace():
     response = await workflow.run(query="private question")
 
     assert response.content == NO_SUFFICIENT_EVIDENCE_REPLY
-    assert response.agent_status == "tool_error"  # Agent V1: non-timeout errors → tool_error
+    assert response.status == "tool_error"  # Agent V1: non-timeout errors → tool_error
     assert response.status == "tool_error"
     run = store.get(response.agent_run_id)
     assert run["knowledge_base_id"] == 9

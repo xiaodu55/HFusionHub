@@ -20,7 +20,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.core.rag.eval_baseline import (
+from eval_baseline import (
     EvaluationReport,
     aggregate_metrics,
     render_markdown,
@@ -83,7 +83,7 @@ def main():
     raw_outcomes = simulate_outcomes(cases)
 
     # Convert to CaseOutcome objects
-    from app.core.rag.eval_baseline import CaseOutcome
+    from eval_baseline import CaseOutcome
     outcomes = [CaseOutcome(**o) for o in raw_outcomes]
 
     metrics = aggregate_metrics(outcomes, top_k=10, exclude_refusal_from_citation=True)

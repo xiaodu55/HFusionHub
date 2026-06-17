@@ -82,7 +82,7 @@ const stats = ref<StatCard[]>([
   {
     title: '检索能力',
     value: 3,
-    caption: '向量、关键词与图谱通道（默认开启）',
+    caption: '向量与关键词混合通道（默认开启）',
     trend: '—',
     path: '/rag',
     icon: Activity,

@@ -220,7 +220,6 @@ async def _status_payload() -> dict[str, Any]:
         ],
         "features": {
             "hybrid_retrieval": feature_flags.is_enabled("rag.hybrid.enabled"),
-            "graph_retrieval": feature_flags.is_enabled("rag.graph.enabled"),
             "reranker": (
                 config.RAG_RERANKER_MODE
                 if config.RAG_RERANKER_MODE not in {"", "disabled", "off", "none"}

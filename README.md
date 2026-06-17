@@ -8,7 +8,7 @@
 ![Java](https://img.shields.io/badge/Java-17%2B-orange)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883)
-![Tests](https://img.shields.io/badge/Tests-Python%201380%2B%20%7C%20Java%20554%20%7C%20Frontend%2045-success)
+![Tests](https://img.shields.io/badge/Tests-Python%201339%20%7C%20Java%20564%20%7C%20Frontend%2049-success)
 
 ## 🚀 项目简介
 
@@ -307,7 +307,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 | KnowledgeGraph | 知识图谱 | 59 |
 | Utils | 公共工具 | 36 |
 
-**RAG 模块：337 个测试用例，100% 通过 | Python AI 总计：1380+ 测试用例 | Java 后端：554 测试用例 | 前端：45 测试用例**
+**Python AI 总计：1339 通过 + 8 跳过 | Java 后端：564 测试 | 前端：49 测试**
 
 ## 🚀 启动指南
 
@@ -329,7 +329,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 
 > 所有文档位于 [docs/](docs/) 目录。按用途分四类：**入口**、**开发**、**运维**、**治理**。
 > 2026-08-19 已做文档体系整合：合并 5 份为 3 份权威，删除 1 份冗余，统一关键事实基线
-> （Java 563 测试 / Python 1407 / 前端 49 / Flyway V74 / DeepSeek 已配置）。
+> （Java 564 测试 / Python 1339 / 前端 49 / Flyway V75 / DeepSeek 已配置）。
 
 ### 入口类
 
@@ -345,9 +345,9 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 | 文档 | 作用 |
 |------|------|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **架构全景**（原 ARCHITECTURE + WHITEPAPER 合并）。CQRS 三层架构图、数据流、关键设计决策、安全边界、设计模式、与 Dify/Ragent/LangChain 对比 |
-| [docs/java-backend.md](docs/java-backend.md) | Java 后端开发指南：项目结构、设计模式、环境变量、Flyway 规则（V1–V74）、测试与构建 |
+| [docs/java-backend.md](docs/java-backend.md) | Java 后端开发指南：项目结构、设计模式、环境变量、Flyway 规则（V1–V75）、测试与构建 |
 | [docs/python-ai.md](docs/python-ai.md) | Python AI 开发指南：模块结构、RAG 管线、Feature Flags、SSE 输出格式、Provider 说明 |
-| [docs/database.md](docs/database.md) | 数据库设计：V1–V74 全部迁移历史、核心表、实体关系、迁移规则 |
+| [docs/database.md](docs/database.md) | 数据库设计：V1–V75 全部迁移历史、核心表、实体关系、迁移规则 |
 | [docs/api.md](docs/api.md) | API 接口参考：模块列表、公开端点、调用约定 |
 | [docs/agent-v1-scope.md](docs/agent-v1-scope.md) | Agent V1 软件契约：只读研究型 Agent 的能力边界、输入/输出 JSON 契约 |
 | [docs/SWAGGER_UI.md](docs/SWAGGER_UI.md) | Swagger UI 配置指南：访问地址、生产关闭/IP 白名单/Basic Auth 策略、注解规范、常见问题 |

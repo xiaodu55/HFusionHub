@@ -203,7 +203,6 @@ class TestCacheAndDegradation:
         client = FeatureFlagClient(cache_ttl=999)
         env_expectations = {
             "rag.hybrid.enabled": _config.RAG_HYBRID_ENABLED,
-            "rag.graph.enabled": _config.RAG_GRAPH_ENABLED,
             "rag.reranker.enabled": _config.RAG_RERANKER_MODE != "disabled",
             "agent.multi_agent.enabled": _config.RAG_MULTI_AGENT_ENABLED,
         }

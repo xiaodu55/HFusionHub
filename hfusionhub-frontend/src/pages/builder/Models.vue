@@ -108,7 +108,6 @@ const featureItems = computed(() => {
   if (!features) return []
   return [
     { name: '混合检索', detail: '向量与关键词结果融合', enabled: features.hybrid_retrieval },
-    { name: '图谱检索', detail: '补充实体关系检索', enabled: features.graph_retrieval },
     { name: '结果重排', detail: features.reranker === 'disabled' ? '当前未启用' : `当前模式：${features.reranker}`, enabled: features.reranker !== 'disabled' },
     { name: 'Agent 工作流', detail: '支持工具调用与执行边界', enabled: features.agent_workflow },
   ]

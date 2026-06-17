@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 清单全量清理批次（2026-08-29）：GraphRAG 移除 + 死代码清零 + 文档对账
+
+#### Removed
+- **GraphRAG（P7）整体移除**：冻结期治理结论（内存图索引、重启重建、收益不稳定）落地为删除——`scoped_graph.py`（363 行）/ `knowledge_graph.py`（1272 行）/ `GraphChannel` 与 graph 检索通道 / `/api/rag/graph/status` 端点 / 向量化与删除时的图索引钩子 / `RAG_GRAPH_ENABLED`、`RAG_GRAPH_INDEX_PATH` 配置 / `rag.graph.enabled` flag / 前端「图谱检索」文案与开关条目；检索通道收敛为向量 + 关键词混合（P5）。评测框架的 `graph_hit_rate` 指标保留（通用通道指标，历史 trace 仍含 graph 标签）
+- **`AgentResponse.agent_status` 废弃字段退役**：`multi_agent_runtime`（3 处）/`workflow_runtime`（2 处）写入点全部改用 `status`，2 处直接断言的测试同步迁移；评测 API 的 `agent_call.agent_status` 为独立局部变量（读 `response.status`），契约不变
+- `OLLAMA_MODEL` 迁移告警函数（观察期满）；`getStatusBadge` 从 `format.ts` 合并至 `badge.ts`（统一徽章映射）
+- `eval_baseline.py` 移出运行时包（`app/core/rag/` → `scripts/`，6 处引用更新，conftest 补 scripts 路径）
+
+#### 复查结清
+- **统一缓存体系（OPTIMIZATION_PLAN 1.9）**：flag 求值缓存已在 R15-16 落地（15s TTL + 写失效）；`UsageLedger` 为预占/结算型账本，原子 SQL 保证配额正确性，不应缓存——该项从半成品清单移除
+
+#### Docs
+- `database.md`：迁移历史补全 V58–V75 + 投标业务线 9 张表与商业化表说明（此前停在 V57）
+- `ENVIRONMENT.md` P7 / `ARCHITECTURE.md` / README / CLAUDE.md / `java-backend.md` / `PRODUCTION_OPS.md`：Flyway 版本（V1–V75）与测试基线（Java 564 / Python 1339 / 前端 49）全面对齐
+
+### 投标冒烟修复 + 低风险清理批次（2026-08-29）
+
+#### Fixed（正确性）
+- **tender_element 唯一键阻断解读（真实缺陷，V75）**：`uk_tender_element (project_id, element_key)` 与解读工作流的数据模型冲突——废标/实质性条款专家为**同类别输出多行**（每条废标条款各一行 `element_key='disqualification_clauses'`），真实招标文件解读落库必撞 `Duplicate entry` 整体 500。新增 `V75__drop_uk_tender_element.sql` 移除该唯一键（幂等由 interpret() 先删后写保证）；本地实测「解读-需求清单非空」由 FAIL 转 PASS，smoke-bid 13 PASS / 0 FAIL
+- **smoke-bid.ps1 无法运行（编码）**：文件缺 UTF-8 BOM，Windows PowerShell 5.1 按 ANSI 解析中文注释/字符串直接语法报错；补 BOM 对齐 smoke-test.ps1
+- **smoke-bid.ps1 断言 bug**：「招标文件4篇」误用顶层 `importedCount+skippedCount`（含资质库/历史标书库，首跑=7/复跑 skipped=7，永不过）；改取 `sections` 中 `bid_kb` 分节
+
+#### Removed（低风险清理，清单见 docs/CLEANUP_BACKLOG.md）
+- `AiClient.chatStream()`（@Deprecated 无调用方）及其测试断言；`VectorizationServiceImpl` 两个无人调用的 @Deprecated 私有方法（`toChunkResponse`/`fromJson`）
+- `MainLayout.vue` 本地 `formatDateTime`（与 `utils/date.ts` 重复），统一引用 utils 版本
+- 根目录残留日志 4 个；`notebooks/rag_evaluation.ipynb` 归档至 `python-ai/scripts/notebooks/`
+
+#### 复查后保留
+- `agent.py` 的 `agent_status` 字段：虽标 deprecated，但 `multi_agent_runtime`/`workflow_runtime` 仍写入且有 6 处测试断言维护，删除需连测试一起迁移，暂保留（已记录于清理清单）
+
 ### 修复计划 P0/P1 批次（2026-08-29）：测试基线清零 + 管理员密码重置
 
 #### Fixed（正确性）

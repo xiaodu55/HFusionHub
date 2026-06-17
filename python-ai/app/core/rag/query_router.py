@@ -51,7 +51,6 @@ class ChannelType(str, Enum):
     """检索通道类型"""
     VECTOR = "vector"          # 向量检索
     KEYWORD = "keyword"        # 关键词检索
-    GRAPH = "graph"           # 图谱检索
     HYBRID = "hybrid"         # 混合检索
 
 
@@ -459,62 +458,6 @@ class KeywordChannel(BaseChannel):
         return "\n\n".join(parts), neighbor_ids
 
 
-class GraphChannel(BaseChannel):
-    """KB-scoped GraphRAG channel backed by source chunks.
-
-    Do not use the legacy global ``knowledge_graph`` manager here: it has no
-    KB ACL metadata and would make a selected-KB chat capable of leaking
-    entities from another KB.
-    """
-
-    def __init__(self, config: ChannelConfig, graph_store=None, chunk_loader=None):
-        super().__init__(config)
-        self._graph_store = graph_store
-        self._chunk_loader = chunk_loader
-
-    async def search(
-        self,
-        query: str,
-        knowledge_base_id: int,
-        top_k: int = 10,
-        **kwargs
-    ) -> List[SearchResult]:
-        """Return only chunk-backed graph evidence from the selected KB."""
-        if knowledge_base_id is not None:
-            try:
-                from app.core.rag.scoped_graph import get_scoped_graph_store
-                from app.core.vectorstore.milvus_store import _load_chunks_store
-
-                graph_store = self._graph_store or get_scoped_graph_store(
-                    app_config.RAG_GRAPH_INDEX_PATH
-                )
-                chunk_loader = self._chunk_loader or _load_chunks_store
-                candidates = await asyncio.to_thread(
-                    graph_store.search,
-                    query,
-                    knowledge_base_id,
-                    await asyncio.to_thread(chunk_loader),
-                    top_k,
-                )
-                return [
-                    SearchResult(
-                        content=candidate["content"],
-                        score=candidate["score"],
-                        source=ChannelType.GRAPH,
-                        document_id=candidate.get("document_id"),
-                        metadata=candidate.get("metadata", {}),
-                    )
-                    for candidate in candidates
-                ]
-            except Exception as error:
-                # Graph retrieval is an enhancement: a broken or unavailable
-                # index must never make scoped vector/BM25 retrieval unsafe.
-                logger.warning("Scoped graph search unavailable: %s", error)
-                return []
-        logger.warning("Graph retrieval requires an explicit knowledge_base_id")
-        return []
-
-
 # =============================================================================
 # 查询路由器
 # =============================================================================
@@ -555,18 +498,12 @@ class QueryRouter:
                 weight=DEFAULT_CHANNEL_WEIGHT * 0.5,
                 enabled=feature_flags.is_enabled("rag.hybrid.enabled"),
             ),
-            ChannelType.GRAPH: ChannelConfig(
-                channel_type=ChannelType.GRAPH,
-                weight=DEFAULT_CHANNEL_WEIGHT * 0.3,
-                enabled=feature_flags.is_enabled("rag.graph.enabled"),
-            ),
         }
 
         # 通道实例
         self.channels = channels or {
             ChannelType.VECTOR: VectorChannel(self.channel_configs[ChannelType.VECTOR]),
             ChannelType.KEYWORD: KeywordChannel(self.channel_configs[ChannelType.KEYWORD]),
-            ChannelType.GRAPH: GraphChannel(self.channel_configs[ChannelType.GRAPH]),
         }
 
         # 查询类型与通道权重映射
@@ -574,32 +511,26 @@ class QueryRouter:
             QueryType.FACTUAL: {
                 ChannelType.VECTOR: 0.7,
                 ChannelType.KEYWORD: 0.3,
-                ChannelType.GRAPH: 0.0,
             },
             QueryType.COMPARISON: {
                 ChannelType.VECTOR: 0.8,
                 ChannelType.KEYWORD: 0.1,
-                ChannelType.GRAPH: 0.1,
             },
             QueryType.SUMMARY: {
                 ChannelType.VECTOR: 0.6,
                 ChannelType.KEYWORD: 0.2,
-                ChannelType.GRAPH: 0.2,
             },
             QueryType.ENTITY: {
                 ChannelType.VECTOR: 0.3,
                 ChannelType.KEYWORD: 0.4,
-                ChannelType.GRAPH: 0.3,
             },
             QueryType.RELATIONSHIP: {
                 ChannelType.VECTOR: 0.2,
                 ChannelType.KEYWORD: 0.2,
-                ChannelType.GRAPH: 0.6,
             },
             QueryType.GENERAL: {
                 ChannelType.VECTOR: 0.6,
                 ChannelType.KEYWORD: 0.3,
-                ChannelType.GRAPH: 0.1,
             },
         }
 
@@ -704,10 +635,6 @@ class QueryRouter:
         if ChannelType.KEYWORD in self.channel_configs:
             self.channel_configs[ChannelType.KEYWORD].enabled = feature_flags.is_enabled(
                 "rag.hybrid.enabled"
-            )
-        if ChannelType.GRAPH in self.channel_configs:
-            self.channel_configs[ChannelType.GRAPH].enabled = feature_flags.is_enabled(
-                "rag.graph.enabled"
             )
 
         enabled_channels = [
@@ -904,7 +831,6 @@ class QueryRouter:
                     "knowledge_base_id": result.metadata.get("knowledge_base_id"),
                     "score": round(result.score, 6),
                     "content_preview": result.content[:500],
-                    "graph": result.metadata.get("graph") if channel_type == ChannelType.GRAPH else None,
                     "multimodal": result.metadata.get("multimodal"),
                 }
                 for rank, result in enumerate(results, start=1)

@@ -3,7 +3,6 @@ import { computed, onMounted, ref, type Component } from 'vue'
 import {
   Bot,
   CheckCircle2,
-  GitBranch,
   Globe2,
   ListFilter,
   Loader2,
@@ -47,7 +46,6 @@ const serverFlags = ref<Record<string, FeatureFlagInfo>>({})
 
 const capabilities: CapabilityDefinition[] = [
   { key: 'rag.hybrid.enabled', name: '混合检索', group: 'retrieval', status: 'stable', icon: Route, summary: '同时使用语义和关键词查找资料。', useCase: '大多数知识库问答', impact: '通常能提高命中率，建议保持开启。' },
-  { key: 'rag.graph.enabled', name: '关系检索', group: 'retrieval', status: 'frozen', icon: GitBranch, summary: '根据人物、系统、规则之间的关系补充资料（已冻结：内存图、大数据集下收益不稳定）。', useCase: '制度、组织关系或系统依赖较复杂', impact: '检索更全面，但会略微增加处理时间。' },
   { key: 'rag.reranker.enabled', name: '结果精排', group: 'retrieval', status: 'experimental', icon: ListFilter, summary: '对检索结果再次排序，把更相关的内容放前面。默认使用内置 lexical 模式（零依赖）；安装可选依赖后可升级 cross_encoder 语义重排（RAG_RERANKER_MODE=cross_encoder）。', useCase: '引用不够准确或资料较多', impact: '答案更精准，会增加少量计算时间。' },
   { key: 'agent.enabled', name: '复杂任务模式', group: 'agent', status: 'experimental', icon: Bot, summary: '为复杂任务增加超时、重试和执行追踪。', useCase: '需要多步骤分析的任务', impact: '成功率更高，但回答时间可能变长。' },
   { key: 'agent.multi_agent.enabled', name: '多角色协作', group: 'agent', status: 'experimental', icon: Users, summary: '让分析和校验角色并发协作完成复杂问题（默认开启：BoundedMultiAgentWorkflow + 确定性证据校验；回答更严谨但延迟与用量更高）。', useCase: '高复杂度、需要复核的任务', impact: '消耗更多模型用量，必须先开启复杂任务模式。', dependsOn: 'agent.enabled' },
@@ -139,9 +137,9 @@ async function confirmEnableCapability() {
 }
 
 const presets = [
-  { name: '日常问答', description: '速度优先，适合一般知识库', values: { 'rag.hybrid.enabled': true, 'rag.graph.enabled': false, 'rag.reranker.enabled': false, 'agent.enabled': false, 'agent.multi_agent.enabled': false } },
-  { name: '精准检索', description: '适合资料多、关系复杂的知识库', values: { 'rag.hybrid.enabled': true, 'rag.graph.enabled': true, 'rag.reranker.enabled': true, 'agent.enabled': false, 'agent.multi_agent.enabled': false } },
-  { name: '复杂任务', description: '适合多步骤分析，耗时和用量更高', values: { 'rag.hybrid.enabled': true, 'rag.graph.enabled': true, 'rag.reranker.enabled': true, 'agent.enabled': true, 'agent.multi_agent.enabled': true } },
+  { name: '日常问答', description: '速度优先，适合一般知识库', values: { 'rag.hybrid.enabled': true, 'rag.reranker.enabled': false, 'agent.enabled': false, 'agent.multi_agent.enabled': false } },
+  { name: '精准检索', description: '适合资料多、关系复杂的知识库', values: { 'rag.hybrid.enabled': true, 'rag.reranker.enabled': true, 'agent.enabled': false, 'agent.multi_agent.enabled': false } },
+  { name: '复杂任务', description: '适合多步骤分析，耗时和用量更高', values: { 'rag.hybrid.enabled': true, 'rag.reranker.enabled': true, 'agent.enabled': true, 'agent.multi_agent.enabled': true } },
 ]
 const presetTarget = ref<(typeof presets)[number] | null>(null)
 const presetConfirmOpen = ref(false)

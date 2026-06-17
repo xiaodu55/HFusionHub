@@ -9,7 +9,6 @@ from app.core.rag.evaluation import EvaluationCase, RetrievalEvaluator
 from app.core.rag.evaluation_runs import get_evaluation_run_store
 from app.core.rag.observability import get_trace_store
 from app.core.rag.retriever import get_retriever
-from app.core.rag.scoped_graph import get_scoped_graph_store
 from app.core.rag.intent_tree_router import resolve_intent_route
 from app.utils.config import config
 
@@ -190,16 +189,6 @@ async def evaluate_production_path(request: ProductionEvaluationRequest):
             "reranker": retrieval.metadata.get("reranker"),
             "trace": trace,
         },
-    }
-
-
-@router.get("/graph/status")
-async def graph_status(knowledge_base_id: int = Query(ge=1)):
-    """Expose only aggregate graph counts for one explicitly selected KB."""
-    return {
-        **get_scoped_graph_store(config.RAG_GRAPH_INDEX_PATH).stats(knowledge_base_id),
-        "enabled": config.RAG_GRAPH_ENABLED,
-        "source_backed_only": True,
     }
 
 

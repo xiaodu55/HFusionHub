@@ -75,3 +75,23 @@ export const BID_REQUIREMENT_CATEGORY_LABELS: Record<string, string> = {
   format: '格式要求',
   disqualification_risk: '废标风险',
 }
+
+/** 文档处理状态 → 徽章文本与 variant（原 utils/format.ts，合并至统一徽章映射） */
+export function getStatusBadge(status: number): { text: string; variant: 'outline' | 'secondary' | 'default' | 'destructive' } {
+  switch (status) {
+    case 0:
+      return { text: '待解析', variant: 'outline' }
+    case 1:
+      return { text: '解析中...', variant: 'secondary' }
+    case 2:
+      return { text: '已完成', variant: 'default' }
+    case 3:
+      return { text: '解析失败', variant: 'destructive' }
+    case 4:
+      return { text: '删除中...', variant: 'secondary' }
+    case 5:
+      return { text: '删除失败', variant: 'destructive' }
+    default:
+      return { text: '未知', variant: 'outline' }
+  }
+}

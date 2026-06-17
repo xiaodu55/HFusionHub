@@ -9,7 +9,6 @@ from app.core.rag.postprocessor import Postprocessor, ProcessedResult, get_postp
 from app.core.rag.query_router import ChannelType, MergedResult, SearchResult
 from app.core.rag.retriever import MultiChannelRetriever, RetrievalResult
 from app.core.rag.reranker import LexicalReranker
-from app.core.rag.scoped_graph import ScopedGraphStore
 from app.main import create_app
 
 

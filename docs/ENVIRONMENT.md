@@ -136,7 +136,6 @@ All advanced RAG features are gated via environment variables in `python-ai/.env
 | Flag | Default | Status | Dependencies |
 |------|---------|--------|--------------|
 | `RAG_HYBRID_ENABLED` | `true` | ✅ Stable | None |
-| `RAG_GRAPH_ENABLED` | `false` | ❄️ Frozen | Scoped graph index built |
 | `RAG_RERANKER_MODE` | `lexical` | ✅ 稳定（默认启用；`rag.reranker.enabled` 已默认开启，前端「能力开关」页可关） | `lexical` 零依赖；`cross_encoder` 需 `pip install -r requirements-reranker.txt`（模型不可用时自动降级不中断服务） |
 | `RAG_MULTIMODAL_ENABLED` | `false` | ❄️ Frozen | Tesseract OCR + `pip install -r requirements-multimodal.txt` |
 | `RAG_AGENT_WORKFLOW_ENABLED` | `true` | 🧪 Beta | None (pure Python)；当前 `.env` 已启用 |
@@ -146,11 +145,9 @@ All advanced RAG features are gated via environment variables in `python-ai/.env
 
 Default: enabled. Combines Milvus vector search with BM25 keyword search via Reciprocal Rank Fusion (RRF). This is the recommended retrieval mode and is fully tested.
 
-**P7: Scoped GraphRAG — ❄️ 冻结（不再投入）**
+**P7: Scoped GraphRAG — 🗑️ 已移除（2026-08-29）**
 
-默认关闭。构建每知识库的实体共现图，图通道仅返回仍存在于选定知识库中的事实。
-
-> **治理状态（2026-08）**：已冻结。图索引为内存实现、重启重建，文档自述不推荐用于 >10,000 文档的知识库，收益不稳定。代码与测试保留，UI 已标注"冻结"，不再投入新功能。
+> **治理状态**：冻结期间收益不稳定（内存图索引、重启重建、不推荐 >10,000 文档知识库），已按清理决策整体移除代码与测试（`scoped_graph.py` / `knowledge_graph.py` / GraphChannel / `/api/rag/graph/status`）。检索通道收敛为向量 + 关键词混合（P5）。历史 trace 中 `source=graph` 的记录仅作展示保留。
 
 **P6: Second-Stage Reranking — 🧪 Beta（cross_encoder 模式已冻结）**
 

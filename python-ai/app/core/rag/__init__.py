@@ -100,7 +100,6 @@ from .query_router import (
     MergedResult,
     VectorChannel,
     KeywordChannel,
-    GraphChannel,
     get_router,
     reset_router,
 )
@@ -140,26 +139,6 @@ from .evaluation import (
     EvaluationCase,
     EvaluationCaseResult,
     RetrievalEvaluator,
-)
-from .knowledge_graph import (
-    EntityType,
-    RelationType,
-    GraphQueryType,
-    Entity,
-    Relation,
-    GraphNode,
-    GraphEdge,
-    GraphPath,
-    SubGraph,
-    GraphQueryResult,
-    GraphDatabase,
-    Neo4jDatabase,
-    InMemoryGraphDatabase,
-    KnowledgeGraphManager,
-    GraphBuilder,
-    KnowledgeGraphFactory,
-    get_knowledge_graph_manager,
-    reset_knowledge_graph_manager,
 )
 from .query_rewriter import QueryRewriter, get_query_rewriter, RewriteResult
 from .retriever import MultiChannelRetriever, get_retriever, RetrievalResult
@@ -330,7 +309,6 @@ __all__ = [
     "MergedResult",
     "VectorChannel",
     "KeywordChannel",
-    "GraphChannel",
     "get_router",
     "reset_router",
     # 多轮检索策略
@@ -380,8 +358,6 @@ __all__ = [
     "KnowledgeGraphManager",
     "GraphBuilder",
     "KnowledgeGraphFactory",
-    "get_knowledge_graph_manager",
-    "reset_knowledge_graph_manager",
     # 问题重写器
     "QueryRewriter",
     "get_query_rewriter",

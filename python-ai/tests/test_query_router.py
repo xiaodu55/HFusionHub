@@ -26,7 +26,6 @@ from app.core.rag.query_router import (
     BaseChannel,
     VectorChannel,
     KeywordChannel,
-    GraphChannel,
     QueryRouter,
     QueryRouterFactory,
     get_router,
@@ -331,27 +330,6 @@ class TestKeywordChannel:
             "2_chunk_0002",
             "2_chunk_0003",
         ]
-
-
-class TestGraphChannel:
-    """GraphChannel 测试"""
-
-    @pytest.mark.asyncio
-    async def test_graph_channel_search(self):
-        """测试图谱检索（预留）"""
-        config = ChannelConfig(channel_type=ChannelType.GRAPH)
-        graph_store = MagicMock()
-        graph_store.search.return_value = []
-        channel = GraphChannel(config, graph_store=graph_store, chunk_loader=lambda: {})
-
-        results = await channel.search(
-            query="测试查询",
-            knowledge_base_id=1,
-            top_k=5
-        )
-
-        assert results == []
-        graph_store.search.assert_called_once()
 
 
 # =============================================================================

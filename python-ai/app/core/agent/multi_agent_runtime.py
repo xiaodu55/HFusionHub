@@ -125,7 +125,7 @@ class BoundedMultiAgentWorkflow(Agent):
             finish_reason="insufficient_evidence",
             sources=[],
             agent_run_id=run.run_id,
-            agent_status="insufficient_evidence",
+            status="insufficient_evidence",
         )
 
     async def run(
@@ -157,7 +157,7 @@ class BoundedMultiAgentWorkflow(Agent):
                 finish_reason="multi_agent_timeout",
                 sources=[],
                 agent_run_id=run.run_id,
-                agent_status="failed",
+                status="failed",
             )
         except Exception:
             self._event(run, "retrieval_agent", "failed", research_started, "agent_failure")
@@ -167,7 +167,7 @@ class BoundedMultiAgentWorkflow(Agent):
                 finish_reason="multi_agent_failure",
                 sources=[],
                 agent_run_id=run.run_id,
-                agent_status="failed",
+                status="failed",
             )
 
         critic_started = time.monotonic()
@@ -181,7 +181,7 @@ class BoundedMultiAgentWorkflow(Agent):
         # The synthesis role preserves the answer and citations verbatim.  It
         # is intentionally not another free-form LLM call in this MVP.
         response.agent_run_id = run.run_id
-        response.agent_status = "completed"
+        response.status = response.status or "completed"
         self._event(run, "synthesis_agent", "completed", synthesis_started)
         self._finish(run, "completed", response.finish_reason or "stop", started)
         return response

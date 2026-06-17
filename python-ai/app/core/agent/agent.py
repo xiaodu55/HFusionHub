@@ -43,7 +43,6 @@ class AgentResponse:
 
     # ── Agent identity ──
     agent_run_id: Optional[str] = None  # P9 workflow run ID (no prompt content)
-    agent_status: Optional[str] = None  # deprecated — prefer `status`
 
     # ── Error detail (only populated on tool_error / timeout) ──
     error_detail: Optional[str] = None

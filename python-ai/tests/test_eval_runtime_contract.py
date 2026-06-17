@@ -21,7 +21,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.rag.eval_baseline import (
+from eval_baseline import (
     CaseOutcome,
     EvalCase,
     load_cases,
