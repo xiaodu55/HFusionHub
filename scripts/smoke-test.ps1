@@ -8,7 +8,7 @@
 #   .\scripts\smoke-test.ps1 -Quick               # 仅 API + 服务健康（快速）
 #   .\scripts\smoke-test.ps1 -BaseUrl http://localhost:8080 -PythonUrl http://localhost:9000 -FrontendUrl http://localhost:3000
 #
-# 前置：服务已启动；docker\.env 含 ADMIN_PASSWORD；KB 52 存在（核心链路用）。
+# 前置：服务已启动；docker\.env 含 ADMIN_PASSWORD。冒烟知识库不存在时会自动创建。
 
 param(
     [switch]$Quick,
@@ -18,6 +18,8 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
+# curl.exe 输出是 UTF-8；PS5.1 默认按控制台 GBK 解码，中文会破坏后续 JSON 解析
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $RepoRoot 'docker\.env'
 
@@ -72,12 +74,33 @@ Test-Ok '登录' ($login -ne $null -and $login.code -eq 200 -and $login.data)
 if (-not $login.data) { exit 1 }
 $headers = @{ satoken = $login.data }
 
+# ── 0.1 解析/创建冒烟知识库（核心链路用；不再写死 KB id）──────────────
+$smokeKbName = '冒烟测试知识库'
+$kbId = $null
+try {
+    $kbList = Invoke-RestMethod -Uri "$BaseUrl/api/knowledge-base/my" -Headers $headers -TimeoutSec 20
+    $records = $kbList.data.records
+    if ($records) {
+        $existing = $records | Where-Object { $_.name -eq $smokeKbName } | Select-Object -First 1
+        if ($existing) { $kbId = $existing.id }
+    }
+} catch { }
+if (-not $kbId) {
+    try {
+        $kbBody = [System.Text.Encoding]::UTF8.GetBytes((@{ name = $smokeKbName; description = 'smoke-test.ps1 核心链路专用，可随时删除' } | ConvertTo-Json))
+        $created = Invoke-RestMethod -Uri "$BaseUrl/api/knowledge-base" -Method Post -Headers $headers -Body $kbBody -ContentType 'application/json; charset=utf-8' -TimeoutSec 20
+        $kbId = $created.data.id
+    } catch { }
+}
+Test-Ok '冒烟知识库就绪' ($null -ne $kbId) "kbId=$kbId"
+if (-not $kbId) { exit 1 }
+
 # ── 1. Java 后端 API ────────────────────────────────────────────────────
 $tests = @(
     @{ n = '认证-用户信息';   m = 'GET';  p = '/user/info' },
     @{ n = '知识库-我的';     m = 'GET';  p = '/knowledge-base/my' },
     @{ n = '知识库-列表';     m = 'GET';  p = '/knowledge-base/list' },
-    @{ n = '文档-我的(52)';   m = 'GET';  p = '/document/my/52' },
+    @{ n = '文档-我的';     m = 'GET';  p = "/document/my/$kbId" },
     @{ n = '文档-回收站';     m = 'GET';  p = '/document/recycle-bin' },
     @{ n = '对话-我的';       m = 'GET';  p = '/conversation/my' },
     @{ n = '对话-列表';       m = 'GET';  p = '/conversation/list' },
@@ -94,8 +117,8 @@ $tests = @(
     @{ n = '插件-列表';       m = 'GET';  p = '/plugin/list?page=1&pageSize=10' },
     @{ n = '提示词-模板';     m = 'GET';  p = '/prompt-templates' },
     @{ n = 'MCP-工具服务';    m = 'GET';  p = '/tools/mcp/servers' },
-    @{ n = 'RAG-追踪';        m = 'GET';  p = '/rag/traces?limit=5&knowledgeBaseId=52' },
-    @{ n = 'RAG-统计';        m = 'GET';  p = '/rag/traces/stats?days=7&knowledgeBaseId=52' },
+    @{ n = 'RAG-追踪';        m = 'GET';  p = "/rag/traces?limit=5&knowledgeBaseId=$kbId" },
+    @{ n = 'RAG-统计';        m = 'GET';  p = "/rag/traces/stats?days=7&knowledgeBaseId=$kbId" },
     @{ n = 'RAG-意图树';      m = 'GET';  p = '/rag/intent-tree/tree' },
     @{ n = '系统-AI健康';     m = 'GET';  p = '/system/ai-health' },
     @{ n = '系统-AI运行时';   m = 'GET';  p = '/system/ai-runtime' },
@@ -186,7 +209,7 @@ if (-not $Quick) {
     try {
         $docFile = Join-Path $RepoRoot 'test-data\java-threads.md'
         if (Test-Path $docFile) {
-            $upJson = curl.exe -s -X POST "$BaseUrl/api/document/upload" -H "satoken: $($login.data)" -F "file=@$docFile" -F "title=Smoke测试文档" -F "knowledgeBaseId=52"
+            $upJson = curl.exe -s -X POST "$BaseUrl/api/document/upload" -H "satoken: $($login.data)" -F "file=@$docFile" -F "title=Smoke-test-doc" -F "knowledgeBaseId=$kbId"
             $up = $upJson | ConvertFrom-Json
             if ($up.code -eq 200 -and $up.data.id) {
                 Test-Ok '链路-文档上传' $true "docId=$($up.data.id)"
@@ -201,7 +224,7 @@ if (-not $Quick) {
                 }
                 Test-Ok '链路-解析完成' $completed
                 if ($completed) {
-                    $searchBody = [System.Text.Encoding]::UTF8.GetBytes((@{ query = 'Java 虚拟线程'; knowledge_base_id = 52; top_k = 3 } | ConvertTo-Json))
+                    $searchBody = [System.Text.Encoding]::UTF8.GetBytes((@{ query = 'Java 虚拟线程'; knowledge_base_id = $kbId; top_k = 3 } | ConvertTo-Json))
                     try {
                         $sr = Invoke-WebRequest -Uri "$PythonUrl/api/rag/debug/search" -Method Post -Headers $pyHeaders -Body $searchBody -ContentType 'application/json; charset=utf-8' -UseBasicParsing -TimeoutSec 60
                         $sj = $sr.Content | ConvertFrom-Json

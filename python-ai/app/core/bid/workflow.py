@@ -282,12 +282,23 @@ class BidInterpretWorkflow:
 
     # ── 专家 ──────────────────────────────────────────────────────
 
+    async def _structured_with_empty_retry(self, prompt: str, schema: Dict[str, Any],
+                                           list_key: str) -> Dict[str, Any]:
+        """generate_structured 只重试格式错误；schema 合法但列表为空的
+        LLM 偶发输出（smoke-bid 曾因此间歇失败）在这里补一次重试。"""
+        data = await generate_structured(self.llm, prompt, schema, system_prompt=_SYSTEM_PROMPT)
+        if not data.get(list_key):
+            logger.warning("bid expert returned empty %r; retrying once with higher temperature", list_key)
+            data = await generate_structured(
+                self.llm, prompt, schema,
+                system_prompt=_SYSTEM_PROMPT, temperature=0.6,
+            )
+        return data
+
     async def _expert_elements(self, task: CollaborationTask) -> ExpertContribution:
-        data = await generate_structured(
-            self.llm,
+        data = await self._structured_with_empty_retry(
             self._prompt(task, "请提取招标文件中的关键要素（招标编号/预算/资质要求/工期/保证金/币种/联系方式）。"),
-            ELEMENTS_SCHEMA,
-            system_prompt=_SYSTEM_PROMPT,
+            ELEMENTS_SCHEMA, "elements",
         )
         return ExpertContribution(
             role=ExpertRole.ELEMENT_EXTRACTION,
@@ -349,11 +360,9 @@ class BidInterpretWorkflow:
         )
 
     async def _expert_requirements(self, task: CollaborationTask) -> ExpertContribution:
-        data = await generate_structured(
-            self.llm,
+        data = await self._structured_with_empty_retry(
             self._prompt(task, "请汇总投标需求清单：资质、业绩、技术、商务、格式要求以及废标风险点。"),
-            REQUIREMENTS_SCHEMA,
-            system_prompt=_SYSTEM_PROMPT,
+            REQUIREMENTS_SCHEMA, "requirements",
         )
         return ExpertContribution(
             role=ExpertRole.REQUIREMENT_SYNTHESIS,
