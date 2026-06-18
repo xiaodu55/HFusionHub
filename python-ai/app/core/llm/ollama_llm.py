@@ -129,7 +129,7 @@ class OllamaLLM(BaseLLM):
         """Check if Ollama is available.
 
         Delegates to the package-level thread-pooled, TTL-cached probe
-        (``app.core.llm._is_ollama_available``) so a probe never blocks the
+        (the gateway availability state) so a probe never blocks the
         event loop with a synchronous HTTP call. The late import avoids a
         circular import between this module and the package ``__init__``.
         """

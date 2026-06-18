@@ -450,13 +450,9 @@ class ModelGateway:
         start = time.perf_counter()
 
         if not self._can_route():
-            return await self._legacy_chat(messages, temperature, max_tokens, kwargs)
+            raise GatewayError("No enabled provider available (gateway not routable)")
 
-        try:
-            provider_name, resolved_model = self.resolve(model)
-        except GatewayError as exc:
-            logger.warning("Model %r could not be resolved; using legacy path: %s", model, exc)
-            return await self._legacy_chat(messages, temperature, max_tokens, kwargs)
+        provider_name, resolved_model = self.resolve(model)
 
         errors: List[str] = []
         for candidate, candidate_model in self._build_chain(provider_name, resolved_model, fallbacks):
@@ -529,17 +525,9 @@ class ModelGateway:
         from app.utils.config import config
 
         if not self._can_route():
-            async for chunk in self._legacy_stream(messages, temperature, max_tokens, kwargs):
-                yield chunk
-            return
+            raise GatewayError("No enabled provider available (gateway not routable)")
 
-        try:
-            provider_name, resolved_model = self.resolve(model)
-        except GatewayError as exc:
-            logger.warning("Model %r could not be resolved; using legacy stream: %s", model, exc)
-            async for chunk in self._legacy_stream(messages, temperature, max_tokens, kwargs):
-                yield chunk
-            return
+        provider_name, resolved_model = self.resolve(model)
 
         # Cache-hit fast path, keyed on the RESOLVED model so an alias or
         # provider name hits the entry the stream was stored under. Runs before
@@ -1059,54 +1047,6 @@ class ModelGateway:
         return dict(results)
 
     # -- legacy fallback ----------------------------------------------------
-
-    async def _legacy_chat(
-        self,
-        messages: List[ChatMessage],
-        temperature: float,
-        max_tokens: int,
-        kwargs: Dict[str, Any],
-    ) -> GatewayResult:
-        """Graceful degradation: delegate to the concrete provider chain.
-
-        Uses ``_build_providers()`` (not ``get_llm()``) so this fallback can
-        never re-enter the gateway branch — otherwise a resolve failure would
-        recurse through GatewayLLM forever.
-        """
-        # legacy 路径访问日志：为退役收集流量证据（见 OPTIMIZATION_PLAN R15）
-        logger.warning("Legacy LLM chat path used (gateway routing unavailable) — deprecation candidate")
-
-        from . import _build_providers
-
-        llm = _build_providers()
-        response = await llm.chat(messages=messages, temperature=temperature, max_tokens=max_tokens, **kwargs)
-        return GatewayResult(
-            content=response.content,
-            model=response.model,
-            provider="legacy",
-            finish_reason=response.finish_reason,
-            degraded=True,
-        )
-
-    async def _legacy_stream(
-        self,
-        messages: List[ChatMessage],
-        temperature: float,
-        max_tokens: int,
-        kwargs: Dict[str, Any],
-    ) -> AsyncGenerator[str, None]:
-        """Graceful degradation for streaming: delegate to the concrete chain."""
-        # legacy 路径访问日志：为退役收集流量证据（见 OPTIMIZATION_PLAN R15）
-        logger.warning("Legacy LLM stream path used (gateway routing unavailable) — deprecation candidate")
-
-        from . import _build_providers
-
-        llm = _build_providers()
-        async for chunk in llm.chat_stream(
-            messages=messages, temperature=temperature, max_tokens=max_tokens, **kwargs
-        ):
-            yield chunk
-
 
 # ---------------------------------------------------------------------------
 # Environment helpers & singleton factory

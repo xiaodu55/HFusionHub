@@ -19,7 +19,7 @@ class Config:
     DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
     # Optional OpenAI-compatible backup provider (B2: model failover routing).
-    # When configured, it joins the FailoverLLM chain after DeepSeek/Ollama.
+    # When configured, it joins the provider chain after DeepSeek/Ollama.
     OPENAI_COMPATIBLE_API_KEY = os.getenv("OPENAI_COMPATIBLE_API_KEY", "")
     OPENAI_COMPATIBLE_BASE_URL = os.getenv("OPENAI_COMPATIBLE_BASE_URL", "")
     OPENAI_COMPATIBLE_MODEL = os.getenv("OPENAI_COMPATIBLE_MODEL", "")
@@ -155,6 +155,15 @@ class Config:
     )
     RAG_MULTIMODAL_OCR_TIMEOUT_SECONDS = int(
         os.getenv("RAG_MULTIMODAL_OCR_TIMEOUT_SECONDS", "20")
+    )
+    # P8 vision-LLM 路线（2026-08-29）：用 Ollama 视觉模型生成图片描述，
+    # 与 OCR 同一管道（普通文本块 + multimodal metadata），零改动进入检索。
+    # VLM 优先、OCR 兜底；模型未拉取/调用失败只跳过增强，永不阻断索引。
+    RAG_MULTIMODAL_VLM_ENABLED = os.getenv("RAG_MULTIMODAL_VLM_ENABLED", "false").lower() == "true"
+    RAG_MULTIMODAL_VLM_MODEL = os.getenv("RAG_MULTIMODAL_VLM_MODEL", "qwen2.5vl:3b")
+    RAG_MULTIMODAL_VLM_BASE_URL = os.getenv("RAG_MULTIMODAL_VLM_BASE_URL", "")
+    RAG_MULTIMODAL_VLM_TIMEOUT_SECONDS = int(
+        os.getenv("RAG_MULTIMODAL_VLM_TIMEOUT_SECONDS", "90")
     )
 
     # P9 is an explicit rollout switch for the bounded single-agent runtime.

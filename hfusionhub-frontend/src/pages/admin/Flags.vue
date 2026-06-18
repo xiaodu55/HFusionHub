@@ -46,7 +46,7 @@ const serverFlags = ref<Record<string, FeatureFlagInfo>>({})
 
 const capabilities: CapabilityDefinition[] = [
   { key: 'rag.hybrid.enabled', name: '混合检索', group: 'retrieval', status: 'stable', icon: Route, summary: '同时使用语义和关键词查找资料。', useCase: '大多数知识库问答', impact: '通常能提高命中率，建议保持开启。' },
-  { key: 'rag.reranker.enabled', name: '结果精排', group: 'retrieval', status: 'experimental', icon: ListFilter, summary: '对检索结果再次排序，把更相关的内容放前面。默认使用内置 lexical 模式（零依赖）；安装可选依赖后可升级 cross_encoder 语义重排（RAG_RERANKER_MODE=cross_encoder）。', useCase: '引用不够准确或资料较多', impact: '答案更精准，会增加少量计算时间。' },
+  { key: 'rag.reranker.enabled', name: '结果精排', group: 'retrieval', status: 'experimental', icon: ListFilter, summary: '对检索结果再次排序，把更相关的内容放前面。默认使用内置 lexical 模式（零依赖）；安装 sentence-transformers 并下载模型后可升级 cross_encoder 语义重排（RAG_RERANKER_MODE=cross_encoder，模型加载失败自动回落一阶段排序，无需重启）。', useCase: '引用不够准确或资料较多', impact: '答案更精准，会增加少量计算时间。' },
   { key: 'agent.enabled', name: '复杂任务模式', group: 'agent', status: 'experimental', icon: Bot, summary: '为复杂任务增加超时、重试和执行追踪。', useCase: '需要多步骤分析的任务', impact: '成功率更高，但回答时间可能变长。' },
   { key: 'agent.multi_agent.enabled', name: '多角色协作', group: 'agent', status: 'experimental', icon: Users, summary: '让分析和校验角色并发协作完成复杂问题（默认开启：BoundedMultiAgentWorkflow + 确定性证据校验；回答更严谨但延迟与用量更高）。', useCase: '高复杂度、需要复核的任务', impact: '消耗更多模型用量，必须先开启复杂任务模式。', dependsOn: 'agent.enabled' },
   { key: 'agent.web_search.enabled', name: '联网搜索', group: 'agent', status: 'experimental', icon: Globe2, summary: '允许 AI 查询互联网上的最新信息（需在服务端配置搜索源）。', useCase: '知识库外的时效性问题', impact: '会使用外部来源，需要注意内容可信度。' },

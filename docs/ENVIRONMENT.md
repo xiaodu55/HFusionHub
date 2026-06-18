@@ -105,7 +105,6 @@ Copy `python-ai/.env.example` to `python-ai/.env`:
 | `LLM_MAX_RETRIES` | No | `3` | 429/5xx/连接错误的额外重试次数（首次调用后的重试上限，P3） |
 | `LLM_RETRY_BACKOFF_SECONDS` | No | `0.5` | 指数退避基础秒数（每次翻倍 + jitter，P3） |
 | `LLM_RESPONSE_CACHE_TTL_SECONDS` | No | `300` | LLM 响应缓存 TTL（P9）；设为 0 禁用缓存 |
-| `MODEL_GATEWAY_STREAM_ENABLED` | No | `true` | 让 agent/chat 的 LLM 调用（含流式）走 ModelGateway：限流/熔断/计费/响应缓存对流式同样生效；设 `false` 走旧 `get_llm()` 链（测试会话强制关闭） |
 | `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama URL for local LLM fallback and embeddings |
 | `OLLAMA_EMBEDDING_MODEL` | No | `bge-m3:latest` | Ollama embedding model (**use this**, not the deprecated `OLLAMA_MODEL`；当前 `.env` 使用 `bge-m3:latest`） |
 | `OPENAI_COMPATIBLE_API_KEY` | No | `` | OpenAI 兼容备用供应商（B2）：加入 FailoverLLM 链，主供应商故障时切换 |
@@ -136,7 +135,7 @@ All advanced RAG features are gated via environment variables in `python-ai/.env
 | Flag | Default | Status | Dependencies |
 |------|---------|--------|--------------|
 | `RAG_HYBRID_ENABLED` | `true` | ✅ Stable | None |
-| `RAG_RERANKER_MODE` | `lexical` | ✅ 稳定（默认启用；`rag.reranker.enabled` 已默认开启，前端「能力开关」页可关） | `lexical` 零依赖；`cross_encoder` 需 `pip install -r requirements-reranker.txt`（模型不可用时自动降级不中断服务） |
+| `RAG_RERANKER_MODE` | `lexical` | ✅ 稳定（默认启用；`rag.reranker.enabled` 已默认开启，前端「能力开关」页可关） | `lexical` 零依赖；`cross_encoder` 需 `pip install -r requirements-reranker.txt` + 模型下载（失败自动降级，装好后无需重启） |
 | `RAG_MULTIMODAL_ENABLED` | `false` | ❄️ Frozen | Tesseract OCR + `pip install -r requirements-multimodal.txt` |
 | `RAG_AGENT_WORKFLOW_ENABLED` | `true` | 🧪 Beta | None (pure Python)；当前 `.env` 已启用 |
 | `RAG_MULTI_AGENT_ENABLED` | `false` | 🧪 Beta（V59 起 flag 默认开启） | Requires P9 enabled + selected KB（运行时由 `agent.multi_agent.enabled` flag 控制） |
@@ -149,20 +148,42 @@ Default: enabled. Combines Milvus vector search with BM25 keyword search via Rec
 
 > **治理状态**：冻结期间收益不稳定（内存图索引、重启重建、不推荐 >10,000 文档知识库），已按清理决策整体移除代码与测试（`scoped_graph.py` / `knowledge_graph.py` / GraphChannel / `/api/rag/graph/status`）。检索通道收敛为向量 + 关键词混合（P5）。历史 trace 中 `source=graph` 的记录仅作展示保留。
 
-**P6: Second-Stage Reranking — 🧪 Beta（cross_encoder 模式已冻结）**
+**P6: Second-Stage Reranking — ✅ 稳定（lexical 默认）+ cross_encoder 基准解锁（2026-08-29）**
 
-默认关闭。对检索候选进行二次打分后进入 LLM 上下文。
+对一阶段融合候选做二次打分后进入 LLM 上下文。
 
 Modes:
-- `disabled` — 不重排（默认）
-- `lexical` — 确定性词法重排（无额外依赖）✅ 建议模式
-- `cross_encoder` — 神经交叉编码器重排 ❄️ 已冻结（需 `pip install -r requirements-reranker.txt`，收益未获离线基准证明前不投入）
+- `disabled` — 不重排
+- `lexical` — 确定性词法重排（无额外依赖）✅ 默认模式
+- `cross_encoder` — 神经交叉编码器重排（BAAI/bge-reranker-base，sentence-transformers）✅ 基准已解锁
 
-**P8: Multimodal Evidence — ❄️ 冻结（不再投入）**
+> **治理状态（2026-08-29）**：cross_encoder 冻结解除。`scripts/eval_reranker.py` 三臂离线 A/B 基准（220 用例合成语料，20 候选）实测：recall@10 = none 0.832 / lexical 0.843 / **cross_encoder 0.846（最高）**；nDCG@10 = none 0.776 / lexical 0.760 / cross_encoder 0.771（与一阶段持平）；代价 CPU 上 ~1.15s/查询。报告：`evaluation/reports/reranker_ab.json`。结论：**召回优先场景推荐 cross_encoder，默认保持 lexical（零依赖零延迟）**。加载失败自动回落一阶段排序（失败实例不缓存，装好依赖即生效、无需重启）。
 
-默认关闭。通过 OCR 从文档图片提取文本进入文本检索管线。
+Env:
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `RAG_RERANKER_MODE` | `lexical` | `lexical` / `cross_encoder` / `disabled` |
+| `RAG_RERANKER_MODEL` | `BAAI/bge-reranker-base` | cross_encoder 模型 |
+| `RAG_RERANK_CANDIDATE_COUNT` | `20` | 重排启用时的一阶段召回候选数 |
 
-> **治理状态（2026-08）**：已冻结。依赖系统级 Tesseract、收益低。等 vision-LLM 路线（可选 C5）再重启。
+**P8: Multimodal Evidence — ✅ 恢复投入（vision-LLM 路线已实现，2026-08-29）**
+
+默认关闭。从 PDF/DOCX 提取内嵌图片，产出普通文本块进入既有检索管道（`multimodal` metadata 标记来源），两个引擎按序尝试：
+
+1. **vision-LLM（推荐，新增）**：Ollama 视觉模型（如 `qwen2.5vl:3b`）生成中文图片描述（`kind=image_vlm`），图表/照片语义理解远强于 OCR。先 `ollama pull qwen2.5vl:3b`。
+2. **Tesseract OCR（兜底）**：文字截图转写（`kind=image_ocr`），也是 VLM 不可用时的降级路径。
+
+> **治理状态**：Tesseract-only 时代的冻结解除。原 CLIP 双向量索引实验模块（`multimodal_rag.py`，从未接线生产）已删除；现实现与 P8 设计哲学一致——图片证据变普通文本块，KB 隔离/引用/删除/trace 全走既有路径，任一引擎失败只跳过该图片，永不阻断文本索引。
+
+Env:
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `RAG_MULTIMODAL_ENABLED` | `false` | 总开关 |
+| `RAG_MULTIMODAL_VLM_ENABLED` | `false` | vision-LLM 描述引擎 |
+| `RAG_MULTIMODAL_VLM_MODEL` | `qwen2.5vl:3b` | Ollama 视觉模型 |
+| `RAG_MULTIMODAL_VLM_BASE_URL` | OLLAMA_BASE_URL | VLM 服务地址 |
+| `RAG_MULTIMODAL_VLM_TIMEOUT_SECONDS` | `90` | 单图描述超时 |
+| `RAG_MULTIMODAL_OCR_*` | — | Tesseract 兜底（command/language/timeout 等） |
 
 **P9: Bounded Single-Agent Workflow — 🧪 Beta（当前已启用）**
 

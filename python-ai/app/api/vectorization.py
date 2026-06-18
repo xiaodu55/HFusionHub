@@ -334,6 +334,10 @@ async def _process_document_background(
             max_image_bytes=config.RAG_MULTIMODAL_MAX_IMAGE_BYTES,
             max_ocr_characters=config.RAG_MULTIMODAL_MAX_OCR_CHARACTERS,
             ocr_timeout_seconds=config.RAG_MULTIMODAL_OCR_TIMEOUT_SECONDS,
+            vlm_enabled=config.RAG_MULTIMODAL_VLM_ENABLED,
+            vlm_model=config.RAG_MULTIMODAL_VLM_MODEL,
+            vlm_base_url=config.RAG_MULTIMODAL_VLM_BASE_URL or config.OLLAMA_BASE_URL,
+            vlm_timeout_seconds=config.RAG_MULTIMODAL_VLM_TIMEOUT_SECONDS,
         )
         blocks, multimodal_report = await asyncio.to_thread(extractor.enrich, file_path, file_type, blocks)
         multimodal = multimodal_report.to_dict()

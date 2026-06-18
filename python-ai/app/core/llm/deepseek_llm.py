@@ -253,7 +253,7 @@ class DeepSeekLLM(BaseLLM):
         }
 
         # Streaming deliberately does not retry: once the generator starts
-        # yielding it cannot transparently restart, and the FailoverLLM layer
+        # yielding it cannot transparently restart, and the failover layer
         # already fails over before the first chunk. The shared client still
         # gives connection reuse on the stream path.
         client = get_shared_client(owner="deepseek", timeout=self.timeout)

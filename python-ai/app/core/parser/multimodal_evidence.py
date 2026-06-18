@@ -10,6 +10,7 @@ must never fail the document's text indexing job.
 
 from __future__ import annotations
 
+import httpx
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
@@ -35,6 +36,7 @@ class MultimodalEnrichmentReport:
     image_candidates: int = 0
     image_blocks: int = 0
     ocr_characters: int = 0
+    vlm_blocks: int = 0
     skipped: Dict[str, int] = field(default_factory=dict)
 
     def skip(self, reason: str) -> None:
@@ -47,15 +49,31 @@ class MultimodalEnrichmentReport:
             "image_candidates": self.image_candidates,
             "image_blocks": self.image_blocks,
             "ocr_characters": self.ocr_characters,
+            "vlm_blocks": self.vlm_blocks,
             "skipped": dict(sorted(self.skipped.items())),
         }
 
 
 class MultimodalEvidenceExtractor:
-    """Extract OCR evidence from embedded PDF/DOCX images under strict limits."""
+    """Extract image evidence from embedded PDF/DOCX images under strict limits.
+
+    两条引擎，产物同为普通文本块（进同一检索/引用/删除管道）：
+
+    - vision-LLM（优先）：Ollama 视觉模型生成图片描述（``image_vlm``），
+      对图表、示意图、照片等非文字内容远强于 OCR；
+    - Tesseract OCR（兜底）：``image_ocr``，适合纯文字截图，且是 VLM
+      不可用时的降级路径。
+
+    任一引擎失败都只跳过该图片，永不阻断文档的文本索引任务。
+    """
 
     _DOCX_MEDIA_PREFIX = "word/media/"
     _SUPPORTED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
+    _VLM_PROMPT = (
+        "请用中文客观描述这张图片的内容：如果是图表/表格，转述其数据要点；"
+        "如果包含文字，逐条转写关键文字；如果是照片/示意图，说明展示了什么。"
+        "不要添加图片中不存在的信息。"
+    )
 
     def __init__(
         self,
@@ -68,6 +86,10 @@ class MultimodalEvidenceExtractor:
         max_image_bytes: int,
         max_ocr_characters: int,
         ocr_timeout_seconds: int,
+        vlm_enabled: bool = False,
+        vlm_model: str = "",
+        vlm_base_url: str = "",
+        vlm_timeout_seconds: int = 90,
     ) -> None:
         self.enabled = enabled
         self.ocr_enabled = ocr_enabled
@@ -77,6 +99,10 @@ class MultimodalEvidenceExtractor:
         self.max_image_bytes = max(1, max_image_bytes)
         self.max_ocr_characters = max(1, max_ocr_characters)
         self.ocr_timeout_seconds = max(1, ocr_timeout_seconds)
+        self.vlm_enabled = vlm_enabled
+        self.vlm_model = (vlm_model or "").strip()
+        self.vlm_base_url = (vlm_base_url or "").rstrip("/")
+        self.vlm_timeout_seconds = max(1, vlm_timeout_seconds)
 
     def enrich(self, file_path: str, file_type: str, blocks: List[ParsedBlock]) -> Tuple[List[ParsedBlock], MultimodalEnrichmentReport]:
         """Return original blocks plus source-backed table/image evidence.
@@ -107,11 +133,8 @@ class MultimodalEvidenceExtractor:
                 report.table_blocks += 1
 
         normalized_type = (file_type or "").lower().lstrip(".")
-        if not self.ocr_enabled:
+        if not self.ocr_enabled and not self.vlm_enabled:
             report.skip("ocr_disabled")
-            return enriched, report
-        if not self._ocr_available():
-            report.skip("ocr_unavailable")
             return enriched, report
 
         try:
@@ -120,6 +143,10 @@ class MultimodalEvidenceExtractor:
             logger.warning("Multimodal image extraction skipped for %s: %s", file_path, exc)
             report.skip("image_extraction_failed")
             return enriched, report
+
+        ocr_usable = self.ocr_enabled and self._ocr_available()
+        if self.ocr_enabled and not ocr_usable:
+            report.skip("ocr_unavailable")
 
         for position, (image_bytes, suffix, source_metadata) in enumerate(images, start=1):
             report.image_candidates += 1
@@ -132,13 +159,40 @@ class MultimodalEvidenceExtractor:
             if not image_bytes:
                 report.skip("empty_image")
                 continue
+
+            # VLM 优先（图表/照片语义描述），失败或未启用时回落 OCR（文字截图）
+            image_hash = sha256(image_bytes).hexdigest()
+            if self.vlm_enabled and self.vlm_model:
+                caption, reason = self._vlm_caption(image_bytes)
+                if caption:
+                    caption = caption[:self.max_ocr_characters]
+                    enriched.append(ParsedBlock(
+                        content=f"[Image description]\n{caption}",
+                        block_type=BlockType.IMAGE,
+                        metadata={
+                            "multimodal": {
+                                "kind": "image_vlm",
+                                "image_sha256": image_hash,
+                                "image_bytes": len(image_bytes),
+                                "image_format": suffix.lstrip("."),
+                                "vlm_model": self.vlm_model,
+                                **source_metadata,
+                            },
+                        },
+                    ))
+                    report.image_blocks += 1
+                    report.vlm_blocks += 1
+                    continue
+                report.skip(reason or "vlm_empty")
+
+            if not ocr_usable:
+                continue
             ocr_text, reason = self._ocr(image_bytes, suffix)
             if not ocr_text:
                 report.skip(reason or "ocr_empty")
                 continue
 
             ocr_text = ocr_text[:self.max_ocr_characters]
-            image_hash = sha256(image_bytes).hexdigest()
             enriched.append(ParsedBlock(
                 content=f"[Image OCR]\n{ocr_text}",
                 block_type=BlockType.IMAGE,
@@ -162,6 +216,43 @@ class MultimodalEvidenceExtractor:
     def _ocr_available(self) -> bool:
         command = self.ocr_command.strip()
         return bool(command and (os.path.isabs(command) and os.path.isfile(command) or shutil.which(command)))
+
+    def _vlm_caption(self, image_bytes: bytes) -> Tuple[str, Optional[str]]:
+        """Describe the image with an Ollama vision model (synchronous, bounded).
+
+        Runs inside the indexing thread (enrich is invoked via to_thread), so a
+        blocking HTTP call is acceptable.  Any failure returns an empty caption
+        plus a skip reason — the caller falls back to OCR.
+        """
+        import base64
+
+        payload = {
+            "model": self.vlm_model,
+            "messages": [{
+                "role": "user",
+                "content": self._VLM_PROMPT,
+                "images": [base64.b64encode(image_bytes).decode("ascii")],
+            }],
+            "stream": False,
+            "options": {"temperature": 0.1},
+        }
+        try:
+            completed = httpx.post(
+                f"{self.vlm_base_url}/api/chat",
+                json=payload,
+                timeout=self.vlm_timeout_seconds,
+            )
+            if completed.status_code != 200:
+                logger.info("VLM caption returned %s: %s", completed.status_code, completed.text[:300])
+                return "", "vlm_failed"
+            body = completed.json()
+            content = str(((body.get("message") or {}).get("content")) or "").strip()
+            return content, None if content else "vlm_empty"
+        except httpx.TimeoutException:
+            return "", "vlm_timeout"
+        except Exception as exc:
+            logger.warning("VLM caption failed: %s", exc)
+            return "", "vlm_failed"
 
     def _extract_images(self, file_path: Path, file_type: str) -> Iterable[Tuple[bytes, str, Dict[str, object]]]:
         if file_type == "docx":

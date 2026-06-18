@@ -198,48 +198,30 @@ async def test_chat_stream_error_after_first_chunk_raises(monkeypatch):
     assert gw._circuits["p1"].total_failures == 1
 
 
-# -- graceful degradation ----------------------------------------------------
+# -- fail-fast（旧链退役后不再静默降级）--------------------------------------
 
 @pytest.mark.asyncio
-async def test_chat_stream_delegates_to_legacy_when_disabled(monkeypatch):
-    """Gateway disabled → stream served by the concrete provider chain."""
+async def test_chat_stream_raises_when_gateway_disabled():
+    """Gateway disabled → clear GatewayError instead of a silent legacy fallback."""
+    import pytest as _pytest
+    from app.core.llm.model_gateway import GatewayError
+
     gw = _gateway(_provider("p1"), enabled=False)
-    from app.core import llm as llm_pkg
-
-    calls = []
-
-    class _FakeLLM:
-        async def chat_stream(self, messages, temperature=0.7, max_tokens=2048, **kwargs):
-            calls.append(messages)
-            yield "legacy stream"
-
-    monkeypatch.setattr(llm_pkg, "_build_providers", lambda model=None: _FakeLLM())
-
-    chunks = [c async for c in gw.chat_stream("p1", _messages("q"))]
-    assert chunks == ["legacy stream"]
-    assert calls and calls[0][0].content == "q"
+    with _pytest.raises(GatewayError, match="not routable"):
+        _ = [c async for c in gw.chat_stream("p1", _messages("q"))]
 
 
 @pytest.mark.asyncio
-async def test_chat_stream_resolve_failure_delegates_without_recursion(monkeypatch):
-    """A model the gateway cannot resolve must fall back — not recurse.
+async def test_chat_stream_resolve_failure_raises(monkeypatch):
+    """A model the gateway cannot resolve surfaces GatewayError to the caller."""
+    import pytest as _pytest
+    from app.core.llm.model_gateway import GatewayError
 
-    This is the case that used to be unsafe: the gateway can route (so the
-    legacy path cannot reuse ``get_llm()`` — it would re-enter the gateway
-    branch and loop forever).
-    """
     gw = _gateway(_provider("p1"))
-    from app.core import llm as llm_pkg
-
-    class _FakeLLM:
-        async def chat_stream(self, messages, temperature=0.7, max_tokens=2048, **kwargs):
-            yield "legacy fallback"
-
-    monkeypatch.setattr(llm_pkg, "_build_providers", lambda model=None: _FakeLLM())
 
     # Empty model name makes resolve() raise GatewayError.
-    chunks = [c async for c in gw.chat_stream("", _messages("q"))]
-    assert chunks == ["legacy fallback"]
+    with _pytest.raises(GatewayError):
+        _ = [c async for c in gw.chat_stream("", _messages("q"))]
 
 
 # -- GatewayLLM facade --------------------------------------------------------
@@ -303,31 +285,32 @@ def test_get_llm_returns_gatewayllm_when_enabled_and_routable(monkeypatch):
     assert isinstance(llm, GatewayLLM)
 
 
-def test_get_llm_concrete_when_stream_disabled(monkeypatch):
-    monkeypatch.setenv("MODEL_GATEWAY_STREAM_ENABLED", "false")
+def test_get_llm_returns_gateway_when_routable(monkeypatch):
+    """ModelGateway 是唯一链：可路由时 get_llm 一律返回 GatewayLLM。"""
     monkeypatch.setenv("LLM_ALLOW_MOCK", "false")
     from app.core.llm import model_gateway as mg_mod
 
     monkeypatch.setattr(mg_mod, "get_model_gateway", lambda: _routable_gateway())
 
     llm = get_llm()
-    assert not isinstance(llm, GatewayLLM)
+    assert isinstance(llm, GatewayLLM)
 
 
-def test_get_llm_concrete_when_gateway_cannot_route(monkeypatch):
-    monkeypatch.setenv("MODEL_GATEWAY_STREAM_ENABLED", "true")
+def test_get_llm_raises_when_gateway_cannot_route(monkeypatch):
+    """Gateway 不可路由（无任何启用的 provider）→ 明确报错而非静默降级。"""
+    import pytest as _pytest
+
     monkeypatch.setenv("LLM_ALLOW_MOCK", "false")
     from app.core.llm import model_gateway as mg_mod
 
     dead = _gateway(_provider("p1"), enabled=False)
     monkeypatch.setattr(mg_mod, "get_model_gateway", lambda: dead)
 
-    llm = get_llm()
-    assert not isinstance(llm, GatewayLLM)
+    with _pytest.raises(RuntimeError, match="No LLM provider available"):
+        get_llm()
 
 
 def test_get_llm_mock_still_wins_over_gateway(monkeypatch):
-    monkeypatch.setenv("MODEL_GATEWAY_STREAM_ENABLED", "true")
     monkeypatch.setenv("LLM_ALLOW_MOCK", "true")
     from app.core.llm import model_gateway as mg_mod
     from app.core.llm.mock_llm import MockLLM

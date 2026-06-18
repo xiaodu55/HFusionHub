@@ -22,8 +22,8 @@ pytest_plugins = ['pytest_asyncio']
 # 依赖 lite co-store JSON 语义的测试在本地失败而在 CI（无 .env）通过——
 # 测试必须 hermetic：默认强制 lite，需要 cluster 语义的测试自行显式设置。
 os.environ["VECTOR_STORE_MODE"] = "lite"
-# MODEL_GATEWAY 同理由 conftest 统一关闭（下方 env 设置），避免 .env 差异。
-os.environ["MODEL_GATEWAY_STREAM_ENABLED"] = "false"
+# ModelGateway 现为唯一 LLM 链（旧 FailoverLLM 链已退役）；gateway 读取
+# .env 配置的差异由各测试按需 monkeypatch provider，无需全局开关。
 
 # HTTP route tests emulate the Java application service.  Production has no
 # fallback token; the test process supplies an explicit, non-secret value.
@@ -35,12 +35,6 @@ config.EMBEDDING_ALLOW_FALLBACK = True
 # Tests run without a Java backend — use transparent degradation so feature
 # flags don't override env-var-based config (preserves existing test behavior).
 os.environ.setdefault("FEATURE_FLAG_DEGRADATION", "transparent")
-
-# get_llm() routes through the ModelGateway when MODEL_GATEWAY_STREAM_ENABLED
-# (default ON in production).  Force it OFF in the test session so the suite
-# keeps exercising the legacy FailoverLLM / mock / monkeypatched-get_llm paths
-# deterministically (e.g. test_llm_failover.py asserts FailoverLLM).
-os.environ["MODEL_GATEWAY_STREAM_ENABLED"] = "false"
 
 
 class FakeInternalNoteResponse:

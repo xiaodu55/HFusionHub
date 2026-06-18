@@ -9,10 +9,13 @@ healthy retrieval request into an outage or silently pretend to have reranked.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Dict, List, Protocol, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 class Reranker(Protocol):
@@ -95,15 +98,29 @@ class CrossEncoderReranker:
         }
 
 
-@lru_cache(maxsize=4)
+# 成功构造的 cross_encoder 按 (mode, model) 缓存；失败（依赖缺失/模型下载
+# 失败）不缓存 —— 否则装好依赖后必须重启进程才能生效。
+_cross_encoder_cache: Dict[str, CrossEncoderReranker] = {}
+
+
 def _get_configured_reranker(mode: str, model_name: str) -> Reranker:
     if mode == "lexical":
         return LexicalReranker()
     if mode == "cross_encoder":
+        cached = _cross_encoder_cache.get(model_name)
+        if cached is not None:
+            return cached
         try:
-            return CrossEncoderReranker(model_name)
-        except (ImportError, OSError, RuntimeError) as error:
+            reranker = CrossEncoderReranker(model_name)
+        except (ImportError, OSError, RuntimeError, ValueError) as error:
+            logger.warning(
+                "cross_encoder reranker unavailable (%s: %s); falling back to "
+                "first-stage order until the model can be loaded",
+                type(error).__name__, error,
+            )
             return DisabledReranker(reason=f"cross_encoder_unavailable:{type(error).__name__}")
+        _cross_encoder_cache[model_name] = reranker
+        return reranker
     return DisabledReranker(reason=f"unsupported_mode:{mode}")
 
 
@@ -113,7 +130,9 @@ def _resolve_reranker(flag_enabled: bool, mode: str, model_name: str) -> Reranke
 
     The feature flag's cached boolean is stable within its TTL, so keying on
     the evaluated value (rather than the flag key) is safe and lets a UI
-    toggle take effect on the next retrieval.
+    toggle take effect on the next retrieval.  A cross-encoder load failure
+    resolves to a fresh DisabledReranker on every call, so installing the
+    optional dependency takes effect without a restart.
     """
     if not flag_enabled:
         return DisabledReranker(reason="rag.reranker.enabled is OFF via feature flag")

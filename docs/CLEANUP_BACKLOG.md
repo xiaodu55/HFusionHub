@@ -10,8 +10,8 @@
 | 功能 | Flag | 代码位置 | 治理决策（2026-08-29） |
 | --- | --- | --- | --- |
 | ~~P7 ScopedGraphRAG~~ | `RAG_GRAPH_ENABLED` | ~~scoped_graph.py / knowledge_graph.py~~ | ✅ **已移除（2026-08-29）**：代码、测试、`/api/rag/graph/status`、GraphChannel、配置项、前端「图谱检索」文案全部删除；检索通道收敛为向量+关键词 |
-| P8 多模态 OCR | `RAG_MULTIMODAL_ENABLED=false` | `python-ai/app/core/rag/multimodal_rag.py` | **保留 · 后续补充**：等 vision-LLM 路线（可选 C5）重启，届时替换 Tesseract 依赖重写 |
-| cross_encoder 重排 | `RAG_RERANKER_MODE=cross_encoder`（默认 lexical） | 重排器分支（P6 二阶段重排） | **保留 · 后续补充**：神经重排器，先跑离线基准证明收益（`requirements-reranker.txt`），达标后设为默认 |
+| ~~P8 多模态 OCR~~ | `RAG_MULTIMODAL_*` | ~~multimodal_rag.py~~ | ✅ **vision-LLM 路线已实现（2026-08-29）**：Ollama 视觉模型（qwen2.5vl）图片描述引擎 + Tesseract 兜底，产普通文本块进既有管道；未接线的 CLIP 实验模块 multimodal_rag.py（1367 行）及其 951 行测试已删除 |
+| ~~cross_encoder 重排~~ | `RAG_RERANKER_MODE` | 重排器分支（P6） | ✅ **基准已解锁（2026-08-29）**：三臂 A/B（`scripts/eval_reranker.py`）实测 recall@10 最高 0.846，加载失败自动回落且失败实例不缓存；默认仍 lexical，召回优先场景可启用 |
 
 注意：`/rag` 页与 admin/Flags 的「冻结」标注 UI 依赖这些 flag 的展示逻辑，若未来删除 GraphRAG 代码需同步。
 
@@ -23,7 +23,7 @@
 
 ## C. 新旧双轨实现（待稳定后收敛）
 
-- **LLM 调用链**：新 ModelGateway 与旧 `get_llm()` 并存，`MODEL_GATEWAY_STREAM_ENABLED` 切换。ModelGateway 稳定运行一个周期后删除旧链及其 fallback 分支。
+- [x] ~~LLM 调用链双轨~~ — **已收敛（2026-08-29）**：`MODEL_GATEWAY_STREAM_ENABLED` 与 `_build_providers`/`_legacy_chat`/`_legacy_stream`/`FailoverLLM` 全部删除，`get_llm()` 单轨返回 GatewayLLM（不可路由时明确报错）；`DeepSeekLLM`/`OllamaLLM` 保留（响应缓存与用户级自定义供应商仍用）。
 - **前端状态徽章**：`src/utils/badge.ts`（`levelBadgeClass`）与 `src/utils/format.ts`（`getStatusBadge`）职责重叠（后者仅 `document/Index.vue`、`knowledge/Detail.vue` 两处使用），合并到 badge.ts。
 - [x] ~~前端日期格式化重复~~ — `MainLayout.vue` 本地 `formatDateTime` 已删除，统一引用 `src/utils/date.ts`（2026-08-29）。
 

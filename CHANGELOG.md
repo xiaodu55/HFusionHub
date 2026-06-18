@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 冻结名目全部清偿批次（2026-08-29）：LLM 单轨化 + P8 vision-LLM 路线 + P6 cross_encoder 基准解锁
+
+#### Added
+- **P8 多模态 vision-LLM 路线**：`MultimodalEvidenceExtractor` 新增 Ollama 视觉模型描述引擎（`RAG_MULTIMODAL_VLM_*`，默认 qwen2.5vl:3b）——内嵌图片 base64 送 `/api/chat`（Ollama images 契约），生成中文描述成为 `kind=image_vlm` 普通文本块进既有检索管道；Tesseract OCR 降级为兜底引擎（VLM 失败自动回落 `image_ocr`），任一引擎失败只跳过该图片永不阻断索引。实测：qwen2.5vl:3b 对含图 docx 准确转写图表全部数字。同时删除从未接线生产的 CLIP 双向量索引实验模块 `multimodal_rag.py`（1367 行）及其 951 行测试
+- **P6 reranker 离线基准 `scripts/eval_reranker.py`**：none/lexical/cross_encoder 三臂 A/B（合成语料 220 用例、20 候选），报告落 `evaluation/reports/reranker_ab.json`。实测 recall@10：none 0.832 / lexical 0.843 / **cross_encoder 0.846（最高）**，nDCG@10 0.771（与一阶段持平），CPU ~1.15s/查询。结论：召回优先场景推荐 cross_encoder，默认保持 lexical
+
+#### Changed
+- **LLM 链收敛为 ModelGateway 单轨**：`MODEL_GATEWAY_STREAM_ENABLED` 开关、`_build_providers`、`_legacy_chat`/`_legacy_stream` 静默降级、`FailoverLLM`（92 行）及旧链 Ollama 探测机制全部删除。`get_llm()` 单轨返回 GatewayLLM，provider 不可路由时明确报错（此前会静默走旧链）。`DeepSeekLLM`/`OllamaLLM` 具体类保留（gateway 复用其响应缓存；用户级自定义供应商 `build_user_llm` 仍基于它们）
+
+#### Fixed
+- **cross_encoder 降级缓存缺陷**：失败实例曾被 `lru_cache` 永久缓存，装好 sentence-transformers 后必须重启进程才生效；改为仅缓存成功构造，失败每次重试，装好依赖即生效
+
+#### Docs
+- ENVIRONMENT.md：P6（基准数字 + 治理解除）、P8（vision-LLM 路线 + 治理解除）、`MODEL_GATEWAY_STREAM_ENABLED` 移除；`.env.example` 同步；Flags.vue 精排条目说明更新
+
 ### 清单全量清理批次（2026-08-29）：GraphRAG 移除 + 死代码清零 + 文档对账
 
 #### Removed
