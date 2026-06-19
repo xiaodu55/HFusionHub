@@ -17,8 +17,6 @@ import { useToast } from '@/composables/useToast'
 import { Button } from '@/components/ui/button'
 import { Check, CircleAlert, Loader2, MessageSquare, Rocket, X } from 'lucide-vue-next'
 
-const DISMISS_KEY = 'hfusionhub.setup.dismissed'
-
 const router = useRouter()
 const userStore = useUserStore()
 const toast = useToast()
@@ -32,7 +30,9 @@ const convCount = ref(0)
 const importing = ref(false)
 const clearing = ref(false)
 const lastSections = ref<DemoSectionResult[]>([])
-const dismissed = ref(localStorage.getItem(DISMISS_KEY) === '1')
+// 收起只对当前页面生效，刷新/下次进入自动恢复显示；
+// 全部完成后才由 allDone 永久隐藏——避免误点 × 后再也找不回
+const dismissed = ref(false)
 
 const modelReady = computed(() => {
   if (modelConfig.value?.configured) return true
@@ -140,14 +140,28 @@ const handleClearDemo = async () => {
 }
 
 const dismiss = () => {
-  localStorage.setItem(DISMISS_KEY, '1')
   dismissed.value = true
+}
+
+const reshow = () => {
+  dismissed.value = false
 }
 
 onMounted(refresh)
 </script>
 
 <template>
+  <div v-if="!show && !allDone" class="mb-1 flex justify-end">
+    <button
+      type="button"
+      class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+      title="重新显示设置引导"
+      @click="reshow"
+    >
+      <Rocket class="h-3.5 w-3.5" />
+      显示设置引导
+    </button>
+  </div>
   <section v-if="show" class="setup-checklist glass-panel p-4 sm:p-5">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="flex items-start gap-3">
@@ -164,7 +178,7 @@ onMounted(refresh)
       <button
         type="button"
         class="rounded-md p-1.5 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground"
-        title="稍后再说"
+        title="收起（本次会话不再显示，刷新后恢复）"
         @click="dismiss"
       >
         <X class="h-4 w-4" />
