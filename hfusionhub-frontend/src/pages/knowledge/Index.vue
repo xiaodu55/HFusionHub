@@ -209,7 +209,7 @@ onMounted(() => {
 
     <LoadingSkeleton v-if="loading" type="card" :count="6" />
     <ErrorState v-else-if="loadError" message="加载知识库失败" @retry="loadKnowledgeBases" />
-    <EmptyState v-else-if="filteredKnowledgeBases.length === 0" :icon="BookOpen" :title="searchQuery ? '没有找到匹配的知识库' : '还没有知识库'" :description="searchQuery ? '尝试更换搜索关键词' : '创建第一个知识库，然后上传文档让 AI 学习。'" action="创建知识库" :show-action="!searchQuery" @action="handleCreateDialogOpen" />
+    <EmptyState v-else-if="filteredKnowledgeBases.length === 0" :icon="BookOpen" :title="searchQuery ? '没有找到匹配的知识库' : '还没有知识库'" :description="searchQuery ? '尝试更换搜索关键词' : '创建第一个知识库，然后上传文档让 AI 学习。'" :steps="searchQuery ? undefined : [{ title: '创建知识库', description: '按主题或项目组织，比如「产品手册」「招标文件」' }, { title: '上传文档', description: '支持 PDF、Word、Markdown，解析后自动建立检索索引' }, { title: '去提问', description: '在智能对话中选择这个知识库，回答会附带原文引用' }]" action="创建知识库" :show-action="!searchQuery" @action="handleCreateDialogOpen" />
     <div v-else class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       <article v-for="kb in filteredKnowledgeBases" :key="kb.id" class="group relative overflow-hidden rounded-2xl border border-border bg-card/80 p-5 transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-[0_18px_38px_rgba(0,0,0,0.14)]" @click="goToDetail(kb.id)">
         <div class="flex items-start justify-between gap-3"><div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><FolderOpen class="h-5 w-5" /></div><Badge variant="outline" :class="kb.status === 0 ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' : 'border-border bg-muted text-muted-foreground'">{{ kb.status === 0 ? '可用于对话' : '已停用' }}</Badge></div>

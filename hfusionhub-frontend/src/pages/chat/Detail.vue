@@ -666,6 +666,12 @@ onBeforeRouteLeave(() => {
 onMounted(() => {
   loadConversation()
   loadMessages()
+  // 支持从列表页示例问题带入（/chat/:id?q=...）
+  const initialQuestion = route.query.q
+  if (initialQuestion) {
+    inputMessage.value = String(initialQuestion)
+    router.replace({ query: { ...route.query, q: undefined } })
+  }
 })
 </script>
 

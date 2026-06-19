@@ -197,8 +197,15 @@ onMounted(loadProjects)
       v-else-if="projects.length === 0"
       :icon="FileSearch"
       title="还没有投标项目"
-      description="新建项目并关联招标文件知识库，AI 将自动解读要素与需求"
-    />
+      description="新建项目并关联招标文件知识库，AI 将自动解读要素与需求。也可以先导入行业演示数据快速体验完整流程。"
+      :steps="[
+        { title: '创建项目并关联招标文件知识库', description: '没有现成资料时，可先到套餐中心导入行业演示数据' },
+        { title: '一键解读', description: 'AI 并发抽取关键要素、评分办法、废标条款与需求清单' },
+        { title: '撰写标书', description: '流式生成分节草稿，自动复用企业资质库与历史标书库' },
+        { title: '废标自检', description: '规则 + 语义双重检查，生成自检报告后再提交' },
+      ]"
+    >
+    </EmptyState>
 
     <div v-else class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       <Card

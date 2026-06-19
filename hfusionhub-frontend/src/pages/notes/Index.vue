@@ -136,7 +136,7 @@ onMounted(loadNotes)
       v-else-if="notes.length === 0"
       :icon="NotebookPen"
       title="还没有笔记"
-      description="在关联知识库的对话中让 AI「把结论整理成笔记保存到知识库」，确认后即可在这里查看。也可以手动新建笔记。"
+      description="在关联知识库的对话中让 AI「把结论整理成笔记保存到知识库」，确认后即可在这里查看。也可以手动新建笔记。适合沉淀问答结论、会议要点和跟进事项。"
       action="新建笔记"
       show-action
       @action="openCreate"

@@ -242,7 +242,7 @@ onMounted(async () => {
           </span>
           <component :is="stat.icon" :class="['h-5 w-5', stat.iconClass]" />
         </span>
-        <span class="mt-5 block text-3xl font-semibold text-foreground">
+        <span class="mt-5 block text-3xl font-semibold tabular-nums tracking-tight text-foreground">
           {{ loading ? '--' : stat.value.toLocaleString() }}
         </span>
         <span class="mt-2 flex items-center justify-between text-xs text-muted-foreground">

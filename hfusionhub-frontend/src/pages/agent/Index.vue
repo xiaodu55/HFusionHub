@@ -255,15 +255,15 @@ onMounted(load)
       </div>
       <div class="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] p-4">
         <p class="text-sm text-muted-foreground">已完成</p>
-        <div class="mt-2 flex items-end justify-between"><strong class="text-2xl text-emerald-300">{{ completedCount }}</strong><CheckCircle2 class="h-4 w-4 text-emerald-300" /></div>
+        <div class="mt-2 flex items-end justify-between"><strong class="text-2xl tabular-nums tracking-tight text-emerald-300">{{ completedCount }}</strong><CheckCircle2 class="h-4 w-4 text-emerald-300" /></div>
       </div>
       <div class="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] p-4">
         <p class="text-sm text-muted-foreground">等待或执行中</p>
-        <div class="mt-2 flex items-end justify-between"><strong class="text-2xl text-cyan-200">{{ runningCount }}</strong><LoaderCircle class="h-4 w-4 text-cyan-200" /></div>
+        <div class="mt-2 flex items-end justify-between"><strong class="text-2xl tabular-nums tracking-tight text-cyan-200">{{ runningCount }}</strong><LoaderCircle class="h-4 w-4 text-cyan-200" /></div>
       </div>
       <div class="rounded-xl border border-rose-400/15 bg-rose-400/[0.04] p-4">
         <p class="text-sm text-muted-foreground">需要处理</p>
-        <div class="mt-2 flex items-end justify-between"><strong class="text-2xl text-rose-300">{{ failedCount }}</strong><AlertCircle class="h-4 w-4 text-rose-300" /></div>
+        <div class="mt-2 flex items-end justify-between"><strong class="text-2xl tabular-nums tracking-tight text-rose-300">{{ failedCount }}</strong><AlertCircle class="h-4 w-4 text-rose-300" /></div>
       </div>
     </section>
 

@@ -103,10 +103,10 @@ onMounted(loadData)
 
     <template v-else-if="summary">
       <section class="grid overflow-hidden rounded-lg border border-border bg-card/40 sm:grid-cols-2 xl:grid-cols-4">
-        <div class="border-b border-border p-4 sm:border-r xl:border-b-0"><p class="flex items-center gap-2 text-sm text-muted-foreground"><CircleDollarSign class="h-4 w-4" />当前费用</p><p class="mt-2 text-2xl font-semibold">{{ formatCost(summary.totalCost) }}</p><p class="mt-1 text-xs text-muted-foreground">最近 {{ days }} 天</p></div>
-        <div class="border-b border-border p-4 xl:border-b-0 xl:border-r"><p class="flex items-center gap-2 text-sm text-muted-foreground"><BarChart3 class="h-4 w-4" />预估月费</p><p class="mt-2 text-2xl font-semibold">{{ formatCost(summary.estimatedMonthCost) }}</p><p class="mt-1 text-xs text-muted-foreground">按当前使用速度估算</p></div>
-        <div class="border-b border-border p-4 sm:border-b-0 sm:border-r"><p class="flex items-center gap-2 text-sm text-muted-foreground"><Zap class="h-4 w-4" />Token 用量</p><p class="mt-2 text-2xl font-semibold">{{ summary.totalTokens.toLocaleString() }}</p><p class="mt-1 text-xs text-muted-foreground">模型处理的文本单位</p></div>
-        <div class="p-4"><p class="flex items-center gap-2 text-sm text-muted-foreground"><Bot class="h-4 w-4" />AI 请求</p><p class="mt-2 text-2xl font-semibold">{{ summary.totalRequests.toLocaleString() }}</p><p class="mt-1 text-xs text-muted-foreground">平均 {{ formatCost(avgCostPerRequest) }} / 次</p></div>
+        <div class="border-b border-border p-4 sm:border-r xl:border-b-0"><p class="flex items-center gap-2 text-sm text-muted-foreground"><CircleDollarSign class="h-4 w-4" />当前费用</p><p class="mt-2 text-2xl font-semibold tabular-nums tracking-tight">{{ formatCost(summary.totalCost) }}</p><p class="mt-1 text-xs text-muted-foreground">最近 {{ days }} 天</p></div>
+        <div class="border-b border-border p-4 xl:border-b-0 xl:border-r"><p class="flex items-center gap-2 text-sm text-muted-foreground"><BarChart3 class="h-4 w-4" />预估月费</p><p class="mt-2 text-2xl font-semibold tabular-nums tracking-tight">{{ formatCost(summary.estimatedMonthCost) }}</p><p class="mt-1 text-xs text-muted-foreground">按当前使用速度估算</p></div>
+        <div class="border-b border-border p-4 sm:border-b-0 sm:border-r"><p class="flex items-center gap-2 text-sm text-muted-foreground"><Zap class="h-4 w-4" />Token 用量</p><p class="mt-2 text-2xl font-semibold tabular-nums tracking-tight">{{ summary.totalTokens.toLocaleString() }}</p><p class="mt-1 text-xs text-muted-foreground">模型处理的文本单位</p></div>
+        <div class="p-4"><p class="flex items-center gap-2 text-sm text-muted-foreground"><Bot class="h-4 w-4" />AI 请求</p><p class="mt-2 text-2xl font-semibold tabular-nums tracking-tight">{{ summary.totalRequests.toLocaleString() }}</p><p class="mt-1 text-xs text-muted-foreground">平均 {{ formatCost(avgCostPerRequest) }} / 次</p></div>
       </section>
 
       <!-- 租户配额（今日）：读 usage_ledger 预占/结算与 usage_quota 日限额 -->

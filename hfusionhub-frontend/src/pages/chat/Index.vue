@@ -130,6 +130,24 @@ const handlePageChange = (page: number) => {
   loadConversations()
 }
 
+const EXAMPLE_QUESTIONS = [
+  '帮我总结这份资料的核心要点',
+  '这份文档里提到了哪些时间节点？',
+  '用通俗的语言解释这份文档里的关键概念',
+]
+
+const startWithExample = async (question: string) => {
+  try {
+    const res = await conversationApi.createConversation({ title: '' })
+    const conversationId = res.data?.id
+    if (!conversationId) throw new Error('no id')
+    router.push(`/chat/${conversationId}?q=${encodeURIComponent(question)}`)
+  } catch (error) {
+    console.error('示例创建对话失败:', error)
+    toast.error('创建对话失败，请稍后重试')
+  }
+}
+
 const openCreateDialog = () => {
   createForm.value = { title: '', knowledgeBaseId: undefined, promptTemplateId: undefined }
   isCreateDialogOpen.value = true
@@ -271,10 +289,12 @@ onMounted(() => {
       v-else-if="conversations.length === 0"
       :icon="MessageSquare"
       title="还没有对话"
-      description="新建一个对话，开始向 AI 提问；也可以选择知识库，让回答基于你的资料。"
+      description="新建一个对话，开始向 AI 提问；也可以选择知识库，让回答基于你的资料。点击下方示例会直接创建对话并填入问题。"
       action="新建对话"
       :show-action="true"
+      :examples="EXAMPLE_QUESTIONS"
       @action="openCreateDialog"
+      @example="startWithExample"
     />
     <EmptyState
       v-else-if="filteredConversations.length === 0"
