@@ -515,7 +515,6 @@ onBeforeUnmount(() => {
         </div>
       </main>
 
-      <Sparkles class="pointer-events-none absolute right-8 top-28 h-5 w-5 text-emerald-600/40 dark:text-emerald-300/40" />
     </div>
 
     <Dialog v-model:open="serviceDialogOpen">

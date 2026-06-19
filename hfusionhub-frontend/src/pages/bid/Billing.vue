@@ -246,7 +246,7 @@ onMounted(() => {
                   月度字符 {{ (binding.charQuota / 10000).toFixed(0) }} 万 · {{ formatCents(binding.priceCents) }}/月
                 </p>
               </div>
-              <Button variant="outline" size="sm" class="gap-1.5" :disabled="bindingBusy === binding.bindingId" @click="handleUnbind(binding.bindingId, binding.planName)">
+              <Button variant="outline" size="sm" class="gap-1.5" :disabled="bindingBusy === binding.bindingId" @click="handleUnbind(binding.subscriptionId, binding.planName)">
                 <Unplug class="h-3.5 w-3.5" />解绑
               </Button>
             </li>
