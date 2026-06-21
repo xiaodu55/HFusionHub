@@ -279,7 +279,6 @@ onMounted(load)
               <p class="mt-1 text-xs text-muted-foreground">工具数：{{ server.tool_count }}</p>
               <div v-if="server.error_message" class="mt-2 rounded-lg border border-rose-400/20 bg-rose-400/[0.06] p-2.5">
                 <p class="text-xs leading-5 text-rose-700 dark:text-rose-300">{{ friendlyError(server.error_message) }}</p>
-                <p v-if="friendlyError(server.error_message) !== server.error_message" class="mt-1 break-all font-mono text-[11px] text-muted-foreground/70">{{ server.error_message }}</p>
               </div>
             </div>
             <div class="flex shrink-0 gap-2">
