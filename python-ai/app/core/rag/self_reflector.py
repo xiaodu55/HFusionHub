@@ -951,14 +951,14 @@ class SelfReflector:
         # 根据问题生成补充查询
         supplement_queries = self._generate_supplement_queries(query, issues)
 
-        # 检索补充内容
+        # 检索补充内容（retrieve 返回 RetrievalResult，取其 results 列表）
         supplement_docs = []
         for supplement_query in supplement_queries:
             try:
-                docs = await retriever.retrieve(supplement_query)
-                supplement_docs.extend(docs)
-            except:
-                pass
+                result = await retriever.retrieve(supplement_query)
+                supplement_docs.extend(result.results)
+            except Exception as exc:
+                logger.warning("Supplement retrieval failed for %r: %s", supplement_query, exc)
 
         return "\n\n".join([doc.content for doc in supplement_docs[:3]])  # 最多3个文档
 

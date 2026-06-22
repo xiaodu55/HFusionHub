@@ -86,7 +86,7 @@ const buildFilters = (page = currentPage.value): TraceFilters => ({
   knowledge_base_id: requireKnowledgeBaseId(),
   query: filterQuery.value.trim() || undefined,
   source: filterSource.value.trim() || undefined,
-  error_only: errorsOnly.value || undefined,
+  errorOnly: errorsOnly.value || undefined,
 })
 
 // 请求序号：快速切 KB / 狂点刷新时丢弃过期响应，防止旧响应覆盖新数据（F1）

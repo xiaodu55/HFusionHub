@@ -63,7 +63,7 @@ export interface TraceFilters {
   limit?: number
   offset?: number
   knowledge_base_id: number
-  error_only?: boolean
+  errorOnly?: boolean
   query?: string
   source?: string
 }

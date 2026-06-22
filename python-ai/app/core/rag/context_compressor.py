@@ -707,7 +707,9 @@ class RecursiveCompressionStrategy(BaseCompressionStrategy):
         iteration = 0
         max_iterations = 5
 
-        while current_tokens > config.max_tokens and iteration < max_iterations:
+        # max_tokens 未配置时不做阈值压缩（避免 int > None TypeError），
+        # 直接按 target_ratio 迭代压缩
+        while (config.max_tokens is None or current_tokens > config.max_tokens) and iteration < max_iterations:
             # 每次压缩 30%
             current_config = CompressionConfig(
                 strategy=CompressionStrategyType.EXTRACTIVE,
@@ -898,8 +900,15 @@ class ContextCompressor:
         text: str,
         config: Optional[CompressionConfig]
     ) -> str:
-        """生成缓存键"""
-        content = f"{text}:{config.strategy.value if config else 'default'}"
+        """生成缓存键（纳入影响压缩结果的全部配置，避免不同参数互串缓存）"""
+        if config is not None:
+            content = (
+                f"{text}:{config.strategy.value}"
+                f":{config.target_ratio}:{config.max_tokens}"
+                f":{config.preserve_keywords}"
+            )
+        else:
+            content = f"{text}:default"
         return hashlib.md5(content.encode()).hexdigest()
 
     def _estimate_tokens(self, text: str) -> int:

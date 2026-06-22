@@ -21,6 +21,7 @@ import javax.crypto.spec.SecretKeySpec;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -91,7 +92,7 @@ public class VectorizationController {
 
     @Operation(summary = "回调：更新文档处理状态")
     @PostMapping("/{documentId}/callback")
-    public R<String> updateStatus(
+    public ResponseEntity<R<String>> updateStatus(
             @Parameter(description = "文档ID") @PathVariable Long documentId,
             @RequestBody String rawBody,
             @RequestHeader(value = "X-Callback-Secret", required = false) String secret,
@@ -103,23 +104,25 @@ public class VectorizationController {
                 || !MessageDigest.isEqual(
                         callbackSecret.getBytes(StandardCharsets.UTF_8), secret.getBytes(StandardCharsets.UTF_8))) {
             log.warn("回调密钥验证失败: documentId={}", documentId);
-            return R.fail("回调密钥无效");
+            // 安全（评估 M6）：鉴权失败必须返回 401——Python 回调客户端按
+            // 状态码 >=400 判定通知失败；此前返回 200 + 错误 body 会被误当成功
+            return ResponseEntity.status(401).body(R.fail("回调密钥无效"));
         }
 
         // 2. 验证 HMAC-SHA256 签名
         if (!verifyHmacSignature(rawBody, callbackSecret, signature)) {
             log.warn("回调签名验证失败: documentId={}", documentId);
-            return R.fail("回调签名无效");
+            return ResponseEntity.status(401).body(R.fail("回调签名无效"));
         }
 
         // 3. 反序列化并处理
         try {
             DocumentIndexCallbackDTO body = objectMapper.readValue(rawBody, DocumentIndexCallbackDTO.class);
             vectorizationService.updateDocumentStatus(documentId, body);
-            return R.ok("状态已更新");
+            return ResponseEntity.ok(R.ok("状态已更新"));
         } catch (Exception e) {
             log.error("回调请求体反序列化失败: documentId={}", documentId, e);
-            return R.fail("回调请求体格式错误");
+            return ResponseEntity.badRequest().body(R.fail("回调请求体格式错误"));
         }
     }
 

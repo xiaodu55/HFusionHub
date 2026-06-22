@@ -1073,7 +1073,10 @@ class ReactAgent(Agent):
                 logger.warning(f"Self-reflection failed: {e}")
 
         # Determine V1 status.
-        if groundedness_failed and not final_answer:
+        # groundedness_failed 仅在重试后答案仍无依据时为 True——
+        # 此时 final_answer 必然非空（原始无据答案），不能再加 not final_answer
+        # 条件（该条件恒 False 导致 insufficient_evidence 状态不可达）
+        if groundedness_failed:
             v1_status = "insufficient_evidence"
             finish_reason = "insufficient_evidence"
         else:

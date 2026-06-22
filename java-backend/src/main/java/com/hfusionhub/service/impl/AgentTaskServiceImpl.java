@@ -737,6 +737,9 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     }
 
     @Override
+    // 评估 M2：approval/task/run 三条更新必须在同一事务内，进程崩溃时不允许
+    // 出现 approval=approved 而 run 卡 waiting_approval 的中间态
+    @Transactional
     public AgentApproval decideApproval(String approvalId, String decision, Long decidedBy, String reason) {
         AgentApproval approval = approvalMapper.selectByApprovalId(approvalId);
         if (approval == null) throw new BusinessException("审批记录不存在: " + approvalId);
@@ -763,7 +766,9 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                 task.setStatus(AgentConstants.STATUS_FAILED);
                 taskMapper.updateById(task);
             }
-            if (run != null) {
+            if (run != null && AgentConstants.STATUS_WAITING_APPROVAL.equals(run.getStatus())) {
+                // 评估 S3/M3：状态守卫——过期调度可能已把 run 置 FAILED，
+                // 只允许从 waiting_approval 迁移，防止覆盖终态
                 run.setStatus(AgentConstants.STATUS_FAILED);
                 run.setErrorCode("approval_denied");
                 run.setErrorDetail("审批被拒绝: " + (reason != null ? reason : "无理由"));
@@ -790,7 +795,9 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                 task.setStatus(AgentConstants.STATUS_RUNNING);
                 taskMapper.updateById(task);
             }
-            if (run != null) {
+            if (run != null && AgentConstants.STATUS_WAITING_APPROVAL.equals(run.getStatus())) {
+                // 评估 S3/M3：状态守卫——仅 waiting_approval 可恢复为 RUNNING，
+                // 防止覆盖并发完成的终态
                 run.setStatus(AgentConstants.STATUS_RUNNING);
                 runMapper.updateById(run);
             }
@@ -1170,7 +1177,9 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                 taskMapper.updateById(task);
             }
             AgentRun run = runMap.get(a.getRunId());
-            if (run != null) {
+            // 评估 S3：与 decideApproval 的双向竞态守卫——用户刚批准（run 已
+            // RUNNING）的任务不允许被过期调度覆盖为 FAILED
+            if (run != null && AgentConstants.STATUS_WAITING_APPROVAL.equals(run.getStatus())) {
                 run.setStatus(AgentConstants.STATUS_FAILED);
                 run.setErrorCode(AgentConstants.ERR_APPROVAL_EXPIRED);
                 run.setErrorDetail("审批超时（5分钟未响应）");

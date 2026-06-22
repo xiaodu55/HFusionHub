@@ -813,9 +813,22 @@ async def chat_stream(request: ChatRequest):
             request.message,
         )
 
+        # 与 V1 端点一致：构建执行上下文，权限/模式门/策略引擎不再被绕过
+        execution_context = None
+        if request.user_id and routed_knowledge_base_id:
+            execution_context = AgentExecutionContext(
+                user_id=request.user_id,
+                knowledge_base_id=routed_knowledge_base_id,
+                tenant_id=get_tenant_id(),
+                permissions=frozenset({"knowledge_base:read"}),
+                agent_run_id=request_id,
+                mode="read_only",
+            )
+
         agent = get_agent(
             knowledge_base_id=routed_knowledge_base_id,
             model=request.model,
+            execution_context=execution_context,
             retrieval_top_k=route_top_k,
         )
 
@@ -836,8 +849,9 @@ async def chat_stream(request: ChatRequest):
                 logger.info("Request %s was cancelled", request_id)
                 yield f"data: {json.dumps({'content': '', 'cancelled': True}, ensure_ascii=False)}\n\n"
             except Exception as e:
+                # 不向客户端泄露内部异常文本，仅记录日志
                 logger.error("Streaming error for request %s: %s", request_id, e, exc_info=True)
-                yield f"data: {json.dumps({'content': '', 'error': str(e)}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'content': '', 'error': '服务暂时不可用，请稍后重试'}, ensure_ascii=False)}\n\n"
             finally:
                 try:
                     yield "data: [DONE]\n\n"
@@ -858,7 +872,8 @@ async def chat_stream(request: ChatRequest):
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Chat stream error: {str(e)}") from e
+        logger.error("Chat stream setup failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Chat stream error: 服务暂时不可用，请稍后重试") from e
 
 
 # ── Agent V1 Step 5: Approval endpoints ──────────────────────────────────

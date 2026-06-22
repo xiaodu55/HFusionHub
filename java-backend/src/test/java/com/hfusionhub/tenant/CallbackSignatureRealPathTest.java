@@ -73,7 +73,9 @@ class CallbackSignatureRealPathTest {
                         .header("X-Callback-Secret", SECRET)
                         .header("X-Callback-Signature", "tampered-signature")
                         .content(body))
-                .andExpect(status().isOk())
+                // 评估 M6：鉴权/签名失败必须返回 401（此前返回 200 + 错误 body
+                // 会被 Python 回调客户端误当成功）
+                .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(500));
 
         verify(vectorizationService, org.mockito.Mockito.never()).updateDocumentStatus(any(), any());

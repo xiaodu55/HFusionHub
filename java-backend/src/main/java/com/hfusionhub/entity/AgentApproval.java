@@ -1,6 +1,7 @@
 package com.hfusionhub.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 import lombok.Data;
@@ -46,7 +47,10 @@ public class AgentApproval {
     @Schema(description = "工具参数SHA-256摘要")
     private String toolInputHash;
 
-    @Schema(description = "一次性执行令牌")
+    // 安全（评估 S1）：一次性执行令牌只走 Java→Python 服务端通道，
+    // 绝不序列化到前端（REST/SSE 均隐藏）
+    @JsonIgnore
+    @Schema(description = "一次性执行令牌（对前端隐藏）", hidden = true)
     private String executionToken;
 
     @Schema(description = "执行令牌状态: none|issued|consumed|revoked")
@@ -59,6 +63,8 @@ public class AgentApproval {
     private java.time.LocalDateTime executionTokenConsumedAt;
 
     /** Exact JSON parameters approved by the user. Kept separately from the redacted summary. */
+    // 安全（评估 S1）：完整工具参数不下发前端，前端只消费脱敏的 argumentsSummary
+    @JsonIgnore
     @TableField(value = "tool_input")
     private String toolInput;
 
