@@ -16,12 +16,12 @@
 
 ### P0 — 上线安全（生产环境必需）
 
-0. **【紧急】恢复 CI 运行** — GitHub Actions 因「recent account payments have failed or your spending limit needs to be increased」全部 job 3 秒即失败（2026-08-29 确认，main 分支 CI/E2E 连续红）。需到 GitHub Settings → Billing & plans 处理账单或提高 Spending limit。在恢复前，PR 门禁（含 eval-offline 阻断）实际失效，合并需本地跑全量测试兜底
-1. **修改默认密码** — `docker/.env` 中 `ADMIN_PASSWORD` / `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` / `REDIS_PASSWORD` / `MINIO_ROOT_PASSWORD` 替换为强随机值（可用 `openssl rand -base64 24` 或 `scripts/init-env.ps1` 重新生成），修改后 `docker compose down && docker compose up -d`
-2. **配置 HTTPS** — 按 [docs/PRODUCTION_OPS.md](docs/PRODUCTION_OPS.md) 第 0 节配置 Nginx + Let's Encrypt，强制 HTTP→HTTPS
-3. **收紧 CORS** — `CORS_ALLOWED_ORIGINS` 移除 `*`，仅保留真实域名
-4. **关闭/限制 Swagger UI** — 生产 `springdoc.swagger-ui.enabled=false` 或 IP 白名单（见 [docs/SWAGGER_UI.md](docs/SWAGGER_UI.md)）
-5. **启用数据库备份** — MySQL 每日 mysqldump + Milvus 卷快照（见 [docs/PRODUCTION_OPS.md](docs/PRODUCTION_OPS.md) 第 8 节容灾）
+0. **【紧急】恢复 CI 运行** — GitHub Actions 因「recent account payments have failed or your spending limit needs to be increased」全部 job 3 秒即失败（2026-08-29 确认，main 分支 CI/E2E 连续红）。**2026-08-29 已复查：仓库侧 workflow 配置（触发器/job 定义/static-checks）全部正常，失败纯属账户计费**。需账户所有者到 GitHub Settings → Billing & plans 处理账单或提高 Spending limit（免费账户可将 Actions 用量降到 0 以内，或等待下月额度重置）。在恢复前，PR 门禁（含 eval-offline 阻断）实际失效，合并需本地跑全量测试兜底：`python scripts/static-checks.py` → Java `mvn test` → Python `pytest -q tests` → 前端 `npm run build && npx vitest run`
+1. **修改默认密码** — `docker/.env` 中 `ADMIN_PASSWORD` / `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` / `REDIS_PASSWORD` / `MINIO_ROOT_PASSWORD` 替换为强随机值（可用 `openssl rand -base64 24` 或 `scripts/init-env.ps1` 重新生成；正式轮换用 `scripts/rotate-secrets.sh`），修改后 `docker compose down && docker compose up -d`
+2. **配置 HTTPS** — `deploy/nginx-https.conf.example` 已提供完整模板：替换域名与证书路径后部署 Nginx + Let's Encrypt（`certbot certonly --webroot`），强制 HTTP→HTTPS（模板含 301 跳转与 SSE `proxy_buffering off`）
+3. **收紧 CORS** — `deploy/docker-compose.prod.yml` 已新增 `APP_CORS_ALLOWED_ORIGINS`（读 `CORS_ALLOWED_ORIGINS`）；在 `deploy/.env` 配置真实域名白名单（逗号分隔），**不要用 `*`**（后端 allowCredentials=true 会拒绝通配且属安全隐患）；留空时后端 fail-closed 仅同源
+4. **关闭/限制 Swagger UI** — ✅ `deploy/docker-compose.prod.yml` 已默认 `SPRINGDOC_API_DOCS_ENABLED=false` / `SPRINGDOC_SWAGGER_UI_ENABLED=false`；如需临时开启在 `deploy/.env` 显式设置
+5. **启用数据库备份** — ✅ 新增 `scripts/backup-mysql.sh`（生产容器版：一致性 dump + gzip + 校验 + 按天清理），crontab 示例见脚本头注释；Milvus 快照用 `scripts/backup_milvus.sh`；恢复后务必做一次恢复演练（PRODUCTION_OPS.md 第 8 节）
 
 ### P1 — 功能验证
 

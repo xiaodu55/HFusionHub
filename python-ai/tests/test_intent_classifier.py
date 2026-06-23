@@ -511,3 +511,21 @@ class TestIntegration:
         chitchat_result = await classifier.classify("你好")
         assert chitchat_result.is_direct_llm() is True
         assert chitchat_result.needs_retrieval() is False
+
+
+def test_classify_sync_shares_bounded_executor():
+    """M13: classify_sync 的运行中事件循环分支复用进程级共享线程池（4 workers），
+    不再每次调用新建 ThreadPoolExecutor 造成线程泄漏。"""
+    import concurrent.futures
+
+    from app.core.rag.intent_classifier import _get_classify_executor
+
+    executor = _get_classify_executor()
+    # 单例：两次获取同一实例（泄漏修复前每次调用都新建）
+    assert _get_classify_executor() is executor
+    assert isinstance(executor, concurrent.futures.ThreadPoolExecutor)
+    assert executor._max_workers == 4
+
+    classifier = IntentClassifier()
+    result = classifier.classify_sync("帮我查一下订单")
+    assert result is not None

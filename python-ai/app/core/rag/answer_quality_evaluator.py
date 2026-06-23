@@ -23,6 +23,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Any, Tuple
 import time
 import hashlib
+from collections import OrderedDict
 import asyncio
 import re
 import json
@@ -716,7 +717,9 @@ class AnswerQualityEvaluator:
         self.strategy_type = strategy_type
         self.config = config or EvaluationConfig(strategy=strategy_type)
         self.strategy = self._create_strategy(strategy_type, **kwargs)
-        self.cache: Dict[str, EvaluationResult] = {}
+        self.cache: "OrderedDict[str, EvaluationResult]" = OrderedDict()
+        # M13: 评估缓存上限（LRU+TTL），长驻进程下无界增长会耗尽内存
+        self._cache_max_size = 2000
         self.cache_timestamps: Dict[str, float] = {}
 
     def _create_strategy(
@@ -742,6 +745,13 @@ class AnswerQualityEvaluator:
             return HybridEvaluationStrategy(**kwargs)
         else:
             raise ValueError(f"Unknown strategy type: {strategy_type}")
+
+    def _evict_cache_if_needed(self) -> None:
+        """M13: 按写入时间淘汰最旧条目，防止评估缓存无界增长。"""
+        while len(self.cache) > self._cache_max_size:
+            oldest_key = min(self.cache_timestamps, key=self.cache_timestamps.get)
+            self.cache.pop(oldest_key, None)
+            self.cache_timestamps.pop(oldest_key, None)
 
     def _generate_cache_key(self, sample: EvaluationSample) -> str:
         """
@@ -799,6 +809,7 @@ class AnswerQualityEvaluator:
         if self.config.enable_cache:
             self.cache[cache_key] = result
             self.cache_timestamps[cache_key] = time.time()
+            self._evict_cache_if_needed()
 
         return result
 

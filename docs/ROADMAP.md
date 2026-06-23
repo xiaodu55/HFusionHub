@@ -13,7 +13,7 @@
 - **Notifications**: System notice table + read tracking (V9)
 - **Production**: Docker Compose prod (MySQL/Redis/MinIO/Milvus/etcd/Attu/Java/Python/Plugin Runner), Helm chart, GHCR 镜像发布流水线（`v*` tag 自动构建推送）
 - **Release**: 版本 1.0.0；`scripts/setup.ps1/.sh` 一键启动 + `init-env` 自动生成随机密钥；演示数据一键导入；Setup 引导清单
-- **Tests**: Python 1407 ✅ | Java 563 ✅ | Frontend 49 ✅
+- **Tests**: Python 1247 ✅ | Java 567 ✅ | Frontend 49 单测 + 74 E2E ✅
 - **Security**: SECURITY.md / CODE_OF_CONDUCT / NOTICE / dependabot / gitleaks / ruff+pip-audit CI 门禁
 - **Frontend**: P0-P4 completed — dashboard cleanup, RAG trend chart, notification stub, SetupChecklist, 能力开关设置页
 

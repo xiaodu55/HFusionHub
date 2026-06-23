@@ -1,7 +1,8 @@
 # 全项目评估修复路线图（源自用户桌面方案.md，2026-08-29 入库跟踪）
 
-> **修复状态（2026-08-29 第一批）**：S1、S2、S7、S8、S9、M1、M2、M6、S3/M3 守卫已完成；
-> 遗留：S4/S5（需 V77 唯一索引 + 并发测试，单独批次）、M4、M5、M7-M13、Low 批、批次 F 运维项。
+> **修复状态（2026-08-29 第二批）**：S1–S5、S7–S9、M1–M13 全部完成；
+> Low 批已修：TaskEventSseManager null userId 防护（AiClient 透传由第一批 S2 覆盖）。
+> 遗留：S6（回调补偿，需 Python/Java 双端对账设计）、Low 批其余项、批次 F 运维项。
 > 逐项状态见文末「修复进度」标注。
 
 # HFusionHub 全项目功能评估 + 修复路线图 + 关键链路实测
@@ -153,7 +154,7 @@
 ## 验证与交付检查
 
 -  实测结果与探索报告一致（S1/M1/S2/S5 有实测证据）
--  三大模块测试基线确认（Java ~563 / Python ~1407 / 前端 ~49）
+-  三大模块测试基线确认（Java 567 / Python 1247 / 前端 49）
 -  评估报告覆盖全部 9 严重 + 13 中等 + Low 批，锚点可点击
 -  修复路线图按「安全→竞态→一致性→契约→资源→运维」排期
 
@@ -172,6 +173,16 @@
 | M2 | ✅ | `decideApproval` 加 `@Transactional` |
 | M6 | ✅ | 回调鉴权/签名失败返回 401（Python 客户端本就按 ≥400 判失败）；对应测试断言同步更新 |
 | S3/M3 | ✅（守卫级） | deny/approve/expire 三处 run 状态迁移加 `waiting_approval` 守卫，防止双向覆盖终态；完整行锁方案待并发压测后评估 |
-| S4 | ⏳ | 需 V77 唯一索引 (task_id, attempt) + 先排查存量重复数据，单独批次 |
-| S5 | ⏳ | 需文档级锁/唯一活跃 job 约束，单独批次 |
-| 其余 M/Low/批次 F | ⏳ | 按路线图排期 |
+| S4 | ✅（第二批） | V77 迁移：`agent_run (task_id, attempt_number)` 唯一索引（含存量重复行清理）+ `selectByIdForUpdate` 行锁 + `MAX(attempt)+1` 计算 + DuplicateKeyException 转友好冲突错误；回归测试 2 项 |
+| S5 | ✅（第二批） | `startVectorizationInternal` 的 supersede+退预占+插新 job 收进 `TransactionTemplate` 文档级行锁短事务；attempt 改 `MAX(attempt)+1`（软删除表无法用部分唯一索引，代码级锁守卫）；回归测试 1 项 |
+| S6 | ⏳ | 需 Python 回调重试 + Java 对账补偿设计（跨端），单独批次 |
+| M4 | ✅（第二批） | `requeueOrphan` SQL 加 `AND status='running'` 守卫；0 行受影响时跳过退预占/删步骤等全部副作用（防止回调已写终态的 run 被误重置） |
+| M5 | ✅（第二批） | `commitFile` 失败时不再在 afterCommit 阶段抛异常（Spring 会吞掉且响应不确定）；标记文档 FAILED 并保留临时文件供对账 |
+| M7 | ✅（第二批） | 非流式 `sendMessage` 配额预占移到用户消息落库之前，超配额不再产生"有问无答"孤立消息 |
+| M8 | ✅（第二批） | SSE 轮询线程池从固定 2 线程改为可配置（`agent.status-event.sse-poll-threads`，默认 CPU/2 且 ≥4） |
+| M9 | ✅（第二批） | `request.ts` 抽取 `handleUnauthorized401` 共享函数；`utils/sse.ts` 与 `chat/Detail.vue` 两处 SSE 401 接入统一登出 |
+| M10 | ✅（第二批） | `_retrieve_context` 失败返回 `None` 与"无结果"区分；run() 返回 `retrieval_error` 状态、run_stream() 发 `run_error` 帧（Java 映射 failed），不再伪装"证据不足" |
+| M11 | ✅（第二批） | workflow_runtime 超时/异常改发结构化 `run_error` SSE 帧（Java 已有消费逻辑），不再把错误文案伪装成内容块 |
+| M12 | ✅（第二批） | run_stream 查询分解补 `needs_decomposition` 判据，与 run() 对齐；流式 groundedness 状态差异记录为已知低危差异 |
+| M13 | ✅（第二批） | `classify_sync` 共享线程池（4 workers）；`_task_status_store` 有界 LRU（10000）；`MemoryEmbedder._embedding_cache` LRU（2048）；评估缓存上限（2000，按时间戳淘汰）；`MemoryStorage._sessions` 上限（1000，淘汰非活跃会话） |
+| Low（部分） | ✅（第二批） | TaskEventSseManager null userId NPE 防护；其余 Low 项按 CLEANUP_BACKLOG 排期 |

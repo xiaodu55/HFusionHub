@@ -85,3 +85,48 @@ def test_tool_policy_rejects_unapproved_tool():
     policy = ToolExecutionPolicy(allowed_names={"calculate"})
     with pytest.raises(ValueError, match="tool_not_allowed"):
         policy.normalize("get_current_time", {})
+
+
+@pytest.mark.asyncio
+async def test_stream_timeout_emits_structured_run_error_frame():
+    """M11: 超时不再把错误文案伪装成内容块，而是发结构化 run_error SSE 帧。"""
+    import json as _json
+
+    class _StreamTimeout(_Agent):
+        async def run_stream(self, **kwargs):
+            raise asyncio.TimeoutError()
+            yield  # pragma: no cover - make it an async generator
+
+    store = AgentRunStore()
+    workflow = SingleAgentWorkflow(_StreamTimeout(), knowledge_base_id=7, run_store=store)
+
+    chunks = [chunk async for chunk in workflow.run_stream(query="q")]
+    assert chunks, "run_error frame must be emitted"
+    frame = _json.loads(chunks[-1])
+    assert frame["event"] == "run_error"
+    assert frame["status"] == "timeout"
+    assert frame["error_code"] == "timeout"
+    # 错误文案不作为普通内容块下发
+    assert all(NO_SUFFICIENT_EVIDENCE_REPLY not in c for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_stream_error_emits_run_error_frame_with_error_code():
+    """M11: 异常以 run_error 帧透传，保留真实 error_code，不泄露给 content。"""
+    import json as _json
+
+    class _StreamError(_Agent):
+        async def run_stream(self, **kwargs):
+            raise RuntimeError("boom")
+            yield  # pragma: no cover
+
+    store = AgentRunStore()
+    workflow = SingleAgentWorkflow(_StreamError(), knowledge_base_id=7, run_store=store)
+
+    chunks = [chunk async for chunk in workflow.run_stream(query="q")]
+    frame = _json.loads(chunks[-1])
+    assert frame["event"] == "run_error"
+    assert frame["status"] == "agent_failure"
+    assert frame["error_code"] == "agent_failure"
+    run = store.get(frame["agent_run_id"])
+    assert run["status"] == "tool_error"

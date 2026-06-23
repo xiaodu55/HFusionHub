@@ -265,6 +265,13 @@ public class ConversationServiceImpl implements ConversationService {
             return convertToMessageInfoDTO(existingAssistant);
         }
 
+        // M7: 用量预占先于用户消息落库 — 超配额抛 400 时不再留下"有问无答"的孤立消息
+        // 预占上界 = 输入估算 + 服务端最大输出（幂等键为 chat:<requestId>）
+        final String usageKey = "chat:" + requestId;
+        final long inputEstimate = estimateChatTokens(dto.getContent());
+        final long reserveTokens = inputEstimate + quotaProperties.getChatMaxOutputTokens();
+        usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, usageKey, reserveTokens, "message", requestId);
+
         // 阶段 1: 验证 + 保存用户消息（短事务）
         Message userMessage = saveUserMessage(dto, requestId);
         Conversation conversation = conversationMapper.selectById(dto.getConversationId());
@@ -281,11 +288,6 @@ public class ConversationServiceImpl implements ConversationService {
         // business rules before passing it to Python.  Regular chat is always null.
         String effectiveCapability = resolveCapabilityProfile(dto.getCapabilityProfile(), conversation, currentUserId);
         List<Map<String, Object>> intentContext = ragIntentNodeService.routeCandidates();
-        // 用量账本：预占上界 = 输入估算 + 服务端最大输出（幂等键为 chat:<requestId>）
-        final String usageKey = "chat:" + requestId;
-        final long inputEstimate = estimateChatTokens(dto.getContent());
-        final long reserveTokens = inputEstimate + quotaProperties.getChatMaxOutputTokens();
-        usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, usageKey, reserveTokens, "message", requestId);
         AiClient.ChatResponse aiResponse;
         try {
             if (conversation.getKnowledgeBaseId() != null && conversation.getKnowledgeBaseId() > 0) {

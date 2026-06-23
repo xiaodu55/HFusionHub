@@ -48,6 +48,10 @@ NO_SUFFICIENT_EVIDENCE_REPLY = (
     "我不会编造知识库范围外的内容。"
 )
 
+# M10: 检索服务故障 ≠ 知识库无资料 — 单独文案 + retrieval_error 状态，
+# 避免把 Milvus/embedding 故障伪装成"证据不足"误导用户
+RETRIEVAL_UNAVAILABLE_REPLY = "知识库检索服务暂时不可用，请稍后重试。"
+
 
 def _approval_required_payload(
     action: str,
@@ -397,7 +401,8 @@ class ReactAgent(Agent):
             intent_result: 意图分类结果（可选）
 
         Returns:
-            (格式化的上下文文本, 来源列表, 自动检测的知识库ID)
+            (格式化的上下文文本, 来源列表, 自动检测的知识库ID)；
+            检索服务故障时返回 None（与"检索成功但无结果"的 ("", [], kb) 区分，M10）
         """
         try:
             retriever = get_retriever()
@@ -439,8 +444,9 @@ class ReactAgent(Agent):
             return "\n\n".join(context_parts), sources, self.knowledge_base_id
 
         except Exception as e:
-            logger.error(f"RAG retrieval failed: {e}")
-            return "", [], self.knowledge_base_id
+            # M10: 不再伪装成"无证据"空上下文 — 返回 None 让调用方按服务故障处理
+            logger.error(f"RAG retrieval failed: {e}", exc_info=True)
+            return None
 
     async def _safe_compress(
         self,
@@ -761,9 +767,12 @@ class ReactAgent(Agent):
         sub_question.status = SubQuestionStatus.PROCESSING
 
         try:
-            rag_context, rag_sources, _ = await self._retrieve_context(
-                sub_question.content, history
-            )
+            retrieved = await self._retrieve_context(sub_question.content, history)
+            if retrieved is None:
+                # M10: 子问题检索失败按空上下文降级，合并答案仍可产出
+                rag_context, rag_sources = "", []
+            else:
+                rag_context, rag_sources, _ = retrieved
 
             if rag_context:
                 rag_context, _ = await self._safe_compress(rag_context)
@@ -858,7 +867,25 @@ class ReactAgent(Agent):
 
         # RAG: 检索相关知识
         logger.info(f"[RAG] Starting retrieval for query: {query[:50]}..., knowledge_base_id: {self.knowledge_base_id}")
-        raw_context, rag_sources, auto_detected_kb_id = await self._retrieve_context(query, history, intent_result)
+        retrieved = await self._retrieve_context(query, history, intent_result)
+        if retrieved is None:
+            # M10: 检索服务故障以 retrieval_error 返回，不伪装成 insufficient_evidence
+            logger.error("[RAG] Retrieval service unavailable — returning retrieval_error")
+            return AgentResponse(
+                content=RETRIEVAL_UNAVAILABLE_REPLY,
+                answer=RETRIEVAL_UNAVAILABLE_REPLY,
+                steps=[],
+                model=getattr(llm, "model", "unknown"),
+                token_count=0,
+                finish_reason="retrieval_error",
+                status="retrieval_error",
+                sources=[],
+                intent=intent_result.to_dict() if intent_result else None,
+                tool_calls_count=self._tool_calls_count,
+                max_tool_steps=self.max_steps,
+                style_used=self.style,
+            )
+        raw_context, rag_sources, auto_detected_kb_id = retrieved
         logger.info(f"[RAG] Retrieved context length: {len(raw_context)}, sources count: {len(rag_sources)}, auto_detected_kb_id: {auto_detected_kb_id}")
 
         rag_context, was_compressed = await self._safe_compress(raw_context)
@@ -1211,7 +1238,13 @@ class ReactAgent(Agent):
                     query_decomposer = get_query_decomposer()
                     decomposition_result = await query_decomposer.decompose(query, intent_result, history)
 
-                    if decomposition_result and decomposition_result.sub_questions:
+                    # M12: 与 run() 的 _decompose_and_handle 判据对齐 — 只有
+                    # needs_decomposition=True 才走分解检索，避免同一问题两路径行为分叉
+                    if (
+                        decomposition_result
+                        and decomposition_result.needs_decomposition
+                        and decomposition_result.sub_questions
+                    ):
                         # ── Decomposition path ──
                         all_results: list = []
                         for sub_q in decomposition_result.sub_questions:
@@ -1480,12 +1513,44 @@ class ReactAgent(Agent):
             raw_context = ""
             rag_context = ""
             was_compressed = False
+            retrieval_failed = False
             try:
-                raw_context, rag_sources, _ = await self._retrieve_context(query, history, intent_result)
-                sources.extend(rag_sources)
-                rag_context, was_compressed = await self._safe_compress(raw_context)
+                retrieved = await self._retrieve_context(query, history, intent_result)
+                if retrieved is None:
+                    # M10: 检索服务故障 — 与"无证据"区分，以 retrieval_error 终止流
+                    retrieval_failed = True
+                else:
+                    raw_context, rag_sources, _ = retrieved
+                    sources.extend(rag_sources)
+                    rag_context, was_compressed = await self._safe_compress(raw_context)
             except Exception as e:
                 logger.error("[Agent V1:stream-react] Retrieval failed: %s", e, exc_info=True)
+                retrieval_failed = True
+
+            if retrieval_failed:
+                _step_seq += 1
+                yield _json.dumps({
+                    "event": "step_completed",
+                    "sequence": _step_seq,
+                    "step_type": "retrieval",
+                    "action": "search_knowledge_base",
+                    "input_summary": query[:200],
+                    "output_summary": "Retrieval service unavailable",
+                    "sources": None,
+                    "duration_ms": round((_time.monotonic() - retrieval_start) * 1000, 2),
+                    "error_code": "retrieval_error",
+                    "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
+                }, ensure_ascii=False)
+                yield _json.dumps({
+                    "event": "run_error",
+                    "status": "failed",
+                    "agent_run_id": _run_id,
+                    "error_code": "retrieval_error",
+                    "error_detail": RETRIEVAL_UNAVAILABLE_REPLY,
+                    "failed_tool": None,
+                    "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
+                }, ensure_ascii=False)
+                return
 
             retrieval_duration_ms = (_time.monotonic() - retrieval_start) * 1000
             _step_seq += 1

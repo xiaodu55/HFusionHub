@@ -44,7 +44,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
@@ -66,6 +68,7 @@ public class VectorizationServiceImpl implements VectorizationService {
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
     private final UsageLedgerService usageLedgerService;
+    private final PlatformTransactionManager transactionManager;
 
     @Value("${python-ai.engine.url:http://localhost:9000}")
     private String pythonEngineUrl;
@@ -119,48 +122,54 @@ public class VectorizationServiceImpl implements VectorizationService {
 
         ensureSourceFileAvailable(document);
 
-        // A new request supersedes any callback from an older worker.  The
-        // version is sent to Python and checked again when it calls back.
-        List<DocumentIndexJob> supersededJobs =
-                documentIndexJobMapper.selectList(new LambdaQueryWrapper<DocumentIndexJob>()
-                        .eq(DocumentIndexJob::getDocumentId, documentId)
-                        .eq(DocumentIndexJob::getStatus, "PROCESSING"));
-        documentIndexJobMapper.update(
-                null,
-                new LambdaUpdateWrapper<DocumentIndexJob>()
-                        .eq(DocumentIndexJob::getDocumentId, documentId)
-                        .eq(DocumentIndexJob::getStatus, "PROCESSING")
-                        .set(DocumentIndexJob::getStatus, "SUPERSEDED")
-                        .set(DocumentIndexJob::getCompletedAt, LocalDateTime.now()));
-        // 退回被取代的索引任务预占
-        for (DocumentIndexJob superseded : supersededJobs) {
-            releaseIndexChunks(document, superseded);
-        }
-        DocumentIndexJob job = new DocumentIndexJob();
-        job.setDocumentId(documentId);
-        job.setKnowledgeBaseId(document.getKnowledgeBaseId());
-        job.setIndexVersion(UUID.randomUUID().toString());
-        job.setEmbeddingModel(model != null ? model : "ollama");
-        job.setStatus("PROCESSING");
-        job.setAttempt(documentIndexJobMapper.countByDocumentId(documentId) + 1);
-        job.setChunkCount(0);
-        job.setStartedAt(LocalDateTime.now());
-        documentIndexJobMapper.insert(job);
-
-        // 用量账本：按文件大小估算分块数上界预占（幂等键为 index_chunks:<indexVersion>）。
-        // 回调按实际 chunk 数结算；失败/超时/被取代时退回。恢复路径在 runAsSystem 中执行，
-        // 无租户上下文，需按文档归属解析租户后预占。
+        // V77/S5: 文档级行锁短事务 — supersede 旧 job + 释放预占 + 插入新 job 在同一
+        // 事务内原子完成，并发重处理/恢复调度在同一文档上串行化；attempt 取
+        // MAX(attempt)+1，配合行锁消除 count+1 的 TOCTOU。
+        TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
+        DocumentIndexJob job;
         try {
-            reserveIndexChunks(document, job);
+            job = txTemplate.execute(status -> {
+                documentMapper.selectByIdForUpdate(documentId);
+                // A new request supersedes any callback from an older worker.  The
+                // version is sent to Python and checked again when it calls back.
+                List<DocumentIndexJob> supersededJobs =
+                        documentIndexJobMapper.selectList(new LambdaQueryWrapper<DocumentIndexJob>()
+                                .eq(DocumentIndexJob::getDocumentId, documentId)
+                                .eq(DocumentIndexJob::getStatus, "PROCESSING"));
+                documentIndexJobMapper.update(
+                        null,
+                        new LambdaUpdateWrapper<DocumentIndexJob>()
+                                .eq(DocumentIndexJob::getDocumentId, documentId)
+                                .eq(DocumentIndexJob::getStatus, "PROCESSING")
+                                .set(DocumentIndexJob::getStatus, "SUPERSEDED")
+                                .set(DocumentIndexJob::getCompletedAt, LocalDateTime.now()));
+                // 退回被取代的索引任务预占
+                for (DocumentIndexJob superseded : supersededJobs) {
+                    releaseIndexChunks(document, superseded);
+                }
+                DocumentIndexJob newJob = new DocumentIndexJob();
+                newJob.setDocumentId(documentId);
+                newJob.setKnowledgeBaseId(document.getKnowledgeBaseId());
+                newJob.setIndexVersion(UUID.randomUUID().toString());
+                newJob.setEmbeddingModel(model != null ? model : "ollama");
+                newJob.setStatus("PROCESSING");
+                newJob.setAttempt(documentIndexJobMapper.selectMaxAttemptByDocumentId(documentId) + 1);
+                newJob.setChunkCount(0);
+                newJob.setStartedAt(LocalDateTime.now());
+                documentIndexJobMapper.insert(newJob);
+
+                // 用量账本：按文件大小估算分块数上界预占（幂等键为 index_chunks:<indexVersion>）。
+                // 回调按实际 chunk 数结算；失败/超时/被取代时退回。恢复路径在 runAsSystem 中执行，
+                // 无租户上下文，需按文档归属解析租户后预占。预占失败抛 BusinessException
+                // → 整个事务回滚（旧 job 保持原状态，不产生半套 supersede/新 job）。
+                reserveIndexChunks(document, newJob);
+                return newJob;
+            });
         } catch (BusinessException e) {
-            log.warn("索引配额预占失败: documentId={} version={}", documentId, job.getIndexVersion(), e);
+            log.warn("索引配额预占失败: documentId={}，已回滚本次重处理", documentId, e);
             document.setStatus(DocumentStatus.FAILED.getCode());
             document.setErrorMessage(e.getMessage());
             documentMapper.updateById(document);
-            job.setStatus("FAILED");
-            job.setErrorMessage(truncate(e.getMessage(), 1000));
-            job.setCompletedAt(LocalDateTime.now());
-            documentIndexJobMapper.updateById(job);
             throw e;
         }
 

@@ -346,6 +346,8 @@ CREATE INDEX IF NOT EXISTS idx_run_status ON agent_run (status);
 CREATE INDEX IF NOT EXISTS idx_run_queue ON agent_run (status, scheduled_at);
 CREATE INDEX IF NOT EXISTS idx_run_lease ON agent_run (lease_expires_at);
 CREATE INDEX IF NOT EXISTS idx_run_holder ON agent_run (lease_holder);
+-- V77 (S4): 并发双重入队守卫
+CREATE UNIQUE INDEX IF NOT EXISTS uk_run_task_attempt ON agent_run (task_id, attempt_number);
 
 -- =====================================================
 -- Agent 步骤记录�?(agent_step) �?V10

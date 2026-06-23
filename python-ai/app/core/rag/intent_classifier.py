@@ -14,6 +14,7 @@ Intent Classifier - 意图分类器
 
 import time
 import logging
+import threading
 from enum import Enum
 from typing import Dict, Any, Optional, List
 
@@ -99,6 +100,24 @@ class IntentClassifierFactory:
     def get_available_strategies(cls) -> List[str]:
         """获取可用的策略列表"""
         return [st.value for st in cls._strategies.keys()]
+
+
+# M13: classify_sync 使用的共享线程池 — 每次调用新建 ThreadPoolExecutor 会泄漏线程
+_classify_executor = None
+_classify_executor_lock = threading.Lock()
+
+
+def _get_classify_executor():
+    """返回进程级共享的同步分类线程池（有界：4 workers）。"""
+    global _classify_executor
+    if _classify_executor is None:
+        with _classify_executor_lock:
+            if _classify_executor is None:
+                import concurrent.futures
+                _classify_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=4, thread_name_prefix="intent-classify"
+                )
+    return _classify_executor
 
 
 class IntentClassifier:
@@ -213,13 +232,13 @@ class IntentClassifier:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # 如果事件循环正在运行，使用线程池
+                # 如果事件循环正在运行，使用共享线程池
+                # （M13: 不再每次调用新建 ThreadPoolExecutor 造成线程泄漏）
                 import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    return pool.submit(
-                        asyncio.run,
-                        self.classify(query, history, **kwargs)
-                    ).result()
+                return _get_classify_executor().submit(
+                    asyncio.run,
+                    self.classify(query, history, **kwargs)
+                ).result()
             else:
                 return loop.run_until_complete(
                     self.classify(query, history, **kwargs)

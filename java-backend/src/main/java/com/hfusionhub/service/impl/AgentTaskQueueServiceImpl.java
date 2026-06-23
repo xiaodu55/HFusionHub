@@ -766,7 +766,19 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
             return;
         }
 
-        // Best-effort cancel the orphaned Python task
+        // Reset run FIRST with status guard (M4): 仅 running → pending 条件更新。
+        // 若选择与更新之间回调已写入终态，这里 0 行受影响，跳过全部副作用
+        // （退预占/删步骤会把已完成 run 的账目与执行痕迹误清）。
+        String newUuid = UUID.randomUUID().toString();
+        LocalDateTime scheduledAt = LocalDateTime.now(); // immediate re-dispatch
+        int requeued = runMapper.requeueOrphan(run.getId(), newUuid, scheduledAt);
+        if (requeued == 0) {
+            log.info(
+                    "Orphan run {} no longer running (terminal callback won the race) — skip reclaim", run.getId());
+            return;
+        }
+
+        // Best-effort cancel the orphaned Python task (old uuid)
         try {
             aiClient.cancelRequest(run.getRunUuid());
         } catch (Exception e) {
@@ -778,11 +790,6 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
 
         // Delete steps for idempotent re-execution
         stepMapper.deleteByRunId(run.getId());
-
-        // Reset run: new UUID, pending, dispatch_count+1
-        String newUuid = UUID.randomUUID().toString();
-        LocalDateTime scheduledAt = LocalDateTime.now(); // immediate re-dispatch
-        runMapper.requeueOrphan(run.getId(), newUuid, scheduledAt);
 
         recordRecoveryAudit(
                 run, "ORPHAN_RECLAIMED", "new uuid=" + newUuid + " dispatchCount=" + (run.getDispatchCount() + 1));

@@ -162,6 +162,7 @@
             heartbeat_at = NULL,
             updated_at = NOW()
         WHERE id = #{id}
+          AND status = 'running'
     </update>
 
     <select id="selectByHolder" resultMap="BaseResultMap">

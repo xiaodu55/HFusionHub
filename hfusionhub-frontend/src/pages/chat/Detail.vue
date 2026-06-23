@@ -217,6 +217,12 @@ const handleSend = async () => {
       throw new Error('Stream request failed')
     }
 
+    if (response.status === 401) {
+      // M9: 聊天流绕过 axios 拦截器 — 401 接入统一登出，避免两种登出体验割裂
+      const { handleUnauthorized401 } = await import('@/api/request')
+      throw handleUnauthorized401('登录已过期')
+    }
+
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)
     }

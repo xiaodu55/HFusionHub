@@ -175,6 +175,12 @@ services:
       PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?required}
       CALLBACK_SECRET: ${CALLBACK_SECRET:?required}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?required}
+      # 生产安全：默认关闭 Swagger/OpenAPI（上线检查清单 P0）；需要时在 deploy/.env 显式开启
+      SPRINGDOC_API_DOCS_ENABLED: ${SPRINGDOC_API_DOCS_ENABLED:-false}
+      SPRINGDOC_SWAGGER_UI_ENABLED: ${SPRINGDOC_SWAGGER_UI_ENABLED:-false}
+      # 生产安全：CORS 白名单（逗号分隔域名，如 https://hub.example.com）；
+      # 留空时后端 fail-closed（仅同源）。不要设为 * — allowCredentials=true 会拒绝通配
+      APP_CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
       # 演示数据端点总开关 — 生产默认关闭（/demo/clear 有数据破坏性），需要时在 deploy/.env 显式开启
       DEMO_ENDPOINTS_ENABLED: ${DEMO_ENDPOINTS_ENABLED:-false}
       AI_SERVICE_URL: http://python-ai:9000

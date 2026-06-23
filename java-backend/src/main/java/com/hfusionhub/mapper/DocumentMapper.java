@@ -33,6 +33,13 @@ public interface DocumentMapper extends BaseMapper<Document> {
     @Select("SELECT * FROM document WHERE id = #{id}")
     Document selectIncludingDeleted(@Param("id") Long id);
 
+    /**
+     * 行锁查询文档（V77/S5）：重处理/恢复向量化前锁定文档行，
+     * 串行化同一文档的 supersede + 新建索引 job 并发
+     */
+    @Select("SELECT * FROM document WHERE id = #{id} FOR UPDATE")
+    Document selectByIdForUpdate(@Param("id") Long id);
+
     @Select("SELECT * FROM document WHERE knowledge_base_id = #{knowledgeBaseId}")
     List<Document> selectByKnowledgeBaseIncludingDeleted(@Param("knowledgeBaseId") Long knowledgeBaseId);
 

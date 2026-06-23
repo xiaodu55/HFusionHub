@@ -19,6 +19,12 @@ public interface DocumentIndexJobMapper extends BaseMapper<DocumentIndexJob> {
     @Select("SELECT COUNT(*) FROM document_index_job WHERE document_id = #{documentId} AND deleted = 0")
     int countByDocumentId(@Param("documentId") Long documentId);
 
+    /**
+     * 文档当前最大尝试号（V77/S5）：配合文档行锁替代 count+1 计算，消除 TOCTOU
+     */
+    @Select("SELECT COALESCE(MAX(attempt), 0) FROM document_index_job WHERE document_id = #{documentId} AND deleted = 0")
+    int selectMaxAttemptByDocumentId(@Param("documentId") Long documentId);
+
     @Select("SELECT * FROM document_index_job WHERE status = 'PROCESSING' AND deleted = 0 "
             + "AND started_at < #{before} AND attempt < #{maxAttempts} ORDER BY id ASC")
     List<DocumentIndexJob> selectStaleProcessingJobs(

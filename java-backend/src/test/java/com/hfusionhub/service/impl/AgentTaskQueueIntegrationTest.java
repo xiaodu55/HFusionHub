@@ -127,7 +127,7 @@ class AgentTaskQueueIntegrationTest {
         task.setUserId(1L);
         task.setConversationId(10L);
 
-        when(taskMapper.selectById(100L)).thenReturn(task);
+        when(taskMapper.selectByIdForUpdate(100L)).thenReturn(task);
         when(runMapper.selectByTaskId(100L)).thenReturn(List.of());
         when(runMapper.insert(any(AgentRun.class))).thenAnswer(inv -> {
             AgentRun r = inv.getArgument(0);
@@ -167,7 +167,7 @@ class AgentTaskQueueIntegrationTest {
         task.setRequestId("req-200");
         task.setUserId(1L);
 
-        when(taskMapper.selectById(200L)).thenReturn(task);
+        when(taskMapper.selectByIdForUpdate(200L)).thenReturn(task);
         when(runMapper.selectByTaskId(200L)).thenReturn(List.of());
         when(runMapper.insert(any(AgentRun.class))).thenAnswer(inv -> {
             AgentRun r = inv.getArgument(0);
@@ -185,9 +185,55 @@ class AgentTaskQueueIntegrationTest {
         AgentTask task = new AgentTask();
         task.setId(300L);
         task.setStatus(AgentConstants.STATUS_SUCCEEDED);
-        when(taskMapper.selectById(300L)).thenReturn(task);
+        when(taskMapper.selectByIdForUpdate(300L)).thenReturn(task);
 
         assertThrows(com.hfusionhub.common.exception.BusinessException.class, () -> agentTaskService.enqueueRun(300L));
+    }
+
+    // ================================================================
+    // V77/S4: attempt 计算 + 唯一索引并发守卫
+    // ================================================================
+
+    @Test
+    void enqueueRunComputesAttemptFromMaxAttemptNumber() {
+        AgentTask task = new AgentTask();
+        task.setId(210L);
+        task.setStatus(AgentConstants.STATUS_PENDING);
+        task.setRequestId("req-210");
+        task.setUserId(1L);
+
+        when(taskMapper.selectByIdForUpdate(210L)).thenReturn(task);
+        when(runMapper.selectByTaskId(210L)).thenReturn(List.of());
+        when(runMapper.selectMaxAttemptNumber(210L)).thenReturn(3);
+        when(runMapper.insert(any(AgentRun.class))).thenAnswer(inv -> {
+            AgentRun r = inv.getArgument(0);
+            r.setId(310L);
+            return 1;
+        });
+        when(taskMapper.updateById(any(AgentTask.class))).thenReturn(1);
+
+        AgentRun run = agentTaskService.enqueueRun(210L);
+
+        assertEquals(4, run.getAttemptNumber());
+    }
+
+    @Test
+    void enqueueRunRejectsDuplicateAttemptOnConcurrentInsert() {
+        AgentTask task = new AgentTask();
+        task.setId(220L);
+        task.setStatus(AgentConstants.STATUS_PENDING);
+        task.setRequestId("req-220");
+        task.setUserId(1L);
+
+        when(taskMapper.selectByIdForUpdate(220L)).thenReturn(task);
+        when(runMapper.selectByTaskId(220L)).thenReturn(List.of());
+        when(runMapper.selectMaxAttemptNumber(220L)).thenReturn(0);
+        when(runMapper.insert(any(AgentRun.class)))
+                .thenThrow(new org.springframework.dao.DuplicateKeyException("uk_run_task_attempt"));
+
+        // V77 唯一索引 (task_id, attempt_number) 冲突 → 友好冲突错误，不记录事件
+        assertThrows(com.hfusionhub.common.exception.BusinessException.class, () -> agentTaskService.enqueueRun(220L));
+        verify(statusEventService, never()).record(anyLong(), anyLong(), anyString(), anyString(), anyMap());
     }
 
     // ================================================================

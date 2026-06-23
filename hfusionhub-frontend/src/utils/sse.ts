@@ -60,6 +60,8 @@ export interface ConsumeSseStreamOptions<T> {
  *
  * 与 chat 流共用同一套解析器（SseDataParser 行为不变），避免各调用方
  * 手写 buffer/line 解析（approval 流曾重复实现）。
+ *
+ * M9: SSE 绕过 axios 拦截器 — 401 在此接入 request.ts 的统一登出逻辑。
  */
 export async function consumeSseJsonStream<T = unknown>(
   url: string,
@@ -71,6 +73,11 @@ export async function consumeSseJsonStream<T = unknown>(
       headers: options.headers,
       signal: options.signal,
     })
+    if (res.status === 401) {
+      // 延迟导入避免 utils → stores 的循环依赖
+      const { handleUnauthorized401 } = await import('../api/request')
+      throw handleUnauthorized401('登录已过期')
+    }
     if (!res.ok || !res.body) throw new Error(`SSE 连接失败 (${res.status})`)
 
     const reader = res.body.getReader()

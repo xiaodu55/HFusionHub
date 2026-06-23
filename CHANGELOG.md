@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 评估修复第二批 + 依赖升级批次（2026-08-30）：S4/S5 竞态、M4–M13 全量、Spring Boot 3.5.16、FastAPI 0.141（源自 docs/REPAIR_ROADMAP.md）
+
+#### Fixed（Java 竞态/事务）
+- **S4 双重入队**：V77 迁移 `agent_run (task_id, attempt_number)` 唯一索引（含存量重复行清理 DELETE）；`enqueueRun/retryTask/requeueTask` 改 `selectByIdForUpdate` 行锁 + `MAX(attempt_number)+1` 计算 + DuplicateKeyException 转友好冲突错误
+- **S5 向量化重处理并发**：supersede 旧 job + 退预占 + 插新 job 收进 `TransactionTemplate` 文档级行锁短事务；attempt 改 `MAX(attempt)+1`（软删除表无法部分唯一索引，代码级锁守卫）
+- **M4 孤儿重派竞态**：`requeueOrphan` SQL 加 `AND status='running'` 守卫；0 行受影响时跳过退预占/删步骤等副作用（防回调已写终态的 run 被误重置）
+- **M5 afterCommit 文件提交**：失败不再抛异常（Spring 吞掉且响应不确定）；标记文档 FAILED 并保留临时文件供对账
+- **M7 孤立消息**：非流式 sendMessage 配额预占移到用户消息落库前，超配额不再产生"有问无答"
+- **M8 SSE 轮询池**：固定 2 线程 → 可配置 `agent.status-event.sse-poll-threads`（默认 max(4, CPU/2)）
+- **Low**：TaskEventSseManager null userId NPE 防护
+
+#### Fixed（Python AI）
+- **M10 检索故障伪装**：`_retrieve_context` 失败返回 None 与"无结果"区分；run() 返回 `retrieval_error` 状态、run_stream() 发 `run_error` 帧（Java 映射 failed），不再伪装"证据不足"
+- **M11 工作流错误伪装**：workflow_runtime 超时/异常改发结构化 `run_error` SSE 帧（Java 已有消费逻辑），不再把错误文案当内容块下发
+- **M12 run/run_stream 分叉**：run_stream 查询分解补 `needs_decomposition` 判据，与 run() 对齐
+- **M13 资源泄漏**：`classify_sync` 共享线程池（4 workers）；`_task_status_store` LRU 上限 10000；`MemoryEmbedder` 嵌入缓存 LRU 2048；评估缓存上限 2000（按时间戳淘汰）；`MemoryStorage._sessions` 上限 1000（淘汰非活跃会话）
+
+#### Fixed（前端）
+- **M9 SSE 401 割裂**：`request.ts` 抽取 `handleUnauthorized401` 共享函数；`utils/sse.ts` 与 `chat/Detail.vue` 两处 SSE 401 接入统一登出
+
+#### Changed（依赖升级）
+- **Spring Boot 3.2.5 → 3.5.16**（3.x 最新稳定线）：全量 565 测试回归通过；surefire argLine 改 `@{argLine}` 前缀以兼容 JaCoCo agent
+- **FastAPI 0.109.0 → 0.141.1、pydantic 2.5.3 → 2.13.5、httpx 0.27 → 0.28.1、starlette 0.35.1 → 0.52.1**：`requirements.in` 提升最低版本约束并 pin `starlette<1.0`，pip-compile 重新生成 hash 锁定文件；全量 1281 测试回归通过
+- **生产安全收口**（TODO.md P0）：prod compose 默认 `SPRINGDOC_API_DOCS_ENABLED/SWAGGER_UI_ENABLED=false`；新增 `APP_CORS_ALLOWED_ORIGINS` 白名单透传；新增 `scripts/backup-mysql.sh`（一致性 dump + 校验 + 按天清理）
+
+#### Added
+- **覆盖率基线**：Java JaCoCo 0.8.12（`mvn test` 后报告落 `target/site/jacoco/`）；Python `pytest-cov>=6.0` 入 dev 依赖（`pytest --cov=app` 按需开启，不影响默认 CI 速度）
+- **回归测试**：S4 attempt 计算 + 唯一索引冲突 2 项、S5 行锁+supersede 1 项、M11 run_error 帧 2 项、M13 共享线程池 1 项
+- **static-checks 检查 3**：`--test-counts` 静态统计三端测试数与 README 徽章 / AGENTS.md 行比对，测试计数漂移直接 CI 失败
+
+#### Docs
+- 测试计数全面对齐（实测口径）：Java 567 · Python 1247 · 前端 49 单测 + 74 E2E（README 徽章、CLAUDE.md、AGENTS.md、ROADMAP、CLEANUP_BACKLOG、OPTIMIZATION_PLAN、python-ai.md）
+- ENVIRONMENT.md 补录 4 个新配置项；TODO.md P0 项 3/4/5 更新为已收口状态
+- REPAIR_ROADMAP.md 修复进度表：S4/S5/M4–M13/Low(部分) 全部标注 ✅（第二批）
+
 ### 全项目评估修复批次（2026-08-29）：安全与正确性 9 项 + 前端体验（源自全项目评估报告 docs/REPAIR_ROADMAP.md）
 
 #### Fixed（安全/正确性）

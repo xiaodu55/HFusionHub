@@ -514,13 +514,15 @@ public class DocumentServiceImpl implements DocumentService {
      */
     private void registerFileCommit(Long documentId, String tempPath) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            commitFile(documentId, tempPath);
+            commitFile(documentId, tempPath, true);
             return;
         }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                commitFile(documentId, tempPath);
+                // M5: afterCommit 阶段 DB 已提交，抛出的异常会被 Spring 吞掉且 HTTP
+                // 响应状态不确定 — 只标记文档失败并保留临时文件供人工排查/补交，不再抛出
+                commitFile(documentId, tempPath, false);
             }
 
             @Override
@@ -532,7 +534,7 @@ public class DocumentServiceImpl implements DocumentService {
         });
     }
 
-    private void commitFile(Long documentId, String tempPath) {
+    private void commitFile(Long documentId, String tempPath, boolean rethrow) {
         if (tempPath == null) return;
         try {
             Path tempFile = Path.of(tempPath);
@@ -551,8 +553,10 @@ public class DocumentServiceImpl implements DocumentService {
         } catch (IOException e) {
             log.error("文件提交失败: {}", tempPath, e);
             markUploadFailed(documentId, "文件提交失败");
-            deleteTempFile(tempPath);
-            throw new BusinessException(StatusCode.INTERNAL_ERROR, "文件提交失败");
+            // 保留临时文件：此时 DB 行已失败，删除文件会造成 DB 与文件双丢失、无法对账
+            if (rethrow) {
+                throw new BusinessException(StatusCode.INTERNAL_ERROR, "文件提交失败");
+            }
         }
     }
 

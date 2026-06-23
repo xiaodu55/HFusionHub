@@ -21,6 +21,7 @@ import json
 import time
 import uuid
 import hashlib
+from collections import OrderedDict
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
@@ -615,9 +616,12 @@ class MemoryStrategyFactory:
 class MemoryEmbedder:
     """记忆向量化器"""
 
+    # M13: 嵌入缓存上限（LRU），长驻进程下无界增长会耗尽内存
+    _EMBEDDING_CACHE_MAX = 2048
+
     def __init__(self, model_name: str = "bge-m3"):
         self.model_name = model_name
-        self._embedding_cache: Dict[str, List[float]] = {}
+        self._embedding_cache: "OrderedDict[str, List[float]]" = OrderedDict()
 
     def _get_cache_key(self, text: str) -> str:
         """获取缓存键"""
@@ -627,6 +631,7 @@ class MemoryEmbedder:
         """将文本转换为向量"""
         cache_key = self._get_cache_key(text)
         if cache_key in self._embedding_cache:
+            self._embedding_cache.move_to_end(cache_key)
             return self._embedding_cache[cache_key]
 
         try:
@@ -640,7 +645,7 @@ class MemoryEmbedder:
             embedding = response.get("embedding", [])
 
             if embedding:
-                self._embedding_cache[cache_key] = embedding
+                self._cache_put(cache_key, embedding)
                 return embedding
         except Exception as e:
             logger.warning(f"Ollama embedding failed: {e}")
@@ -653,8 +658,14 @@ class MemoryEmbedder:
         norm = sum(x**2 for x in embedding) ** 0.5
         embedding = [x / norm for x in embedding]
 
-        self._embedding_cache[cache_key] = embedding
+        self._cache_put(cache_key, embedding)
         return embedding
+
+    def _cache_put(self, cache_key: str, embedding: List[float]) -> None:
+        self._embedding_cache[cache_key] = embedding
+        self._embedding_cache.move_to_end(cache_key)
+        while len(self._embedding_cache) > self._EMBEDDING_CACHE_MAX:
+            self._embedding_cache.popitem(last=False)
 
     async def embed_messages(self, messages: List[Message]) -> List[Message]:
         """为消息列表添加向量"""
@@ -686,6 +697,10 @@ class MemoryEmbedder:
 class MemoryStorage:
     """记忆存储"""
 
+    # M13: 会话表上限 — 长驻进程下每个 session_id 一条、只增不删会无限增长；
+    # 超出上限时淘汰最久未更新的非活跃会话（活跃会话保留）
+    MAX_SESSIONS = 1000
+
     def __init__(self, storage_path: str = "memory_storage"):
         self.storage_path = storage_path
         self._sessions: Dict[str, ConversationSession] = {}
@@ -695,6 +710,7 @@ class MemoryStorage:
         """保存会话"""
         try:
             self._sessions[session.session_id] = session
+            self._evict_sessions_if_needed()
 
             # 更新用户会话索引
             if session.user_id not in self._user_sessions:
@@ -706,6 +722,17 @@ class MemoryStorage:
         except Exception as e:
             logger.error(f"Failed to save session: {e}")
             return False
+
+    def _evict_sessions_if_needed(self) -> None:
+        """M13: 会话数超上限时淘汰最久未更新的非活跃会话。"""
+        if len(self._sessions) <= self.MAX_SESSIONS:
+            return
+        inactive = [s for s in self._sessions.values() if not getattr(s, "is_active", True)]
+        inactive.sort(key=lambda s: getattr(s, "updated_at", None) or getattr(s, "created_at", None))
+        for session in inactive:
+            if len(self._sessions) <= self.MAX_SESSIONS:
+                break
+            self.delete_session(session.session_id)
 
     def load_session(self, session_id: str) -> Optional[ConversationSession]:
         """加载会话"""

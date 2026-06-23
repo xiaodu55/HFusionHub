@@ -36,6 +36,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -518,7 +519,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     @Override
     @Transactional
     public AgentRun retryTask(Long taskId, Long userId) {
-        AgentTask task = taskMapper.selectById(taskId);
+        // V77/S4: 行锁串行化同一任务的并发重试
+        AgentTask task = taskMapper.selectByIdForUpdate(taskId);
         if (task == null) {
             throw new BusinessException("任务不存在: " + taskId);
         }
@@ -530,31 +532,46 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         }
 
         // V13: 创建新 pending Run，Worker 自动执行
-        List<AgentRun> existingRuns = runMapper.selectByTaskId(taskId);
-        int attemptNumber = existingRuns.size() + 1;
-
-        AgentRun newRun = new AgentRun();
-        newRun.setTaskId(taskId);
-        newRun.setRunUuid(java.util.UUID.randomUUID().toString());
-        newRun.setAttemptNumber(attemptNumber);
-        newRun.setStatus(AgentConstants.STATUS_PENDING);
-        newRun.setScheduledAt(LocalDateTime.now()); // immediate
-        newRun.setDispatchCount(1);
-        newRun.setModel(
-                existingRuns.isEmpty()
-                        ? null
-                        : existingRuns.get(existingRuns.size() - 1).getModel());
-        newRun.setStyle("detailed");
-        newRun.setMaxToolSteps(5);
-        runMapper.insert(newRun);
+        AgentRun newRun = insertPendingRun(taskId, existingRunsModel(taskId), "RETRY");
 
         // 更新 task 状态
         task.setStatus(AgentConstants.STATUS_PENDING);
         task.setCurrentRunId(newRun.getId());
         taskMapper.updateById(task);
 
-        log.info("Task {} retry scheduled: new run id={} attempt={}", taskId, newRun.getId(), attemptNumber);
+        log.info("Task {} retry scheduled: new run id={} attempt={}", taskId, newRun.getId(), newRun.getAttemptNumber());
         return newRun;
+    }
+
+    /**
+     * V77/S4: 创建 pending Run。attempt 取 MAX(attempt_number)+1（行锁下无 TOCTOU），
+     * 并以 V77 唯一索引 (task_id, attempt_number) 兜底：并发双重入队时第二条插入
+     * 触发 DuplicateKeyException，转友好冲突错误并回滚。
+     */
+    private AgentRun insertPendingRun(Long taskId, String inheritedModel, String action) {
+        int attemptNumber = runMapper.selectMaxAttemptNumber(taskId) + 1;
+        AgentRun run = new AgentRun();
+        run.setTaskId(taskId);
+        run.setRunUuid(java.util.UUID.randomUUID().toString());
+        run.setAttemptNumber(attemptNumber);
+        run.setStatus(AgentConstants.STATUS_PENDING);
+        run.setScheduledAt(LocalDateTime.now()); // immediate execution
+        run.setDispatchCount(1);
+        run.setModel(inheritedModel);
+        run.setStyle("detailed");
+        run.setMaxToolSteps(5);
+        try {
+            runMapper.insert(run);
+        } catch (DuplicateKeyException e) {
+            log.warn("Task {} {} rejected: duplicate attempt {} (concurrent enqueue/retry)", taskId, action, attemptNumber);
+            throw new BusinessException("任务正在重试中，请勿重复操作");
+        }
+        return run;
+    }
+
+    private String existingRunsModel(Long taskId) {
+        List<AgentRun> existingRuns = runMapper.selectByTaskId(taskId);
+        return existingRuns.isEmpty() ? null : existingRuns.get(existingRuns.size() - 1).getModel();
     }
 
     // ================================================================
@@ -564,7 +581,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     @Override
     @Transactional
     public AgentRun enqueueRun(Long taskId) {
-        AgentTask task = taskMapper.selectById(taskId);
+        // V77/S4: 行锁串行化同一任务的并发入队/重试/恢复
+        AgentTask task = taskMapper.selectByIdForUpdate(taskId);
         if (task == null) {
             throw new BusinessException("Agent任务不存在: " + taskId);
         }
@@ -575,25 +593,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             throw new BusinessException(String.format("无法入队：任务状态 %s 不允许创建新 Run", task.getStatus()));
         }
 
-        // Compute attempt number
-        List<AgentRun> existingRuns = runMapper.selectByTaskId(taskId);
-        int attemptNumber = existingRuns.size() + 1;
-
-        LocalDateTime now = LocalDateTime.now();
-        AgentRun run = new AgentRun();
-        run.setTaskId(taskId);
-        run.setRunUuid(java.util.UUID.randomUUID().toString());
-        run.setAttemptNumber(attemptNumber);
-        run.setStatus(AgentConstants.STATUS_PENDING);
-        run.setScheduledAt(now); // immediate execution
-        run.setDispatchCount(1);
-        run.setModel(
-                existingRuns.isEmpty()
-                        ? null
-                        : existingRuns.get(existingRuns.size() - 1).getModel());
-        run.setStyle("detailed");
-        run.setMaxToolSteps(5);
-        runMapper.insert(run);
+        AgentRun run = insertPendingRun(taskId, existingRunsModel(taskId), "QUEUED");
+        int attemptNumber = run.getAttemptNumber();
 
         // Update task: pending, point to new run
         task.setStatus(AgentConstants.STATUS_PENDING);
@@ -1206,7 +1207,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     @Override
     @Transactional
     public AgentRun requeueTask(Long taskId, Long userId) {
-        AgentTask task = taskMapper.selectById(taskId);
+        // V77/S4: 行锁串行化同一任务的并发恢复
+        AgentTask task = taskMapper.selectByIdForUpdate(taskId);
         if (task == null) {
             throw new BusinessException("任务不存在: " + taskId);
         }
@@ -1222,23 +1224,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         task.setDeadLetterAt(null);
 
         // 创建新 pending Run
-        List<AgentRun> existingRuns = runMapper.selectByTaskId(taskId);
-        int attemptNumber = existingRuns.size() + 1;
-
-        AgentRun newRun = new AgentRun();
-        newRun.setTaskId(taskId);
-        newRun.setRunUuid(java.util.UUID.randomUUID().toString());
-        newRun.setAttemptNumber(attemptNumber);
-        newRun.setStatus(AgentConstants.STATUS_PENDING);
-        newRun.setScheduledAt(LocalDateTime.now()); // immediate
-        newRun.setDispatchCount(1);
-        newRun.setModel(
-                existingRuns.isEmpty()
-                        ? null
-                        : existingRuns.get(existingRuns.size() - 1).getModel());
-        newRun.setStyle("detailed");
-        newRun.setMaxToolSteps(5);
-        runMapper.insert(newRun);
+        AgentRun newRun = insertPendingRun(taskId, existingRunsModel(taskId), "RECOVER");
+        int attemptNumber = newRun.getAttemptNumber();
 
         // 重置 task
         task.setStatus(AgentConstants.STATUS_PENDING);

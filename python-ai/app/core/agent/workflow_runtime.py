@@ -11,6 +11,7 @@ list_document_chunks) and returns standardised status codes.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections import deque
 from dataclasses import asdict, dataclass, field
@@ -346,13 +347,32 @@ class SingleAgentWorkflow(Agent):
             run.events.append(AgentRunEvent(name="agent_stream", status="failed", error_code="timeout"))
             self._finish(run, STATUS_TIMEOUT, "agent_timeout", started)
             self._record_trace(run)
-            yield NO_SUFFICIENT_EVIDENCE_REPLY if self._has_selected_knowledge_base else SERVICE_UNAVAILABLE_REPLY
+            # M11: 超时以结构化 run_error 帧透传（Java 映射为 timed_out），
+            # 不再把错误文案伪装成普通内容块流入 SSE
+            yield json.dumps({
+                "event": "run_error",
+                "status": STATUS_TIMEOUT,
+                "agent_run_id": run.run_id,
+                "error_code": "timeout",
+                "error_detail": None,
+                "failed_tool": None,
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+            }, ensure_ascii=False)
         except Exception as error:
             code = self._error_code(error)
             run.events.append(AgentRunEvent(name="agent_stream", status="failed", error_code=code))
             self._finish(run, STATUS_TOOL_ERROR, "agent_failure", started)
             self._record_trace(run)
-            yield NO_SUFFICIENT_EVIDENCE_REPLY if self._has_selected_knowledge_base else SERVICE_UNAVAILABLE_REPLY
+            # M11: 异常同样以 run_error 帧透传，保留真实 error_code/error_detail
+            yield json.dumps({
+                "event": "run_error",
+                "status": "agent_failure",
+                "agent_run_id": run.run_id,
+                "error_code": code,
+                "error_detail": str(error)[:500],
+                "failed_tool": None,
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+            }, ensure_ascii=False)
 
     def get_tools(self) -> List[Dict[str, Any]]:
         return self._filter_tools(self.delegate.get_tools())

@@ -5,6 +5,7 @@ import com.hfusionhub.entity.AgentTask;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 /**
  * Agent 任务 Mapper
@@ -13,6 +14,13 @@ import org.apache.ibatis.annotations.Param;
  */
 @Mapper
 public interface AgentTaskMapper extends BaseMapper<AgentTask> {
+
+    /**
+     * 行锁查询任务（V77/S4）：入队/重试/恢复前锁定任务行，
+     * 串行化同一任务的并发状态迁移
+     */
+    @Select("SELECT * FROM agent_task WHERE id = #{id} FOR UPDATE")
+    AgentTask selectByIdForUpdate(@Param("id") Long id);
 
     /**
      * 按幂等键查询任务

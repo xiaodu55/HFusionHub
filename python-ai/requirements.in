@@ -1,9 +1,9 @@
 # HFusionHub Python AI Engine — direct dependencies
 # Rebuild lock separately: pip-compile --generate-hashes --allow-unsafe --output-file=requirements.txt requirements.in
 
-fastapi>=0.109.0
+fastapi>=0.141.1
 uvicorn[standard]>=0.27.0
-pydantic>=2.5.3
+pydantic>=2.13.5
 python-dotenv>=1.0.1
 loguru>=0.7.3
 PyPDF2>=3.0.1
@@ -11,8 +11,9 @@ python-docx>=1.1.0
 pymilvus>=3.0.0
 milvus-lite>=3.1.0
 requests>=2.31.0
-httpx>=0.27.0
+httpx>=0.28.1
 regex>=2023.10.3
 cryptography>=42.0.0
 docker>=7.0.0
 cyclonedx-bom>=4.0.0
+starlette>=0.46,<1.0

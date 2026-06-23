@@ -48,6 +48,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -79,6 +80,9 @@ class VectorizationServiceImplTest {
     @Mock
     private RestTemplate restTemplate;
 
+    @Mock
+    private PlatformTransactionManager transactionManager;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @InjectMocks
@@ -93,6 +97,8 @@ class VectorizationServiceImplTest {
                 new org.apache.ibatis.builder.MapperBuilderAssistant(
                         new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""),
                 com.hfusionhub.entity.DocumentIndexJob.class);
+        // V77/S5: TransactionTemplate 直接持有 mock 的 PlatformTransactionManager，
+        // getTransaction 返回 null / commit 为 no-op，回调会真实执行
         ReflectionTestUtils.setField(vectorizationService, "objectMapper", objectMapper);
         ReflectionTestUtils.setField(vectorizationService, "internalApiToken", "test-token");
         ReflectionTestUtils.setField(vectorizationService, "callbackSecret", "test-secret");
@@ -449,7 +455,7 @@ class VectorizationServiceImplTest {
             when(documentMapper.selectById(10L)).thenReturn(document);
             when(knowledgeBaseMapper.selectById(20L)).thenReturn(kb);
             when(userMapper.selectById(1L)).thenReturn(ownerUser(7L));
-            when(documentIndexJobMapper.countByDocumentId(10L)).thenReturn(0);
+            when(documentIndexJobMapper.selectMaxAttemptByDocumentId(10L)).thenReturn(0);
             org.mockito.Mockito.doReturn(
                             new org.springframework.http.ResponseEntity<>("ok", org.springframework.http.HttpStatus.OK))
                     .when(restTemplate)
@@ -493,7 +499,7 @@ class VectorizationServiceImplTest {
             when(documentMapper.selectById(10L)).thenReturn(document);
             when(knowledgeBaseMapper.selectById(20L)).thenReturn(kb);
             when(userMapper.selectById(1L)).thenReturn(ownerUser(7L));
-            when(documentIndexJobMapper.countByDocumentId(10L)).thenReturn(0);
+            when(documentIndexJobMapper.selectMaxAttemptByDocumentId(10L)).thenReturn(0);
             org.mockito.Mockito.doReturn(
                             new org.springframework.http.ResponseEntity<>("ok", org.springframework.http.HttpStatus.OK))
                     .when(restTemplate)
@@ -719,4 +725,41 @@ class VectorizationServiceImplTest {
 
         assertEquals(0, vectorizationService.reconcileVectorCounts());
     }
+
+    @Test
+    void startVectorizationLocksDocumentAndComputesAttemptFromMax() throws Exception {
+        // V77/S5: 文档级行锁 + MAX(attempt)+1 + 旧 PROCESSING job 被 supersede
+        java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("vec-lock", ".md");
+        try {
+            Document document = ownedDocument(DocumentStatus.PROCESSING);
+            document.setFilePath(tempFile.toString());
+            document.setFileSize(300L);
+            KnowledgeBase kb = ownedKnowledgeBase();
+            DocumentIndexJob oldJob = job("version-old", "PROCESSING", 0);
+            when(documentMapper.selectById(10L)).thenReturn(document);
+            when(knowledgeBaseMapper.selectById(20L)).thenReturn(kb);
+            when(userMapper.selectById(1L)).thenReturn(ownerUser(7L));
+            when(documentIndexJobMapper.selectMaxAttemptByDocumentId(10L)).thenReturn(2);
+            when(documentIndexJobMapper.selectList(any())).thenReturn(List.of(oldJob));
+            org.mockito.Mockito.doReturn(
+                            new org.springframework.http.ResponseEntity<>("ok", org.springframework.http.HttpStatus.OK))
+                    .when(restTemplate)
+                    .exchange(
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.any(),
+                            org.mockito.ArgumentMatchers.any(),
+                            eq(String.class));
+            ArgumentCaptor<DocumentIndexJob> jobCaptor = ArgumentCaptor.forClass(DocumentIndexJob.class);
+
+            vectorizationService.startVectorization(10L, "ollama");
+
+            verify(documentMapper).selectByIdForUpdate(10L);
+            verify(documentIndexJobMapper).insert(jobCaptor.capture());
+            assertEquals(3, jobCaptor.getValue().getAttempt());
+            verify(usageLedgerService).release(eq(UsageMeter.INDEX_CHUNKS), eq("INDEX_CHUNKS:version-old"));
+        } finally {
+            java.nio.file.Files.deleteIfExists(tempFile);
+        }
+    }
+
 }

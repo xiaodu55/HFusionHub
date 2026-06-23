@@ -9,6 +9,7 @@ import time
 import logging
 import json
 import httpx
+from collections import OrderedDict
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, BackgroundTasks
 
@@ -54,7 +55,17 @@ logger = logging.getLogger(__name__)
 
 # In-memory task status store for tracking background task progress
 # Key: document_id, Value: {status, message, chunks_count, start_time, end_time, error}
-_task_status_store: Dict[str, Dict[str, Any]] = {}
+# M13: 有界 LRU — 长驻进程下每个 document_id 一条、只增不删会无限增长；
+# 上限 10000 条，写入时移到末尾，超出淘汰最旧条目（持久状态以 Java DB 为准）
+_TASK_STATUS_STORE_MAX = 10000
+_task_status_store: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+
+
+def _task_status_put(document_id: str, entry: Dict[str, Any]) -> None:
+    _task_status_store[document_id] = entry
+    _task_status_store.move_to_end(document_id)
+    while len(_task_status_store) > _TASK_STATUS_STORE_MAX:
+        _task_status_store.popitem(last=False)
 
 
 def _estimate_processing_seconds(file_path: str, file_type: str) -> int:
@@ -195,7 +206,7 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
     estimated_seconds = _estimate_processing_seconds(resolved_path, file_type)
 
     # Initialize task status
-    _task_status_store[request.document_id] = {
+    _task_status_put(request.document_id, {
         "status": "PROCESSING",
         "message": f"Task started. Estimated processing time: about {estimated_seconds} seconds",
         "chunks_count": 0,
@@ -210,7 +221,7 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
         "estimated_seconds": estimated_seconds,
         "processed_chunks": 0,
         "total_chunks": None,
-    }
+    })
 
     # Move heavy processing to background task (use resolved path)
     background_tasks.add_task(
@@ -293,7 +304,7 @@ async def _process_document_background(
         next_progress = progress if progress is not None else previous_progress
         if status not in ("COMPLETED", "FAILED"):
             next_progress = max(previous_progress, min(next_progress, 95))
-        _task_status_store[document_id] = {
+        _task_status_put(document_id, {
             "status": status,
             "message": message,
             "chunks_count": chunks_count,
@@ -308,7 +319,7 @@ async def _process_document_background(
             "estimated_seconds": previous.get("estimated_seconds"),
             "processed_chunks": processed_chunks if processed_chunks is not None else previous.get("processed_chunks", 0),
             "total_chunks": total_chunks if total_chunks is not None else previous.get("total_chunks"),
-        }
+        })
 
     try:
         # Background tasks run outside the HTTP request context, so restore the

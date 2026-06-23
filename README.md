@@ -8,7 +8,7 @@
 ![Java](https://img.shields.io/badge/Java-17%2B-orange)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883)
-![Tests](https://img.shields.io/badge/Tests-Python%201339%20%7C%20Java%20562%20%7C%20Frontend%2049-success)
+![Tests](https://img.shields.io/badge/Tests-Python%201247%20%7C%20Java%20567%20%7C%20Frontend%2049-success)
 
 ## 🚀 项目简介
 
@@ -307,7 +307,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 | KnowledgeGraph | 知识图谱 | 59 |
 | Utils | 公共工具 | 36 |
 
-**Python AI 总计：1339 通过 + 8 跳过 | Java 后端：562 测试 | 前端：49 测试**
+**Python AI 总计：1247 测试函数（2026-08-30 实测）| Java 后端：567 测试 | 前端：49 单测 + 74 E2E**
 
 ## 🚀 启动指南
 

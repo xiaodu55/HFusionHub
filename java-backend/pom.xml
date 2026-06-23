@@ -7,7 +7,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.2.5</version>
+        <version>3.5.16</version>
         <relativePath/>
     </parent>
 
@@ -226,9 +226,30 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <!-- JDK 21 起默认禁止动态代理自附加，Mockito/ByteBuddy 需要该开关；
-                         JDK 17 下未知属性会被忽略，无副作用。 -->
-                    <argLine>-Djdk.attach.allowAttachSelf=true</argLine>
+                         JDK 17 下未知属性会被忽略，无副作用。
+                         @{argLine} 由 jacoco prepare-agent 注入（无 JaCoCo 时为空）。 -->
+                    <argLine>@{argLine} -Djdk.attach.allowAttachSelf=true</argLine>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>

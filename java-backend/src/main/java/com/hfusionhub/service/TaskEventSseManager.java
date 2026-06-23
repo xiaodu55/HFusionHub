@@ -33,19 +33,35 @@ public class TaskEventSseManager {
     @Value("${agent.status-event.sse-poll-delay-ms:1000}")
     private long pollDelayMs;
 
+    /** SSE 轮询线程池大小；<=0 时按 CPU 自动计算（M8: 不再固定 2 线程，慢连接不再拖垮全局轮询） */
+    @Value("${agent.status-event.sse-poll-threads:0}")
+    private int pollThreads;
+
     /** 内存 fan-out：同实例内即时推送 */
     private final ConcurrentMap<Long, Set<SseEmitter>> taskEmitters = new ConcurrentHashMap<>();
 
-    private final ScheduledExecutorService pollScheduler = Executors.newScheduledThreadPool(2, r -> {
-        Thread t = new Thread(r, "sse-poll-");
-        t.setDaemon(true);
-        return t;
-    });
+    private ScheduledExecutorService pollScheduler;
+
+    @jakarta.annotation.PostConstruct
+    void initPollScheduler() {
+        int threads = pollThreads > 0 ? pollThreads : Math.max(4, Runtime.getRuntime().availableProcessors() / 2);
+        pollScheduler = Executors.newScheduledThreadPool(threads, r -> {
+            Thread t = new Thread(r, "sse-poll-");
+            t.setDaemon(true);
+            return t;
+        });
+    }
 
     /**
      * 注册一个 SSE 连接并开始推送
      */
     public SseEmitter register(Long taskId, Long userId) {
+        if (userId == null) {
+            // 防 NPE（Low 批）：未认证上下文直接拒绝
+            SseEmitter rejected = new SseEmitter(0L);
+            rejected.completeWithError(new RuntimeException("未认证"));
+            return rejected;
+        }
         // Ownership check
         AgentTaskDetailDTO taskDetail = agentTaskService.getTaskDetail(taskId);
         if (taskDetail == null || !taskDetail.getUserId().equals(userId)) {
