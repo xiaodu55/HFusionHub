@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as vectorizationApi from '@/api/vectorization'
 import * as documentApi from '@/api/document'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, FileText, Code, Table, List, Heading, AlignLeft } from 'lucide-vue-next'
+import { ArrowLeft, FileText, Code, Table, List, Heading, AlignLeft, ChevronDown, ChevronUp, Copy, Check } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -32,15 +32,20 @@ const pageSize = ref(20)
 const selectedBlockType = ref('all')
 const loading = ref(false)
 const loadError = ref(false)
+const expandedChunks = ref<Set<string>>(new Set())
+const copiedChunkId = ref<string | null>(null)
 
 const blockTypes = [
-  { value: 'all', label: '全部' },
+  { value: 'all', label: '全部类型' },
   { value: 'HEADING', label: '标题' },
   { value: 'PARAGRAPH', label: '段落' },
   { value: 'CODE', label: '代码' },
   { value: 'TABLE', label: '表格' },
   { value: 'LIST', label: '列表' },
 ]
+
+// 长内容折叠阈值（字符）
+const COLLAPSE_THRESHOLD = 400
 
 const loadDocumentInfo = async () => {
   try {
@@ -83,12 +88,14 @@ const loadChunks = async () => {
 
 const handlePageChange = (page: number) => {
   currentPage.value = page
+  expandedChunks.value.clear()
   loadChunks()
 }
 
-const handleBlockTypeChange = (e: Event) => {
-  selectedBlockType.value = (e.target as HTMLSelectElement).value
+const handleBlockTypeChange = (value: string) => {
+  selectedBlockType.value = value
   currentPage.value = 1
+  expandedChunks.value.clear()
   loadChunks()
 }
 
@@ -114,19 +121,67 @@ const getBlockTypeLabel = (type: string) => {
   }
 }
 
-const getBlockTypeBadgeClass = (type: string) => {
+/** 类型徽标配色（含 dark 变体）+ 内容区左侧色条 */
+const getBlockTypeTheme = (type: string): { badge: string; bar: string } => {
   switch (type) {
-    case 'CODE': return 'bg-red-100 text-red-700'
-    case 'HEADING': return 'bg-blue-50 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300'
-    case 'TABLE': return 'bg-purple-50 text-purple-700 dark:bg-purple-400/15 dark:text-purple-300'
-    default: return 'bg-gray-100 text-gray-700'
+    case 'HEADING':
+      return { badge: 'bg-blue-50 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300', bar: 'bg-blue-400 dark:bg-blue-500' }
+    case 'CODE':
+      return { badge: 'bg-red-50 text-red-700 dark:bg-red-400/15 dark:text-red-300', bar: 'bg-red-400 dark:bg-red-500' }
+    case 'TABLE':
+      return { badge: 'bg-purple-50 text-purple-700 dark:bg-purple-400/15 dark:text-purple-300', bar: 'bg-purple-400 dark:bg-purple-500' }
+    case 'LIST':
+      return { badge: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300', bar: 'bg-emerald-400 dark:bg-emerald-500' }
+    case 'PARAGRAPH':
+      return { badge: 'bg-slate-100 text-slate-700 dark:bg-slate-400/15 dark:text-slate-300', bar: 'bg-slate-300 dark:bg-slate-500' }
+    default:
+      return { badge: 'bg-gray-100 text-gray-700 dark:bg-gray-400/15 dark:text-gray-300', bar: 'bg-gray-300 dark:bg-gray-500' }
   }
 }
 
 const formatOutlinePath = (path: string[]) => {
-  if (!path || path.length === 0) return '无章节信息'
-  return path.join(' > ')
+  if (!path || path.length === 0) return ''
+  return path.join(' › ')
 }
+
+const isLongContent = (chunk: Chunk) => chunk.content.length > COLLAPSE_THRESHOLD
+
+const isExpanded = (chunk: Chunk) => expandedChunks.value.has(chunk.chunk_id)
+
+const toggleExpand = (chunk: Chunk) => {
+  if (isExpanded(chunk)) {
+    expandedChunks.value.delete(chunk.chunk_id)
+  } else {
+    expandedChunks.value.add(chunk.chunk_id)
+  }
+  // Set 响应式触发
+  expandedChunks.value = new Set(expandedChunks.value)
+}
+
+const displayContent = (chunk: Chunk) => {
+  if (isLongContent(chunk) && !isExpanded(chunk)) {
+    return chunk.content.slice(0, COLLAPSE_THRESHOLD) + '…'
+  }
+  return chunk.content
+}
+
+const copyChunk = async (chunk: Chunk) => {
+  try {
+    await navigator.clipboard.writeText(chunk.content)
+    copiedChunkId.value = chunk.chunk_id
+    toast.success('已复制到剪贴板')
+    setTimeout(() => { copiedChunkId.value = null }, 1500)
+  } catch {
+    toast.error('复制失败')
+  }
+}
+
+const pageLabel = computed(() => {
+  if (totalChunks.value === 0) return ''
+  const start = (currentPage.value - 1) * pageSize.value + 1
+  const end = Math.min(currentPage.value * pageSize.value, totalChunks.value)
+  return `${start}–${end} / ${totalChunks.value}`
+})
 
 const goBack = () => {
   router.back()
@@ -148,34 +203,37 @@ onMounted(() => {
       </Button>
       <div class="flex-1">
         <h2 class="text-2xl font-bold">{{ documentName }} 分块详情</h2>
-        <p class="text-muted-foreground">共 {{ totalChunks }} 个块</p>
+        <p class="text-sm text-muted-foreground">共 <span class="tabular-nums font-medium text-foreground">{{ totalChunks }}</span> 个块 · 已向量化用于语义检索</p>
       </div>
     </div>
-
-    <!-- 筛选器 -->
-    <Card>
-      <CardContent class="pt-6">
-        <div class="flex items-center gap-4">
-          <span class="text-sm font-medium">筛选：</span>
-          <select
-            :value="selectedBlockType"
-            aria-label="按分块类型筛选"
-            @change="handleBlockTypeChange"
-            class="rounded-md border border-input bg-background px-3 py-2 text-sm"
-          >
-            <option v-for="type in blockTypes" :key="type.value" :value="type.value">
-              {{ type.label }}
-            </option>
-          </select>
-        </div>
-      </CardContent>
-    </Card>
 
     <!-- 分块列表 -->
     <Card>
       <CardHeader>
-        <CardTitle>分块列表</CardTitle>
-        <CardDescription>查看文档的分块内容和类型</CardDescription>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <CardTitle>分块列表</CardTitle>
+            <p class="text-sm text-muted-foreground mt-1">查看文档解析后的分块内容与类型</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <!-- 类型快捷筛选 chips -->
+            <button
+              v-for="type in blockTypes"
+              :key="type.value"
+              type="button"
+              :class="[
+                'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                selectedBlockType === type.value
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-input bg-background text-muted-foreground hover:bg-muted hover:text-foreground'
+              ]"
+              @click="handleBlockTypeChange(type.value)"
+            >
+              <component :is="getBlockTypeIcon(type.value)" class="h-3.5 w-3.5" />
+              {{ type.label }}
+            </button>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
         <LoadingSkeleton v-if="loading" type="card" :count="3" />
@@ -186,62 +244,101 @@ onMounted(() => {
           title="暂无分块数据"
           description="文档解析完成后，系统会将内容分割成多个可检索的小块。"
         />
-        <div v-else class="space-y-4">
-          <div
+        <div v-else class="space-y-3">
+          <article
             v-for="(chunk, index) in chunks"
             :key="chunk.chunk_id"
-            class="rounded-lg border p-4"
+            class="group relative overflow-hidden rounded-lg border bg-card transition-shadow hover:shadow-sm"
           >
-            <!-- 分块头部 -->
-            <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center gap-3">
-                <span class="text-sm text-muted-foreground">
-                  块 #{{ (currentPage - 1) * pageSize + index + 1 }}
-                </span>
-                <span
-                  :class="[
-                    'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium',
-                    getBlockTypeBadgeClass(chunk.block_type)
-                  ]"
-                >
-                  <component :is="getBlockTypeIcon(chunk.block_type)" class="h-3 w-3" />
-                  {{ getBlockTypeLabel(chunk.block_type) }}
-                </span>
+            <!-- 类型色条 -->
+            <div class="absolute inset-y-0 left-0 w-1" :class="getBlockTypeTheme(chunk.block_type).bar" />
+
+            <div class="pl-5 pr-4 py-4">
+              <!-- 分块头部 -->
+              <div class="mb-2.5 flex items-start justify-between gap-3">
+                <div class="flex min-w-0 flex-wrap items-center gap-2">
+                  <span class="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
+                    #{{ (currentPage - 1) * pageSize + index + 1 }}
+                  </span>
+                  <span
+                    :class="[
+                      'inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+                      getBlockTypeTheme(chunk.block_type).badge
+                    ]"
+                  >
+                    <component :is="getBlockTypeIcon(chunk.block_type)" class="h-3 w-3" />
+                    {{ getBlockTypeLabel(chunk.block_type) }}
+                  </span>
+                  <span v-if="formatOutlinePath(chunk.outline_path)" class="min-w-0 truncate text-xs text-muted-foreground" :title="formatOutlinePath(chunk.outline_path)">
+                    {{ formatOutlinePath(chunk.outline_path) }}
+                  </span>
+                </div>
+                <div class="flex shrink-0 items-center gap-1">
+                  <span class="text-xs tabular-nums text-muted-foreground">{{ chunk.metadata?.char_count || chunk.content.length }} 字</span>
+                  <button
+                    type="button"
+                    class="ml-1 rounded-md p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+                    :aria-label="`复制分块 #${(currentPage - 1) * pageSize + index + 1}`"
+                    @click="copyChunk(chunk)"
+                  >
+                    <Check v-if="copiedChunkId === chunk.chunk_id" class="h-3.5 w-3.5 text-emerald-500" />
+                    <Copy v-else class="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
-              <span class="text-xs text-muted-foreground">
-                {{ formatOutlinePath(chunk.outline_path) }}
-              </span>
-            </div>
 
-            <!-- 分块内容 -->
-            <div class="rounded bg-muted p-3 font-mono text-sm whitespace-pre-wrap">
-              {{ chunk.content }}
-            </div>
+              <!-- 分块内容：按类型差异化排版 -->
+              <div
+                v-if="chunk.block_type === 'CODE'"
+                class="overflow-x-auto rounded-md bg-zinc-900 p-3.5 font-mono text-[13px] leading-relaxed text-zinc-100 whitespace-pre-wrap dark:bg-zinc-950"
+              >{{ displayContent(chunk) }}</div>
+              <div
+                v-else-if="chunk.block_type === 'TABLE'"
+                class="overflow-x-auto rounded-md bg-muted/60 p-3.5 font-mono text-[13px] leading-relaxed whitespace-pre-wrap"
+              >{{ displayContent(chunk) }}</div>
+              <p
+                v-else
+                :class="[
+                  'whitespace-pre-wrap text-sm leading-relaxed text-foreground/90',
+                  chunk.block_type === 'HEADING' && 'font-semibold text-foreground'
+                ]"
+              >{{ displayContent(chunk) }}</p>
 
-            <!-- 元数据 -->
-            <div class="mt-2 text-xs text-muted-foreground">
-              字符数：{{ chunk.metadata?.char_count || chunk.content.length }}
-              <template v-if="chunk.metadata?.language">
-                · 语言：{{ chunk.metadata.language }}
-              </template>
+              <!-- 展开收起 -->
+              <div v-if="isLongContent(chunk)" class="mt-2">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                  @click="toggleExpand(chunk)"
+                >
+                  <component :is="isExpanded(chunk) ? ChevronUp : ChevronDown" class="h-3.5 w-3.5" />
+                  {{ isExpanded(chunk) ? '收起' : `展开全文（共 ${chunk.content.length} 字）` }}
+                </button>
+              </div>
             </div>
-          </div>
+          </article>
         </div>
 
         <!-- 分页 -->
-        <div v-if="totalChunks > pageSize" class="flex justify-center mt-6 gap-2">
+        <div
+          v-if="totalChunks > pageSize"
+          class="mt-6 flex flex-wrap items-center justify-center gap-3"
+        >
+          <p class="mr-2 text-xs tabular-nums text-muted-foreground">{{ pageLabel }}</p>
           <Button
             variant="outline"
+            size="sm"
             :disabled="currentPage <= 1"
             @click="handlePageChange(currentPage - 1)"
           >
             上一页
           </Button>
-          <span class="flex items-center px-4 text-sm text-muted-foreground">
+          <span class="text-sm tabular-nums text-muted-foreground">
             {{ currentPage }} / {{ Math.ceil(totalChunks / pageSize) }}
           </span>
           <Button
             variant="outline"
+            size="sm"
             :disabled="currentPage >= Math.ceil(totalChunks / pageSize)"
             @click="handlePageChange(currentPage + 1)"
           >
