@@ -4,9 +4,9 @@
 
 ## 概述
 
-数据库 `hfusionhub` 由 Flyway 管理，迁移脚本位于 `java-backend/src/main/resources/db/migration/`，当前已应用到 **V75**。
+数据库 `hfusionhub` 由 Flyway 管理，迁移脚本位于 `java-backend/src/main/resources/db/migration/`，当前已应用到 **V76**。
 
-## 迁移历史（V1–V75）
+## 迁移历史（V1–V76）
 
 | 版本 | 文件 | 说明 |
 |------|------|------|
@@ -57,11 +57,12 @@
 | V70–V73 | `V70`–`V73` | 租户套餐绑定 / 投标模块开关 flags / 行业方案包 / 内建投标插件 |
 | V74 | `V74__missing_tenant_indexes.sql` | 补齐缺失的 tenant_id 索引 |
 | V75 | `V75__drop_uk_tender_element.sql` | 移除 tender_element 的 (project_id, element_key) 唯一键（同类别多行是解读工作流的预期数据形态） |
+| V76 | `V76__tenant_plan_binding_deleted.sql` | 补齐 tenant_plan_binding 缺失的逻辑删除列 deleted（BaseEntity 全局字段，V70 建表遗漏，导致 /bid/plan/current 500） |
 
 ## 迁移规则
 
-1. **历史迁移（V1–V75）不可修改**——修改会导致 Flyway checksum mismatch。
-2. **所有新表结构变更必须使用 V76+ 脚本**。
+1. **历史迁移（V1–V76）不可修改**——修改会导致 Flyway checksum mismatch。
+2. **所有新表结构变更必须使用 V77+ 脚本**。
 3. **新表必须包含 `tenant_id` 列**（除非加入 `MybatisPlusConfig.TENANT_IGNORE_TABLES`）——租户拦截器会对非忽略表自动注入 `WHERE tenant_id=?`，缺列会导致整表功能 500（V52/V53 曾因此出问题，`scripts/static-checks.py` 在 CI 中静态校验）。
 4. **生产环境**：禁止手动修改 `flyway_schema_history`。
 5. **本地重置**：`cd docker && docker compose down -v && docker compose up -d`。

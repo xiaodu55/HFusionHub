@@ -352,7 +352,7 @@ docker compose up -d
 
 重置后重新启动 Java，Flyway 会按 `V1` ~ `V74` 自动重建 schema。
 
-> ⚠️ 以后新增表结构必须创建新的 `V75+` 迁移文件，**不要修改已有的迁移文件**，否则会导致 Flyway checksum mismatch。
+> ⚠️ 以后新增表结构必须创建新的 `V77+` 迁移文件，**不要修改已有的迁移文件**，否则会导致 Flyway checksum mismatch。
 > 提示：`down -v` 也会删除 Milvus 向量卷（`<project>_milvus-data`）；如需保留向量数据，改用 `docker compose down`（不带 `-v`），或先执行 `scripts/backup_milvus.sh`。
 
 ---

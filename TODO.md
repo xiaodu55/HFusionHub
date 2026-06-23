@@ -6,7 +6,7 @@
 ## ✅ 已自动完成（2026-08-19）
 
 - ✅ **DeepSeek API Key 已配置** — `python-ai/.env` 已写入真实 key（`deepseek-v4-flash`），流式聊天实测通过
-- ✅ **冒烟测试全绿** — `scripts/smoke-test.ps1` 47 PASS / 0 FAIL
+- ✅ **冒烟测试全绿** — `scripts/smoke-test.ps1` 48 PASS / 0 FAIL
 - ✅ **演示数据导入/清空** — `POST /api/demo/import` / `POST /api/demo/clear`
 - ✅ **CORS 配置化** — 内网穿透（cpolar 动态域名）下浏览器登录 403 已修复
 - ✅ **公网访问** — 改用生产预览（vite preview + preview.proxy），打包产物 <4s 渲染
@@ -29,7 +29,7 @@
    ```powershell
    .\scripts\smoke-test.ps1
    ```
-   预期：`==== 结果: 47 PASS / 0 FAIL ====`
+   预期：`==== 结果: 48 PASS / 0 FAIL ====`
 7. **运行性能基线**
    ```powershell
    .\scripts\run-all-benchmarks.ps1 > baseline-$(Get-Date -Format 'yyyyMMdd').txt
@@ -62,5 +62,5 @@
 ---
 
 **生成时间**：2026-08-19  
-**当前状态**：✅ 所有自动化任务已完成（DeepSeek 已配置、冒烟 47 PASS / 0 FAIL）  
+**当前状态**：✅ 所有自动化任务已完成（DeepSeek 已配置、冒烟 48 PASS / 0 FAIL）  
 **剩余**：👆 P0（上线安全）按需执行

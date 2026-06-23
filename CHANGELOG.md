@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 全项目评估修复批次（2026-08-29）：安全与正确性 9 项 + 前端体验（源自全项目评估报告 docs/REPAIR_ROADMAP.md）
+
+#### Fixed（安全/正确性）
+- **S1 审批令牌泄露**：`AgentApproval.executionToken`（一次性执行令牌）与 `toolInput`（完整工具参数）加 `@JsonIgnore`——不再经 REST/SSE 下发浏览器（Java→Python 通道走 getter 不受影响）
+- **S2 权限绕过**：旧版 `/api/chat/stream` 构建 `AgentExecutionContext`（read_only + kb:read），工具权限/模式门/策略引擎全部生效；内部异常文本不再透传客户端
+- **解绑套餐必失败**：前端错传 bindingId（绑定行 id）给按 subscriptionId 查询的后端——改传 subscriptionId，实测解绑成功
+- **V76**：`tenant_plan_binding` 补 BaseEntity 全局逻辑删除列 deleted（V70 遗漏），修复 /bid/plan/current 500（套餐中心不可用）
+- **M2**：`decideApproval` 加 `@Transactional`（approval/task/run 三表更新原子化）
+- **S3/M3 竞态守卫**：deny/approve/expire 三处 run 状态迁移加 waiting_approval 守卫，阻断"刚批准被过期调度覆盖为 FAILED"的双向丢失更新（完整行锁待并发压测）
+- **M6**：回调鉴权/签名失败返回 401（此前 200+错误 body 被 Python 回调客户端误当成功），测试断言同步更新
+
+#### Fixed（Python 逻辑）
+- **S7 补充检索完全失效**：`_supplement_retrieval` 对 RetrievalResult（非列表）extend 必然 TypeError 被裸 except 吞掉——改取 results 列表，裸 except 改记录日志
+- **S8 insufficient_evidence 不可达**：去掉恒 False 的 `not final_answer` 条件
+- **S9 潜伏崩溃**：RecursiveCompression 的 `int > None` TypeError 修复；压缩缓存键纳入 target_ratio/max_tokens/preserve_keywords 防参数互串
+
+#### Fixed（前端体验）
+- **M1 「只看失败请求」静默失效**：前端 error_only → errorOnly 与后端参数名对齐
+- **MCP 服务页**：新增「编辑」（令牌填错此前只能删除重建）；底层错误人性化（HTTP 401 JSON → 可操作中文提示，且不再展示原始错误详情）
+- **解绑/MCP 之外**：删除每页右上角装饰 Sparkles 残留；设置引导（导入演示数据）收起改为页面级——刷新自动恢复，不再"点 × 后永远消失"
+- **空态示例引导**：智能对话（3 个可点击示例问题，点击直接建对话并预填问题）、知识库/文档（三步引导）、投标项目（四步引导）
+- **数据样式**：用量/仪表盘/运行记录大数字 tabular-nums；用量页重设计（彩色指标卡、峰值柱状图、多彩模型占比、斑马纹明细表）；审计日志页重设计（统计卡 + 动作前缀配色 + 时间线布局）
+
 ### 冻结名目全部清偿批次（2026-08-29）：LLM 单轨化 + P8 vision-LLM 路线 + P6 cross_encoder 基准解锁
 
 #### Added

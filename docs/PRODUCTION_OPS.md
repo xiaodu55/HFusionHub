@@ -23,7 +23,7 @@
 
 ### 🗄️ 数据库与持久化
 
-- [ ] **Flyway 迁移验证** — 确保 V1–V75 全部成功应用；检查 `flyway_schema_history` 表状态
+- [ ] **Flyway 迁移验证** — 确保 V1–V76 全部成功应用；检查 `flyway_schema_history` 表状态
 - [ ] **备份策略** — 脚本已就绪：`scripts/backup-data.ps1`（MySQL mysqldump）+ `scripts/backup_milvus.sh`（Milvus 卷快照）；cron 示例 `0 3 * * * cd /opt/hfusionhub && ./scripts/backup_milvus.sh /backups/milvus`；恢复演练见下文「备份恢复演练」
 - [ ] **Redis 持久化** — AOF 已启用（`appendonly yes`）；RDB 每小时备份（`save 3600 1`）
 
@@ -43,7 +43,7 @@
 
 ### 🧪 测试验证
 
-- [ ] **冒烟测试通过** — `.\scripts\smoke-test.ps1` 全部 PASS（当前 47 PASS / 0 FAIL）
+- [ ] **冒烟测试通过** — `.\scripts\smoke-test.ps1` 全部 PASS（当前 48 PASS / 0 FAIL）
 - [ ] **E2E 测试通过** — `cd hfusionhub-frontend && npx playwright test`
 - [ ] **压力测试** — 并发用户 100（JMeter/Locust）；文档上传→解析→检索链路稳定性；数据库连接池无泄漏
 

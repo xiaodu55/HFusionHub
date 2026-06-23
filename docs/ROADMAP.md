@@ -84,7 +84,7 @@
 
 - [x] **各菜单一键导入示例数据** - `/demo/import` 覆盖知识库/回答方案/笔记/记忆/应用/公告 6 个菜单（幂等分项计数，导入后按菜单显示新增/已存在）；`/demo/clear` 一键清除（软删除，7 天可恢复）；MCP 服务页空状态 CTA 直接预填示例并打开表单；工作台统计失败展示具体原因 + 重试
 - [x] **真实 DeepSeek API Key 配置** — `python-ai/.env` 已写入真实 key（`deepseek-v4-flash`），流式聊天实测通过（"你好呀！很高兴能和你聊天…"）
-- [x] **冒烟测试全绿** — `scripts/smoke-test.ps1` **47 PASS / 0 FAIL**（修复演示数据清空端点为 `POST /demo/clear`、DeepSeek 探测 cwd、文档解析响应捕获 3 处脚本缺陷）
+- [x] **冒烟测试全绿** — `scripts/smoke-test.ps1` **48 PASS / 0 FAIL**（修复演示数据清空端点为 `POST /demo/clear`、DeepSeek 探测 cwd、文档解析响应捕获 3 处脚本缺陷）
 - [x] **CORS 支持配置化/任意 Origin** — `app.cors.allowed-origins`：修复内网穿透（cpolar 动态域名）下浏览器登录 403；开发/穿透默认放行，生产可配置白名单收紧
 - [x] **公网访问改用生产预览** — vite preview + preview.proxy：dev 模式 33 模块经公网逐模块加载需 40s，打包产物 <4s 渲染
 - [x] **隧道 URL 查询脚本** — `scripts/get-tunnel-url.ps1` 一键查询 cpolar 当前公网 URL（隧道重连后 URL 变化时使用）
