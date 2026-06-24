@@ -128,6 +128,7 @@ const isActive = (path: string) => {
 const currentItem = computed(() => menuItems.find((item) => isActive(item.path)))
 const userDisplayName = computed(() => userStore.nickname || userStore.username || 'HFusionHub 用户')
 const userInitial = computed(() => userDisplayName.value.trim().slice(0, 1).toUpperCase() || 'H')
+const userAvatarUrl = computed(() => userStore.userInfo?.avatar || '')
 const userRoleLabel = computed(() => ({ pending: '等待分配', user: '普通用户', builder: 'AI 配置员', admin: '超级管理员' }[userStore.role]))
 const unreadNotificationCount = computed(() => notifications.value.length + unreadNoticeCount.value)
 const serviceLabel = computed(() => ({ checking: '检查中', online: '服务在线', offline: '服务异常' }[serviceState.value]))
@@ -406,7 +407,13 @@ onBeforeUnmount(() => {
           ]"
           @click="router.push('/profile')"
         >
-          <span class="user-avatar">{{ userInitial }}</span>
+          <img
+            v-if="userAvatarUrl"
+            :src="userAvatarUrl"
+            alt="头像"
+            class="user-avatar object-cover"
+          />
+          <span v-else class="user-avatar">{{ userInitial }}</span>
           <span v-if="isSidebarOpen" class="min-w-0">
             <span class="block truncate text-sm font-medium text-foreground">{{ userDisplayName }}</span>
             <span class="block truncate text-xs text-emerald-600 dark:text-emerald-400">{{ userRoleLabel }}</span>

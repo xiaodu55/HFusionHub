@@ -22,9 +22,15 @@ import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.TenantMemberMapper;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.UserService;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +38,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -53,6 +60,24 @@ public class UserServiceImpl implements UserService {
 
     private static final Set<String> ASSIGNABLE_PLATFORM_ROLES =
             Set.of(CommonConstants.ROLE_PENDING, CommonConstants.ROLE_USER, CommonConstants.ROLE_BUILDER);
+
+    /** 头像大小上限 2MB */
+    private static final long AVATAR_MAX_SIZE = 2 * 1024 * 1024L;
+    /** DB avatar 字段存储的标准相对路径标记（实际落盘目录由 {@link #avatarDir} 决定） */
+    private static final String AVATAR_DB_PREFIX = "uploads/avatars/";
+    /**
+     * 头像落盘目录（相对应用工作目录，与文档上传 uploads/ 同卷持久化；
+     * 可配置以便测试注入临时目录）
+     */
+    @Value("${app.avatar.dir:uploads/avatars}")
+    private String avatarDir;
+    /** 允许的图片类型：扩展名 → Content-Type → 魔数 */
+    private static final Map<String, String> AVATAR_TYPES = Map.of(
+            "jpg", "image/jpeg",
+            "jpeg", "image/jpeg",
+            "png", "image/png",
+            "webp", "image/webp",
+            "gif", "image/gif");
 
     private final UserMapper userMapper;
     private final TenantMemberMapper tenantMemberMapper;
@@ -451,6 +476,103 @@ public class UserServiceImpl implements UserService {
         return convertToUserInfoDTO(user);
     }
 
+    @Override
+    @Transactional
+    public String updateAvatar(Long userId, MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("请选择头像图片");
+        }
+        if (file.getSize() > AVATAR_MAX_SIZE) {
+            throw new BusinessException("头像图片不能超过 2MB");
+        }
+        String ext = detectImageExtension(file);
+        try {
+            User user = userMapper.selectById(userId);
+            if (user == null) {
+                throw new BusinessException("用户不存在");
+            }
+            Path dir = resolveAvatarDir();
+            Files.createDirectories(dir);
+            // 移除旧头像（扩展名可能变化），写入新文件
+            removeAvatarFiles(dir, userId);
+            Path target = dir.resolve(userId + "." + ext);
+            file.transferTo(target.toAbsolutePath());
+            user.setAvatar(AVATAR_DB_PREFIX + userId + "." + ext);
+            userMapper.updateById(user);
+            log.info("用户 {} 头像已更新: {}", userId, target.getFileName());
+            return "/api/user/avatar/" + userId;
+        } catch (IOException e) {
+            log.error("头像保存失败: userId={}", userId, e);
+            throw new BusinessException("头像保存失败，请稍后重试");
+        }
+    }
+
+    @Override
+    public Optional<Path> getAvatarFile(Long userId) {
+        Path dir = resolveAvatarDir();
+        return AVATAR_TYPES.keySet().stream()
+                .map(ext -> dir.resolve(userId + "." + ext))
+                .filter(Files::exists)
+                .findFirst();
+    }
+
+    /** 头像目录解析：相对路径相对应用工作目录；绝对路径直接使用（测试注入 @TempDir） */
+    private Path resolveAvatarDir() {
+        Path configured = Paths.get(avatarDir);
+        return configured.isAbsolute() ? configured : Paths.get(System.getProperty("user.dir"), avatarDir);
+    }
+
+    /** 按魔数识别真实图片类型；不匹配时拒绝（防伪装扩展名） */
+    private String detectImageExtension(MultipartFile file) {
+        String name = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase(Locale.ROOT);
+        String ext = name.contains(".")
+                ? name.substring(name.lastIndexOf('.') + 1)
+                : "";
+        if (!AVATAR_TYPES.containsKey(ext)) {
+            throw new BusinessException("仅支持 JPG / PNG / WEBP / GIF 格式图片");
+        }
+        byte[] magic = new byte[12];
+        int read;
+        try {
+            read = file.getInputStream().readNBytes(magic, 0, magic.length);
+        } catch (IOException e) {
+            throw new BusinessException("头像读取失败，请重试");
+        }
+        boolean isJpeg = read >= 3 && (magic[0] & 0xFF) == 0xFF && (magic[1] & 0xFF) == 0xD8 && (magic[2] & 0xFF) == 0xFF;
+        boolean isPng = read >= 4 && (magic[0] & 0xFF) == 0x89 && magic[1] == 0x50 && magic[2] == 0x4E && magic[3] == 0x47;
+        boolean isGif = read >= 4 && magic[0] == 0x47 && magic[1] == 0x49 && magic[2] == 0x46 && magic[3] == 0x38;
+        boolean isWebP = read >= 12 && magic[0] == 0x52 && magic[1] == 0x49 && magic[2] == 0x46 && magic[3] == 0x46
+                && magic[8] == 0x57 && magic[9] == 0x45 && magic[10] == 0x42 && magic[11] == 0x50;
+        boolean matches = switch (ext) {
+            case "jpg", "jpeg" -> isJpeg;
+            case "png" -> isPng;
+            case "gif" -> isGif;
+            case "webp" -> isWebP;
+            default -> false;
+        };
+        if (!matches) {
+            throw new BusinessException("图片内容与扩展名不符，请选择真实的图片文件");
+        }
+        return ext;
+    }
+
+    private void removeAvatarFiles(Path avatarDir, Long userId) {
+        for (String ext : AVATAR_TYPES.keySet()) {
+            try {
+                Files.deleteIfExists(avatarDir.resolve(userId + "." + ext));
+            } catch (IOException e) {
+                log.warn("删除旧头像失败: userId={} ext={}", userId, ext, e);
+            }
+        }
+    }
+
+    /** DB 存相对路径，DTO 统一转换为可访问 URL；未设置头像时返回 null（前端回退首字母头像） */
+    private String avatarUrl(User user) {
+        return user.getAvatar() == null || user.getAvatar().isBlank()
+                ? null
+                : "/api/user/avatar/" + user.getId();
+    }
+
     /**
      * User 实体转换为 UserInfoDTO
      *
@@ -465,7 +587,7 @@ public class UserServiceImpl implements UserService {
                 .email(user.getEmail())
                 .phone(user.getPhone())
                 .themePreference(user.getThemePreference())
-                .avatar(user.getAvatar())
+                .avatar(avatarUrl(user))
                 .role(user.getRole())
                 .status(user.getStatus())
                 .lastLoginTime(user.getLastLoginTime())

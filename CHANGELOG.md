@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 头像上传（2026-08-30）
+
+#### Added
+- **头像上传端到端**：`POST /user/avatar`（multipart，≤2MB，JPG/PNG/WEBP/GIF 扩展名 + 文件魔数双重校验防伪装文件）落盘 `uploads/avatars/{userId}.{ext}`（uploads-data 卷持久化，可 `app.avatar.dir` 覆盖）；`GET /user/avatar/{userId}` 读取头像（SaToken 放行——`<img>` 无法携带 satoken 头，仅返回图片字节；Cache-Control 1h）。DB `user.avatar` 存标准相对路径标记，`UserInfoDTO.avatar` 统一转换为 `/api/user/avatar/{userId}`
+- **个人中心头像交互**：横幅头像可点击上传（hover 相机蒙层、前端预校验类型/大小、成功后刷新 store 并以时间戳参数破缓存）；有头像显示图片、无头像回退首字母渐变
+- **侧边栏头像**：MainLayout 用户区同步显示已上传头像（object-cover 裁剪），未设置保持首字母
+- **回归测试**：updateAvatar 落盘/相对路径标记、换扩展名替换旧文件、超大拒绝、伪装扩展名拒绝、不存在头像返回空——5 项
+
 ### 评估修复第二批 + 依赖升级批次（2026-08-30）：S4/S5 竞态、M4–M13 全量、Spring Boot 3.5.16、FastAPI 0.141（源自 docs/REPAIR_ROADMAP.md）
 
 #### Fixed（Java 竞态/事务）

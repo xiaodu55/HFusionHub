@@ -14,6 +14,11 @@ import com.hfusionhub.dto.UserSearchDTO;
 import com.hfusionhub.dto.UserUpdateDTO;
 import com.hfusionhub.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
+import java.util.Optional;
+import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.multipart.MultipartFile;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -81,6 +86,44 @@ public class UserController {
     public R<UserInfoDTO> getCurrentUser() {
         UserInfoDTO userInfo = userService.getCurrentUser();
         return R.ok(userInfo);
+    }
+
+    /**
+     * 上传当前用户头像
+     *
+     * @param file 头像图片（jpeg/png/webp/gif，≤2MB）
+     * @return 头像访问 URL
+     */
+    @PostMapping(value = "/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "上传头像", description = "上传当前用户头像，返回头像访问 URL")
+    public R<String> uploadAvatar(@RequestParam("file") MultipartFile file) {
+        Long userId = com.hfusionhub.common.utils.JwtUtils.getCurrentUserId();
+        String avatarUrl = userService.updateAvatar(userId, file);
+        return R.ok("头像已更新", avatarUrl);
+    }
+
+    /**
+     * 读取用户头像（<img> 标签无法携带 satoken 头，故 GET 放行鉴权；仅返回图片字节）
+     */
+    @GetMapping("/avatar/{userId}")
+    @Operation(summary = "获取头像", description = "按用户 ID 读取头像图片，未设置返回 404")
+    public ResponseEntity<byte[]> getAvatar(@org.springframework.web.bind.annotation.PathVariable Long userId) {
+        Optional<java.nio.file.Path> file = userService.getAvatarFile(userId);
+        if (file.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        try {
+            byte[] bytes = java.nio.file.Files.readAllBytes(file.get());
+            String name = file.get().getFileName().toString();
+            String contentType =
+                    MediaType.parseMediaType("image/" + name.substring(name.lastIndexOf('.') + 1)).toString();
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(contentType.replace("image/jpg", "image/jpeg")))
+                    .cacheControl(CacheControl.maxAge(java.time.Duration.ofHours(1)))
+                    .body(bytes);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
     /**

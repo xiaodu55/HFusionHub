@@ -104,4 +104,21 @@ public interface UserService {
      * @return 用户信息
      */
     UserInfoDTO updateThemePreference(String themePreference);
+
+    /**
+     * 上传当前用户头像（校验图片类型/大小后落盘 uploads/avatars 并更新 avatar 字段）
+     *
+     * @param userId 用户 ID
+     * @param file 头像图片文件（jpeg/png/webp/gif，≤2MB）
+     * @return 头像访问 URL（/api/user/avatar/{userId}）
+     */
+    String updateAvatar(Long userId, org.springframework.web.multipart.MultipartFile file);
+
+    /**
+     * 读取用户头像文件（不存在时返回 empty）
+     *
+     * @param userId 用户 ID
+     * @return 头像文件路径
+     */
+    java.util.Optional<java.nio.file.Path> getAvatarFile(Long userId);
 }

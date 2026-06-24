@@ -6,8 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { KeyRound, IdCard, Mail, Phone, CalendarDays, Clock3, ShieldCheck, ShieldAlert, Fingerprint } from 'lucide-vue-next'
-import { changePassword } from '@/api/user'
+import { KeyRound, IdCard, Mail, Phone, CalendarDays, Clock3, ShieldCheck, ShieldAlert, Fingerprint, Camera } from 'lucide-vue-next'
+import { changePassword, uploadAvatar } from '@/api/user'
 import type { UserRole } from '@/api/types'
 import { useToast } from '@/composables/useToast'
 
@@ -55,6 +55,46 @@ const formatDateTime = (value?: string) => {
   if (!value) return '—'
   const d = new Date(value)
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+// ── 头像上传 ──
+// 版本时间戳：上传成功后拼到 URL 防浏览器缓存
+const avatarTs = ref(Date.now())
+const avatarUploading = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
+const avatarUrl = computed(() =>
+  userStore.userInfo?.avatar ? `${userStore.userInfo.avatar}?t=${avatarTs.value}` : ''
+)
+
+const triggerAvatarUpload = () => {
+  fileInput.value?.click()
+}
+
+const onAvatarFileChange = async (e: Event) => {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  // 允许重复选择同一文件
+  input.value = ''
+  if (!file) return
+  if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
+    toast.error('仅支持 JPG / PNG / WEBP / GIF 格式图片')
+    return
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    toast.error('头像图片不能超过 2MB')
+    return
+  }
+  avatarUploading.value = true
+  try {
+    await uploadAvatar(file)
+    avatarTs.value = Date.now()
+    await userStore.getUserInfo()
+    toast.success('头像已更新')
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '头像上传失败')
+  } finally {
+    avatarUploading.value = false
+  }
 }
 
 // ── 个人信息编辑 ──
@@ -140,14 +180,42 @@ onMounted(() => {
     <!-- 身份横幅 -->
     <Card class="overflow-hidden border-0 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent">
       <CardContent class="flex flex-wrap items-center gap-5 py-6">
-        <div
-          :class="[
-            'flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br text-3xl font-bold text-white shadow-md',
-            avatarGradient
-          ]"
+        <button
+          type="button"
+          class="group relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          :aria-label="avatarUrl ? '更换头像' : '上传头像'"
+          :disabled="avatarUploading"
+          @click="triggerAvatarUpload"
         >
-          {{ avatarInitial }}
-        </div>
+          <img
+            v-if="avatarUrl"
+            :src="avatarUrl"
+            alt="头像"
+            class="h-full w-full object-cover"
+          />
+          <span
+            v-else
+            :class="[
+              'flex h-full w-full items-center justify-center bg-gradient-to-br text-3xl font-bold text-white shadow-md',
+              avatarGradient
+            ]"
+          >
+            {{ avatarInitial }}
+          </span>
+          <span
+            class="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+          >
+            <Camera class="h-5 w-5" />
+            <span class="text-[11px] font-medium">{{ avatarUploading ? '上传中…' : avatarUrl ? '更换头像' : '上传头像' }}</span>
+          </span>
+        </button>
+        <input
+          ref="fileInput"
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          class="hidden"
+          @change="onAvatarFileChange"
+        >
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-2.5">
             <h3 class="truncate text-xl font-semibold">{{ displayName }}</h3>

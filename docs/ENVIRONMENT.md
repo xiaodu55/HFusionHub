@@ -73,6 +73,7 @@ Copy `deploy/.env.example` to `deploy/.env` for production Docker Compose:
 | `SPRINGDOC_SWAGGER_UI_ENABLED` | No | `true`（dev）/ `false`（prod compose） | Swagger UI 开关。生产默认关闭；临时开启在 `deploy/.env` 显式设置 |
 | `APP_CORS_ALLOWED_ORIGINS` | No | ``（fail-closed 同源） | Java CORS 白名单（逗号分隔，如 `https://hub.example.com`）。生产 compose 读取 `CORS_ALLOWED_ORIGINS`；**禁止 `*`**（allowCredentials=true 拒绝通配且属安全隐患）；留空时仅同源。开发/内网穿透用 `APP_CORS_ALLOW_ANY_ORIGIN=true` 显式放行 |
 | `AGENT_STATUS_EVENT_SSE_POLL_THREADS` | No | `0`（自动） | 任务 SSE 轮询线程池大小；0 = max(4, CPU/2)。慢连接不再拖垮全局轮询（M8） |
+| `APP_AVATAR_DIR` | No | `uploads/avatars` | 用户头像落盘目录（相对应用工作目录；Docker 下在 uploads-data 卷内持久化）。上传接口校验 JPG/PNG/WEBP/GIF 魔数、≤2MB |
 
 > Redis 密码：dev compose 已在 `docker/docker-compose.yml` 通过 `redis-server ... --requirepass "$REDIS_PASSWORD"` 启用（2026-08-21 起生效）。Java 侧 `application.yml` 读取 `REDIS_PASSWORD`，**两端必须一致**，否则 Java 启动报 NOAUTH。生产若 Redis 关闭 requirepass，将 `REDIS_PASSWORD` 留空即可。
 

@@ -1,4 +1,4 @@
-import { get, post, put } from './request'
+import { get, post, put, upload } from './request'
 import type { ApiResponse, LoginForm, PageResult, RegisterForm, UserInfo, UserRole } from './types'
 
 // 用户登录
@@ -65,6 +65,16 @@ export interface UserSearchResult {
 /** 按用户名/昵称搜索用户（登录用户可用） */
 export const searchUsers = (keyword: string): Promise<ApiResponse<UserSearchResult[]>> => {
   return get('/user/search', { keyword })
+}
+
+/**
+ * 上传当前用户头像（multipart，服务端校验类型/大小）
+ * @returns 头像访问 URL（/api/user/avatar/{userId}）
+ */
+export const uploadAvatar = (file: File): Promise<ApiResponse<string>> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return upload('/user/avatar', formData)
 }
 
 /** 修改当前用户密码 */
