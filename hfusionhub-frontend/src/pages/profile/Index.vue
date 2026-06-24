@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { KeyRound, IdCard, Mail, Phone, CalendarDays, Clock3, ShieldCheck, ShieldAlert, Fingerprint, Camera } from 'lucide-vue-next'
+import { KeyRound, IdCard, Mail, Phone, CalendarDays, Clock3, ShieldCheck, ShieldAlert, Fingerprint, Camera, Loader2 } from 'lucide-vue-next'
 import { changePassword, uploadAvatar } from '@/api/user'
 import type { UserRole } from '@/api/types'
 import { useToast } from '@/composables/useToast'
@@ -203,10 +203,17 @@ onMounted(() => {
             {{ avatarInitial }}
           </span>
           <span
-            class="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+            v-if="!avatarUrl"
+            class="pointer-events-none absolute inset-x-0 bottom-0 bg-black/45 py-0.5 text-center text-[10px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
           >
-            <Camera class="h-5 w-5" />
-            <span class="text-[11px] font-medium">{{ avatarUploading ? '上传中…' : avatarUrl ? '更换头像' : '上传头像' }}</span>
+            {{ avatarUploading ? '上传中…' : '上传头像' }}
+          </span>
+          <!-- 常驻相机徽章：不依赖悬停即可发现上传入口 -->
+          <span
+            class="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-card bg-primary text-primary-foreground shadow-md"
+          >
+            <Camera v-if="!avatarUploading" class="h-3.5 w-3.5" />
+            <Loader2 v-else class="h-3.5 w-3.5 animate-spin" />
           </span>
         </button>
         <input
@@ -227,7 +234,10 @@ onMounted(() => {
               {{ isAccountActive ? '账户正常' : '已禁用' }}
             </Badge>
           </div>
-          <p class="mt-1.5 text-sm text-muted-foreground">@{{ userStore.username }}</p>
+          <p class="mt-1.5 text-sm text-muted-foreground">
+            @{{ userStore.username }}
+            <span class="ml-2 text-xs">· 点击左侧头像可上传 / 更换头像（支持 JPG / PNG / WEBP / GIF，≤2MB）</span>
+          </p>
         </div>
         <div class="grid shrink-0 grid-cols-2 gap-x-8 gap-y-2 text-sm">
           <div class="flex items-center gap-2 text-muted-foreground">
