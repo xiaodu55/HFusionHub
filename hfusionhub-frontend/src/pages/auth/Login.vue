@@ -7,10 +7,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { BookOpen, CheckCircle2, Eye, EyeOff, MessageSquare, Sparkles } from 'lucide-vue-next'
+import { useToast } from '@/composables/useToast'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const toast = useToast()
 
 const form = ref({
   username: '',
@@ -62,6 +64,11 @@ const handleLogin = async () => {
 
 const goToRegister = () => {
   router.push('/register')
+}
+
+// 未接入邮件服务，无法自助邮件找回 —— 引导走管理员重置流程（真实存在的路径）
+const handleForgotPassword = () => {
+  toast.info('请联系管理员，在「账号权限」页为你的账号重置密码')
 }
 </script>
 
@@ -133,6 +140,16 @@ const goToRegister = () => {
                 <Eye v-else class="h-4 w-4" />
               </button>
             </div>
+          </div>
+
+          <div class="flex justify-end">
+            <button
+              type="button"
+              class="text-xs text-muted-foreground transition-colors hover:text-foreground"
+              @click="handleForgotPassword"
+            >
+              忘记密码？
+            </button>
           </div>
 
           <div v-if="error" class="rounded-xl border border-destructive/25 bg-destructive/[0.08] px-4 py-3 text-sm text-destructive">
