@@ -21,6 +21,6 @@ public class DocumentQueryDTO extends PageQuery {
     @Schema(description = "文档标题（模糊查询）")
     private String title;
 
-    @Schema(description = "文档状态：0-处理中，1-成功，2-失败")
+    @Schema(description = "文档状态：0-待解析，1-解析中，2-已完成，3-失败（见 DocumentStatus 枚举）")
     private Integer status;
 }

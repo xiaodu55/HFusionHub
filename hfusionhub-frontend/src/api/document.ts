@@ -84,6 +84,8 @@ export const getDocumentsByKbId = (kbId: number, params?: {
 export const getMyDocumentsByKbId = (kbId: number, params?: {
   page?: number
   pageSize?: number
+  /** 文档状态：0-待解析，1-解析中，2-已完成，3-失败；不传 = 全部 */
+  status?: number
 }): Promise<ApiResponse<PageResult<Document>>> => {
   return get(`/document/my/${kbId}`, params)
 }

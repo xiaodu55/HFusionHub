@@ -57,6 +57,8 @@ const loading = ref(false)
 const loadError = ref(false)
 const searchQuery = ref('')
 const selectedKbId = ref<number>(0) // 0 = 全部
+// 状态筛选：'' = 全部；0-待解析 1-解析中 2-已完成 3-失败（DocumentStatus 枚举）
+const selectedStatus = ref<number | ''>('')
 // 服务端分页（后端 /document/my/{kbId} 支持 page/pageSize）
 const currentPage = ref(1)
 const pageSize = ref(10)
@@ -95,16 +97,19 @@ const loadDocuments = async () => {
   loading.value = true
   loadError.value = false
   try {
+    const statusParam = selectedStatus.value === '' ? undefined : selectedStatus.value
     let res
     if (selectedKbId.value > 0) {
       res = await documentApi.getMyDocumentsByKbId(selectedKbId.value, {
         page: currentPage.value,
         pageSize: pageSize.value,
+        status: statusParam,
       })
     } else {
       res = await documentApi.getMyDocumentsByKbId(0, {
         page: currentPage.value,
         pageSize: pageSize.value,
+        status: statusParam,
       })
     }
     if (seq !== loadSeq) return // 过期响应（用户已切换知识库/翻页）
@@ -316,6 +321,11 @@ watch(selectedKbId, () => {
   loadDocuments()
 })
 
+watch(selectedStatus, () => {
+  currentPage.value = 1
+  loadDocuments()
+})
+
 onMounted(() => {
   loadDocuments()
   loadKnowledgeBases()
@@ -326,7 +336,7 @@ onMounted(() => {
   <div class="space-y-6 pb-4">
     <section class="relative overflow-hidden rounded-2xl border border-border bg-card/80 shadow-[0_18px_45px_rgba(0,0,0,0.18)]"><div class="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-primary/10 blur-3xl" /><div class="relative flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"><div class="flex gap-4"><div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><Files class="h-5 w-5" /></div><div><p class="text-xs font-medium tracking-[0.16em] text-primary/90">DOCUMENT LIBRARY</p><h2 class="mt-1 text-2xl font-semibold tracking-tight">文档</h2><p class="mt-1 text-sm leading-6 text-muted-foreground">上传、解析并维护 AI 可以检索的资料。</p></div></div><div class="flex flex-wrap gap-2"><Button variant="outline" size="sm" @click="router.push('/document/recycle-bin')"><Archive class="mr-1.5 h-3.5 w-3.5" />回收站</Button><Button variant="outline" size="sm" :disabled="syncing" @click="handleSyncAll"><RefreshCcw :class="['mr-1.5 h-3.5 w-3.5', { 'animate-spin': syncing }]" />同步状态</Button><Button class="gap-2" :disabled="!hasEnabledKnowledgeBase" @click="isUploadDialogOpen = true"><Upload class="h-4 w-4" />添加文档</Button></div></div></section>
 
-    <Card class="border-border bg-card/80"><CardContent class="grid gap-3 p-4 md:grid-cols-[13rem_minmax(0,1fr)]"><select v-model="selectedKbId" aria-label="按知识库筛选" class="h-10 rounded-md border border-input bg-background/70 px-3 text-sm outline-none focus:border-primary/50"><option :value="0">全部知识库</option><option v-for="kb in knowledgeBases" :key="kb.id" :value="kb.id">{{ kb.name }}</option></select><div class="relative"><Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input v-model="searchQuery" placeholder="搜索文档名称" class="pl-10" /></div></CardContent></Card>
+    <Card class="border-border bg-card/80"><CardContent class="grid gap-3 p-4 md:grid-cols-[13rem_11rem_minmax(0,1fr)]"><select v-model="selectedKbId" aria-label="按知识库筛选" class="h-10 rounded-md border border-input bg-background/70 px-3 text-sm outline-none focus:border-primary/50"><option :value="0">全部知识库</option><option v-for="kb in knowledgeBases" :key="kb.id" :value="kb.id">{{ kb.name }}</option></select><select v-model="selectedStatus" aria-label="按解析状态筛选" class="h-10 rounded-md border border-input bg-background/70 px-3 text-sm outline-none focus:border-primary/50"><option :value="''">全部状态</option><option :value="0">待解析</option><option :value="1">解析中</option><option :value="2">已解析</option><option :value="3">解析失败</option></select><div class="relative"><Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input v-model="searchQuery" placeholder="搜索文档名称" class="pl-10" /></div></CardContent></Card>
 
     <section class="grid gap-3 sm:grid-cols-3"><div class="rounded-xl border border-border bg-card/70 p-4"><p class="text-sm text-muted-foreground">文档总数</p><p class="mt-2 text-2xl font-semibold">{{ total }}</p></div><div class="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] p-4"><p class="text-sm text-muted-foreground">正在处理</p><p class="mt-2 text-2xl font-semibold text-cyan-200">{{ processingDocumentCount }}</p></div><div class="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] p-4"><p class="text-sm text-muted-foreground">已可检索</p><p class="mt-2 text-2xl font-semibold text-emerald-200">{{ parsedDocumentCount }}</p></div></section>
 
