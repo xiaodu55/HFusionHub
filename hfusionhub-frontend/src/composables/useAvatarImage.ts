@@ -14,11 +14,15 @@ export function useAvatarImage(avatarUrl: Ref<string | undefined | null>) {
 
   watch(
     avatarUrl,
-    async (url) => {
-      if (!url) {
+    async (rawUrl) => {
+      if (!rawUrl) {
         blobUrl.value = ''
         return
       }
+      // 后端返回的地址可能带 /api 前缀，axios baseURL 也是 /api，
+      // 直接拼会变成 /api/api/... 404 —— 剥离重复前缀
+      const base = '/api'
+      const url = rawUrl.startsWith(`${base}/`) ? rawUrl.slice(base.length) : rawUrl
       try {
         const data = (await get(url, undefined, { responseType: 'blob' })) as unknown as Blob
         if (blobUrl.value) URL.revokeObjectURL(blobUrl.value)
