@@ -60,7 +60,7 @@ const stats = ref<StatCard[]>([
   {
     title: '文档',
     value: 0,
-    caption: '已解析与可检索',
+    caption: '名下文档（含待解析）',
     trend: '--',
     path: '/document',
     icon: FileText,
@@ -81,7 +81,8 @@ const stats = ref<StatCard[]>([
   },
   {
     title: '检索能力',
-    value: 3,
+    // 检索架构常量：P5 混合检索 = 向量 + 关键词共 2 条通道（GraphRAG 已移除）
+    value: 2,
     caption: '向量与关键词混合通道（默认开启）',
     trend: '—',
     path: '/rag',
@@ -115,7 +116,7 @@ const healthItems = computed(() => [
   },
   {
     label: '文档索引',
-    value: stats.value[1].value > 0 ? '可检索' : '待上传',
+    value: stats.value[1].value > 0 ? '已上传' : '待上传',
     icon: FileText,
     tone: 'text-cyan-700 dark:text-cyan-300',
   },
