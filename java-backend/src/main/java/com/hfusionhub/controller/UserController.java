@@ -103,7 +103,9 @@ public class UserController {
     }
 
     /**
-     * 读取用户头像（<img> 标签无法携带 satoken 头，故 GET 放行鉴权；仅返回图片字节）
+     * 读取用户头像（需登录；前端经 fetch+blob 携带 satoken 头加载。
+     * 端点不可免鉴权：SaToken 路径放行不区分 HTTP 方法，会连带放开 POST 上传，
+     * 且租户上下文是 MyBatis 租户插件写 user 表的必要条件）
      */
     @GetMapping("/avatar/{userId}")
     @Operation(summary = "获取头像", description = "按用户 ID 读取头像图片，未设置返回 404")

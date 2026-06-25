@@ -49,6 +49,10 @@ service.interceptors.request.use(
 // 响应拦截器
 service.interceptors.response.use(
   (response: AxiosResponse) => {
+    // 二进制响应（如头像图片）直接透传，无 R 结构可解析
+    if (response.config.responseType === 'blob' || response.data instanceof Blob) {
+      return response.data
+    }
     const res = response.data
     if (res.code === 200) {
       return res

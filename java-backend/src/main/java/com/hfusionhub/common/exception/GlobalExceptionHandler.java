@@ -136,6 +136,26 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 请求方法不支持 — 返回 405 而非兜底 500（如旧客户端打到已下线的方法）
+     */
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    @ResponseStatus(HttpStatus.METHOD_NOT_ALLOWED)
+    public R<?> handleMethodNotSupported(org.springframework.web.HttpRequestMethodNotSupportedException e) {
+        log.warn("请求方法不支持: {}", e.getMessage());
+        return R.fail(405, "请求方法不被支持");
+    }
+
+    /**
+     * 请求 Content-Type 不支持 — 返回 415 而非兜底 500（如 multipart 端点收到 JSON）
+     */
+    @ExceptionHandler(org.springframework.web.HttpMediaTypeNotSupportedException.class)
+    @ResponseStatus(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+    public R<?> handleMediaTypeNotSupported(org.springframework.web.HttpMediaTypeNotSupportedException e) {
+        log.warn("Content-Type 不支持: {}", e.getMessage());
+        return R.fail(415, "请求内容类型不被支持");
+    }
+
+    /**
      * 运行时异常
      */
     @ExceptionHandler(RuntimeException.class)

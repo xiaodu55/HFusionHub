@@ -14,6 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **侧边栏头像**：MainLayout 用户区同步显示已上传头像（object-cover 裁剪），未设置保持首字母
 - **回归测试**：updateAvatar 落盘/相对路径标记、换扩展名替换旧文件、超大拒绝、伪装扩展名拒绝、不存在头像返回空——5 项
 
+#### Fixed（头像上传上线首日修复）
+- **SaToken 放行误伤 POST**：`/user/avatar/*` 曾整体加入免登录清单（SaToken 路径匹配不分 HTTP 方法），匿名上传直接 500——移除放行，上传/读取均需登录；头像改为前端 fetch+blob 携带 satoken 头加载（新增 `useAvatarImage` composable，axios 拦截器豁免 blob 响应）
+- **入口不可发现**：上传入口原为 hover 才出现的蒙层——改为头像右上角常驻相机徽章 + 用户名旁说明文字
+- **405/415 语义**：GlobalExceptionHandler 补 HttpRequestMethodNotSupportedException（405）与 HttpMediaTypeNotSupportedException（415），不再落入 500 兜底误导排障
+
 ### 评估修复第二批 + 依赖升级批次（2026-08-30）：S4/S5 竞态、M4–M13 全量、Spring Boot 3.5.16、FastAPI 0.141（源自 docs/REPAIR_ROADMAP.md）
 
 #### Fixed（Java 竞态/事务）

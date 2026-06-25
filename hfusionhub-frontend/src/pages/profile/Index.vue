@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { KeyRound, IdCard, Mail, Phone, CalendarDays, Clock3, ShieldCheck, ShieldAlert, Fingerprint, Camera, Loader2 } from 'lucide-vue-next'
 import { changePassword, uploadAvatar } from '@/api/user'
+import { useAvatarImage } from '@/composables/useAvatarImage'
 import type { UserRole } from '@/api/types'
 import { useToast } from '@/composables/useToast'
 
@@ -62,9 +63,11 @@ const formatDateTime = (value?: string) => {
 const avatarTs = ref(Date.now())
 const avatarUploading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
-const avatarUrl = computed(() =>
+const avatarSrc = computed(() =>
   userStore.userInfo?.avatar ? `${userStore.userInfo.avatar}?t=${avatarTs.value}` : ''
 )
+// <img> 无法携带 satoken 头 → blob 拉取后以 objectURL 展示
+const avatarUrl = useAvatarImage(avatarSrc)
 
 const triggerAvatarUpload = () => {
   fileInput.value?.click()

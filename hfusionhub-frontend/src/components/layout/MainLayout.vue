@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { useAvatarImage } from '@/composables/useAvatarImage'
 import { get } from '@/api/request'
 import type { ApiResponse, UserRole } from '@/api/types'
 import * as agentApi from '@/api/agent'
@@ -128,7 +129,8 @@ const isActive = (path: string) => {
 const currentItem = computed(() => menuItems.find((item) => isActive(item.path)))
 const userDisplayName = computed(() => userStore.nickname || userStore.username || 'HFusionHub 用户')
 const userInitial = computed(() => userDisplayName.value.trim().slice(0, 1).toUpperCase() || 'H')
-const userAvatarUrl = computed(() => userStore.userInfo?.avatar || '')
+const userAvatarSrc = computed(() => userStore.userInfo?.avatar || '')
+const userAvatarUrl = useAvatarImage(userAvatarSrc)
 const userRoleLabel = computed(() => ({ pending: '等待分配', user: '普通用户', builder: 'AI 配置员', admin: '超级管理员' }[userStore.role]))
 const unreadNotificationCount = computed(() => notifications.value.length + unreadNoticeCount.value)
 const serviceLabel = computed(() => ({ checking: '检查中', online: '服务在线', offline: '服务异常' }[serviceState.value]))
