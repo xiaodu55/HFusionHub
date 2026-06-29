@@ -140,17 +140,30 @@ select {
   width: 2.5rem;
   height: 2.5rem;
   border-radius: var(--radius);
-  border: 1px solid rgba(52, 211, 153, 0.34);
-  background: linear-gradient(135deg, rgba(52, 211, 153, 0.2), rgba(255, 255, 255, 0.06));
-  color: #d9f99d;
+  /* 浅色模式：深绿文字 + 清晰底色边框，保证对比度（原 #d9f99d 在浅色下不可读） */
+  border: 1px solid rgba(5, 150, 105, 0.45);
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.22), rgba(16, 185, 129, 0.10));
+  color: #047857;
   font-size: 0.85rem;
   font-weight: 800;
   box-shadow: 0 0 28px rgba(52, 211, 153, 0.16);
 }
 
+/* 暗色模式：恢复亮色文字与柔和底 */
+.dark .brand-mark,
+.dark .user-avatar {
+  border-color: rgba(52, 211, 153, 0.34);
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.2), rgba(255, 255, 255, 0.06));
+  color: #d9f99d;
+}
+
 .user-avatar {
   width: 2.25rem;
   height: 2.25rem;
+  color: #065f46;
+}
+
+.dark .user-avatar {
   color: #f8fafc;
 }
 
