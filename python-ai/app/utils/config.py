@@ -84,7 +84,9 @@ class Config:
 
     # Embedding Configuration
     EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", "1024"))
-    EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "unknown")
+    # 空 = 未显式配置；消费端回退 OLLAMA_EMBEDDING_MODEL。
+    # 旧默认 "unknown" 会作为 embeddingModel 元数据写入索引，误导排障
+    EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "")
     EMBEDDING_MAX_RETRIES = int(os.getenv("EMBEDDING_MAX_RETRIES", "3"))
     EMBEDDING_RETRY_DELAY = float(os.getenv("EMBEDDING_RETRY_DELAY", "1.0"))
     # Allow random-vector fallback ONLY in test environments.  Production must

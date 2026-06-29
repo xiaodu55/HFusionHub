@@ -7,8 +7,8 @@ import type {
   KnowledgeBaseUpdateDTO
 } from './types'
 
-// 创建知识库
-export const createKnowledgeBase = (data: KnowledgeBaseCreateDTO): Promise<ApiResponse<number>> => {
+// 创建知识库（后端返回 R<KnowledgeBaseInfoDTO>）
+export const createKnowledgeBase = (data: KnowledgeBaseCreateDTO): Promise<ApiResponse<KnowledgeBase>> => {
   return post('/knowledge-base', data)
 }
 

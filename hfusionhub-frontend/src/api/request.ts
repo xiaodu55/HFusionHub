@@ -54,6 +54,10 @@ service.interceptors.response.use(
       return response.data
     }
     const res = response.data
+    // 空响应体（204/空字符串）：无 R 结构可解析，直接放行
+    if (res === null || res === undefined || res === '') {
+      return res
+    }
     if (res.code === 200) {
       return res
     } else if (res.code === 401) {

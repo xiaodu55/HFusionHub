@@ -586,8 +586,10 @@ class ModelGateway:
 
             if config.LLM_RESPONSE_CACHE_TTL_SECONDS > 0 and content:
                 from .base import LLMResponse
+                # 缓存键与 get 侧一致用 resolved_model —— 此前 put 用 candidate_model，
+                # fallback 命中时两键错位导致缓存永不命中
                 _response_cache_put(
-                    _response_cache_key(candidate_model, temperature, max_tokens, "", messages),
+                    _response_cache_key(resolved_model, temperature, max_tokens, "", messages),
                     LLMResponse(content=content, model=candidate_model, finish_reason="stop"),
                 )
             return
@@ -708,8 +710,12 @@ class ModelGateway:
 
     @staticmethod
     def _estimate_completion(content: str) -> int:
-        """Rough post-hoc completion-token estimate for streamed output."""
-        return max(0, len(content or "") // 4)
+        """Post-hoc completion-token estimate for streamed output.
+
+        中文约 1 字/token、ASCII 约 4 字符/token（OpenAI 系分词经验值）。
+        旧实现统一 chars//4 会把中文成本低估约 4 倍；偏高估算对计量更安全。
+        """
+        return max(0, ModelGateway._estimate_tokens_text(content or ""))
 
     async def _call_provider(
         self,
@@ -907,9 +913,14 @@ class ModelGateway:
 
     @staticmethod
     def _estimate_tokens(messages: List[ChatMessage]) -> int:
-        """Rough pre-flight token estimate (chars / 4) for rate limiting."""
-        chars = sum(len(message.content or "") for message in messages)
-        return max(1, chars // 4)
+        """Pre-flight token estimate for rate limiting（中文校准，同 _estimate_completion）。"""
+        total = sum(ModelGateway._estimate_tokens_text(m.content or "") for m in messages)
+        return max(1, total)
+
+    @staticmethod
+    def _estimate_tokens_text(text: str) -> int:
+        cjk = sum(1 for ch in text if "一" <= ch <= "鿿")
+        return cjk + (len(text) - cjk + 3) // 4
 
     def _default_provider(self) -> Optional[ProviderConfig]:
         for provider in self._providers.values():

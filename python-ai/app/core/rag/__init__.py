@@ -608,33 +608,5 @@ def reset_conversation_memory_instance():
     _conversation_memory = None
 
 
-# 全局 WorkflowEngine 实例
-_workflow_engine: Optional["WorkflowEngine"] = None
-
-
-def get_workflow_engine_instance(
-    config: Optional["WorkflowConfig"] = None
-) -> "WorkflowEngine":
-    """
-    获取全局 WorkflowEngine 实例
-
-    Args:
-        config: 工作流配置
-
-    Returns:
-        WorkflowEngine 实例
-    """
-    global _workflow_engine
-
-    if _workflow_engine is None:
-        _workflow_engine = WorkflowFactory.create_engine(config)
-
-    return _workflow_engine
-
-
-def reset_workflow_engine_instance():
-    """重置全局 WorkflowEngine（用于测试）"""
-    global _workflow_engine
-    if _workflow_engine:
-        _workflow_engine.clear_history()
-    _workflow_engine = None
+# WorkflowEngine 全局单例统一由 agent_workflow.get_workflow_engine /
+# reset_workflow_engine 提供（此前此处重复实现了一份 instance 变体，无任何引用）

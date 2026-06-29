@@ -86,6 +86,7 @@ class FeatureFlagClient:
         self._cache_ttl = cache_ttl
         self._cache: dict = {}          # flag_key → {enabled, rules, fetched_at}
         self._lock = threading.Lock()
+        self._refresh_lock = threading.Lock()  # 串行化后台刷新线程的创建（check-then-start 竞态）
         self._last_fetch: float = 0
         self._fetch_url = f"{config.JAVA_BACKEND_URL}/api/internal/feature-flags/snapshot"
         self._internal_token = getattr(config, "INTERNAL_API_TOKEN", "")
@@ -158,7 +159,10 @@ class FeatureFlagClient:
 
     def _trigger_background_refresh(self):
         """Fire-and-forget background refresh if not already running."""
-        if not self._refresh_thread or not self._refresh_thread.is_alive():
+        with self._refresh_lock:
+            # 双重检查：并发调用下只允许起一个刷新线程
+            if self._refresh_thread and self._refresh_thread.is_alive():
+                return
             self._refresh_thread = threading.Thread(target=self._fetch_all, daemon=True)
             self._refresh_thread.start()
 

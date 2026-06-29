@@ -1,8 +1,8 @@
 import { get, post, put, del } from './request'
 import type { ApiResponse, PageResult, Document } from './types'
 
-// 上传文档
-export const uploadDocument = (file: File, kbId: number, title?: string): Promise<ApiResponse<number>> => {
+// 上传文档（后端返回 R<DocumentInfoDTO>）
+export const uploadDocument = (file: File, kbId: number, title?: string): Promise<ApiResponse<Document>> => {
   const formData = new FormData()
   formData.append('file', file)
   formData.append('knowledgeBaseId', kbId.toString())

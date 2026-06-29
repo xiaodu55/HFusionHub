@@ -1,4 +1,5 @@
 import { get } from './request'
+import type { ApiResponse } from './types'
 
 export interface CostSummary {
   totalCost: number
@@ -31,14 +32,14 @@ export interface TenantCostSummary {
   userCount: number
 }
 
-export const getCostSummary = (days = 30) =>
-  get<{ data: CostSummary }>('/cost/summary', { days })
+export const getCostSummary = (days = 30): Promise<ApiResponse<CostSummary>> =>
+  get('/cost/summary', { days })
 
-export const getDailyCosts = (days = 30) =>
-  get<{ data: DailyCost[] }>('/cost/daily', { days })
+export const getDailyCosts = (days = 30): Promise<ApiResponse<DailyCost[]>> =>
+  get('/cost/daily', { days })
 
-export const getModelBreakdown = (days = 30) =>
-  get<{ data: ModelBreakdown[] }>('/cost/models', { days })
+export const getModelBreakdown = (days = 30): Promise<ApiResponse<ModelBreakdown[]>> =>
+  get('/cost/models', { days })
 
-export const getTenantCost = (tenantId: number) =>
-  get<{ data: TenantCostSummary }>(`/cost/tenant/${tenantId}`)
+export const getTenantCost = (tenantId: number): Promise<ApiResponse<TenantCostSummary>> =>
+  get(`/cost/tenant/${tenantId}`)

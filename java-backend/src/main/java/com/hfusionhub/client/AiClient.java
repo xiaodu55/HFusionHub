@@ -44,6 +44,16 @@ public class AiClient {
         this.userModelConfigService = userModelConfigService;
     }
 
+    @jakarta.annotation.PostConstruct
+    void warnIfTokenMissing() {
+        // 启动期大声提示（生产 compose 已 :?required 强制；dev/测试空值合法不阻断）。
+        // 此前只在调用时才发现，排障成本高。
+        if (internalApiToken == null || internalApiToken.isBlank()) {
+            log.error("PYTHON_AI_INTERNAL_TOKEN 未配置 —— 所有 AI 调用将失败。"
+                    + "生产由 compose :?required 强制注入；本地联调请在环境变量或 application.yml 配置");
+        }
+    }
+
     /**
      * Chat with AI agent — general path (knowledge_base_id optional).
      *
@@ -470,10 +480,13 @@ public class AiClient {
                 .retrieve()
                 .onStatus(status -> status.isError(), clientResponse -> clientResponse
                         .bodyToMono(String.class)
-                        .flatMap(body -> reactor.core.publisher.Mono.error(new BusinessException(
-                                StatusCode.SERVICE_UNAVAILABLE,
-                                "Python AI returned status "
-                                        + clientResponse.statusCode().value() + ": " + body))))
+                        .flatMap(body -> {
+                            log.warn("Python AI error status={} body={}", clientResponse.statusCode().value(),
+                                    body.length() > 500 ? body.substring(0, 500) : body);
+                            return reactor.core.publisher.Mono.error(new BusinessException(
+                                    StatusCode.SERVICE_UNAVAILABLE,
+                                    "AI 服务暂时不可用（HTTP " + clientResponse.statusCode().value() + "），请稍后重试"));
+                        }))
                 .bodyToFlux(String.class)
                 .doOnNext(chunk -> log.debug("SSE raw chunk ({}B)", chunk.length()))
                 .doOnError(ResourceAccessException.class, e -> {
@@ -591,10 +604,13 @@ public class AiClient {
                 .retrieve()
                 .onStatus(status -> status.isError(), clientResponse -> clientResponse
                         .bodyToMono(String.class)
-                        .flatMap(body -> reactor.core.publisher.Mono.error(new BusinessException(
-                                StatusCode.SERVICE_UNAVAILABLE,
-                                "Python AI returned status "
-                                        + clientResponse.statusCode().value() + ": " + body))))
+                        .flatMap(body -> {
+                            log.warn("Python AI error status={} body={}", clientResponse.statusCode().value(),
+                                    body.length() > 500 ? body.substring(0, 500) : body);
+                            return reactor.core.publisher.Mono.error(new BusinessException(
+                                    StatusCode.SERVICE_UNAVAILABLE,
+                                    "AI 服务暂时不可用（HTTP " + clientResponse.statusCode().value() + "），请稍后重试"));
+                        }))
                 .bodyToFlux(String.class)
                 .doOnNext(chunk -> log.debug("Agent V1 SSE raw chunk ({}B)", chunk.length()))
                 .doOnError(ResourceAccessException.class, e -> {
@@ -1106,10 +1122,13 @@ public class AiClient {
                 .retrieve()
                 .onStatus(status -> status.isError(), clientResponse -> clientResponse
                         .bodyToMono(String.class)
-                        .flatMap(body -> reactor.core.publisher.Mono.error(new BusinessException(
-                                StatusCode.SERVICE_UNAVAILABLE,
-                                "Python AI returned status "
-                                        + clientResponse.statusCode().value() + ": " + body))))
+                        .flatMap(body -> {
+                            log.warn("Python AI error status={} body={}", clientResponse.statusCode().value(),
+                                    body.length() > 500 ? body.substring(0, 500) : body);
+                            return reactor.core.publisher.Mono.error(new BusinessException(
+                                    StatusCode.SERVICE_UNAVAILABLE,
+                                    "AI 服务暂时不可用（HTTP " + clientResponse.statusCode().value() + "），请稍后重试"));
+                        }))
                 .bodyToFlux(String.class)
                 .doOnError(ResourceAccessException.class, e -> {
                     log.error("AI service connection failed during bid write streaming: {}", e.getMessage());

@@ -201,8 +201,8 @@ async def execute_tool(
     """
     _warn_legacy_once("execute_tool")
 
-    # Try to find the registry from the tools list (attached at registration)
-    # or fall back to policy-based execution.
+    # Registry-attached 形式（审批流等场景在 tool dict 携带 _registry）走
+    # Registry 执行（模式门/权限/KB 隔离生效）；否则回退 policy-based 执行。
     registry: Optional[ToolRegistry] = None
     for tool in tools:
         reg = tool.get("_registry")
@@ -211,11 +211,10 @@ async def execute_tool(
             break
 
     if registry is not None:
-        # Use the Registry for execution (with optional context).
         result = await registry.execute(tool_name, tool_input, context=context)
         return json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
 
-    # Fallback: policy-based execution (MCP path)
+    # Policy-based execution (MCP path)
     try:
         safe_input = policy.normalize(tool_name, tool_input) if policy else tool_input
     except ToolPolicyError as error:

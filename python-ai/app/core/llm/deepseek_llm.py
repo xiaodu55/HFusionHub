@@ -273,15 +273,20 @@ class DeepSeekLLM(BaseLLM):
                     if data_str.strip() == "[DONE]":
                         break
 
+                    # 空 choices / 非字典载荷与 JSONDecodeError 一样按心跳行跳过
+                    # （此前只捕获 JSONDecodeError，choices 为空时 IndexError 直接崩流）
                     try:
                         data = json.loads(data_str)
-                        delta = data["choices"][0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            parts.append(content)
-                            yield content
                     except json.JSONDecodeError:
                         continue
+                    choices = data.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = (choices[0] or {}).get("delta") or {}
+                    content = delta.get("content", "")
+                    if content:
+                        parts.append(content)
+                        yield content
 
             if config.LLM_RESPONSE_CACHE_TTL_SECONDS > 0 and parts:
                 from .base import LLMResponse

@@ -42,6 +42,11 @@ def _validated_base_url(raw: str) -> str:
             raise
         # A normal DNS hostname is allowed. Private addresses remain available
         # for self-hosted Ollama/OpenAI-compatible services.
+        #
+        # SSRF 权衡（有意为之，勿"加固"掉）：放行私网段是自托管模型（内网
+        # Ollama/vLLM）的硬需求；对冲手段是仅登录用户可配置自定义供应商 +
+        # 出网域名/IP 由部署侧网络策略约束。若未来开放给不可信租户，需改为
+        # 白名单制并校验解析后 IP。
     return value
 
 

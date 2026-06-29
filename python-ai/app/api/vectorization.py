@@ -466,7 +466,18 @@ async def _process_document_background(
                 chunks=_callback_chunk_metadata(chunks),
             )
             if not callback_ok:
-                raise RuntimeError("Java callback was not acknowledged; index remains pending")
+                # S6 收敛：新索引已落库且旧版本已删（上方替换逻辑），索引是最新且
+                # 无重复的 —— 此时把任务标 FAILED 会造成"索引有效但任务失败"的对账
+                # 漂移并触发 Java 恢复调度重复重析。改为按完成收尾 + ERROR 告警；
+                # 回调真丢失时 document 会停在 PROCESSING，由 Java stale 恢复调度
+                # 幂等重析收敛。
+                logger.error(
+                    "[Vectorization] Java callback unacknowledged after retries: "
+                    "document=%s version=%s — index stored, task marked COMPLETED; "
+                    "document status will be reconciled by Java recovery scheduler",
+                    document_id,
+                    index_version,
+                )
 
         _update_status(
             "COMPLETED",
@@ -543,19 +554,21 @@ async def get_chunks(document_id: str, page: int = 1, size: int = 20, block_type
         total = data.get("total", 0)
 
         chunks = []
-        for record in records:
+        # index = 文档内全局顺序：分页 offset + 页内序号（此前硬编码 0，分页语义丢失）
+        base_index = (max(page, 1) - 1) * size
+        for offset, record in enumerate(records):
             # Parse outline_path from JSON string to list
             outline_path = record.get("outline_path", "[]")
             if isinstance(outline_path, str):
                 import json
                 try:
                     outline_path = json.loads(outline_path)
-                except:
+                except Exception:
                     outline_path = []
 
             chunks.append(VectorChunk(
                 chunk_id=record.get("chunk_id", ""),
-                index=0,
+                index=base_index + offset,
                 content=record.get("content", ""),
                 block_type=record.get("block_type", "PARAGRAPH"),
                 outline_path=outline_path,
@@ -707,24 +720,34 @@ async def _notify_callback_async(
             ).decode("ascii")
             headers["X-Callback-Signature"] = signature
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(callback_url, content=payload_json, headers=headers)
+        # 复用共享 httpx 池（此前每次调用新建 AsyncClient 泄漏连接）+ 指数退避重试
+        from app.core.llm.http_client import get_shared_client
 
-        if response.status_code >= 400:
-            logger.warning(f"[Callback] Warning: {callback_url} returned {response.status_code}")
-            return False
-        else:
-            logger.info(f"[Callback] Notified {callback_url}: {response.status_code}")
-            return True
+        client = get_shared_client("callback", timeout=10.0)
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await client.post(callback_url, content=payload_json, headers=headers)
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                logger.warning(f"[Callback] attempt {attempt}/{max_attempts} network error: {callback_url}: {type(e).__name__}")
+            except Exception as e:
+                logger.error(f"[Callback] attempt {attempt}/{max_attempts} failed: {type(e).__name__}: {str(e)[:200]}")
+            else:
+                if response.status_code < 400:
+                    logger.info(f"[Callback] Notified {callback_url}: {response.status_code}")
+                    return True
+                logger.warning(
+                    f"[Callback] attempt {attempt}/{max_attempts}: {callback_url} returned {response.status_code}"
+                )
+                # 4xx 属确定性失败（鉴权/参数错误），重试无意义
+                if 400 <= response.status_code < 500:
+                    return False
+            if attempt < max_attempts:
+                await asyncio.sleep(0.5 * (2 ** (attempt - 1)))
+        return False
 
-    except httpx.TimeoutException:
-        logger.warning(f"[Callback] Timeout: {callback_url}")
-        return False
-    except httpx.ConnectError:
-        logger.warning(f"[Callback] Connection failed: {callback_url}")
-        return False
     except Exception as e:
-        logger.error(f"[Callback] Failed to notify: {str(e)}")
+        logger.error(f"[Callback] Failed to notify: {type(e).__name__}: {str(e)[:200]}")
         return False
 
 
@@ -740,7 +763,7 @@ def _callback_chunk_metadata(chunks: List[VectorChunk]) -> List[Dict[str, Any]]:
             "contentExcerpt": chunk.content[:1000],
             "charCount": len(chunk.content),
             "metadata": _json_safe_metadata(chunk.metadata),
-            "embeddingModel": config.EMBEDDING_MODEL,
+            "embeddingModel": config.EMBEDDING_MODEL or config.OLLAMA_EMBEDDING_MODEL,
             "embeddingDimension": config.EMBEDDING_DIMENSION,
             "embeddingVersion": "v1",
         }

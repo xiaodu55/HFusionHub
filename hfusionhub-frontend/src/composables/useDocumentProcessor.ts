@@ -191,11 +191,12 @@ export function useDocumentProcessor() {
         updateProcessingStatus(docId, payload)
         const status = payload?.status
 
-        if (status === 'COMPLETED' || status === 'FAILED' || status === 'NOT_FOUND' || status === 'ERROR') {
+        // SUPERSEDED：重处理触发的取代终态，同样停止轮询并清理（此前缺失导致被取代文档永久轮询）
+        if (status === 'COMPLETED' || status === 'FAILED' || status === 'SUPERSEDED' || status === 'NOT_FOUND' || status === 'ERROR') {
           // 完成或失败，停止轮询
           removeProcessing(docId)
           activePollingDocs.delete(docId)
-          if (status === 'COMPLETED' || status === 'NOT_FOUND') {
+          if (status === 'COMPLETED' || status === 'SUPERSEDED' || status === 'NOT_FOUND') {
             clearProcessingStatus(docId)
           }
           onStatusChange?.()

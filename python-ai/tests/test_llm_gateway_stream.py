@@ -319,3 +319,21 @@ def test_get_llm_mock_still_wins_over_gateway(monkeypatch):
 
     llm = get_llm()
     assert isinstance(llm, MockLLM)
+
+
+def test_token_estimation_calibrated_for_chinese():
+    """A3: token 估算中文校准 — 中文 ~1 字/token，ASCII ~4 字符/token。
+    旧实现 chars//4 会把中文成本低估约 4 倍。"""
+    from app.core.llm.model_gateway import ModelGateway
+    from app.core.llm.base import ChatMessage
+
+    # 纯中文 12 字 → 12 tokens（旧算法得 3）
+    text = "知识库问答助手测试通过"
+    assert len(text) == 11
+    assert ModelGateway._estimate_tokens_text(text) == 11  # 每个中文字 1 token
+    # 纯 ASCII 8 字符 → 2 tokens
+    assert ModelGateway._estimate_tokens_text("abcdefgh") == 2
+    # 混合：中文 2 字 + ASCII 3 字符 → 2 + ceil(3/4) = 3
+    assert ModelGateway._estimate_tokens_text("知识abc") == 3
+    # 消息级汇总不低于 1
+    assert ModelGateway._estimate_tokens([ChatMessage(role="user", content="测试")]) >= 1

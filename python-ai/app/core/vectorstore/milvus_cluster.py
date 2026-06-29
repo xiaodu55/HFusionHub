@@ -461,6 +461,27 @@ class MilvusClusterStore(VectorStoreProtocol):
                 return []
             client.load_collection(self._collection_name)
             filter_expr = self._tenant_filter(knowledge_base_id=knowledge_base_id)
+            # 单次 query 硬上限 16384 — 大库对账会静默截断虚低。
+            # 优先 query_iterator（游标迭代无窗口限制），不可用时回退单次 query
+            try:
+                iterator = client.query_iterator(
+                    collection_name=self._collection_name,
+                    filter=filter_expr,
+                    output_fields=["chunk_id"],
+                    batch_size=1000,
+                )
+                ids: List[str] = []
+                while True:
+                    batch = iterator.next()
+                    if not batch:
+                        break
+                    ids.extend(r["chunk_id"] for r in batch)
+                iterator.close()
+                return ids
+            except (AttributeError, TypeError) as exc:
+                logger.warning(
+                    "query_iterator unavailable (%s); falling back to single query (16384 cap)", exc
+                )
             results = client.query(
                 collection_name=self._collection_name,
                 filter=filter_expr,
