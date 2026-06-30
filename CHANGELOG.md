@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Low 批清偿 + 覆盖率门禁批次（2026-08-30 第四批，源自 docs/REPAIR_ROADMAP.md Low 批）
+
+#### Fixed（Python AI）
+- **A1 DeepSeek 流式解析**：空 choices / 非字典载荷按心跳行跳过（此前仅捕获 JSONDecodeError，choices 为空 IndexError 直接崩流）
+- **A2 网关流式缓存键错位**：put 侧改用 resolved_model 与 get 对齐（fallback 命中时两键错位导致缓存永不命中）
+- **A3 中文 token 估算校准**：CJK ≈ 1 字/token、ASCII ≈ 4 字符/token（旧 chars//4 低估中文成本约 4 倍）；回归测试 1 项
+- **A4 回调通知**：复用共享 httpx 池（get_shared_client，此前每次新建客户端）+ 指数退避重试 3 次（4xx 确定性失败不重试）
+- **A5 get_chunks 分页语义**：index = 分页 offset + 页内序号（此前硬编码 0）
+- **A6 Milvus 对账截断**：query_iterator 游标迭代（无 16384 窗口限制），不可用时回退原单次 query
+- **A7 EMBEDDING_MODEL 默认 unknown → 空**，回调元数据回退 OLLAMA_EMBEDDING_MODEL
+- **A8 feature_flag 后台刷新**：加锁串行化线程创建（check-then-start 竞态）
+- **A9**：移除 rag/__init__ 重复的 get_workflow_engine_instance 死导出（无引用）。
+  评估报告所称 execute_tool 死分支经实测**不成立**（审批流 tool dict 携带 _registry 在用），已保留并补注释
+- **S6 回调收敛**：回调重试耗尽后不再 raise（索引已落库且旧版本已删，标 FAILED 会造成对账漂移并触发重复重析）；
+  改按完成收尾 + ERROR 告警，document 状态由 Java stale 恢复调度幂等收敛
+
+#### Fixed（Java）
+- **AiClient onStatus 三处**：Python 原始错误 body 只进日志（截断 500 字），客户端异常改友好文案（信息泄露）
+- **internalApiToken 启动期校验**：@PostConstruct 空值大声 error（生产 compose :?required 已强制，dev 不阻断）
+- **V78 迁移**：回填 agent_alert_rule/event 无 user 系统行的 NULL tenant_id → 默认租户 1（V32 遗留，生产实测 4+11 行）
+- 依赖小版本：sa-token 1.37→1.46、hutool 5.8.25→5.8.47、mapstruct 1.5.5→1.6.3（全量回归通过）
+
+#### Fixed（前端）
+- **SUPERSEDED 终态守卫**：useDocumentProcessor 轮询补 SUPERSEDED（被取代文档此前会永久轮询）
+- **request.ts 空响应体**：204/空 body 直接放行（此前 res.code 访问报错）
+- **类型对齐**：uploadDocument/createKnowledgeBase 返回 R<DocumentInfoDTO>/<KnowledgeBaseInfoDTO>（原 number）；cost.ts 四个接口改 ApiResponse<T> 泛型
+- **SSRF 权衡注释**：custom_provider 私网段放行是为自托管 Ollama 的有意设计，补注释防止误加固
+
+#### Added（质量门禁）
+- **JaCoCo check**：BUNDLE 行覆盖 ≥45% 棘轮起点（当前基线 ~47%，防恶化不追历史）
+- **CI pytest 加 --cov=app --cov-report=term-missing**（报告可见，阈值观察后另设）
+- badge 双份经核实已在前端主题统一重构中解决（CLEANUP_BACKLOG C 项关闭）
+
 ### 头像上传（2026-08-30）
 
 #### Added

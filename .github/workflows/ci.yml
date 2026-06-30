@@ -152,7 +152,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: Run tests
-        run: pytest -q tests --durations=20
+        run: pytest -q tests --durations=20 --cov=app --cov-report=term-missing:skip-covered
 
   # ─── Python AI 容器专项（阻断门禁）───
   # 数据面关键安全门禁：容器插件执行（digest 校验、固定入口、网络/资源限制）。

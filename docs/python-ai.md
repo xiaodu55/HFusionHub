@@ -78,7 +78,7 @@ Health check: `curl http://localhost:9000/health` → `{"status":"healthy"}`
 ## Running Tests
 
 ```bash
-pytest -q tests                    # All tests (1247 functions)
+pytest -q tests                    # All tests (1248 functions)
 pytest -q tests/test_retriever.py  # Specific module
 ```
 
