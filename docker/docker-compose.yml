@@ -257,6 +257,8 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set}
       AI_SERVICE_URL: http://python-ai:9000
       PYTHON_AI_CALLBACK_BASE_URL: http://java-backend:8080/api
+      # 开发环境显式开启演示数据端点（应用默认已翻转为 false；/demo/clear 有破坏性）
+      DEMO_ENDPOINTS_ENABLED: "true"
       JAVA_OPTS: "-Xmx512m -Xms256m"
     volumes:
       - uploads-data:/app/uploads

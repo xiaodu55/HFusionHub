@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+（暂无）
+
+## [1.0.0] — 2026-08-30
+
+
 ### Low 批清偿 + 覆盖率门禁批次（2026-08-30 第四批，源自 docs/REPAIR_ROADMAP.md Low 批）
 
 #### Fixed（Python AI）

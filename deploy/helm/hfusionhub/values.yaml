@@ -43,7 +43,7 @@ redis:
 # --- Java Backend ---
 javaBackend:
   enabled: true
-  image: hfusionhub/java-backend:latest
+  image: ghcr.io/xiaodu55/hfusionhub-java:latest
   port: 8080
   replicas: 1
   javaOpts: "-Xmx512m -Xms256m"
@@ -61,7 +61,7 @@ javaBackend:
 # --- Python AI ---
 pythonAi:
   enabled: true
-  image: hfusionhub/python-ai:latest
+  image: ghcr.io/xiaodu55/hfusionhub-python:latest
   port: 9000
   # Stateless: >=2 replicas in production. No per-pod RWO state is required
   # because vector data lives in Milvus and uploads are on a shared RWX volume.
@@ -82,7 +82,7 @@ pythonAi:
 # ca.pem, cert.pem and key.pem keys, then set tlsSecretName and dockerHost.
 pluginRunner:
   enabled: true
-  image: hfusionhub/plugin-runner:latest
+  image: ghcr.io/xiaodu55/hfusionhub-plugin-runner:latest
   port: 9100
   dockerHost: ""
   tlsSecretName: ""
@@ -152,7 +152,7 @@ attu:
 # --- Frontend ---
 frontend:
   enabled: true
-  image: hfusionhub/frontend:latest
+  image: ghcr.io/xiaodu55/hfusionhub-frontend:latest
   port: 80
   replicas: 1
   resources:

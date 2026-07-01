@@ -28,7 +28,8 @@ services:
     image: grafana/grafana:11.1.0
     container_name: hfusionhub-grafana
     ports:
-      - "127.0.0.1:3000:3000"
+      # 3001 避开前端 dev server 的 3000 端口
+      - "127.0.0.1:3001:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}

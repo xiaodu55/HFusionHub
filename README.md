@@ -2,6 +2,7 @@
 
 > Java + Python 混合架构的 AI Agent 智能助手平台
 
+<!-- 注意：GitHub Actions 因账户计费暂停期间，以下徽章会显示 failing；恢复计费后自动转绿 -->
 ![CI](https://github.com/xiaodu55/HFusionHub1/actions/workflows/ci.yml/badge.svg)
 ![E2E](https://github.com/xiaodu55/HFusionHub1/actions/workflows/e2e.yml/badge.svg)
 ![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)
@@ -201,8 +202,8 @@ bash scripts/setup.sh --fullstack  # 全部容器化
 
 ```bash
 # 1. 克隆项目并启动 MySQL、Redis
-git clone https://github.com/xiaodu55/HFusionHub.git
-cd HFusionHub
+git clone https://github.com/xiaodu55/HFusionHub1.git
+cd HFusionHub1
 # 必须使用自己的随机值；请勿提交 .env 文件
 export MYSQL_ROOT_PASSWORD='replace-with-a-strong-password'
 export MYSQL_PASSWORD='replace-with-a-strong-password'
@@ -217,11 +218,26 @@ cd docker
 docker compose up -d
 ```
 
+### 一键演示数据（推荐新用户体验）
+
+基础设施启动并完成初始注册后，可一键导入演示数据（知识库文档、回答方案、
+我的笔记、记忆、应用发布、公告等），导入后即可直接提问体验 RAG 全链路：
+
+```bash
+# ADMIN_PASSWORD 见 docker/.env（setup 脚本生成的随机值）
+curl -X POST http://localhost:8080/api/demo/import   -H "satoken: <登录后获取的token>"
+# 清空演示数据：
+curl -X POST http://localhost:8080/api/demo/clear -H "satoken: <token>"
+```
+
+> 注意：演示端点默认关闭，开发 compose 已开启（`DEMO_ENDPOINTS_ENABLED=true`）；
+> 生产环境默认不可用（`/demo/clear` 有数据破坏性）。
+
 数据库启动后，在三个独立终端中分别运行：
 
 ```bash
 # 终端 1：Java 后端
-cd HFusionHub/java-backend
+cd HFusionHub1/java-backend
 # 若 docker/.env 的 MINIO_ROOT_USER/PASSWORD 非默认值，需显式传给 Java，
 # 否则 MinIO 工件存储会被禁用（日志提示签名不匹配）：
 export MINIO_ACCESS_KEY="$MINIO_ROOT_USER"
@@ -231,7 +247,7 @@ mvn spring-boot:run
 
 ```bash
 # 终端 2：Python AI 层
-cd HFusionHub/python-ai
+cd HFusionHub1/python-ai
 python -m venv .venv
 # Windows PowerShell: .venv\Scripts\Activate.ps1
 # macOS/Linux: source .venv/bin/activate
@@ -241,7 +257,7 @@ python -m app.main
 
 ```bash
 # 终端 3：前端
-cd HFusionHub/hfusionhub-frontend
+cd HFusionHub1/hfusionhub-frontend
 npm ci
 npm run dev
 ```
@@ -307,7 +323,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 | KnowledgeGraph | 知识图谱 | 59 |
 | Utils | 公共工具 | 36 |
 
-**Python AI 总计：1247 测试函数（2026-08-30 实测）| Java 后端：567 测试 | 前端：49 单测 + 74 E2E**
+**Python AI 总计：1248 测试函数（2026-08-30 实测）| Java 后端：572 测试 | 前端：49 单测 + 74 E2E**
 
 ## 🚀 启动指南
 
@@ -329,7 +345,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 
 > 所有文档位于 [docs/](docs/) 目录。按用途分四类：**入口**、**开发**、**运维**、**治理**。
 > 2026-08-19 已做文档体系整合：合并 5 份为 3 份权威，删除 1 份冗余，统一关键事实基线
-> （Java 562 测试 / Python 1339 / 前端 49 / Flyway V76 / DeepSeek 已配置）。
+> （Java 572 测试 / Python 1248 / 前端 49 单测 + 74 E2E / Flyway V78 / DeepSeek 已配置）。
 
 ### 入口类
 
@@ -361,6 +377,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 | [docs/startup-guide.md](docs/startup-guide.md) | **启动/重启/排障双语指南**（中英对照）：首次安装、一键启动、日常启动顺序、重启决策表、数据库重置、生产部署注意 |
 | [docs/PRODUCTION_OPS.md](docs/PRODUCTION_OPS.md) | **生产运维手册**（原 PRODUCTION_OPS + PRODUCTION_CHECKLIST + DR_VECTORS 合并）：上线检查清单、Runner TLS、插件 digest、配额账本、Agent 故障定位、向量库容灾、Staging 演练 |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 故障排查手册：P0 服务不可用 / P1 功能异常 / P2 性能 / P3 非关键，含数据恢复与日志收集 |
+| [docs/FAQ.md](docs/FAQ.md) | 常见问题速查：菜单为空、插件 runner、演示数据、忘记密码、检索通道数等 |
 | [docs/SCALING.md](docs/SCALING.md) | **扩容与性能手册**（原 SCALING + PERFORMANCE_BASELINE 合并）：扩容决策矩阵、垂直/水平扩容、K8s/Helm、性能基线测试、监控告警、成本优化 |
 | [docs/PLUGIN_BUILTINS.md](docs/PLUGIN_BUILTINS.md) | **平台内建插件**（P2-3 bid_docx/bid_quote）：provision 管线（wheel→签名→镜像→dind→digest 回填）、dev 沙箱解锁、租户可见性、e2e 验收、与 MCP 第三方工具路径对比 |
 | [docs/PLUGIN_RUNNER_TLS.md](docs/PLUGIN_RUNNER_TLS.md) | Plugin Runner TLS 配置指引（dev compose dind sidecar 默认解锁 + rehearsal/宿主 daemon 备选路径） |

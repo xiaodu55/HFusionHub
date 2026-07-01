@@ -106,7 +106,10 @@ else
 ==========================================
   基础设施已启动。请打开三个终端分别运行：
   终端1 (Java):   ./start-java.sh 或 cd java-backend && mvn spring-boot:run
-                  （需先设置环境变量，见 docs/ENVIRONMENT.md）
+                  （必需变量：PYTHON_AI_INTERNAL_TOKEN / CALLBACK_SECRET /
+                   ADMIN_PASSWORD / MINIO_ACCESS_KEY / MINIO_SECRET_KEY，
+                   已由 init-env 写入 docker/.env，可 source docker/.env 后再启动；
+                   完整清单见 docs/ENVIRONMENT.md「Java Backend」节）
   终端2 (Python): cd python-ai && source .venv/bin/activate && python -m app.main
   终端3 (前端):   cd hfusionhub-frontend && npm ci && npm run dev
 
