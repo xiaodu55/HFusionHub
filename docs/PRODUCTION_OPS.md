@@ -23,7 +23,7 @@
 
 ### 🗄️ 数据库与持久化
 
-- [ ] **Flyway 迁移验证** — 确保 V1–V76 全部成功应用；检查 `flyway_schema_history` 表状态
+- [ ] **Flyway 迁移验证** — 确保 V1–V78 全部成功应用；检查 `flyway_schema_history` 表状态
 - [ ] **备份策略** — 脚本已就绪：`scripts/backup-data.ps1`（MySQL mysqldump）+ `scripts/backup_milvus.sh`（Milvus 卷快照）；cron 示例 `0 3 * * * cd /opt/hfusionhub && ./scripts/backup_milvus.sh /backups/milvus`；恢复演练见下文「备份恢复演练」
 - [ ] **Redis 持久化** — AOF 已启用（`appendonly yes`）；RDB 每小时备份（`save 3600 1`）
 

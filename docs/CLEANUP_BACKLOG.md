@@ -24,7 +24,7 @@
 ## C. 新旧双轨实现（待稳定后收敛）
 
 - [x] ~~LLM 调用链双轨~~ — **已收敛（2026-08-29）**：`MODEL_GATEWAY_STREAM_ENABLED` 与 `_build_providers`/`_legacy_chat`/`_legacy_stream`/`FailoverLLM` 全部删除，`get_llm()` 单轨返回 GatewayLLM（不可路由时明确报错）；`DeepSeekLLM`/`OllamaLLM` 保留（响应缓存与用户级自定义供应商仍用）。
-- **前端状态徽章**：`src/utils/badge.ts`（`levelBadgeClass`）与 `src/utils/format.ts`（`getStatusBadge`）职责重叠（后者仅 `document/Index.vue`、`knowledge/Detail.vue` 两处使用），合并到 badge.ts。
+- [x] ~~前端状态徽章双份~~ — **已收敛（2026-08-30 核实）**：`getStatusBadge` 仅存于 `src/utils/badge.ts`（`format.ts` 现仅含 `formatFileSize`/`getKnowledgeBaseStatusText` 格式化函数），前端主题统一重构时已完成合并，无残留。
 - [x] ~~前端日期格式化重复~~ — `MainLayout.vue` 本地 `formatDateTime` 已删除，统一引用 `src/utils/date.ts`（2026-08-29）。
 
 ## D. 仓库卫生

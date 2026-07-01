@@ -345,9 +345,9 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 | 文档 | 作用 |
 |------|------|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **架构全景**（原 ARCHITECTURE + WHITEPAPER 合并）。CQRS 三层架构图、数据流、关键设计决策、安全边界、设计模式、与 Dify/Ragent/LangChain 对比 |
-| [docs/java-backend.md](docs/java-backend.md) | Java 后端开发指南：项目结构、设计模式、环境变量、Flyway 规则（V1–V76）、测试与构建 |
+| [docs/java-backend.md](docs/java-backend.md) | Java 后端开发指南：项目结构、设计模式、环境变量、Flyway 规则（V1–V78）、测试与构建 |
 | [docs/python-ai.md](docs/python-ai.md) | Python AI 开发指南：模块结构、RAG 管线、Feature Flags、SSE 输出格式、Provider 说明 |
-| [docs/database.md](docs/database.md) | 数据库设计：V1–V76 全部迁移历史、核心表、实体关系、迁移规则 |
+| [docs/database.md](docs/database.md) | 数据库设计：V1–V78 全部迁移历史、核心表、实体关系、迁移规则 |
 | [docs/api.md](docs/api.md) | API 接口参考：模块列表、公开端点、调用约定 |
 | [docs/agent-v1-scope.md](docs/agent-v1-scope.md) | Agent V1 软件契约：只读研究型 Agent 的能力边界、输入/输出 JSON 契约 |
 | [docs/SWAGGER_UI.md](docs/SWAGGER_UI.md) | Swagger UI 配置指南：访问地址、生产关闭/IP 白名单/Basic Auth 策略、注解规范、常见问题 |

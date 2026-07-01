@@ -1,8 +1,10 @@
 # 全项目评估修复路线图（源自用户桌面方案.md，2026-08-29 入库跟踪）
 
-> **修复状态（2026-08-29 第二批）**：S1–S5、S7–S9、M1–M13 全部完成；
-> Low 批已修：TaskEventSseManager null userId 防护（AiClient 透传由第一批 S2 覆盖）。
-> 遗留：S6（回调补偿，需 Python/Java 双端对账设计）、Low 批其余项、批次 F 运维项。
+> **修复状态（2026-08-30 第四批）**：S1–S9、M1–M13、Low 批、S6 全部完成 —— 代码侧缺陷清零。
+> 其中 S6 实测修正：新索引落库时旧版本已同步删除（无重复索引问题），真正的漂移是
+> "回调耗尽重试仍失败后任务标 FAILED"，已改为按完成收尾 + ERROR 告警，由 Java stale
+> 恢复调度幂等收敛。评估报告所称 execute_tool 死分支经实测不成立（审批流在用），已保留。
+> 仍遗留：批次 F 运维项（CI 计费恢复、生产密码轮换/HTTPS/CORS 域名 —— 需部署侧操作）。
 > 逐项状态见文末「修复进度」标注。
 
 # HFusionHub 全项目功能评估 + 修复路线图 + 关键链路实测
@@ -185,4 +187,5 @@
 | M11 | ✅（第二批） | workflow_runtime 超时/异常改发结构化 `run_error` SSE 帧（Java 已有消费逻辑），不再把错误文案伪装成内容块 |
 | M12 | ✅（第二批） | run_stream 查询分解补 `needs_decomposition` 判据，与 run() 对齐；流式 groundedness 状态差异记录为已知低危差异 |
 | M13 | ✅（第二批） | `classify_sync` 共享线程池（4 workers）；`_task_status_store` 有界 LRU（10000）；`MemoryEmbedder._embedding_cache` LRU（2048）；评估缓存上限（2000，按时间戳淘汰）；`MemoryStorage._sessions` 上限（1000，淘汰非活跃会话） |
-| Low（部分） | ✅（第二批） | TaskEventSseManager null userId NPE 防护；其余 Low 项按 CLEANUP_BACKLOG 排期 |
+| Low（部分） | ✅（第二批） | TaskEventSseManager null userId NPE 防护 |
+| Low（其余）+ S6 | ✅（第四批，2026-08-30） | Python 8 项（DeepSeek 解析/缓存键/token 校准/回调重试/分页/对账截断/EMBEDDING 默认/flag 锁）+ Java 2 项（AiClient 透传/令牌启动告警）+ 前端 4 项（SUPERSEDED/空 body/类型/SSRF 注释）+ S6 回调收敛 + V78 回填；execute_tool "死分支"实测不成立已保留；详见 CHANGELOG 第四批 |

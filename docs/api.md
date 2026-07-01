@@ -58,6 +58,10 @@ satoken: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 - `POST /register` — Register
 - `POST /logout` — Logout
 - `GET /info` — Get current user profile
+- `PUT /info` — Update profile (nickname/email/phone)
+- `POST /password` — Change own password (old password required)
+- `POST /avatar` — Upload avatar (multipart, jpg/png/webp/gif ≤2MB; magic bytes validated)
+- `GET /avatar/{userId}` — Fetch avatar image (auth required; frontend loads via fetch+blob)
 
 ### Knowledge Base (`/api/knowledge-base`)
 - `POST /` — Create knowledge base
