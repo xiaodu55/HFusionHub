@@ -4,9 +4,11 @@ test.describe('Theme Preference', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:3000/login')
     await page.fill('input[type="text"]', 'admin')
-    await page.fill('input[type="password"]', process.env.ADMIN_PASSWORD || 'test123')
+    // CI（e2e.yml）种子管理员密码为 admin123；本地跑传 ADMIN_PASSWORD 覆盖
+    await page.fill('input[type="password"]', process.env.ADMIN_PASSWORD || 'admin123')
     await page.click('button:has-text("登录")')
-    await page.waitForURL('**/dashboard')
+    // 登录后跳首页（无 /dashboard 路由）
+    await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 15_000 })
   })
 
   test('should switch theme and persist to server', async ({ page }) => {
@@ -33,16 +35,14 @@ test.describe('Theme Preference', () => {
     await systemBtn.click()
     await page.waitForTimeout(500)
 
-    // Reload page and verify theme persists
-    await page.reload()
-    await page.waitForLoadState('networkidle')
-
-    // Theme should be restored from server
-    const userInfoResponse = await page.waitForResponse(response =>
-      response.url().includes('/api/user/info') && response.status() === 200
+    // Reload page and verify theme persists（先挂响应监听再 reload，避免错过事件）
+    const userInfoResponse = page.waitForResponse(
+      (response) => response.url().includes('/api/user/info') && response.status() === 200,
     )
-    const userInfo = await userInfoResponse.json()
+    await page.reload()
+    const userInfo = await (await userInfoResponse).json()
     expect(userInfo.data).toHaveProperty('themePreference')
+    await page.waitForLoadState('networkidle')
   })
 
   test('should sync theme across devices (simulated)', async ({ page, context }) => {
@@ -50,16 +50,12 @@ test.describe('Theme Preference', () => {
     await page.goto('http://localhost:3000/settings')
     await page.locator('button:has-text("深色")').click()
     await page.waitForTimeout(500)
+    await expect(page.locator('html')).toHaveClass(/dark/)
 
-    // Open new page (simulating different device)
+    // 同 context 新页面共享登录态（模拟另一设备已登录）：
+    // 主题偏好已持久化到服务端，新页面加载后应为 dark
     const page2 = await context.newPage()
-    await page2.goto('http://localhost:3000/login')
-    await page2.fill('input[type="text"]', 'admin')
-    await page2.fill('input[type="password"]', process.env.ADMIN_PASSWORD || 'test123')
-    await page2.click('button:has-text("登录")')
-    await page2.waitForURL('**/dashboard')
-
-    // Theme should be dark (from server)
+    await page2.goto('http://localhost:3000/settings')
     await expect(page2.locator('html')).toHaveClass(/dark/)
   })
 })

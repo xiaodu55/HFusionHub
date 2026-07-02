@@ -4,16 +4,18 @@ test.describe('Demo Data Management', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:3000/login')
     await page.fill('input[type="text"]', 'admin')
-    await page.fill('input[type="password"]', process.env.ADMIN_PASSWORD || 'test123')
+    // CI（e2e.yml）种子管理员密码为 admin123；本地跑传 ADMIN_PASSWORD 覆盖
+    await page.fill('input[type="password"]', process.env.ADMIN_PASSWORD || 'admin123')
     await page.click('button:has-text("登录")')
-    await page.waitForURL('**/dashboard')
+    // 登录后跳首页（无 /dashboard 路由）
+    await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 15_000 })
   })
 
   test('should import demo data successfully', async ({ page }) => {
-    await page.goto('http://localhost:3000/settings')
+    await page.goto('http://localhost:3000/')
 
     // Find and click import demo data button
-    const importButton = page.locator('button:has-text("导入演示数据")')
+    const importButton = page.getByRole('button', { name: '导入演示数据', exact: true })
     await expect(importButton).toBeVisible()
     await importButton.click()
 
@@ -23,8 +25,8 @@ test.describe('Demo Data Management', () => {
     )
     const result = await importResponse.json()
 
-    // Verify success message
-    await expect(page.locator('text=/导入成功/')).toBeVisible({ timeout: 10000 })
+    // Verify success: per-section result panel renders (新增/已存在 counts)
+    await expect(page.locator('li:has-text("知识库文档")')).toBeVisible({ timeout: 10000 })
 
     // Check sections are reported
     expect(result.data.sections).toBeDefined()
@@ -33,28 +35,27 @@ test.describe('Demo Data Management', () => {
 
   test('should show demo data in various pages after import', async ({ page }) => {
     // Import demo data first
-    await page.goto('http://localhost:3000/settings')
-    await page.locator('button:has-text("导入演示数据")').click()
+    await page.goto('http://localhost:3000/')
+    await page.getByRole('button', { name: '导入演示数据', exact: true }).click()
     await page.waitForResponse(response =>
       response.url().includes('/api/demo/import') && response.status() === 200
     )
     await page.waitForTimeout(2000)
 
     // Check knowledge base has demo data
-    await page.goto('http://localhost:3000/knowledge')
+    await page.goto('http://localhost:3000/knowledge-base')
     await page.waitForLoadState('networkidle')
-    const kbCards = page.locator('[data-testid="kb-card"], .rounded-xl:has-text("演示")')
-    await expect(kbCards.first()).toBeVisible({ timeout: 5000 })
+    await expect(page.getByRole('heading', { name: '演示知识库', exact: true })).toBeVisible({ timeout: 5000 })
 
     // Check prompts have demo templates
-    await page.goto('http://localhost:3000/prompt')
+    await page.goto('http://localhost:3000/builder/prompts')
     await page.waitForLoadState('networkidle')
-    await expect(page.locator('text=/客服答疑|文档总结|代码审查/')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText('客服答疑').first()).toBeVisible({ timeout: 5000 })
 
     // Check notes have demo entries
     await page.goto('http://localhost:3000/notes')
     await page.waitForLoadState('networkidle')
-    await expect(page.locator('text=/周会纪要|RAG/')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText('周会纪要').first()).toBeVisible({ timeout: 5000 })
 
     // Check memory has demo entries
     await page.goto('http://localhost:3000/memory')
@@ -65,54 +66,31 @@ test.describe('Demo Data Management', () => {
 
   test('should clear demo data with confirmation', async ({ page }) => {
     // First import demo data
-    await page.goto('http://localhost:3000/settings')
-    await page.locator('button:has-text("导入演示数据")').click()
+    await page.goto('http://localhost:3000/')
+    await page.getByRole('button', { name: '导入演示数据', exact: true }).click()
     await page.waitForResponse(response =>
       response.url().includes('/api/demo/import') && response.status() === 200
     )
     await page.waitForTimeout(2000)
 
-    // Click clear demo data button
-    const clearButton = page.locator('button:has-text("清空演示数据")')
-    await expect(clearButton).toBeVisible()
+    // Click clear demo data button（当前 UI 直接执行，无确认对话框）
+    // 先等导入的 refresh 完成（分项面板渲染 = importing 已复位），再点清除
+    await expect(page.locator('li:has-text("知识库文档")')).toBeVisible({ timeout: 20_000 })
+    const clearButton = page.getByRole('button', { name: '清除演示数据', exact: true })
+    await expect(clearButton).toBeEnabled({ timeout: 30_000 })
     await clearButton.click()
 
-    // Confirmation dialog should appear
-    await expect(page.locator('text=/确认清空演示数据/')).toBeVisible()
-
-    // Confirm deletion
-    const confirmButton = page.locator('button:has-text("确认清空")')
-    await confirmButton.click()
-
     // Wait for delete API response
+    // 清除走 POST /demo/clear（非 DELETE）
     await page.waitForResponse(response =>
-      response.url().includes('/api/demo') &&
-      response.request().method() === 'DELETE' &&
+      response.url().includes('/api/demo/clear') &&
+      response.request().method() === 'POST' &&
       response.status() === 200
     )
 
-    // Success message should appear
-    await expect(page.locator('text=/清空成功/')).toBeVisible({ timeout: 10000 })
-
-    // Verify data is cleared - check knowledge base is empty or only has non-demo data
-    await page.goto('http://localhost:3000/knowledge')
+    // Verify demo KB is removed from the list
+    await page.goto('http://localhost:3000/knowledge-base')
     await page.waitForLoadState('networkidle')
-    const demokb = page.locator('text="演示知识库"')
-    await expect(demokb).not.toBeVisible({ timeout: 5000 })
-  })
-
-  test('should cancel clear operation when dialog is dismissed', async ({ page }) => {
-    await page.goto('http://localhost:3000/settings')
-
-    // Click clear demo data button
-    const clearButton = page.locator('button:has-text("清空演示数据")')
-    await clearButton.click()
-
-    // Dismiss dialog by clicking cancel or X
-    const cancelButton = page.locator('button:has-text("取消")')
-    await cancelButton.click()
-
-    // Dialog should close
-    await expect(page.locator('text=/确认清空演示数据/')).not.toBeVisible()
+    await expect(page.getByRole('heading', { name: '演示知识库', exact: true })).not.toBeVisible({ timeout: 5000 })
   })
 })

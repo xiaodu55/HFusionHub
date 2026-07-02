@@ -188,7 +188,7 @@ test.describe('Plugin Management', () => {
     )
     await page.goto('/builder/plugins')
     await expect(page.getByRole('main').getByRole('heading', { name: '插件与工具' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '新建插件' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '新建插件' }).first()).toBeVisible()
     await expect(page.getByRole('button', { name: '上传插件包' })).toBeVisible()
   })
 
@@ -315,7 +315,7 @@ test.describe('Plugin Management', () => {
     )
     await page.goto('/builder/plugins')
 
-    await page.getByRole('button', { name: '新建插件' }).click()
+    await page.getByRole('button', { name: '新建插件' }).first().click()
     await expect(page.getByRole('heading', { name: '新建插件' })).toBeVisible()
     await page.getByRole('button', { name: '使用示例' }).click()
 
