@@ -1,0 +1,163 @@
+"""评估中枢 API（内部数据面）：驱动运行 / 重放评分 / 报告 / A/B 对比。
+
+与 rag.py 同守卫（X-Internal-Token + X-Tenant-Id）。评估会真实调用生产链路
+（SSE 对话 + 检索评估），代价与真实流量相当 —— 请在评测环境使用。
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+from ..core.eval_harness import EvalSample, MetricResult
+from ..core.eval_harness import diff as diff_mod
+from ..core.eval_harness import report as report_mod
+from ..core.eval_harness import runner as runner_mod
+from ..core.eval_harness import score as score_mod
+from ..utils.config import config
+
+router = APIRouter(prefix="/api/eval-harness", tags=["eval-harness"])
+
+# 数据集白名单目录：仅允许加载该目录下的 .jsonl（防目录穿越）
+DATASET_DIR = Path(__file__).resolve().parent.parent / "scripts" / "eval_sets"
+REPORTS_DIR = Path("data/eval_harness/reports")
+
+
+class _RunRequest(BaseModel):
+    label: str = Field(default="run", max_length=60)
+    knowledge_base_id: int = Field(ge=1)
+    top_k: int = Field(default=5, ge=1, le=20)
+    # 二选一：内联样本，或 dataset_name（scripts/eval_sets/<name>.jsonl 白名单）
+    samples: Optional[List[Dict[str, Any]]] = Field(default=None, max_length=500)
+    dataset_name: Optional[str] = Field(default=None, max_length=120)
+    concurrency: Optional[int] = Field(default=None, ge=1, le=16)
+    enable_judge: bool = False
+    judge_runs: Optional[int] = Field(default=None, ge=1, le=5)
+
+
+def _load_samples(request: _RunRequest) -> List[EvalSample]:
+    if request.samples:
+        raw = request.samples
+    elif request.dataset_name:
+        safe = request.dataset_name
+        if "/" in safe or "\\" in safe or ".." in safe or not safe.endswith(".jsonl"):
+            raise HTTPException(status_code=422, detail="invalid dataset name")
+        path = DATASET_DIR / safe
+        if not path.exists():
+            raise HTTPException(status_code=404, detail=f"dataset not found: {safe}")
+        raw = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    else:
+        raise HTTPException(status_code=422, detail="samples or dataset_name is required")
+
+    samples: List[EvalSample] = []
+    for i, item in enumerate(raw):
+        try:
+            samples.append(EvalSample(
+                query_id=str(item.get("query_id") or f"case-{i + 1}"),
+                query=str(item["query"]),
+                expected_document_ids=[str(x) for x in (item.get("expected_document_ids")
+                                                        or item.get("expected_documents") or [])],
+                requires_rag=bool(item.get("requires_rag", True)),
+                ground_truth=item.get("ground_truth"),
+                tags={k: str(v) for k, v in (item.get("tags") or {}).items()},
+            ))
+        except KeyError as exc:
+            raise HTTPException(status_code=422, detail=f"sample {i} missing field: {exc}") from exc
+    if not samples:
+        raise HTTPException(status_code=422, detail="no usable samples")
+    return samples
+
+
+@router.post("/run")
+async def start_run(request: _RunRequest) -> Dict[str, Any]:
+    """驱动一次完整评估（同步执行；样本量大时耗时与并发配置相关）。"""
+    samples = _load_samples(request)
+    headers = {"X-Internal-Token": config.INTERNAL_API_TOKEN, "X-Tenant-Id": "1"}
+    run_file = runner_mod.run_dataset(
+        samples,
+        base_url=config.EVAL_BASE_URL,
+        headers=headers,
+        kb_id=request.knowledge_base_id,
+        top_k=request.top_k,
+        concurrency=request.concurrency or config.EVAL_CONCURRENCY,
+        timeout=float(config.EVAL_TIMEOUT_S),
+        label=request.label,
+    )
+    # 运行后立即评分（评审按开关；报告同步生成）
+    result = score_mod.score_run(
+        run_file.name, enable_judge=request.enable_judge,
+        judge_model=config.EVAL_JUDGE_MODEL or None,
+        judge_runs=request.judge_runs or config.EVAL_JUDGE_RUNS,
+        retrieval_k=request.top_k,
+    )
+    report_mod.save_report(result, REPORTS_DIR, title=request.label)
+    return {"run_file": run_file.name, "summary": result.overall, "meta": result.meta}
+
+
+class _ScoreRequest(BaseModel):
+    run_file: str = Field(max_length=160)
+    enable_judge: bool = False
+    judge_model: Optional[str] = Field(default=None, max_length=120)
+    judge_runs: int = Field(default=1, ge=1, le=5)
+    retrieval_k: int = Field(default=5, ge=1, le=20)
+
+
+@router.post("/score")
+async def score(request: _ScoreRequest) -> Dict[str, Any]:
+    try:
+        result = score_mod.score_run(
+            request.run_file, enable_judge=request.enable_judge,
+            judge_model=request.judge_model or config.EVAL_JUDGE_MODEL or None,
+            judge_runs=request.judge_runs, retrieval_k=request.retrieval_k,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    path = score_mod.save_scores(result, REPORTS_DIR)
+    return {"scores_file": path.name, "result": result.to_dict()}
+
+
+@router.get("/runs")
+async def list_runs() -> Dict[str, Any]:
+    return {"runs": runner_mod.list_run_files()}
+
+
+@router.get("/report")
+async def get_report(run_file: str) -> Dict[str, Any]:
+    if "/" in run_file or "\\" in run_file or ".." in run_file:
+        raise HTTPException(status_code=422, detail="invalid run file name")
+    report_path = REPORTS_DIR / run_file.replace(".jsonl", "_report.md")
+    if not report_path.exists():
+        raise HTTPException(status_code=404, detail="report not found; run score first")
+    return {"run_file": run_file, "report": report_path.read_text(encoding="utf-8")}
+
+
+class _DiffRequest(BaseModel):
+    base_run: str = Field(max_length=160)
+    candidate_run: str = Field(max_length=160)
+
+
+@router.post("/diff")
+async def diff(request: _DiffRequest) -> Dict[str, Any]:
+    try:
+        base = score_mod.load_scores(REPORTS_DIR, request.base_run)
+        candidate = score_mod.load_scores(REPORTS_DIR, request.candidate_run)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    rows = diff_mod.diff_metrics(base.get("overall", {}), candidate.get("overall", {}))
+    return {
+        "base_run": request.base_run,
+        "candidate_run": request.candidate_run,
+        "rows": rows,
+        "has_regression": diff_mod.has_regression(rows),
+    }
+
+
+@router.get("/datasets")
+async def list_datasets() -> Dict[str, Any]:
+    if not DATASET_DIR.exists():
+        return {"datasets": []}
+    return {"datasets": sorted(p.name for p in DATASET_DIR.glob("*.jsonl"))}

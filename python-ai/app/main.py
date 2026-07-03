@@ -39,6 +39,7 @@ from app.api.vectorization import router as vectorization_router
 from app.api.ingest import router as ingest_router
 from app.api.chat import router as chat_router
 from app.api.rag import router as rag_router
+from app.api.eval_harness import router as eval_harness_router
 from app.api.bid import router as bid_router
 from app.api.agent_observability_api import router as agent_obs_router
 from app.api.mcp import router as mcp_router
@@ -115,6 +116,7 @@ def create_app() -> FastAPI:
     app.include_router(ingest_router, dependencies=tenant_dependencies)
     app.include_router(chat_router, dependencies=tenant_dependencies)
     app.include_router(rag_router, dependencies=tenant_dependencies)
+    app.include_router(eval_harness_router, dependencies=tenant_dependencies)
     app.include_router(bid_router, dependencies=tenant_dependencies)
     # Applies on top of the internal token on the MCP data handler.
     app.include_router(agent_obs_router, dependencies=tenant_dependencies)

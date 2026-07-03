@@ -135,6 +135,18 @@ class Config:
     # baseline; ``cross_encoder`` needs sentence-transformers and an explicitly
     # configured model name.
     RAG_RERANKER_MODE = os.getenv("RAG_RERANKER_MODE", "lexical")
+
+    # ── 评估中枢（eval_harness）──
+    # EVAL_BASE_URL：评估 runner 自调用的生产链路地址（默认本服务）
+    EVAL_BASE_URL = os.getenv("EVAL_BASE_URL", "http://localhost:9000")
+    # 评审模型：空 = 网关默认主模型；可覆盖（会过 judge_gate 私有部署门禁）
+    EVAL_JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "")
+    # 评审重复次数（>1 取均值抑制判分方差，成本线性增加）
+    EVAL_JUDGE_RUNS = int(os.getenv("EVAL_JUDGE_RUNS", "1"))
+    # 评估并发（对生产链路的同时请求数）
+    EVAL_CONCURRENCY = int(os.getenv("EVAL_CONCURRENCY", "4"))
+    # 单样本调用超时（秒）
+    EVAL_TIMEOUT_S = int(os.getenv("EVAL_TIMEOUT_S", "180"))
     RAG_RERANKER_MODEL = os.getenv("RAG_RERANKER_MODEL", "BAAI/bge-reranker-base")
     RAG_RERANK_CANDIDATE_COUNT = int(os.getenv("RAG_RERANK_CANDIDATE_COUNT", "20"))
 
