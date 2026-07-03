@@ -205,10 +205,6 @@ onMounted(async () => {
 
     <section class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
       <div class="min-w-0">
-        <div class="mb-3 inline-flex items-center gap-2 rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-3 py-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
-          <Sparkles class="h-3.5 w-3.5" />
-          AI 工作台
-        </div>
         <h2 class="text-3xl font-semibold text-foreground sm:text-4xl">欢迎回来，{{ userName }}</h2>
         <p class="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
           {{ todayLabel }}。从资料管理开始，让 AI 更准确地理解和回答你的问题。

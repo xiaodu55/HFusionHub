@@ -30,8 +30,9 @@ const convCount = ref(0)
 const importing = ref(false)
 const clearing = ref(false)
 const lastSections = ref<DemoSectionResult[]>([])
-// 收起只对当前页面生效，刷新/下次进入自动恢复显示；
-// 全部完成后才由 allDone 永久隐藏——避免误点 × 后再也找不回
+// 收起只对当前页面生效，刷新/下次进入自动恢复显示。
+// 全部完成（allDone）不再隐藏：引导清单内有「导入/清除演示数据」的唯一入口，
+// 隐藏会导致完成引导后再也无法导入演示数据（2026-08-30 用户反馈）
 const dismissed = ref(false)
 
 const modelReady = computed(() => {
@@ -82,7 +83,7 @@ const items = computed(() => {
 
 const doneCount = computed(() => items.value.filter((item) => item.done).length)
 const allDone = computed(() => items.value.length > 0 && items.value.every((item) => item.done))
-const show = computed(() => !dismissed.value && !allDone.value)
+const show = computed(() => !dismissed.value)
 
 const refresh = async () => {
   loading.value = true
@@ -151,7 +152,7 @@ onMounted(refresh)
 </script>
 
 <template>
-  <div v-if="!show && !allDone" class="mb-1 flex justify-end">
+  <div v-if="!show" class="mb-1 flex justify-end">
     <button
       type="button"
       class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
@@ -171,7 +172,7 @@ onMounted(refresh)
         <div>
           <p class="text-sm font-semibold text-foreground">完成设置，开始使用</p>
           <p class="mt-1 text-xs text-muted-foreground">
-            {{ loading ? '正在检查环境…' : `已完成 ${doneCount} / ${items.length} 项` }}
+            {{ loading ? '正在检查环境…' : allDone ? `全部就绪 ${doneCount} / ${items.length} 项` : `已完成 ${doneCount} / ${items.length} 项` }}
           </p>
         </div>
       </div>
