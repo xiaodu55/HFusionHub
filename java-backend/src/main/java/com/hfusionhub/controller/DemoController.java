@@ -3,7 +3,9 @@ package com.hfusionhub.controller;
 import cn.dev33.satoken.annotation.SaCheckRole;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.dto.DemoImportResultDTO;
+import com.hfusionhub.dto.EvalCorpusImportResultDTO;
 import com.hfusionhub.service.BidDemoImportService;
+import com.hfusionhub.service.EvalCorpusImportService;
 import com.hfusionhub.service.DemoImportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -31,6 +33,7 @@ public class DemoController {
 
     private final DemoImportService demoImportService;
     private final BidDemoImportService bidDemoImportService;
+    private final EvalCorpusImportService evalCorpusImportService;
 
     /** 演示数据端点总开关（生产默认关闭，见 deploy/.env.example） */
     @Value("${app.demo.endpoints-enabled:true}")
@@ -41,6 +44,18 @@ public class DemoController {
             return R.fail(403, "演示数据功能已关闭（DEMO_ENDPOINTS_ENABLED=false），如需使用请在环境配置中开启");
         }
         return null;
+    }
+
+    @Operation(summary = "导入评测语料", description = "导入评估中枢专用语料（115 篇业务 markdown），返回业务码→文档ID映射（幂等，仅管理员可用）")
+    @PostMapping("/import-corpus")
+    @SaCheckRole("admin")
+    public R<EvalCorpusImportResultDTO> importCorpus() {
+        R<EvalCorpusImportResultDTO> denied = checkEnabled();
+        if (denied != null) {
+            return denied;
+        }
+        return R.ok("评测语料导入已受理（解析在后台异步执行）",
+                evalCorpusImportService.importCorpus(com.hfusionhub.common.utils.JwtUtils.getCurrentUserId()));
     }
 
     @Operation(summary = "导入演示数据", description = "一键导入各菜单示例数据：知识库文档、回答方案、我的笔记、我的记忆、应用发布、公告（幂等，仅管理员可用）")
