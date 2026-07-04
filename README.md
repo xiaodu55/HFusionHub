@@ -9,7 +9,7 @@
 ![Java](https://img.shields.io/badge/Java-17%2B-orange)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883)
-![Tests](https://img.shields.io/badge/Tests-Python%201248%20%7C%20Java%20572%20%7C%20Frontend%2049-success)
+![Tests](https://img.shields.io/badge/Tests-Python%201258%20%7C%20Java%20572%20%7C%20Frontend%2049-success)
 
 ## 🚀 项目简介
 
@@ -345,7 +345,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 
 > 所有文档位于 [docs/](docs/) 目录。按用途分四类：**入口**、**开发**、**运维**、**治理**。
 > 2026-08-19 已做文档体系整合：合并 5 份为 3 份权威，删除 1 份冗余，统一关键事实基线
-> （Java 572 测试 / Python 1248 / 前端 49 单测 + 74 E2E / Flyway V78 / DeepSeek 已配置）。
+> （Java 572 测试 / Python 1258 / 前端 49 单测 + 74 E2E / Flyway V78 / DeepSeek 已配置）。
 
 ### 入口类
 

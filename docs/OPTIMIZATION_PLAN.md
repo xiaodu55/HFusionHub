@@ -244,7 +244,7 @@
 - **批次 2（P1，✅ 全部完成 2026-08-20）**：前端超大组件拆分 ✅ + ESLint ✅ + 竞态 ✅ + 服务端分页 ✅ + chat 配置缓存 ✅ + Scheduler 分布式锁 ✅ + N+1 ✅ + 无界列表 ✅ + 写接口 `@Valid` ✅——**Java P1 项全部清零**。
 - **批次 3（P2，✅ 全部完成 2026-08-20）**：硬编码清理 ✅、CI JDK 版本对齐 ✅、Dockerfile.python uvicorn[standard] 决策 ✅、token 估算校准 ✅、Helm/Compose 拓扑对齐 ✅——**P2 全部清零**。
 
-> 每批完成后建议跑 `scripts/smoke-test.ps1`（48 项）与各子项目单测（Java 572 / Python 1248 / 前端 49）回归。
+> 每批完成后建议跑 `scripts/smoke-test.ps1`（48 项）与各子项目单测（Java 572 / Python 1258 / 前端 49）回归。
 
 ---
 
