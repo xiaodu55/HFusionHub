@@ -18,6 +18,7 @@ from ..core.eval_harness import diff as diff_mod
 from ..core.eval_harness import report as report_mod
 from ..core.eval_harness import runner as runner_mod
 from ..core.eval_harness import score as score_mod
+from ..core.eval_harness import slides as slides_mod
 from ..utils.config import config
 
 router = APIRouter(prefix="/api/eval-harness", tags=["eval-harness"])
@@ -117,12 +118,23 @@ async def score(request: _ScoreRequest) -> Dict[str, Any]:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     path = score_mod.save_scores(result, REPORTS_DIR)
-    return {"scores_file": path.name, "result": result.to_dict()}
+    slides_mod.save_slides(result, REPORTS_DIR, title=request.label)
+    return {"scores_file": path.name, "slides_file": path.name.replace("_scores.json", "_slides.html"), "result": result.to_dict()}
 
 
 @router.get("/runs")
 async def list_runs() -> Dict[str, Any]:
     return {"runs": runner_mod.list_run_files()}
+
+
+@router.get("/slides")
+async def get_slides(run_file: str) -> Dict[str, Any]:
+    if "/" in run_file or "\\" in run_file or ".." in run_file:
+        raise HTTPException(status_code=422, detail="invalid run file name")
+    slides_path = REPORTS_DIR / run_file.replace(".jsonl", "_slides.html")
+    if not slides_path.exists():
+        raise HTTPException(status_code=404, detail="slides not found; run score first")
+    return {"run_file": run_file, "html": slides_path.read_text(encoding="utf-8")}
 
 
 @router.get("/report")

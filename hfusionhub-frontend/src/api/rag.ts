@@ -178,3 +178,80 @@ export const evaluateProductionPath = (data: {
   top_k?: number
   conversation_history?: Array<Record<string, unknown>>
 }): Promise<ApiResponse<Record<string, unknown>>> => post('/rag/eval', data)
+
+
+// ── 评估中枢（eval_harness）：生成质量 / 行为红线 / TTFT / A/B 门禁 ──
+
+export interface HarnessCase {
+  query_id: string
+  metrics: Record<string, number>
+  skip_reason?: string | null
+  flags?: string[]
+}
+
+export interface HarnessResult {
+  run_file: string
+  overall: Record<string, number>
+  cases: HarnessCase[]
+  meta: Record<string, any>
+}
+
+export interface HarnessRunFile {
+  file: string
+  size_bytes: number
+  modified_at: string
+}
+
+export interface HarnessDiffRow {
+  metric: string
+  base: number | null
+  candidate: number | null
+  delta: number | null
+  direction: 'higher' | 'lower'
+  threshold: number | null
+  verdict: 'improved' | 'regressed' | 'neutral' | 'missing_in_candidate'
+}
+
+/** 运行一次评估（同步；会真实驱动生产链路，耗时与并发配置相关） */
+export const runHarnessEvaluation = (body: {
+  label?: string
+  knowledge_base_id: number
+  top_k?: number
+  dataset_name?: string
+  samples?: Array<Record<string, any>>
+  concurrency?: number
+  enable_judge?: boolean
+  judge_runs?: number
+}): Promise<ApiResponse<{ run_file: string; summary: Record<string, number>; meta: Record<string, any> }>> =>
+  post('/eval-harness/run', body)
+
+/** 重放评分（不重打生产链路） */
+export const scoreHarnessRun = (body: {
+  run_file: string
+  enable_judge?: boolean
+  retrieval_k?: number
+}): Promise<ApiResponse<{ scores_file: string; result: HarnessResult }>> =>
+  post('/eval-harness/score', body)
+
+/** 运行文件列表 */
+export const listHarnessRuns = (): Promise<ApiResponse<{ runs: HarnessRunFile[] }>> =>
+  get('/eval-harness/runs')
+
+/** markdown 评估报告 */
+export const getHarnessReport = (runFile: string): Promise<ApiResponse<{ run_file: string; report: string }>> =>
+  get('/eval-harness/report', { run_file: runFile })
+
+/** A/B 回归门禁对比 */
+export const diffHarnessRuns = (body: {
+  base_run: string
+  candidate_run: string
+}): Promise<ApiResponse<{ base_run: string; candidate_run: string; rows: HarnessDiffRow[]; has_regression: boolean }>> =>
+  post('/eval-harness/diff', body)
+
+/** 数据集白名单 */
+export const listHarnessDatasets = (): Promise<ApiResponse<{ datasets: string[] }>> =>
+  get('/eval-harness/datasets')
+
+/** 自包含 HTML 幻灯片（原文） */
+export const getHarnessSlides = (runFile: string): Promise<ApiResponse<{ run_file: string; html: string }>> =>
+  get('/eval-harness/slides', { run_file: runFile })

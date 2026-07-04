@@ -6,7 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-（暂无）
+### 评估中枢 eval_harness（ragenteval × HFusionHub 结合，2026-08-30 第五批）
+
+#### Added
+- **评估内核**（python-ai `app/core/eval_harness/`，record/score 分离架构，方法论源自 ragenteval 工具包）：
+  - runner 驱动生产链路：`/api/rag/eval`（检索 bypass）+ `/api/chat/stream`（SSE 对话，TTFT=首个 content delta），并发执行、逐条落 JSONL 可重放评分
+  - 指标：检索 Hit@K/Recall/MRR（仅 requires_rag 样本）+ 行为红线（该答未答/回退话术/过度检索）+ TTFT P50/均值 + LLM-as-judge 三指标（忠实度/答案正确性/相关性，走 ModelGateway 单轨 + judge_gate + N 次均值）
+  - report（markdown）/ diff（阈值化 A/B 回归门禁）/ slides（自包含 16:9 HTML 幻灯片，XSS 转义）
+  - API：`/api/eval-harness/run|score|runs|report|slides|diff|datasets`（internal-token + tenant 守卫、数据集白名单防穿越）
+- **评测语料入库**：ragenteval 120 篇中文业务 markdown → `resources/eval-corpus/`；
+  `EvalCorpusImportService` 幂等导入（KB「评测语料库」，文档标题=业务码，
+  复用 demo-import 真实解析模式），`POST /demo/import-corpus` 返回业务码→文档ID映射；
+  150 样本评测集适配入库 `scripts/eval_sets/hfusionhub_v1.jsonl`
+- **回答效果页升级**：新增「生成质量评估」（选数据集/KB 运行，指标卡 + 失败明细 +
+  报告/幻灯片下载）与「A/B 回归对比」（双 run 阈值化对比 + 回归标记）两个区块
+- **V79**：`eval_harness_runs` 表（聚合指标摘要 + tenant_id）
+- 单测 10 项（指标/runner 持久化/score 重放/diff 门禁/API 流）
+
 
 ## [1.0.0] — 2026-08-30
 

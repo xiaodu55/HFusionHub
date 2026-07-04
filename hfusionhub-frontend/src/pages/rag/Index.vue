@@ -22,6 +22,9 @@ import {
   Sparkles,
   Target,
   XCircle,
+  FlaskConical,
+  GitCompareArrows,
+  Download,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -238,6 +241,110 @@ const submitEvaluation = async () => {
   }
 }
 
+// ── 评估中枢（eval_harness）：生成质量 / 行为红线 / TTFT / A/B 门禁 ──
+const harnessRunning = ref(false)
+const harnessResult = ref<Record<string, number> | null>(null)
+const harnessRunFile = ref('')
+const harnessReport = ref('')
+const harnessRuns = ref<ragApi.HarnessRunFile[]>([])
+const harnessDatasets = ref<string[]>([])
+const harnessDataset = ref('')
+const harnessEnableJudge = ref(false)
+const diffBase = ref('')
+const diffCandidate = ref('')
+const diffRows = ref<ragApi.HarnessDiffRow[]>([])
+const diffHasRegression = ref(false)
+const diffLoading = ref(false)
+
+const HARNESS_METRIC_LABELS: Record<string, string> = {
+  'retrieval_hit@5': '检索 Hit@5',
+  'retrieval_recall@5': '检索 Recall@5',
+  'retrieval_mrr@5': '检索 MRR@5',
+  refusal_when_required_rate: '该答未答率',
+  fallback_when_required_rate: '回退话术率',
+  over_retrieval_rate: '过度检索率',
+  ttft_p50_ms: '首字延迟 P50 (ms)',
+  ttft_mean_ms: '首字延迟均值 (ms)',
+  latency_mean_ms: '总延迟均值 (ms)',
+  judge_faithfulness_mean: '忠实度',
+  judge_answer_correctness_mean: '答案正确性',
+  judge_answer_relevancy_mean: '答案相关性',
+}
+
+const loadHarnessRuns = async () => {
+  try {
+    const [runsRes, dsRes] = await Promise.all([
+      ragApi.listHarnessRuns(),
+      ragApi.listHarnessDatasets().catch(() => ({ data: { datasets: [] } }) as any),
+    ])
+    harnessRuns.value = runsRes.data.runs
+    harnessDatasets.value = dsRes.data.datasets
+  } catch {
+    // 评估服务未启动时静默降级（页面其余功能不受影响）
+  }
+}
+
+const runHarness = async () => {
+  if (!selectedKnowledgeBaseId.value) return
+  harnessRunning.value = true
+  try {
+    const res = await ragApi.runHarnessEvaluation({
+      label: 'kb' + selectedKnowledgeBaseId.value,
+      knowledge_base_id: selectedKnowledgeBaseId.value,
+      dataset_name: harnessDataset.value || undefined,
+      enable_judge: harnessEnableJudge.value,
+    })
+    harnessResult.value = res.data.summary
+    harnessRunFile.value = res.data.run_file
+    const reportRes = await ragApi.getHarnessReport(res.data.run_file)
+    harnessReport.value = reportRes.data.report
+    toast.success('评估完成')
+    await loadHarnessRuns()
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '评估失败，请检查评估服务与数据集')
+  } finally {
+    harnessRunning.value = false
+  }
+}
+
+const downloadSlides = async () => {
+  const res = await ragApi.getHarnessSlides(harnessRunFile.value)
+  const blob = new Blob([res.data.html], { type: 'text/html;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = harnessRunFile.value.replace('.jsonl', '_slides.html')
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+const downloadReport = () => {
+  const blob = new Blob([harnessReport.value], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = harnessRunFile.value.replace('.jsonl', '_report.md')
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+const runDiff = async () => {
+  if (!diffBase.value || !diffCandidate.value || diffBase.value === diffCandidate.value) return
+  diffLoading.value = true
+  try {
+    const res = await ragApi.diffHarnessRuns({ base_run: diffBase.value, candidate_run: diffCandidate.value })
+    diffRows.value = res.data.rows
+    diffHasRegression.value = res.data.has_regression
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : 'A/B 对比失败')
+  } finally {
+    diffLoading.value = false
+  }
+}
+
+const formatMetric = (_key: string, value: number) =>
+  value > 1.5 ? value.toLocaleString(undefined, { maximumFractionDigits: 1 }) : value.toFixed(4)
+
 const jumpToEvaluation = () => document.getElementById('retrieval-evaluation')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 const formatDate = (value?: string) => value ? value.replace('T', ' ').slice(0, 16) : '—'
 
@@ -245,6 +352,7 @@ onMounted(async () => {
   try {
     await loadKnowledgeBases()
     await loadData()
+    await loadHarnessRuns()
   } catch (error) {
     console.error('初始化 RAG 调试中心失败:', error)
     loadNotice.value = `暂时无法加载知识库：${error instanceof Error ? error.message : '请稍后刷新页面'}`
@@ -342,6 +450,52 @@ onMounted(async () => {
       </Card>
 
       <Card v-if="evaluationRuns.length" class="border-border bg-card/80"><CardHeader class="p-5"><CardTitle class="text-base">最近评测</CardTitle><CardDescription class="mt-1">保存的是聚合指标与失败用例标识，不保存原始问题或文档内容。</CardDescription></CardHeader><CardContent class="space-y-2 p-5 pt-0"><div v-for="run in evaluationRuns.slice(0, 5)" :key="run.run_id" class="grid gap-2 rounded-xl border border-border bg-muted/20 p-3 text-sm md:grid-cols-[minmax(0,1fr)_auto_auto_auto]"><span class="font-medium">{{ run.label || '手动评测' }}</span><span class="text-muted-foreground">{{ run.case_count }} 题 · Top {{ run.top_k }}</span><span class="text-muted-foreground">Recall {{ run.recall_at_k.toFixed(3) }} · MRR {{ run.mean_reciprocal_rank.toFixed(3) }}</span><span :class="run.failed_case_ids.length ? 'text-amber-200' : 'text-emerald-300'">{{ run.failed_case_ids.length ? `失败 ${run.failed_case_ids.length} 题` : '全部命中' }}</span></div></CardContent></Card>
+
+      <Card id="generation-evaluation" class="border-border bg-card/80 scroll-mt-6">
+        <CardHeader class="p-5"><CardTitle class="flex items-center gap-2 text-base"><FlaskConical class="h-4 w-4 text-primary" />生成质量评估（评估中枢）</CardTitle><CardDescription class="mt-1">端到端评估：真实驱动对话链路，产出检索命中、行为红线（该答未答/过度检索）、首字延迟与 LLM 评审（忠实度/正确性/相关性）指标。会真实调用模型，请在评测环境使用。</CardDescription></CardHeader>
+        <CardContent class="p-5 pt-0">
+          <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <label class="text-sm"><span class="mb-1.5 block text-muted-foreground">评测数据集（JSONL，可选）</span><select v-model="harnessDataset" class="h-10 w-full rounded-md border border-input bg-background/70 px-3 text-sm outline-none focus:border-primary/50"><option value="">不使用数据集（仅冒烟）</option><option v-for="dataset in harnessDatasets" :key="dataset" :value="dataset">{{ dataset }}</option></select></label>
+            <label class="mt-[1.4rem] flex items-center gap-2 text-sm"><input v-model="harnessEnableJudge" type="checkbox" class="accent-primary" /><span class="text-muted-foreground">启用 LLM 评审（会产生模型调用成本）</span></label>
+            <div class="flex items-end"><Button :disabled="harnessRunning || !selectedKnowledgeBaseId" class="gap-2" @click="runHarness"><LoaderCircle v-if="harnessRunning" class="h-4 w-4 animate-spin" /><Play v-else class="h-4 w-4" />{{ harnessRunning ? '评估运行中…' : '运行评估' }}</Button></div>
+          </div>
+
+          <div v-if="harnessResult" class="mt-5 space-y-4">
+            <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              <div v-for="(value, key) in harnessResult" :key="key" class="rounded-lg border border-border bg-muted/20 p-3"><p class="text-xs text-muted-foreground">{{ HARNESS_METRIC_LABELS[String(key)] || key }}</p><p class="mt-1 font-semibold tabular-nums">{{ formatMetric(String(key), Number(value)) }}</p></div>
+            </div>
+            <div class="flex flex-wrap items-center gap-3"><p class="text-xs text-muted-foreground">运行文件：<code class="rounded bg-muted px-1.5 py-0.5">{{ harnessRunFile }}</code></p><Button v-if="harnessReport" variant="outline" size="sm" class="gap-1.5" @click="downloadReport"><Download class="h-3.5 w-3.5" />下载报告</Button><Button v-if="harnessReport" variant="outline" size="sm" class="gap-1.5" @click="downloadSlides"><Download class="h-3.5 w-3.5" />下载幻灯片</Button></div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card id="ab-diff" class="border-border bg-card/80 scroll-mt-6">
+        <CardHeader class="p-5"><CardTitle class="flex items-center gap-2 text-base"><GitCompareArrows class="h-4 w-4 text-primary" />A/B 回归对比</CardTitle><CardDescription class="mt-1">选择两次评估运行做阈值化对比，回归指标标记为红色。用于验证改动没有劣化回答质量。</CardDescription></CardHeader>
+        <CardContent class="p-5 pt-0">
+          <div v-if="harnessRuns.length < 2" class="text-sm text-muted-foreground">至少完成两次评估后才能对比。</div>
+          <template v-else>
+            <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+              <label class="text-sm"><span class="mb-1.5 block text-muted-foreground">基线（改动前）</span><select v-model="diffBase" class="h-10 w-full rounded-md border border-input bg-background/70 px-3 text-sm outline-none focus:border-primary/50"><option v-for="run in harnessRuns" :key="run.file" :value="run.file">{{ run.file }}</option></select></label>
+              <label class="text-sm"><span class="mb-1.5 block text-muted-foreground">候选（改动后）</span><select v-model="diffCandidate" class="h-10 w-full rounded-md border border-input bg-background/70 px-3 text-sm outline-none focus:border-primary/50"><option v-for="run in harnessRuns" :key="run.file" :value="run.file">{{ run.file }}</option></select></label>
+              <div class="flex items-end"><Button :disabled="diffLoading" class="gap-2" @click="runDiff"><GitCompareArrows v-if="!diffLoading" class="h-4 w-4" /><LoaderCircle v-else class="h-4 w-4 animate-spin" />对比</Button></div>
+            </div>
+            <div v-if="diffRows.length" class="mt-5 space-y-2">
+              <p v-if="diffHasRegression" class="rounded-lg border border-rose-400/25 bg-rose-400/[0.07] px-3 py-2 text-sm text-rose-200">存在回归指标 —— 请检查改动是否劣化了回答质量。</p>
+              <div class="overflow-hidden rounded-xl border border-border">
+                <table class="w-full text-sm"><thead class="bg-muted/40 text-left text-xs text-muted-foreground"><tr><th class="px-3 py-2">指标</th><th class="px-3 py-2 text-right">基线</th><th class="px-3 py-2 text-right">候选</th><th class="px-3 py-2 text-right">变化</th><th class="px-3 py-2 text-center">结论</th></tr></thead><tbody>
+                  <tr v-for="row in diffRows" :key="row.metric" class="border-t border-border/70">
+                    <td class="px-3 py-2">{{ HARNESS_METRIC_LABELS[row.metric] || row.metric }}</td>
+                    <td class="px-3 py-2 text-right tabular-nums">{{ row.base === null ? '—' : formatMetric(row.metric, row.base) }}</td>
+                    <td class="px-3 py-2 text-right tabular-nums">{{ row.candidate === null ? '—' : formatMetric(row.metric, row.candidate) }}</td>
+                    <td class="px-3 py-2 text-right tabular-nums" :class="row.verdict === 'regressed' ? 'text-rose-300' : row.verdict === 'improved' ? 'text-emerald-300' : 'text-muted-foreground'">{{ row.delta === null ? '—' : (row.delta > 0 ? '+' : '') + row.delta }}</td>
+                    <td class="px-3 py-2 text-center"><span :class="row.verdict === 'regressed' ? 'rounded-full bg-rose-400/15 px-2 py-0.5 text-xs text-rose-300' : row.verdict === 'improved' ? 'rounded-full bg-emerald-400/15 px-2 py-0.5 text-xs text-emerald-300' : 'text-xs text-muted-foreground'">{{ ({ improved: '改善', regressed: '回归', neutral: '持平', missing_in_candidate: '候选缺失' } as Record<string, string>)[row.verdict] }}</span></td>
+                  </tr>
+                </tbody></table>
+              </div>
+            </div>
+          </template>
+        </CardContent>
+      </Card>
     </template>
   </div>
 </template>
