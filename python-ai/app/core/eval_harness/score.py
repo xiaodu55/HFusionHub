@@ -11,10 +11,10 @@ from .runner import load_run_file
 from .schemas import EvalRecord, MetricResult
 
 
-def score_run(run_file: str, runs_dir: Optional[Path] = None,
-              enable_judge: bool = False, judge_model: Optional[str] = None,
-              judge_runs: int = 1, retrieval_k: int = 5,
-              judge_sample_limit: Optional[int] = None) -> MetricResult:
+async def score_run(run_file: str, runs_dir: Optional[Path] = None,
+                    enable_judge: bool = False, judge_model: Optional[str] = None,
+                    judge_runs: int = 1, retrieval_k: int = 5,
+                    judge_sample_limit: Optional[int] = None) -> MetricResult:
     """重放一个 run 文件：检索/行为/TTFT 指标总是计算；LLM 评审按开关执行。
 
     judge_sample_limit 限制评审条数（评审调用有真实 token 成本）。
@@ -34,8 +34,8 @@ def score_run(run_file: str, runs_dir: Optional[Path] = None,
         if judge_sample_limit is not None:
             targets = targets[:judge_sample_limit]
         for record in targets:
-            judge_cases.append(llm_judge.judge_sample(record, judge_model=judge_model,
-                                                      runs=judge_runs))
+            judge_cases.append(await llm_judge.judge_sample(record, judge_model=judge_model,
+                                                            runs=judge_runs))
 
     overall: dict = {}
     overall.update({f"retrieval_{k}": v for k, v in retrieval.aggregate(records, retrieval_k).items()})

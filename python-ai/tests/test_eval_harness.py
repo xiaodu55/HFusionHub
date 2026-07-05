@@ -138,7 +138,8 @@ def test_score_replay_and_diff(tmp_path: Path):
     for r in records:
         runner_mod.append_record(run_file, r)
 
-    result = score_mod.score_run(run_file.name, runs_dir=runs_dir, enable_judge=False)
+    import asyncio
+    result = asyncio.run(score_mod.score_run(run_file.name, runs_dir=runs_dir, enable_judge=False))
     # 检索指标（q1）
     assert result.overall["retrieval_hit@5"] == 1.0
     # 行为指标

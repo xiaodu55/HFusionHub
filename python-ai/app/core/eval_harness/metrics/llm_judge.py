@@ -58,8 +58,8 @@ def _parse_scores(text: str) -> Optional[Dict[str, float]]:
     return scores
 
 
-def judge_sample(record: EvalRecord, judge_model: Optional[str] = None,
-                 runs: int = 1, temperature: float = 0.2) -> CaseMetric:
+async def judge_sample(record: EvalRecord, judge_model: Optional[str] = None,
+                       runs: int = 1, temperature: float = 0.2) -> CaseMetric:
     """对单条记录执行 LLM 评审。异常/不可评审返回 skip_reason 而非抛错。"""
     contexts_text = "\n\n".join(f"[{i}] {c}" for i, c in enumerate(record.contexts, 1)) or "（无检索上下文）"
     has_gt = bool((record.ground_truth or "").strip())
@@ -77,7 +77,7 @@ def judge_sample(record: EvalRecord, judge_model: Optional[str] = None,
     for _ in range(max(1, runs)):
         try:
             llm = get_llm(model=resolved)
-            response = llm.chat(
+            response = await llm.chat(
                 messages=[ChatMessage(role="user", content=prompt)],
                 temperature=temperature,
             )

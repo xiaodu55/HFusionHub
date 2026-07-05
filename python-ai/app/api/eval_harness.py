@@ -78,18 +78,24 @@ async def start_run(request: _RunRequest) -> Dict[str, Any]:
     """驱动一次完整评估（同步执行；样本量大时耗时与并发配置相关）。"""
     samples = _load_samples(request)
     headers = {"X-Internal-Token": config.INTERNAL_API_TOKEN, "X-Tenant-Id": "1"}
-    run_file = runner_mod.run_dataset(
+    # runner 使用同步 httpx 自调用本服务 —— 必须进线程池执行，
+    # 否则会阻塞事件循环造成"自己等自己"的死锁
+    import asyncio
+    run_file = await asyncio.to_thread(
+        runner_mod.run_dataset,
         samples,
-        base_url=config.EVAL_BASE_URL,
-        headers=headers,
-        kb_id=request.knowledge_base_id,
-        top_k=request.top_k,
-        concurrency=request.concurrency or config.EVAL_CONCURRENCY,
-        timeout=float(config.EVAL_TIMEOUT_S),
-        label=request.label,
+        config.EVAL_BASE_URL,
+        headers,
+        request.knowledge_base_id,
+        request.top_k,
+        request.concurrency or config.EVAL_CONCURRENCY,
+        float(config.EVAL_TIMEOUT_S),
+        None,
+        request.label,
+        None,
     )
     # 运行后立即评分（评审按开关；报告同步生成）
-    result = score_mod.score_run(
+    result = await score_mod.score_run(
         run_file.name, enable_judge=request.enable_judge,
         judge_model=config.EVAL_JUDGE_MODEL or None,
         judge_runs=request.judge_runs or config.EVAL_JUDGE_RUNS,
@@ -110,7 +116,7 @@ class _ScoreRequest(BaseModel):
 @router.post("/score")
 async def score(request: _ScoreRequest) -> Dict[str, Any]:
     try:
-        result = score_mod.score_run(
+        result = await score_mod.score_run(
             request.run_file, enable_judge=request.enable_judge,
             judge_model=request.judge_model or config.EVAL_JUDGE_MODEL or None,
             judge_runs=request.judge_runs, retrieval_k=request.retrieval_k,
