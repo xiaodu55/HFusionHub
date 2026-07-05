@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -24,6 +26,8 @@ from ..utils.config import config
 router = APIRouter(prefix="/api/eval-harness", tags=["eval-harness"])
 
 # 数据集白名单目录：仅允许加载该目录下的 .jsonl（防目录穿越）
+logger = logging.getLogger(__name__)
+TENANT_ID_HEADER = "1"
 DATASET_DIR = Path(__file__).resolve().parent.parent.parent / "scripts" / "eval_sets"
 REPORTS_DIR = Path("data/eval_harness/reports")
 
@@ -38,6 +42,49 @@ class _RunRequest(BaseModel):
     concurrency: Optional[int] = Field(default=None, ge=1, le=16)
     enable_judge: bool = False
     judge_runs: Optional[int] = Field(default=None, ge=1, le=5)
+
+
+def _notify_java_record(run_file: str, request: _RunRequest, result: MetricResult) -> None:
+    """评估完成后回调 Java 记录聚合摘要（eval_harness_runs 表）。
+
+    失败仅告警不影响评估结果 —— Java 侧可通过 /api/eval-harness/report 按需拉取。
+    """
+    import httpx
+
+    failed_ids = [c.query_id for c in result.cases
+                  if any(isinstance(m, float) and m == 0.0 for m in c.metrics.values())][:200]
+    java_base = str(config.JAVA_BACKEND_URL).rstrip("/")
+    if java_base.endswith("/api"):
+        java_base = java_base[:-4]
+    body = {
+        "run_file": run_file,
+        "label": request.label,
+        "knowledge_base_id": request.knowledge_base_id,
+        "top_k": request.top_k,
+        "record_count": result.meta.get("record_count", 0),
+        "requires_rag_count": result.meta.get("requires_rag_count", 0),
+        "judge_enabled": bool(result.meta.get("judge_enabled")),
+        "judge_cases": result.meta.get("judge_cases", 0),
+        "overall": result.overall,
+        "failed_case_ids": {"failed": failed_ids},
+    }
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(
+                java_base + "/api/internal/eval-harness/record",
+                json=body,
+                headers={
+                    "X-Internal-Token": config.INTERNAL_API_TOKEN,
+                    "X-Tenant-Id": TENANT_ID_HEADER,
+                },
+            )
+        if resp.status_code >= 400:
+            logger.warning("[eval-harness] Java record callback failed: %s %s",
+                           resp.status_code, resp.text[:200])
+        else:
+            logger.info("[eval-harness] Java record callback ok: %s", run_file)
+    except Exception as exc:
+        logger.warning("[eval-harness] Java record callback error: %s", exc)
 
 
 def _load_samples(request: _RunRequest) -> List[EvalSample]:
@@ -102,6 +149,7 @@ async def start_run(request: _RunRequest) -> Dict[str, Any]:
         retrieval_k=request.top_k,
     )
     report_mod.save_report(result, REPORTS_DIR, title=request.label)
+    _notify_java_record(run_file.name, request, result)
     return {"run_file": run_file.name, "summary": result.overall, "meta": result.meta}
 
 

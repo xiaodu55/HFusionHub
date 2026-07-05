@@ -43,6 +43,22 @@ async def score_run(run_file: str, runs_dir: Optional[Path] = None,
     overall.update(ttft_metrics)
     overall.update({f"judge_{k}": v for k, v in llm_judge.aggregate(judge_cases).items()})
 
+    # 切片汇总：按任意标签维度拆检索指标（如 intent_l1 / difficulty / trap_type）
+    by_tag: dict = {}
+    tag_keys = sorted({k for r in records for k in (r.tags or {})})
+    for tag_key in tag_keys:
+        groups: dict = {}
+        for r in records:
+            value = (r.tags or {}).get(tag_key)
+            if value:
+                groups.setdefault(value, []).append(r)
+        if len(groups) < 2:
+            continue  # 单一取值的维度无对比价值
+        by_tag[tag_key] = {
+            value: retrieval.aggregate(group, retrieval_k)
+            for value, group in sorted(groups.items())
+        }
+
     meta = {
         "record_count": len(records),
         "requires_rag_count": sum(1 for r in records if r.requires_rag),
@@ -51,6 +67,8 @@ async def score_run(run_file: str, runs_dir: Optional[Path] = None,
         "judge_cases": len(judge_cases),
         "judge_skipped": sum(1 for c in judge_cases if c.skip_reason),
     }
+    if by_tag:
+        meta["by_tag"] = by_tag
     for r in records:
         if r.error:
             meta.setdefault("record_errors", []).append({"query_id": r.query_id, "error": r.error})

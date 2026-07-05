@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [Unreleased]
+
+### 评估中枢收尾批（2026-08-30 第六批）：V79 写入接线 + 切片汇总 + judge 缓存 + nightly 接入
+
+#### Added
+- **V79 写入接线**：`EvalHarnessInternalController`（/internal/eval-harness/record，
+  InternalTokenGuard 常时比较 + X-Tenant-Id 显式租户上下文）+ `EvalHarnessRun` 实体/Mapper；
+  python 评估完成后自动回调 Java 落库（失败仅告警），「回答效果」A/B 列表可跨重启持久
+- **切片汇总**：score 按 tags 任意维度拆检索指标（intent_l1/difficulty/trap_type…，
+  单一取值维度自动跳过），落在 `meta.by_tag`
+- **judge 结果缓存**：按 (model, query, answer, ground_truth) 哈希缓存评分，
+  同答案跨 run 不重复评审（省 token 成本）
+- **eval-nightly 接入**：新增 `eval-harness` job（CI 起服务栈 → 导入评测语料 →
+  跑评估 → 上传报告/幻灯片 artifact；真实 LLM 评审在 staging 配置下启用）
+
+#### Fixed
+- Java 内部控制器编译（lambda final 变量、IdType import）；SaTokenConfig
+  登录检查与租户拦截器分别放行 `/internal/eval-harness/**`（内部通道自行 runAs）
+- eval-harness 数据集目录解析修正（app/api 两级 parent → python-ai 三级）
+
 ### 评估中枢 eval_harness（ragenteval × HFusionHub 结合，2026-08-30 第五批）
 
 #### Added

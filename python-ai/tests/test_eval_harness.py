@@ -213,3 +213,26 @@ def test_api_runs_and_score_flow(tmp_path, monkeypatch):
     assert "评估报告" in resp.json()["report"]
 
     app.dependency_overrides.clear()
+
+
+def test_score_by_tag_slicing(tmp_path: Path):
+    """切片汇总：带标签样本按维度拆检索指标（intent/difficulty）。"""
+    records = [
+        _record("q1", retrieved=["1"], expected=["1"]),
+        _record("q2", retrieved=["2"], expected=["1"]),
+        _record("q3", retrieved=["3"], expected=["1"]),
+    ]
+    records[0].tags = {"difficulty": "easy"}
+    records[1].tags = {"difficulty": "hard"}
+    records[2].tags = {"difficulty": "hard"}
+
+    runs_dir = tmp_path / "runs"
+    run_file = runner_mod.new_run_file("slice", runs_dir)
+    for r in records:
+        runner_mod.append_record(run_file, r)
+
+    import asyncio
+    result = asyncio.run(score_mod.score_run(run_file.name, runs_dir=runs_dir, enable_judge=False))
+    by_diff = result.meta.get("by_tag", {}).get("difficulty", {})
+    assert by_diff["easy"]["hit@5"] == 1.0
+    assert by_diff["hard"]["hit@5"] == 0.0

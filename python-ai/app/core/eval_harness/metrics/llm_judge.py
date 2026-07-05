@@ -10,8 +10,10 @@ N 次评审取均值抑制判分方差；评审异常/不可评审样本记录 s
 
 from __future__ import annotations
 
+import hashlib
 import json
-import re
+import threading
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from ...llm import ChatMessage, get_llm
@@ -58,6 +60,40 @@ def _parse_scores(text: str) -> Optional[Dict[str, float]]:
     return scores
 
 
+_CACHE_PATH = Path("data/eval_harness/judge_cache.json")
+_cache_lock = threading.Lock()
+
+
+def _cache_key(record: EvalRecord, model: Optional[str]) -> str:
+    raw = f"{model or 'default'}|{record.query}|{record.answer}|{record.ground_truth or ''}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _cache_get(key: str) -> Optional[Dict[str, float]]:
+    try:
+        with _cache_lock:
+            if _CACHE_PATH.exists():
+                data = json.loads(_CACHE_PATH.read_text(encoding="utf-8"))
+                scores = data.get(key)
+                return {k: float(v) for k, v in scores.items()} if scores else None
+    except Exception:
+        pass
+    return None
+
+
+def _cache_put(key: str, scores: Dict[str, float]) -> None:
+    try:
+        _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _cache_lock:
+            data = {}
+            if _CACHE_PATH.exists():
+                data = json.loads(_CACHE_PATH.read_text(encoding="utf-8"))
+            data[key] = scores
+            _CACHE_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass  # 缓存写入失败不影响评分主流程
+
+
 async def judge_sample(record: EvalRecord, judge_model: Optional[str] = None,
                        runs: int = 1, temperature: float = 0.2) -> CaseMetric:
     """对单条记录执行 LLM 评审。异常/不可评审返回 skip_reason 而非抛错。"""
@@ -71,6 +107,11 @@ async def judge_sample(record: EvalRecord, judge_model: Optional[str] = None,
         no_gt_note="" if has_gt else "\n- 无参考答案时 answer_correctness 请依据上下文合理性给分，并在分数上保守",
     )
     resolved = resolve_judge_model(judge_model)
+
+    cache_key = _cache_key(record, resolved)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return CaseMetric(query_id=record.query_id, metrics=cached)
 
     all_scores: List[Dict[str, float]] = []
     skip_reason: Optional[str] = None
@@ -96,6 +137,7 @@ async def judge_sample(record: EvalRecord, judge_model: Optional[str] = None,
         key: round(sum(s[key] for s in all_scores) / len(all_scores), 4)
         for key in ("faithfulness", "answer_correctness", "answer_relevancy")
     }
+    _cache_put(cache_key, averaged)
     return CaseMetric(query_id=record.query_id, metrics=averaged)
 
 

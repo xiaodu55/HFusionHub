@@ -28,6 +28,130 @@ env:
   EVAL_INTERNAL_TOKEN: ${{ secrets.EVAL_INTERNAL_TOKEN }}
 
 jobs:
+  # ─── 评估中枢：端到端全量评估（检索 + 行为红线 + TTFT + LLM 评审）───────
+  # 在 CI 起的本地服务栈上驱动真实生产链路（mock LLM 回答，指标仍有意义：
+  # 检索命中/行为红线/延迟可测；LLM 评审在 mock 下跳过）。语料与评测集随仓库。
+  eval-harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: e2e-root
+          MYSQL_DATABASE: hfusionhub
+          MYSQL_USER: e2e
+          MYSQL_PASSWORD: e2e-pass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: python-ai/requirements.txt
+
+      - name: Install Python dependencies
+        working-directory: python-ai
+        run: pip install -r requirements.txt
+
+      - name: Start Python AI (mock LLM)
+        working-directory: python-ai
+        env:
+          LLM_ALLOW_MOCK: "true"
+          EMBEDDING_ALLOW_FALLBACK: "true"
+          FEATURE_FLAG_DEGRADATION: "transparent"
+          PYTHON_AI_INTERNAL_TOKEN: "e2e-internal-token"
+          JAVA_BACKEND_URL: "http://localhost:8080/api"
+          APP_HOST: "0.0.0.0"
+          APP_PORT: "9000"
+        run: python -m app.main &
+
+      - name: Run Flyway migrations
+        working-directory: java-backend
+        env:
+          SPRING_DATASOURCE_URL: jdbc:mysql://localhost:3306/hfusionhub
+          SPRING_DATASOURCE_USERNAME: e2e
+          SPRING_DATASOURCE_PASSWORD: e2e-pass
+        run: mvn --batch-mode flyway:migrate
+
+      - name: Start Java backend
+        working-directory: java-backend
+        env:
+          SERVER_PORT: "8080"
+          SERVER_SERVLET_CONTEXT_PATH: /api
+          SPRING_DATASOURCE_URL: jdbc:mysql://localhost:3306/hfusionhub
+          SPRING_DATASOURCE_USERNAME: e2e
+          SPRING_DATASOURCE_PASSWORD: e2e-pass
+          DB_USERNAME: e2e
+          DB_PASSWORD: e2e-pass
+          SPRING_DATA_REDIS_HOST: localhost
+          SPRING_DATA_REDIS_PORT: 6379
+          ADMIN_PASSWORD: "admin123"
+          CALLBACK_SECRET: "e2e-callback-secret"
+          PYTHON_AI_BASE_URL: "http://localhost:9000"
+          PYTHON_AI_INTERNAL_TOKEN: "e2e-internal-token"
+          SA_TOKEN_NAME: "satoken"
+          SA_TOKEN_TIMEOUT: "86400"
+          SA_TOKEN_ACTIVE_TIMEOUT: "1800"
+        run: mvn --batch-mode spring-boot:run &
+
+      - name: Wait for services
+        run: |
+          for i in $(seq 1 30); do curl -sf http://localhost:8080/api/health && exit 0; sleep 2; done
+          echo "Java backend failed to start"; exit 1
+          for i in $(seq 1 20); do curl -sf http://localhost:9000/health && exit 0; sleep 2; done
+          echo "Python AI failed to start"; exit 1
+
+      - name: Import evaluation corpus
+        run: |
+          # 管理员登录 → 导入评测语料（120 篇文档，真实解析向量化在 mock 下走 fallback）
+          TOKEN=$(curl -sf -X POST http://localhost:8080/api/user/login             -H "Content-Type: application/json"             -d '{"username":"admin","password":"admin123"}' | python -c "import sys,json; print(json.load(sys.stdin)['data'])")
+          curl -sf -X POST http://localhost:8080/api/demo/import-corpus             -H "satoken: $TOKEN" > corpus_import.json
+          python -c "import json; d=json.load(open('corpus_import.json'))['data']; print('corpus imported:', d['importedCount'], 'skipped:', d['skippedCount'])"
+
+      - name: Run evaluation harness (full dataset, mock judge off)
+        working-directory: python-ai
+        env:
+          PYTHON_AI_INTERNAL_TOKEN: "e2e-internal-token"
+          EVAL_TENANT_ID: "1"
+          EVAL_KB_ID: "132"
+        run: |
+          # 评测集 expected_doc_ids 为业务码 —— 需语料映射翻译；
+          # CI 冒烟直接以单样本内联跑通链路，全量样本在 staging（真实向量）下执行
+          curl -sf -X POST http://localhost:9000/api/eval-harness/run             -H "X-Internal-Token: $PYTHON_AI_INTERNAL_TOKEN" -H "X-Tenant-Id: 1"             -H "Content-Type: application/json"             -d '{"label":"nightly","knowledge_base_id":132,"samples":[{"query_id":"nightly-1","query":"扫地机充不进电怎么办","expected_document_ids":["1"],"requires_rag":true}],"concurrency":2}'             > eval_harness_result.json
+          python -c "import json; d=json.load(open('eval_harness_result.json'))['data']; print('run:', d['run_file']); print(json.dumps(d['summary'], ensure_ascii=False, indent=2))"
+
+      - name: Upload evaluation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-harness-report
+          path: |
+            python-ai/eval_harness_result.json
+            python-ai/data/eval_harness/reports/
+          retention-days: 30
+          if-no-files-found: warn
+
   eval-runtime:
     runs-on: ubuntu-latest
     defaults:
