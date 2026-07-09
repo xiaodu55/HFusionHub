@@ -125,7 +125,7 @@ def get_agent(
     agent = ReactAgent(
         knowledge_base_id=knowledge_base_id,
         model=model,
-        max_steps=config.RAG_AGENT_MAX_STEPS if _ff_workflow else 5,
+        max_steps=config.RAG_AGENT_MAX_STEPS,
         tool_policy=tool_policy,
         tool_registry=tool_registry,
         execution_context=execution_context,
@@ -151,4 +151,5 @@ def get_agent(
         delegate=bounded_agent,
         knowledge_base_id=knowledge_base_id,
         timeout_seconds=config.RAG_MULTI_AGENT_TIMEOUT_SECONDS,
+        mode=config.RAG_MULTI_AGENT_MODE,
     )

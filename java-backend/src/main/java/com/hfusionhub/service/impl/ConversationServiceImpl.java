@@ -30,6 +30,7 @@ import com.hfusionhub.quota.UsageMeter;
 import com.hfusionhub.service.AgentTaskService;
 import com.hfusionhub.service.ConversationService;
 import com.hfusionhub.service.CostTrackingService;
+import com.hfusionhub.service.FeatureFlagService;
 import com.hfusionhub.service.MemoryService;
 import com.hfusionhub.service.UsageLedgerService;
 import com.hfusionhub.tenant.TenantContext;
@@ -73,6 +74,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final AiClient aiClient;
     private final AgentTaskService agentTaskService;
     private final MemoryService memoryService;
+    private final FeatureFlagService featureFlagService;
     private final UsageLedgerService usageLedgerService;
     private final CostTrackingService costTrackingService;
     private final QuotaProperties quotaProperties;
@@ -150,6 +152,10 @@ public class ConversationServiceImpl implements ConversationService {
             throw new BusinessException("无权删除该对话");
         }
 
+        // 2.5 长期记忆固化：删除前快照消息异步交给 Python 抽取
+        //     （flag memory.long_term.enabled 关闭时零开销；失败不影响删除）。
+        snapshotMessagesForMemoryConsolidation(conversation);
+
         // 3. 逻辑删除对话
         conversationMapper.deleteById(id);
 
@@ -157,6 +163,52 @@ public class ConversationServiceImpl implements ConversationService {
         LambdaQueryWrapper<Message> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Message::getConversationId, id);
         messageMapper.delete(wrapper);
+    }
+
+    /**
+     * 删除会话前快照消息并调度长期记忆固化（Batch 1 接线）。
+     *
+     * <p>抽取结果按用户维度落 memory_entry，会话删除后记忆仍然存续。
+     * 快照在本事务内查询（删除前），异步调用不阻塞删除主流程。</p>
+     */
+    private void snapshotMessagesForMemoryConsolidation(Conversation conversation) {
+        try {
+            if (!featureFlagService.isEnabled(
+                    "memory.long_term.enabled",
+                    conversation.getUserId(),
+                    conversation.getKnowledgeBaseId(),
+                    TenantContext.getTenantId(),
+                    null)) {
+                return;
+            }
+            List<Message> messages = messageMapper.selectList(new LambdaQueryWrapper<Message>()
+                    .eq(Message::getConversationId, conversation.getId())
+                    .orderByAsc(Message::getCreatedAt)
+                    .last("LIMIT 100"));
+            if (messages.isEmpty()) {
+                return;
+            }
+            List<Map<String, String>> snapshot = messages.stream()
+                    .filter(m -> ("user".equals(m.getRole()) || "assistant".equals(m.getRole()))
+                            && StringUtils.hasText(m.getContent()))
+                    // Python 端点校验 content ≤ 4000 字符，超长截断
+                    .map(m -> Map.of("role", m.getRole(),
+                            "content", m.getContent().length() > 4000
+                                    ? m.getContent().substring(0, 4000) : m.getContent()))
+                    .toList();
+            if (snapshot.isEmpty()) {
+                return;
+            }
+            aiClient.consolidateMemoryOnConversationDeleted(
+                    conversation.getId(),
+                    conversation.getUserId(),
+                    conversation.getKnowledgeBaseId(),
+                    TenantContext.getTenantId(),
+                    snapshot);
+        } catch (Exception e) {
+            log.warn("Memory consolidation snapshot failed for conversation {}: {}",
+                    conversation.getId(), e.getMessage());
+        }
     }
 
     @Override

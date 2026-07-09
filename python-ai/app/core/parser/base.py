@@ -64,6 +64,9 @@ class BaseParser(ABC):
         from app.core.parser.docx_parser import DocxParser
         from app.core.parser.csv_parser import CsvParser
         from app.core.parser.xlsx_parser import XlsxParser
+        from app.core.parser.pptx_parser import PptxParser
+        from app.core.parser.html_parser import HtmlParser
+        from app.core.parser.image_parser import ImageParser
 
         parsers = {
             "md": MarkdownParser,
@@ -74,6 +77,13 @@ class BaseParser(ABC):
             "docx": DocxParser,
             "csv": CsvParser,
             "xlsx": XlsxParser,
+            # Batch 4 扩展：PPTX / HTML / 图片 OCR（零第三方依赖实现）
+            "pptx": PptxParser,
+            "html": HtmlParser,
+            "htm": HtmlParser,
+            "png": ImageParser,
+            "jpg": ImageParser,
+            "jpeg": ImageParser,
         }
 
         parser_class = parsers.get(file_type.lower())

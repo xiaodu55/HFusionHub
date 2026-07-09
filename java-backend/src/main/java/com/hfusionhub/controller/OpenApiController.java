@@ -36,6 +36,19 @@ public class OpenApiController {
         return openApiService.chat(apiKey, request);
     }
 
+    @Operation(summary = "应用对话流式", description = "使用已发布应用的 API Key 发起 SSE 流式对话（Batch 6，需应用绑定知识库）")
+    @PostMapping("/chat/stream")
+    public org.springframework.web.servlet.mvc.method.annotation.SseEmitter chatStream(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestHeader(value = "X-API-Key", required = false) String apiKeyHeader,
+            @RequestBody OpenApiChatRequest request) {
+        String apiKey = extractApiKey(authorization, apiKeyHeader);
+        org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter =
+                new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(120_000L);
+        openApiService.chatStream(apiKey, request, emitter);
+        return emitter;
+    }
+
     @Operation(summary = "投标废标自检", description = "使用已发布应用的 API Key 对租户投标项目执行废标自检（P2-7，需开通 openapi 模块）")
     @PostMapping("/bid/check")
     public OpenApiBidCheckResponse bidCheck(

@@ -15,7 +15,7 @@ import json
 import re
 import logging
 import time
-from typing import List, Dict, Any, Optional, AsyncGenerator
+from typing import List, Dict, Any, Optional, AsyncGenerator, Tuple
 
 from .agent import Agent, AgentResponse, AgentStep
 from .citation import normalize_source
@@ -143,7 +143,7 @@ class ReactAgent(Agent):
         self,
         knowledge_base_id: int = None,
         model: str = None,
-        max_steps: int = 5,
+        max_steps: Optional[int] = None,
         tool_policy: Optional[ToolExecutionPolicy] = None,
         style: str = "detailed",
         tool_registry: Optional[ToolRegistry] = None,
@@ -154,6 +154,10 @@ class ReactAgent(Agent):
     ):
         self.knowledge_base_id = knowledge_base_id
         self.model = model
+        # max_steps 配置化（Batch 2）：未显式传入时回落 RAG_AGENT_MAX_STEPS（默认 12）
+        if max_steps is None or max_steps <= 0:
+            from app.utils.config import config as _config
+            max_steps = _config.RAG_AGENT_MAX_STEPS
         self.max_steps = max_steps
         self.tool_policy = tool_policy
         self.style = style if style in _STYLE_PROMPTS else "detailed"
@@ -249,7 +253,11 @@ class ReactAgent(Agent):
         llm: BaseLLM
     ) -> AgentResponse:
         """处理闲聊"""
-        messages = [ChatMessage(role="system", content="你是一个友好的AI助手。")]
+        memory_context = await self._safe_memory_context(query)
+        chitchat_system = "你是一个友好的AI助手。"
+        if memory_context:
+            chitchat_system = f"{chitchat_system}\n\n{memory_context}"
+        messages = [ChatMessage(role="system", content=chitchat_system)]
 
         if history:
             for msg in history[-5:]:
@@ -270,6 +278,111 @@ class ReactAgent(Agent):
             sources=[],
             style_used=self.style,
         )
+
+    def _native_tools_enabled(self) -> bool:
+        """原生 function calling 开关（agent.native_tool_calls.enabled，默认关）。"""
+        try:
+            from app.utils.feature_flag import feature_flags
+
+            return feature_flags.is_enabled(
+                "agent.native_tool_calls.enabled",
+                user_id=getattr(self._context, "user_id", None) if self._context else None,
+                knowledge_base_id=self.knowledge_base_id,
+            )
+        except Exception:
+            return False
+
+    def _native_tools_schema(self, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+        """把 Registry 工具（含 _spec）转成 OpenAI function-calling 形态。
+
+        无 spec 或无工具时返回 None（调用方直接走文本 ReAct）。
+        """
+        payload: List[Dict[str, Any]] = []
+        for tool in tools or []:
+            spec = tool.get("_spec")
+            if spec is None:
+                continue
+            payload.append({
+                "type": "function",
+                "function": {
+                    "name": spec.name,
+                    "description": spec.description,
+                    "parameters": spec.input_schema or {"type": "object", "properties": {}},
+                },
+            })
+        return payload or None
+
+    async def _chat_step(
+        self,
+        llm: BaseLLM,
+        messages: List[ChatMessage],
+        tools: List[Dict[str, Any]],
+    ) -> Tuple[Any, Optional[Tuple[str, Dict[str, Any]]]]:
+        """ReAct 单步 LLM 调用：原生 tool-calls 优先，失败/不支持降级文本协议。
+
+        返回 ``(response, native_action)``。native_action 为
+        ``(tool_name, arguments_dict)`` 或 None（None 时调用方按文本协议
+        ``_parse_action`` 解析）。原生命中时会把工具调用序列化回写
+        ``response.content``，保持后续消息历史以纯文本延续（ChatMessage 无
+        tool_calls 字段，避免引入第二套协议状态）。
+        """
+        payload_tools = self._native_tools_schema(tools)
+        if payload_tools and self._native_tools_enabled():
+            try:
+                response = await llm.chat(
+                    messages=messages, temperature=0.7,
+                    tools=payload_tools, tool_choice="auto",
+                )
+            except Exception as exc:
+                logger.info(
+                    "[ReAct] Native tool-calls rejected by provider (%s); "
+                    "falling back to text ReAct", exc,
+                )
+            else:
+                calls = getattr(response, "tool_calls", None)
+                if calls:
+                    fn = (calls[0] or {}).get("function") or {}
+                    name = fn.get("name") or ""
+                    raw_args = fn.get("arguments")
+                    try:
+                        args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args or {})
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    # 回写 content：保持消息历史以纯文本延续
+                    response.content = (
+                        (response.content or "")
+                        + f"\nAction: {name}\nAction Input: {json.dumps(args, ensure_ascii=False)}"
+                    ).strip()
+                    logger.info("[ReAct] Native tool call: %s", name)
+                    return response, (name, args)
+                return response, None  # 模型直接回答，交文本终答解析
+
+        response = await llm.chat(messages=messages, temperature=0.7)
+        return response, None
+
+    async def _safe_memory_context(self, query: str) -> str:
+        """长期记忆注入块（memory.long_term.enabled 门控；失败静默降级为空串）。
+
+        记忆来自用户自有数据（Java memory_entry，经 /internal/memory 相关性查询），
+        属半可信内容：注入块自带"非指令"标注，与检索证据的不可信边界处理一致。
+        user_id 取自 Java 会话态构建的执行上下文，模型无法伪造。
+        """
+        try:
+            from app.core.rag.long_term_memory import get_long_term_memory
+
+            service = get_long_term_memory()
+            user_id = getattr(self._context, "user_id", None) if self._context else None
+            if not user_id:
+                return ""
+            return await service.build_memory_context(
+                user_id=user_id,
+                query=query,
+                knowledge_base_id=self.knowledge_base_id,
+                tenant_id=getattr(self._context, "tenant_id", None) if self._context else None,
+            )
+        except Exception as exc:
+            logger.debug("long-term memory context unavailable: %s", exc)
+            return ""
 
     async def _classify_intent_safely(
         self,
@@ -859,6 +972,12 @@ class ReactAgent(Agent):
             tools_description=self._format_tools_description()
         )
 
+        # 长期记忆注入（flag 门控，失败降级为空串）——拼进 system 消息，
+        # 不进 <reference_material>（记忆是用户自有数据，非本次检索证据）。
+        memory_context = await self._safe_memory_context(query)
+        if memory_context:
+            system_prompt = f"{system_prompt}\n\n{memory_context}"
+
         messages = [ChatMessage(role="system", content=system_prompt)]
 
         if history:
@@ -948,11 +1067,11 @@ class ReactAgent(Agent):
         response = None
 
         for step_num in range(self.max_steps):
-            response = await llm.chat(messages=messages, temperature=0.7)
+            response, native_action = await self._chat_step(llm, messages, tools)
             _last_response_token_count = response.token_count
             assistant_text = response.content
 
-            action_result = self._parse_action(assistant_text)
+            action_result = native_action or self._parse_action(assistant_text)
 
             if action_result:
                 action, action_input = action_result
@@ -1574,6 +1693,9 @@ class ReactAgent(Agent):
             system_prompt = REACT_SYSTEM_PROMPT.format(
                 tools_description=self._format_tools_description()
             )
+            memory_context = await self._safe_memory_context(query)
+            if memory_context:
+                system_prompt = f"{system_prompt}\n\n{memory_context}"
             messages = [ChatMessage(role="system", content=system_prompt)]
             if history:
                 for msg in history[-10:]:
@@ -1588,10 +1710,10 @@ class ReactAgent(Agent):
             # ── Phase 3: ReAct loop ─────────────────────────────────────
             final_answer = None
             for step_num in range(self.max_steps):
-                response = await llm.chat(messages=messages, temperature=0.7)
+                response, native_action = await self._chat_step(llm, messages, tools)
                 assistant_text = response.content
 
-                action_result = self._parse_action(assistant_text)
+                action_result = native_action or self._parse_action(assistant_text)
 
                 if action_result:
                     action, action_input = action_result

@@ -119,6 +119,88 @@ public class OpenApiServiceImpl implements OpenApiService {
     }
 
     @Override
+    public void chatStream(String apiKey, OpenApiChatRequest request,
+                           org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter) {
+        if (request.getQuery() == null || request.getQuery().isBlank()) {
+            throw new BusinessException(400, "query 不能为空");
+        }
+        if (request.getQuery().length() > 4000) {
+            throw new BusinessException(400, "query 长度不能超过 4000");
+        }
+
+        ResolvedKey resolved = resolvePublishedApp(apiKey);
+        App app = resolved.app();
+        AppApiKey key = resolved.key();
+
+        if (!allow(key.getId())) {
+            recordCall(app, key, "rate_limited", 0, 0, 0);
+            throw new BusinessException(429, "调用频率超限，请稍后重试");
+        }
+        if (app.getKnowledgeBaseId() == null || app.getKnowledgeBaseId() <= 0) {
+            recordCall(app, key, "error", 0, 0, 0);
+            throw new BusinessException(400, "流式对话要求应用绑定知识库（Agent V1 通道）");
+        }
+
+        String requestId = "openapi-" + UUID.randomUUID();
+        int[] usage = new int[3]; // prompt, completion, total
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
+        try {
+            aiClient.agentV1ChatStream(
+                            request.getQuery(),
+                            null,
+                            app.getKnowledgeBaseId(),
+                            request.getHistory(),
+                            requestId,
+                            app.getUserId(),
+                            null,
+                            null)
+                    .doOnNext(chunk -> {
+                        try {
+                            emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter
+                                    .event().data(chunk));
+                        } catch (java.io.IOException io) {
+                            throw new RuntimeException(io);
+                        }
+                        // run_completed 事件携带 token_usage —— 提取用于计费
+                        try {
+                            java.util.Map<?, ?> event = mapper.readValue(chunk, java.util.Map.class);
+                            if ("run_completed".equals(event.get("event"))) {
+                                Object usageObj = event.get("token_usage");
+                                if (usageObj instanceof java.util.Map<?, ?> usageMap) {
+                                    usage[0] = intOf(usageMap.get("prompt_tokens"));
+                                    usage[1] = intOf(usageMap.get("completion_tokens"));
+                                    usage[2] = intOf(usageMap.get("total_tokens"));
+                                }
+                            }
+                        } catch (Exception ignored) {
+                            // 非 JSON chunk（如 [DONE]）直接跳过
+                        }
+                    })
+                    .doOnError(e -> {
+                        recordCall(app, key, "error", 0, 0, 0);
+                        log.warn("开放 API 流式调用失败: app={}, key={}, err={}",
+                                app.getId(), key.getId(), e.getMessage());
+                        emitter.completeWithError(e);
+                    })
+                    .doOnComplete(() -> {
+                        try {
+                            emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter
+                                    .event().data("[DONE]"));
+                        } catch (java.io.IOException ignored) {
+                            // 客户端已断开
+                        }
+                        emitter.complete();
+                        recordCall(app, key, "ok", usage[0], usage[1], usage[2]);
+                    })
+                    .subscribe();
+        } catch (Exception e) {
+            recordCall(app, key, "error", 0, 0, 0);
+            throw e;
+        }
+    }
+
+    @Override
     public OpenApiBidCheckResponse bidCheck(String apiKey, Long projectId) {
         if (projectId == null) {
             throw new BusinessException(400, "project_id 不能为空");
@@ -197,6 +279,11 @@ public class OpenApiServiceImpl implements OpenApiService {
             return true; // fail-open with logging
         }
     }
+    /** Number → int（null/非数值返回 0）。流式 token 提取用。 */
+    private static int intOf(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
+    }
+
 
     private static int intVal(Map<String, Object> map, String key, int defaultValue) {
         if (map == null || !map.containsKey(key)) {

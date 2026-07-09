@@ -71,14 +71,14 @@ class KbShareServiceImplTest {
         foreign.setUserId(2L);
         when(knowledgeBaseMapper.selectById(10L)).thenReturn(foreign);
 
-        assertThrows(BusinessException.class, () -> kbShareService.share(10L, 2L));
+        assertThrows(BusinessException.class, () -> kbShareService.share(10L, 2L, "read"));
     }
 
     @Test
     void shareRejectsSelfShare() {
         when(knowledgeBaseMapper.selectById(10L)).thenReturn(ownedKb());
 
-        assertThrows(BusinessException.class, () -> kbShareService.share(10L, 1L));
+        assertThrows(BusinessException.class, () -> kbShareService.share(10L, 1L, "read"));
     }
 
     @Test
@@ -88,7 +88,7 @@ class KbShareServiceImplTest {
         when(kbShareMapper.selectOne(any())).thenReturn(null);
         when(kbShareMapper.insert(any(KbShare.class))).thenReturn(1);
 
-        KbShareInfoDTO result = kbShareService.share(10L, 2L);
+        KbShareInfoDTO result = kbShareService.share(10L, 2L, "read");
 
         assertEquals("read", result.getPermission());
         assertEquals(2L, result.getSharedUserId());

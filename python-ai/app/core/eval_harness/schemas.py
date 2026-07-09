@@ -17,6 +17,15 @@ class EvalSample:
     ground_truth: Optional[str] = None
     # 任意维度标签（intent/difficulty/trap...），用于分切片汇总
     tags: Dict[str, str] = field(default_factory=dict)
+    # ── 多轮/记忆扩展 ──────────────────────────────────────────────
+    # 常规多轮：探测请求附带的对话历史（[{role, content}]）
+    history: List[Dict[str, str]] = field(default_factory=list)
+    # 长期记忆 case：非空时走记忆流程——先以 seed_messages 调
+    # /api/internal/memory/consolidate 固化记忆，再以空 history 探测 query
+    seed_messages: List[Dict[str, str]] = field(default_factory=list)
+    # 记忆归属用户（探测请求以此身份触发长期记忆注入）
+    user_id: Optional[int] = None
+    conversation_id: Optional[int] = None
 
 
 @dataclass

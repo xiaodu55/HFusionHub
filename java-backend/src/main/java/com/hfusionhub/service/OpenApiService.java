@@ -21,6 +21,20 @@ public interface OpenApiService {
     OpenApiChatResponse chat(String apiKey, OpenApiChatRequest request);
 
     /**
+     * 开放 API 流式对话（Batch 6 /openapi/chat/stream）。
+     *
+     * <p>与 {@link #chat} 同一套 Key 解析 / 限流 / 计费语义；Python SSE 事件
+     * 经解析后逐条转发到 emitter，{@code [DONE]} 时正常完成。调用方须持有
+     * emitter 的写线程（Spring MVC 异步上下文）。</p>
+     *
+     * @param apiKey  明文 API Key
+     * @param request 对话请求
+     * @param emitter Spring SSE emitter
+     */
+    void chatStream(String apiKey, OpenApiChatRequest request,
+                    org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter);
+
+    /**
      * 开放 API 废标自检（P2-7 /openapi/bid/check）。
      *
      * <p>以 API Key 所属应用的所有者身份，在其租户上下文内对指定投标项目执行自检；

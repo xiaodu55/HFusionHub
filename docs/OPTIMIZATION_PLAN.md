@@ -143,33 +143,37 @@
 
 ### P1 — 中优
 
-#### 2.5 BM25 语料/倒排索引缓存
+#### 2.5 BM25 语料/倒排索引缓存 ✅ 已完成（Batch 3 核实，2026-08-30）
 - **文件**：[query_router.py](../python-ai/app/core/rag/query_router.py) `KeywordChannel`
-- **问题**：每次 search 重新读整个 chunk JSON + 全语料重新分词建 BM25。
-- **方案**：按 (tenant, KB) 缓存倒排索引，文档插入时增量维护。
+- **实现**：`_corpus_cache` 按 ``(store id, KB)`` 缓存预解析语料（分词 + 倒排索引 + 文档分组），
+  co-store 文件 mtime/size 变化自动失效（milvus_store `_load_chunks_store` 按 mtime+size 缓存），
+  并经 `asyncio.to_thread` 执行避免事件循环阻塞。测试：test_query_router.py / test_co_store_tenant_cache.py
 
 #### 2.6 O(n²) 去重
 - **文件**：[postprocessor.py](../python-ai/app/core/rag/postprocessor.py) `_calculate_similarity`
 - **问题**：字符集 Jaccard 两两计算，chunk 多时平方级耗时且对中文去重效果一般。
 - **方案**：token 化 + minhash（局部敏感哈希）或 embedding 相似度粗筛。
 
-#### 2.7 流式多 Agent 绕过证据审查
+#### 2.7 流式多 Agent 绕过证据审查 ✅ 已完成（Batch 3 核实，2026-08-30）
 - **文件**：[multi_agent_runtime.py](../python-ai/app/core/agent/multi_agent_runtime.py) `run_stream`
-- **问题**：流式路径直接把 delegate chunk 透传，绕过 `_validate_evidence` critic——流式回答质量低于非流式。
-- **方案**：流式前先跑确定性证据校验，或边生成边做证据门控。
+- **实现**：流式路径在首个自由文本 chunk 前对 retrieval 事件收集的 sources 执行与
+  非流式完全相同的确定性门控 `_validate_sources`（`_validate_evidence` 本身即委托该方法），
+  未授权证据直接以 NO_SUFFICIENT_EVIDENCE_REPLY 终止流。测试：test_multi_agent_workflow.py
 
-#### 2.8 文件重复读取
-- **文件**：[scoped_graph.py](../python-ai/app/core/rag/scoped_graph.py)、[milvus_store.py](../python-ai/app/core/vectorstore/milvus_store.py)
-- **问题**：每次 `search()` 重读整个图 JSON / 共存 chunk JSON 镜像。
-- **方案**：内存缓存 + 变更失效（insert/delete 时失效）。
+#### 2.8 文件重复读取 ✅ 已完成（Batch 3 核实，2026-08-30）
+- **文件**：[milvus_store.py](../python-ai/app/core/vectorstore/milvus_store.py)（scoped_graph 已随 P7 GraphRAG 整体移除）
+- **实现**：lite 模式 co-store 按「租户 + 文件 mtime+size」缓存解析结果，
+  热检索路径不再每请求重读 + 重解析 JSON；文件变更自动失效。测试：test_co_store_tenant_cache.py
 
-#### 2.9 事件循环阻塞与线程浪费
-- **文件**：[embedding/__init__.py](../python-ai/app/core/embedding/__init__.py)（每次 `asyncio.run` 新建 ThreadPoolExecutor）、[ollama_llm.py](../python-ai/app/core/llm/ollama_llm.py) `is_available()` 同步 `httpx.get`
-- **方案**：模块级复用事件循环/线程池；同步探测改 async 或确保线程池调用。
+#### 2.9 事件循环阻塞与线程浪费 ✅ 已完成（Batch 3 核实，2026-08-30）
+- **文件**：[embedding/__init__.py](../python-ai/app/core/embedding/__init__.py)、[ollama_llm.py](../python-ai/app/core/llm/ollama_llm.py)
+- **实现**：embedding 模块级 `_embedding_executor`（复用线程池，不再每次调用新建）；
+  Ollama `is_available()` 委托包级 `_is_ollama_available`（线程池 + TTL 缓存探测），
+  同步 HTTP 不再阻塞事件循环。
 
 ### P2 — 成本/健壮性
 
-- **LLM 响应缓存**：同 query（FAQ 型）重复调用重复计费 → 语义/归一化精确命中缓存；**流式走 ModelGateway**（当前限流/计费/熔断对流式失效）。
+- **LLM 响应缓存**：✅ 精确命中缓存已接入非流式与流式（chat_stream 缓存命中路径，2026-08-30 Batch 3 核实）；语义/归一化模糊命中仍未做（可选后续）。
 - **配置校验**：[config.py](../python-ai/app/utils/config.py) 裸 `os.getenv` → pydantic-settings，启动 fail-fast（必填/枚举/类型）。
 - **token 估算** ✅ 已处理（2026-08-20）：[utils.py](../python-ai/app/core/rag/utils.py) `estimate_tokens` 朴素「中文字符+英文单词」估算 → 按模型族校准的字符-比例模型（中文 1 token/字 + 拉丁字母/数字 0.25 token/字符、round-half-up），无第三方 tokenizer 依赖；修复旧实现忽略数字的缺陷，英文估算值与 GPT 族 tokenizer 对齐（如 "Hello World" 2→3）。
 - **Reranker 默认 `mode="disabled"`**：模型重排能力未上线；`get_reranker()` 每次解析配置。

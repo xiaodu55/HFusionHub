@@ -334,6 +334,7 @@ class MilvusClusterStore(VectorStoreProtocol):
         top_k: int = 5,
         document_id: Optional[str] = None,
         knowledge_base_id: Optional[int] = None,
+        metadata_filter: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         try:
             client = self._get_client()
@@ -358,11 +359,16 @@ class MilvusClusterStore(VectorStoreProtocol):
 
             # R15-15：不再每次查询 load_collection（冗余 RPC）。集合在
             # ensure/启动阶段已 load；若被驱逐，load 后重试一次。
+            # 元数据过滤（Batch 5）：先超额召回再后过滤
+            fetch_k = top_k
+            if metadata_filter:
+                fetch_k = min(max(top_k * 4, 20), 200)
+
             def _do_search():
                 return client.search(
                     collection_name=self._collection_name,
                     data=[query_embedding],
-                    limit=top_k,
+                    limit=fetch_k,
                     search_params={"metric_type": "COSINE", "params": {"nprobe": 16}},
                     output_fields=["chunk_id", "document_id", "knowledge_base_id", "tenant_id", "content", "block_type", "outline_path", "metadata"],
                     filter=filter_expr,
@@ -395,6 +401,12 @@ class MilvusClusterStore(VectorStoreProtocol):
                         "metadata": json.loads(hit.get("metadata", "{}")),
                         "score": hit.get("distance"),
                     })
+            if metadata_filter:
+                from app.core.vectorstore.milvus_store import _matches_metadata_filter
+                formatted = [
+                    r for r in formatted
+                    if _matches_metadata_filter(r.get("metadata"), metadata_filter)
+                ][:top_k]
             return formatted
         except Exception as exc:
             logger.exception("Failed to search cluster")

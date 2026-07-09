@@ -75,6 +75,7 @@ const shareKeyword = ref('')
 const shareResults = ref<UserSearchResult[]>([])
 const shareSearching = ref(false)
 const shareSearchError = ref('')
+const sharePermission = ref<'read' | 'read_write'>('read')
 const sharingUserId = ref<number | null>(null)
 
 const loadShares = async () => {
@@ -119,7 +120,7 @@ const handleShare = async (user: UserSearchResult) => {
   if (!knowledgeBase.value || sharingUserId.value !== null) return
   sharingUserId.value = user.id
   try {
-    await kbShareApi.shareKnowledgeBase(knowledgeBase.value.id, user.id)
+    await kbShareApi.shareKnowledgeBase(knowledgeBase.value.id, user.id, sharePermission.value)
     toast.success(`已共享「${knowledgeBase.value.name}」给 ${user.nickname || user.username}`)
     shareKeyword.value = ''
     shareResults.value = []
@@ -528,7 +529,7 @@ onMounted(() => {
           <div class="space-y-2">
             <Input
               type="file"
-              accept=".txt,.pdf,.docx,.md"
+              accept=".txt,.pdf,.docx,.md,.csv,.xlsx,.pptx,.html,.htm,.png,.jpg,.jpeg"
               @change="handleFileSelect"
             />
             <p class="text-sm text-muted-foreground">
@@ -631,6 +632,16 @@ onMounted(() => {
               </Button>
             </div>
             <p v-if="shareSearchError" class="text-sm text-destructive">{{ shareSearchError }}</p>
+            <div class="flex items-center gap-2">
+              <Label class="whitespace-nowrap text-xs text-muted-foreground">共享权限</Label>
+              <select
+                v-model="sharePermission"
+                class="h-8 flex-1 rounded-md border border-border bg-background px-2 text-sm"
+              >
+                <option value="read">只读（可查看与提问）</option>
+                <option value="read_write">可写（还可上传文档）</option>
+              </select>
+            </div>
             <div v-if="shareResults.length" class="space-y-1.5">
               <div
                 v-for="user in shareResults"

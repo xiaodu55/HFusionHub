@@ -123,6 +123,14 @@ class TextChunker:
         """
         content = block.content
 
+        # 表格感知分块（Batch 4）：TABLE 块按「行」边界切分并保留表头上下文，
+        # 不走句子边界启发式——句子切分会把一行记录拦腰截断，破坏表格语义。
+        if block.block_type == BlockType.TABLE:
+            return self._chunk_table(
+                block=block, document_id=document_id, chunk_index=chunk_index,
+                outline_path=outline_path,
+            )
+
         # If content is small enough, return as single chunk
         if len(content) <= self.chunk_size:
             return [VectorChunk(
@@ -182,6 +190,79 @@ class TextChunker:
                 start = end
 
         return chunks
+
+
+    def _chunk_table(
+        self,
+        block: ParsedBlock,
+        document_id: str,
+        chunk_index: int,
+        outline_path: List[str],
+    ) -> List[VectorChunk]:
+        """表格按行打包：每块尽量容纳整数行，续块带表头前缀保持可解释性。
+
+        单行超限时对该行硬切（极端长单元格的兜底），其余场景永不切断一行。
+        """
+        content = block.content
+        if len(content) <= self.chunk_size:
+            return [VectorChunk(
+                chunk_id=f"{document_id}_chunk_{chunk_index:04d}",
+                index=chunk_index,
+                content=content,
+                block_type=block.block_type.value,
+                outline_path=outline_path,
+                metadata={**block.metadata, "char_count": len(content)},
+            )]
+
+        lines = content.split("\n")
+        header = lines[0] if lines else ""
+        header_prefix = f"{header}\n（表格续，表头同上）\n" if header else "（表格续）\n"
+
+        chunks: List[VectorChunk] = []
+        current_index = chunk_index
+        current_lines: List[str] = []
+        current_len = 0
+
+        def _flush() -> None:
+            nonlocal current_lines, current_len, current_index
+            if not current_lines:
+                return
+            body = "\n".join(current_lines)
+            if len(body) > self.chunk_size:
+                # 单行超限兜底：对该行按 chunk_size 硬切
+                pieces = _hard_split(body, self.chunk_size)
+            else:
+                pieces = [body]
+            for piece in pieces:
+                prefix = "" if current_index == chunk_index else header_prefix
+                chunk_content = f"{prefix}{piece}"
+                chunks.append(VectorChunk(
+                    chunk_id=f"{document_id}_chunk_{current_index:04d}",
+                    index=current_index,
+                    content=chunk_content,
+                    block_type=block.block_type.value,
+                    outline_path=outline_path,
+                    metadata={
+                        **block.metadata,
+                        "char_count": len(chunk_content),
+                        "table_row_aligned": True,
+                    },
+                ))
+                current_index += 1
+            current_lines = []
+            current_len = 0
+
+        for line in lines:
+            if current_lines and current_len + len(line) + 1 > self.chunk_size:
+                _flush()
+            current_lines.append(line)
+            current_len += len(line) + 1
+        _flush()
+        return chunks
+
+
+def _hard_split(text: str, size: int) -> List[str]:
+    return [text[start:start + size] for start in range(0, len(text), size)]
 
 
 def chunk_blocks(blocks: List[ParsedBlock], document_id: str) -> List[VectorChunk]:

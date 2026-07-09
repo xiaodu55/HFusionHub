@@ -20,4 +20,11 @@ public interface MemoryService {
     List<MemoryEntry> getRelevantMemories(Long userId, String query, int limit);
 
     List<MemoryEntry> getRelevantMemories(Long userId, Long knowledgeBaseId, String query, int limit);
+
+    /**
+     * Batch-save memory entries for an explicit user (internal-token path used
+     * by the Python AI long-term memory consolidation). Invalid or duplicate
+     * entries (same user + same content) are skipped. Returns the number saved.
+     */
+    int saveBatchForUser(Long userId, Long conversationId, Long knowledgeBaseId, List<MemoryEntry> entries);
 }

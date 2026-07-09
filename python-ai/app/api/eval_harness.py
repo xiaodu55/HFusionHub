@@ -112,6 +112,12 @@ def _load_samples(request: _RunRequest) -> List[EvalSample]:
                 requires_rag=bool(item.get("requires_rag", True)),
                 ground_truth=item.get("ground_truth"),
                 tags={k: str(v) for k, v in (item.get("tags") or {}).items()},
+                history=[{"role": str(m.get("role")), "content": str(m.get("content"))}
+                         for m in (item.get("history") or [])],
+                seed_messages=[{"role": str(m.get("role")), "content": str(m.get("content"))}
+                               for m in (item.get("seed_messages") or [])],
+                user_id=item.get("user_id"),
+                conversation_id=item.get("conversation_id"),
             ))
         except KeyError as exc:
             raise HTTPException(status_code=422, detail=f"sample {i} missing field: {exc}") from exc

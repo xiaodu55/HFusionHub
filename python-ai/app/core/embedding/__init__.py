@@ -11,6 +11,7 @@ import concurrent.futures
 from typing import List, Optional
 
 from app.core.embedding.ollama import OllamaEmbedding
+from app.core.embedding.openai_compatible import OpenAICompatibleEmbedding
 from app.core.exceptions import EmbeddingException
 from app.utils.config import config
 
@@ -51,6 +52,18 @@ class EmbeddingService:
             model=ollama_model,
             dimension=dimension
         )
+        # Batch 5：OpenAI 兼容通道（通义/OpenAI 等），EMBEDDING_PROVIDER=openai_compatible
+        # 且三项配置齐全时优先使用；维度 fail-closed 校验保护 collection 完整性。
+        self._openai_compatible = OpenAICompatibleEmbedding(
+            base_url=config.EMBEDDING_OPENAI_BASE_URL,
+            api_key=config.EMBEDDING_OPENAI_API_KEY,
+            model=config.EMBEDDING_OPENAI_MODEL,
+            dimension=config.EMBEDDING_OPENAI_DIMENSION or dimension,
+        )
+
+    def _use_openai_compatible(self) -> bool:
+        return (config.EMBEDDING_PROVIDER == "openai_compatible"
+                and self._openai_compatible.is_configured)
 
     async def generate(self, text: str, model: str = None) -> List[float]:
         """
@@ -67,6 +80,15 @@ class EmbeddingService:
         Raises:
             EmbeddingException: 嵌入服务不可用
         """
+        # 优先：OpenAI 兼容通道（EMBEDDING_PROVIDER=openai_compatible）
+        if self._use_openai_compatible():
+            try:
+                embedding = await self._openai_compatible.generate(text)
+                logger.info("OpenAI-compatible embedding successful")
+                return embedding
+            except Exception as e:
+                logger.warning(f"OpenAI-compatible embedding failed: {e}")
+
         # 尝试 Ollama
         if self._ollama.is_available:
             try:
@@ -143,6 +165,15 @@ class EmbeddingService:
         Raises:
             EmbeddingException: 嵌入服务不可用
         """
+        # 优先：OpenAI 兼容通道
+        if self._use_openai_compatible():
+            try:
+                embeddings = await self._openai_compatible.generate_batch(texts)
+                logger.info("OpenAI-compatible batch embedding successful")
+                return embeddings
+            except Exception as e:
+                logger.warning(f"OpenAI-compatible batch embedding failed: {e}")
+
         # 尝试 Ollama
         if self._ollama.is_available:
             try:

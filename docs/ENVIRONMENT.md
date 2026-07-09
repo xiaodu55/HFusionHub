@@ -144,6 +144,61 @@ All advanced RAG features are gated via environment variables in `python-ai/.env
 | `RAG_MULTIMODAL_ENABLED` | `false` | ❄️ Frozen | Tesseract OCR + `pip install -r requirements-multimodal.txt` |
 | `RAG_AGENT_WORKFLOW_ENABLED` | `true` | 🧪 Beta | None (pure Python)；当前 `.env` 已启用 |
 | `RAG_MULTI_AGENT_ENABLED` | `false` | 🧪 Beta（V59 起 flag 默认开启） | Requires P9 enabled + selected KB（运行时由 `agent.multi_agent.enabled` flag 控制） |
+| `MEMORY_LONG_TERM_ENABLED` | `false` | 🧪 Beta（运行时由 `memory.long_term.enabled` flag 统一治理，V80 默认 FALSE） | LLM 调用（记忆抽取）+ Java `/internal/memory/*` 通道 |
+| `AGENT_NATIVE_TOOL_CALLS_ENABLED` | `false` | 🧪 Beta（运行时由 `agent.native_tool_calls.enabled` flag 统一治理，V81 默认 FALSE） | provider 原生 tool-calls（DeepSeek / OpenAI 兼容 / Ollama ≥0.4）；不支持自动降级文本 ReAct |
+
+**长期记忆接线（2026-08-30 Batch 1）**
+
+- 触发：每 `MEMORY_CONSOLIDATE_EVERY_TURNS` 轮对话收尾后台抽取一次；会话删除前由 Java
+  异步回调 `POST /api/internal/memory/consolidate` 携带消息快照做最终抽取。
+- 存储：抽取结果经 `POST /api/internal/memory/entries` 落 Java `memory_entry` 表
+  （Java 侧按 user+content 去重，单批 ≤50）。
+- 注入：Agent 组装上下文前经 `GET /api/internal/memory/relevant` 拉取相关记忆
+  （Java 按重要性+词命中排序），以「非指令」标注块拼入 system prompt。
+- 关联 env：`MEMORY_CONSOLIDATE_EVERY_TURNS`（默认 6，下限 2）、
+  `MEMORY_CONTEXT_MAX_ENTRIES`（默认 8，注入条数上限）、
+  `MEMORY_CONTEXT_MAX_TOKENS`（默认 600，注入块粗略 token 预算）、
+  `MEMORY_INTERNAL_TIMEOUT_SECONDS`（默认 5）。
+- 全链路失败静默降级：flag 关闭/后端不可达时零网络调用、零抽取，不阻塞聊天主链路。
+**语音 STT/TTS（2026-08-30 Batch 10）**
+
+- `VOICE_ENABLED`：`false`（默认）| `true`。开启需同时配置
+  `VOICE_OPENAI_BASE_URL` / `VOICE_OPENAI_API_KEY` / `VOICE_STT_MODEL` /
+  `VOICE_TTS_MODEL`（OpenAI 兼容 /v1/audio/* 端点）。
+- 前端聊天页经 `GET /voice/status` 决定按钮渲染；STT 收原始音频字节
+  （≤10MB，X-Audio-Filename 头标注格式），TTS 返回 mp3 二进制。
+- 关闭时端点 503、按钮不渲染；引擎不可用 503 不做静默降级。
+
+**知识库资源级授权矩阵（2026-08-30 Batch 10）**
+
+- `kb_share.permission` 两档生效：`read`（只读）| `read_write`（可上传文档）；
+  删除/管理等操作仍为所有者专属。
+- 查询入口：`KbShareService.getEffectivePermission(userId, kbId)` →
+  `"owner" | "read_write" | "read" | null`。
+- 共享 API `POST /knowledge-base/share` 增加 `permission` 字段（默认 read，
+  重复共享=档位更新）；前端知识库详情页分享对话框提供权限选择。
+
+**Embedding 多通道（2026-08-30 Batch 5）**
+
+- `EMBEDDING_PROVIDER`：`ollama`（默认本地）/ `openai_compatible`（通义/OpenAI 等
+  `/v1/embeddings` 端点）。openai_compatible 配置齐全时优先使用，失败自动回落 Ollama。
+- 关联 env：`EMBEDDING_OPENAI_BASE_URL` / `EMBEDDING_OPENAI_API_KEY` /
+  `EMBEDDING_OPENAI_MODEL` / `EMBEDDING_OPENAI_DIMENSION`（默认 1024）。
+- 维度 fail-closed：模型返回维度 ≠ 配置维度即抛错（Milvus collection 以固定维度建表，
+  切换供应商必须重建向量索引）。
+- 检索元数据过滤（同批）：`retriever.retrieve(..., metadata_filter={"field": "value"})`
+  等值过滤贯穿向量/关键词双通道与 `/api/rag/debug/search`、`/api/rag/eval`、
+  `search_knowledge_base` 工具；存储层超额召回 + 谓词后过滤，无 schema 变更。
+
+**原生 function calling（2026-08-30 Batch 2）**
+
+- ReAct Agent 每步优先以原生 tool-calls 调用 provider（`tools`/`tool_choice` 经
+  ModelGateway 透传；Ollama 的 dict arguments 归一化为 OpenAI JSON 字符串形态）。
+- provider 报错（不支持 tools 的旧版模型/网关）自动降级回文本 Thought/Action 协议，
+  flag 关闭时完全走文本路径，零行为变化。
+- ReAct 步数上限改为配置驱动：`RAG_AGENT_MAX_STEPS`（默认 5 → **12**），
+  ReactAgent 未显式传 max_steps 时回落该配置；`max_tool_steps` 请求字段上限放宽到 24。
+- 关联 env：`AGENT_NATIVE_TOOL_CALLS_ENABLED`（降级回退值，默认 false）。
 
 **P5: Hybrid Retrieval (Vector + BM25) — ✅ Stable**
 

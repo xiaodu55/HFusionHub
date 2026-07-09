@@ -223,9 +223,12 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
         "total_chunks": None,
     })
 
-    # Move heavy processing to background task (use resolved path)
-    background_tasks.add_task(
-        _process_document_background,
+    # Batch 8：按 TASK_QUEUE_MODE 分发（inline 进程内 / arq 独立 worker，
+    # 入队失败自动降级 inline）
+    from app.core.tasks.queue import dispatch_document_processing
+
+    await dispatch_document_processing(
+        background_tasks,
         document_id=request.document_id,
         file_path=resolved_path,
         file_type=file_type,

@@ -95,6 +95,8 @@ python-ai/milvus_data2.db.active_collection.json
 python-ai/milvus_data_test.db/
 python-ai/chunks_store.json
 python-ai/data/
+# 根目录 data/ 为 eval-harness 报告等运行时产物（Batch 收官后补充）
+/data/
 
 # --- Python AI evaluation reports (generated; baselines stay committed) ---
 python-ai/evaluation/reports/

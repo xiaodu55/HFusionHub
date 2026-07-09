@@ -10,6 +10,8 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -127,5 +129,53 @@ public class MemoryServiceImpl implements MemoryService {
         if (terms.isEmpty()) return importance;
         String text = entry.getContent() == null ? "" : entry.getContent().toLowerCase(Locale.ROOT);
         return importance + terms.stream().filter(text::contains).count();
+    }
+
+    @Override
+    @Transactional
+    public int saveBatchForUser(Long userId, Long conversationId, Long knowledgeBaseId, List<MemoryEntry> entries) {
+        if (userId == null || userId <= 0) {
+            throw new BusinessException("user_id is required for internal memory save");
+        }
+        if (entries == null || entries.isEmpty()) {
+            return 0;
+        }
+        // 防御性上限：Python 侧已限制单批 20 条，这里兜底 50。
+        List<MemoryEntry> bounded = entries.size() > 50 ? entries.subList(0, 50) : entries;
+
+        // 去重：同一用户已有相同 content 的记忆直接跳过（LLM 抽取重复会话时高频出现）。
+        List<String> contents = bounded.stream()
+                .map(MemoryEntry::getContent)
+                .filter(StringUtils::hasText)
+                .toList();
+        Set<String> existing = contents.isEmpty() ? Set.of()
+                : memoryEntryMapper.selectList(new LambdaQueryWrapper<MemoryEntry>()
+                                .select(MemoryEntry::getContent)
+                                .eq(MemoryEntry::getUserId, userId)
+                                .in(MemoryEntry::getContent, contents))
+                        .stream()
+                        .map(MemoryEntry::getContent)
+                        .collect(Collectors.toSet());
+
+        int saved = 0;
+        for (MemoryEntry entry : bounded) {
+            entry.setUserId(userId);
+            if (conversationId != null) entry.setConversationId(conversationId);
+            if (knowledgeBaseId != null) entry.setKnowledgeBaseId(knowledgeBaseId);
+            if (!StringUtils.hasText(entry.getType())) entry.setType("entity_fact");
+            if (entry.getImportance() == null) entry.setImportance(0.5);
+            try {
+                validate(entry);
+            } catch (BusinessException e) {
+                log.debug("Skip invalid memory entry for user {}: {}", userId, e.getMessage());
+                continue;
+            }
+            if (existing.contains(entry.getContent())) {
+                continue;
+            }
+            memoryEntryMapper.insert(entry);
+            saved++;
+        }
+        return saved;
     }
 }

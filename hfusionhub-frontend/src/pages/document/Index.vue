@@ -403,7 +403,7 @@ onMounted(() => {
               <Input
                 id="doc-file"
                 type="file"
-                accept=".txt,.pdf,.docx,.md,.csv,.xlsx"
+                accept=".txt,.pdf,.docx,.md,.csv,.xlsx,.pptx,.html,.htm,.png,.jpg,.jpeg"
                 @change="handleFileSelect"
               />
               <p class="text-sm text-muted-foreground">

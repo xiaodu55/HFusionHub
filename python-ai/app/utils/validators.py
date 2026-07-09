@@ -16,6 +16,13 @@ SUPPORTED_FILE_TYPES = {
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "csv": "text/csv",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    # Batch 4 解析扩展：PPTX / HTML / 图片 OCR（image_parser 由 RAG_MULTIMODAL_OCR_ENABLED 门控）
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "html": "text/html",
+    "htm": "text/html",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
 }
 
 # File size limits (in bytes)

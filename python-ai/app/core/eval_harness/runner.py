@@ -9,13 +9,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import httpx
 
@@ -96,6 +97,12 @@ def _run_chat_stream(base_url: str, headers: dict, sample: EvalSample,
     body = {"message": sample.query, "stream": True, "request_id": f"eval-{sample.query_id}"}
     if kb_id:
         body["knowledge_base_id"] = kb_id
+    if sample.history:
+        body["history"] = sample.history
+    if sample.user_id:
+        body["user_id"] = sample.user_id
+    if sample.conversation_id:
+        body["conversation_id"] = sample.conversation_id
     answer_parts: List[str] = []
     ttft_ms: Optional[float] = None
     start = time.perf_counter()
@@ -124,9 +131,35 @@ def _run_chat_stream(base_url: str, headers: dict, sample: EvalSample,
     return "".join(answer_parts), ttft_ms, latency_ms, status
 
 
+def _consolidate_memory(base_url: str, headers: dict, sample: EvalSample,
+                        kb_id: Optional[int], timeout: float) -> None:
+    """记忆 case 前置：把 seed_messages 同步交给记忆固化端点（LLM 抽取→Java 落库）。
+
+    依赖：被测栈已开启 memory.long_term.enabled（V80 flag）；固化失败直接抛错，
+    由 run_sample 记入 error——探测结果失去意义。
+    """
+    body: Dict[str, Any] = {
+        "conversation_id": sample.conversation_id
+        or (int(hashlib.md5(sample.query_id.encode("utf-8")).hexdigest()[:8], 16) % 100000 + 1),
+        "user_id": sample.user_id or 1,
+        "messages": sample.seed_messages,
+    }
+    if kb_id:
+        body["knowledge_base_id"] = kb_id
+    with httpx.Client(timeout=httpx.Timeout(timeout * 2)) as client:
+        resp = client.post(f"{base_url}/api/internal/memory/consolidate",
+                           json=body, headers=headers)
+        resp.raise_for_status()
+
+
 def run_sample(sample: EvalSample, base_url: str, headers: dict,
                kb_id: int, top_k: int, timeout: float) -> EvalRecord:
     """对单条样本执行记录（检索 bypass + 流式对话）。"""
+    # 记忆 case：先固化（同步），再以空 history 探测——答对与否取决于
+    # 长期记忆注入是否生效，而非本次请求携带的上下文。
+    if sample.seed_messages:
+        return _run_memory_sample(sample, base_url, headers, kb_id, top_k, timeout)
+
     retrieved: List[str] = []
     contexts: List[str] = []
     error: Optional[str] = None
@@ -153,6 +186,46 @@ def run_sample(sample: EvalSample, base_url: str, headers: dict,
         expected_document_ids=list(sample.expected_document_ids),
         retrieved_document_ids=retrieved,
         contexts=contexts,
+        ground_truth=sample.ground_truth,
+        tags=sample.tags,
+        error=error,
+        recorded_at=_now_iso(),
+    )
+
+
+def _run_memory_sample(sample: EvalSample, base_url: str, headers: dict,
+                       kb_id: int, top_k: int, timeout: float) -> EvalRecord:
+    """长期记忆 case：seed 固化（同步）→ 空 history 探测。
+
+    探测答案命中与否取决于被测栈的长期记忆注入是否生效（consolidate →
+    Java memory_entry → chat 前拉取注入）。固化失败即记 error。
+    """
+    error: Optional[str] = None
+    try:
+        _consolidate_memory(base_url, headers, sample, kb_id, timeout)
+    except Exception as exc:
+        msg = f"consolidate: {type(exc).__name__}: {exc}"[:300]
+        error = msg
+
+    try:
+        answer, ttft_ms, latency_ms, status = _run_chat_stream(
+            base_url, headers, sample, kb_id, timeout)
+    except Exception as exc:
+        answer, ttft_ms, latency_ms, status = "", None, 0.0, "error"
+        msg = f"chat: {type(exc).__name__}: {exc}"[:300]
+        error = f"{error}; {msg}" if error else msg
+
+    return EvalRecord(
+        query_id=sample.query_id,
+        query=sample.query,
+        answer=answer,
+        ttft_ms=ttft_ms,
+        latency_ms=latency_ms,
+        final_status=status,
+        requires_rag=False,
+        expected_document_ids=[],
+        retrieved_document_ids=[],
+        contexts=[],
         ground_truth=sample.ground_truth,
         tags=sample.tags,
         error=error,

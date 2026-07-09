@@ -37,6 +37,8 @@ class RetrievalDebugRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
     conversation_history: Optional[List[Dict[str, Any]]] = Field(default=None, max_length=50)
     enable_rewrite: bool = True
+    # Batch 5：元数据等值过滤（如 {"block_type": "TABLE"}）
+    metadata_filter: Optional[Dict[str, str]] = Field(default=None)
 
 
 class ProductionEvaluationRequest(BaseModel):
@@ -48,6 +50,7 @@ class ProductionEvaluationRequest(BaseModel):
     conversation_history: Optional[List[Dict[str, Any]]] = Field(default=None, max_length=50)
     intent_context: List[Dict[str, Any]] = Field(default_factory=list, max_length=500)
     enable_rewrite: bool = True
+    metadata_filter: Optional[Dict[str, str]] = Field(default=None)
 
 
 @router.get("/traces")
@@ -129,6 +132,7 @@ async def debug_search(request: RetrievalDebugRequest):
         conversation_history=request.conversation_history,
         top_k=request.top_k,
         enable_rewrite=request.enable_rewrite,
+        metadata_filter=request.metadata_filter,
     )
     trace_id = retrieval.metadata.get("trace_id")
     trace = get_trace_store().get(trace_id) if trace_id else None
@@ -165,6 +169,7 @@ async def evaluate_production_path(request: ProductionEvaluationRequest):
         conversation_history=request.conversation_history,
         top_k=top_k,
         enable_rewrite=request.enable_rewrite,
+        metadata_filter=request.metadata_filter,
     )
     trace_id = retrieval.metadata.get("trace_id")
     trace = get_trace_store().get(trace_id) if trace_id else None

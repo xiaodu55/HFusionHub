@@ -57,7 +57,8 @@ class MultiChannelRetriever:
         knowledge_base_id: Optional[int] = None,
         conversation_history: Optional[List[Dict]] = None,
         top_k: int = 5,
-        enable_rewrite: bool = True
+        enable_rewrite: bool = True,
+        metadata_filter: Optional[Dict[str, Any]] = None,
     ) -> RetrievalResult:
         """
         多通道检索
@@ -104,6 +105,7 @@ class MultiChannelRetriever:
                     query=rewritten_query,
                     knowledge_base_id=knowledge_base_id,
                     top_k=candidate_top_k,
+                    metadata_filter=metadata_filter,
                 )
                 route = merged.metadata.get("route_result", {})
                 routes.append({

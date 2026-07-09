@@ -490,8 +490,14 @@ class ContentModerator:
             severity = _worse(severity, "high")
             break  # one flag is enough; details are logged by the caller
 
+        external_category = self._external_moderation(text, "input")
+        if external_category:
+            flags.append(f"external_moderation:{external_category}")
+            severity = _worse(severity, "high")
+
         hard_block = (
             "toxic_content" in flags
+            or any(f.startswith("external_moderation:") for f in flags)
             or (enable_injection and inj.is_injection and inj.severity == "critical")
         )
         return ModerationResult(not hard_block, flags, severity, sanitized)
@@ -529,11 +535,40 @@ class ContentModerator:
                 severity = _worse(severity, inj.severity)
                 sanitized = inj.sanitized_input
 
+        external_category = self._external_moderation(text, "output")
+        if external_category:
+            flags.append(f"external_moderation:{external_category}")
+            severity = _worse(severity, "high")
+
         hard_block = (
             "inappropriate_content" in flags
+            or any(f.startswith("external_moderation:") for f in flags)
             or (enable_injection and inj.is_injection and inj.severity == "critical")
         )
         return ModerationResult(not hard_block, flags, severity, sanitized)
+
+    def _external_moderation(self, text: str, kind: str) -> Optional[str]:
+        """外部审核引擎（Batch 7）。未配置返回 None；失败 fail-open 放行。"""
+        if not text:
+            return None
+        try:
+            from app.core.policy.moderation_provider import get_moderation_provider
+
+            provider = get_moderation_provider()
+        except Exception as e:  # pragma: no cover - 配置读取失败视为无引擎
+            logger.warning("Moderation provider lookup failed (fail-open): %s", e)
+            return None
+        if provider is None:
+            return None
+        try:
+            verdict = provider.check(text, kind)
+        except Exception as e:
+            logger.warning("External moderation call failed (fail-open): %s", e)
+            return None
+        if verdict is not None and not verdict.allowed:
+            logger.warning("External moderation flagged %s text: category=%s", kind, verdict.category)
+            return verdict.category or "external_flagged"
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════

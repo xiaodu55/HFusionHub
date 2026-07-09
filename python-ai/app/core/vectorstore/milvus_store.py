@@ -108,7 +108,26 @@ def insert_chunks(
 ) -> bool:
     """Insert chunks with embeddings into the vector store."""
     return _get_store().insert_chunks(chunks, embeddings, document_id, knowledge_base_id)
+def _matches_metadata_filter(metadata: Any, metadata_filter: Any) -> bool:
+    """元数据过滤谓词（Batch 5）：filter 为 {field: value} 等值匹配。
 
+    - metadata/filter 均容忍 JSON 字符串形态（Milvus 返回的 metadata 已反序列化，
+      但扩展字段可能是 str 值），比较前做 str 归一化。
+    - filter 为空/None 恒真。"""
+    if not metadata_filter:
+        return True
+    if not isinstance(metadata, dict) or not isinstance(metadata_filter, dict):
+        return False
+    for key, expected in metadata_filter.items():
+        actual = metadata.get(key)
+        if actual is None:
+            return False
+        if isinstance(expected, (int, float)) and isinstance(actual, (int, float)):
+            if actual != expected:
+                return False
+        elif str(actual) != str(expected):
+            return False
+    return True
 
 def search_similar(
     query_text: Optional[str] = None,
@@ -116,9 +135,19 @@ def search_similar(
     top_k: int = 5,
     document_id: Optional[str] = None,
     knowledge_base_id: Optional[int] = None,
+    metadata_filter: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
-    """Search for similar chunks."""
-    return _get_store().search(query_text, query_embedding, top_k, document_id, knowledge_base_id)
+    """Search for similar chunks.
+
+    ``metadata_filter``（Batch 5）：{field: value} 等值过滤，作用于 chunk
+    metadata（如 {"block_type": "TABLE"}）。后过滤实现：存储层先超额召回
+    再按谓词筛选并截断到 top_k，不依赖 Milvus schema 变更。
+    """
+    return _get_store().search(
+        query_text, query_embedding, top_k, document_id, knowledge_base_id,
+        metadata_filter=metadata_filter,
+    )
+
 
 
 def get_document_chunks(

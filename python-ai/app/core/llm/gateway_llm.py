@@ -49,6 +49,7 @@ class GatewayLLM(BaseLLM):
             model=result.model,
             token_count=result.usage.total_tokens if result.usage else 0,
             finish_reason=result.finish_reason,
+            tool_calls=result.tool_calls,
         )
 
     async def chat_stream(

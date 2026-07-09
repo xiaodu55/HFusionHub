@@ -232,7 +232,7 @@ class ChatRequest(BaseModel):
     stream: bool = Field(False)
     request_id: Optional[str] = Field(None, max_length=CHAT_REQUEST_ID_MAX_LENGTH)
     style: Optional[str] = Field("detailed")
-    max_tool_steps: Optional[int] = Field(5, ge=1, le=10)
+    max_tool_steps: Optional[int] = Field(5, ge=1, le=24)
     temperature: Optional[float] = Field(0.3, ge=0.0, le=2.0)
     intent_context: List[Dict[str, Any]] = Field(default_factory=list, max_length=500)
     provider_config: Optional[Dict[str, Any]] = Field(
@@ -265,7 +265,7 @@ class AgentV1Request(BaseModel):
     stream: bool = Field(False)
     request_id: Optional[str] = Field(None, max_length=CHAT_REQUEST_ID_MAX_LENGTH)
     style: Optional[str] = Field("detailed")
-    max_tool_steps: Optional[int] = Field(5, ge=1, le=10)
+    max_tool_steps: Optional[int] = Field(5, ge=1, le=24)
     temperature: Optional[float] = Field(0.3, ge=0.0, le=2.0)
     capability_profile: Optional[str] = Field(None, pattern="^(approval_write)$")
     user_role: Optional[str] = Field(None, pattern="^(user|admin)$",
@@ -341,6 +341,35 @@ def _resolve_chat_route(request: ChatRequest) -> tuple[Dict[str, Any], Optional[
     )
     knowledge_base_id = request.knowledge_base_id or route.get("knowledge_base_id")
     return route, knowledge_base_id, route.get("top_k")
+
+
+def _schedule_long_term_memory(
+    *,
+    conversation_id: Optional[int],
+    user_id: Optional[int],
+    knowledge_base_id: Optional[int],
+    history: List[Any],
+    message: str,
+) -> None:
+    """对话轮次收尾的长期记忆抽取调度（每 N 轮真正触发；flag 关闭时零开销）。
+
+    抽取在后台任务执行（见 long_term_memory.schedule_turn_consolidation），
+    任何异常只记日志，绝不阻塞聊天主链路。会话删除场景的抽取由 Java
+    回调 /api/internal/memory/consolidate 完成，不走这里。
+    """
+    try:
+        from app.core.rag.long_term_memory import get_long_term_memory
+
+        get_long_term_memory().schedule_turn_consolidation(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            messages=[{"role": m.role, "content": m.content} for m in history]
+            + [{"role": "user", "content": message}],
+            knowledge_base_id=knowledge_base_id,
+            tenant_id=get_tenant_id(),
+        )
+    except Exception as e:  # 记忆属增强能力，失败静默
+        logger.debug("long-term memory scheduling skipped: %s", e)
 
 
 def _clarification_response(route: Dict[str, Any], style: str) -> ChatResponse:
@@ -558,6 +587,13 @@ async def chat(request: ChatRequest):
             max_tool_steps=request.max_tool_steps,
         )
 
+        _schedule_long_term_memory(
+            conversation_id=request.conversation_id,
+            user_id=request.user_id,
+            knowledge_base_id=routed_knowledge_base_id,
+            history=request.history,
+            message=request.message,
+        )
         return _build_chat_response(response, style)
 
     except Exception as e:
@@ -646,6 +682,13 @@ async def agent_v1_chat(request: AgentV1Request):
             max_tool_steps=request.max_tool_steps,
         )
 
+        _schedule_long_term_memory(
+            conversation_id=request.conversation_id,
+            user_id=request.user_id,
+            knowledge_base_id=request.knowledge_base_id,
+            history=request.history,
+            message=request.message,
+        )
         return _build_chat_response(response, style)
 
     except Exception as e:
@@ -769,6 +812,13 @@ async def agent_v1_chat_stream(request: AgentV1Request):
                 )
                 yield f"data: {json.dumps({'content': '', 'error': str(e)}, ensure_ascii=False)}\n\n"
             finally:
+                _schedule_long_term_memory(
+                    conversation_id=request.conversation_id,
+                    user_id=request.user_id,
+                    knowledge_base_id=request.knowledge_base_id,
+                    history=request.history,
+                    message=request.message,
+                )
                 try:
                     yield "data: [DONE]\n\n"
                 except Exception:
@@ -853,6 +903,13 @@ async def chat_stream(request: ChatRequest):
                 logger.error("Streaming error for request %s: %s", request_id, e, exc_info=True)
                 yield f"data: {json.dumps({'content': '', 'error': '服务暂时不可用，请稍后重试'}, ensure_ascii=False)}\n\n"
             finally:
+                _schedule_long_term_memory(
+                    conversation_id=request.conversation_id,
+                    user_id=request.user_id,
+                    knowledge_base_id=routed_knowledge_base_id,
+                    history=request.history,
+                    message=request.message,
+                )
                 try:
                     yield "data: [DONE]\n\n"
                 except Exception:

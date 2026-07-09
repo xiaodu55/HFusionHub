@@ -51,6 +51,7 @@ public class SaTokenConfig implements WebMvcConfigurer {
                                     "/internal/agent/**",
                                     "/internal/plugin/**",
                                     "/internal/notes/**",
+                                    "/internal/memory/**",
                                     "/openapi/**",
                                     "/doc.html",
                                     "/swagger-ui.html",

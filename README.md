@@ -9,7 +9,7 @@
 ![Java](https://img.shields.io/badge/Java-17%2B-orange)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883)
-![Tests](https://img.shields.io/badge/Tests-Python%201258%20%7C%20Java%20572%20%7C%20Frontend%2049-success)
+![Tests](https://img.shields.io/badge/Tests-Python%201343%20%7C%20Java%20595%20%7C%20Frontend%2049-success)
 
 ## 🚀 项目简介
 
@@ -323,7 +323,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 | KnowledgeGraph | 知识图谱 | 59 |
 | Utils | 公共工具 | 36 |
 
-**Python AI 总计：1248 测试函数（2026-08-30 实测）| Java 后端：572 测试 | 前端：49 单测 + 74 E2E**
+**Python AI 总计：1343 测试函数（2026-08-30 实测）| Java 后端：595 测试 | 前端：49 单测 + 74 E2E**
 
 ## 🚀 启动指南
 
@@ -345,7 +345,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 
 > 所有文档位于 [docs/](docs/) 目录。按用途分四类：**入口**、**开发**、**运维**、**治理**。
 > 2026-08-19 已做文档体系整合：合并 5 份为 3 份权威，删除 1 份冗余，统一关键事实基线
-> （Java 572 测试 / Python 1258 / 前端 49 单测 + 74 E2E / Flyway V78 / DeepSeek 已配置）。
+> （Java 595 测试 / Python 1343 / 前端 49 单测 + 74 E2E / Flyway V81 / DeepSeek 已配置）。
 
 ### 入口类
 
@@ -362,9 +362,9 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 |------|------|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **架构全景**（原 ARCHITECTURE + WHITEPAPER 合并）。CQRS 三层架构图、数据流、关键设计决策、安全边界、设计模式、与 Dify/Ragent/LangChain 对比 |
 | [docs/PROJECT_TOUR.md](docs/PROJECT_TOUR.md) | **项目功能全览**（带截图）：每个页面的功能说明与使用方法，新用户与评估者首选入口 |
-| [docs/java-backend.md](docs/java-backend.md) | Java 后端开发指南：项目结构、设计模式、环境变量、Flyway 规则（V1–V78）、测试与构建 |
+| [docs/java-backend.md](docs/java-backend.md) | Java 后端开发指南：项目结构、设计模式、环境变量、Flyway 规则（V1–V80）、测试与构建 |
 | [docs/python-ai.md](docs/python-ai.md) | Python AI 开发指南：模块结构、RAG 管线、Feature Flags、SSE 输出格式、Provider 说明 |
-| [docs/database.md](docs/database.md) | 数据库设计：V1–V78 全部迁移历史、核心表、实体关系、迁移规则 |
+| [docs/database.md](docs/database.md) | 数据库设计：V1–V80 全部迁移历史、核心表、实体关系、迁移规则 |
 | [docs/api.md](docs/api.md) | API 接口参考：模块列表、公开端点、调用约定 |
 | [docs/agent-v1-scope.md](docs/agent-v1-scope.md) | Agent V1 软件契约：只读研究型 Agent 的能力边界、输入/输出 JSON 契约 |
 | [docs/SWAGGER_UI.md](docs/SWAGGER_UI.md) | Swagger UI 配置指南：访问地址、生产关闭/IP 白名单/Basic Auth 策略、注解规范、常见问题 |
@@ -380,6 +380,8 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 故障排查手册：P0 服务不可用 / P1 功能异常 / P2 性能 / P3 非关键，含数据恢复与日志收集 |
 | [docs/FAQ.md](docs/FAQ.md) | 常见问题速查：菜单为空、插件 runner、演示数据、忘记密码、检索通道数等 |
 | [docs/SCALING.md](docs/SCALING.md) | **扩容与性能手册**（原 SCALING + PERFORMANCE_BASELINE 合并）：扩容决策矩阵、垂直/水平扩容、K8s/Helm、性能基线测试、监控告警、成本优化 |
+| [docs/PUBLISH_CHANNELS.md](docs/PUBLISH_CHANNELS.md) | **发布渠道**（Batch 6）：可嵌入聊天挂件（/embed/chat）+ 飞书/钉钉/企微机器人接入与安全要点 |
+| [docs/GRAPHRAG_REVIEW.md](docs/GRAPHRAG_REVIEW.md) | **GraphRAG 数据驱动复评结论**（Batch 10）：cross_document 基线数据、不立项结论与重开条件 |
 | [docs/PLUGIN_BUILTINS.md](docs/PLUGIN_BUILTINS.md) | **平台内建插件**（P2-3 bid_docx/bid_quote）：provision 管线（wheel→签名→镜像→dind→digest 回填）、dev 沙箱解锁、租户可见性、e2e 验收、与 MCP 第三方工具路径对比 |
 | [docs/PLUGIN_RUNNER_TLS.md](docs/PLUGIN_RUNNER_TLS.md) | Plugin Runner TLS 配置指引（dev compose dind sidecar 默认解锁 + rehearsal/宿主 daemon 备选路径） |
 

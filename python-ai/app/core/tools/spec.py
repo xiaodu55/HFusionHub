@@ -104,6 +104,14 @@ SEARCH_KB_SPEC = ToolSpec(
                 "minimum": 1,
                 "maximum": 20,
             },
+            "metadata_filter": {
+                "type": "object",
+                "description": (
+                    "可选的元数据等值过滤（如 {\"block_type\": \"TABLE\"}）。"
+                    "键为分块 metadata 字段名，值为期望值。"
+                ),
+                "additionalProperties": {"type": "string"},
+            },
         },
         "required": ["query"],
     },

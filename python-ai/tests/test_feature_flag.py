@@ -205,6 +205,8 @@ class TestCacheAndDegradation:
             "rag.hybrid.enabled": _config.RAG_HYBRID_ENABLED,
             "rag.reranker.enabled": _config.RAG_RERANKER_MODE != "disabled",
             "agent.multi_agent.enabled": _config.RAG_MULTI_AGENT_ENABLED,
+            "memory.long_term.enabled": _config.MEMORY_LONG_TERM_ENABLED,
+            "agent.native_tool_calls.enabled": _config.AGENT_NATIVE_TOOL_CALLS_ENABLED,
         }
         for flag in AVAILABILITY_FLAGS:
             expected = env_expectations.get(flag, True)

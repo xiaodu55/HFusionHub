@@ -8,7 +8,8 @@ import type { Conversation, Message } from '@/api/types'
 import { useUserStore } from '@/stores/user'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ArrowLeft, BookOpen, Check, Copy, Download, Eraser, Pencil, Send, User, Bot, Loader2, Square, RefreshCw, ThumbsUp, ThumbsDown, X } from 'lucide-vue-next'
+import * as voiceApi from '@/api/voice'
+import { ArrowLeft, BookOpen, Check, Copy, Download, Eraser, Mic, Pencil, Send, User, Bot, Loader2, Square, RefreshCw, ThumbsUp, ThumbsDown, Volume2, X } from 'lucide-vue-next'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useToast } from '@/composables/useToast'
 import { formatDateTime, formatTime } from '@/utils/date'
@@ -39,6 +40,81 @@ const loading = ref(false)
 const sending = ref(false)
 const inputMessage = ref('')
 const isComposing = ref(false) // 中文输入法组合态：组合期间按 Enter 不发送
+
+// ── 语音输入/播报（Batch 10：VOICE_ENABLED 默认关闭，按钮按 /voice/status 渲染）──
+const voiceStatus = ref<voiceApi.VoiceStatus>({ enabled: false, stt: false, tts: false })
+const recording = ref(false)
+const transcribing = ref(false)
+const speakingMessageId = ref<string | null>(null)
+let mediaRecorder: MediaRecorder | null = null
+let recordedChunks: Blob[] = []
+let currentAudio: HTMLAudioElement | null = null
+
+onMounted(async () => {
+  try {
+    const result = await voiceApi.getVoiceStatus()
+    if (result.data) voiceStatus.value = result.data
+  } catch {
+    /* 语音状态获取失败视作未启用 */
+  }
+})
+
+const toggleRecording = async () => {
+  if (recording.value) {
+    mediaRecorder?.stop()
+    return
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    recordedChunks = []
+    mediaRecorder = new MediaRecorder(stream)
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) recordedChunks.push(event.data)
+    }
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach((track) => track.stop())
+      recording.value = false
+      if (!recordedChunks.length) return
+      const blob = new Blob(recordedChunks, { type: 'audio/webm' })
+      transcribing.value = true
+      try {
+        const text = await voiceApi.transcribeAudio(blob, 'audio.webm')
+        if (text) inputMessage.value = inputMessage.value ? `${inputMessage.value} ${text}` : text
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '语音识别失败')
+      } finally {
+        transcribing.value = false
+      }
+    }
+    recording.value = true
+    mediaRecorder.start()
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : '无法访问麦克风')
+    recording.value = false
+  }
+}
+
+const speakMessage = async (messageId: string, content: string) => {
+  if (speakingMessageId.value === messageId) {
+    currentAudio?.pause()
+    speakingMessageId.value = null
+    return
+  }
+  try {
+    currentAudio?.pause()
+    const audioUrl = await voiceApi.synthesizeSpeech(content)
+    currentAudio = new Audio(audioUrl)
+    speakingMessageId.value = messageId
+    currentAudio.onended = () => {
+      speakingMessageId.value = null
+      URL.revokeObjectURL(audioUrl)
+    }
+    await currentAudio.play()
+  } catch (error) {
+    speakingMessageId.value = null
+    toast.error(error instanceof Error ? error.message : '语音播报失败')
+  }
+}
 const messagesContainer = ref<HTMLElement | null>(null)
 const streamingMessageId = ref<number | null>(null) // 正在流式输出的消息ID
 
@@ -871,6 +947,17 @@ onMounted(() => {
                     >
                       <Copy class="h-3.5 w-3.5" />
                     </Button>
+                    <Button
+                      v-if="voiceStatus.tts && message.id > 0 && message.content && !isErrorMessage(message)"
+                      variant="ghost"
+                      size="icon"
+                      class="h-7 w-7 text-muted-foreground hover:text-primary"
+                      :title="speakingMessageId === String(message.id) ? '停止播报' : '语音播报'"
+                      @click="speakMessage(String(message.id), message.content)"
+                    >
+                      <Volume2 v-if="speakingMessageId !== String(message.id)" class="h-3.5 w-3.5" />
+                      <Square v-else class="h-3.5 w-3.5" />
+                    </Button>
                     <template v-if="message.role === 'assistant' && message.id > 0 && !isErrorMessage(message) && !streamingMessageId">
                       <Button
                         variant="ghost"
@@ -987,6 +1074,19 @@ onMounted(() => {
           @compositionend="isComposing = false"
           @keyup.enter="!isComposing && handleSend()"
         />
+        <!-- 语音输入按钮（Batch 10：STT 启用时渲染） -->
+        <Button
+          v-if="voiceStatus.stt"
+          variant="outline"
+          :disabled="sending"
+          :class="recording ? 'text-rose-500 border-rose-400' : ''"
+          :title="recording ? '停止录音' : '语音输入'"
+          @click="toggleRecording"
+        >
+          <Loader2 v-if="transcribing" class="h-4 w-4 mr-2 animate-spin" />
+          <Mic v-else class="h-4 w-4" :class="recording ? 'animate-pulse' : ''" />
+          {{ recording ? '停止' : '语音' }}
+        </Button>
         <!-- 停止生成按钮 -->
         <Button
           v-if="sending"

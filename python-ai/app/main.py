@@ -48,6 +48,8 @@ from app.api.runtime import router as runtime_router
 from app.api.tools import router as tools_router
 from app.api.plugin_admin import router as plugin_admin_router
 from app.api.mcp_admin import router as mcp_admin_router
+from app.api.memory_internal import router as memory_internal_router
+from app.api.voice import router as voice_router
 from app.api.exception_handlers import (
     hfusionhub_exception_handler,
     http_exception_handler,
@@ -129,6 +131,8 @@ def create_app() -> FastAPI:
     app.include_router(tools_router, dependencies=tenant_dependencies)
     app.include_router(plugin_admin_router, dependencies=tenant_dependencies)
     app.include_router(mcp_admin_router, dependencies=tenant_dependencies)
+    app.include_router(memory_internal_router, dependencies=internal_dependencies)
+    app.include_router(voice_router, dependencies=internal_dependencies)
 
     # Optional feature modules
     if _has_gateway:

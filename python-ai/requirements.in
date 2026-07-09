@@ -17,3 +17,5 @@ cryptography>=42.0.0
 docker>=7.0.0
 cyclonedx-bom>=4.0.0
 starlette>=0.46,<1.0
+# 任务队列 worker（Batch 8）：镜像经 Dockerfile 显式钉版安装；重新 pip-compile 后可移除该注释
+arq>=0.26

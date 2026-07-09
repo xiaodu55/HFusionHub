@@ -149,6 +149,8 @@ class GatewayResult:
     finish_reason: str = "stop"
     usage: Optional[ModelUsage] = None
     fallback_used: bool = False
+    # 原生 function calling：provider 返回的 tool_calls（OpenAI 形态），无则为 None
+    tool_calls: Optional[List[Dict[str, Any]]] = None
     # True when the request was served by the legacy ``get_llm()`` path
     # (gateway disabled, nothing to route with, or model unresolved).
     degraded: bool = False
@@ -468,7 +470,7 @@ class ModelGateway:
 
             provider = self._providers[candidate]
             try:
-                content, finish_reason, raw_usage = await self._call_provider(
+                content, finish_reason, raw_usage, provider_tool_calls = await self._call_provider(
                     provider, candidate_model, messages, temperature, max_tokens, kwargs
                 )
             except Exception as exc:
@@ -487,6 +489,7 @@ class ModelGateway:
                 finish_reason=finish_reason,
                 usage=usage,
                 fallback_used=candidate != provider_name,
+                tool_calls=provider_tool_calls,
             )
 
         raise GatewayError(
@@ -725,10 +728,10 @@ class ModelGateway:
         temperature: float,
         max_tokens: int,
         kwargs: Dict[str, Any],
-    ) -> Tuple[str, str, Dict[str, Any]]:
-        """Invoke one provider; return ``(content, finish_reason, usage)``."""
+    ) -> Tuple[str, str, Dict[str, Any], Optional[List[Dict[str, Any]]]]:
+        """Invoke one provider; return ``(content, finish_reason, usage, tool_calls)``."""
         if provider.provider_type == "ollama":
-            return await self._call_ollama(provider, model, messages, temperature, max_tokens)
+            return await self._call_ollama(provider, model, messages, temperature, max_tokens, kwargs)
         return await self._call_openai_compatible(
             provider, model, messages, temperature, max_tokens, kwargs
         )
@@ -741,11 +744,14 @@ class ModelGateway:
         temperature: float,
         max_tokens: int,
         kwargs: Dict[str, Any],
-    ) -> Tuple[str, str, Dict[str, Any]]:
+    ) -> Tuple[str, str, Dict[str, Any], Optional[List[Dict[str, Any]]]]:
         """Chat-completions protocol (DeepSeek, OpenAI-compatible endpoints).
 
         Uses the shared connection pool and P3 bounded retry (429/5xx + jitter)
         so the gateway path keeps the same transport quality as the LLM layer.
+        ``kwargs`` may carry ``tools``/``tool_choice`` for native function
+        calling; unsupported-parameter errors bubble up so callers can degrade
+        to text ReAct.
         """
         from .http_client import get_shared_client, post_with_retry
 
@@ -782,8 +788,9 @@ class ModelGateway:
         choice = data["choices"][0]
         content = choice["message"].get("content") or ""
         finish_reason = choice.get("finish_reason") or "stop"
+        tool_calls = choice["message"].get("tool_calls") or None
         usage = data.get("usage") or {}
-        return content, finish_reason, usage
+        return content, finish_reason, usage, tool_calls
 
     @staticmethod
     async def _call_ollama(
@@ -792,16 +799,26 @@ class ModelGateway:
         messages: List[ChatMessage],
         temperature: float,
         max_tokens: int,
-    ) -> Tuple[str, str, Dict[str, Any]]:
-        """Native Ollama ``/api/chat`` protocol (shared client, bounded retry)."""
+        kwargs: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[str, str, Dict[str, Any], Optional[List[Dict[str, Any]]]]:
+        """Native Ollama ``/api/chat`` protocol (shared client, bounded retry).
+
+        Ollama ≥0.4 原生支持 ``tools``（OpenAI 同构形态）；不支持的旧版会返回
+        400，由调用方降级到文本 ReAct。
+        """
         from .http_client import get_shared_client, post_with_retry
 
-        payload = {
+        payload: Dict[str, Any] = {
             "model": model,
             "messages": [{"role": msg.role, "content": msg.content} for msg in messages],
             "stream": False,
             "options": {"temperature": temperature, "num_predict": max_tokens},
         }
+        kwargs = kwargs or {}
+        if kwargs.get("tools"):
+            payload["tools"] = kwargs["tools"]
+            if kwargs.get("tool_choice"):
+                payload["tool_choice"] = kwargs["tool_choice"]
 
         client = get_shared_client(owner=f"gateway:{provider.name}")
         response = await post_with_retry(
@@ -815,12 +832,25 @@ class ModelGateway:
             )
         data = response.json()
 
-        content = data.get("message", {}).get("content") or ""
+        message = data.get("message") or {}
+        content = message.get("content") or ""
+        raw_tool_calls = message.get("tool_calls") or None
+        # Ollama 原生 tool_calls：[{"function": {"name": …, "arguments": {…}}}，
+        # arguments 是 dict——归一化为 OpenAI 形态（arguments 序列化为 JSON 字符串）。
+        tool_calls: Optional[List[Dict[str, Any]]] = None
+        if raw_tool_calls:
+            tool_calls = []
+            for call in raw_tool_calls:
+                fn = call.get("function") or {}
+                args = fn.get("arguments")
+                if isinstance(args, dict):
+                    args = json.dumps(args, ensure_ascii=False)
+                tool_calls.append({"function": {"name": fn.get("name") or "", "arguments": args}})
         usage = {
             "prompt_tokens": data.get("prompt_eval_count", 0) or 0,
             "completion_tokens": data.get("eval_count", 0) or 0,
         }
-        return content, "stop", usage
+        return content, "stop", usage, tool_calls
 
     # -- circuit breaker & rate limiting ------------------------------------
 

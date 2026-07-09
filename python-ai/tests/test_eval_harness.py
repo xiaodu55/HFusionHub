@@ -236,3 +236,148 @@ def test_score_by_tag_slicing(tmp_path: Path):
     by_diff = result.meta.get("by_tag", {}).get("difficulty", {})
     assert by_diff["easy"]["hit@5"] == 1.0
     assert by_diff["hard"]["hit@5"] == 0.0
+
+
+# ── runner：长期记忆 case（Batch 1）────────────────────────
+
+class _FakeStreamResponse:
+    def __init__(self, lines):
+        self._lines = lines
+
+    def raise_for_status(self):
+        return None
+
+    def iter_lines(self):
+        return iter(self._lines)
+
+
+class _FakeStreamContext:
+    def __init__(self, lines, sink):
+        self._lines = lines
+        self._sink = sink
+
+    def __enter__(self):
+        return _FakeStreamResponse(self._lines)
+
+    def __exit__(self, *args):
+        return False
+
+
+class _FakeHttpClient:
+    """记录请求体的 httpx.Client 替身（支持 stream 上下文与普通 post）。"""
+
+    posts = []
+    stream_bodies = []
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def post(self, url, json=None, headers=None, **kwargs):
+        _FakeHttpClient.posts.append({"url": url, "json": json, "headers": headers})
+        return _FakePostResponse()
+
+    def stream(self, method, url, json=None, headers=None, **kwargs):
+        _FakeHttpClient.stream_bodies.append({"url": url, "json": json})
+        return _FakeStreamContext(
+            ['data: {"content": "记忆回答"}', "data: [DONE]"], _FakeHttpClient.stream_bodies)
+
+
+class _FakePostResponse:
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {"data": {"saved": 1}}
+
+
+def test_memory_sample_flow_consolidates_then_probes(monkeypatch):
+    """seed_messages 非空 → 先同步固化再空 history 探测，产出 requires_rag=False 记录。"""
+    consolidate_calls = []
+    monkeypatch.setattr(runner_mod, "_consolidate_memory",
+                        lambda *a, **k: consolidate_calls.append(a))
+    chat_samples = []
+    monkeypatch.setattr(runner_mod, "_run_chat_stream",
+                        lambda base_url, headers, sample, kb_id, timeout: (
+                            chat_samples.append(sample), ("记忆回答", 90.0, 600.0, "completed"))[1])
+
+    sample = EvalSample(
+        query_id="mem-001", query="我说过我喜欢什么风格？", requires_rag=False,
+        ground_truth="用户偏好简洁风格。",
+        tags={"memory_type": "preference"},
+        seed_messages=[{"role": "user", "content": "我更喜欢简洁风格。"}],
+        user_id=7, conversation_id=990001,
+    )
+    record = runner_mod.run_sample(sample, "http://test", {"X-Internal-Token": "t"},
+                                   kb_id=132, top_k=5, timeout=30)
+
+    assert len(consolidate_calls) == 1
+    assert record.requires_rag is False
+    assert record.answer == "记忆回答"
+    assert record.error is None
+    # 探测请求不携带 seed 历史（注入必须来自长期记忆链路）
+    assert chat_samples[-1].history == []
+
+
+def test_consolidate_memory_posts_seed_payload(monkeypatch):
+    _FakeHttpClient.posts = []
+    _FakeHttpClient.stream_bodies = []
+    monkeypatch.setattr(runner_mod.httpx, "Client", _FakeHttpClient)
+
+    sample = EvalSample(
+        query_id="mem-042", query="探测", requires_rag=False,
+        seed_messages=[{"role": "user", "content": "事实 A"}, {"role": "assistant", "content": "好的"}],
+        user_id=3, conversation_id=990042,
+    )
+    runner_mod._consolidate_memory("http://test", {"X-Internal-Token": "t"},
+                                   sample, kb_id=None, timeout=5.0)
+
+    assert len(_FakeHttpClient.posts) == 1
+    body = _FakeHttpClient.posts[0]["json"]
+    assert _FakeHttpClient.posts[0]["url"].endswith("/api/internal/memory/consolidate")
+    assert body["conversation_id"] == 990042
+    assert body["user_id"] == 3
+    assert body["messages"] == sample.seed_messages
+
+
+def test_memory_sample_without_conversation_id_gets_stable_fallback(monkeypatch):
+    _FakeHttpClient.posts = []
+    _FakeHttpClient.stream_bodies = []
+    monkeypatch.setattr(runner_mod.httpx, "Client", _FakeHttpClient)
+
+    sample = EvalSample(
+        query_id="mem-stable", query="探测", requires_rag=False,
+        seed_messages=[{"role": "user", "content": "事实"}],
+    )
+    runner_mod._consolidate_memory("http://test", {}, sample, kb_id=None, timeout=5.0)
+    first = _FakeHttpClient.posts[0]["json"]["conversation_id"]
+
+    runner_mod._consolidate_memory("http://test", {}, sample, kb_id=None, timeout=5.0)
+    second = _FakeHttpClient.posts[-1]["json"]["conversation_id"]
+
+    assert first == second and first >= 1  # 同一 query_id 两次调用 conversation_id 稳定
+
+
+def test_chat_stream_carries_history_and_user_context(monkeypatch):
+    _FakeHttpClient.posts = []
+    _FakeHttpClient.stream_bodies = []
+    monkeypatch.setattr(runner_mod.httpx, "Client", _FakeHttpClient)
+
+    sample = EvalSample(
+        query_id="mt-1", query="接着说", requires_rag=False,
+        history=[{"role": "user", "content": "我喜欢蓝色"}],
+        user_id=5, conversation_id=77,
+    )
+    answer, ttft, latency, status = runner_mod._run_chat_stream(
+        "http://test", {}, sample, kb_id=None, timeout=5.0)
+
+    body = _FakeHttpClient.stream_bodies[0]["json"]
+    assert body["history"] == [{"role": "user", "content": "我喜欢蓝色"}]
+    assert body["user_id"] == 5
+    assert body["conversation_id"] == 77
+    assert answer == "记忆回答" and status == "completed"

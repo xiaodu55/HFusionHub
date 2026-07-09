@@ -13,7 +13,7 @@ from app.main import create_app
 
 
 class FakeRouter:
-    async def search(self, query, knowledge_base_id, top_k):
+    async def search(self, query, knowledge_base_id, top_k, **kwargs):
         return MergedResult(
             results=[SearchResult(
                 content="RAG observability document",

@@ -488,6 +488,7 @@ class MilvusLiteStore(VectorStoreProtocol):
         top_k: int = 5,
         document_id: Optional[str] = None,
         knowledge_base_id: Optional[int] = None,
+        metadata_filter: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         try:
             client = self._get_client()
@@ -509,19 +510,50 @@ class MilvusLiteStore(VectorStoreProtocol):
             # ensure/迁移阶段已 load；若被驱逐（not loaded 错误），在 except
             # 中 load 后重试一次。
             try:
-                return self._search_client(
-                    client, query_embedding, top_k, knowledge_base_id, document_id
+                return self._filtered_search(
+                    client, query_embedding, top_k, knowledge_base_id, document_id,
+                    metadata_filter,
                 )
             except Exception as exc:
                 if "not loaded" in str(exc).lower() or "not exist" in str(exc).lower():
                     client.load_collection(self._collection_name)
-                    return self._search_client(
-                        client, query_embedding, top_k, knowledge_base_id, document_id
+                    return self._filtered_search(
+                        client, query_embedding, top_k, knowledge_base_id, document_id,
+                        metadata_filter,
                     )
                 raise
         except Exception as exc:
             logger.exception("Failed to search")
             return []
+
+    def _filtered_search(
+        self,
+        client,
+        query_embedding: List[float],
+        top_k: int,
+        knowledge_base_id: Optional[int],
+        document_id: Optional[str],
+        metadata_filter: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """带元数据过滤的搜索：先超额召回再按谓词后过滤（Batch 5）。
+
+        无 filter 时与原路径完全一致（top_k 直取）。
+        """
+        if not metadata_filter:
+            return self._search_client(
+                client, query_embedding, top_k, knowledge_base_id, document_id
+            )
+        from app.core.vectorstore.milvus_store import _matches_metadata_filter
+
+        fetch_k = min(max(top_k * 4, 20), 200)
+        candidates = self._search_client(
+            client, query_embedding, fetch_k, knowledge_base_id, document_id
+        )
+        matched = [
+            r for r in candidates
+            if _matches_metadata_filter(r.get("metadata"), metadata_filter)
+        ]
+        return matched[:top_k]
 
     def _search_client(
         self,

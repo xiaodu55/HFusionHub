@@ -58,11 +58,15 @@ public class DocumentServiceImpl implements DocumentService {
     private final VectorizationService vectorizationService;
     private final DeletionService deletionService;
     private final com.hfusionhub.client.AiClient aiClient;
+    private final com.hfusionhub.service.KbShareService kbShareService;
 
     private static final String UPLOAD_DIR = "uploads/documents";
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
     // 允许的文件扩展名（优先使用扩展名检查，比MIME类型更可靠）
-    private static final List<String> ALLOWED_EXTENSIONS = List.of(".pdf", ".docx", ".txt", ".md", ".csv", ".xlsx");
+    private static final List<String> ALLOWED_EXTENSIONS = List.of(
+            ".pdf", ".docx", ".txt", ".md", ".csv", ".xlsx",
+            // Batch 4 解析扩展：PPTX / HTML / 图片 OCR
+            ".pptx", ".html", ".htm", ".png", ".jpg", ".jpeg");
     // 允许的MIME类型（作为辅助验证）
     private static final List<String> ALLOWED_TYPES = List.of(
             "application/pdf",
@@ -72,6 +76,10 @@ public class DocumentServiceImpl implements DocumentService {
             "text/markdown",
             "text/csv",
             "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "text/html",
+            "image/png",
+            "image/jpeg",
             "application/octet-stream" // 允许通用二进制流（由扩展名验证）
             );
 
@@ -84,7 +92,12 @@ public class DocumentServiceImpl implements DocumentService {
         if (kb == null) {
             throw new BusinessException("知识库不存在");
         }
-        if (!kb.getUserId().equals(currentUserId)) {
+        // Batch 10 授权矩阵：owner 或 read_write 共享可上传（read 仅可读）
+        String effectivePermission = kbShareService.getEffectivePermission(currentUserId, kbId);
+        if ("read".equals(effectivePermission)) {
+            throw new BusinessException("该知识库对您为只读共享，无法上传文档");
+        }
+        if (effectivePermission == null && !kb.getUserId().equals(currentUserId)) {
             throw new BusinessException("无权访问该知识库");
         }
         if (kb.getStatus() == null || kb.getStatus() != CommonConstants.KB_STATUS_NORMAL) {

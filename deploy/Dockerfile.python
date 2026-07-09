@@ -14,6 +14,9 @@ COPY requirements.txt .
 # The sed workaround (3cd5303) was for --require-hashes mode, which is no longer
 # used. Restoring [standard] for production-grade event loop.
 RUN pip install --no-cache-dir -r requirements.txt
+# Batch 8：arq（任务队列 worker）。requirements.txt 为 pip-compile 哈希锁文件，
+# arq 以显式钉版本在此单独安装（升级需同步修改此处与 requirements.in）。
+RUN pip install --no-cache-dir "arq==0.26.3"
 
 COPY app/ app/
 RUN mkdir -p /data/uploads /data \

@@ -18,6 +18,7 @@ class SearchTool(BaseTool):
         query: str,
         top_k: int = 5,
         knowledge_base_id: int = None,
+        metadata_filter: Dict[str, Any] = None,
         **kwargs
     ) -> List[Dict[str, Any]]:
         """
@@ -27,6 +28,8 @@ class SearchTool(BaseTool):
             query: Search query text
             top_k: Number of results to return
             knowledge_base_id: Override knowledge base ID
+            metadata_filter: Optional {field: value} equality filter on chunk
+                metadata (Batch 5)
 
         Returns:
             List of search results with source information
@@ -45,7 +48,8 @@ class SearchTool(BaseTool):
             results = search_similar(
                 query_text=query,
                 top_k=top_k,
-                knowledge_base_id=kb_id
+                knowledge_base_id=kb_id,
+                metadata_filter=metadata_filter,
             )
 
             # Format results with source information

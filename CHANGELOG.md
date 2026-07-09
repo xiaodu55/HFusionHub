@@ -8,6 +8,203 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 权限细化 + 语音 + GraphRAG 复评批（2026-08-30 第十六批，Batch 10 收官）
+
+#### Added
+- **资源级授权矩阵**：`kb_share.permission` 两档生效（`read` | `read_write`）——
+  `KbShareService.share` 支持档位与重复共享=更新；新增
+  `getEffectivePermission(userId, kbId)`（owner/read_write/read/null）；
+  `DocumentServiceImpl.upload` 放行 read_write 共享（read 明确拒绝，
+  删除/管理仍所有者专属）；分享 API 带 `permission` 字段 + 知识库详情页
+  分享对话框权限下拉
+- **语音 STT/TTS**（`VOICE_ENABLED` 默认 false，关闭时端点 503/按钮不渲染）：
+  - Python `app/api/voice.py`：`/api/voice/transcribe`（原始音频字节 +
+    X-Audio-Filename 头，避免引入 multipart 依赖）、`/api/voice/synthesize`
+    （文本→mp3 二进制）、`/api/voice/status`；引擎为 OpenAI 兼容
+    /v1/audio/*（通义/OpenAI）
+  - Java `VoiceController`（/voice/**，登录态）：字节流转发 + 内部令牌注入
+  - 前端：`api/voice.ts` + 聊天页语音输入按钮（MediaRecorder→STT→填入输入框）
+    与助手消息播报按钮（TTS→Audio 播放）
+  - 测试：`test_voice.py` 7 例（503 门控/格式与空体校验/状态能力位）
+- **GraphRAG 数据驱动复评**（docs/GRAPHRAG_REVIEW.md）：离线确定性轨道
+  （220 case 冻结套件）实测 cross_document 30 case **Hit@5=100%**、
+  Recall@5=0.900，整体 Recall@5=0.932 / nDCG@10=0.903——多跳场景混合检索
+  已达高位，GraphRAG 边际收益不足，**不立项重建**；文档载明重开条件
+  （cross_document Hit@5<0.85 持续出现且归因为实体关系跳接缺口）
+
+### 多 Agent 模式批（2026-08-30 第十五批）：supervisor / handoff 编排（无 DSL）
+
+#### Added
+- **`BoundedMultiAgentWorkflow` 新增 `mode` 参数**（三种有界编排模式，全部复用
+  同一 delegate / KB scope / 超时 / 确定性证据门控，不引入 DSL）：
+  - `pipeline`（默认）：原 P10 行为不变（researcher → critic → synthesis）
+  - `supervisor`：检索研究员产出初答后，按确定性规则分派一个「补充分析」专家
+    （同一 delegate + 查漏限定提示），产出经证据门控后确定性合并
+    （【补充要点】追加 + 来源按 chunk_id 去重合并；"无补充"/无证据/异常时
+    回退初答）——不引入自由 LLM 汇总，sources 只能来自同 KB delegate 产物
+  - `handoff`：顺序移交——检索棒证据不足时移交扩展检索棒（改写提示重跑，
+    handoff 事件留痕），移交次数 `max_handoffs` 硬上限（默认 1），全部失败走
+    既有 insufficient 语义
+- **流式**：supervisor/handoff 非流式执行后按 run_started → step_completed →
+  文本 → run_completed 事件契约一次性发流；pipeline 流式路径不变
+- **配置**：`RAG_MULTI_AGENT_MODE`（pipeline|supervisor|handoff，默认 pipeline）
+- **测试**：`test_multi_agent_modes.py` 10 例（补充合并/无证据丢弃/查漏回退/
+  拒答保留/早退/移交改写/上限/流式契约/pipeline 透传/非法模式拒绝）+
+  既有 test_multi_agent_workflow.py 回归
+
+### 任务队列外置批（2026-08-30 第十四批）：arq worker + compose python-ai-worker
+
+#### Added
+- **`core/tasks/queue.py`**：`dispatch_document_processing` 按 `TASK_QUEUE_MODE`
+  分发解析/向量化任务——`inline`（默认，BackgroundTasks 进程内，零依赖）|
+  `arq`（入 Redis 队列）；arq 入队失败自动降级 inline（告警日志）
+- **arq worker**：`app/core/tasks/arq_tasks.py`（process_document 任务复用
+  vectorization 生产链路全流程，job_timeout=1800 / max_jobs=4）+
+  `python-ai/arq_worker.py` CLI 入口（`python -m arq arq_worker.WorkerSettings`）
+- **compose**：新增 `python-ai-worker` 服务（同镜像，dev/fullstack 栈默认启用，
+  python-ai 与 worker 均设 `TASK_QUEUE_MODE=arq`）；`deploy/Dockerfile.python`
+  显式钉版安装 arq==0.26.3（锁文件哈希不受扰动，requirements.in 声明意图）
+- **配置**：`TASK_QUEUE_MODE` / `ARQ_REDIS_DSN`（默认 redis://localhost:6379/2）
+- **测试**：`test_task_queue.py` 5 例（inline 直通/转交 kwargs/arq 入队 payload/
+  失败降级/worker 任务函数委托）——arq 延迟导入 + sys.modules 假模块，
+  测试环境无需安装 arq
+
+### 可插拔审核批（2026-08-30 第十三批）：外部内容安全 provider
+
+#### Added
+- **`core/policy/moderation_provider.py`**：审核引擎抽象（ModerationProvider 协议
+  + ModerationVerdict）+ `HttpModerationProvider`（通用 REST：POST {text, kind}，
+  响应 dot-path 解析 flagged/category/score，适配阿里云内容安全/网易易盾等）。
+  `MODERATION_PROVIDER=local`（默认，零行为变化）| `http`
+- **ContentModerator 集成**：check_input/check_output 在本地规则之后调用外部引擎，
+  命中即硬阻断（flag `external_moderation:<category>`）；外部失败 **fail-open**
+  （告警放行，本地规则仍生效）——与仓库"外部引擎失败只跳过"取舍一致
+- **配置**：`MODERATION_HTTP_ENDPOINT/API_KEY/TIMEOUT_SECONDS/FLAGGED_PATH/
+  CATEGORY_PATH/SCORE_PATH`
+- **测试**：`test_moderation_provider.py` 8 例（工厂/请求构造/dot-path 解析/
+  输入输出阻断/fail-open/local 不变）
+
+### 发布渠道批（2026-08-30 第十二批）：可嵌入挂件 + 飞书/钉钉/企微机器人
+
+#### Added
+- **`POST /openapi/chat/stream`**（SSE）：开放 API 流式对话——与 `/openapi/chat`
+  同一套 Key 解析/限流/计费（run_completed token_usage 提取入 app_call_log），
+  经 Agent V1 通道转发（要求应用绑定知识库）
+- **可嵌入聊天挂件**：前端新路由 `/embed/chat?key=<开放API Key>`（无需登录态，
+  iframe 友好）：独立聊天壳（SSE 流式渲染/Markdown+DOMPurify/取消/历史携带），
+  接入文档 docs/PUBLISH_CHANNELS.md
+- **IM 机器人适配器**（`com.hfusionhub.bot`，全部默认关闭，统一复用开放 API
+  鉴权/限流/计费链路）：
+  - 钉钉（企业内部机器人 HTTP 模式）：timestamp+sign HMAC-SHA256 加签校验
+    （常量时间比较），sessionWebhook 回复
+  - 飞书（事件订阅明文模式）：url_verification challenge 回显 + verification
+    token 校验 + tenant_access_token 缓存 + IM API 回复
+  - 企业微信（自建应用回调）：官方加解密协议纯 JDK 实现（WeComCrypto：
+    SHA1 签名 + AES-256-CBC/PKCS7，round-trip 测试）+ 应用消息主动回复
+  - `BotChatService`：平台消息 → 开放 API chat，异常全部降级为用户可读兜底文案
+- **配置**：`bots.dingtalk/feishu/wecom.*`（BotProperties），含每 bot 的
+  appKey 与平台凭证
+- **测试**：BotAdaptersTest 8 例（钉钉签名/企微 round-trip+篡改拒绝/飞书
+  challenge/服务降级/默认关闭）+ docs/PUBLISH_CHANNELS.md
+
+### Embedding 多通道批（2026-08-30 第十一批）：云端 embedding + 检索元数据过滤
+
+#### Added
+- **`OpenAICompatibleEmbedding`**（`core/embedding/openai_compatible.py`）：通义/OpenAI
+  等任意 `/v1/embeddings` 端点；复用共享连接池 + P3 有界重试；**维度 fail-closed 校验**
+  （异维向量拒绝写入，保护 Milvus collection 完整性）
+- **EmbeddingService 双通道路由**：`EMBEDDING_PROVIDER=openai_compatible` 且配置齐全时
+  优先云端通道，失败回落 Ollama；测试随机降级路径不变。新增 env：
+  `EMBEDDING_PROVIDER` / `EMBEDDING_OPENAI_BASE_URL` / `EMBEDDING_OPENAI_API_KEY` /
+  `EMBEDDING_OPENAI_MODEL` / `EMBEDDING_OPENAI_DIMENSION`
+- **检索元数据过滤**（`metadata_filter={field: value}` 等值谓词）：
+  - 存储层：`_matches_metadata_filter` 共享谓词 + lite/cluster 超额召回（top_k×4，下限 20）
+    后过滤截断，无 Milvus schema 变更
+  - 通道层：VectorChannel 透传、KeywordChannel 候选过滤
+  - API 层：`retriever.retrieve(...)`、`/api/rag/debug/search`、`/api/rag/eval`、
+    `search_knowledge_base` 工具 schema（`metadata_filter` 可选 object 参数）
+- **测试**：`test_embedding_channels.py` 13 例（云端解析/维度校验/路由优先级/失败回落/
+  过滤谓词/lite 后过滤/通道透传）
+
+### 文档解析扩展批（2026-08-30 第十批）：PPTX / HTML / 图片 OCR + 表格感知分块
+
+#### Added
+- **三个新解析器**（全部零第三方依赖，不翻搅 pip-compile 哈希锁文件）：
+  - `pptx_parser.py` — stdlib zipfile+ElementTree 读 OOXML：标题占位符→HEADING、
+    正文段→PARAGRAPH、`<a:tbl>`→TABLE（TSV）、演讲者备注（metadata source=speaker_notes）
+  - `html_parser.py` — stdlib html.parser：h1-h6 层级、p/li、table(tr/td|th TSV)、
+    script/style/head 跳过；UTF-8→GB18030 降级解码
+  - `image_parser.py` — 独立图片（png/jpg/jpeg）复用既有 Tesseract OCR 通道
+    （MultimodalEvidenceExtractor._ocr），`RAG_MULTIMODAL_OCR_ENABLED=false` 时
+    明确报错不静默入库空文档
+- **表格感知分块**：TextChunker 对 TABLE 块按行打包（不再走句子边界启发式切断行），
+  续块自动带表头前缀「（表格续，表头同上）」，metadata 标注 table_row_aligned；
+  单行超限才硬切兜底
+- **三端格式白名单同步**：Java ALLOWED_EXTENSIONS/MIME + Python
+  validators.SUPPORTED_FILE_TYPES + 前端两处 upload accept 属性
+  （新增 .pptx/.html/.htm/.png/.jpg/.jpeg）
+- **测试**：`test_parser_extensions.py` 10 例（最小 OOXML zip 仿真/HTML 块语义/
+  OCR 门控/表格行对齐断言）
+
+### 性能债核实批（2026-08-30 第九批）：OPTIMIZATION_PLAN Python P1 四项对账
+
+#### Fixed
+- **docs/OPTIMIZATION_PLAN.md 与代码实现对账**（此前批次修复后文档未同步）：
+  - 2.5 BM25 语料/倒排索引缓存 ✅ — `KeywordChannel._corpus_cache` 按 (store id, KB)
+    缓存预解析语料，co-store mtime/size 变化自动失效
+  - 2.7 流式多 Agent 绕过证据审查 ✅ — 流式首个文本 chunk 前对 retrieval sources
+    执行与非流式同一确定性门控 `_validate_sources`（空 sources 放行为委托层
+    拒答门控的文档化设计）
+  - 2.8 文件重复读取 ✅ — co-store 按租户 + mtime+size 缓存，热路径零重读
+  - 2.9 事件循环阻塞 ✅ — embedding 模块级线程池复用 + Ollama 探测 TTL 缓存线程池化
+  - P2 LLM 响应缓存精确命中已覆盖流式（chat_stream 缓存路径），模糊命中留待后续
+- 全量回归佐证：Python 1324 passed / Java 581 passed（含上述各专项测试）
+
+### 原生 function calling 批（2026-08-30 第八批）：provider 原生 tool-calls + max_steps 配置化
+
+#### Added
+- **LLM 接口层**：`LLMResponse`/`GatewayResult` 新增 `tool_calls` 字段；
+  `ModelGateway._call_openai_compatible` 提取响应中的 tool_calls，
+  `_call_ollama` 支持 `tools`/`tool_choice` 透传并把 Ollama dict arguments
+  归一化为 OpenAI JSON 字符串形态（GatewayLLM 门面全链路转发）
+- **ReAct 原生分支**：新增 `ReactAgent._chat_step`——flag 开启时优先以原生
+  tool-calls 调用（tools 由 `ToolSpec.input_schema` 转 OpenAI function 形态），
+  命中则把调用序列化回写 assistant content 保持消息历史纯文本延续；
+  provider 报错/不支持自动降级文本 Thought/Action 协议；flag 关闭零行为变化。
+  run 与 _run_stream_react 两个循环均已接入
+- **治理**：V81 迁移注册 `agent.native_tool_calls.enabled` flag（默认 FALSE）；
+  env `AGENT_NATIVE_TOOL_CALLS_ENABLED` 降级回退；AVAILABILITY_FLAGS 映射
+- **max_steps 配置化**：`RAG_AGENT_MAX_STEPS` 默认 5 → **12**；ReactAgent 构造器
+  未传时回落配置；请求字段 `max_tool_steps` 上限 10 → 24
+- **测试**：`test_native_tool_calls.py` 11 例（gateway 提取/Ollama 归一化/原生命中/
+  异常降级/flag 关闭/schema 转换/max_steps 配置）
+
+### 长期记忆接线批（2026-08-30 第七批）：memory_consolidator 激活 + 上下文注入 + 会话删除回调
+
+#### Added
+- **长期记忆闭环**（此前三个休眠组件 MemoryConsolidator / MemoryManager / Java MemoryService 首次连通）：
+  - 触发 1（对话中）：chat 四端点（/api/chat、/api/chat/stream、/api/agent/v1/chat、/api/agent/v1/chat/stream）
+    轮次收尾计数，每 N 轮（`MEMORY_CONSOLIDATE_EVERY_TURNS`，默认 6）后台 LLM 抽取记忆
+  - 触发 2（会话删除）：Java `ConversationServiceImpl.delete` 删除前快照消息（≤100 条），
+    `@Async` 回调 Python `POST /api/internal/memory/consolidate` 做最终抽取
+  - 存储：抽取结果批量落 Java `memory_entry`（新增 `InternalMemoryController`：
+    `POST /internal/memory/entries` 按 user+content 去重 + `GET /internal/memory/relevant`
+    重要性+词命中排序，均 X-Internal-Token 常时比较保护）
+  - 注入：ReactAgent 三路径（run / _run_stream_react / _handle_chitchat）组装上下文前经
+    `LongTermMemoryService.build_memory_context` 拉取相关记忆，以「非指令」标注块拼入 system prompt
+- **治理**：V80 迁移注册 `memory.long_term.enabled` flag（默认 FALSE）；
+  env `MEMORY_LONG_TERM_ENABLED`/`MEMORY_CONSOLIDATE_EVERY_TURNS`/`MEMORY_CONTEXT_MAX_ENTRIES`/
+  `MEMORY_CONTEXT_MAX_TOKENS`/`MEMORY_INTERNAL_TIMEOUT_SECONDS` 作为降级回退；
+  flag 加入 AVAILABILITY_FLAGS 降级映射
+- **测试**：Python `test_long_term_memory.py` 16 例（门控零开销/类别映射/截断钳制/归一化/
+  静默降级/每 N 轮触发/抽取落库串联）+ Java `InternalMemoryControllerTest` 9 例
+
+#### Fixed
+- **修复 main 上 Java 测试无法编译的既有问题**（CI 计费停摆期间未被发现）：
+  sa-token 1.46 的 `SaTokenContext` 接口变更（新增 setContext/clearContext/getModelBox 抽象方法、
+  getRequest 等转 default）导致 12 个测试文件内嵌 `MockSaTokenContext` 编译失败——统一升级为
+  ModelBox 装配式实现并补齐缺失 import
+
 ### 评估中枢收尾批（2026-08-30 第六批）：V79 写入接线 + 切片汇总 + judge 缓存 + nightly 接入
 
 #### Added

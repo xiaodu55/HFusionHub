@@ -4,7 +4,7 @@ LLM Base Module - Abstract base class and data models
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional, AsyncGenerator
+from typing import Any, Dict, List, Optional, AsyncGenerator
 
 
 @dataclass
@@ -21,6 +21,10 @@ class LLMResponse:
     model: str
     token_count: int = 0
     finish_reason: str = "stop"
+    # 原生 function calling：provider 返回的 tool_calls（OpenAI 形态
+    # [{"id","type","function":{"name","arguments"}}]；arguments 为 JSON 字符串
+    # 或 dict——Ollama 原生返回 dict，消费方需同时兼容）。文本 ReAct 降级时为 None。
+    tool_calls: Optional[List[Dict[str, Any]]] = None
 
 
 class BaseLLM(ABC):

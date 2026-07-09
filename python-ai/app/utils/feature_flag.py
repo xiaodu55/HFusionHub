@@ -43,6 +43,8 @@ AVAILABILITY_FLAGS = frozenset({
     "rag.reranker.enabled",
     "agent.multi_agent.enabled",
     "agent.enabled",
+    "memory.long_term.enabled",
+    "agent.native_tool_calls.enabled",
 })
 
 
@@ -59,6 +61,8 @@ def _env_fallback_value(flag_key: str):
         "rag.hybrid.enabled": lambda: _config.RAG_HYBRID_ENABLED,
         "rag.reranker.enabled": lambda: _config.RAG_RERANKER_MODE != "disabled",
         "agent.multi_agent.enabled": lambda: _config.RAG_MULTI_AGENT_ENABLED,
+        "memory.long_term.enabled": lambda: _config.MEMORY_LONG_TERM_ENABLED,
+        "agent.native_tool_calls.enabled": lambda: _config.AGENT_NATIVE_TOOL_CALLS_ENABLED,
     }
     factory = mapping.get(flag_key)
     return factory() if factory else None

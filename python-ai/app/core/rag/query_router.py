@@ -39,6 +39,7 @@ from .utils import (
 )
 from app.utils.config import config as app_config
 from app.utils.feature_flag import feature_flags
+from app.core.vectorstore.milvus_store import _matches_metadata_filter
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,7 @@ class VectorChannel(BaseChannel):
         query: str,
         knowledge_base_id: int,
         top_k: int = 10,
+        metadata_filter: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> List[SearchResult]:
         """向量检索（兼容 Milvus Lite 的同步搜索接口）"""
@@ -166,6 +168,7 @@ class VectorChannel(BaseChannel):
                 query_text=query,
                 knowledge_base_id=knowledge_base_id,
                 top_k=top_k,
+                metadata_filter=metadata_filter,
             )
 
             return [
@@ -261,6 +264,7 @@ class KeywordChannel(BaseChannel):
         query: str,
         knowledge_base_id: int,
         top_k: int = 10,
+        metadata_filter: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> List[SearchResult]:
         """Return normalized BM25 candidates from the scoped local corpus."""
@@ -288,6 +292,10 @@ class KeywordChannel(BaseChannel):
             average_length = corpus.average_length
             scored: List[Tuple[float, str, Dict]] = []
             for document_id, chunk, tokens in documents:
+                # 元数据过滤（Batch 5）：与向量通道同一谓词语义
+                if metadata_filter and not _matches_metadata_filter(
+                        chunk.get("metadata"), metadata_filter):
+                    continue
                 raw_score = self._bm25_score(
                     terms=terms,
                     tokens=tokens,

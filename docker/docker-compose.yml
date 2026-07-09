@@ -313,6 +313,9 @@ services:
       PLUGIN_BUILTIN_WHEELS_DIR: /plugin-wheels
       # 插件签名信任策略（scripts/plugin-provision.sh 注册的平台公钥）
       HFUSIONHUB_PLUGIN_TRUST_DIR: /plugin-trust
+      # Batch 8：解析/向量化任务经 arq 队列交由 python-ai-worker 执行
+      TASK_QUEUE_MODE: ${TASK_QUEUE_MODE:-arq}
+      ARQ_REDIS_DSN: "redis://:${REDIS_PASSWORD:-}@redis7:6379/2"
     volumes:
       - python-data:/data
       - ../python-ai/plugins/dist:/plugin-wheels:ro
@@ -328,6 +331,49 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: "1.0"
+    restart: unless-stopped
+    networks:
+      - backend
+
+  python-ai-worker:
+    profiles: ["fullstack"]
+    image: ${REGISTRY:-ghcr.io/xiaodu55}/hfusionhub-python:${HFUSIONHUB_TAG:-latest}
+    build:
+      context: ../python-ai
+      dockerfile: ../deploy/Dockerfile.python
+    container_name: hfusionhub-python-worker
+    command: ["python", "-m", "arq", "arq_worker.WorkerSettings"]
+    environment:
+      PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?PYTHON_AI_INTERNAL_TOKEN must be set}
+      CALLBACK_SECRET: ${CALLBACK_SECRET:?CALLBACK_SECRET must be set}
+      JAVA_BACKEND_URL: http://java-backend:8080
+      VECTOR_STORE_MODE: cluster
+      MILVUS_HOST: milvus
+      MILVUS_PORT: "19530"
+      UPLOAD_DIR: /data/uploads
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      RAG_HYBRID_ENABLED: "true"
+      LLM_ALLOW_MOCK: "false"
+      PLUGIN_BUILTIN_WHEELS_DIR: /plugin-wheels
+      HFUSIONHUB_PLUGIN_TRUST_DIR: /plugin-trust
+      TASK_QUEUE_MODE: ${TASK_QUEUE_MODE:-arq}
+      ARQ_REDIS_DSN: "redis://:${REDIS_PASSWORD:-}@redis7:6379/2"
+    volumes:
+      - python-data:/data
+      - ../python-ai/plugins/dist:/plugin-wheels:ro
+      - ../python-ai/plugins/trust:/plugin-trust:ro
+    depends_on:
+      python-ai:
+        condition: service_healthy
+      redis7:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
     deploy:
       resources:
         limits:

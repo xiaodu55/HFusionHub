@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
@@ -1162,6 +1163,40 @@ public class AiClient {
         HttpHeaders headers = new HttpHeaders();
         addInternalToken(headers);
         return headers;
+    }
+
+    /**
+     * 会话删除前的长期记忆固化（fire-and-forget）。
+     *
+     * <p>Java 把被删会话的消息快照交给 Python 跑 LLM 记忆抽取（特征开关
+     * memory.long_term.enabled 由调用方判定）；Python 抽取完成后经
+     * {@code POST /api/internal/memory/entries} 回写 memory_entry 表。
+     * 失败只记日志，不影响删除主流程。</p>
+     */
+    @Async
+    public void consolidateMemoryOnConversationDeleted(
+            Long conversationId, Long userId, Long knowledgeBaseId, Long tenantId,
+            List<Map<String, String>> messages) {
+        if (internalApiToken == null || internalApiToken.isBlank()
+                || messages == null || messages.isEmpty()) {
+            return;
+        }
+        try {
+            Map<String, Object> body = new HashMap<>();
+            body.put("conversation_id", conversationId);
+            body.put("user_id", userId);
+            if (knowledgeBaseId != null) body.put("knowledge_base_id", knowledgeBaseId);
+            if (tenantId != null) body.put("tenant_id", tenantId);
+            body.put("messages", messages);
+            restTemplate.postForEntity(
+                    baseUrl + "/api/internal/memory/consolidate",
+                    new HttpEntity<>(body, internalHeaders()),
+                    String.class);
+            log.info("Memory consolidation dispatched for deleted conversation {}", conversationId);
+        } catch (Exception e) {
+            log.warn("Memory consolidation call failed for conversation {}: {}",
+                    conversationId, e.getMessage());
+        }
     }
 
     private void addUserProviderConfig(Map<String, Object> request, Long userId) {

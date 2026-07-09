@@ -32,9 +32,12 @@ public class KbShareServiceImpl implements KbShareService {
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final UserMapper userMapper;
 
+    /** 合法权限档位（Batch 10 授权矩阵：read 生效读，read_write 生效写） */
+    private static final List<String> ALLOWED_PERMISSIONS = List.of("read", "read_write");
+
     @Override
     @Transactional
-    public KbShareInfoDTO share(Long knowledgeBaseId, Long targetUserId) {
+    public KbShareInfoDTO share(Long knowledgeBaseId, Long targetUserId, String permission) {
         Long currentUserId = JwtUtils.getCurrentUserId();
         KnowledgeBase kb = knowledgeBaseMapper.selectById(knowledgeBaseId);
         if (kb == null) {
@@ -49,6 +52,10 @@ public class KbShareServiceImpl implements KbShareService {
         if (targetUserId.equals(currentUserId)) {
             throw new BusinessException("不能共享给自己");
         }
+        String effectivePermission = (permission == null || permission.isBlank()) ? "read" : permission.trim();
+        if (!ALLOWED_PERMISSIONS.contains(effectivePermission)) {
+            throw new BusinessException("非法权限档位: " + effectivePermission);
+        }
         User target = userMapper.selectById(targetUserId);
         if (target == null) {
             throw new BusinessException("目标用户不存在");
@@ -58,6 +65,12 @@ public class KbShareServiceImpl implements KbShareService {
                 .eq(KbShare::getKnowledgeBaseId, knowledgeBaseId)
                 .eq(KbShare::getSharedUserId, targetUserId));
         if (existing != null) {
+            // 重复共享 = 权限档位更新
+            if (!effectivePermission.equals(existing.getPermission())) {
+                existing.setPermission(effectivePermission);
+                kbShareMapper.updateById(existing);
+                log.info("知识库 {} 对用户 {} 的权限更新为 {}", knowledgeBaseId, targetUserId, effectivePermission);
+            }
             return toDTO(existing);
         }
 
@@ -65,10 +78,25 @@ public class KbShareServiceImpl implements KbShareService {
         share.setKnowledgeBaseId(knowledgeBaseId);
         share.setOwnerUserId(currentUserId);
         share.setSharedUserId(targetUserId);
-        share.setPermission("read");
+        share.setPermission(effectivePermission);
         kbShareMapper.insert(share);
-        log.info("知识库 {} 已共享给用户 {}", knowledgeBaseId, targetUserId);
+        log.info("知识库 {} 已共享给用户 {}（{}）", knowledgeBaseId, targetUserId, effectivePermission);
         return toDTO(share);
+    }
+
+    @Override
+    public String getEffectivePermission(Long userId, Long knowledgeBaseId) {
+        if (userId == null || knowledgeBaseId == null) {
+            return null;
+        }
+        KnowledgeBase kb = knowledgeBaseMapper.selectById(knowledgeBaseId);
+        if (kb != null && userId.equals(kb.getUserId())) {
+            return "owner";
+        }
+        KbShare share = kbShareMapper.selectOne(new LambdaQueryWrapper<KbShare>()
+                .eq(KbShare::getKnowledgeBaseId, knowledgeBaseId)
+                .eq(KbShare::getSharedUserId, userId));
+        return share == null ? null : share.getPermission();
     }
 
     @Override

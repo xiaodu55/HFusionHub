@@ -32,6 +32,13 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    // 可嵌入聊天挂件（Batch 6）：iframe 场景，鉴权走开放 API Key，无需登录态
+    path: '/embed/chat',
+    name: 'EmbedChat',
+    component: () => import('@/pages/embed/Chat.vue'),
+    meta: { requiresAuth: false },
+  },
+  {
     path: '/',
     component: () => import('@/components/layout/MainLayout.vue'),
     meta: { requiresAuth: true },

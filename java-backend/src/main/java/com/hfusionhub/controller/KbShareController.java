@@ -29,7 +29,9 @@ public class KbShareController {
     public R<KbShareInfoDTO> share(@RequestBody Map<String, Object> body) {
         Long knowledgeBaseId = Long.valueOf(String.valueOf(body.get("knowledgeBaseId")));
         Long targetUserId = Long.valueOf(String.valueOf(body.get("targetUserId")));
-        KbShareInfoDTO dto = kbShareService.share(knowledgeBaseId, targetUserId);
+        Object permissionObj = body.get("permission");
+        String permission = permissionObj == null ? null : String.valueOf(permissionObj);
+        KbShareInfoDTO dto = kbShareService.share(knowledgeBaseId, targetUserId, permission);
         auditLogService.record(
                 "kb.share",
                 "kb_share",

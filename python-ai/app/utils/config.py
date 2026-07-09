@@ -186,7 +186,7 @@ class Config:
     RAG_AGENT_TIMEOUT_SECONDS = float(os.getenv("RAG_AGENT_TIMEOUT_SECONDS", "45"))
     RAG_AGENT_MAX_RETRIES = int(os.getenv("RAG_AGENT_MAX_RETRIES", "1"))
     RAG_AGENT_RETRY_DELAY_SECONDS = float(os.getenv("RAG_AGENT_RETRY_DELAY_SECONDS", "0.2"))
-    RAG_AGENT_MAX_STEPS = int(os.getenv("RAG_AGENT_MAX_STEPS", "5"))
+    RAG_AGENT_MAX_STEPS = int(os.getenv("RAG_AGENT_MAX_STEPS", "12"))
     RAG_AGENT_TOOL_TIMEOUT_SECONDS = float(os.getenv("RAG_AGENT_TOOL_TIMEOUT_SECONDS", "10"))
     RAG_AGENT_MAX_SEARCH_RESULTS = int(os.getenv("RAG_AGENT_MAX_SEARCH_RESULTS", "5"))
     # Agent V1 whitelist — only knowledge-base research tools.
@@ -200,10 +200,58 @@ class Config:
         ).split(",") if item.strip()
     )
 
+    # 原生 function calling（Batch 2）：生效开关由 Java flag
+    # agent.native_tool_calls.enabled 统一治理（V81，默认 FALSE）；
+    # env 仅作后端不可达时的降级回退。开启后 provider 不支持时自动降级文本 ReAct。
+    AGENT_NATIVE_TOOL_CALLS_ENABLED = os.getenv("AGENT_NATIVE_TOOL_CALLS_ENABLED", "false").lower() == "true"
+
+    # ── Embedding 多通道（Batch 5）────────────────────────────────────
+    # provider: "ollama"（默认，本地）| "openai_compatible"（通义/OpenAI 等
+    # /v1/embeddings 端点）。切换供应商会改变向量维度语义，Milvus collection
+    # 需重建索引（openai_compatible 通道对维度做 fail-closed 校验）。
+    EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "ollama").lower()
+    EMBEDDING_OPENAI_BASE_URL = os.getenv("EMBEDDING_OPENAI_BASE_URL", "")
+    EMBEDDING_OPENAI_API_KEY = os.getenv("EMBEDDING_OPENAI_API_KEY", "")
+    EMBEDDING_OPENAI_MODEL = os.getenv("EMBEDDING_OPENAI_MODEL", "")
+    EMBEDDING_OPENAI_DIMENSION = int(os.getenv("EMBEDDING_OPENAI_DIMENSION", "1024"))
+
+    # ── 可插拔内容审核（Batch 7）──────────────────────────────────────
+    # provider: "local"（默认，纯本地规则）| "http"（通用 REST 审核端点，
+    # 阿里云内容安全/网易易盾等）。外部引擎失败 fail-open（告警放行）。
+    MODERATION_PROVIDER = os.getenv("MODERATION_PROVIDER", "local").lower()
+    MODERATION_HTTP_ENDPOINT = os.getenv("MODERATION_HTTP_ENDPOINT", "")
+    MODERATION_HTTP_API_KEY = os.getenv("MODERATION_HTTP_API_KEY", "")
+    MODERATION_HTTP_TIMEOUT_SECONDS = float(os.getenv("MODERATION_HTTP_TIMEOUT_SECONDS", "2"))
+    # 响应解析 dot-path（按供应商适配）
+    MODERATION_HTTP_FLAGGED_PATH = os.getenv("MODERATION_HTTP_FLAGGED_PATH", "flagged")
+    MODERATION_HTTP_CATEGORY_PATH = os.getenv("MODERATION_HTTP_CATEGORY_PATH", "category")
+    MODERATION_HTTP_SCORE_PATH = os.getenv("MODERATION_HTTP_SCORE_PATH", "score")
+
+    # ── 语音 STT/TTS（Batch 10，默认关闭）─────────────────────────────
+    # 引擎：OpenAI 兼容音频接口（/v1/audio/transcriptions、/v1/audio/speech）。
+    # VOICE_ENABLED=false 时端点 503，前端按钮不渲染。
+    VOICE_ENABLED = os.getenv("VOICE_ENABLED", "false").lower() == "true"
+    VOICE_OPENAI_BASE_URL = os.getenv("VOICE_OPENAI_BASE_URL", "")
+    VOICE_OPENAI_API_KEY = os.getenv("VOICE_OPENAI_API_KEY", "")
+    VOICE_STT_MODEL = os.getenv("VOICE_STT_MODEL", "")
+    VOICE_TTS_MODEL = os.getenv("VOICE_TTS_MODEL", "")
+    VOICE_TTS_VOICE = os.getenv("VOICE_TTS_VOICE", "alloy")
+    VOICE_TIMEOUT_SECONDS = float(os.getenv("VOICE_TIMEOUT_SECONDS", "60"))
+
+    # ── 任务队列外置（Batch 8）────────────────────────────────────────
+    # inline（默认）：FastAPI BackgroundTasks 进程内执行，单实例零依赖；
+    # arq：解析/向量化任务入 Redis 队列，由独立 worker（arq_worker.py /
+    # compose python-ai-worker 服务）消费。入队失败自动降级 inline。
+    TASK_QUEUE_MODE = os.getenv("TASK_QUEUE_MODE", "inline").lower()
+    ARQ_REDIS_DSN = os.getenv("ARQ_REDIS_DSN", "redis://localhost:6379/2")
+
     # P10 collaboration remains disabled unless P9 is already enabled.  It is
     # an evidence-review wrapper around the bounded, read-only workflow, not a
     # route to autonomous or cross-knowledge-base tool calls.
     RAG_MULTI_AGENT_ENABLED = os.getenv("RAG_MULTI_AGENT_ENABLED", "false").lower() == "true"
+    # Batch 9：多 Agent 编排模式（无 DSL）——pipeline（默认，原 P10）|
+    # supervisor（检索→并行补充分析→确定性合并）| handoff（证据不足顺序移交）
+    RAG_MULTI_AGENT_MODE = os.getenv("RAG_MULTI_AGENT_MODE", "pipeline").lower()
     RAG_MULTI_AGENT_TIMEOUT_SECONDS = float(
         os.getenv("RAG_MULTI_AGENT_TIMEOUT_SECONDS", "60")
     )
@@ -222,6 +270,19 @@ class Config:
     GUARDRAILS_PII_MASKING_ENABLED = os.getenv(
         "GUARDRAILS_PII_MASKING_ENABLED", "true"
     ).lower() == "true"
+
+    # ── 长期记忆接线（memory.long_term.enabled，Batch 1）────────────────
+    # env 是降级回退值；生效开关由 Java feature flag memory.long_term.enabled
+    # 统一治理（默认 FALSE），见 docs/ENVIRONMENT.md。
+    MEMORY_LONG_TERM_ENABLED = os.getenv("MEMORY_LONG_TERM_ENABLED", "false").lower() == "true"
+    # 每完成 N 轮对话后台触发一次 LLM 记忆抽取（下限 2）
+    MEMORY_CONSOLIDATE_EVERY_TURNS = int(os.getenv("MEMORY_CONSOLIDATE_EVERY_TURNS", "6"))
+    # 注入上下文的记忆条数上限（Java 侧再钳制到 20）
+    MEMORY_CONTEXT_MAX_ENTRIES = int(os.getenv("MEMORY_CONTEXT_MAX_ENTRIES", "8"))
+    # 注入块的粗略 token 预算（MemoryManager 按 ~3 char/token 折算）
+    MEMORY_CONTEXT_MAX_TOKENS = int(os.getenv("MEMORY_CONTEXT_MAX_TOKENS", "600"))
+    # Python→Java internal memory 端点超时
+    MEMORY_INTERNAL_TIMEOUT_SECONDS = float(os.getenv("MEMORY_INTERNAL_TIMEOUT_SECONDS", "5"))
 
 
 config = Config()

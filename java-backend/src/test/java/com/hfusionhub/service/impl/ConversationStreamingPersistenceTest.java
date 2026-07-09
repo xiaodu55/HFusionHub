@@ -7,10 +7,12 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.context.SaTokenContext;
+import cn.dev33.satoken.context.model.SaTokenContextModelBox;
 import cn.dev33.satoken.context.model.SaRequest;
 import cn.dev33.satoken.context.model.SaResponse;
 import cn.dev33.satoken.context.model.SaStorage;
@@ -38,6 +40,7 @@ import com.hfusionhub.mapper.UsageReservationMapper;
 import com.hfusionhub.service.ConversationService;
 import com.hfusionhub.service.MemoryService;
 import com.hfusionhub.tenant.TenantContext;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -286,53 +289,54 @@ class ConversationStreamingPersistenceTest {
 
     /** Minimal in-memory SaTokenContext for tests without a servlet container. */
     private static class MockSaTokenContext implements SaTokenContext {
-        private final java.util.Map<String, Object> storage = new java.util.HashMap<>();
-
-        @Override
-        public SaRequest getRequest() {
-            return org.mockito.Mockito.mock(SaRequest.class);
-        }
-
-        @Override
-        public SaResponse getResponse() {
-            return org.mockito.Mockito.mock(SaResponse.class);
-        }
-
-        @Override
-        public SaStorage getStorage() {
-            return new SaStorage() {
+        private final Map<String, Object> storage = new HashMap<>();
+        private SaTokenContextModelBox modelBox;
+    
+        private MockSaTokenContext() {
+            // 构造即装配 modelBox：SaManager.setSaTokenContext 之后立即可用
+            setContext(mock(SaRequest.class), mock(SaResponse.class), new SaStorage() {
                 @Override
                 public Object getSource() {
                     return storage;
                 }
-
+    
                 @Override
                 public Object get(String key) {
                     return storage.get(key);
                 }
-
+    
                 @Override
                 public SaStorage set(String key, Object value) {
                     storage.put(key, value);
                     return this;
                 }
-
+    
                 @Override
                 public SaStorage delete(String key) {
                     storage.remove(key);
                     return this;
                 }
-            };
+            });
         }
-
+    
         @Override
-        public boolean matchPath(String pattern, String path) {
-            return true;
+        public void setContext(SaRequest request, SaResponse response, SaStorage storage) {
+            this.modelBox = new SaTokenContextModelBox(request, response, storage);
         }
-
+    
+        @Override
+        public void clearContext() {
+            this.modelBox = null;
+        }
+    
         @Override
         public boolean isValid() {
-            return true;
+            return this.modelBox != null;
+        }
+    
+        @Override
+        public SaTokenContextModelBox getModelBox() {
+            return this.modelBox;
         }
     }
 }

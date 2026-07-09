@@ -14,11 +14,13 @@ export interface KbShareInfo {
   createdAt: string
 }
 
-/** 共享知识库给用户（只读） */
+/** 共享知识库给用户（permission: read 只读 | read_write 可上传，Batch 10 授权矩阵） */
 export const shareKnowledgeBase = (
   knowledgeBaseId: number,
   targetUserId: number,
-): Promise<ApiResponse<KbShareInfo>> => post('/knowledge-base/share', { knowledgeBaseId, targetUserId })
+  permission: 'read' | 'read_write' = 'read',
+): Promise<ApiResponse<KbShareInfo>> =>
+  post('/knowledge-base/share', { knowledgeBaseId, targetUserId, permission })
 
 /** 某知识库的共享记录（所有者） */
 export const listKbShares = (knowledgeBaseId: number): Promise<ApiResponse<KbShareInfo[]>> =>
