@@ -603,7 +603,7 @@ class ModelGateway:
 
     # -- provider calls -----------------------------------------------------
 
-    async def _stream_provider(
+    def _stream_provider(
         self,
         provider: ProviderConfig,
         model: str,
@@ -612,7 +612,14 @@ class ModelGateway:
         max_tokens: int,
         kwargs: Dict[str, Any],
     ) -> AsyncGenerator[str, None]:
-        """Yield content chunks from one provider's streaming endpoint."""
+        """Yield content chunks from one provider's streaming endpoint.
+
+        注意必须是普通 ``def``：直接返回内层 async generator（_stream_ollama /
+        _stream_openai_compatible）。若声明为 ``async def``，调用它会得到
+        coroutine 而非生成器，``async for`` 直接报
+        ``'async for' requires an object with __aiter__``（单轨化引入、
+        单测 mock 掉本方法而漏测的回归，Batch 收官冒烟修复）。
+        """
         if provider.provider_type == "ollama":
             return self._stream_ollama(provider, model, messages, temperature, max_tokens)
         return self._stream_openai_compatible(provider, model, messages, temperature, max_tokens, kwargs)

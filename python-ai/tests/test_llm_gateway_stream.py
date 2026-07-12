@@ -13,6 +13,7 @@ transport injection point, so provider I/O is replaced by monkeypatching
 surrounds that call.
 """
 
+import inspect
 import os
 
 import pytest
@@ -337,3 +338,30 @@ def test_token_estimation_calibrated_for_chinese():
     assert ModelGateway._estimate_tokens_text("知识abc") == 3
     # 消息级汇总不低于 1
     assert ModelGateway._estimate_tokens([ChatMessage(role="user", content="测试")]) >= 1
+
+
+# ── 回归：_stream_provider 必须直接返回 async generator（Batch 收官冒烟修复）──
+
+@pytest.mark.asyncio
+async def test_stream_provider_returns_async_generator_not_coroutine(monkeypatch):
+    """_stream_provider 曾误用 async def + return 内层生成器——async for 拿到
+    coroutine 直接抛 __aiter__ 错误（单测 mock 掉本方法而漏测）。"""
+    from app.core.llm.model_gateway import ProviderConfig
+
+    provider = ProviderConfig(
+        name="local", base_url="http://provider.invalid",
+        models=["qwen"], enabled=True, provider_type="ollama",
+    )
+    gw = _gateway(provider)
+
+    async def fake_ollama(*args, **kwargs):
+        yield "chunk-1"
+        yield "chunk-2"
+
+    monkeypatch.setattr(gw, "_stream_ollama", fake_ollama)
+
+    gen = gw._stream_provider(provider, "qwen", _messages("q"), 0.7, 32, {})
+    # 修复前：gen 是 coroutine（__aiter__ 缺失）；修复后：直接是 async generator
+    assert not inspect.iscoroutine(gen)
+    chunks = [chunk async for chunk in gen]
+    assert chunks == ["chunk-1", "chunk-2"]
