@@ -1,7 +1,7 @@
 # HFusionHub 访问地图 / Access Map
 
 > 本文档是**已启动服务的完整访问清单**：浏览器网址、登录凭据、API 文档、全部接口/路由/页面路径。
-> 由 2026-08-21 全栈启动验收时实测生成（`java-live.log` / `docker ps` / `/api/v3/api-docs` / `/openapi.json` / 前端 router 交叉核对）；2026-08-28 增补第十四轮 P2 商业化（套餐/模板/开放 API）。
+> 由 2026-08-21 全栈启动验收时实测生成（`java-live.log` / `docker ps` / `/api/v3/api-docs` / `/openapi.json` / 前端 router 交叉核对）；2026-08-28 增补第十四轮 P2 商业化（套餐/模板/开放 API）；2026-08-30 增补优化路线 Batch 0-10（长期记忆/语音/发布渠道等，接口数按代码静态统计，运行时数字以重启后 Swagger 实测为准）。
 >
 > ⚠️ 本文档**不保存任何明文凭据**：所有密码/令牌请到 `docker/.env`（已 gitignore）查看。生产部署必须全部换新。
 
@@ -18,10 +18,10 @@
 | 服务 | 地址 | 说明 |
 | :--- | :--- | :--- |
 | 前端主界面 | http://localhost:3000 | 登录后使用全部功能 |
-| Java API 文档（Knife4j） | http://localhost:8080/api/doc.html | ⭐ 267 个接口可视化/调试 |
+| Java API 文档（Knife4j） | http://localhost:8080/api/doc.html | ⭐ 277 个接口可视化/调试 |
 | Java Swagger UI 备用 | http://localhost:8080/api/swagger-ui/index.html | 同上（Knife4j 底层） |
 | Java OpenAPI JSON | http://localhost:8080/api/v3/api-docs | 机器可读（接口清单数据源） |
-| Python API 文档（FastAPI Swagger） | http://localhost:9000/docs | ⭐ 70 个路由交互式调试 |
+| Python API 文档（FastAPI Swagger） | http://localhost:9000/docs | ⭐ 74 个路由交互式调试 |
 | Python Redoc | http://localhost:9000/redoc | 只读文档 |
 | Python OpenAPI JSON | http://localhost:9000/openapi.json | 机器可读 |
 | MinIO 控制台 | http://localhost:9001 | 对象存储管理（API 端口 :9002） |
@@ -55,7 +55,7 @@
 
 **内部互信令牌**（Java ↔ Python 调用，不用于登录；值在 `docker/.env`）：`PYTHON_AI_INTERNAL_TOKEN`、`CALLBACK_SECRET`、`PLUGIN_RUNNER_TOKEN`
 
-## 4. Java 后端接口（267 个）
+## 4. Java 后端接口（277 个）
 
 - **完整接口列表与请求/响应结构**：浏览器打开 http://localhost:8080/api/doc.html（Knife4j，含 Try it out）。
 - **分组概览**（均以 `/api` 为前缀）：
@@ -91,16 +91,18 @@
 - **内部接口**（Java→Java 或内网，不对浏览器开放）：`AgentApprovalInternalController`、`AgentTaskEventController`、`FeatureFlagInternalController`、`InternalNoteController`、`InternalPluginController`、`InternalPluginQuotaController`。
 - 认证：登录 `POST /api/user/login` 拿 `data`（Sa-Token），后续请求带 header `satoken: <token>`。无 token 访问受保护接口返回 401。
 
-## 5. Python AI 路由（70 个）
+## 5. Python AI 路由（74 个）
 
 - **完整交互式文档**：http://localhost:9000/docs（或 /redoc）。
 - 核心入口：
   - 聊天：`POST /api/chat` / `POST /api/chat/stream`（SSE）/ `POST /api/chat/cancel`
   - Agent：`POST /api/agent/v1/chat` / `.../stream` / `.../decide`
   - 解析：`POST /api/parse`；检索：`POST /api/search`；调试检索：`POST /api/rag/debug/search`
+  - 语音（Batch 10）：`POST /api/voice/transcribe` / `POST /api/voice/synthesize` / `GET /api/voice/status`（VOICE_ENABLED 门控）
+  - 长期记忆内部（Batch 1）：`POST /api/internal/memory/consolidate`
 - 全部路由经 Java 代理访问（Java 带 `X-Internal-Token`）；直连需带 `X-Internal-Token: <PYTHON_AI_INTERNAL_TOKEN>` 头，否则 401/403。
 
-## 6. 前端页面（42 个路由）
+## 6. 前端页面（43 个路由）
 
 | 分组 | 路径 |
 | :--- | :--- |

@@ -63,6 +63,8 @@ pythonAi:
   enabled: true
   image: ghcr.io/xiaodu55/hfusionhub-python:latest
   port: 9000
+  # Batch 8 任务队列模式：inline（默认，进程内）| arq（需另行部署 Redis + arq worker）
+  taskQueueMode: "inline"
   # Stateless: >=2 replicas in production. No per-pod RWO state is required
   # because vector data lives in Milvus and uploads are on a shared RWX volume.
   replicas: 2

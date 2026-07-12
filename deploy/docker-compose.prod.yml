@@ -237,6 +237,10 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       LLM_ALLOW_MOCK: "false"
       EMBEDDING_ALLOW_FALLBACK: "false"
+      # Batch 8：任务队列模式（inline=进程内默认；arq 需另行部署 worker + Redis，
+      # 见 docs/ENVIRONMENT.md 与 docker/docker-compose.yml 的 python-ai-worker 服务）
+      TASK_QUEUE_MODE: ${TASK_QUEUE_MODE:-inline}
+      ARQ_REDIS_DSN: ${ARQ_REDIS_DSN:-redis://redis7:6379/2}
       # The runner owns the Docker API connection. Python only reaches this
       # internal service and must fail closed if it is unavailable.
       PLUGIN_RUNNER_URL: http://plugin-runner:9100
