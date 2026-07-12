@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+#### Fixed（2026-08-30 收官冒烟）
+- **网关流式不可用**：`ModelGateway._stream_provider` 误用 `async def` + `return`
+  内层生成器——所有 `/api/chat/stream` 真实调用报 "'async for' requires an object
+  with __aiter__"。单轨化（08-29）引入，单测 mock 掉该方法未暴露、CI 停摆无冒烟
+  兜底；改普通 `def` 直接返回 async generator，并新增防回归用例
+  （inspect.iscoroutine 反向断言）。Python 全量 1378 passed。
+
 ### 权限细化 + 语音 + GraphRAG 复评批（2026-08-30 第十六批，Batch 10 收官）
 
 #### Added
