@@ -256,7 +256,7 @@
                             <goal>check</goal>
                         </goals>
                         <configuration>
-                            <!-- 覆盖率棘轮：当前基线 ~47%，先设 45% 防恶化；
+                            <!-- 覆盖率棘轮：2026-08-30 补测后实测 47.4%，上调至 46% 防恶化；
                                  后续随补测逐步上调，不追历史 -->
                             <rules>
                                 <rule>
@@ -265,7 +265,7 @@
                                         <limit>
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.45</minimum>
+                                            <minimum>0.46</minimum>
                                         </limit>
                                     </limits>
                                 </rule>

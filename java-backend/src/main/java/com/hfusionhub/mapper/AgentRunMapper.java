@@ -120,4 +120,36 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
      * 按租约持有者查询活跃 Run
      */
     List<AgentRun> selectByHolder(@Param("holder") String holder);
+
+    // ================================================================
+    // S3/M3: 审批竞态 — 行级守卫的状态迁移（条件 UPDATE，数据库原子判定）
+    // ================================================================
+
+    /**
+     * 守卫式状态迁移：仅当当前状态等于 expectedStatus 时原子迁移到 newStatus
+     * （REPAIR_ROADMAP S3/M3：替代 check-then-act 的内存态守卫）。
+     *
+     * @return 影响行数（1=迁移成功, 0=状态已被并发方改变）
+     */
+    int transitionRunStatusGuarded(
+            @Param("id") Long id,
+            @Param("expectedStatus") String expectedStatus,
+            @Param("newStatus") String newStatus,
+            @Param("errorCode") String errorCode,
+            @Param("errorDetail") String errorDetail,
+            @Param("completedAt") LocalDateTime completedAt);
+
+    /**
+     * 非终态守卫迁移：仅当当前状态不属于 terminalStatuses 时原子迁移到 newStatus
+     * （M3：审批后恢复失败的收敛，防止覆盖并发写入的真实终态）。
+     *
+     * @return 影响行数（1=迁移成功, 0=已是终态）
+     */
+    int transitionRunStatusFromAnyActive(
+            @Param("id") Long id,
+            @Param("terminalStatuses") java.util.Collection<String> terminalStatuses,
+            @Param("newStatus") String newStatus,
+            @Param("errorCode") String errorCode,
+            @Param("errorDetail") String errorDetail,
+            @Param("completedAt") LocalDateTime completedAt);
 }

@@ -65,14 +65,27 @@ class SchedulerLockAspectTest {
     }
 
     @Test
-    void failsOpenWhenRedisUnavailable() throws Throwable {
+    void failsClosedByDefaultWhenRedisUnavailable() throws Throwable {
+        when(valueOperations.setIfAbsent(anyString(), anyString(), anyLong(), any(TimeUnit.class)))
+                .thenThrow(new RuntimeException("connection refused"));
+
+        Object result = aspect.around(joinPoint, lock("test"));
+
+        // 默认 fail-closed：Redis 故障时跳过本次调度，等待下一周期补偿
+        assertThat(result).isNull();
+        verify(joinPoint, never()).proceed();
+    }
+
+    @Test
+    void failsOpenWhenExplicitlyConfigured() throws Throwable {
+        org.springframework.test.util.ReflectionTestUtils.setField(aspect, "failOpen", true);
         when(valueOperations.setIfAbsent(anyString(), anyString(), anyLong(), any(TimeUnit.class)))
                 .thenThrow(new RuntimeException("connection refused"));
         when(joinPoint.proceed()).thenReturn("ran");
 
         Object result = aspect.around(joinPoint, lock("test"));
 
-        // Redis 故障时退化为无锁执行，任务照常运行
+        // 显式 fail-open=true 时保留历史行为：无锁执行
         assertThat(result).isEqualTo("ran");
         verify(joinPoint).proceed();
     }

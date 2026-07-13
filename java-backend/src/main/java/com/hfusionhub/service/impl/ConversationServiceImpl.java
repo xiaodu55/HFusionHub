@@ -81,6 +81,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final com.hfusionhub.service.AgentStreamEventProcessor streamEventProcessor;
     private final com.hfusionhub.service.RagIntentNodeService ragIntentNodeService;
     private final com.hfusionhub.service.KbShareService kbShareService;
+    private final ChatUsageRecorder chatUsageRecorder;
 
     private static final int REQUEST_ID_MAX_LENGTH = 64;
     public static final String ASSISTANT_REQUEST_SUFFIX = ":assistant";
@@ -320,7 +321,7 @@ public class ConversationServiceImpl implements ConversationService {
         // M7: 用量预占先于用户消息落库 — 超配额抛 400 时不再留下"有问无答"的孤立消息
         // 预占上界 = 输入估算 + 服务端最大输出（幂等键为 chat:<requestId>）
         final String usageKey = "chat:" + requestId;
-        final long inputEstimate = estimateChatTokens(dto.getContent());
+        final long inputEstimate = chatUsageRecorder.estimateChatTokens(dto.getContent());
         final long reserveTokens = inputEstimate + quotaProperties.getChatMaxOutputTokens();
         usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, usageKey, reserveTokens, "message", requestId);
 
@@ -397,7 +398,7 @@ public class ConversationServiceImpl implements ConversationService {
         long chargeTokens = Math.min(reserveTokens, realTokens);
         usageLedgerService.settle(UsageMeter.CHAT_TOKENS, usageKey, chargeTokens, "message", requestId);
         // 模型用量落账（model_usage_record）：同步聊天路径记录真实 token 用量。
-        recordChatModelUsage(currentUserId, dto.getConversationId(), aiResponse);
+        chatUsageRecorder.recordChatModelUsage(currentUserId, dto.getConversationId(), aiResponse);
         return saveAssistantMessageV1(
                 dto.getConversationId(), aiResponse, conversation, dto.getContent(), assistantRequestId);
     }
@@ -613,45 +614,6 @@ public class ConversationServiceImpl implements ConversationService {
         return findMessageByRequestId("user", requestId);
     }
 
-    /**
-     * 聊天 token 预占估算：按内容长度粗估，至少 64 token。
-     */
-    private long estimateChatTokens(String content) {
-        int length = content == null ? 0 : content.length();
-        return Math.max(64, length / 4);
-    }
-
-    /**
-     * 结算/退回流式聊天的用量，AtomicBoolean 保证只执行一次。
-     * 在 Reactor 线程调用，需以预捕获的租户 ID 恢复 TenantContext。
-     * 结算量 = min(预占上界, 输入估算 + 实际输出/4)，封顶在预留内。
-     * 内部吞异常，避免账本失败影响 SSE 主流程。
-     */
-    private void finalizeChatUsage(
-            Long tenantId,
-            String usageKey,
-            long reserveTokens,
-            long inputEstimate,
-            AtomicBoolean usageFinalized,
-            boolean success,
-            int outputChars) {
-        if (usageFinalized.compareAndSet(false, true)) {
-            TenantContext.runAs(tenantId, () -> {
-                try {
-                    if (success) {
-                        long charge = Math.min(reserveTokens, inputEstimate + Math.max(0, outputChars) / 4);
-                        usageLedgerService.settle(UsageMeter.CHAT_TOKENS, usageKey, charge, "message", usageKey);
-                    } else {
-                        usageLedgerService.release(UsageMeter.CHAT_TOKENS, usageKey);
-                    }
-                } catch (Exception e) {
-                    log.warn("Failed to finalize chat usage for {}: {}", usageKey, e.getMessage());
-                }
-                return null;
-            });
-        }
-    }
-
     private Message findAssistantByRequestId(String requestId) {
         return findMessageByRequestId("assistant", requestId);
     }
@@ -723,7 +685,7 @@ public class ConversationServiceImpl implements ConversationService {
             // 模型用量落账（model_usage_record）：知识库流式会话由 Agent run 终态
             // （completeRun）记录真实 token；非知识库流式会话 Python 不返回 token，
             // 此处按输出内容长度估算记录，保证 /cost 页面有数据。
-            recordStreamUsageEstimate(conversationId, content);
+            chatUsageRecorder.recordStreamUsageEstimate(conversationId, content);
             return true;
         } catch (DuplicateKeyException e) {
             existingAssistant = findAssistantByRequestId(requestId);
@@ -732,86 +694,6 @@ public class ConversationServiceImpl implements ConversationService {
             }
             throw e;
         }
-    }
-
-    /**
-     * 非知识库流式聊天的用量估算落账（估算值，非精确 token）。
-     */
-    private void recordStreamUsageEstimate(Long conversationId, String content) {
-        try {
-            if (conversationId == null) {
-                return;
-            }
-            Conversation conv = conversationMapper.selectById(conversationId);
-            if (conv == null || conv.getUserId() == null) {
-                return;
-            }
-            // 知识库会话由 Agent run 终态记录真实用量，此处跳过避免重复。
-            if (conv.getKnowledgeBaseId() != null && conv.getKnowledgeBaseId() > 0) {
-                return;
-            }
-            ModelUsageRecord rec = new ModelUsageRecord();
-            rec.setUserId(conv.getUserId());
-            rec.setTenantId(TenantContext.getTenantId());
-            rec.setConversationId(conversationId);
-            rec.setModel("streaming");
-            rec.setProvider("streaming");
-            rec.setRequestType("chat");
-            int outTokens = content == null ? 0 : Math.max(1, content.length() / 4);
-            rec.setPromptTokens(0);
-            rec.setCompletionTokens(outTokens);
-            rec.setTotalTokens(outTokens);
-            rec.setCostUsd(BigDecimal.ZERO);
-            rec.setLatencyMs(0);
-            costTrackingService.record(rec);
-            log.debug("Stream usage estimate recorded: conversationId={} tokens={}", conversationId, outTokens);
-        } catch (Exception e) {
-            log.warn("Failed to record stream usage estimate (non-blocking): {}", e.getMessage());
-        }
-    }
-
-    /**
-     * 同步聊天路径的模型用量落账（model_usage_record）。
-     */
-    private void recordChatModelUsage(Long userId, Long conversationId, AiClient.ChatResponse aiResponse) {
-        try {
-            if (userId == null || userId <= 0) {
-                return;
-            }
-            ModelUsageRecord rec = new ModelUsageRecord();
-            rec.setUserId(userId);
-            rec.setConversationId(conversationId);
-            rec.setTenantId(TenantContext.getTenantId());
-            String model = aiResponse.getModel();
-            rec.setModel(model != null && !model.isBlank() ? model : "unknown");
-            rec.setProvider(rec.getModel());
-            rec.setRequestType("chat");
-            int prompt = 0;
-            int completion = 0;
-            int total = aiResponse.getTokenCount();
-            Map<String, Object> usage = aiResponse.getTokenUsage();
-            if (usage != null) {
-                prompt = usageInt(usage.get("prompt_tokens"));
-                completion = usageInt(usage.get("completion_tokens"));
-                total = usageInt(usage.get("total_tokens"));
-                if (total <= 0) {
-                    total = prompt + completion;
-                }
-            }
-            rec.setPromptTokens(prompt);
-            rec.setCompletionTokens(completion);
-            rec.setTotalTokens(total);
-            rec.setCostUsd(BigDecimal.ZERO);
-            rec.setLatencyMs(0);
-            costTrackingService.record(rec);
-            log.debug("Chat model usage recorded: userId={} model={} tokens={}", userId, rec.getModel(), total);
-        } catch (Exception e) {
-            log.warn("Failed to record chat model usage (non-blocking): {}", e.getMessage());
-        }
-    }
-
-    private static int usageInt(Object value) {
-        return value instanceof Number n ? n.intValue() : 0;
     }
 
     private void sendExistingAssistantAndComplete(SseEmitter emitter, Message message) {
@@ -1162,7 +1044,7 @@ public class ConversationServiceImpl implements ConversationService {
         // TenantContext.runAs 恢复上下文。
         final Long streamTenantId = TenantContext.requireTenantId();
         final String usageKey = "chat:" + requestId;
-        final long streamInputEstimate = estimateChatTokens(dto.getContent());
+        final long streamInputEstimate = chatUsageRecorder.estimateChatTokens(dto.getContent());
         final long streamReserveTokens = streamInputEstimate + quotaProperties.getChatMaxOutputTokens();
         final AtomicBoolean usageFinalized = new AtomicBoolean(false);
         usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, usageKey, streamReserveTokens, "message", requestId);
@@ -1241,7 +1123,7 @@ public class ConversationServiceImpl implements ConversationService {
                                     accumulatedSources,
                                     assistantRequestId);
                         }
-                        finalizeChatUsage(
+                        chatUsageRecorder.finalizeChatUsage(
                                 streamTenantId,
                                 usageKey,
                                 streamReserveTokens,
@@ -1278,7 +1160,7 @@ public class ConversationServiceImpl implements ConversationService {
                         if (isCancelled) {
                             log.info("Python AI request cancelled: {}", requestId);
                             agentTaskService.cancelRun(agentRun.getId());
-                            finalizeChatUsage(
+                            chatUsageRecorder.finalizeChatUsage(
                                     streamTenantId,
                                     usageKey,
                                     streamReserveTokens,
@@ -1325,7 +1207,7 @@ public class ConversationServiceImpl implements ConversationService {
                 }),
                 error -> TenantContext.runAs(streamTenantId, () -> {
                     // onError
-                    finalizeChatUsage(
+                    chatUsageRecorder.finalizeChatUsage(
                             streamTenantId,
                             usageKey,
                             streamReserveTokens,
@@ -1372,7 +1254,7 @@ public class ConversationServiceImpl implements ConversationService {
                 }),
                 () -> TenantContext.runAs(streamTenantId, () -> {
                     // onComplete: ensure emitter is closed and assistant saved.
-                    finalizeChatUsage(
+                    chatUsageRecorder.finalizeChatUsage(
                             streamTenantId,
                             usageKey,
                             streamReserveTokens,

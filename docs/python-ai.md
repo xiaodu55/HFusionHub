@@ -78,8 +78,8 @@ Health check: `curl http://localhost:9000/health` → `{"status":"healthy"}`
 ## Running Tests
 
 ```bash
-pytest -q tests                    # All tests (1258 functions)
-pytest -q tests/test_retriever.py  # Specific module
+pytest -q tests                         # All tests (1381 functions)
+pytest -q tests/test_adaptive_retrieval.py  # Specific module
 ```
 
 ## Key Design Patterns

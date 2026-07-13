@@ -280,11 +280,11 @@ class MultimodalEvidenceExtractor:
             raise ValueError("invalid DOCX image archive") from exc
 
     def _extract_pdf_images(self, file_path: Path) -> Iterable[Tuple[bytes, str, Dict[str, object]]]:
-        """Use optional pypdf's documented ``page.images`` API.
+        """Use pypdf's documented ``page.images`` API.
 
-        PyPDF2 remains the text parser used by the service.  ``pypdf`` is only
-        an explicit P8 optional dependency because robust image extraction is
-        version-sensitive and should not change the baseline parser package.
+        ``pypdf`` is also the baseline text parser (pdf_parser.py); the
+        image-extraction API is version-sensitive, so it is exercised only
+        when P8 multimodal evidence extraction is enabled.
         """
         try:
             from pypdf import PdfReader

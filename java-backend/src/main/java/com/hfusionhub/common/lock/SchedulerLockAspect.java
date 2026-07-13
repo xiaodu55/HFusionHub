@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
@@ -15,8 +16,11 @@ import org.springframework.stereotype.Component;
 /**
  * {@link SchedulerLock} 注解切面 — 通过 Redis SETNX 实现跨实例互斥。
  *
- * <p>Redis 不可用时 fail-open：加锁失败（异常）时仅告警并直接执行任务，
- * 保证清理/补偿任务不因 Redis 抖动而中断（单实例或 Redis 故障期间退化为无锁执行）。</p>
+ * <p>Redis 不可用时的行为可配置（{@code hfusionhub.scheduler-lock.fail-open}，默认
+ * {@code false} 即 fail-closed）：fail-closed 时本次调度直接跳过，任务延迟到
+ * Redis 恢复后的下一个周期，杜绝多实例在无锁状态下并发执行；清理/补偿类任务
+ * 均按周期幂等设计，延迟执行是安全的。如需旧版"无锁也执行"的行为，将
+ * {@code SCHEDULER_LOCK_FAIL_OPEN} 设为 {@code true}。</p>
  *
  * @author HFusionHub Team
  */
@@ -35,6 +39,10 @@ public class SchedulerLockAspect {
 
     private final StringRedisTemplate redisTemplate;
 
+    /** Redis 故障时是否退化为无锁执行；默认 false（fail-closed，跳过本次调度） */
+    @Value("${hfusionhub.scheduler-lock.fail-open:false}")
+    private boolean failOpen;
+
     @Around("@annotation(schedulerLock)")
     public Object around(ProceedingJoinPoint joinPoint, SchedulerLock schedulerLock) throws Throwable {
         String key = LOCK_KEY_PREFIX + schedulerLock.value();
@@ -51,12 +59,20 @@ public class SchedulerLockAspect {
                 return null;
             }
         } catch (Exception e) {
-            // Redis 不可用 → fail-open，退化为无锁执行
+            if (failOpen) {
+                // Redis 不可用 → fail-open，退化为无锁执行（历史行为，可配置回退）
+                log.warn(
+                        "Scheduler lock '{}' unavailable (Redis error), executing without lock: {}",
+                        schedulerLock.value(),
+                        e.getMessage());
+                return joinPoint.proceed();
+            }
+            // 默认 fail-closed：跳过本次调度，任务由下一个周期补偿
             log.warn(
-                    "Scheduler lock '{}' unavailable (Redis error), executing without lock: {}",
+                    "Scheduler lock '{}' unavailable (Redis error), skipping this round (fail-closed): {}",
                     schedulerLock.value(),
                     e.getMessage());
-            return joinPoint.proceed();
+            return null;
         }
 
         try {

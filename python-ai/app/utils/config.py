@@ -108,6 +108,12 @@ class Config:
     LLM_RESPONSE_CACHE_TTL_SECONDS = float(
         os.getenv("LLM_RESPONSE_CACHE_TTL_SECONDS", "300")
     )
+    # Fuzzy (normalized) secondary lookup for the response cache: on an exact
+    # miss, retry with whitespace-collapsed / casefolded message text so
+    # trivially identical prompts hit the same entry.
+    LLM_RESPONSE_CACHE_FUZZY_ENABLED = os.getenv(
+        "LLM_RESPONSE_CACHE_FUZZY_ENABLED", "true"
+    ).lower() == "true"
 
     # Hybrid retrieval configuration.  RRF combines ranks rather than the
     # incomparable raw scores returned by vector and keyword search.

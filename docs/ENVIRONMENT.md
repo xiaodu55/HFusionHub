@@ -29,6 +29,7 @@ Copy `docker/.env.example` to `docker/.env`:
 | `REDIS_PASSWORD` | `your_redis_password` | Redis `requirepass`。dev compose（`docker/docker-compose.yml`）已通过 `--requirepass` 启用；**设置后 Java 必须注入同名 `REDIS_PASSWORD`**，否则启动报 `NOAUTH Authentication required`（见 2026-08-21 修复 cf07937） |
 | `ADMIN_PASSWORD` | `changeme` | Bootstrap admin password |
 | `MINIO_ROOT_USER` | `minioadmin` | MinIO object storage username |
+| `SCHEDULER_LOCK_FAIL_OPEN` | `false` | 调度锁 Redis 故障时是否退化为无锁执行；默认 false（fail-closed，跳过本轮调度等待下一周期） |
 | `MINIO_ROOT_PASSWORD` | `minioadmin` | MinIO object storage password |
 | `PLUGIN_RUNNER_TOKEN` | *(random)* | Plugin sandbox runner auth token (required — compose fails without it) |
 
@@ -110,6 +111,7 @@ Copy `python-ai/.env.example` to `python-ai/.env`:
 | `LLM_MAX_RETRIES` | No | `3` | 429/5xx/连接错误的额外重试次数（首次调用后的重试上限，P3） |
 | `LLM_RETRY_BACKOFF_SECONDS` | No | `0.5` | 指数退避基础秒数（每次翻倍 + jitter，P3） |
 | `LLM_RESPONSE_CACHE_TTL_SECONDS` | No | `300` | LLM 响应缓存 TTL（P9）；设为 0 禁用缓存 |
+| `LLM_RESPONSE_CACHE_FUZZY_ENABLED` | No | `true` | LLM 响应缓存归一化模糊命中（精确 miss 后按空白折叠+casefold 二次查找）；设为 false 仅精确匹配 |
 | `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama URL for local LLM fallback and embeddings |
 | `OLLAMA_EMBEDDING_MODEL` | No | `bge-m3:latest` | Ollama embedding model (**use this**, not the deprecated `OLLAMA_MODEL`；当前 `.env` 使用 `bge-m3:latest`） |
 | `OPENAI_COMPATIBLE_API_KEY` | No | `` | OpenAI 兼容备用供应商（B2）：加入 FailoverLLM 链，主供应商故障时切换 |

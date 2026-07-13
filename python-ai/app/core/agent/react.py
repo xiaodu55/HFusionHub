@@ -598,6 +598,73 @@ class ReactAgent(Agent):
         )
         return result.compressed_text, True
 
+    async def _build_react_messages(
+        self,
+        query: str,
+        history: Optional[List[Dict[str, str]]],
+    ) -> List[ChatMessage]:
+        """Build the ReAct system prompt + memory injection + trimmed history.
+
+        Shared by the non-streaming pipeline (run) and the streaming ReAct
+        pipeline (_run_stream_react) so prompt/memory handling cannot drift.
+        """
+        system_prompt = REACT_SYSTEM_PROMPT.format(
+            tools_description=self._format_tools_description()
+        )
+
+        # 长期记忆注入（flag 门控，失败降级为空串）——拼进 system 消息，
+        # 不进 <reference_material>（记忆是用户自有数据，非本次检索证据）。
+        memory_context = await self._safe_memory_context(query)
+        if memory_context:
+            system_prompt = f"{system_prompt}\n\n{memory_context}"
+
+        messages = [ChatMessage(role="system", content=system_prompt)]
+
+        if history:
+            for msg in history[-10:]:
+                messages.append(ChatMessage(role=msg["role"], content=msg["content"]))
+        return messages
+
+    async def _retrieve_and_compress(
+        self,
+        query: str,
+        history: Optional[List[Dict[str, str]]],
+        intent_result: Optional[Any],
+    ) -> Optional[tuple[str, List[Dict[str, Any]], Optional[int], str, bool]]:
+        """Retrieve + compress core shared by run() and _run_stream_react().
+
+        Returns ``(raw_context, rag_sources, auto_detected_kb_id,
+        rag_context, was_compressed)`` or ``None`` when the retrieval service
+        is unavailable (M10: distinct from "no evidence").  Exceptions from
+        retrieval propagate to the caller — each pipeline applies its own
+        error emission.
+        """
+        retrieved = await self._retrieve_context(query, history, intent_result)
+        if retrieved is None:
+            return None
+        raw_context, rag_sources, auto_detected_kb_id = retrieved
+        rag_context, was_compressed = await self._safe_compress(raw_context)
+        return raw_context, rag_sources, auto_detected_kb_id, rag_context, was_compressed
+
+    def _empty_context_reply(self) -> str:
+        """Reply used when retrieval returned nothing for a selected KB.
+
+        Distinguishes "KB empty / still parsing" from "no relevant content"
+        so the user gets an actionable hint.
+        """
+        try:
+            from app.core.vectorstore.milvus_store import _get_store
+            corpus = _get_store().all_chunks(knowledge_base_id=self.knowledge_base_id)
+            has_content = bool(corpus)
+        except Exception:
+            has_content = True  # 无法确认时按普通无依据处理
+        return (
+            "当前知识库还没有可检索的内容。如果资料刚上传，可能仍在解析中，"
+            "请稍候或到「文档」页查看解析状态；解析完成后即可基于资料回答。"
+            if not has_content
+            else NO_SUFFICIENT_EVIDENCE_REPLY
+        )
+
     @staticmethod
     def _is_groundless_answer(answer: str) -> bool:
         """Return True when the answer text signals the model found no usable evidence."""
@@ -967,27 +1034,12 @@ class ReactAgent(Agent):
                 if decomposition_result:
                     return decomposition_result
 
-        # Build system prompt
-        system_prompt = REACT_SYSTEM_PROMPT.format(
-            tools_description=self._format_tools_description()
-        )
-
-        # 长期记忆注入（flag 门控，失败降级为空串）——拼进 system 消息，
-        # 不进 <reference_material>（记忆是用户自有数据，非本次检索证据）。
-        memory_context = await self._safe_memory_context(query)
-        if memory_context:
-            system_prompt = f"{system_prompt}\n\n{memory_context}"
-
-        messages = [ChatMessage(role="system", content=system_prompt)]
-
-        if history:
-            for msg in history[-10:]:
-                messages.append(ChatMessage(role=msg["role"], content=msg["content"]))
+        messages = await self._build_react_messages(query, history)
 
         # RAG: 检索相关知识
         logger.info(f"[RAG] Starting retrieval for query: {query[:50]}..., knowledge_base_id: {self.knowledge_base_id}")
-        retrieved = await self._retrieve_context(query, history, intent_result)
-        if retrieved is None:
+        retrieved_full = await self._retrieve_and_compress(query, history, intent_result)
+        if retrieved_full is None:
             # M10: 检索服务故障以 retrieval_error 返回，不伪装成 insufficient_evidence
             logger.error("[RAG] Retrieval service unavailable — returning retrieval_error")
             return AgentResponse(
@@ -1004,10 +1056,8 @@ class ReactAgent(Agent):
                 max_tool_steps=self.max_steps,
                 style_used=self.style,
             )
-        raw_context, rag_sources, auto_detected_kb_id = retrieved
+        raw_context, rag_sources, auto_detected_kb_id, rag_context, was_compressed = retrieved_full
         logger.info(f"[RAG] Retrieved context length: {len(raw_context)}, sources count: {len(rag_sources)}, auto_detected_kb_id: {auto_detected_kb_id}")
-
-        rag_context, was_compressed = await self._safe_compress(raw_context)
 
         if has_selected_kb and not rag_context:
             # Agent V1 Step 5: If non-retrieval tools (e.g. write_note) are
@@ -1019,19 +1069,7 @@ class ReactAgent(Agent):
                 and getattr(t["_spec"], "risk_level", "read_only") != "read_only"
             ]
             if not non_retrieval_tools:
-                # 区分"知识库为空/资料解析中"与"确实无相关内容"，给出针对性提示
-                try:
-                    from app.core.vectorstore.milvus_store import _get_store
-                    corpus = _get_store().all_chunks(knowledge_base_id=self.knowledge_base_id)
-                    has_content = bool(corpus)
-                except Exception:
-                    has_content = True  # 无法确认时按普通无依据处理
-                reply = (
-                    "当前知识库还没有可检索的内容。如果资料刚上传，可能仍在解析中，"
-                    "请稍候或到「文档」页查看解析状态；解析完成后即可基于资料回答。"
-                    if not has_content
-                    else NO_SUFFICIENT_EVIDENCE_REPLY
-                )
+                reply = self._empty_context_reply()
                 self._last_sources = []
                 return AgentResponse(
                     content=reply,
@@ -1446,20 +1484,7 @@ class ReactAgent(Agent):
             self._last_sources = sources
 
             if has_selected_kb and not context:
-                # 区分"知识库为空/资料解析中"与"确实无相关内容"，给出针对性提示
-                try:
-                    from app.core.vectorstore.milvus_store import _get_store
-                    corpus = _get_store().all_chunks(knowledge_base_id=self.knowledge_base_id)
-                    has_content = bool(corpus)
-                except Exception:
-                    has_content = True  # 无法确认时按普通无依据处理
-                if not has_content:
-                    yield (
-                        "当前知识库还没有可检索的内容。如果资料刚上传，可能仍在解析中，"
-                        "请稍候或到「文档」页查看解析状态；解析完成后即可基于资料回答。"
-                    )
-                else:
-                    yield NO_SUFFICIENT_EVIDENCE_REPLY
+                yield self._empty_context_reply()
                 return
 
             prompt = self._build_rag_prompt(context, query, self.style) if context else query
@@ -1634,14 +1659,13 @@ class ReactAgent(Agent):
             was_compressed = False
             retrieval_failed = False
             try:
-                retrieved = await self._retrieve_context(query, history, intent_result)
-                if retrieved is None:
+                retrieved_full = await self._retrieve_and_compress(query, history, intent_result)
+                if retrieved_full is None:
                     # M10: 检索服务故障 — 与"无证据"区分，以 retrieval_error 终止流
                     retrieval_failed = True
                 else:
-                    raw_context, rag_sources, _ = retrieved
+                    raw_context, rag_sources, _, rag_context, was_compressed = retrieved_full
                     sources.extend(rag_sources)
-                    rag_context, was_compressed = await self._safe_compress(raw_context)
             except Exception as e:
                 logger.error("[Agent V1:stream-react] Retrieval failed: %s", e, exc_info=True)
                 retrieval_failed = True
@@ -1690,16 +1714,7 @@ class ReactAgent(Agent):
             }, ensure_ascii=False)
 
             # ── Phase 2: Build messages ─────────────────────────────────
-            system_prompt = REACT_SYSTEM_PROMPT.format(
-                tools_description=self._format_tools_description()
-            )
-            memory_context = await self._safe_memory_context(query)
-            if memory_context:
-                system_prompt = f"{system_prompt}\n\n{memory_context}"
-            messages = [ChatMessage(role="system", content=system_prompt)]
-            if history:
-                for msg in history[-10:]:
-                    messages.append(ChatMessage(role=msg["role"], content=msg["content"]))
+            messages = await self._build_react_messages(query, history)
 
             if rag_context:
                 enhanced_query = self._build_rag_prompt(rag_context, query, self.style)

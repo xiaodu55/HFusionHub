@@ -53,6 +53,7 @@ class QueryRewriter:
         Returns:
             RewriteResult 重写结果
         """
+        original = query
         # 1. 上下文补充（处理指代）
         if conversation_history:
             query = self._add_context(query, conversation_history)
@@ -61,7 +62,7 @@ class QueryRewriter:
         queries = self._split_query(query)
 
         return RewriteResult(
-            original_query=query,
+            original_query=original,
             rewritten_queries=queries,
             context_added=bool(conversation_history),
             split_count=len(queries)
@@ -120,17 +121,17 @@ class QueryRewriter:
 
         例如: "Python是什么? 它有什么优势?" -> ["Python是什么?", "它有什么优势?"]
         """
-        # 按问号拆分
-        parts = re.split(r'[?？]', query)
+        # 按问号拆分（保留每段原始问号的半角/全角风格）
+        pieces = re.split(r'([?？])', query)
         queries = []
-
-        for part in parts:
-            part = part.strip()
+        for idx in range(0, len(pieces) - 1, 2):
+            part = pieces[idx].strip()
             if part:
-                # 如果不是以问号结尾，加上问号
-                if not part.endswith('?') and not part.endswith('？'):
-                    part += '?'
-                queries.append(part)
+                queries.append(part + pieces[idx + 1])
+
+        tail = pieces[-1].strip() if len(pieces) % 2 == 1 else ""
+        if tail:
+            queries.append(tail + '?')
 
         # 如果没有问号，检查分隔符
         if len(queries) <= 1:

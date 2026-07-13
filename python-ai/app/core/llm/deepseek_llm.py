@@ -13,11 +13,15 @@ import httpx
 from .base import BaseLLM, ChatMessage, LLMResponse
 from .http_client import get_shared_client, post_with_retry
 
-# Non-streaming exact-match response cache (P2).  Keyed by
+# Non-streaming response cache (P2).  Keyed by
 # (model, temperature, max_tokens, api_key, normalized messages) so repeated
 # FAQ-style prompts reuse the answer within the TTL instead of re-billing.
 # Module-level so all DeepSeekLLM instances share one bounded LRU.
+# _response_cache holds exact keys; _fuzzy_response_cache holds normalized
+# (whitespace-collapsed / casefolded) keys as a secondary lookup so trivially
+# identical prompts hit the same entry.
 _response_cache: "OrderedDict[tuple, tuple[float, LLMResponse]]" = OrderedDict()
+_fuzzy_response_cache: "OrderedDict[tuple, tuple[float, LLMResponse]]" = OrderedDict()
 _RESPONSE_CACHE_MAX = 1024
 
 
@@ -37,21 +41,53 @@ def _cache_key(
     )
 
 
+def _normalise_text(text: str) -> str:
+    """Collapse whitespace runs and case differences for fuzzy cache lookup."""
+    return " ".join(text.split()).casefold()
+
+
+def _fuzzy_cache_key(key: tuple) -> tuple:
+    """Derive the normalized lookup key from an exact cache key."""
+    model, temperature, max_tokens, api_key, messages = key
+    return (
+        model,
+        temperature,
+        max_tokens,
+        api_key,
+        tuple((role, _normalise_text(content)) for role, content in messages),
+    )
+
+
+def _fuzzy_enabled() -> bool:
+    from app.utils.config import config
+    return config.LLM_RESPONSE_CACHE_FUZZY_ENABLED
+
+
 def _cache_get(key: tuple) -> Optional[LLMResponse]:
     entry = _response_cache.get(key)
+    if entry is None and _fuzzy_enabled():
+        entry = _fuzzy_response_cache.get(_fuzzy_cache_key(key))
     if entry is None:
         return None
     cached_at, cached = entry
     if time.monotonic() - cached_at < _cache_ttl_seconds():
         return cached
+    # Expired — drop both the exact entry and its fuzzy twin.
     _response_cache.pop(key, None)
+    _fuzzy_response_cache.pop(_fuzzy_cache_key(key), None)
     return None
 
 
 def _cache_put(key: tuple, response: LLMResponse) -> None:
-    _response_cache[key] = (time.monotonic(), response)
+    now = time.monotonic()
+    _response_cache[key] = (now, response)
     if len(_response_cache) > _RESPONSE_CACHE_MAX:
         _response_cache.popitem(last=False)
+    fuzzy_key = _fuzzy_cache_key(key)
+    if fuzzy_key != key:
+        _fuzzy_response_cache[fuzzy_key] = (now, response)
+        if len(_fuzzy_response_cache) > _RESPONSE_CACHE_MAX:
+            _fuzzy_response_cache.popitem(last=False)
 
 
 def _cache_ttl_seconds() -> float:

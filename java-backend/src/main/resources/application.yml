@@ -250,6 +250,10 @@ logging:
 # Tenant quota plan defaults (used when no tenant_quota override exists)
 # =====================================================
 hfusionhub:
+  scheduler-lock:
+    # 调度锁在 Redis 故障时的行为：false=fail-closed（跳过本轮，下一周期补偿，默认）；
+    # true=fail-open（退化为无锁执行，历史行为）
+    fail-open: ${SCHEDULER_LOCK_FAIL_OPEN:false}
   quota:
     # Server-side upper bound for a single chat output (tokens). Used as the
     # reservation ceiling: reserve = input estimate + max-output-tokens.

@@ -172,4 +172,45 @@
           AND status = 'running'
     </select>
 
+    <!-- ================================================================ -->
+    <!-- S3/M3: 审批竞态 — 行级守卫的状态迁移（条件 UPDATE，数据库原子判定）    -->
+    <!-- ================================================================ -->
+
+    <update id="transitionRunStatusGuarded">
+        UPDATE agent_run
+        <set>
+            status = #{newStatus},
+            <if test="errorCode != null">
+                error_code = #{errorCode},
+                error_detail = #{errorDetail},
+            </if>
+            <if test="completedAt != null">
+                completed_at = #{completedAt},
+            </if>
+            updated_at = NOW(),
+        </set>
+        WHERE id = #{id}
+          AND status = #{expectedStatus}
+    </update>
+
+    <update id="transitionRunStatusFromAnyActive">
+        UPDATE agent_run
+        <set>
+            status = #{newStatus},
+            <if test="errorCode != null">
+                error_code = #{errorCode},
+                error_detail = #{errorDetail},
+            </if>
+            <if test="completedAt != null">
+                completed_at = #{completedAt},
+            </if>
+            updated_at = NOW(),
+        </set>
+        WHERE id = #{id}
+          AND status NOT IN
+        <foreach collection="terminalStatuses" item="terminalStatus" open="(" separator="," close=")">
+            #{terminalStatus}
+        </foreach>
+    </update>
+
 </mapper>

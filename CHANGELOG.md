@@ -6,9 +6,76 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-## [Unreleased]
+### 技术债清偿批（2026-08-30 第十七批：文档漂移/依赖健康/竞态行锁/租户桶/缓存模糊命中/巨型类拆分）
+
+#### Fixed（文档与仓库卫生）
+- **CLAUDE.md 全面漂移修复**：Spring Boot 3.2.5→3.5.16、测试数 1247/567→1344/595、
+  Controller/Service/Entity 计数（25/25/42→53/43/64）、前端页面 13→43 路由、
+  失效引用 `test_retriever.py`→`test_adaptive_retrieval.py`；AGENTS/README/
+  docs/java-backend.md/docs/database.md 的 Flyway 窗口统一为 V1–V81 / V82+；
+  `static-checks.py` 新增检查 3 的 CLAUDE.md 测试表校验 + **检查 4
+  （Flyway 版本窗口文档同步）**，迁移目录再进版本后文档漂移会被 CI 拦截；
+  ACCESS_MAP.md 首尾日期对齐；清理入库调试产物（verify-body.json、
+  measure_stream.py/.ps1、chinese-test.json）
+- **CI 运行时对齐**：4 个 workflow 的 Python 3.12→3.11（与锁文件/本地 venv/
+  pyproject 一致）、Java 21→17（与 pom/Dockerfile 一致）；
+  `deploy/Dockerfile.java` 构建与运行镜像同步降为 temurin-17
+
+#### Changed（依赖健康）
+- **PyPDF2→pypdf 6.16.2**：PyPDF2 已废弃停更（并入 pypdf）；`pdf_parser.py`
+  切换 import（API 兼容），requirements.in/requirements.txt（hash 锁）同步，
+  移除锁文件 `--trusted-host mirrors.aliyun.com`（削弱传输校验语义且非必需）
+
+#### Added（测试覆盖）
+- **query_rewriter**（原零覆盖）：33 例（指代替换/拆分/术语扩展/单例），
+  顺带修 `original_query` 语义 bug（误存替换后文本）与 `_split_query`
+  全角问号被改写为半角的粗糙行为（保留用户标点风格）
+- **agent/checkpoint**（原零覆盖）：save/load/load_at_step/INSERT OR REPLACE
+  幂等/删除/清理/并发/`build_checkpoint_from_agent` 映射，共 19 例
+- **LLM 响应缓存**：+4 例模糊命中（归一化命中/开关关闭/TTL 过期/api_key+model
+  仍参与键）
+- **VoiceController**（原零覆盖）：8 例（转发/内部令牌注入/空体 400/降级 503）
+- **AgentObservabilityController**（原零覆盖，25 端点）：27 例全端点契约测试
+- **NoteServiceImpl / WebhookSubscriptionServiceImpl**（原零覆盖）：10+13 例
+  （归属校验/校验规则/分页/投递历史/testFire 委托）
+- **审批竞态守卫回归**（AgentApprovalRaceGuardTest，6 例）：deny/approve/expire/
+  resume 失败收敛四条路径——只有条件 UPDATE 真正迁移成功的一方结算账本
+- **MinioArtifactStore**（原零覆盖）：5 例（租户桶写入/默认桶/旧对象回退/解析）
+- Java 侧 JaCoCo 棘轮 45%→46%（实测 47.4%）
+
+#### Changed（行为与架构）
+- **S3/M3 审批竞态升级为完整行锁**：`AgentRunMapper` 新增
+  `transitionRunStatusGuarded`（WHERE status=?）与
+  `transitionRunStatusFromAnyActive`（WHERE status NOT IN 终态）两条条件
+  UPDATE；deny/approve/expire/resume 失败收敛四处迁移由 check-then-act 改为
+  数据库行级原子判定，仅迁移成功方结算用量（原"守卫级"标记清除）
+- **AgentRunLifecycleService 收口**（AgentTaskServiceImpl 拆分第一步）：
+  守卫迁移 + 用量账本结算 + 租户归属解析统一入口（1412→约 1360 行）
+- **ChatUsageRecorder 收口**（ConversationServiceImpl 拆分第一步）：
+  账本结算/退回 + 模型用量落账 + 预占估算统一入口（1647→1595 行）
+- **SchedulerLockAspect fail-open→fail-closed 默认**：Redis 故障时跳过本轮
+  调度等待下一周期补偿，不再无锁并发执行；`SCHEDULER_LOCK_FAIL_OPEN=true`
+  可回退历史行为（测试同步更新）
+- **MinIO per-tenant bucket 隔离（R15-28 收尾）**：插件工件上传写入
+  `hfusionhub-t<tenantId>` 租户专属桶（自动建桶 + 桶缓存）；读取/删除/
+  预签名优先租户桶、未命中回退默认桶兼容旧对象；旧签名保留 @Deprecated
+- **LLM 响应缓存归一化模糊命中**（OPTIMIZATION_PLAN P2 收尾）：精确 miss 后
+  以空白折叠+casefold 的归一化键二次查找；写入同步维护两条索引；
+  `LLM_RESPONSE_CACHE_FUZZY_ENABLED`（默认开）可关
+
+#### 顺延（明确记录）
+- **grpcio 1.67.1 升级**：pip-compile --upgrade-package 在国内镜像下挂起，
+  为避免手工升级 pymilvus 传递依赖风险，保留 1.67.1（无已知未修复 CVE），
+  待网络窗口期重新 pip-compile
+- **react.py 三管线渐进重构（第一批）**：提取 `_build_react_messages` /
+  `_retrieve_and_compress` / `_empty_context_reply` 三个共享助手，消除
+  run/run_stream/_run_stream_react 三份重复的提示词+记忆注入、检索+压缩、
+  空上下文提示逻辑；ReAct 循环本体合并仍列渐进项
+- 生产部署侧（TODO.md P0）为真机操作：deploy/.env 六个密钥已是强随机，
+  HTTPS/CORS 白名单/Swagger 关闭的仓库侧配置与脚本均已就绪
 
 #### Fixed（2026-08-30 收官冒烟）
+
 - **网关流式不可用**：`ModelGateway._stream_provider` 误用 `async def` + `return`
   内层生成器——所有 `/api/chat/stream` 真实调用报 "'async for' requires an object
   with __aiter__"。单轨化（08-29）引入，单测 mock 掉该方法未暴露、CI 停摆无冒烟

@@ -62,6 +62,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     private final UsageLedgerService usageLedgerService;
     private final QuotaProperties quotaProperties;
     private final CostTrackingService costTrackingService;
+    private final AgentRunLifecycleService runLifecycle;
 
     @SuppressWarnings("java:S107")
     public AgentTaskServiceImpl(
@@ -77,7 +78,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             com.hfusionhub.common.utils.RedisUtils redisUtils,
             UsageLedgerService usageLedgerService,
             QuotaProperties quotaProperties,
-            CostTrackingService costTrackingService) {
+            CostTrackingService costTrackingService,
+            AgentRunLifecycleService runLifecycle) {
         this.taskMapper = taskMapper;
         this.runMapper = runMapper;
         this.stepMapper = stepMapper;
@@ -91,6 +93,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         this.usageLedgerService = usageLedgerService;
         this.quotaProperties = quotaProperties;
         this.costTrackingService = costTrackingService;
+        this.runLifecycle = runLifecycle;
     }
 
     @org.springframework.beans.factory.annotation.Value("${agent.run.lease-seconds:120}")
@@ -379,7 +382,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             throw new BusinessException("Agent run does not exist or has no run UUID: " + runId);
         }
         AgentTask task = taskMapper.selectById(run.getTaskId());
-        Long tenantId = resolveRunTenant(run, task);
+        Long tenantId = runLifecycle.resolveRunTenant(run, task);
         if (tenantId == null) {
             throw new BusinessException("Cannot execute agent run without a resolvable tenant: " + runId);
         }
@@ -403,44 +406,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     @Override
     @Transactional
     public void finalizeAgentRunUsage(Long runId, String status, Map<String, Object> tokenUsage) {
-        AgentRun run = runMapper.selectById(runId);
-        if (run == null || run.getRunUuid() == null) {
-            return;
-        }
-        Long tenantId = resolveRunTenant(run, null);
-        if (tenantId == null) {
-            log.warn("Cannot finalize AGENT_TOKENS for run {} — tenant unresolvable", runId);
-            return;
-        }
-        final Long tenant = tenantId;
-        final String usageKey = "agent_run:" + run.getRunUuid();
-        TenantContext.runAs(tenant, () -> {
-            if (AgentConstants.STATUS_SUCCEEDED.equals(status)) {
-                long actual = extractTotalTokens(tokenUsage);
-                usageLedgerService.settle(
-                        UsageMeter.AGENT_TOKENS, usageKey, actual, "agent_run", String.valueOf(runId));
-            } else {
-                usageLedgerService.release(UsageMeter.AGENT_TOKENS, usageKey);
-            }
-            return null;
-        });
-    }
-
-    /**
-     * Resolves the durable owner for an Agent run.  AgentTask has no tenant
-     * column, so a legacy run without tenant_id must be attributed through its
-     * task owner.  Do not use a request/worker thread-local as an authority.
-     */
-    private Long resolveRunTenant(AgentRun run, AgentTask task) {
-        if (run.getTenantId() != null) {
-            return run.getTenantId();
-        }
-        AgentTask resolvedTask = task != null ? task : taskMapper.selectById(run.getTaskId());
-        if (resolvedTask == null || resolvedTask.getUserId() == null) {
-            return null;
-        }
-        com.hfusionhub.entity.User owner = userMapper.selectById(resolvedTask.getUserId());
-        return owner != null ? owner.getTenantId() : null;
+        // 已收口到 AgentRunLifecycleService（守卫迁移 + 账本结算统一入口）
+        runLifecycle.finalizeAgentRunUsage(runId, status, tokenUsage);
     }
 
     /**
@@ -451,24 +418,6 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         long inputEstimate = Math.max(64, (query == null ? 0 : query.length()) / 4);
         int steps = Math.max(1, maxToolSteps);
         return inputEstimate + quotaProperties.getChatMaxOutputTokens() * (steps + 1L);
-    }
-
-    /**
-     * 从 tokenUsage 字典提取实际 total_tokens（缺省 0）。
-     */
-    private long extractTotalTokens(Map<String, Object> tokenUsage) {
-        if (tokenUsage == null) {
-            return 0L;
-        }
-        Object total = tokenUsage.get("total_tokens");
-        if (total instanceof Number n) {
-            return Math.max(0L, n.longValue());
-        }
-        Object prompt = tokenUsage.get("prompt_tokens");
-        Object completion = tokenUsage.get("completion_tokens");
-        long p = prompt instanceof Number pn ? Math.max(0L, pn.longValue()) : 0L;
-        long c = completion instanceof Number cn ? Math.max(0L, cn.longValue()) : 0L;
-        return p + c;
     }
 
     // ================================================================
@@ -767,16 +716,18 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                 task.setStatus(AgentConstants.STATUS_FAILED);
                 taskMapper.updateById(task);
             }
-            if (run != null && AgentConstants.STATUS_WAITING_APPROVAL.equals(run.getStatus())) {
-                // 评估 S3/M3：状态守卫——过期调度可能已把 run 置 FAILED，
-                // 只允许从 waiting_approval 迁移，防止覆盖终态
-                run.setStatus(AgentConstants.STATUS_FAILED);
-                run.setErrorCode("approval_denied");
-                run.setErrorDetail("审批被拒绝: " + (reason != null ? reason : "无理由"));
-                run.setCompletedAt(java.time.LocalDateTime.now());
-                runMapper.updateById(run);
-                // 用量账本：审批拒绝直接写终态，绕过 completeRun，退回预占
-                finalizeAgentRunUsage(run.getId(), AgentConstants.STATUS_FAILED, null);
+            if (run != null) {
+                // S3/M3 行锁升级：条件 UPDATE（WHERE status='waiting_approval'）原子完成
+                // 迁移，与过期调度 expireApprovals 的竞态由数据库行级判定，不再依赖
+                // check-then-act 的内存态守卫；仅真正迁移成功的一方结算用量
+                boolean transitioned = runLifecycle.failFromWaitingApproval(
+                        run.getId(),
+                        "approval_denied",
+                        "审批被拒绝: " + (reason != null ? reason : "无理由"));
+                if (transitioned) {
+                    // 用量账本：审批拒绝直接写终态，绕过 completeRun，退回预占
+                    finalizeAgentRunUsage(run.getId(), AgentConstants.STATUS_FAILED, null);
+                }
             }
             // V13: record event
             statusEventService.record(
@@ -796,11 +747,13 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                 task.setStatus(AgentConstants.STATUS_RUNNING);
                 taskMapper.updateById(task);
             }
-            if (run != null && AgentConstants.STATUS_WAITING_APPROVAL.equals(run.getStatus())) {
-                // 评估 S3/M3：状态守卫——仅 waiting_approval 可恢复为 RUNNING，
+            if (run != null) {
+                // S3/M3 行锁升级：仅当仍处 waiting_approval 时原子迁移到 running，
                 // 防止覆盖并发完成的终态
-                run.setStatus(AgentConstants.STATUS_RUNNING);
-                runMapper.updateById(run);
+                boolean transitioned = runLifecycle.resumeFromWaitingApproval(run.getId());
+                if (transitioned) {
+                    run.setStatus(AgentConstants.STATUS_RUNNING);
+                }
             }
             // V13: record event
             statusEventService.record(
@@ -860,13 +813,11 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                 try {
                     AgentRun checkRun = runMapper.selectById(run.getId());
                     if (checkRun != null) {
-                        String currentStatus = checkRun.getStatus();
-                        if (!AgentConstants.TERMINAL_STATUSES.contains(currentStatus)) {
-                            checkRun.setStatus(AgentConstants.STATUS_FAILED);
-                            checkRun.setErrorCode("internal_error");
-                            checkRun.setErrorDetail("审批后恢复执行失败: " + errorMsg);
-                            checkRun.setCompletedAt(LocalDateTime.now());
-                            runMapper.updateById(checkRun);
+                        // M3 行锁升级：条件 UPDATE 仅在仍处非终态时收敛为 failed，
+                        // 重读与写入之间即使 run 真实完成也不会被覆盖
+                        boolean transitioned = runLifecycle.failUnlessTerminal(
+                                checkRun.getId(), "internal_error", "审批后恢复执行失败: " + errorMsg);
+                        if (transitioned) {
                             finalizeAgentRunUsage(checkRun.getId(), AgentConstants.STATUS_FAILED, null);
                             AgentTask checkTask = taskMapper.selectById(checkRun.getTaskId());
                             if (checkTask != null
@@ -876,17 +827,16 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                             }
                         }
                     } else {
-                        // Even if the run can't be found now, update the
-                        // in-memory run reference to failed and persist it.
+                        // Even if the run can't be found now, converge the
+                        // original run reference via the guarded transition.
                         log.warn(
-                                "Could not re-read run {} after resume failure — updating original reference",
+                                "Could not re-read run {} after resume failure — converging original reference",
                                 run.getId());
-                        run.setStatus(AgentConstants.STATUS_FAILED);
-                        run.setErrorCode("internal_error");
-                        run.setErrorDetail("审批后恢复执行失败: " + errorMsg);
-                        run.setCompletedAt(LocalDateTime.now());
-                        runMapper.updateById(run);
-                        finalizeAgentRunUsage(run.getId(), AgentConstants.STATUS_FAILED, null);
+                        boolean transitioned = runLifecycle.failUnlessTerminal(
+                                run.getId(), "internal_error", "审批后恢复执行失败: " + errorMsg);
+                        if (transitioned) {
+                            finalizeAgentRunUsage(run.getId(), AgentConstants.STATUS_FAILED, null);
+                        }
                         if (task != null && !AgentConstants.TERMINAL_STATUSES.contains(task.getStatus())) {
                             task.setStatus(AgentConstants.STATUS_FAILED);
                             taskMapper.updateById(task);
@@ -1178,14 +1128,12 @@ public class AgentTaskServiceImpl implements AgentTaskService {
                 taskMapper.updateById(task);
             }
             AgentRun run = runMap.get(a.getRunId());
-            // 评估 S3：与 decideApproval 的双向竞态守卫——用户刚批准（run 已
-            // RUNNING）的任务不允许被过期调度覆盖为 FAILED
-            if (run != null && AgentConstants.STATUS_WAITING_APPROVAL.equals(run.getStatus())) {
-                run.setStatus(AgentConstants.STATUS_FAILED);
-                run.setErrorCode(AgentConstants.ERR_APPROVAL_EXPIRED);
-                run.setErrorDetail("审批超时（5分钟未响应）");
-                run.setCompletedAt(java.time.LocalDateTime.now());
-                runMapper.updateById(run);
+            // S3/M3 行锁升级：与 decideApproval 的双向竞态由条件 UPDATE 行级判定——
+            // 用户刚批准（run 已 RUNNING）的任务不会被过期调度覆盖为 FAILED
+            if (run != null && runLifecycle.failFromWaitingApproval(
+                    run.getId(),
+                    AgentConstants.ERR_APPROVAL_EXPIRED,
+                    "审批超时（5分钟未响应）")) {
                 finalizeAgentRunUsage(run.getId(), AgentConstants.STATUS_FAILED, null);
             }
             // V13: record event

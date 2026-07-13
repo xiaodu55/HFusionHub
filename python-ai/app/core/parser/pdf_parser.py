@@ -21,9 +21,9 @@ class PDFParser(BaseParser):
     def parse(self, file_path: str) -> List[ParsedBlock]:
         """Parse PDF file into paragraph blocks."""
         try:
-            from PyPDF2 import PdfReader
+            from pypdf import PdfReader
         except ImportError as exc:
-            raise ImportError("PyPDF2 is required for PDF parsing. Install with: pip install PyPDF2") from exc
+            raise ImportError("pypdf is required for PDF parsing. Install with: pip install pypdf") from exc
 
         reader = PdfReader(file_path)
         blocks: List[ParsedBlock] = []
@@ -51,7 +51,7 @@ class PDFParser(BaseParser):
 
 
 def clean_pdf_text(text: str) -> str:
-    """Normalize PyPDF2 text and repair common CJK extraction artifacts."""
+    """Normalize pypdf text and repair common CJK extraction artifacts."""
     if not text:
         return ""
 

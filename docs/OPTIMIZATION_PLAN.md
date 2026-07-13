@@ -173,7 +173,7 @@
 
 ### P2 — 成本/健壮性
 
-- **LLM 响应缓存**：✅ 精确命中缓存已接入非流式与流式（chat_stream 缓存命中路径，2026-08-30 Batch 3 核实）；语义/归一化模糊命中仍未做（可选后续）。
+- **LLM 响应缓存**：✅ 精确命中缓存已接入非流式与流式（chat_stream 缓存命中路径，2026-08-30 Batch 3 核实）；✅ 归一化模糊命中已接入（2026-08-30 第十七批：精确 miss 后以空白折叠+casefold 二次查找，`LLM_RESPONSE_CACHE_FUZZY_ENABLED` 默认开）。语义（向量）级命中明确不做——LLM 输出对输入高度敏感，收益风险比不成立。
 - **配置校验**：[config.py](../python-ai/app/utils/config.py) 裸 `os.getenv` → pydantic-settings，启动 fail-fast（必填/枚举/类型）。
 - **token 估算** ✅ 已处理（2026-08-20）：[utils.py](../python-ai/app/core/rag/utils.py) `estimate_tokens` 朴素「中文字符+英文单词」估算 → 按模型族校准的字符-比例模型（中文 1 token/字 + 拉丁字母/数字 0.25 token/字符、round-half-up），无第三方 tokenizer 依赖；修复旧实现忽略数字的缺陷，英文估算值与 GPT 族 tokenizer 对齐（如 "Hello World" 2→3）。
 - **Reranker 默认 `mode="disabled"`**：模型重排能力未上线；`get_reranker()` 每次解析配置。
@@ -303,7 +303,7 @@
 | R15-21 | API 层几乎零测试：bid/ingest/rag/mcp/tools/gateway/guardrails 等约 10 个路由无任何测试 | `python-ai/tests/` 对照 `app/api/` | FastAPI TestClient 契约测试（对齐 `tests/test_chat_api.py` 模式） |
 | R15-22 | 测试基座漂移：H2 schema 手维护停在 V70、Flyway 关闭、tenant 拦截器在测试中关闭（核心隔离机制未被测试覆盖） | `application-test.yml`、`schema-h2.sql` | Testcontainers-MySQL（依赖已在 pom）抽样集成 + 至少一条 tenant 拦截器真实链路 |
 | R15-23 | 内部 token guard 复制粘贴 6 份；`allow-circular-references: true` 掩盖循环依赖；manifest hash 拼接歧义 | 6 个 Internal*Controller、`application.yml:8`、`PluginServiceImpl.java:628-644` | 收敛为 servlet filter；解循环；规范化 JSON 重算 |
-| R15-24 | God classes：ConversationServiceImpl 1647 / AgentTaskServiceImpl 1412 / VectorizationServiceImpl 1222 | java-backend service/impl | 按职责拆分（渐进，随触碰随拆） |
+| R15-24 | God classes：ConversationServiceImpl 1595 / AgentTaskServiceImpl 约1360 / VectorizationServiceImpl 1222 | java-backend service/impl | 按职责拆分（渐进，随触碰随拆）。✅ 第一批（2026-08-30）：`AgentRunLifecycleService`（守卫迁移+账本结算+租户归属）、`ChatUsageRecorder`（聊天账本+模型用量落账）收口 |
 
 ## R15-P3 文档 / 运维（✅ 已完成 2026-08-28；R15-28 以最小落地实现，R15-27/30 已文档化待真机执行）
 
@@ -312,6 +312,6 @@
 | R15-25 | 文档失真 10 处：README/ROADMAP 测试计数（445/1220+）、database.md Flyway「V1–V57」、CI_GATES 分支保护自相矛盾 + eval-nightly 描述过时、ARCHITECTURE flag 表（2026-08-19）、TODO.md 停在 08-19、CHANGELOG 三个 `## [Unreleased]`、P1-3 编号缺位、ACCESS_MAP/TODO runner 状态过时、本文档旧脚注计数 | 各对应文档 | 一次性对账清理（合并 Unreleased、统一计数源为 CI 实际值） |
 | R15-26 | **生产安全上线阻断清单（TODO.md P0 五项全未勾）**：默认密码轮换、HTTPS+Nginx/Let's Encrypt、CORS 收紧（去 `*`）、prod 关 Swagger、MySQL 每日备份 + Milvus 快照 | `TODO.md` P0 1-5、`docs/PRODUCTION_OPS.md §0` | 产出轮换脚本 + HTTPS 反代样例 + 备份 cron 脚本 + 告警启用文档（不在真实环境直接执行） |
 | R15-27 | eval-nightly 依赖 cpolar 免费隧道随机子域名且需 02:00 在线 | `docs/ROADMAP.md:97` | 固定子域名或注册为 Windows 服务 |
-| R15-28 | P2-8 私有部署加固未做：MinIO per-tenant bucket 隔离、敏感标书禁外部 LLM-as-judge | `docs/BID_COMPLIANCE.md:31, 81` | 私有化部署模式开关 + 存储隔离 |
+| R15-28 | P2-8 私有部署加固：✅ MinIO per-tenant bucket 隔离已落地（2026-08-30 第十七批：插件工件写 `hfusionhub-t<tenantId>` 租户桶，读取回退默认桶兼容旧对象）；敏感标书禁外部 LLM-as-judge 已由 judge_gate 覆盖 | `docs/BID_COMPLIANCE.md:31, 81` | 私有化部署模式开关 + 存储隔离 |
 | R15-29 | 前端 chat 断线重连遗留（幂等 requestId 自动重试；scrollToBottom 改 rAF） | 本文 §3 P2 遗留项 | F2 模式收尾 |
 | R15-30 | staging 真机验证缺口：隔离 Docker Engine / K8s runner 未在 staging 机器演练 | CHANGELOG 验收记录、`docs/PRODUCTION_OPS.md §9` | staging 机器跑 dind rehearsal + `plugin-e2e-acceptance.ps1` |

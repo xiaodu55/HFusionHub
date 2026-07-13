@@ -136,12 +136,14 @@ public class PluginServiceImpl implements PluginService {
         String name = String.valueOf(manifest.get("name"));
         String version = String.valueOf(manifest.get("version"));
 
+        // R15-28: 工件写入租户专属桶，实现存储层租户隔离
+        Long tenantId = TenantContext.getTenantId();
         String objectKey = artifactStore.uploadWheel(
-                name, version, artifactHash, new ByteArrayInputStream(wheelData), wheelData.length);
+                tenantId, name, version, artifactHash, new ByteArrayInputStream(wheelData), wheelData.length);
 
         manifest.put("artifact_path", objectKey);
 
-        String presignedUrl = artifactStore.getPresignedUrl(objectKey, Duration.ofHours(1));
+        String presignedUrl = artifactStore.getPresignedUrl(tenantId, objectKey, Duration.ofHours(1));
         manifest.put("wheel_url", presignedUrl);
 
         return doInstall(manifest, objectKey, artifactHash);
@@ -326,7 +328,7 @@ public class PluginServiceImpl implements PluginService {
         pluginMapper.deleteById(plugin.getId());
         if (plugin.getArtifactPath() != null) {
             try {
-                artifactStore.deleteWheel(plugin.getArtifactPath());
+                artifactStore.deleteWheel(plugin.getTenantId(), plugin.getArtifactPath());
             } catch (Exception e) {
                 log.warn("Failed to delete artifact from MinIO: {}", e.getMessage());
             }

@@ -14,12 +14,19 @@
 检查 3：测试计数文档同步
   静态统计三端测试数（Java @Test 注解、Python tests/ 下 def test_、
   前端 src/ 下 spec 的 it/test 单测数），与 README.md 徽章、AGENTS.md
-  "Tests:" 行比对。AGENTS.md 要求文档与代码计数保持同步，防止漂移。
+  "Tests:" 行、CLAUDE.md 测试表比对。AGENTS.md 要求文档与代码计数保持
+  同步，防止漂移。
+
+检查 4：Flyway 版本窗口文档同步
+  取 db/migration/ 下最新迁移版本 V<n>，校验 CLAUDE.md / AGENTS.md /
+  README.md / docs/java-backend.md / docs/database.md 中的区间写法
+  "V1–V<n>" 与新脚本窗口写法 "V<n+1>+" 是否与实际一致。
 
 用法:
   python scripts/static-checks.py --tenant-columns
   python scripts/static-checks.py --internal-token-keys
   python scripts/static-checks.py --test-counts
+  python scripts/static-checks.py --flyway-doc-sync
   python scripts/static-checks.py            # 全部检查
 退出码: 0=通过, 1=发现违规
 """
@@ -39,6 +46,7 @@ FRONTEND_SRC_DIR = REPO / "hfusionhub-frontend" / "src"
 FRONTEND_E2E_DIR = REPO / "hfusionhub-frontend" / "e2e"
 README_FILE = REPO / "README.md"
 AGENTS_FILE = REPO / "AGENTS.md"
+CLAUDE_FILE = REPO / "CLAUDE.md"
 
 problems: list[str] = []
 
@@ -154,7 +162,7 @@ def count_frontend_e2e_tests() -> int:
 
 
 def extract_doc_counts(text: str, source: str) -> dict[str, int] | None:
-    """从 README 徽章或 AGENTS.md Tests 行提取声称的计数；格式变化时返回 None。"""
+    """从 README 徽章、AGENTS.md Tests 行或 CLAUDE.md 测试表提取声称的计数；格式变化时返回 None。"""
     m = re.search(
         r"Tests-Python%20(\d+)%20%7C%20Java%20(\d+)%20%7C%20Frontend%20(\d+)-success", text
     )
@@ -163,7 +171,13 @@ def extract_doc_counts(text: str, source: str) -> dict[str, int] | None:
     m = re.search(r"\*\*Tests\*\*:\s*Java\s*(\d+)\s*·\s*Python\s*(\d+)\s*·\s*Frontend\s*(\d+)", text)
     if m:
         return {"java": int(m.group(1)), "python": int(m.group(2)), "frontend": int(m.group(3))}
-    problems.append(f"{source}: 未找到测试计数标记（README 徽章 / AGENTS.md '**Tests**:' 行格式已变化，请更新检查 3 的正则）")
+    # CLAUDE.md 测试表：三行 markdown 表格
+    m_py = re.search(r"\|\s*python-ai\s*\|[^|]*\|\s*(\d+)\s*\|", text)
+    m_ja = re.search(r"\|\s*java-backend\s*\|[^|]*\|\s*(\d+)\s*\|", text)
+    m_fe = re.search(r"\|\s*frontend\s*\|[^|]*\|\s*(\d+)\s*unit", text)
+    if m_py and m_ja and m_fe:
+        return {"python": int(m_py.group(1)), "java": int(m_ja.group(1)), "frontend": int(m_fe.group(1))}
+    problems.append(f"{source}: 未找到测试计数标记（README 徽章 / AGENTS.md '**Tests**:' 行 / CLAUDE.md 测试表格式已变化，请更新检查 3 的正则）")
     return None
 
 
@@ -174,7 +188,7 @@ def check_test_counts() -> None:
         "frontend": count_frontend_unit_tests(),
     }
     e2e = count_frontend_e2e_tests()
-    for source_file, pattern in ((README_FILE, "badge"), (AGENTS_FILE, "Tests line")):
+    for source_file, pattern in ((README_FILE, "badge"), (AGENTS_FILE, "Tests line"), (CLAUDE_FILE, "test table")):
         if not source_file.exists():
             problems.append(f"{source_file.name}: 文件不存在，无法校验测试计数")
             continue
@@ -191,15 +205,60 @@ def check_test_counts() -> None:
             )
 
 
+# ── 检查 4：Flyway 版本窗口文档同步 ─────────────────────────────────────
+
+FLYWAY_DOC_FILES = (
+    CLAUDE_FILE,
+    AGENTS_FILE,
+    README_FILE,
+    REPO / "docs" / "java-backend.md",
+    REPO / "docs" / "database.md",
+)
+
+
+def latest_migration_version() -> int:
+    latest = 0
+    for f in MIGRATION_DIR.glob("V*.sql"):
+        m = re.match(r"V(\d+)__", f.name)
+        if m:
+            latest = max(latest, int(m.group(1)))
+    return latest
+
+
+def check_flyway_doc_sync() -> None:
+    latest = latest_migration_version()
+    if latest == 0:
+        problems.append("未找到任何 Flyway 迁移脚本（V<n>__*.sql）")
+        return
+    bad: list[str] = []
+    for f in FLYWAY_DOC_FILES:
+        if not f.exists():
+            continue
+        text = f.read_text(encoding="utf-8")
+        for m in re.finditer(r"V1[–-]V(\d+)", text):
+            claimed = int(m.group(1))
+            if claimed != latest:
+                bad.append(f"{f.name}: 迁移区间写作 V1–V{claimed}，实际最新版本为 V{latest}")
+        for m in re.finditer(r"\bV(\d+)\+", text):
+            claimed = int(m.group(1))
+            if claimed != latest + 1:
+                bad.append(f"{f.name}: 新脚本版本窗口写作 V{claimed}+，应为 V{latest + 1}+")
+    if bad:
+        problems.append("Flyway 版本窗口文档漂移:\n    " + "\n    ".join(bad))
+    else:
+        print(f"[ok] Flyway 版本窗口同步：最新迁移 V{latest}，新脚本窗口 V{latest + 1}+")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
     parser.add_argument("--internal-token-keys", action="store_true")
     parser.add_argument("--test-counts", action="store_true")
+    parser.add_argument("--flyway-doc-sync", action="store_true")
     args = parser.parse_args()
 
-    if not (args.tenant_columns or args.internal_token_keys or args.test_counts):
-        args.tenant_columns = args.internal_token_keys = args.test_counts = True
+    if not (args.tenant_columns or args.internal_token_keys or args.test_counts or args.flyway_doc_sync):
+        args.tenant_columns = args.internal_token_keys = args.test_counts = args.flyway_doc_sync = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -207,6 +266,8 @@ def main() -> int:
         check_internal_token_keys()
     if args.test_counts:
         check_test_counts()
+    if args.flyway_doc_sync:
+        check_flyway_doc_sync()
 
     if problems:
         print("\n发现问题:")
