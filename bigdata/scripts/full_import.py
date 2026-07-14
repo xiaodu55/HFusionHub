@@ -55,13 +55,13 @@ TABLE_COLUMNS = {
         "status", "current_run_id", "created_at",
     ],
     "agent_run": [
-        "id", "task_id", "run_uuid", "attempt_number", "status", "model",
-        "tool_calls_count", "error_code", "failed_tool", "duration_ms",
-        "created_at",
+        "id", "task_id", "run_uuid", "attempt_number", "tenant_id", "status",
+        "model", "tool_calls_count", "error_code", "failed_tool",
+        "duration_ms", "created_at",
     ],
     # 仅导分析所需列;password/phone/email 等敏感字段不进数仓(脱敏边界)
     "sys_user": [
-        "id", "username", "role", "status", "created_at",
+        "id", "username", "tenant_id", "role", "status", "created_at",
     ],
 }
 
@@ -98,6 +98,18 @@ def import_table(spark: SparkSession, table: str, dt: str,
     pk = TABLE_PARTITIONS[table]
     cols = ", ".join(TABLE_COLUMNS[table])
 
+    # 预读主键上界(JDBC partitionColumn 必须同时提供 lowerBound/upperBound)
+    upper_bound = max(1, int(
+        spark.read.format("jdbc")
+        .option("url", jdbc_url)
+        .option("query", f"SELECT COALESCE(MAX({pk}), 0) AS hi FROM {table}")
+        .option("user", db_user)
+        .option("password", db_password)
+        .option("driver", "com.mysql.cj.jdbc.Driver")
+        .load()
+        .collect()[0]["hi"]
+    ) + 1)
+
     reader = (
         spark.read.format("jdbc")
         .option("url", jdbc_url)
@@ -108,6 +120,7 @@ def import_table(spark: SparkSession, table: str, dt: str,
         .option("fetchsize", fetchsize)
         .option("partitionColumn", pk)
         .option("lowerBound", "1")
+        .option("upperBound", str(upper_bound))
         .option("numPartitions", str(num_partitions))
     )
 
@@ -130,7 +143,7 @@ def main() -> None:
     import os
     jdbc_url = os.environ.get(
         "ANALYTICS_JDBC_URL", "jdbc:mysql://mysql8:3306/hfusionhub?useSSL=false&allowPublicKeyRetrieval=true")
-    db_user = os.environ.get("ANALYTICS_DB_USER", "hfusion")
+    db_user = os.environ.get("ANALYTICS_DB_USER", "hfusionhub")
     db_password = os.environ.get("ANALYTICS_DB_PASSWORD", "")
 
     spark = build_spark()

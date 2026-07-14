@@ -150,13 +150,15 @@ def main():
     conv_ids = next_ids(cur, "conversation", N_USERS * CONVS_PER_USER)
     conv_rows, conv_owner = [], {}
     k = 0
-    for uid in user_ids:
+    for uidx, uid in enumerate(user_ids):
+        tenant_id = uidx % 8 + 1
         for _ in range(CONVS_PER_USER):
-            conv_rows.append((conv_ids[k], uid, f"seed 会话 {conv_ids[k]}", now, now, 0))
+            conv_rows.append((conv_ids[k], uid, tenant_id,
+                              f"seed 会话 {conv_ids[k]}", now, now, 0))
             conv_owner[conv_ids[k]] = uid
             k += 1
-    flush(cur, "INSERT INTO conversation (id, user_id, title, created_at, "
-               "updated_at, deleted) VALUES (%s,%s,%s,%s,%s,%s)",
+    flush(cur, "INSERT INTO conversation (id, user_id, tenant_id, title, created_at, "
+               "updated_at, deleted) VALUES (%s,%s,%s,%s,%s,%s,%s)",
           conv_rows, "conversation")
 
     user_tenant = {u[0]: u[6] for u in user_rows}
@@ -175,7 +177,7 @@ def main():
         status = weighted(rng, [("succeeded", 0.88), ("failed", 0.06),
                                 ("timed_out", 0.03), ("cancelled", 0.03)])
         task_rows.append((
-            task_ids[i], f"seed-task-{task_ids[i]:09d}", uid, cid,
+            task_ids[i], f"seed-task-{task_ids[i]:09d}", uid, tenant_id, cid,
             rng.randint(1, 6) if rng.random() < 0.5 else None,
             f"seed 合成任务 #{task_ids[i]}", status, None, created, created))
         run_status = "succeeded" if status == "succeeded" else weighted(
@@ -197,9 +199,10 @@ def main():
                 else latency_ms(rng),
                 step_err, created + dt.timedelta(seconds=seq * rng.randint(2, 30))))
         step_run_links.append(run_ids[i])
-    flush(cur, "INSERT INTO agent_task (id, request_id, user_id, conversation_id, "
-               "knowledge_base_id, query, status, current_run_id, created_at, updated_at) "
-               "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", task_rows, "agent_task")
+    flush(cur, "INSERT INTO agent_task (id, request_id, user_id, tenant_id, "
+               "conversation_id, knowledge_base_id, query, status, current_run_id, "
+               "created_at, updated_at) "
+               "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", task_rows, "agent_task")
     flush(cur, "INSERT INTO agent_run (id, task_id, run_uuid, attempt_number, status, "
                "model, tool_calls_count, error_code, failed_tool, duration_ms, "
                "created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",

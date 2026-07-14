@@ -133,6 +133,27 @@ docker compose -f docker/docker-compose.analytics.yml \
 ClickHouse(`bigdata/superset/README.md`)、告警渠道配置接入既有
 Alertmanager(`deploy/monitoring/alertmanager.yml`)。
 
+### 5.2.1 实测踩坑记录(2026-08-31 全链路实跑验证,新环境必读)
+
+以下问题在本机 Docker 全链路实跑中全部遇到并解决,新环境按此清单可少走弯路:
+
+| # | 症状 | 根因 | 解决 |
+|---|---|---|---|
+| 1 | NameNode 起不来 "not formatted" | apache/hadoop 镜像不支持 ENSURE_NAMENODE_DIR 自动格式化 | 首启前 `compose run --rm hadoop-namenode hdfs namenode -format -nonInteractive` |
+| 2 | hive-metastore 起不来 "Failed to load driver" | apache/hive:4.0.0 镜像不带 Postgres 驱动 | 挂载 `bigdata/jars/postgresql-42.7.3.jar` 到 /opt/hive/lib(compose 已配) |
+| 3 | hive 容器秒退 "HiveServer2 running as process 7" | 重启用错方式(PID 文件残留指向自身) | 必须用 `--force-recreate` 重启 hive 容器 |
+| 4 | HS2 反复重试 "/tmp/hive on HDFS should be writable" | **hive 容器没加载 core-site,fs.defaultFS 退化为本地 FS** | hive-site.xml 必须自带 fs.defaultFS(已修);并放通 HDFS /tmp/hive 1777 |
+| 5 | Spark 作业连不上 mysql8 | mysql8 实际在 `docker_backend` 网络(不是 default) | compose external 网络指向 docker_backend(已修) |
+| 6 | Hive INSERT/SELECT 报 Tez NPE | Hive 4 内嵌 Tez local 模式在部分环境不稳 | 已知问题:用 Spark SQL 查同一 Parquet(本方案计算存储解耦,天然支持);集群档 Tez on YARN 正常 |
+| 7 | CDC 报 "Public Key Retrieval is not allowed" | MySQL 8 caching_sha2 认证 | cdc 源加 `'debezium.database.allowPublicKeyRetrieval'='true'`(已配) |
+| 8 | CDC 报 "need RELOAD privilege" | 非增量快照要 FLUSH TABLES 锁 | `GRANT RELOAD, REPLICATION SLAVE ON *.* TO 'hfusionhub'@'%'` |
+| 9 | CDC 报 chunk key-column required | 增量快照需显式 chunk key | 源加 `'scan.incremental.snapshot.chunk.key-column'='id'`(已配) |
+| 10 | upsert-kafka sink 报不支持 changelog | 普通 kafka connector 不收 UPDATE | sink 用 `upsert-kafka` + `PRIMARY KEY (id) NOT ENFORCED` + key/value json(已配) |
+| 11 | Flink TM 加载不到 connector 类 | docker cp 进容器的 jar 在容器重建后丢失 | jar 用 **compose volume 挂载**进 /opt/flink/lib(已配,重建不丢) |
+| 12 | CDC 提交成功但零产出、报 Access denied | **运行时 SQL 的密码占位符未注入**(CHANGE_ME 残留) | 提交前必须校验密码注入(对比 md5);交付脚本保留 {PWD}/CHANGE_ME 占位符,密码只在部署时注入 |
+
+实测通过的环境口径:MySQL 8 默认 log_bin=ON/ROW;业务用户名 `hfusionhub`(非 hfusion);实时链路验证结果:MySQL `analytics_realtime_metrics` 12,879 个窗口行(30 天合成数据)。
+
 ### 5.3 演示数据(让"大数据"名副其实)
 
 ```bash

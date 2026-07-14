@@ -38,6 +38,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### 技术债清偿批（2026-08-30 第十七批：文档漂移/依赖健康/竞态行锁/租户桶/缓存模糊命中/巨型类拆分）
 
+#### Verified（2026-08-31 全链路实跑验证）
+- **离线链路端到端跑通**:seed 15 万行合成事件 → Spark JDBC 全量导入
+  HDFS(178,945 行 Parquet)→ DWD/DWS 四表 → 质量门禁 **14 条规则全绿**
+  (实跑中还抓到主产品 2 条负延迟脏数据与 meter 枚举清单过期——门禁真实有效)
+  → ADS 四表回写 MySQL(279/1120/248/1342 行,`/analytics` 大屏数据就绪)
+  → Spark SQL 与 Hive 同口径查询验证通过
+- **实时链路端到端跑通**:Flink CDC(MySQL binlog→Kafka,增量快照+chunk key)
+  → Flink TVF 1 分钟窗口 → MySQL `analytics_realtime_metrics`
+  **12,879 个窗口行**;RealtimeThresholdScheduler 采样与
+  `hfusionhub_slo_analytics` 告警组数据源就绪
+- **12 条实测踩坑记录**沉淀到 docs/BIGDATA_ARCHITECTURE.md §5.2.1
+  (NN 格式化/PG 驱动/SERVICE_NAME/fs.defaultFS/网络归属/Tez NPE/
+  CDC 认证与快照模式/upsert-kafka/jar 挂载持久化/密码注入校验)
+
 #### Fixed（文档与仓库卫生）
 - **CLAUDE.md 全面漂移修复**：Spring Boot 3.2.5→3.5.16、测试数 1247/567→1344/595、
   Controller/Service/Entity 计数（25/25/42→53/43/64）、前端页面 13→43 路由、

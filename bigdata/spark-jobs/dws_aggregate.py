@@ -20,7 +20,7 @@ def read_dwd(spark, table: str, dt: str):
     return spark.read.parquet(f"{WAREHOUSE}/dwd/{table}").where(f"dt = '{dt}'").drop("dt")
 
 
-def p95(df, value_col: str) -> "Column":
+def p95(value_col: str) -> "Column":
     return F.percentile_approx(value_col, 0.95, 10000)
 
 

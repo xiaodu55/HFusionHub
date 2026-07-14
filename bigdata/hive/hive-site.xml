@@ -6,6 +6,11 @@
   Tez(local 模式),Spark 不直连 metastore,规避客户端版本耦合。
 -->
 <configuration>
+  <!-- 关键:HS2/查询需要访问 HDFS 仓库路径;不设则退化为本地 FS -->
+  <property>
+    <name>fs.defaultFS</name>
+    <value>hdfs://hadoop-namenode:9000</value>
+  </property>
   <property>
     <name>hive.metastore.warehouse.dir</name>
     <value>/warehouse</value>
@@ -26,6 +31,19 @@
   <property>
     <name>hive.tez.container.size</name>
     <value>1024</value>
+  </property>
+  <!-- Tez 本地执行修复:暂存/用户目录必须落在可写 HDFS 路径 -->
+  <property>
+    <name>tez.staging-dir</name>
+    <value>/tmp/hive/tez</value>
+  </property>
+  <property>
+    <name>hive.user.install.directory</name>
+    <value>/user/hive</value>
+  </property>
+  <property>
+    <name>hive.jar.directory</name>
+    <value>/user/hive</value>
   </property>
   <property>
     <name>datanucleus.autoCreateSchema</name>

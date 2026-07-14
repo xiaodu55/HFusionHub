@@ -15,7 +15,7 @@ import os
 import pyspark.sql.functions as F
 from pyspark.sql import Window
 
-from _common import build_spark, WAREHOUSE, write_mysql_mirror
+from _common import build_spark, WAREHOUSE, write_mysql_mirror, write_partitioned
 
 
 def read_layer(spark, layer: str, table: str, dt: str):
@@ -28,7 +28,11 @@ def build_ads(spark, dt: str) -> dict:
     tenant_model = read_layer(spark, "dws", "dws_tenant_model_daily", dt)
     model_daily = read_layer(spark, "dws", "dws_model_daily", dt)
     tenant_step = read_layer(spark, "dws", "dws_tenant_step_daily", dt)
-    evals = read_layer(spark, "dwd", "dwd_eval_record", dt)
+    # 评测明细为可选链路(未入湖时 DWD 无该表)——跳过 ads_eval_quality
+    _sc = spark.sparkContext
+    _hp = _sc._jvm.org.apache.hadoop.fs.Path(f"{WAREHOUSE}/dwd/dwd_eval_record")
+    evals = (read_layer(spark, "dwd", "dwd_eval_record", dt)
+             if _hp.getFileSystem(_sc._jsc.hadoopConfiguration()).exists(_hp) else None)
 
     # ── ads_cost_daily(租户 + 平台全局=-1) ─────────────────────────────────
     per_tenant = (
@@ -110,6 +114,7 @@ def build_ads(spark, dt: str) -> dict:
 
     # ── ads_eval_quality(评测链路;归属租户经 dataset 缺失按平台 -1 口径) ───
     eval_quality = (
+        None if evals is None else
         evals.withColumn("stat_date", F.col("event_date"))
         .groupBy("stat_date")
         .agg(
@@ -125,7 +130,10 @@ def build_ads(spark, dt: str) -> dict:
         .select("tenant_id", "stat_date", "eval_count", "avg_hit_ratio",
                 "avg_ttft_ms", "avg_latency_ms", "failure_rate")
     )
-    stats["ads_eval_quality"] = write_partitioned(eval_quality, "ads", "ads_eval_quality", dt)
+    if eval_quality is not None:
+        stats["ads_eval_quality"] = write_partitioned(eval_quality, "ads", "ads_eval_quality", dt)
+    else:
+        print("[skip] ads_eval_quality(dwd_eval_record 不存在)")
 
     return stats
 
@@ -149,8 +157,13 @@ def main():
         else:
             # 全表刷新语义:从 Hive ADS 全分区读取(聚合小表),整表覆盖 MySQL,
             # 与单日回补天然幂等,详见 _common.write_mysql_mirror
+            _sc = spark.sparkContext
             for table in ("ads_cost_daily", "ads_model_share", "ads_tenant_topn",
                           "ads_tool_success", "ads_eval_quality"):
+                _hp = _sc._jvm.org.apache.hadoop.fs.Path(f"{WAREHOUSE}/ads/{table}")
+                if not _hp.getFileSystem(_sc._jsc.hadoopConfiguration()).exists(_hp):
+                    print(f"[skip] {table}(Hive 侧未产出,如评测链路未入湖)")
+                    continue
                 df = spark.read.parquet(f"{WAREHOUSE}/ads/{table}")
                 write_mysql_mirror(df, table, args.dt)
 

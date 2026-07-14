@@ -14,6 +14,8 @@ from __future__ import annotations
 import datetime as _dt
 import os
 
+import pyspark.sql.functions as F  # noqa: E402  (延迟导入避免循环)
+
 WAREHOUSE = "/warehouse/hfusionhub"
 
 
@@ -48,6 +50,9 @@ def read_ods(spark, table: str, dt: str):
 
 def write_partitioned(df, layer: str, table: str, dt: str) -> str:
     out = f"{WAREHOUSE}/{layer}/{table}"
+    if "dt" not in df.columns:
+        # 防御:调用方漏带 dt 列时补齐,否则 partitionBy 会被静默忽略
+        df = df.withColumn("dt", F.lit(dt))
     (
         df.write.mode("overwrite")
         .partitionBy("dt")
@@ -72,7 +77,7 @@ def mysql_options() -> dict:
         "url": os.environ.get(
             "ANALYTICS_JDBC_URL",
             "jdbc:mysql://mysql8:3306/hfusionhub?useSSL=false&allowPublicKeyRetrieval=true"),
-        "user": os.environ.get("ANALYTICS_DB_USER", "hfusion"),
+        "user": os.environ.get("ANALYTICS_DB_USER", "hfusionhub"),
         "password": os.environ.get("ANALYTICS_DB_PASSWORD", ""),
         "driver": "com.mysql.cj.jdbc.Driver",
     }
@@ -85,6 +90,9 @@ def write_mysql_mirror(df, table: str, stat_date: str = "") -> None:
     全表覆盖天然幂等,且避免 JDBC sink 无法按分区删除的语义陷阱。
     """
     opts = mysql_options()
+    # Hive 侧带 dt 分区列,MySQL 镜像表没有 —— JDBC 回写前丢掉多余列
+    if "dt" in df.columns:
+        df = df.drop("dt")
     (
         df.write.format("jdbc")
         .option("url", opts["url"])

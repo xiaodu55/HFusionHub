@@ -10,7 +10,7 @@ set -euo pipefail
 
 DT="${1:-$(date +%F)}"
 CONNECT="jdbc:mysql://mysql8:3306/hfusionhub?useSSL=false&allowPublicKeyRetrieval=true"
-USER="${ANALYTICS_DB_USER:-hfusion}"
+USER="${ANALYTICS_DB_USER:-hfusionhub}"
 PASS="${ANALYTICS_DB_PASSWORD:?请 export ANALYTICS_DB_PASSWORD}"
 MAPRED="${MAPRED_TASKS:-4}"
 TARGET="/warehouse/hfusionhub/ods"

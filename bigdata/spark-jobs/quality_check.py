@@ -72,9 +72,11 @@ def main():
     usage = read_dwd(spark, "dwd_usage_event", dt)
     bad_op = usage.where(~F.col("operation").isin("RESERVE", "COMMIT", "RELEASE")).count()
     record("dwd_usage_event", "operation_enum_violation", bad_op, 0, bad_op == 0)
+    # 枚举全集与 Java UsageMeter 一致(含招投标线 4 项;新增计量项需同步)
     bad_meter = usage.where(
         ~F.col("meter").isin("chat_tokens", "agent_tokens", "index_chunks",
-                             "plugin_executions")).count()
+                             "plugin_executions", "bid_projects", "tender_elements",
+                             "bid_draft_chars", "bid_check_reports")).count()
     record("dwd_usage_event", "meter_enum_violation", bad_meter, 0, bad_meter == 0)
 
     # ── R4 数值域 ───────────────────────────────────────────────────────────

@@ -24,6 +24,13 @@ docker restart flink-jobmanager flink-taskmanager
 
 ## 2. Source/Sink catalog DDL
 
+> **实测修正(2026-08-31 全链路实跑)**:`-i` 预载整文件在 sql-client 有解析边界问题,
+> 实际提交采用**合并单文件**方式——把 00_catalogs.sql 的 sink/source 定义与作业 INSERT
+> 拼成一个 `_run_cdc.sql` / `_run_realtime.sql` 后 `-f` 提交(仓库内此两文件由部署时
+> 从模板生成,密码占位符 CHANGE_ME 必须在生成时注入并在提交前 md5 校验)。
+> sink 端实测采用 **upsert-kafka**(PK=id):CDC 源产生 changelog,普通 kafka
+> connector 不收 UPDATE;下游实时读以 plain kafka source 消费 value 流即可。
+
 `00_catalogs.sql` 定义所有 Kafka topic source(JSON)、HDFS filesystem sink
 (Parquet,dt 分区)、MySQL JDBC sink(`analytics_realtime_metrics`,V82 迁移建表)、
 ClickHouse sink(标准档)。提交作业时用 `sql-client.sh` 的 `-i` 预载:

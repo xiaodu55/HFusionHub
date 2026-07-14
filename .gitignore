@@ -125,3 +125,9 @@ python-ai/plugins/trust/
 
 # --- ZCode 会话产物 ---
 .zcode/
+
+# HFusionData Analytics — 运行时生成的 Flink 提交脚本(内含注入的真实密码,严禁入库)
+bigdata/flink-jobs/_run_*.sql
+bigdata/flink-jobs/_exec_*.sql
+bigdata/flink-jobs/_t[0-9]*.sql
+bigdata/flink-jobs/_test_part.sql

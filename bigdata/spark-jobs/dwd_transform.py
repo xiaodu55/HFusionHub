@@ -120,6 +120,13 @@ def build_dwd(spark, dt: str) -> dict:
     stats["dwd_usage_event"] = write_partitioned(usage, "dwd", "dwd_usage_event", dt)
 
     # ── dwd_eval_record(JSON → 结构化,派生命中指标) ───────────────────────
+    # 评测 JSONL 未入湖时该 ODS 分区不存在 —— 跳过而非报错(评测链路可选)
+    sc = spark.sparkContext
+    hpath = sc._jvm.org.apache.hadoop.fs.Path(_ods_eval_path(dt))
+    if not hpath.getFileSystem(sc._jsc.hadoopConfiguration()).exists(hpath):
+        print(f"[skip] ods_eval_record dt={dt} 不存在(评测 JSONL 未入湖),跳过 eval 明细")
+        return stats
+
     def _ids(col):
         return F.split(F.regexp_replace(F.coalesce(F.col(col), F.lit("")), r"[\[\]\"' ]", ""), ",")
 
