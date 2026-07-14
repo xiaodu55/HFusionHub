@@ -17,6 +17,7 @@ import { formatDateTime } from '@/utils/date'
 import { APPROVAL_POLL_INTERVAL_MS, NOTICE_POLL_INTERVAL_MS } from '@/constants/timing'
 import {
   Activity,
+  BarChart3,
   Bell,
   BookOpen,
   Cable,
@@ -100,6 +101,7 @@ const menuItems: Array<{
   { path: '/builder/test-bench', label: '方案测试', description: '验证单个回答效果', icon: FlaskConical, roles: ['builder', 'admin'], group: 'build', keywords: ['测试', 'test', 'bench', '评测'] },
   { path: '/builder/test-sets', label: '回归用例', description: '批量比较回答结果', icon: FlaskConical, roles: ['builder', 'admin'], group: 'build', keywords: ['用例', '批量', '回归', 'suite'] },
   { path: '/rag', label: '回答效果', description: '分析检索和引用质量', icon: Activity, roles: ['builder', 'admin'], group: 'build', keywords: ['rag', '检索', '引用', '评估'] },
+  { path: '/analytics', label: '运营分析', description: '平台用量成本与质量大屏', icon: BarChart3, roles: ['builder', 'admin'], group: 'build', keywords: ['分析', '数仓', '大屏', '成本', 'analytics', 'spark', 'hadoop'] },
   { path: '/builder/plugins', label: '插件管理', description: '安装和隔离运行插件', icon: Package, roles: ['admin'], group: 'admin', keywords: ['插件', 'plugin', '沙箱'] },
   { path: '/builder/apps', label: '应用发布', description: '打包知识库为对外 API', icon: Rocket, roles: ['builder', 'admin'], group: 'build', keywords: ['应用', '发布', 'api', 'key', 'app'] },
   { path: '/builder/mcp', label: 'MCP 服务', description: '接入外部 MCP 工具服务器', icon: Cable, roles: ['builder', 'admin'], group: 'build', keywords: ['mcp', '外部', '服务', 'cable'] },

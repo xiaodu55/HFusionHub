@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 大数据扩展包批（2026-08-31 第十八批：HFusionData Analytics）
+
+#### Added（毕设 + 可上线产品双形态的分析扩展包）
+- **总体**：以 Hadoop 生态为主线的运营数仓扩展包（HDFS/YARN/Hive/Spark/
+  MapReduce/Sqoop-等价/Flink CDC/ClickHouse/Superset），独立 compose profile
+  （`docker/docker-compose.analytics.yml`），主产品零依赖、默认关闭。
+  完整架构/数据字典/部署运维/演示动线见 `docs/BIGDATA_ARCHITECTURE.md`
+- **采集层**：`full_import.py`（Spark JDBC 全量，dt 分区幂等）+ 经典 Sqoop
+  命令单 + `jsonl_to_hdfs.sh`（评测 JSONL 入湖）+ Flink CDC 作业
+  （binlog→Kafka→HDFS，checkpoint 断点续传，主产品零侵入）
+- **数仓**：Hive 四层 HQL 七件套（ODS/DIM/DWD/DWS/ADS/查询示例）；
+  计算存储解耦设计（外部表指向 Spark 写入的同一 Parquet，规避 metastore
+  客户端版本耦合）
+- **离线计算**：PySpark 四作业（dwd 租户回补/dws 聚合/ads 回写 MySQL/
+  quality 六类规则门禁，不合格阻断下游；按 dt 回补幂等）；MapReduce
+  经典词频作业（CJK bigram，mvn 编译通过）
+- **实时链路**：Flink SQL 1min 窗口聚合 → `analytics_realtime_metrics`；
+  `RealtimeThresholdScheduler` 采样暴露 3 个 Micrometer gauge，
+  新增 `hfusionhub_slo_analytics` 告警组（延迟/成本尖峰/链路停滞）
+- **应用层**：V82 迁移（实时指标/5 张 ADS 镜像/批处理日志，全部含
+  tenant_id）+ `AnalyticsController`（/analytics 六端点，服务端租户强制
+  隔离，普通用户仅本租户）+ `BigDataBatchScheduler`（@SchedulerLock
+  日结，默认关闭）+ 内部回补端点（X-Internal-Token 保护）
+- **可视化**：Vue3 大屏页 `/analytics`（概览/成本趋势/模型占比/步骤成功率/
+  评测质量/实时区 30s 轮询，零新前端依赖）+ Superset 配置与 5 看板说明
+- **数据制造器**：`seed_generator.py`（FK 安全链式造数，长尾租户/双峰
+  时段/对数正态 token，百万级）+ ClickHouse 标准档初始化脚本
+- **测试**：AnalyticsControllerTest 4 例 + AnalyticsBatchRunnerTest 5 例
+  （模板替换/SKIPPED/失败中止/质量门禁阻断 ADS/全绿管线）
+
 ### 技术债清偿批（2026-08-30 第十七批：文档漂移/依赖健康/竞态行锁/租户桶/缓存模糊命中/巨型类拆分）
 
 #### Fixed（文档与仓库卫生）

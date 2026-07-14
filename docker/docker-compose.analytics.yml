@@ -1,0 +1,268 @@
+# ============================================================================
+# HFusionData Analytics — 分析扩展包(Hadoop 生态)
+#
+# 独立 profile,不影响主产品交付:
+#   精简档: docker compose -f docker-compose.analytics.yml --profile analytics up -d
+#   标准档: docker compose -f docker-compose.analytics.yml \
+#             --profile analytics --profile analytics-full up -d
+#
+# 依赖主 compose 的 mysql8(经 external network `docker_default` 连接)。
+# 全部 UI 端口仅绑本机回环,不直接对外。
+# 端口映射(宿主机): HDFS NN 9870 | YARN RM 18088 | HiveServer2 10000 |
+#   Flink UI 8081 | Kafka 29092 | ClickHouse 18123 | Superset 8088
+# 内存预算见 docs/BIGDATA_ARCHITECTURE.md(精简档 ≈7.6GB 新增)。
+# ============================================================================
+
+name: hfusionhub-analytics
+
+services:
+
+  # ── HDFS ────────────────────────────────────────────────────────────────
+  hadoop-namenode:
+    image: apache/hadoop:3.3.6
+    container_name: hadoop-namenode
+    profiles: ["analytics"]
+    user: root
+    command: hdfs namenode
+    environment:
+      ENSURE_NAMENODE_DIR: "/hadoop/dfs/name"
+      HDFS_NAMENODE_OPTS: "-Xmx768m"
+    ports:
+      - "127.0.0.1:9870:9870"    # NameNode UI
+    volumes:
+      - hadoop-namenode:/hadoop/dfs/name
+      - ../bigdata/hadoop:/opt/hadoop/etc/hadoop:ro
+    networks: [analytics-net]
+    healthcheck:
+      test: ["CMD-SHELL", "hdfs dfsadmin -report >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  hadoop-datanode:
+    image: apache/hadoop:3.3.6
+    container_name: hadoop-datanode
+    profiles: ["analytics"]
+    user: root
+    command: hdfs datanode
+    environment:
+      HDFS_DATANODE_OPTS: "-Xmx768m"
+    volumes:
+      - hadoop-datanode:/hadoop/dfs/data
+      - ../bigdata/hadoop:/opt/hadoop/etc/hadoop:ro
+    networks: [analytics-net]
+    depends_on:
+      hadoop-namenode:
+        condition: service_healthy
+
+  # ── YARN ────────────────────────────────────────────────────────────────
+  yarn-resourcemanager:
+    image: apache/hadoop:3.3.6
+    container_name: yarn-resourcemanager
+    profiles: ["analytics"]
+    user: root
+    command: yarn resourcemanager
+    environment:
+      YARN_RESOURCEMANAGER_OPTS: "-Xmx512m"
+    ports:
+      - "127.0.0.1:18088:8088"   # ResourceManager UI(8088 让给 Superset)
+    volumes:
+      - ../bigdata/hadoop:/opt/hadoop/etc/hadoop:ro
+    networks: [analytics-net]
+    depends_on:
+      hadoop-namenode:
+        condition: service_healthy
+
+  yarn-nodemanager:
+    image: apache/hadoop:3.3.6
+    container_name: yarn-nodemanager
+    profiles: ["analytics"]
+    user: root
+    command: yarn nodemanager
+    environment:
+      YARN_NODEMANAGER_OPTS: "-Xmx768m"
+    volumes:
+      - ../bigdata/hadoop:/opt/hadoop/etc/hadoop:ro
+    networks: [analytics-net]
+    depends_on:
+      - yarn-resourcemanager
+
+  # 运维入口容器:hdfs/beeline/hadoop jar/数据回补都在这里执行
+  # (同时接入 core 网络以便 Spark JDBC 直读 mysql8)
+  hadoop-client:
+    image: apache/hadoop:3.3.6
+    container_name: hadoop-client
+    profiles: ["analytics"]
+    user: root
+    command: sleep infinity
+    volumes:
+      - ../bigdata:/opt/bigdata:ro
+      - ../bigdata/hadoop:/opt/hadoop/etc/hadoop:ro
+    networks: [analytics-net, core]
+
+  # ── Hive(Metastore 元数据用独立 Postgres;计算存储解耦:外部表指向 Spark
+  #    写入的同一批 HDFS Parquet,避免 metastore 客户端版本耦合) ──────────────
+  hive-metastore-db:
+    image: postgres:16-alpine
+    container_name: hive-metastore-db
+    profiles: ["analytics"]
+    environment:
+      POSTGRES_DB: hive_metastore
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: ${HIVE_METASTORE_PASSWORD:-hive123}
+    volumes:
+      - hive-metastore-db:/var/lib/postgresql/data
+    networks: [analytics-net]
+
+  hive-metastore:
+    image: apache/hive:4.0.0
+    container_name: hive-metastore
+    profiles: ["analytics"]
+    environment:
+      SERVICE: metastore
+      DB_DRIVER: postgres
+      SERVICE_OPTS: >-
+        -Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver
+        -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://hive-metastore-db:5432/hive_metastore
+        -Djavax.jdo.option.ConnectionUserName=hive
+        -Djavax.jdo.option.ConnectionPassword=${HIVE_METASTORE_PASSWORD:-hive123}
+        -Xmx512m
+      HIVE_CUSTOM_CONF_DIR: /opt/hive/conf.custom
+    volumes:
+      - ../bigdata/hive:/opt/hive/conf.custom:ro
+    networks: [analytics-net]
+    depends_on:
+      - hive-metastore-db
+
+  hive-server2:
+    image: apache/hive:4.0.0
+    container_name: hive-server2
+    profiles: ["analytics"]
+    environment:
+      SERVICE: hiveserver2
+      DB_DRIVER: postgres
+      SERVICE_OPTS: >-
+        -Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver
+        -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://hive-metastore-db:5432/hive_metastore
+        -Djavax.jdo.option.ConnectionUserName=hive
+        -Djavax.jdo.option.ConnectionPassword=${HIVE_METASTORE_PASSWORD:-hive123}
+        -Xmx768m
+      HIVE_CUSTOM_CONF_DIR: /opt/hive/conf.custom
+    ports:
+      - "127.0.0.1:10000:10000"  # HiveServer2 thrift(Beeline/Superset)
+    volumes:
+      - ../bigdata/hive:/opt/hive/conf.custom:ro
+    networks: [analytics-net]
+    depends_on:
+      - hive-metastore
+
+  # ── Kafka(KRaft,无 ZooKeeper) ─────────────────────────────────────────
+  kafka:
+    image: bitnami/kafka:3.7
+    container_name: analytics-kafka
+    profiles: ["analytics"]
+    environment:
+      KAFKA_CFG_NODE_ID: "1"
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
+    ports:
+      - "127.0.0.1:29092:9092"
+    volumes:
+      - kafka-data:/bitnami/kafka
+    networks: [analytics-net]
+
+  # ── Flink(CDC 增量采集 + 实时聚合;connector jar 安装见 bigdata/flink-jobs/README.md) ──
+  flink-jobmanager:
+    image: flink:1.18.1
+    container_name: flink-jobmanager
+    profiles: ["analytics"]
+    command: jobmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        state.checkpoints.dir: file:///opt/flink/checkpoints
+        state.backend: hashmap
+        execution.checkpointing.interval: 30s
+      FLINK_JM_HEAP: 512m
+    ports:
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - ../bigdata/flink-jobs:/opt/flink/usrlib/analytics:ro
+      - flink-checkpoints:/opt/flink/checkpoints
+    networks: [analytics-net, core]
+
+  flink-taskmanager:
+    image: flink:1.18.1
+    container_name: flink-taskmanager
+    profiles: ["analytics"]
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 2
+      FLINK_TM_HEAP: 768m
+    volumes:
+      - ../bigdata/flink-jobs:/opt/flink/usrlib/analytics:ro
+      - flink-checkpoints:/opt/flink/checkpoints
+    networks: [analytics-net, core]
+    depends_on:
+      - flink-jobmanager
+
+  # ── ClickHouse(标准档;精简档可不开,实时指标由 Flink 直写 MySQL) ─────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: analytics-clickhouse
+    profiles: ["analytics-full"]
+    environment:
+      CLICKHOUSE_DB: analytics
+      CLICKHOUSE_USER: analytics
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-analytics123}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "127.0.0.1:18123:8123"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ../bigdata/clickhouse:/docker-entrypoint-initdb.d:ro
+    ulimits:
+      nofile: 262144
+    networks: [analytics-net]
+
+  # ── Superset(BI 报表;首启初始化见 bigdata/superset/README.md) ───────────
+  superset:
+    image: apache/superset:4.0.1
+    container_name: analytics-superset
+    profiles: ["analytics"]
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-please-rotate-this-analytics-secret}
+      SUPERSET_LOAD_EXAMPLES: "false"
+      MAPBOX_API_KEY: ""
+    ports:
+      - "127.0.0.1:8088:8088"
+    volumes:
+      - ../bigdata/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - superset-home:/app/superset_home
+    networks: [analytics-net]
+    depends_on:
+      - hive-server2
+
+networks:
+  analytics-net:
+    name: hfusionhub-analytics
+  core:
+    external: true
+    name: docker_default      # 主 compose(dev)的默认网络名,连 mysql8
+
+volumes:
+  hadoop-namenode:
+  hadoop-datanode:
+  hive-metastore-db:
+  kafka-data:
+  flink-checkpoints:
+  clickhouse-data:
+  superset-home:

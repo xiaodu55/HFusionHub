@@ -254,6 +254,25 @@ hfusionhub:
     # 调度锁在 Redis 故障时的行为：false=fail-closed（跳过本轮，下一周期补偿，默认）；
     # true=fail-open（退化为无锁执行，历史行为）
     fail-open: ${SCHEDULER_LOCK_FAIL_OPEN:false}
+  # ── HFusionData Analytics(分析扩展包;默认关闭,主产品零依赖) ─────────────
+  analytics:
+    enabled: ${ANALYTICS_ENABLED:false}
+  batch:
+    # 日结管线开关与 cron(启用前提: docker-compose.analytics.yml 已部署)
+    enabled: ${BIGDATA_BATCH_ENABLED:false}
+    cron: ${BIGDATA_BATCH_CRON:0 0 4 * * ?}
+    offset-days: ${BIGDATA_BATCH_OFFSET_DAYS:1}
+    jobs:
+      # 各步骤命令模板,{date} 替换为处理日期;留空 = 该步 SKIPPED
+      # 示例(精简档,见 docs/BIGDATA_ARCHITECTURE.md §5):
+      #   docker exec hadoop-client spark-submit --master yarn
+      #     --jars /opt/bigdata/jars/mysql-connector-j-8.0.33.jar
+      #     /opt/bigdata/spark-jobs/full_import.py --dt {date}
+      full-import: ${BIGDATA_JOB_FULL_IMPORT:}
+      dwd-transform: ${BIGDATA_JOB_DWD_TRANSFORM:}
+      dws-aggregate: ${BIGDATA_JOB_DWS_AGGREGATE:}
+      quality-check: ${BIGDATA_JOB_QUALITY_CHECK:}
+      ads-build: ${BIGDATA_JOB_ADS_BUILD:}
   quota:
     # Server-side upper bound for a single chat output (tokens). Used as the
     # reservation ceiling: reserve = input estimate + max-output-tokens.

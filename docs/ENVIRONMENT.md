@@ -30,6 +30,11 @@ Copy `docker/.env.example` to `docker/.env`:
 | `ADMIN_PASSWORD` | `changeme` | Bootstrap admin password |
 | `MINIO_ROOT_USER` | `minioadmin` | MinIO object storage username |
 | `SCHEDULER_LOCK_FAIL_OPEN` | `false` | 调度锁 Redis 故障时是否退化为无锁执行；默认 false（fail-closed，跳过本轮调度等待下一周期） |
+| `ANALYTICS_ENABLED` | `false` | 分析扩展包（HFusionData Analytics）启用标记；/analytics 大屏在未启用时显示空态 |
+| `BIGDATA_BATCH_ENABLED` | `false` | 大数据日结调度开关（默认关闭，主产品零依赖） |
+| `BIGDATA_BATCH_CRON` | `0 0 4 * * ?` | 日结管线触发时间（UTC 由 JVM 时区决定） |
+| `BIGDATA_BATCH_OFFSET_DAYS` | `1` | 日结处理的数据日期偏移（1=T-1） |
+| `BIGDATA_JOB_FULL_IMPORT` 等 5 个 | 空 | 日结各步骤命令模板（`{date}` 占位；留空=该步 SKIPPED）。完整示例见 docs/BIGDATA_ARCHITECTURE.md §5.1 |
 | `MINIO_ROOT_PASSWORD` | `minioadmin` | MinIO object storage password |
 | `PLUGIN_RUNNER_TOKEN` | *(random)* | Plugin sandbox runner auth token (required — compose fails without it) |
 

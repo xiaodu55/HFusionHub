@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  HFusionData Analytics — MapReduce 经典计算示例
+  DocWordCount: 对知识库文档分词统计词频(呼应 AI 平台"文档关键词分析"业务),
+  经典 Mapper/Reducer/Shuffle 链路,提交到 YARN 执行。
+  构建: mvn -q package  (依赖 hadoop-client 以 provided 提供,不打进 uber jar)
+  提交: hadoop jar target/hfusion-bigdata-mapreduce-1.0.0.jar \
+          com.hfusionhub.bigdata.DocWordCount \
+          /warehouse/hfusionhub/ods/document_text/dt=2026-08-30 \
+          /warehouse/hfusionhub/ads/doc_wordcount/dt=2026-08-30
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.hfusionhub</groupId>
+    <artifactId>hfusion-bigdata-mapreduce</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <hadoop.version>3.3.6</hadoop.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-client</artifactId>
+            <version>${hadoop.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>

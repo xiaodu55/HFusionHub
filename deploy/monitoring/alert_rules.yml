@@ -325,3 +325,41 @@ groups:
         annotations:
           summary: "Agent queue backlog exceeds 50 tasks"
           description: "Agent queue depth is {{ $value }} — requests may be delayed."
+
+  # ── SLO: Analytics(分析扩展包;指标由 RealtimeThresholdScheduler 采样) ────
+  # 扩展包未启用时 gauge 恒为 0,不会触发;启用后由 Flink 实时指标驱动。
+  - name: hfusionhub_slo_analytics
+    rules:
+      - alert: AnalyticsAvgLatencyHigh
+        expr: |
+          analytics_avg_latency_ms > 30000
+        for: 5m
+        labels:
+          severity: warning
+          slo: analytics
+        annotations:
+          summary: "LLM 平均延迟超过 30s(近 5 分钟窗口)"
+          description: "运营数仓实时采样 {{ $value | humanizeDuration }} — 检查模型网关/上游供应商。"
+
+      - alert: AnalyticsCostSpike
+        expr: |
+          analytics_cost_rate_per_min > 1.0
+        for: 10m
+        labels:
+          severity: warning
+          slo: analytics
+        annotations:
+          summary: "LLM 成本速率超过 $1/分钟持续 10 分钟"
+          description: "成本速率 ${{ $value }}/min — 疑似异常用量或压测流量,核对 ads_tenant_topn。"
+
+      - alert: AnalyticsStalled
+        expr: |
+          analytics_request_rate_per_min < 1
+          and on() (sum(rate(hfusionhub_chat_requests_total[5m])) > 1)
+        for: 15m
+        labels:
+          severity: warning
+          slo: analytics
+        annotations:
+          summary: "业务有流量但数仓实时指标停止更新"
+          description: "Chat 仍有请求但 analytics_request_rate_per_min≈0 — 检查 Flink 作业与 Kafka 链路。"

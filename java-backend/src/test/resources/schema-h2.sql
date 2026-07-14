@@ -1354,3 +1354,91 @@ CREATE TABLE IF NOT EXISTS tenant_plan_binding (
     PRIMARY KEY (id),
     CONSTRAINT uk_binding_tenant_plan UNIQUE (tenant_id, subscription_id)
 );
+
+-- ============================================================
+-- V82: HFusionData Analytics(与 V82__analytics_warehouse.sql 同步)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS analytics_realtime_metrics (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    window_start DATETIME NOT NULL,
+    window_end DATETIME NOT NULL,
+    tenant_id BIGINT NOT NULL,
+    model VARCHAR(100) NOT NULL,
+    request_count BIGINT NOT NULL DEFAULT 0,
+    total_tokens BIGINT NOT NULL DEFAULT 0,
+    total_cost DECIMAL(12,6) NOT NULL DEFAULT 0.000000,
+    avg_latency_ms BIGINT NOT NULL DEFAULT 0,
+    max_latency_ms BIGINT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_rt_window UNIQUE (window_start, tenant_id, model)
+);
+CREATE TABLE IF NOT EXISTS ads_cost_daily (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    stat_date DATE NOT NULL,
+    call_count BIGINT NOT NULL DEFAULT 0,
+    total_tokens BIGINT NOT NULL DEFAULT 0,
+    cost_usd DECIMAL(12,6) NOT NULL DEFAULT 0.000000,
+    est_month_cost DECIMAL(12,2) DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_ads_cost UNIQUE (tenant_id, stat_date)
+);
+CREATE TABLE IF NOT EXISTS ads_model_share (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    model VARCHAR(100) NOT NULL,
+    stat_date DATE NOT NULL,
+    call_count BIGINT NOT NULL DEFAULT 0,
+    cost_usd DECIMAL(12,6) NOT NULL DEFAULT 0.000000,
+    cost_share DOUBLE NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_ads_model UNIQUE (tenant_id, model, stat_date)
+);
+CREATE TABLE IF NOT EXISTS ads_tenant_topn (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    stat_date DATE NOT NULL,
+    rank_no INT NOT NULL,
+    tenant_id BIGINT NOT NULL,
+    call_count BIGINT NOT NULL DEFAULT 0,
+    total_tokens BIGINT NOT NULL DEFAULT 0,
+    cost_usd DECIMAL(12,6) NOT NULL DEFAULT 0.000000,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_ads_topn UNIQUE (stat_date, rank_no)
+);
+CREATE TABLE IF NOT EXISTS ads_tool_success (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    step_type VARCHAR(50) NOT NULL,
+    stat_date DATE NOT NULL,
+    step_count BIGINT NOT NULL DEFAULT 0,
+    error_count BIGINT NOT NULL DEFAULT 0,
+    success_rate DOUBLE NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_ads_tool UNIQUE (tenant_id, step_type, stat_date)
+);
+CREATE TABLE IF NOT EXISTS ads_eval_quality (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    stat_date DATE NOT NULL,
+    eval_count BIGINT NOT NULL DEFAULT 0,
+    avg_hit_ratio DOUBLE DEFAULT NULL,
+    avg_ttft_ms BIGINT DEFAULT NULL,
+    avg_latency_ms BIGINT DEFAULT NULL,
+    failure_rate DOUBLE NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_ads_eval UNIQUE (tenant_id, stat_date)
+);
+CREATE TABLE IF NOT EXISTS bigdata_batch_run_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT DEFAULT NULL,
+    job_name VARCHAR(50) NOT NULL,
+    batch_date DATE NOT NULL,
+    command VARCHAR(1000) DEFAULT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'RUNNING',
+    exit_code INT DEFAULT NULL,
+    started_at DATETIME NOT NULL,
+    finished_at DATETIME DEFAULT NULL,
+    duration_ms BIGINT DEFAULT NULL,
+    log_excerpt VARCHAR(2000) DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

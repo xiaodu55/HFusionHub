@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  HFusionData Analytics — Hive 配置(apache/hive:4.0.0,HIVE_CUSTOM_CONF_DIR)
+  角色定位:元数据 + SQL 查询层。计算存储解耦 —— ODS/DWD/DWS/ADS 均为
+  外部表,指向 Spark/MapReduce 写入的同一批 HDFS Parquet;HQL 查询走内置
+  Tez(local 模式),Spark 不直连 metastore,规避客户端版本耦合。
+-->
+<configuration>
+  <property>
+    <name>hive.metastore.warehouse.dir</name>
+    <value>/warehouse</value>
+  </property>
+  <property>
+    <name>hive.server2.thrift.bind.host</name>
+    <value>0.0.0.0</value>
+  </property>
+  <property>
+    <name>hive.server2.thrift.port</name>
+    <value>10000</value>
+  </property>
+  <!-- 单机演示用内嵌 Tez(local);集群档换 Tez on YARN -->
+  <property>
+    <name>hive.execution.engine</name>
+    <value>tez</value>
+  </property>
+  <property>
+    <name>hive.tez.container.size</name>
+    <value>1024</value>
+  </property>
+  <property>
+    <name>datanucleus.autoCreateSchema</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>hive.metastore.schema.verification</name>
+    <value>false</value>
+  </property>
+  <!-- 大屏直连的用户免鉴权(内网);集群档接 Ranger/LDAP -->
+  <property>
+    <name>hive.server2.enable.doAs</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>hive.server2.authentication</name>
+    <value>NONE</value>
+  </property>
+</configuration>
