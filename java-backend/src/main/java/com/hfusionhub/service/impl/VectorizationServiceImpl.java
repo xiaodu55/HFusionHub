@@ -613,7 +613,7 @@ public class VectorizationServiceImpl implements VectorizationService {
             // is incorrectly displayed as NOT_FOUND or ERROR.
             DocumentIndexJob job = documentIndexJobMapper.selectLatestByDocumentId(documentId);
             Map<String, Object> response = new HashMap<>();
-            String status = job == null ? statusName(document.getStatus()) : job.getStatus();
+            String status = job == null ? VectorizationProgress.statusName(document.getStatus()) : job.getStatus();
             int chunksCount = job == null
                     ? (document.getChunkCount() == null ? 0 : document.getChunkCount())
                     : (job.getChunkCount() == null ? 0 : job.getChunkCount());
@@ -640,7 +640,7 @@ public class VectorizationServiceImpl implements VectorizationService {
                         "\u7d22\u5f15\u4efb\u52a1\u66fe\u5b8c\u6210\uff0c\u4f46\u5206\u5757\u6570\u636e\u7f3a\u5931\uff0c\u8bf7\u91cd\u65b0\u5206\u5757");
                 response.put("chunks_count", 0);
             }
-            enrichWithEstimatedProgress(response, document, job, status);
+            VectorizationProgress.enrichWithEstimatedProgress(response, document, job, status);
             if (!completedButMissingChunks) {
                 mergePythonTaskStatus(response, documentId, job);
             }
@@ -649,27 +649,6 @@ public class VectorizationServiceImpl implements VectorizationService {
             log.error("获取任务状态失败: {}", documentId, e);
             return "{\"status\":\"ERROR\",\"message\":\"任务状态暂不可用\"}";
         }
-    }
-
-    private String statusName(Integer statusCode) {
-        DocumentStatus status = DocumentStatus.fromCode(statusCode);
-        return status == null ? "PENDING" : status.name();
-    }
-
-    private void enrichWithEstimatedProgress(
-            Map<String, Object> response, Document document, DocumentIndexJob job, String status) {
-        int initialEstimatedSeconds = estimateProcessingSeconds(document);
-        int elapsedSeconds = elapsedSeconds(job);
-        int progress = estimateProgress(status, elapsedSeconds, initialEstimatedSeconds);
-        int estimatedSeconds = dynamicEstimatedSeconds(status, elapsedSeconds, progress, initialEstimatedSeconds);
-        int remainingSeconds = isTerminalStatus(status) ? 0 : Math.max(1, estimatedSeconds - elapsedSeconds);
-
-        response.put("stage", stageForStatus(status, progress));
-        response.put("progress", progress);
-        response.put("elapsed_seconds", elapsedSeconds);
-        response.put("estimated_seconds", estimatedSeconds);
-        response.put("initial_estimated_seconds", initialEstimatedSeconds);
-        response.put("remaining_seconds", remainingSeconds);
     }
 
     private void mergePythonTaskStatus(Map<String, Object> response, Long documentId, DocumentIndexJob job) {
@@ -696,15 +675,15 @@ public class VectorizationServiceImpl implements VectorizationService {
             if ("NOT_FOUND".equals(pythonStatus.get("status"))) {
                 return;
             }
-            copyIfPresent(response, pythonStatus, "stage");
-            copyIfPresent(response, pythonStatus, "progress");
-            copyIfPresent(response, pythonStatus, "elapsed_seconds");
-            copyIfPresent(response, pythonStatus, "estimated_seconds");
-            copyIfPresent(response, pythonStatus, "remaining_seconds");
-            copyIfPresent(response, pythonStatus, "processed_chunks");
-            copyIfPresent(response, pythonStatus, "total_chunks");
-            copyIfPresent(response, pythonStatus, "chunk_quality");
-            copyIfPresent(response, pythonStatus, "multimodal");
+            VectorizationProgress.copyIfPresent(response, pythonStatus, "stage");
+            VectorizationProgress.copyIfPresent(response, pythonStatus, "progress");
+            VectorizationProgress.copyIfPresent(response, pythonStatus, "elapsed_seconds");
+            VectorizationProgress.copyIfPresent(response, pythonStatus, "estimated_seconds");
+            VectorizationProgress.copyIfPresent(response, pythonStatus, "remaining_seconds");
+            VectorizationProgress.copyIfPresent(response, pythonStatus, "processed_chunks");
+            VectorizationProgress.copyIfPresent(response, pythonStatus, "total_chunks");
+            VectorizationProgress.copyIfPresent(response, pythonStatus, "chunk_quality");
+            VectorizationProgress.copyIfPresent(response, pythonStatus, "multimodal");
             Object message = pythonStatus.get("message");
             if (message != null && !String.valueOf(message).isBlank()) {
                 response.put("message", message);
@@ -712,89 +691,6 @@ public class VectorizationServiceImpl implements VectorizationService {
         } catch (Exception e) {
             log.debug("Python task status unavailable for document {}: {}", documentId, e.getMessage());
         }
-    }
-
-    private void copyIfPresent(Map<String, Object> target, Map<String, Object> source, String key) {
-        if (source.containsKey(key) && source.get(key) != null) {
-            target.put(key, source.get(key));
-        }
-    }
-
-    private int estimateProcessingSeconds(Document document) {
-        long fileSize = document.getFileSize() == null ? 1024 * 1024 : document.getFileSize();
-        long sizeMb = Math.max(1, (long) Math.ceil(fileSize / (1024.0 * 1024.0)));
-        String fileType =
-                document.getFileType() == null ? "" : document.getFileType().toLowerCase();
-        int base =
-                switch (fileType) {
-                    case "pdf", ".pdf" -> 45;
-                    case "docx", ".docx" -> 35;
-                    case "txt", ".txt", "md", ".md" -> 15;
-                    default -> 30;
-                };
-        long estimate = base + sizeMb * 25;
-        return (int) Math.max(15, Math.min(900, estimate));
-    }
-
-    private int elapsedSeconds(DocumentIndexJob job) {
-        if (job == null || job.getStartedAt() == null) {
-            return 0;
-        }
-        LocalDateTime end = job.getCompletedAt() == null ? LocalDateTime.now() : job.getCompletedAt();
-        return (int) Math.max(0, Duration.between(job.getStartedAt(), end).toSeconds());
-    }
-
-    private int estimateProgress(String status, int elapsedSeconds, int estimatedSeconds) {
-        if ("COMPLETED".equals(status)) {
-            return 100;
-        }
-        if ("FAILED".equals(status) || "ERROR".equals(status)) {
-            return 100;
-        }
-        if (!"PROCESSING".equals(status)) {
-            return 0;
-        }
-        if (estimatedSeconds <= 0) {
-            return 10;
-        }
-        int progress = 5 + (int) Math.floor((elapsedSeconds / (double) estimatedSeconds) * 80);
-        return Math.max(5, Math.min(90, progress));
-    }
-
-    private int dynamicEstimatedSeconds(String status, int elapsedSeconds, int progress, int initialEstimatedSeconds) {
-        if (isTerminalStatus(status) || progress <= 5 || elapsedSeconds < 1) {
-            return initialEstimatedSeconds;
-        }
-
-        double observedTotal = elapsedSeconds * 100.0 / Math.min(progress, 99);
-        double dynamicTotal = Math.max(initialEstimatedSeconds * 0.75, observedTotal);
-        return (int) Math.max(15, Math.min(900, Math.round(dynamicTotal)));
-    }
-
-    private String stageForStatus(String status, int progress) {
-        if ("COMPLETED".equals(status)) {
-            return "completed";
-        }
-        if ("FAILED".equals(status) || "ERROR".equals(status)) {
-            return "failed";
-        }
-        if (!"PROCESSING".equals(status)) {
-            return "queued";
-        }
-        if (progress < 25) {
-            return "parsing";
-        }
-        if (progress < 40) {
-            return "chunking";
-        }
-        if (progress < 90) {
-            return "embedding";
-        }
-        return "storing";
-    }
-
-    private boolean isTerminalStatus(String status) {
-        return "COMPLETED".equals(status) || "FAILED".equals(status) || "ERROR".equals(status);
     }
 
     private void ensureSourceFileAvailable(Document document) {

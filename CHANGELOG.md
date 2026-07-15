@@ -118,6 +118,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 生产部署侧（TODO.md P0）为真机操作：deploy/.env 六个密钥已是强随机，
   HTTPS/CORS 白名单/Swagger 关闭的仓库侧配置与脚本均已就绪
 
+#### Verified & Hardened（2026-08-31 阶段二:产品化加固实测)
+- **安全复核清零**:`rotate-secrets.sh --check` 原报 2 项——MINIO_ROOT_USER 弱默认
+  (minioadmin)已轮换为强用户名(MinIO 重启实测 live 200,Java 侧同步
+  MINIO_ACCESS_KEY/SECRET_KEY);MODEL_CREDENTIAL_ENCRYPTION_KEY 补配(32 字符)
+- **告警规则校验**:promtool check rules **28 条全部合法**(含 analytics 组)
+- **CDC 断点续传实测**:restart TaskManager → CDC/实时作业自动从 checkpoint
+  持久卷恢复 RUNNING,窗口行 PK upsert 防重;运维复杂度固化为
+  `bigdata/scripts/start_realtime_jobs.sh` 一键重建(先 cancel 全部→生成运行时
+  SQL→密码 md5 校验→提交,实测重建双作业 RUNNING)
+- **备份恢复演练**:一致性 dump(1.7s/4.4MB)→ 临时库恢复 **RTO 14.3s** →
+  四表精确 COUNT 对账 100% 一致(model_usage_record 50,028/usage_event
+  100,354/agent_step 19,852/analytics_realtime_metrics 38,383)
+- **grpcio 1.67.1→1.83.1**:锁文件手动换条目(51 平台哈希,aliyun simple API),
+  venv 升级后 Python 全量 **1415 passed**(pymilvus 兼容验证)
+- **VectorizationServiceImpl 拆分(1205→1101 行)**:进度估算/阶段映射纯计算族
+  收口为 `VectorizationProgress`(9 个单测锁定行为:估算钳制/阶段迁移/
+  动态估算边界/copyIfPresent)
+- **负延迟源头修复**:AgentTaskServiceImpl 提取 `clampDuration`(completeRun
+  fallback 与审批恢复路径统一钳制),6 单测覆盖时钟回拨场景;流式路径
+  durationMs=0 的 fallback 不再产出负 latency
+- **Java 重启排障记录**:spring-boot 本地启动需 DB_PASSWORD(非
+  MYSQL_PASSWORD)/SPRING_DATA_REDIS_PASSWORD 等变量,.env 有 BOM 需剥离,
+  .env 扩展名不被 Spring 识别——复制为 target/env.properties 经
+  SPRING_CONFIG_ADDITIONAL_LOCATION 注入
+
 #### Fixed（2026-08-30 收官冒烟）
 
 - **网关流式不可用**：`ModelGateway._stream_provider` 误用 `async def` + `return`

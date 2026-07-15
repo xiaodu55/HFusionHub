@@ -151,6 +151,8 @@ Alertmanager(`deploy/monitoring/alertmanager.yml`)。
 | 10 | upsert-kafka sink 报不支持 changelog | 普通 kafka connector 不收 UPDATE | sink 用 `upsert-kafka` + `PRIMARY KEY (id) NOT ENFORCED` + key/value json(已配) |
 | 11 | Flink TM 加载不到 connector 类 | docker cp 进容器的 jar 在容器重建后丢失 | jar 用 **compose volume 挂载**进 /opt/flink/lib(已配,重建不丢) |
 | 12 | CDC 提交成功但零产出、报 Access denied | **运行时 SQL 的密码占位符未注入**(CHANGE_ME 残留) | 提交前必须校验密码注入(对比 md5);交付脚本保留 {PWD}/CHANGE_ME 占位符,密码只在部署时注入 |
+| 13 | 多个 Flink 作业实例并存、slot 争抢与恢复循环 | 反复提交未先取消旧实例 | 固化为一键脚本 `bigdata/scripts/start_realtime_jobs.sh`(先 cancel 全部非终态→生成运行时 SQL→md5 校验→提交),实测重建后双作业 RUNNING |
+| 14 | kill TaskManager 后作业自动恢复,但验证"数据没丢"要看对表 | 断点续传由 checkpoint 持久卷保证;实时窗口行有 PK(window/tenant/model)upsert 防重 | 实测:restart TM → 作业自动回 RUNNING,`analytics_realtime_metrics` 38,383 行无重复;最新事件验证用"未来时间戳事件推进 watermark"触发窗口关闭 |
 
 实测通过的环境口径:MySQL 8 默认 log_bin=ON/ROW;业务用户名 `hfusionhub`(非 hfusion);实时链路验证结果:MySQL `analytics_realtime_metrics` 12,879 个窗口行(30 天合成数据)。
 
