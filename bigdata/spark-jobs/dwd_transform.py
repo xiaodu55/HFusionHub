@@ -20,6 +20,7 @@
 import argparse
 
 from pyspark.sql import DataFrame, functions as F
+from pyspark.sql.types import ArrayType
 
 from _common import build_spark, read_ods, write_partitioned
 
@@ -127,14 +128,19 @@ def build_dwd(spark, dt: str) -> dict:
         print(f"[skip] ods_eval_record dt={dt} 不存在(评测 JSONL 未入湖),跳过 eval 明细")
         return stats
 
-    def _ids(col):
-        return F.split(F.regexp_replace(F.coalesce(F.col(col), F.lit("")), r"[\[\]\"' ]", ""), ",")
+    def _ids(df, col):
+        """JSONL 各批次字段形态不一(字符串/数组)——按推断类型自适应转 ARRAY<STRING>。"""
+        if col not in df.columns:
+            return F.array()
+        if isinstance(df.schema[col].dataType, ArrayType):
+            return F.coalesce(F.col(col), F.array())
+        return F.split(F.regexp_replace(F.coalesce(F.col(col).cast("string"), F.lit("")), r"[\[\]\"' ]", ""), ",")
 
     eval_df = spark.read.json(f"{_ods_eval_path(dt)}")
     eval_out = (
         eval_df
-        .withColumn("expected_document_ids", _ids("expected_document_ids"))
-        .withColumn("retrieved_document_ids", _ids("retrieved_document_ids"))
+        .withColumn("expected_document_ids", _ids(eval_df, "expected_document_ids"))
+        .withColumn("retrieved_document_ids", _ids(eval_df, "retrieved_document_ids"))
         .withColumn(
             "hit_count",
             F.size(F.array_intersect("expected_document_ids", "retrieved_document_ids")))

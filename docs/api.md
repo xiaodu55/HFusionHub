@@ -170,6 +170,20 @@ curl -X POST http://localhost:8080/api/openapi/bid/check \
 - `GET /` — Prometheus text format metrics (requests, latency, errors)
 - `GET /json` — Human-readable JSON snapshot
 
+### Analytics (`/api/analytics`) — 分析扩展包（HFusionData Analytics）
+
+- `GET /overview?days=7` — 概览：近 N 天累计调用/Token/成本 + 近 5 分钟实时速率
+- `GET /cost-daily?days=7&tenantId=` — 每日成本趋势（Spark ADS 镜像）
+- `GET /model-share?date=&tenantId=` — 模型成本占比（默认 T-1）
+- `GET /tool-success?days=7&tenantId=` — Agent 步骤成功率
+- `GET /eval-quality?days=30&tenantId=` — 检索/评测质量趋势
+- `GET /realtime?minutes=60&tenantId=` — 实时指标（1 分钟窗口，Flink 聚合）
+
+租户隔离在服务端强制：普通用户仅本租户数据；平台管理员（crossTenant 会话）
+可传 `tenantId` 查指定租户或 `-1` 平台全局。扩展包未部署时返回空集而非报错。
+内部回补端点：`POST /api/internal/analytics/batch/run`（X-Internal-Token 保护，
+body `{"date":"YYYY-MM-DD"}`，触发 Sqoop→Spark→质量门禁→ADS 管线）。
+
 ## Internal API (Python AI ↔ Java)
 
 Communication between Java and Python uses:

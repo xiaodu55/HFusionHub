@@ -106,6 +106,21 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     // 生命周期方法
     // ================================================================
 
+    /**
+     * 运行耗时钳制（时钟回拨防护）：调用方未传时长（<=0）且 run 有 startedAt 时
+     * 以墙钟相减兜底；startedAt 晚于当前墙钟（NTP 校正/宿主机休眠恢复）会得到
+     * 负值，一律钳为 0 —— 负耗时入库会经 model_usage_record.latency_ms 传导到
+     * 运营数仓，被质量门禁 R4 拦截。
+     */
+    static long clampDuration(long durationMs, LocalDateTime startedAt) {
+        long actual = durationMs;
+        if (actual <= 0 && startedAt != null) {
+            actual = Math.max(0, java.time.Duration.between(startedAt, LocalDateTime.now()).toMillis());
+        }
+        return Math.max(0, actual);
+    }
+
+
     @Override
     @Transactional
     public AgentTask createTask(String requestId, Long userId, Long conversationId, Long kbId, String query) {
@@ -251,12 +266,9 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             return;
         }
 
-        // 计算实际耗时
-        long actualDuration = durationMs;
-        if (actualDuration <= 0 && run.getStartedAt() != null) {
-            actualDuration = java.time.Duration.between(run.getStartedAt(), LocalDateTime.now())
-                    .toMillis();
-        }
+        // 计算实际耗时（时钟回拨防护见 clampDuration；负耗时入库会经
+        // model_usage_record.latency_ms 传导到运营数仓，被质量门禁 R4 拦截）
+        long actualDuration = clampDuration(durationMs, run.getStartedAt());
 
         // V13: 守护终态写入 — 仅 running/waiting_approval → 终态
         int affected =
@@ -972,11 +984,7 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             freshRun = run;
         }
 
-        long actualDuration = 0L;
-        if (freshRun.getStartedAt() != null) {
-            actualDuration = java.time.Duration.between(freshRun.getStartedAt(), LocalDateTime.now())
-                    .toMillis();
-        }
+        long actualDuration = clampDuration(0L, freshRun.getStartedAt());
         freshRun.setStatus(mappedStatus);
         if (tokenUsage != null) freshRun.setTokenUsage(tokenUsage);
         freshRun.setToolCallsCount(aiResponse.getToolCallsCount());

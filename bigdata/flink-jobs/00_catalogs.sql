@@ -117,7 +117,7 @@ CREATE TABLE realtime_model_usage_record (
     'topic' = 'ods_model_usage_record',
     'properties.bootstrap.servers' = 'analytics-kafka:9092',
     'properties.group.id' = 'flink_analytics_rt',
-    'scan.startup.mode' = 'latest-offset',
+    'scan.startup.mode' = 'earliest-offset',
     'format' = 'json',
     'json.ignore-parse-errors' = 'true'
 );
