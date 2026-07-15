@@ -11,6 +11,7 @@
 - ✅ **CORS 配置化** — 内网穿透（cpolar 动态域名）下浏览器登录 403 已修复
 - ✅ **公网访问** — 改用生产预览（vite preview + preview.proxy），打包产物 <4s 渲染
 - ✅ **隧道 URL 查询** — `scripts/get-tunnel-url.ps1`
+- ✅ **分析扩展包已部署实跑（2026-08-31）** — `docker-compose.analytics.yml` 13 容器全部就绪；离线链路（全量导入 178,945 行→DWD/DWS→质量门禁 14 条全绿→ADS 回写 MySQL）与实时链路（Flink CDC→Kafka→1min 窗口→analytics_realtime_metrics 12,879 行）均实测打通；12 条踩坑记录见 docs/BIGDATA_ARCHITECTURE.md §5.2.1
 
 ## 🔧 需手动完成
 
@@ -38,6 +39,7 @@
 
 ### P2 — 生产准备
 
+7a. **分析扩展包剩余人工项**（可选，毕设演示用）— Superset 首启初始化管理员 + 搭建 5 张看板（bigdata/superset/README.md）；标准档加开 ClickHouse（--profile analytics-full）；Grafana 验证 analytics 告警组触发
 8. **逐项核对生产检查清单** — [docs/PRODUCTION_OPS.md](docs/PRODUCTION_OPS.md) 第 0 节（安全/持久化/性能/监控/合规）
 9. **启用监控告警** — `deploy/monitoring/`（Prometheus + Grafana + 告警规则）
 10. **配置 Plugin Runner TLS** — 按 [docs/PLUGIN_RUNNER_TLS.md](docs/PLUGIN_RUNNER_TLS.md) 生成证书并挂载（dev compose dind sidecar 下 healthy（引擎不可用时 503 属 fail-closed 设计））

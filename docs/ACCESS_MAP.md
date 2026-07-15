@@ -18,7 +18,7 @@
 | 服务 | 地址 | 说明 |
 | :--- | :--- | :--- |
 | 前端主界面 | http://localhost:3000 | 登录后使用全部功能 |
-| Java API 文档（Knife4j） | http://localhost:8080/api/doc.html | ⭐ 277 个接口可视化/调试 |
+| Java API 文档（Knife4j） | http://localhost:8080/api/doc.html | ⭐ 284 个接口可视化/调试 |
 | Java Swagger UI 备用 | http://localhost:8080/api/swagger-ui/index.html | 同上（Knife4j 底层） |
 | Java OpenAPI JSON | http://localhost:8080/api/v3/api-docs | 机器可读（接口清单数据源） |
 | Python API 文档（FastAPI Swagger） | http://localhost:9000/docs | ⭐ 74 个路由交互式调试 |
@@ -55,7 +55,7 @@
 
 **内部互信令牌**（Java ↔ Python 调用，不用于登录；值在 `docker/.env`）：`PYTHON_AI_INTERNAL_TOKEN`、`CALLBACK_SECRET`、`PLUGIN_RUNNER_TOKEN`
 
-## 4. Java 后端接口（277 个）
+## 4. Java 后端接口（284 个）
 
 - **完整接口列表与请求/响应结构**：浏览器打开 http://localhost:8080/api/doc.html（Knife4j，含 Try it out）。
 - **分组概览**（均以 `/api` 为前缀）：
@@ -87,8 +87,9 @@
 | 模型配置/成本/系统 | UserModelConfigController + CostController + SystemController | 10 | `/model-config` `/cost/*` `/system/*` |
 | 管理/其他 | AuditController + VectorReconciliationController + EvaluationGateController + DemoController + HealthController | 12 | `/admin/*` `/evaluation/*` `/demo/*` `/health` |
 | 投标项目 | BidProjectController + BidWriteController + BidCheckController | 14 | `/bid/project/*` `/bid/write*` `/bid/check*` |
+| 运营分析（扩展包） | AnalyticsController | 6 | `/analytics/*`（概览/成本趋势/模型占比/步骤成功率/评测质量/实时指标） |
 
-- **内部接口**（Java→Java 或内网，不对浏览器开放）：`AgentApprovalInternalController`、`AgentTaskEventController`、`FeatureFlagInternalController`、`InternalNoteController`、`InternalPluginController`、`InternalPluginQuotaController`。
+- **内部接口**（Java→Java 或内网，不对浏览器开放）：`AgentApprovalInternalController`、`AgentTaskEventController`、`FeatureFlagInternalController`、`InternalNoteController`、`InternalPluginController`、`InternalPluginQuotaController`、`InternalAnalyticsController`（大数据批处理手工回补触发，X-Internal-Token 保护）。
 - 认证：登录 `POST /api/user/login` 拿 `data`（Sa-Token），后续请求带 header `satoken: <token>`。无 token 访问受保护接口返回 401。
 
 ## 5. Python AI 路由（74 个）
@@ -102,7 +103,7 @@
   - 长期记忆内部（Batch 1）：`POST /api/internal/memory/consolidate`
 - 全部路由经 Java 代理访问（Java 带 `X-Internal-Token`）；直连需带 `X-Internal-Token: <PYTHON_AI_INTERNAL_TOKEN>` 头，否则 401/403。
 
-## 6. 前端页面（43 个路由）
+## 6. 前端页面（44 个路由）
 
 | 分组 | 路径 |
 | :--- | :--- |
@@ -114,6 +115,7 @@
 | Agent | `/agent` `/approvals` |
 | 构建器 | `/builder/prompts` `/builder/prompts/recycle-bin` `/builder/models` `/builder/tools` `/builder/plugins` `/builder/test-bench` `/builder/test-sets` `/builder/apps` `/builder/mcp` |
 | 成本/记忆/笔记/RAG | `/cost` `/memory` `/notes` `/rag` |
+| 运营分析 | `/analytics`（大屏页：概览/成本趋势/模型占比/步骤成功率/评测质量/实时指标，分析扩展包） |
 | 投标项目 | `/bid/projects` `/bid/projects/:id/interpret` `/bid/projects/:id/requirements` `/bid/projects/:id/draft` |
 | 套餐中心 | `/bid/billing` |
 | 个人/设置 | `/profile` `/settings` |
@@ -140,4 +142,4 @@
 
 ---
 
-**最后更新**：2026-08-30（增补优化路线 Batch 0-10：长期记忆/语音/发布渠道等端点计数；日期与行 4 增补记录对齐）
+**最后更新**：2026-08-31（增补 HFusionData Analytics 运营分析模块：/analytics 6 端点 + 内部回补端点 + 前端大屏路由；Flyway V82）

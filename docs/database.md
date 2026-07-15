@@ -63,6 +63,7 @@
 | V79 | `V79__eval_harness_runs.sql` | eval_harness_runs 运行记录表（评估中枢收尾批） |
 | V80 | `V80__long_term_memory_flag.sql` | 注册 `memory.long_term.enabled` 特性开关（默认 FALSE，长期记忆接线批） |
 | V81 | `V81__native_tool_calls_flag.sql` | 注册 `agent.native_tool_calls.enabled` 特性开关（默认 FALSE，原生 function calling 批） |
+| V82 | `V82__analytics_warehouse.sql` | HFusionData Analytics 运营数仓应用层：`analytics_realtime_metrics`（Flink 实时窗口）、5 张 `ads_*` ADS 镜像（Spark 回写）、`bigdata_batch_run_log`（批处理日志），全部含 tenant_id（大数据扩展包批） |
 
 ## 迁移规则
 

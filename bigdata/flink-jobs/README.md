@@ -4,8 +4,24 @@ CDC 增量采集与实时聚合的 Flink SQL 作业集。提交前需按下面�
 
 ## 1. Connector 安装(一次性)
 
-在 `flink-jobmanager` / `flink-taskmanager` 两个容器内把以下 jar 放入
-`/opt/flink/lib/` 后 `docker restart` Flink 容器(版本与 Flink 1.18 匹配):
+**主方式(实测)**:docker-compose.analytics.yml 已把这 4 个 jar 以 volume
+挂载进两个 Flink 容器的 `/opt/flink/lib/`(见 x 服务 volumes 段)——
+容器重建不丢,拉齐 jar 后无需手动操作:
+
+```yaml
+    volumes:
+      - ../bigdata/jars/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/...:ro
+      - ../bigdata/jars/flink-connector-jdbc-3.1.2-1.18.jar:/opt/flink/lib/...:ro
+      - ../bigdata/jars/flink-sql-connector-mysql-cdc-3.0.1.jar:/opt/flink/lib/...:ro
+      - ../bigdata/jars/mysql-connector-j-8.0.33.jar:/opt/flink/lib/...:ro
+```
+
+> ⚠️ 备用方式(docker cp)在容器重建后会丢失——**不要**只用 docker cp。
+> 注意:flink-sql-connector-mysql-cdc 的 Maven group 是 `com.ververica`
+> (不是 org.apache.flink),从 aliyun 镜像拉取:`com/ververica/...`。
+> 该 jar 不含 Catalog 工厂——请用逐表 mysql-cdc source 方案(见 cdc_ingest.sql,
+> 并配 `scan.incremental.snapshot.chunk.key-column` + `debezium.database.
+> allowPublicKeyRetrieval=true`),版本与 Flink 1.18 匹配:
 
 | jar | 用途 | 获取方式 |
 |---|---|---|
