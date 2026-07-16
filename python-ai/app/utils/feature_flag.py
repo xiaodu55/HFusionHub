@@ -24,19 +24,30 @@ from app.utils.config import config
 SCOPE_PRIORITY = {"environment": 5, "kb": 4, "user": 3, "tenant": 2, "global": 1}
 
 # ── Flag classification for degraded-mode behavior ──────────────────────────
-# SECURITY flags: must be OFF when backend is unreachable (fail-closed).
-# AVAILABILITY flags: preserve env-var config when backend is unreachable.
-SECURITY_FLAGS = frozenset({
+# When the backend is unreachable and no cache exists, every security flag
+# degrades to its SAFE direction:
+#   DENY_CAPABILITY_FLAGS → False (the capability is refused).
+#   MUST_ENFORCE_FLAGS    → True  (the control stays enforced).
+# Silently waiving a guardrail or a write approval when the backend is
+# unreachable is worse than blocking requests; the env-var kill switches
+# (e.g. GUARDRAILS_ENABLED=false) remain the explicit way to hard-disable a
+# control.
+DENY_CAPABILITY_FLAGS = frozenset({
     "agent.write_tools.enabled",
     "agent.web_search.enabled",
+})
+
+MUST_ENFORCE_FLAGS = frozenset({
     "approval.required_for_write",
-    # Content safety guardrails — must be OFF (disabled) when the backend is
-    # unreachable: a guardrail that silently disappears is worse than none.
     "guardrails.enabled",
     "guardrails.prompt_injection.enabled",
     "guardrails.content_moderation.enabled",
     "guardrails.pii_masking.enabled",
 })
+
+# Union of both security sets (kept for callers/tests that reason about
+# "flags with a safety-critical direction").
+SECURITY_FLAGS = DENY_CAPABILITY_FLAGS | MUST_ENFORCE_FLAGS
 
 AVAILABILITY_FLAGS = frozenset({
     "rag.hybrid.enabled",
@@ -61,6 +72,7 @@ def _env_fallback_value(flag_key: str):
         "rag.hybrid.enabled": lambda: _config.RAG_HYBRID_ENABLED,
         "rag.reranker.enabled": lambda: _config.RAG_RERANKER_MODE != "disabled",
         "agent.multi_agent.enabled": lambda: _config.RAG_MULTI_AGENT_ENABLED,
+        "agent.enabled": lambda: _config.AGENT_ENABLED,
         "memory.long_term.enabled": lambda: _config.MEMORY_LONG_TERM_ENABLED,
         "agent.native_tool_calls.enabled": lambda: _config.AGENT_NATIVE_TOOL_CALLS_ENABLED,
     }
@@ -68,7 +80,7 @@ def _env_fallback_value(flag_key: str):
     return factory() if factory else None
 
 # Degradation modes (controlled by FEATURE_FLAG_DEGRADATION env var):
-#   "fail_closed" — security flags → False, availability → True (production default)
+#   "fail_closed" — each flag degrades to its safe direction (production default)
 #   "transparent" — all flags → True, preserve env-var config (tests / dev)
 #   "fail_open"   — all flags → True (not recommended for production)
 DEGRADATION_MODE = os.getenv("FEATURE_FLAG_DEGRADATION", "fail_closed").lower()
@@ -81,8 +93,9 @@ class FeatureFlagClient:
     - Cache fresh → use cached value (normal path).
     - Cache expired but stale data exists → use stale data, schedule background refresh.
     - No cache at all (first boot, backend unreachable):
-      * SECURITY flags → False (fail-closed).
-      * AVAILABILITY flags → True (preserve env-var config).
+      * DENY_CAPABILITY flags → False (capability refused).
+      * MUST_ENFORCE flags → True (guardrail/approval stays enforced).
+      * AVAILABILITY flags → env-config value.
       * Unknown flags → False (fail-closed).
     """
 
@@ -108,7 +121,8 @@ class FeatureFlagClient:
         """Return whether flag_key is enabled for the given context.
 
         Degradation (when Java backend unreachable and no cache):
-        - "fail_closed" mode: security flags → False, availability → True
+        - "fail_closed" mode: every flag degrades to its safe direction
+          (deny-capability → False, must-enforce → True)
         - "transparent" mode: all flags → True (preserve env-var config)
         - "fail_open" mode: all flags → True
         """
@@ -120,10 +134,15 @@ class FeatureFlagClient:
                 return True  # preserve env-var config
             if DEGRADATION_MODE == "fail_open":
                 return True
-            # fail_closed (default): security flags → False, availability → True
-            if flag_key in SECURITY_FLAGS:
-                logger.warning(f"Feature flag '{flag_key}' degraded to FAIL-CLOSED (no cache)")
+            # fail_closed (default): degrade to the flag's safe direction
+            if flag_key in DENY_CAPABILITY_FLAGS:
+                logger.warning(f"Feature flag '{flag_key}' degraded to FAIL-CLOSED (denied, no cache)")
                 return False
+            if flag_key in MUST_ENFORCE_FLAGS:
+                logger.warning(
+                    f"Feature flag '{flag_key}' degraded to ENFORCED (no cache: guardrail/approval stays active)"
+                )
+                return True
             if flag_key in AVAILABILITY_FLAGS:
                 fallback = _env_fallback_value(flag_key)
                 if fallback is not None:

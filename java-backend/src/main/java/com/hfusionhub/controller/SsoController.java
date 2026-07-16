@@ -22,7 +22,8 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>仅服务外部 IdP 的授权码流程：{@code /user/sso/authorize} 302 跳转 IdP，
  * {@code /user/sso/callback} 消费授权码并回跳前端携带 satoken。路由位于
- * {@code /user/**} 下，Sa-Token 已放行（未登录可访问）。
+ * {@code /user/sso/**}，已在 {@link com.hfusionhub.config.SaTokenConfig}
+ * 的登录校验白名单中放行（IdP 回跳时用户天然未登录）。
  *
  * @author HFusionHub Team
  */

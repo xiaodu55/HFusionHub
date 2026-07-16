@@ -14,7 +14,14 @@ import pytest
 # Ensure transparent degradation for all tests (no Java backend)
 os.environ.setdefault("FEATURE_FLAG_DEGRADATION", "transparent")
 
-from app.utils.feature_flag import FeatureFlagClient, SECURITY_FLAGS, AVAILABILITY_FLAGS, DEGRADATION_MODE
+from app.utils.feature_flag import (
+    FeatureFlagClient,
+    SECURITY_FLAGS,
+    DENY_CAPABILITY_FLAGS,
+    MUST_ENFORCE_FLAGS,
+    AVAILABILITY_FLAGS,
+    DEGRADATION_MODE,
+)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -191,10 +198,16 @@ class TestCacheAndDegradation:
 
     @patch("app.utils.feature_flag.DEGRADATION_MODE", "fail_closed")
     def test_fail_closed_security_flag(self):
+        """无缓存降级：每个安全旗标落到自己的安全方向（拒绝能力 / 保持强制）。"""
         client = FeatureFlagClient(cache_ttl=999)
-        # No cache → fail-closed for security flags
-        for flag in SECURITY_FLAGS:
+        # No cache → deny-capability flags are refused
+        for flag in DENY_CAPABILITY_FLAGS:
             assert client.is_enabled(flag) is False
+        # No cache → must-enforce flags stay enforced
+        for flag in MUST_ENFORCE_FLAGS:
+            assert client.is_enabled(flag) is True
+        # Union covers both sets
+        assert SECURITY_FLAGS == DENY_CAPABILITY_FLAGS | MUST_ENFORCE_FLAGS
 
     @patch("app.utils.feature_flag.DEGRADATION_MODE", "fail_closed")
     def test_fail_closed_availability_flag(self):
@@ -205,6 +218,7 @@ class TestCacheAndDegradation:
             "rag.hybrid.enabled": _config.RAG_HYBRID_ENABLED,
             "rag.reranker.enabled": _config.RAG_RERANKER_MODE != "disabled",
             "agent.multi_agent.enabled": _config.RAG_MULTI_AGENT_ENABLED,
+            "agent.enabled": _config.AGENT_ENABLED,
             "memory.long_term.enabled": _config.MEMORY_LONG_TERM_ENABLED,
             "agent.native_tool_calls.enabled": _config.AGENT_NATIVE_TOOL_CALLS_ENABLED,
         }

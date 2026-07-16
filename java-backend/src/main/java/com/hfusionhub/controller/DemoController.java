@@ -20,8 +20,8 @@ import org.springframework.web.bind.annotation.RestController;
  * 演示数据控制器 — 一键导入各菜单示例数据，帮助新用户快速上手
  *
  * <p>所有端点受 {@code DEMO_ENDPOINTS_ENABLED} 门控（application.yml {@code app.demo.endpoints-enabled}，
- * 默认 true 便于开发/演示；生产部署通过 deploy/.env 默认关闭）。/clear 系列具有数据破坏性，
- * 生产环境保持关闭可避免误触发。
+ * 代码内默认 false —— 安全默认必须落在代码里；docker 开发布局由
+ * docker-compose.yml 显式开启）。/clear 系列具有数据破坏性，生产环境保持关闭。
  *
  * @author HFusionHub Team
  */
@@ -35,8 +35,8 @@ public class DemoController {
     private final BidDemoImportService bidDemoImportService;
     private final EvalCorpusImportService evalCorpusImportService;
 
-    /** 演示数据端点总开关（生产默认关闭，见 deploy/.env.example） */
-    @Value("${app.demo.endpoints-enabled:true}")
+    /** 演示数据端点总开关 — 代码内默认关闭（破坏性 /demo/clear），开发布局显式开启 */
+    @Value("${app.demo.endpoints-enabled:false}")
     private boolean demoEndpointsEnabled;
 
     private <T> R<T> checkEnabled() {

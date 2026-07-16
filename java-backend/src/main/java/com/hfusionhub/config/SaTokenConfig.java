@@ -25,6 +25,34 @@ public class SaTokenConfig implements WebMvcConfigurer {
     private final TenantContextInterceptor tenantContextInterceptor;
 
     /**
+     * 登录校验白名单 — 未登录即可访问（相对 /api 的路径）。
+     *
+     * <p>注意 {@code /user/sso/**}：OIDC 授权码流程入口（providers / authorize /
+     * callback）。IdP 回跳时用户<b>天然未登录</b>，若不放行，{@code checkLogin()}
+     * 会直接 401，登录流程死锁。该清单由 {@code SaTokenConfigWhitelistTest}
+     * 守护，新增未登录端点时必须同步维护。
+     */
+    public static final String[] AUTH_WHITELIST = {
+            "/user/login",
+            "/user/register",
+            "/user/sso/**",
+            "/health",
+            "/vectorize/*/callback",
+            "/internal/feature-flags/snapshot",
+            "/internal/eval-harness/**",
+            "/internal/agent/**",
+            "/internal/plugin/**",
+            "/internal/notes/**",
+            "/internal/memory/**",
+            "/openapi/**",
+            "/doc.html",
+            "/swagger-ui.html",
+            "/swagger-ui/**",
+            "/v3/api-docs/**",
+            "/webjars/**"
+    };
+
+    /**
      * 注册拦截器链：限流（1）→ 认证（2）→ 租户上下文（3）
      *
      * @param registry 拦截器注册表
@@ -41,23 +69,7 @@ public class SaTokenConfig implements WebMvcConfigurer {
         // matching.  These patterns must therefore be relative to /api.
         registry.addInterceptor(new SaInterceptor(handle -> {
                     SaRouter.match("/**")
-                            .notMatch(
-                                    "/user/login",
-                                    "/user/register",
-                                    "/health",
-                                    "/vectorize/*/callback",
-                                    "/internal/feature-flags/snapshot",
-                                    "/internal/eval-harness/**",
-                                    "/internal/agent/**",
-                                    "/internal/plugin/**",
-                                    "/internal/notes/**",
-                                    "/internal/memory/**",
-                                    "/openapi/**",
-                                    "/doc.html",
-                                    "/swagger-ui.html",
-                                    "/swagger-ui/**",
-                                    "/v3/api-docs/**",
-                                    "/webjars/**")
+                            .notMatch(AUTH_WHITELIST)
                             .check(r -> StpUtil.checkLogin());
 
                     // Newly registered accounts may log in and inspect their account state,

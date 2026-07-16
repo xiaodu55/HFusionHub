@@ -114,8 +114,9 @@ test_response.json
 # --- Runner TLS 私钥（绝不提交；由 scripts/generate-runner-tls.sh 生成） ---
 deploy/runner-tls/
 
-# --- Data backups (scripts/backup-data.ps1 output) ---
+# --- Data backups (scripts/backup-data.ps1 / scripts/backup-mysql.sh output) ---
 backup/
+backups/
 
 # --- 平台内建插件签名私钥（绝不提交；scripts/plugin-provision.sh 首次运行时生成） ---
 deploy/plugin-signing/

@@ -211,6 +211,9 @@ class Config:
     # env 仅作后端不可达时的降级回退。开启后 provider 不支持时自动降级文本 ReAct。
     AGENT_NATIVE_TOOL_CALLS_ENABLED = os.getenv("AGENT_NATIVE_TOOL_CALLS_ENABLED", "false").lower() == "true"
 
+    # agent.enabled 旗标的降级回退（默认 true 保持既有放行行为）。
+    AGENT_ENABLED = os.getenv("AGENT_ENABLED", "true").lower() == "true"
+
     # ── Embedding 多通道（Batch 5）────────────────────────────────────
     # provider: "ollama"（默认，本地）| "openai_compatible"（通义/OpenAI 等
     # /v1/embeddings 端点）。切换供应商会改变向量维度语义，Milvus collection

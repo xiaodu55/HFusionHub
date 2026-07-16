@@ -22,9 +22,10 @@ combined with an env-var kill-switch in :class:`app.utils.config.Config`:
   * ``guardrails.pii_masking.enabled``        ↔ ``GUARDRAILS_PII_MASKING_ENABLED``
   * ``guardrails.enabled``                    ↔ ``GUARDRAILS_ENABLED`` (master switch)
 
-The flags are registered in :data:`app.utils.feature_flag.SECURITY_FLAGS`, so
-they **fail closed** when the Java backend is unreachable (degraded mode →
-disabled).  They activate once registered in Java (or under
+The flags are registered in :data:`app.utils.feature_flag.MUST_ENFORCE_FLAGS`, so
+they **stay enforced** when the Java backend is unreachable (degraded mode →
+controls remain on; the env-var kill-switches above are the explicit way to
+hard-disable a component).  They activate once registered in Java (or under
 ``FEATURE_FLAG_DEGRADATION=transparent`` used by tests).
 
 All detection logic is pure over strings (regex / keyword matching) and is

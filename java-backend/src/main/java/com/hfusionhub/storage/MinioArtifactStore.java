@@ -29,6 +29,9 @@ public class MinioArtifactStore {
 
     private final MinioClient minioClient;
 
+    /** 凭据未配置时的原因说明；非 null 表示工件存储已禁用（fail-closed）。 */
+    private final String unconfiguredReason;
+
     @Value("${minio.bucket-name:hfusionhub}")
     private String bucketName;
 
@@ -37,16 +40,39 @@ public class MinioArtifactStore {
 
     public MinioArtifactStore(
             @Value("${minio.endpoint:http://localhost:9002}") String endpoint,
-            @Value("${minio.access-key:minioadmin}") String accessKey,
-            @Value("${minio.secret-key:minioadmin}") String secretKey) {
+            @Value("${minio.access-key:}") String accessKey,
+            @Value("${minio.secret-key:}") String secretKey) {
+        if (accessKey == null || accessKey.isBlank() || secretKey == null || secretKey.isBlank()) {
+            // 凭据缺失：禁用工件存储但不阻断启动——deploy 生产布局不含 MinIO
+            // 服务；docker 布局由 docker/.env 提供 MINIO_ACCESS_KEY /
+            // MINIO_SECRET_KEY。使用时 fail-closed（见 requireClient），
+            // 不再回退 minioadmin 弱默认。
+            this.minioClient = null;
+            this.unconfiguredReason = "MINIO_ACCESS_KEY / MINIO_SECRET_KEY 未配置";
+            log.warn("MinIO 凭据未配置，插件工件存储已禁用"
+                    + "（设置 MINIO_ACCESS_KEY / MINIO_SECRET_KEY 后重启以启用）");
+            return;
+        }
         this.minioClient = MinioClient.builder()
                 .endpoint(endpoint)
                 .credentials(accessKey, secretKey)
                 .build();
+        this.unconfiguredReason = null;
+    }
+
+    /** 未配置凭据时对使用方 fail-closed，并给出明确的修复指引。 */
+    private MinioClient requireClient() {
+        if (minioClient == null) {
+            throw new IllegalStateException("MinIO 工件存储未启用：" + unconfiguredReason);
+        }
+        return minioClient;
     }
 
     @PostConstruct
     public void init() {
+        if (minioClient == null) {
+            return;
+        }
         ensureBucket(bucketName);
     }
 
@@ -60,7 +86,7 @@ public class MinioArtifactStore {
             return;
         }
         try {
-            boolean exists = minioClient.bucketExists(
+            boolean exists = requireClient().bucketExists(
                     BucketExistsArgs.builder().bucket(bucket).build());
             if (!exists) {
                 minioClient.makeBucket(
@@ -91,7 +117,7 @@ public class MinioArtifactStore {
         String bucket = resolveBucket(tenantId);
         ensureBucket(bucket);
         try {
-            minioClient.putObject(PutObjectArgs.builder().bucket(bucket).object(objectKey).stream(data, size, -1)
+            requireClient().putObject(PutObjectArgs.builder().bucket(bucket).object(objectKey).stream(data, size, -1)
                     .contentType("application/zip")
                     .build());
             log.info("Uploaded plugin wheel to {}: {} ({} bytes)", bucket, objectKey, size);
@@ -115,7 +141,7 @@ public class MinioArtifactStore {
      */
     public InputStream downloadWheel(Long tenantId, String objectKey) {
         try {
-            return minioClient.getObject(GetObjectArgs.builder()
+            return requireClient().getObject(GetObjectArgs.builder()
                     .bucket(resolveObjectBucket(tenantId, objectKey))
                     .object(objectKey)
                     .build());
@@ -135,7 +161,7 @@ public class MinioArtifactStore {
      */
     public String getPresignedUrl(Long tenantId, String objectKey, Duration expiry) {
         try {
-            return minioClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
+            return requireClient().getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
                     .method(Method.GET)
                     .bucket(resolveObjectBucket(tenantId, objectKey))
                     .object(objectKey)
@@ -157,7 +183,7 @@ public class MinioArtifactStore {
      */
     public boolean exists(Long tenantId, String objectKey) {
         try {
-            minioClient.statObject(StatObjectArgs.builder()
+            requireClient().statObject(StatObjectArgs.builder()
                     .bucket(resolveObjectBucket(tenantId, objectKey))
                     .object(objectKey)
                     .build());
@@ -178,7 +204,7 @@ public class MinioArtifactStore {
      */
     public void deleteWheel(Long tenantId, String objectKey) {
         try {
-            minioClient.removeObject(RemoveObjectArgs.builder()
+            requireClient().removeObject(RemoveObjectArgs.builder()
                     .bucket(resolveObjectBucket(tenantId, objectKey))
                     .object(objectKey)
                     .build());
@@ -231,7 +257,7 @@ public class MinioArtifactStore {
 
     private boolean objectInBucket(String bucket, String objectKey) {
         try {
-            minioClient.statObject(StatObjectArgs.builder().bucket(bucket).object(objectKey).build());
+            requireClient().statObject(StatObjectArgs.builder().bucket(bucket).object(objectKey).build());
             return true;
         } catch (Exception e) {
             return false;
