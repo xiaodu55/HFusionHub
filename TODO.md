@@ -23,6 +23,7 @@
 3. **收紧 CORS** — ✅ 仓库侧就绪（2026-08-30）：后端默认 fail-closed（未配置白名单时仅同源，`allow-any-origin` 默认 false），`deploy/.env.example` 已含 `CORS_ALLOWED_ORIGINS` 键与说明；生产 `deploy/.env` 填入真实域名白名单（逗号分隔）即生效，**不要用 `*`**（后端 allowCredentials=true 会拒绝通配且属安全隐患）
 4. **关闭/限制 Swagger UI** — ✅ `deploy/docker-compose.prod.yml` 已默认 `SPRINGDOC_API_DOCS_ENABLED=false` / `SPRINGDOC_SWAGGER_UI_ENABLED=false`；如需临时开启在 `deploy/.env` 显式设置
 5. **启用数据库备份** — ✅ 新增 `scripts/backup-mysql.sh`（生产容器版：一致性 dump + gzip + 校验 + 按天清理），crontab 示例见脚本头注释；Milvus 快照用 `scripts/backup_milvus.sh`；恢复后务必做一次恢复演练（PRODUCTION_OPS.md 第 8 节）
+6. **【已完成 2026-09-01】git 历史中的数据库备份泄漏清除** — `backups/mysql/hfusionhub_drill.sql.gz`（含 sys_user bcrypt 哈希与租户数据）曾随「备份恢复演练」提交（eaf7bf9）进入 git 历史，根因是 `.gitignore` 写的是 `backup/` 而目录为 `backups/`。已用 `git filter-repo` 重写全部 270 个提交、修复 gitignore、删除 5 条引用旧历史的 dependabot 分支并 force push main；重写前全量 bundle 备份在仓库外 `../HFusionHub1-pre-rewrite.bundle`。**后续注意事项**：① 远端不可达对象 GitHub 侧可能缓存一段时间，可联系 GitHub Support 请求立即 GC；② 轮换前检出过该仓库的克隆需重新克隆（旧对象仍在其中）；③ 备份内的用户密码哈希已暴露，建议触发一次全员密码重置（管理员密码已随 .env 轮换更新）
 
 ### P1 — 功能验证
 
