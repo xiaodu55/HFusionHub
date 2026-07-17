@@ -7,10 +7,9 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
 
 # 评分方式：最低价法 特征（按优先级）
-_LOWEST_PRICE_PATTERNS: List[str] = [
+_LOWEST_PRICE_PATTERNS: list[str] = [
     r"经评审的最低投标价(?:法)?",
     r"最低评标价法",
     r"最低投标报价法",
@@ -20,7 +19,7 @@ _LOWEST_PRICE_PATTERNS: List[str] = [
 ]
 
 # 评分方式：综合评分法 特征
-_COMPREHENSIVE_PATTERNS: List[str] = [
+_COMPREHENSIVE_PATTERNS: list[str] = [
     r"综合评分法",
     r"综合评估法",
     r"综合打分(?:法)?",
@@ -64,7 +63,7 @@ ELEMENT_KEYS: tuple = (
 )
 
 
-def detect_method_type(text: Optional[str]) -> str:
+def detect_method_type(text: str | None) -> str:
     """从文本中识别评分方式：lowest_price | comprehensive。
 
     最低价法特征优先匹配（如"经评审的最低投标价法"含"最低价"），
@@ -81,12 +80,12 @@ def detect_method_type(text: Optional[str]) -> str:
     return "comprehensive"
 
 
-def extract_disqualification_clauses(text: Optional[str]) -> List[str]:
+def extract_disqualification_clauses(text: str | None) -> list[str]:
     """抽取含废标/否决关键词的条款句子（近似按句切分）。"""
     if not text:
         return []
     sentences = re.split(r"[。；;\n]+", text)
-    clauses: List[str] = []
+    clauses: list[str] = []
     for sentence in sentences:
         s = sentence.strip()
         if not s:
@@ -96,7 +95,7 @@ def extract_disqualification_clauses(text: Optional[str]) -> List[str]:
     return clauses
 
 
-def parse_scoring_method(text: Optional[str]) -> Dict[str, object]:
+def parse_scoring_method(text: str | None) -> dict[str, object]:
     """规则版评分办法解析：返回 {method_type, matches} 供交叉校验。
 
     LLM 结构化抽取失败时可作为降级依据；score 为命中特征数。
@@ -115,13 +114,13 @@ def parse_scoring_method(text: Optional[str]) -> Dict[str, object]:
 # ── P1-1：多文件合并 + 评分表解析 ────────────────────────────────────
 
 
-def merge_documents(documents: List[Dict[str, str]]) -> str:
+def merge_documents(documents: list[dict[str, str]]) -> str:
     """多文件合并（主招标文件 + 澄清/补遗等），为每份来源加标签。
 
     合并后的文本供 RAG 检索与规则解析共用，来源标签保留可追溯性。
     入参形如 [{"title": "招标公告", "content": "..."}, ...]。
     """
-    parts: List[str] = []
+    parts: list[str] = []
     for doc in documents:
         title = (doc.get("title") or "未命名文件").strip()
         content = (doc.get("content") or "").strip()
@@ -130,7 +129,7 @@ def merge_documents(documents: List[Dict[str, str]]) -> str:
     return "\n\n".join(parts)
 
 
-def extract_scoring_points(text: Optional[str]) -> List[Dict[str, object]]:
+def extract_scoring_points(text: str | None) -> list[dict[str, object]]:
     """从评分表格文本中确定性抽取评分点（无 LLM）。
 
     支持行式表格两种常见写法：
@@ -140,7 +139,7 @@ def extract_scoring_points(text: Optional[str]) -> List[Dict[str, object]]:
     """
     if not text:
         return []
-    points: List[Dict[str, object]] = []
+    points: list[dict[str, object]] = []
     for line in text.splitlines():
         line = line.strip().rstrip("。；;")
         if not line:
@@ -163,7 +162,7 @@ def extract_scoring_points(text: Optional[str]) -> List[Dict[str, object]]:
     return points
 
 
-def parse_scoring_points_xlsx(path: str) -> List[Dict[str, object]]:
+def parse_scoring_points_xlsx(path: str) -> list[dict[str, object]]:
     """解析 XLSX 评分表为评分点列表（openpyxl 可用时）。
 
     兼容常见招标评分表布局：第一列为评分项名称，分值列为含"NN 分"文本或纯数字。
@@ -177,7 +176,7 @@ def parse_scoring_points_xlsx(path: str) -> List[Dict[str, object]]:
         wb = load_workbook(path, read_only=True, data_only=True)
     except Exception:
         return []
-    points: List[Dict[str, object]] = []
+    points: list[dict[str, object]] = []
     try:
         for ws in wb.worksheets:
             for row in ws.iter_rows(values_only=True):
@@ -186,8 +185,8 @@ def parse_scoring_points_xlsx(path: str) -> List[Dict[str, object]]:
                 cells = [str(c).strip() for c in row if c is not None and str(c).strip()]
                 if not cells:
                     continue
-                name: Optional[str] = None
-                score: Optional[float] = None
+                name: str | None = None
+                score: float | None = None
                 for cell in cells:
                     m = re.search(r"(\d+(?:\.\d+)?)\s*分", cell)
                     if m and score is None:

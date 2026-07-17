@@ -7,7 +7,7 @@ import pytest
 
 from app.core.agent.agent import Agent, AgentResponse
 from app.core.agent.multi_agent_runtime import BoundedMultiAgentWorkflow
-from app.core.agent.workflow_runtime import AgentRunStore, NO_SUFFICIENT_EVIDENCE_REPLY
+from app.core.agent.workflow_runtime import NO_SUFFICIENT_EVIDENCE_REPLY, AgentRunStore
 
 
 class _Delegate(Agent):

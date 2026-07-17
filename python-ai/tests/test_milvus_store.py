@@ -1,7 +1,6 @@
 """Tests for the milvus_store backward-compatible facade and vector store status."""
 
-from app.core.vectorstore import milvus_store
-from app.core.vectorstore import factory
+from app.core.vectorstore import factory, milvus_store
 from app.core.vectorstore.milvus_lite import MilvusLiteStore
 
 

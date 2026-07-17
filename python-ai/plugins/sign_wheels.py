@@ -87,7 +87,7 @@ def _manifest_from_wheel(wheel_path: str) -> dict:
 
 def _wheel_path_for(plugin: str) -> str:
     manifest_path = os.path.join(PLUGINS_ROOT, plugin, "hfusion_plugin.json")
-    with open(manifest_path, "r", encoding="utf-8") as f:
+    with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
     dist_name = manifest["name"].replace("-", "_").replace(".", "_")
     return os.path.join(DIST_DIR, f"{dist_name}-{manifest['version']}-py3-none-any.whl")

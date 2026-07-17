@@ -15,7 +15,7 @@ content. They are registered behind the internal-token dependency in
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter
@@ -39,7 +39,7 @@ async def gateway_usage(hours: float = 1.0) -> dict[str, Any]:
         hours: Look-back window; clamped to [0.1, 720].
     """
     hours = min(max(hours, 0.1), 720.0)
-    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    since = datetime.now(UTC) - timedelta(hours=hours)
     return get_model_gateway().usage_accumulator.summary(since=since)
 
 

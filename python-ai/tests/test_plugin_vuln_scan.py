@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.core.plugin.vuln_scan import VulnScanner, ScanResult, Vulnerability
+from app.core.plugin.vuln_scan import ScanResult, Vulnerability, VulnScanner
 
 
 class TestVulnerability:

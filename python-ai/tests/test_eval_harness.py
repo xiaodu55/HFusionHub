@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -171,6 +170,7 @@ def test_score_replay_and_diff(tmp_path: Path):
 
 def test_api_runs_and_score_flow(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
+
     from app.core.eval_harness import runner as runner_mod
     from app.main import app
 
@@ -178,8 +178,8 @@ def test_api_runs_and_score_flow(tmp_path, monkeypatch):
     headers = {"X-Internal-Token": "test-token", "X-Tenant-Id": "1"}
 
     # 依赖守卫需要 token 一致 —— 直接 monkeypatch 校验函数最省事
-    from app.api.internal_auth import require_internal_token
     from app.api.deps import require_tenant
+    from app.api.internal_auth import require_internal_token
     app.dependency_overrides[require_internal_token] = lambda: None
     app.dependency_overrides[require_tenant] = lambda: 1
 

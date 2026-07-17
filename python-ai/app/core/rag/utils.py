@@ -8,8 +8,6 @@ RAG 公共工具模块
 """
 
 import re
-from typing import List
-
 
 # =============================================================================
 # 常量定义
@@ -89,7 +87,7 @@ def estimate_tokens(text: str) -> int:
 # 关键短语提取工具函数
 # =============================================================================
 
-def extract_key_phrases(text: str, max_phrases: int = MAX_KEY_PHRASES) -> List[str]:
+def extract_key_phrases(text: str, max_phrases: int = MAX_KEY_PHRASES) -> list[str]:
     """
     从文本中提取关键短语
 
@@ -145,7 +143,7 @@ def extract_key_phrases(text: str, max_phrases: int = MAX_KEY_PHRASES) -> List[s
 # 文本处理工具函数
 # =============================================================================
 
-def split_sentences(text: str, min_length: int = MIN_SENTENCE_LENGTH) -> List[str]:
+def split_sentences(text: str, min_length: int = MIN_SENTENCE_LENGTH) -> list[str]:
     """
     将文本分割为句子
 

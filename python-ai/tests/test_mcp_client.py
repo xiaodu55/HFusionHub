@@ -12,10 +12,10 @@ import httpx
 import pytest
 
 from app.core.tools.mcp_client import (
+    ConnectionStatus,
     MCPClientManager,
     MCPServerConnection,
     TransportType,
-    ConnectionStatus,
 )
 
 
@@ -210,8 +210,8 @@ class TestToolExecution:
 class TestRegistryIntegration:
     @pytest.mark.asyncio
     async def test_registry_registers_and_routes_mcp_tools(self):
-        from app.core.tools.registry import ToolRegistry
         from app.core.tools.mcp_client import get_mcp_client_manager
+        from app.core.tools.registry import ToolRegistry
 
         seen = {}
 

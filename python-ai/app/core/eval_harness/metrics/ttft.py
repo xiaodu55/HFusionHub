@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..schemas import EvalRecord
 
 
-def _percentile(values: List[float], pct: float) -> Optional[float]:
+def _percentile(values: list[float], pct: float) -> float | None:
     """线性插值百分位（p50 对偶数样本取中间两数均值）。"""
     if not values:
         return None
@@ -22,10 +22,10 @@ def _percentile(values: List[float], pct: float) -> Optional[float]:
     return ordered[low] + (ordered[high] - ordered[low]) * frac
 
 
-def aggregate(records: List["EvalRecord"]) -> Dict[str, float]:
+def aggregate(records: list[EvalRecord]) -> dict[str, float]:
     ttfts = [r.ttft_ms for r in records if r.ttft_ms is not None]
     latencies = [r.latency_ms for r in records if r.latency_ms]
-    out: Dict[str, float] = {}
+    out: dict[str, float] = {}
     if ttfts:
         out["ttft_p50_ms"] = round(_percentile(ttfts, 50) or 0.0, 1)
         out["ttft_mean_ms"] = round(sum(ttfts) / len(ttfts), 1)

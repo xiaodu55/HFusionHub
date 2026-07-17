@@ -128,7 +128,9 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install ruff
-        run: pip install ruff
+        # 版本与 pyproject required-version 一致：新版本引入新规则会让门禁
+        # 在无代码变更时翻红（pyproject 注释见）。
+        run: pip install ruff==0.16.3
       - name: Lint with ruff
         run: ruff check . --output-format=github
       - name: Audit dependencies (pip-audit)

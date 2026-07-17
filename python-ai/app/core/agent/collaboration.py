@@ -5,7 +5,7 @@ import inspect
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Union
+from typing import Any, Awaitable, Callable, Iterable
 
 
 class ExpertRole(str, Enum):
@@ -28,16 +28,16 @@ class ExpertRole(str, Enum):
 @dataclass
 class CollaborationTask:
     query: str
-    context: Dict[str, Any] = field(default_factory=dict)
-    required_roles: Optional[List[ExpertRole]] = None
+    context: dict[str, Any] = field(default_factory=dict)
+    required_roles: list[ExpertRole] | None = None
 
 
 @dataclass
 class ExpertContribution:
     role: ExpertRole
     content: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -47,11 +47,11 @@ class ExpertContribution:
 @dataclass
 class CollaborationResult:
     answer: str
-    contributions: List[ExpertContribution]
-    errors: Dict[ExpertRole, str] = field(default_factory=dict)
+    contributions: list[ExpertContribution]
+    errors: dict[ExpertRole, str] = field(default_factory=dict)
 
     @property
-    def successful_roles(self) -> List[ExpertRole]:
+    def successful_roles(self) -> list[ExpertRole]:
         return [item.role for item in self.contributions if item.succeeded]
 
 
@@ -65,10 +65,10 @@ class ExpertAgent(ABC):
         pass
 
 
-ExpertCallable = Union[
-    Callable[[CollaborationTask], ExpertContribution],
-    Callable[[CollaborationTask], Awaitable[ExpertContribution]],
-]
+ExpertCallable = (
+    Callable[[CollaborationTask], ExpertContribution]
+    | Callable[[CollaborationTask], Awaitable[ExpertContribution]]
+)
 
 
 class CallableExpertAgent(ExpertAgent):
@@ -95,7 +95,7 @@ class MultiAgentCoordinator:
     def __init__(
         self,
         experts: Iterable[ExpertAgent],
-        synthesizer: Optional[ExpertCallable] = None,
+        synthesizer: ExpertCallable | None = None,
         max_concurrency: int = 4,
     ):
         if max_concurrency < 1:
@@ -123,7 +123,7 @@ class MultiAgentCoordinator:
         return CollaborationResult(answer=answer, contributions=contributions, errors=errors)
 
     async def _synthesize(
-        self, task: CollaborationTask, contributions: List[ExpertContribution]
+        self, task: CollaborationTask, contributions: list[ExpertContribution]
     ) -> str:
         if self._synthesizer:
             synthesis_task = CollaborationTask(

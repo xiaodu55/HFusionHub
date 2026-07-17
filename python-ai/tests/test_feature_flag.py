@@ -6,23 +6,18 @@ Feature Flag 单元测试 — 覆盖评估逻辑、降级策略、五层优先�
 
 import os
 import time
-import threading
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import patch
 
 # Ensure transparent degradation for all tests (no Java backend)
 os.environ.setdefault("FEATURE_FLAG_DEGRADATION", "transparent")
 
 from app.utils.feature_flag import (
-    FeatureFlagClient,
-    SECURITY_FLAGS,
+    AVAILABILITY_FLAGS,
     DENY_CAPABILITY_FLAGS,
     MUST_ENFORCE_FLAGS,
-    AVAILABILITY_FLAGS,
-    DEGRADATION_MODE,
+    SECURITY_FLAGS,
+    FeatureFlagClient,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

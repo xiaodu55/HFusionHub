@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -36,13 +36,13 @@ class MemoryConsolidateRequest(BaseModel):
 
     conversation_id: int = Field(..., ge=1)
     user_id: int = Field(..., ge=1, description="Java 会话态解析出的用户 ID")
-    knowledge_base_id: Optional[int] = Field(None, ge=1)
-    tenant_id: Optional[int] = Field(None, ge=1)
-    messages: List[ConsolidateMessage] = Field(..., max_length=_CONSOLIDATE_MAX_MESSAGES)
+    knowledge_base_id: int | None = Field(None, ge=1)
+    tenant_id: int | None = Field(None, ge=1)
+    messages: list[ConsolidateMessage] = Field(..., max_length=_CONSOLIDATE_MAX_MESSAGES)
 
 
 @router.post("/api/internal/memory/consolidate")
-async def consolidate_memory(request: MemoryConsolidateRequest) -> Dict[str, Any]:
+async def consolidate_memory(request: MemoryConsolidateRequest) -> dict[str, Any]:
     """对被删除会话的消息快照执行记忆抽取并回写 Java（调用方 fire-and-forget）。"""
     service = get_long_term_memory()
     if not service.is_enabled(user_id=request.user_id, tenant_id=request.tenant_id):

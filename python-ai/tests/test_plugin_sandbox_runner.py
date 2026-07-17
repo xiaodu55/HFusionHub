@@ -16,8 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import textwrap
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -27,7 +25,6 @@ from app.core.plugin.sandbox_runner import (
     _make_domain_check,
     execute_in_sandbox,
 )
-
 
 # ── P0-1: container execution chain ──────────────────────────────────
 

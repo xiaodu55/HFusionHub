@@ -10,11 +10,9 @@ Postprocessor - 后处理模块
 
 import hashlib
 import re
-from typing import List, Dict, Optional, Set
 from dataclasses import dataclass, field
 
 from app.utils.config import config
-
 
 # ---- Output-format constraint patterns ----
 # These are instructions about HOW to answer, not WHAT to search for.
@@ -48,7 +46,7 @@ _OUTPUT_CONSTRAINT_PATTERNS = [
 
 # Tokens that signal output-format constraints rather than content intent.
 # These are stripped AFTER regex pattern matching above.
-_OUTPUT_CONSTRAINT_TOKENS: Set[str] = {
+_OUTPUT_CONSTRAINT_TOKENS: set[str] = {
     "answer", "exact", "exactly", "precise", "precisely", "specific",
     "specifically", "numeric", "numerical", "brief", "briefly", "concise",
     "concisely", "short", "shortly", "only", "just", "output", "return",
@@ -81,7 +79,7 @@ _REHASH_PRIME = 2654435761  # Knuth multiplicative hash constant
 _HASH_SPACE = 1 << 128
 
 
-def _tokenize(text: str) -> List[str]:
+def _tokenize(text: str) -> list[str]:
     """Tokenize into words + CJK 2-shingles (adjacent character bigrams)."""
     normalized = text.lower()
     tokens = re.findall(r"[a-z0-9_]+", normalized)
@@ -93,13 +91,13 @@ def _tokenize(text: str) -> List[str]:
     return tokens
 
 
-def _token_set(text: Optional[str]) -> Optional[frozenset]:
+def _token_set(text: str | None) -> frozenset | None:
     if not text:
         return None
     return frozenset(_tokenize(text))
 
 
-def _minhash_signature(tokens: frozenset) -> List[int]:
+def _minhash_signature(tokens: frozenset) -> list[int]:
     """64-length MinHash signature (one md5 digest per token + linear rehash)."""
     signature = [_HASH_SPACE] * _MINHASH_LENGTH
     for token in tokens:
@@ -111,7 +109,7 @@ def _minhash_signature(tokens: frozenset) -> List[int]:
     return signature
 
 
-def _band_keys(signature: List[int]) -> List[tuple]:
+def _band_keys(signature: list[int]) -> list[tuple]:
     """Return one candidate-bucket key per LSH band."""
     return [
         tuple(signature[i * _MINHASH_ROWS:(i + 1) * _MINHASH_ROWS])
@@ -125,10 +123,10 @@ class ProcessedResult:
     content: str
     score: float
     document_id: str
-    knowledge_base_id: Optional[int] = None
-    outline_path: List[str] = field(default_factory=list)
+    knowledge_base_id: int | None = None
+    outline_path: list[str] = field(default_factory=list)
     source: str = "vector"  # 来源: vector/keyword/graph
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 
 class Postprocessor:
@@ -137,8 +135,8 @@ class Postprocessor:
     def __init__(
         self,
         dedup_threshold: float = 0.95,
-        min_score: Optional[float] = None,
-        strong_evidence_score: Optional[float] = None,
+        min_score: float | None = None,
+        strong_evidence_score: float | None = None,
     ):
         """
         初始化后处理器
@@ -156,9 +154,9 @@ class Postprocessor:
 
     def process(
         self,
-        results: List[Dict],
+        results: list[dict],
         top_k: int = 5
-    ) -> List[ProcessedResult]:
+    ) -> list[ProcessedResult]:
         """
         处理检索结果
 
@@ -189,11 +187,11 @@ class Postprocessor:
 
     def process_with_debug(
         self,
-        results: List[Dict],
+        results: list[dict],
         top_k: int = 5,
-        query: Optional[str] = None,
+        query: str | None = None,
         allow_scoped_summary: bool = False,
-    ) -> tuple[List[ProcessedResult], List[Dict]]:
+    ) -> tuple[list[ProcessedResult], list[dict]]:
         """Process results and retain an auditable decision for every input.
 
         A whole-KB summary is different from a fact lookup: generic words
@@ -207,7 +205,7 @@ class Postprocessor:
         query_terms = self._query_terms(query)
 
         # ---- 跨通道互认：向量+关键词同时命中的分块视为强证据 ----
-        cross_channel_chunks: Set[str] = self._find_cross_channel_hits(processed)
+        cross_channel_chunks: set[str] = self._find_cross_channel_hits(processed)
 
         decisions = [
             {
@@ -228,7 +226,7 @@ class Postprocessor:
         # confidence score, so use the best original channel score when it is
         # present. This keeps P0's "no sufficient evidence" safety contract
         # intact while allowing rank fusion to decide result order.
-        evidence_accepted: List[tuple[ProcessedResult, int]] = []
+        evidence_accepted: list[tuple[ProcessedResult, int]] = []
         for index, result in enumerate(processed):
             evidence_score = self._evidence_score_of(result)
             chunk_id = result.metadata.get("chunk_id")
@@ -287,10 +285,10 @@ class Postprocessor:
         # Signatures/token sets are computed once per result; exact duplicates
         # hit the content-fingerprint dict; band buckets restrict Jaccard
         # checks to genuine candidates instead of every accepted result.
-        deduplicated: List[tuple[ProcessedResult, int]] = []
-        content_fingerprints: Dict[str, int] = {}  # md5(content) -> kept position
-        band_index: Dict[tuple, List[int]] = {}  # band key -> kept positions
-        kept: List[tuple] = []  # (result, index, token_set, signature)
+        deduplicated: list[tuple[ProcessedResult, int]] = []
+        content_fingerprints: dict[str, int] = {}  # md5(content) -> kept position
+        band_index: dict[tuple, list[int]] = {}  # band key -> kept positions
+        kept: list[tuple] = []  # (result, index, token_set, signature)
 
         for result, index in evidence_accepted:
             content = result.content or ""
@@ -301,7 +299,7 @@ class Postprocessor:
 
             duplicate_pos = content_fingerprints.get(fingerprint)
             if duplicate_pos is None and signature is not None:
-                candidates: Set[int] = set()
+                candidates: set[int] = set()
                 for key in band_keys:
                     candidates.update(band_index.get(key, ()))
                 for pos in sorted(candidates):
@@ -325,7 +323,7 @@ class Postprocessor:
         deduplicated.sort(key=lambda item: item[0].score, reverse=True)
 
         # 5. 截取 top_k
-        accepted: List[ProcessedResult] = []
+        accepted: list[ProcessedResult] = []
         for rank, (result, index) in enumerate(deduplicated, start=1):
             if rank <= top_k:
                 decisions[index]["decision"] = "accepted"
@@ -336,7 +334,7 @@ class Postprocessor:
 
         return accepted, decisions
 
-    def _to_processed(self, result: Dict) -> ProcessedResult:
+    def _to_processed(self, result: dict) -> ProcessedResult:
         """将字典转换为 ProcessedResult"""
         return ProcessedResult(
             content=result.get("content", ""),
@@ -348,7 +346,7 @@ class Postprocessor:
             metadata=result.get("metadata", {})
         )
 
-    def _deduplicate(self, results: List[ProcessedResult]) -> List[ProcessedResult]:
+    def _deduplicate(self, results: list[ProcessedResult]) -> list[ProcessedResult]:
         """
         去重：移除内容高度相似的结果
         """
@@ -383,7 +381,7 @@ class Postprocessor:
         return self._jaccard_sets(_token_set(text1), _token_set(text2))
 
     @staticmethod
-    def _jaccard_sets(set1: Optional[frozenset], set2: Optional[frozenset]) -> float:
+    def _jaccard_sets(set1: frozenset | None, set2: frozenset | None) -> float:
         """Jaccard similarity between two precomputed token sets."""
         if not set1 or not set2:
             return 0.0
@@ -404,7 +402,7 @@ class Postprocessor:
         return stripped or query
 
     @classmethod
-    def _query_terms(cls, query: Optional[str]) -> List[str]:
+    def _query_terms(cls, query: str | None) -> list[str]:
         if not query:
             return []
         stripped = cls._strip_output_constraints(query)
@@ -418,7 +416,7 @@ class Postprocessor:
             "tell", "me", "about",
         }
         raw_terms = re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]", stripped.lower())
-        terms: List[str] = []
+        terms: list[str] = []
         for term in raw_terms:
             if term in stopwords or term in _OUTPUT_CONSTRAINT_TOKENS:
                 continue
@@ -429,10 +427,10 @@ class Postprocessor:
         return terms
 
     @classmethod
-    def _find_cross_channel_hits(cls, processed: List[ProcessedResult]) -> Set[str]:
+    def _find_cross_channel_hits(cls, processed: list[ProcessedResult]) -> set[str]:
         """Return chunk_ids that appear in BOTH vector and keyword channels."""
-        vector_ids: Set[str] = set()
-        keyword_ids: Set[str] = set()
+        vector_ids: set[str] = set()
+        keyword_ids: set[str] = set()
         for result in processed:
             chunk_id = result.metadata.get("chunk_id")
             if not chunk_id:
@@ -444,7 +442,7 @@ class Postprocessor:
         return vector_ids & keyword_ids
 
     @classmethod
-    def _query_coverage(cls, query_terms: List[str], content: str) -> float:
+    def _query_coverage(cls, query_terms: list[str], content: str) -> float:
         if not query_terms:
             return 1.0
         content_terms = set(cls._query_terms(content))
@@ -453,7 +451,7 @@ class Postprocessor:
         return len(set(query_terms) & content_terms) / len(query_terms)
 
     @classmethod
-    def _passes_query_coverage(cls, query_terms: List[str], content: str) -> bool:
+    def _passes_query_coverage(cls, query_terms: list[str], content: str) -> bool:
         if not query_terms:
             return True
         coverage = cls._query_coverage(query_terms, content)
@@ -463,7 +461,7 @@ class Postprocessor:
             return coverage >= 0.33
         return coverage >= 0.45
 
-    def _sort(self, results: List[ProcessedResult]) -> List[ProcessedResult]:
+    def _sort(self, results: list[ProcessedResult]) -> list[ProcessedResult]:
         """
         排序：按分数降序
         """
@@ -471,11 +469,11 @@ class Postprocessor:
 
     def merge_results(
         self,
-        vector_results: List[Dict],
-        keyword_results: Optional[List[Dict]] = None,
-        graph_results: Optional[List[Dict]] = None,
-        weights: Optional[Dict[str, float]] = None
-    ) -> List[Dict]:
+        vector_results: list[dict],
+        keyword_results: list[dict] | None = None,
+        graph_results: list[dict] | None = None,
+        weights: dict[str, float] | None = None
+    ) -> list[dict]:
         """
         合并多通道检索结果
 
@@ -524,7 +522,7 @@ class Postprocessor:
 
 
 # 全局实例
-_postprocessor: Optional[Postprocessor] = None
+_postprocessor: Postprocessor | None = None
 
 
 def get_postprocessor() -> Postprocessor:

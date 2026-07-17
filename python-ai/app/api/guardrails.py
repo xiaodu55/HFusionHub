@@ -13,8 +13,8 @@ the internal token is required for every endpoint.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -30,19 +30,19 @@ router = APIRouter(tags=["guardrails"])
 class GuardrailContext(BaseModel):
     """Optional scoping for feature-flag evaluation and audit logging."""
 
-    user_id: Optional[int] = Field(None, ge=1)
-    knowledge_base_id: Optional[int] = Field(None, ge=1)
-    tenant_id: Optional[int] = Field(None, ge=1)
-    environment: Optional[str] = Field(None, max_length=32)
-    channel: Optional[str] = Field(None, pattern="^(chat|tool|input|output)$")
-    tool_name: Optional[str] = Field(None, max_length=128)
+    user_id: int | None = Field(None, ge=1)
+    knowledge_base_id: int | None = Field(None, ge=1)
+    tenant_id: int | None = Field(None, ge=1)
+    environment: str | None = Field(None, max_length=32)
+    channel: str | None = Field(None, pattern="^(chat|tool|input|output)$")
+    tool_name: str | None = Field(None, max_length=128)
 
 
 class GuardCheckRequest(BaseModel):
     """Content to check, with optional flag-scoping context."""
 
     content: str = Field(..., min_length=1, max_length=20000)
-    context: Optional[GuardrailContext] = Field(
+    context: GuardrailContext | None = Field(
         None, description="user_id / knowledge_base_id / environment scoping"
     )
 
@@ -54,10 +54,10 @@ class GuardCheckResponse(BaseModel):
     sanitized_content: str = Field(
         ..., description="Content with dangerous parts removed / PII masked"
     )
-    flags: List[str] = Field(
+    flags: list[str] = Field(
         default_factory=list, description="Findings, e.g. prompt_injection:high, pii:email"
     )
-    blocked_reason: Optional[str] = Field(
+    blocked_reason: str | None = Field(
         None, description="Set when allowed=False (critical_prompt_injection, …)"
     )
     severity: str = Field("low", description="low | medium | high | critical")
@@ -66,18 +66,18 @@ class GuardCheckResponse(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
-def _to_response(result: GuardResult) -> Dict[str, Any]:
+def _to_response(result: GuardResult) -> dict[str, Any]:
     return {
         "allowed": result.allowed,
         "sanitized_content": result.sanitized_content,
         "flags": list(result.flags),
         "blocked_reason": result.blocked_reason,
         "severity": result.severity,
-        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "checked_at": datetime.now(UTC).isoformat(),
     }
 
 
-def _context_dict(context: Optional[GuardrailContext]) -> Optional[Dict[str, Any]]:
+def _context_dict(context: GuardrailContext | None) -> dict[str, Any] | None:
     if context is None:
         return None
     return {
@@ -89,7 +89,7 @@ def _context_dict(context: Optional[GuardrailContext]) -> Optional[Dict[str, Any
 # ── Endpoints ─────────────────────────────────────────────────────────────
 
 @router.post("/api/guardrails/check-input", response_model=GuardCheckResponse)
-async def check_input(request: GuardCheckRequest) -> Dict[str, Any]:
+async def check_input(request: GuardCheckRequest) -> dict[str, Any]:
     """Check a user message for safety (prompt injection, PII, toxic content).
 
     Diagnostic only — returns the verdict in the body; enforcement happens at
@@ -102,7 +102,7 @@ async def check_input(request: GuardCheckRequest) -> Dict[str, Any]:
 
 
 @router.post("/api/guardrails/check-output", response_model=GuardCheckResponse)
-async def check_output(request: GuardCheckRequest) -> Dict[str, Any]:
+async def check_output(request: GuardCheckRequest) -> dict[str, Any]:
     """Check an AI response before returning it (echo, leaks, toxicity).
 
     Diagnostic only — returns the verdict in the body; the chat layer
@@ -115,7 +115,7 @@ async def check_output(request: GuardCheckRequest) -> Dict[str, Any]:
 
 
 @router.get("/api/guardrails/status")
-async def guardrails_status() -> Dict[str, Any]:
+async def guardrails_status() -> dict[str, Any]:
     """Current guardrail configuration, effective flag state, and statistics.
 
     Deliberately exposes counts and audit *metadata* only — masked values
@@ -131,5 +131,5 @@ async def guardrails_status() -> Dict[str, Any]:
         },
         "statistics": guardrails_pipeline.stats(),
         "masking_audit_recent": guardrails_pipeline.audit_trail(limit=20),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
     }

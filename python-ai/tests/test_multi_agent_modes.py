@@ -6,22 +6,22 @@ ReactAgent 产物一致（document_id/chunk_id/knowledge_base_id）。
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pytest
 
 from app.core.agent.agent import AgentResponse
 from app.core.agent.multi_agent_runtime import BoundedMultiAgentWorkflow
-from app.core.agent.workflow_runtime import AgentRunStore, NO_SUFFICIENT_EVIDENCE_REPLY
+from app.core.agent.workflow_runtime import AgentRunStore
 
 
-def _source(chunk_id: str, kb_id: int = 1) -> Dict[str, Any]:
+def _source(chunk_id: str, kb_id: int = 1) -> dict[str, Any]:
     return {"document_id": "doc-1", "chunk_id": chunk_id,
             "knowledge_base_id": kb_id, "score": 0.9}
 
 
-def _response(content: str, sources: List[Dict[str, Any]], **overrides) -> AgentResponse:
-    payload: Dict[str, Any] = {
+def _response(content: str, sources: list[dict[str, Any]], **overrides) -> AgentResponse:
+    payload: dict[str, Any] = {
         "content": content,
         "answer": content,
         "sources": sources,
@@ -41,7 +41,7 @@ class FakeAgent:
 
     def __init__(self, responses):
         self._responses = list(responses)
-        self.queries: List[str] = []
+        self.queries: list[str] = []
 
     async def run(self, query: str, history=None, **kwargs):
         self.queries.append(query)

@@ -3,13 +3,11 @@ Tests for the CSV and XLSX table parsers (A3: 表格知识摄入).
 """
 
 import csv
-import io
 import zipfile
 
 from app.core.parser.base import BaseParser, BlockType
 from app.core.parser.csv_parser import CsvParser, _render_table
 from app.core.parser.xlsx_parser import XlsxParser, _col_index, _col_name
-
 
 # ── CSV ────────────────────────────────────────────────────────────────
 

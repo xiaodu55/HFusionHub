@@ -17,25 +17,21 @@
 日期：2026-07-22
 """
 
-from abc import ABC, abstractmethod
+import asyncio
+import hashlib
+import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple
-import time
-import hashlib
-import asyncio
-import re
+from typing import Any
 
+from .base import BaseCompressionStrategy
+from .cache import CacheManager
 from .utils import (
+    MAX_KEY_PHRASES,
     estimate_tokens,
     extract_key_phrases,
     split_sentences,
-    DEFAULT_TARGET_RATIO,
-    MIN_SENTENCE_LENGTH,
-    MAX_KEY_PHRASES,
 )
-from .cache import CacheManager, compression_cache
-from .base import BaseCompressionStrategy
 
 # ---- Compression guard thresholds ----
 # Tokens below this threshold == skip compression entirely
@@ -86,12 +82,12 @@ class CompressionResult:
     compressed_tokens: int
     compression_ratio: float
     strategy_used: str
-    key_phrases: List[str] = field(default_factory=list)
-    summary: Optional[str] = None
+    key_phrases: list[str] = field(default_factory=list)
+    summary: str | None = None
     status: CompressionStatus = CompressionStatus.COMPLETED
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "original_text": self.original_text[:100] + "..." if len(self.original_text) > 100 else self.original_text,
@@ -107,7 +103,7 @@ class CompressionResult:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'CompressionResult':
+    def from_dict(cls, data: dict[str, Any]) -> 'CompressionResult':
         """从字典创建"""
         return cls(
             original_text=data.get("original_text", ""),
@@ -138,8 +134,8 @@ class CompressionConfig:
     """
     strategy: CompressionStrategyType = CompressionStrategyType.EXTRACTIVE
     target_ratio: float = 0.5
-    max_tokens: Optional[int] = None
-    preserve_keywords: Optional[List[str]] = None
+    max_tokens: int | None = None
+    preserve_keywords: list[str] | None = None
     language: str = "zh"
     min_sentence_length: int = 10
 
@@ -176,7 +172,7 @@ class ExtractiveCompressionStrategy(BaseCompressionStrategy):
     async def compress(
         self,
         text: str,
-        config: Optional[CompressionConfig] = None,
+        config: CompressionConfig | None = None,
         **kwargs
     ) -> CompressionResult:
         """
@@ -266,7 +262,7 @@ class ExtractiveCompressionStrategy(BaseCompressionStrategy):
         """估算 token 数"""
         return estimate_tokens(text)
 
-    def _split_sentences(self, text: str) -> List[str]:
+    def _split_sentences(self, text: str) -> list[str]:
         """分句"""
         return split_sentences(text, min_length=2)
 
@@ -311,9 +307,9 @@ class ExtractiveCompressionStrategy(BaseCompressionStrategy):
 
     def _calculate_sentence_scores(
         self,
-        sentences: List[str],
+        sentences: list[str],
         full_text: str
-    ) -> List[float]:
+    ) -> list[float]:
         """
         计算句子重要性得分。
 
@@ -358,7 +354,7 @@ class ExtractiveCompressionStrategy(BaseCompressionStrategy):
 
         return scores
 
-    def _extract_key_phrases(self, text: str) -> List[str]:
+    def _extract_key_phrases(self, text: str) -> list[str]:
         """提取关键短语"""
         return extract_key_phrases(text, MAX_KEY_PHRASES)
 
@@ -401,7 +397,7 @@ class AbstractiveCompressionStrategy(BaseCompressionStrategy):
     async def compress(
         self,
         text: str,
-        config: Optional[CompressionConfig] = None,
+        config: CompressionConfig | None = None,
         **kwargs
     ) -> CompressionResult:
         """压缩文本"""
@@ -451,7 +447,7 @@ class AbstractiveCompressionStrategy(BaseCompressionStrategy):
                 status=CompressionStatus.COMPLETED,
             )
 
-        except Exception as e:
+        except Exception:
             # 降级到抽取式压缩
             fallback = ExtractiveCompressionStrategy()
             return await fallback.compress(text, config)
@@ -495,7 +491,7 @@ Requirements:
 
 Compressed text:"""
 
-    def _extract_key_phrases(self, text: str) -> List[str]:
+    def _extract_key_phrases(self, text: str) -> list[str]:
         """提取关键短语"""
         return extract_key_phrases(text, MAX_KEY_PHRASES)
 
@@ -531,7 +527,7 @@ class HybridCompressionStrategy(BaseCompressionStrategy):
     async def compress(
         self,
         text: str,
-        config: Optional[CompressionConfig] = None,
+        config: CompressionConfig | None = None,
         **kwargs
     ) -> CompressionResult:
         """压缩文本"""
@@ -593,7 +589,7 @@ class HybridCompressionStrategy(BaseCompressionStrategy):
                 status=CompressionStatus.COMPLETED,
             )
 
-        except Exception as e:
+        except Exception:
             # 降级到抽取式结果
             return CompressionResult(
                 original_text=text,
@@ -645,7 +641,7 @@ Requirements:
 
 Optimized text:"""
 
-    def _extract_key_phrases(self, text: str) -> List[str]:
+    def _extract_key_phrases(self, text: str) -> list[str]:
         """提取关键短语"""
         return extract_key_phrases(text, MAX_KEY_PHRASES)
 
@@ -678,7 +674,7 @@ class RecursiveCompressionStrategy(BaseCompressionStrategy):
     async def compress(
         self,
         text: str,
-        config: Optional[CompressionConfig] = None,
+        config: CompressionConfig | None = None,
         **kwargs
     ) -> CompressionResult:
         """压缩文本"""
@@ -743,7 +739,7 @@ class RecursiveCompressionStrategy(BaseCompressionStrategy):
         """估算 token 数"""
         return estimate_tokens(text)
 
-    def _extract_key_phrases(self, text: str) -> List[str]:
+    def _extract_key_phrases(self, text: str) -> list[str]:
         """提取关键短语"""
         return extract_key_phrases(text, MAX_KEY_PHRASES)
 
@@ -772,7 +768,7 @@ class ContextCompressor:
         cache_enabled: bool = True,
         cache_ttl: int = 3600,
         llm=None,
-        cache: Optional[CacheManager] = None,
+        cache: CacheManager | None = None,
         **kwargs
     ):
         """
@@ -832,7 +828,7 @@ class ContextCompressor:
     async def compress(
         self,
         text: str,
-        config: Optional[CompressionConfig] = None,
+        config: CompressionConfig | None = None,
         **kwargs
     ) -> CompressionResult:
         """
@@ -878,10 +874,10 @@ class ContextCompressor:
 
     async def compress_batch(
         self,
-        texts: List[str],
-        config: Optional[CompressionConfig] = None,
+        texts: list[str],
+        config: CompressionConfig | None = None,
         **kwargs
-    ) -> List[CompressionResult]:
+    ) -> list[CompressionResult]:
         """
         批量压缩
 
@@ -898,7 +894,7 @@ class ContextCompressor:
     def _get_cache_key(
         self,
         text: str,
-        config: Optional[CompressionConfig]
+        config: CompressionConfig | None
     ) -> str:
         """生成缓存键（纳入影响压缩结果的全部配置，避免不同参数互串缓存）"""
         if config is not None:
@@ -923,7 +919,7 @@ class ContextCompressor:
         """获取缓存大小"""
         return self._cache_manager.get_stats().size
 
-    def get_cache_stats(self) -> Dict[str, Any]:
+    def get_cache_stats(self) -> dict[str, Any]:
         """获取缓存统计"""
         return self._cache_manager.get_stats().to_dict()
 
@@ -989,7 +985,7 @@ class ContextCompressorFactory:
 
 # ==================== 全局实例 ====================
 
-_compressor: Optional[ContextCompressor] = None
+_compressor: ContextCompressor | None = None
 
 
 def get_compressor(

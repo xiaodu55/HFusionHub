@@ -9,9 +9,7 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-import app.api.voice as voice_mod
-from app.api.voice import status, synthesize, transcribe
-from app.api.voice import SynthesizeRequest
+from app.api.voice import SynthesizeRequest, status, synthesize, transcribe
 
 
 class _FakeRequest:

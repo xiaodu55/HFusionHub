@@ -27,7 +27,10 @@ timeout_method = "thread"
 generate-hashes = true
 
 # ── ruff lint（CI 门禁：ruff check）──
+# required-version 与 CI 钉住的版本一致：ruff 小版本升级会引入新规则，
+# 未固定时门禁会在无代码变更的情况下翻红（2026-09 实际发生过）。
 [tool.ruff]
+required-version = ">=0.16.3"
 line-length = 120
 target-version = "py311"
 extend-exclude = [".venv", "evaluation", "tests/.tmp-*"]
@@ -35,9 +38,18 @@ extend-exclude = [".venv", "evaluation", "tests/.tmp-*"]
 [tool.ruff.lint]
 # E/F/W: pycodestyle + pyflakes 基础；I: import 排序；UP: pyupgrade 现代化
 select = ["E", "F", "W", "I", "UP"]
-# E501 行长由 formatter 负责；E203 与格式化器冲突；UP035 等类型标注现代化按需忽略
-ignore = ["E501", "E203", "UP035"]
+# E501 行长由 formatter 负责；E203 与格式化器冲突；UP035 等类型标注现代化按需忽略；
+# UP042（str Enum → StrEnum）涉及序列化行为变更，暂缓统一迁移。
+ignore = ["E501", "E203", "UP035", "UP042"]
 
 [tool.ruff.lint.per-file-ignores]
 # 测试文件允许宽松断言风格
 "tests/**" = ["UP018", "UP030"]
+# conftest 先设置测试环境变量（VECTOR_STORE_MODE、FEATURE_FLAG_DEGRADATION
+# 等），再导入 app 模块——导入顺序是测试夹具语义的一部分。
+"tests/conftest.py" = ["E402"]
+# 独立评估/告警脚本先注入 sys.path（PROJECT_ROOT）再导入仓库内模块。
+"scripts/**" = ["E402"]
+# main.py 的导入顺序是有意为之：先完成 sys.path 注入与日志体系（含
+# TraceFilter），再导入应用模块，保证所有模块日志都挂上 trace_id。
+"app/main.py" = ["E402"]

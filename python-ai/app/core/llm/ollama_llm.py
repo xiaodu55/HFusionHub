@@ -4,7 +4,7 @@ Uses local Ollama API for chat completion
 """
 
 import json
-from typing import List, AsyncGenerator, Optional
+from typing import AsyncGenerator
 
 from .base import BaseLLM, ChatMessage, LLMResponse
 from .http_client import get_shared_client, post_with_retry
@@ -18,9 +18,9 @@ class OllamaLLM(BaseLLM):
         base_url: str = "http://localhost:11434",
         model: str = "qwen2.5:latest",
         *,
-        timeout: Optional[float] = None,
-        max_retries: Optional[int] = None,
-        retry_backoff: Optional[float] = None,
+        timeout: float | None = None,
+        max_retries: int | None = None,
+        retry_backoff: float | None = None,
     ):
         from app.utils.config import config
 
@@ -35,7 +35,7 @@ class OllamaLLM(BaseLLM):
 
     async def chat(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs
@@ -82,7 +82,7 @@ class OllamaLLM(BaseLLM):
 
     async def chat_stream(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs

@@ -14,7 +14,7 @@ turns a healthy request into an outage.
 from __future__ import annotations
 
 import logging
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator
 
 from .base import BaseLLM, ChatMessage, LLMResponse
 from .model_gateway import ModelGateway
@@ -25,14 +25,14 @@ logger = logging.getLogger(__name__)
 class GatewayLLM(BaseLLM):
     """Adapter that delegates ``chat`` / ``chat_stream`` to a ModelGateway."""
 
-    def __init__(self, gateway: ModelGateway, model: Optional[str] = None):
+    def __init__(self, gateway: ModelGateway, model: str | None = None):
         self._gateway = gateway
         # An unpinned model resolves to the gateway's default provider model.
         self.model = model or gateway._default_model()
 
     async def chat(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs,
@@ -54,7 +54,7 @@ class GatewayLLM(BaseLLM):
 
     async def chat_stream(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs,

@@ -13,12 +13,11 @@ Key changes from v1:
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
@@ -39,8 +38,8 @@ class ContainerConfig:
     timeout: float = 30.0
     network: str = "plugin-isolated"
     read_only_rootfs: bool = True
-    allowed_domains: List[str] = field(default_factory=list)
-    blocked_domains: List[str] = field(default_factory=list)
+    allowed_domains: list[str] = field(default_factory=list)
+    blocked_domains: list[str] = field(default_factory=list)
     tmpfs_size: str = "100m"
     pids_limit: int = 256
 
@@ -50,11 +49,11 @@ class ContainerResult:
     """Result from container execution."""
     success: bool
     data: Any = None
-    error: Optional[str] = None
-    error_code: Optional[str] = None
+    error: str | None = None
+    error_code: str | None = None
     duration_ms: float = 0.0
-    resource_usage: Optional[Dict[str, Any]] = None
-    container_id: Optional[str] = None
+    resource_usage: dict[str, Any] | None = None
+    container_id: str | None = None
 
 
 @dataclass
@@ -70,11 +69,11 @@ class PluginVersionInfo:
 async def execute_in_container(
     image_tag: str,
     tool_name: str,
-    tool_input: Dict[str, Any],
+    tool_input: dict[str, Any],
     config: ContainerConfig = ContainerConfig(),
-    plugin_id: Optional[str] = None,
-    user_id: Optional[int] = None,
-    image_digest: Optional[str] = None,
+    plugin_id: str | None = None,
+    user_id: int | None = None,
+    image_digest: str | None = None,
 ) -> ContainerResult:
     """Execute a plugin tool in a Docker container via plugin-runner service.
 
@@ -178,7 +177,7 @@ async def execute_in_container(
         )
 
 
-async def list_container_images() -> List[Dict[str, Any]]:
+async def list_container_images() -> list[dict[str, Any]]:
     """List all plugin Docker images."""
     client = get_shared_client("plugin-runner", timeout=10.0)
     resp = await client.get(
@@ -199,7 +198,7 @@ async def remove_container_image(image_tag: str) -> bool:
     return resp.status_code == 200
 
 
-async def fetch_plugin_versions(plugin_id: str, java_backend_url: str, internal_token: str) -> List[PluginVersionInfo]:
+async def fetch_plugin_versions(plugin_id: str, java_backend_url: str, internal_token: str) -> list[PluginVersionInfo]:
     """Fetch all versions of a plugin from Java backend for canary routing."""
     client = get_shared_client("plugin-versions", timeout=10.0)
     resp = await client.get(
@@ -220,7 +219,7 @@ async def fetch_plugin_versions(plugin_id: str, java_backend_url: str, internal_
         ]
 
 
-def compute_sticky_version(plugin_id: str, user_id: int, versions: List[str], weights: List[float]) -> str:
+def compute_sticky_version(plugin_id: str, user_id: int, versions: list[str], weights: list[float]) -> str:
     """Determine which version a user sees via sticky hash routing.
 
     hash(user_id + plugin_id) -> weighted selection across available versions.
@@ -245,10 +244,10 @@ def compute_sticky_version(plugin_id: str, user_id: int, versions: List[str], we
 
 
 def select_canary_version(
-    plugin_versions: List[PluginVersionInfo],
+    plugin_versions: list[PluginVersionInfo],
     user_id: int,
     plugin_id: str,
-) -> Optional[PluginVersionInfo]:
+) -> PluginVersionInfo | None:
     """Select the appropriate version for a user based on canary weights.
 
     Returns the version to execute (with its container_image and image_digest).
@@ -308,7 +307,7 @@ def select_canary_version(
 async def execute_with_canary(
     plugin_id: str,
     tool_name: str,
-    tool_input: Dict[str, Any],
+    tool_input: dict[str, Any],
     user_id: int,
     config: ContainerConfig,
     java_backend_url: str,

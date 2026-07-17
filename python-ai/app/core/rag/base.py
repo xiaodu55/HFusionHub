@@ -19,7 +19,7 @@ Base Classes - 策略基类
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class BaseStrategy(ABC):
@@ -210,7 +210,7 @@ class BaseMemoryStrategy(BaseStrategy):
     @abstractmethod
     async def add_message(
         self,
-        message: Dict[str, Any],
+        message: dict[str, Any],
         **kwargs
     ) -> None:
         """
@@ -225,9 +225,9 @@ class BaseMemoryStrategy(BaseStrategy):
     async def get_context(
         self,
         query: str,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
         **kwargs
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         获取相关上下文
 
@@ -256,9 +256,9 @@ class BaseWorkflowNode(ABC):
     @abstractmethod
     async def execute(
         self,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         执行节点
 

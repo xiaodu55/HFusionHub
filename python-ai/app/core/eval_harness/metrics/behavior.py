@@ -9,8 +9,6 @@
 
 from __future__ import annotations
 
-from typing import Dict, List
-
 from ..schemas import CaseMetric, EvalRecord
 
 # 回退话术标记：与 python-ai 侧模板文案保持同步（react.py / workflow_runtime.py）
@@ -27,7 +25,7 @@ def _is_fallback_answer(answer: str) -> bool:
 
 
 def evaluate_case(record: EvalRecord) -> CaseMetric:
-    flags: List[str] = []
+    flags: list[str] = []
     answered = bool((record.answer or "").strip()) and not _is_fallback_answer(record.answer)
     retrieved = len(record.retrieved_document_ids) > 0
 
@@ -41,7 +39,7 @@ def evaluate_case(record: EvalRecord) -> CaseMetric:
     return CaseMetric(query_id=record.query_id, metrics={}, flags=flags)
 
 
-def aggregate(records: List[EvalRecord]) -> Dict[str, float]:
+def aggregate(records: list[EvalRecord]) -> dict[str, float]:
     total = len(records)
     if total == 0:
         return {}

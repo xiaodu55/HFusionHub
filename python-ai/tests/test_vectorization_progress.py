@@ -1,4 +1,3 @@
-import os
 import time
 
 from app.api.vectorization import _estimate_processing_seconds, _remaining_seconds

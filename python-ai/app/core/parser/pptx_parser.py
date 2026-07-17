@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 import zipfile
-from typing import Iterator, List
+from typing import Iterator
 from xml.etree import ElementTree as ET
 
 from app.core.parser.base import BaseParser, BlockType, ParsedBlock
@@ -41,8 +41,8 @@ _NOTES_XML_RE = re.compile(r"^ppt/notesSlides/notesSlide(\d+)\.xml$")
 class PptxParser(BaseParser):
     """Parse .pptx into blocks: per-slide headings, paragraphs, tables and notes."""
 
-    def parse(self, file_path: str) -> List[ParsedBlock]:
-        blocks: List[ParsedBlock] = []
+    def parse(self, file_path: str) -> list[ParsedBlock]:
+        blocks: list[ParsedBlock] = []
         with zipfile.ZipFile(file_path, "r") as archive:
             slide_names = sorted(
                 (name for name in archive.namelist() if _SLIDE_XML_RE.match(name)),
@@ -62,8 +62,8 @@ class PptxParser(BaseParser):
             raise ValueError("PPTX 中未提取到任何文本内容（空演示文稿或纯图片页）")
         return blocks
 
-    def _parse_slide(self, root: ET.Element, number: int) -> List[ParsedBlock]:
-        blocks: List[ParsedBlock] = []
+    def _parse_slide(self, root: ET.Element, number: int) -> list[ParsedBlock]:
+        blocks: list[ParsedBlock] = []
         for shape in root.iter(f"{{{_P_NS}}}sp"):
             # 标题占位符：<p:ph type="title"|"ctrTitle"> 挂在 shape 的 nvSpPr 下
             is_title = any(
@@ -101,7 +101,7 @@ class PptxParser(BaseParser):
                 ))
         return blocks
 
-    def _parse_notes(self, root: ET.Element, number: int) -> List[ParsedBlock]:
+    def _parse_notes(self, root: ET.Element, number: int) -> list[ParsedBlock]:
         text = "\n".join(p for p in _iter_paragraph_text(root) if p)
         if not text.strip():
             return []
@@ -128,10 +128,10 @@ def _iter_paragraph_text(root: ET.Element) -> Iterator[str]:
         yield text.strip()
 
 
-def _table_rows(table: ET.Element) -> List[str]:
-    rows: List[str] = []
+def _table_rows(table: ET.Element) -> list[str]:
+    rows: list[str] = []
     for row in table.iter(_TAG_TABLE_ROW):
-        cells: List[str] = []
+        cells: list[str] = []
         for cell in row.iter(_TAG_TABLE_CELL):
             cell_text = " ".join(
                 "".join(node.text or "" for node in paragraph.iter(_TAG_TEXT)).strip()

@@ -13,7 +13,10 @@ The Java layer is responsible for upstream validation (approval record
 existence, status, user_id match, expiry) before calling the decide
 endpoint.  Python trusts Java's validated params.
 """
-import hashlib, json, sys, urllib.request, urllib.error
+import json
+import sys
+import urllib.error
+import urllib.request
 
 BASE = "http://localhost:9000"
 TOKEN = "dev-token"

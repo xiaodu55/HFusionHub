@@ -33,7 +33,7 @@ import asyncio
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -360,7 +360,7 @@ def main() -> int:
           f"({len(cases)} cases, concurrency={max(1, args.concurrency)})...")
     outcomes = asyncio.run(run_all(args))
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         report, failures = build_report_and_failures(
             args, cases, suite_manifest, outcomes, now
@@ -370,7 +370,7 @@ def main() -> int:
         return 1
 
     report_path = args.report or (
-        REPORT_DIR / f"runtime_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.json"
+        REPORT_DIR / f"runtime_{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}.json"
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(

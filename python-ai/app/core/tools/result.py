@@ -6,8 +6,8 @@ share the same structure; the ``ok`` flag disambiguates.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -30,16 +30,16 @@ class ToolResult:
     # Success fields
     data: Any = None
     # Failure fields
-    error_code: Optional[str] = None
+    error_code: str | None = None
     message: str = ""
     # Approval fields (Agent V1 Step 5)
     approval_required: bool = False
-    approval_tool_input: Optional[Dict[str, Any]] = None
+    approval_tool_input: dict[str, Any] | None = None
 
     # ── Factory methods ────────────────────────────────────────────────
 
     @classmethod
-    def success(cls, tool_name: str, data: Any, duration_ms: float = 0.0) -> "ToolResult":
+    def success(cls, tool_name: str, data: Any, duration_ms: float = 0.0) -> ToolResult:
         return cls(
             ok=True,
             tool_name=tool_name,
@@ -54,7 +54,7 @@ class ToolResult:
         error_code: str,
         message: str = "",
         duration_ms: float = 0.0,
-    ) -> "ToolResult":
+    ) -> ToolResult:
         return cls(
             ok=False,
             tool_name=tool_name,
@@ -64,12 +64,12 @@ class ToolResult:
         )
 
     @classmethod
-    def approval_required(
+    def approval(
         cls,
         tool_name: str,
-        tool_input: Dict[str, Any],
+        tool_input: dict[str, Any],
         message: str = "",
-    ) -> "ToolResult":
+    ) -> ToolResult:
         """High-risk tool requires human approval before execution."""
         return cls(
             ok=False,
@@ -82,8 +82,8 @@ class ToolResult:
 
     # ── Serialisation ──────────────────────────────────────────────────
 
-    def to_dict(self) -> Dict[str, Any]:
-        base: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        base: dict[str, Any] = {
             "ok": self.ok,
             "tool_name": self.tool_name,
             "duration_ms": self.duration_ms,

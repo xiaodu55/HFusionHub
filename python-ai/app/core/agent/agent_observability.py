@@ -9,16 +9,14 @@ trace layer, not this operational journal.
 
 from __future__ import annotations
 
+import builtins
 import json
 import sqlite3
-import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
-from typing import Any, Deque, Dict, List, Optional
-from uuid import uuid4
-
+from typing import Any
 
 # ── Data models ────────────────────────────────────────────────────────
 
@@ -27,22 +25,22 @@ class AgentTrace:
     """One agent run record — operational metadata only, no user content."""
 
     run_uuid: str
-    knowledge_base_id: Optional[int]
+    knowledge_base_id: int | None
     status: str  # completed | insufficient_evidence | tool_error | timeout | failed
     model: str = ""
     duration_ms: float = 0.0
-    token_usage: Optional[Dict[str, int]] = None  # {prompt_tokens, completion_tokens, total_tokens}
+    token_usage: dict[str, int] | None = None  # {prompt_tokens, completion_tokens, total_tokens}
     tool_calls_count: int = 0
     sources_count: int = 0
     step_count: int = 0
     approval_count: int = 0
     total_approval_duration_ms: float = 0.0
-    error_code: Optional[str] = None
-    error_detail: Optional[str] = None
-    failed_tool: Optional[str] = None
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    error_code: str | None = None
+    error_detail: str | None = None
+    failed_tool: str | None = None
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         return data
 
@@ -60,7 +58,7 @@ class AgentTraceStore:
     def __init__(self, database_path: str):
         self._path = Path(database_path)
         self._lock = Lock()
-        self._memory_connection: Optional[sqlite3.Connection] = None
+        self._memory_connection: sqlite3.Connection | None = None
         if database_path == ":memory:":
             self._memory_connection = sqlite3.connect(database_path, check_same_thread=False)
             self._memory_connection.row_factory = sqlite3.Row
@@ -150,7 +148,7 @@ class AgentTraceStore:
             )
         return trace
 
-    def get(self, run_uuid: str) -> Optional[Dict[str, Any]]:
+    def get(self, run_uuid: str) -> dict[str, Any] | None:
         with self._lock, self._connect() as connection:
             row = connection.execute(
                 "SELECT * FROM agent_traces WHERE run_uuid = ?", (run_uuid,)
@@ -164,14 +162,14 @@ class AgentTraceStore:
         *,
         limit: int = 50,
         offset: int = 0,
-        knowledge_base_id: Optional[int] = None,
-        status: Optional[str] = None,
+        knowledge_base_id: int | None = None,
+        status: str | None = None,
         error_only: bool = False,
-    ) -> List[Dict[str, Any]]:
+    ) -> builtins.list[dict[str, Any]]:
         limit = max(1, min(limit, 200))
         offset = max(0, min(offset, 1000))
         clauses = ["1=1"]
-        params: List[Any] = []
+        params: list[Any] = []
         if knowledge_base_id is not None:
             clauses.append("knowledge_base_id = ?")
             params.append(knowledge_base_id)
@@ -190,12 +188,12 @@ class AgentTraceStore:
     def count(
         self,
         *,
-        knowledge_base_id: Optional[int] = None,
-        status: Optional[str] = None,
+        knowledge_base_id: int | None = None,
+        status: str | None = None,
         error_only: bool = False,
     ) -> int:
         clauses = ["1=1"]
-        params: List[Any] = []
+        params: list[Any] = []
         if knowledge_base_id is not None:
             clauses.append("knowledge_base_id = ?")
             params.append(knowledge_base_id)
@@ -217,11 +215,11 @@ class AgentTraceStore:
         self,
         *,
         window_days: int = 7,
-        knowledge_base_id: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        knowledge_base_id: int | None = None,
+    ) -> dict[str, Any]:
         window_days = max(1, min(window_days, 30))
         clauses = ["created_at >= datetime('now', ? || ' days')"]
-        params: List[Any] = [f"-{window_days}"]
+        params: list[Any] = [f"-{window_days}"]
         if knowledge_base_id is not None:
             clauses.append("knowledge_base_id = ?")
             params.append(knowledge_base_id)
@@ -304,14 +302,14 @@ class AgentTraceStore:
         self,
         *,
         max_running_seconds: float = 120.0,
-        knowledge_base_id: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        knowledge_base_id: int | None = None,
+    ) -> builtins.list[dict[str, Any]]:
         """Find runs that are still 'running' beyond the threshold."""
         clauses = [
             "status = 'running'",
             "created_at <= datetime('now', ? || ' seconds')",
         ]
-        params: List[Any] = [f"-{max_running_seconds}"]
+        params: list[Any] = [f"-{max_running_seconds}"]
         if knowledge_base_id is not None:
             clauses.append("knowledge_base_id = ?")
             params.append(knowledge_base_id)
@@ -328,7 +326,7 @@ class AgentTraceStore:
             connection.execute("DELETE FROM agent_traces")
 
     @staticmethod
-    def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
+    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         data = dict(row)
         # Parse JSON fields
         if isinstance(data.get("token_usage"), str):
@@ -341,10 +339,10 @@ class AgentTraceStore:
 
 # ── Global singleton ───────────────────────────────────────────────────
 
-_trace_store: Optional[AgentTraceStore] = None
+_trace_store: AgentTraceStore | None = None
 
 
-def get_agent_trace_store(database_path: Optional[str] = None) -> AgentTraceStore:
+def get_agent_trace_store(database_path: str | None = None) -> AgentTraceStore:
     global _trace_store
     if _trace_store is None:
         if database_path is None:

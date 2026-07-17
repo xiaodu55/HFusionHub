@@ -20,113 +20,117 @@ RAG Module - 检索增强生成模块
 
 from typing import Optional
 
-from .utils import (
-    estimate_tokens,
-    extract_key_phrases,
-    split_sentences,
-    calculate_text_similarity,
-    truncate_text,
-)
-
-from .models import (
-    IntentType,
-    ComplexityLevel,
-    DomainType,
-    IntentResult
-)
-from .strategies import (
-    ClassificationStrategy,
-    LLMClassificationStrategy,
-    RuleClassificationStrategy,
-    HybridClassificationStrategy
-)
-from .intent_classifier import (
-    IntentClassifierFactory,
-    ClassificationStrategyType,
-    IntentClassifier
-)
-from .query_decomposer import (
-    SubQuestion,
-    DecompositionResult,
-    QuestionTreeNode,
-    DecompositionStrategy,
-    DecompositionStrategyType,
-    LLMDecompositionStrategy,
-    RuleDecompositionStrategy,
-    HybridDecompositionStrategy,
-    QueryDecomposer,
-    QueryDecomposerFactory,
-    SubQuestionStatus,
-)
-from .context_compressor import (
-    ContextCompressor,
-    ContextCompressorFactory,
-    CompressionStrategyType,
-    CompressionResult,
-    CompressionConfig,
-    CompressionStatus,
-    ExtractiveCompressionStrategy,
-    AbstractiveCompressionStrategy,
-    HybridCompressionStrategy,
-    RecursiveCompressionStrategy,
-    get_compressor,
-    reset_compressor,
-)
-from .self_reflector import (
-    SelfReflector,
-    SelfReflectorFactory,
-    ReflectionStrategyType,
-    ReflectionResult,
-    ReflectionConfig,
-    ReflectionStatus,
-    QualityCriteria,
-    QualityDimension,
-    LLMReflectionStrategy,
-    RuleBasedReflectionStrategy,
-    HybridReflectionStrategy,
-    get_reflector,
-    reset_reflector,
-)
-from .query_router import (
-    QueryRouter,
-    QueryRouterFactory,
-    ChannelType,
-    RouteStrategy,
-    QueryType,
-    ChannelConfig,
-    RouteResult,
-    SearchResult,
-    MergedResult,
-    VectorChannel,
-    KeywordChannel,
-    get_router,
-    reset_router,
-)
-from .multi_turn_strategy import (
-    MultiTurnManager,
-    MultiTurnStrategyFactory,
-    ConversationState,
-    StrategyType,
-    TurnRole,
-    ConversationTurn,
-    ConversationContext,
-    StrategyConfig,
-    RetrievalAdjustment,
-    ConversationStateManager,
-    TopicEntityExtractor,
-    ContextualStrategy,
-    TopicFocusedStrategy,
-    ExpansiveStrategy,
-    HistoryBasedStrategy,
-    AdaptiveMultiTurnStrategy,
-    get_manager,
-    reset_manager,
-)
 from .adaptive_retrieval import (
-    RetrievalPlan,
     AdaptiveRetrievalPlanner,
+    RetrievalPlan,
     get_adaptive_retrieval_planner,
     reset_adaptive_retrieval_planner,
+)
+from .agent_workflow import (
+    BaseWorkflowNode,
+    ConditionNode,
+    EndNode,
+    LoopNode,
+    MergeNode,
+    NodeResult,
+    NodeStatus,
+    NodeType,
+    ParallelNode,
+    StartNode,
+    TaskNode,
+    Workflow,
+    WorkflowBuilder,
+    WorkflowConfig,
+    WorkflowContext,
+    WorkflowEngine,
+    WorkflowEvent,
+    WorkflowEventType,
+    WorkflowFactory,
+    WorkflowHistory,
+    WorkflowResult,
+    WorkflowStatus,
+    get_workflow_engine,
+    reset_workflow_engine,
+)
+from .answer_quality_evaluator import (
+    AnswerQualityEvaluator,
+    AnswerQualityEvaluatorFactory,
+    BaseEvaluationStrategy,
+    EvaluationConfig,
+    EvaluationDimension,
+    EvaluationResult,
+    EvaluationSample,
+    EvaluationStatus,
+    EvaluationStrategyType,
+    HybridEvaluationStrategy,
+    LLMEvaluationStrategy,
+    MetricResult,
+    RuleBasedEvaluationStrategy,
+)
+from .context_compressor import (
+    AbstractiveCompressionStrategy,
+    CompressionConfig,
+    CompressionResult,
+    CompressionStatus,
+    CompressionStrategyType,
+    ContextCompressor,
+    ContextCompressorFactory,
+    ExtractiveCompressionStrategy,
+    HybridCompressionStrategy,
+    RecursiveCompressionStrategy,
+)
+from .conversation_memory import (
+    BaseMemoryStrategy,
+    ConversationMemory,
+    ConversationMemoryFactory,
+    ConversationSession,
+    HybridMemory,
+    ImportanceBasedMemory,
+    MemoryConfig,
+    MemoryEmbedder,
+    MemoryEventType,
+    MemoryRetriever,
+    MemorySearchResponse,
+    MemorySearchResult,
+    MemoryStats,
+    MemoryStorage,
+    MemoryStrategyFactory,
+    MemoryStrategyType,
+    MemoryType,
+    Message,
+    MessageRole,
+    SlidingWindowMemory,
+    SummaryMemory,
+    TokenBasedMemory,
+    get_conversation_memory,
+    reset_conversation_memory,
+)
+from .evaluation import (
+    EvaluationCase,
+    EvaluationCaseResult,
+    RetrievalEvaluator,
+)
+from .intent_classifier import ClassificationStrategyType, IntentClassifier, IntentClassifierFactory
+from .models import ComplexityLevel, DomainType, IntentResult, IntentType
+from .multi_turn_strategy import (
+    AdaptiveMultiTurnStrategy,
+    ContextualStrategy,
+    ConversationContext,
+    ConversationState,
+    ConversationStateManager,
+    ConversationTurn,
+    ExpansiveStrategy,
+    HistoryBasedStrategy,
+    MultiTurnManager,
+    MultiTurnStrategyFactory,
+    RetrievalAdjustment,
+    StrategyConfig,
+    StrategyType,
+    TopicEntityExtractor,
+    TopicFocusedStrategy,
+    TurnRole,
+    get_manager,
+    reset_manager,
 )
 from .observability import (
     RetrievalTrace,
@@ -134,82 +138,62 @@ from .observability import (
     get_trace_store,
     reset_trace_store,
 )
-from .evaluation import (
-    EvaluationCase,
-    EvaluationCaseResult,
-    RetrievalEvaluator,
+from .postprocessor import Postprocessor, ProcessedResult, get_postprocessor
+from .query_decomposer import (
+    DecompositionResult,
+    DecompositionStrategy,
+    DecompositionStrategyType,
+    HybridDecompositionStrategy,
+    LLMDecompositionStrategy,
+    QueryDecomposer,
+    QueryDecomposerFactory,
+    QuestionTreeNode,
+    RuleDecompositionStrategy,
+    SubQuestion,
+    SubQuestionStatus,
 )
-from .query_rewriter import QueryRewriter, get_query_rewriter, RewriteResult
-from .retriever import MultiChannelRetriever, get_retriever, RetrievalResult
-from .postprocessor import Postprocessor, get_postprocessor, ProcessedResult
-from .answer_quality_evaluator import (
-    AnswerQualityEvaluator,
-    AnswerQualityEvaluatorFactory,
-    EvaluationStrategyType,
-    EvaluationDimension,
-    EvaluationStatus,
-    EvaluationSample,
-    EvaluationResult,
-    MetricResult,
-    EvaluationConfig,
-    BaseEvaluationStrategy,
-    RuleBasedEvaluationStrategy,
-    LLMEvaluationStrategy,
-    HybridEvaluationStrategy,
-    get_evaluator,
-    reset_evaluator,
+from .query_rewriter import QueryRewriter, RewriteResult, get_query_rewriter
+from .query_router import (
+    ChannelConfig,
+    ChannelType,
+    KeywordChannel,
+    MergedResult,
+    QueryRouter,
+    QueryRouterFactory,
+    QueryType,
+    RouteResult,
+    RouteStrategy,
+    SearchResult,
+    VectorChannel,
+    get_router,
+    reset_router,
 )
-from .conversation_memory import (
-    ConversationMemory,
-    ConversationMemoryFactory,
-    MemoryType,
-    MemoryStrategyType,
-    MessageRole,
-    MemoryEventType,
-    Message,
-    ConversationSession,
-    MemoryConfig,
-    MemorySearchResult,
-    MemorySearchResponse,
-    MemoryStats,
-    BaseMemoryStrategy,
-    SlidingWindowMemory,
-    TokenBasedMemory,
-    SummaryMemory,
-    ImportanceBasedMemory,
-    HybridMemory,
-    MemoryStrategyFactory,
-    MemoryEmbedder,
-    MemoryStorage,
-    MemoryRetriever,
-    get_conversation_memory,
-    reset_conversation_memory,
+from .retriever import MultiChannelRetriever, RetrievalResult, get_retriever
+from .self_reflector import (
+    HybridReflectionStrategy,
+    LLMReflectionStrategy,
+    QualityCriteria,
+    QualityDimension,
+    ReflectionConfig,
+    ReflectionResult,
+    ReflectionStatus,
+    ReflectionStrategyType,
+    RuleBasedReflectionStrategy,
+    SelfReflector,
+    SelfReflectorFactory,
 )
-from .agent_workflow import (
-    Workflow,
-    WorkflowEngine,
-    WorkflowBuilder,
-    WorkflowFactory,
-    WorkflowStatus,
-    NodeType,
-    NodeStatus,
-    WorkflowEventType,
-    WorkflowContext,
-    NodeResult,
-    WorkflowResult,
-    WorkflowConfig,
-    WorkflowEvent,
-    WorkflowHistory,
-    BaseWorkflowNode,
-    StartNode,
-    EndNode,
-    TaskNode,
-    ConditionNode,
-    ParallelNode,
-    LoopNode,
-    MergeNode,
-    get_workflow_engine,
-    reset_workflow_engine,
+from .strategies import (
+    ClassificationStrategy,
+    HybridClassificationStrategy,
+    LLMClassificationStrategy,
+    RuleClassificationStrategy,
+)
+from .utils import (
+    calculate_text_similarity,
+    estimate_tokens,
+    extract_key_phrases,
+    split_sentences,
+    truncate_text,
 )
 
 __all__ = [
@@ -416,7 +400,7 @@ __all__ = [
 
 
 # 全局意图分类器实例
-_intent_classifier: Optional[IntentClassifier] = None
+_intent_classifier: IntentClassifier | None = None
 
 
 def get_intent_classifier(
@@ -449,7 +433,7 @@ def reset_intent_classifier():
 
 
 # 全局问题分解器实例
-_query_decomposer: Optional[QueryDecomposer] = None
+_query_decomposer: QueryDecomposer | None = None
 
 
 def get_query_decomposer(
@@ -481,7 +465,7 @@ def reset_query_decomposer():
 
 
 # 全局上下文压缩器实例
-_compressor: Optional[ContextCompressor] = None
+_compressor: ContextCompressor | None = None
 
 
 def get_compressor(
@@ -513,7 +497,7 @@ def reset_compressor():
 
 
 # 全局自我反思器实例
-_reflector: Optional[SelfReflector] = None
+_reflector: SelfReflector | None = None
 
 
 def get_reflector(

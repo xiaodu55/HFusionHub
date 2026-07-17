@@ -16,12 +16,11 @@
 - 状态机模式: 对话状态转换
 """
 
-import time
 import logging
-from enum import Enum
-from typing import Dict, List, Optional, Any, Set, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +66,9 @@ class ConversationTurn:
     role: TurnRole
     content: str
     timestamp: datetime = field(default_factory=datetime.now)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "role": self.role.value,
@@ -83,11 +82,11 @@ class ConversationTurn:
 class ConversationContext:
     """对话上下文"""
     conversation_id: str
-    turns: List[ConversationTurn] = field(default_factory=list)
+    turns: list[ConversationTurn] = field(default_factory=list)
     state: ConversationState = ConversationState.INIT
-    topics: List[str] = field(default_factory=list)
-    entities: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    topics: list[str] = field(default_factory=list)
+    entities: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def turn_count(self) -> int:
@@ -95,7 +94,7 @@ class ConversationContext:
         return len(self.turns)
 
     @property
-    def last_user_turn(self) -> Optional[ConversationTurn]:
+    def last_user_turn(self) -> ConversationTurn | None:
         """最后一个用户轮次"""
         for turn in reversed(self.turns):
             if turn.role == TurnRole.USER:
@@ -103,7 +102,7 @@ class ConversationContext:
         return None
 
     @property
-    def last_assistant_turn(self) -> Optional[ConversationTurn]:
+    def last_assistant_turn(self) -> ConversationTurn | None:
         """最后一个助手轮次"""
         for turn in reversed(self.turns):
             if turn.role == TurnRole.ASSISTANT:
@@ -120,7 +119,7 @@ class ConversationContext:
         self.turns.append(turn)
         return turn
 
-    def get_recent_turns(self, n: int = 5) -> List[ConversationTurn]:
+    def get_recent_turns(self, n: int = 5) -> list[ConversationTurn]:
         """获取最近 n 轮对话"""
         return self.turns[-n:] if len(self.turns) >= n else self.turns
 
@@ -150,16 +149,16 @@ class StrategyConfig:
     topic_detection_enabled: bool = True
     entity_tracking_enabled: bool = True
     adaptive_threshold: float = 0.7
-    params: Dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class RetrievalAdjustment:
     """检索调整"""
     strategy_type: StrategyType
-    query_modifications: List[str] = field(default_factory=list)
-    context_additions: List[str] = field(default_factory=list)
-    weight_adjustments: Dict[str, float] = field(default_factory=dict)
+    query_modifications: list[str] = field(default_factory=list)
+    context_additions: list[str] = field(default_factory=list)
+    weight_adjustments: dict[str, float] = field(default_factory=dict)
     reasoning: str = ""
     confidence: float = 0.0
 
@@ -172,7 +171,7 @@ class ConversationStateManager:
     """对话状态管理器"""
 
     # 状态转换规则
-    _transitions: Dict[ConversationState, List[ConversationState]] = {
+    _transitions: dict[ConversationState, list[ConversationState]] = {
         ConversationState.INIT: [
             ConversationState.GREETING,
             ConversationState.TOPIC_DETECTION,
@@ -249,7 +248,7 @@ class ConversationStateManager:
         allowed = self._transitions.get(current, [])
         return next_state in allowed
 
-    def get_next_states(self, current: ConversationState) -> List[ConversationState]:
+    def get_next_states(self, current: ConversationState) -> list[ConversationState]:
         """获取当前状态可以转换到的下一状态"""
         return self._transitions.get(current, [])
 
@@ -261,7 +260,7 @@ class ConversationStateManager:
 class TopicEntityExtractor:
     """话题和实体提取器"""
 
-    def extract_topics(self, context: ConversationContext) -> List[str]:
+    def extract_topics(self, context: ConversationContext) -> list[str]:
         """
         提取对话话题
 
@@ -280,7 +279,7 @@ class TopicEntityExtractor:
 
         return list(topics)[:5]  # 最多5个话题
 
-    def extract_entities(self, context: ConversationContext) -> List[str]:
+    def extract_entities(self, context: ConversationContext) -> list[str]:
         """
         提取实体
 
@@ -310,7 +309,7 @@ class TopicEntityExtractor:
 class MultiTurnStrategy:
     """多轮检索策略基类"""
 
-    def __init__(self, config: Optional[StrategyConfig] = None):
+    def __init__(self, config: StrategyConfig | None = None):
         self.config = config or StrategyConfig(strategy_type=StrategyType.ADAPTIVE)
 
     async def adjust_retrieval(
@@ -326,7 +325,7 @@ class MultiTurnStrategy:
 class ContextualStrategy(MultiTurnStrategy):
     """上下文感知策略"""
 
-    def __init__(self, config: Optional[StrategyConfig] = None):
+    def __init__(self, config: StrategyConfig | None = None):
         super().__init__(config)
         self.config.strategy_type = StrategyType.CONTEXTUAL
 
@@ -354,7 +353,6 @@ class ContextualStrategy(MultiTurnStrategy):
 
         # 3. 根据话题调整
         if context.topics:
-            topic_query = f"{query} {' '.join(context.topics[:3])}"
             modifications.append(f"添加话题关键词: {context.topics[:3]}")
 
         return RetrievalAdjustment(
@@ -370,7 +368,7 @@ class ContextualStrategy(MultiTurnStrategy):
 class TopicFocusedStrategy(MultiTurnStrategy):
     """话题聚焦策略"""
 
-    def __init__(self, config: Optional[StrategyConfig] = None):
+    def __init__(self, config: StrategyConfig | None = None):
         super().__init__(config)
         self.config.strategy_type = StrategyType.TOPIC_FOCUSED
 
@@ -412,7 +410,7 @@ class TopicFocusedStrategy(MultiTurnStrategy):
 class ExpansiveStrategy(MultiTurnStrategy):
     """扩展检索策略"""
 
-    def __init__(self, config: Optional[StrategyConfig] = None):
+    def __init__(self, config: StrategyConfig | None = None):
         super().__init__(config)
         self.config.strategy_type = StrategyType.EXPANSIVE
 
@@ -455,7 +453,7 @@ class ExpansiveStrategy(MultiTurnStrategy):
 class HistoryBasedStrategy(MultiTurnStrategy):
     """基于历史策略"""
 
-    def __init__(self, config: Optional[StrategyConfig] = None):
+    def __init__(self, config: StrategyConfig | None = None):
         super().__init__(config)
         self.config.strategy_type = StrategyType.HISTORY_BASED
 
@@ -506,12 +504,12 @@ class HistoryBasedStrategy(MultiTurnStrategy):
 class AdaptiveMultiTurnStrategy(MultiTurnStrategy):
     """自适应多轮策略"""
 
-    def __init__(self, config: Optional[StrategyConfig] = None):
+    def __init__(self, config: StrategyConfig | None = None):
         super().__init__(config)
         self.config.strategy_type = StrategyType.ADAPTIVE
 
         # 子策略
-        self._strategies: Dict[StrategyType, MultiTurnStrategy] = {
+        self._strategies: dict[StrategyType, MultiTurnStrategy] = {
             StrategyType.CONTEXTUAL: ContextualStrategy(config),
             StrategyType.TOPIC_FOCUSED: TopicFocusedStrategy(config),
             StrategyType.EXPANSIVE: ExpansiveStrategy(config),
@@ -577,7 +575,7 @@ class MultiTurnManager:
 
     def __init__(
         self,
-        strategy: Optional[MultiTurnStrategy] = None,
+        strategy: MultiTurnStrategy | None = None,
         max_context_tokens: int = 4000,
     ):
         self.strategy = strategy or AdaptiveMultiTurnStrategy()
@@ -586,7 +584,7 @@ class MultiTurnManager:
         self.extractor = TopicEntityExtractor()
 
         # 对话上下文缓存
-        self._contexts: Dict[str, ConversationContext] = {}
+        self._contexts: dict[str, ConversationContext] = {}
 
     def get_or_create_context(self, conversation_id: str) -> ConversationContext:
         """获取或创建对话上下文"""
@@ -653,7 +651,7 @@ class MultiTurnManager:
         if conversation_id in self._contexts:
             del self._contexts[conversation_id]
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """获取统计信息"""
         return {
             "active_conversations": len(self._contexts),
@@ -672,7 +670,7 @@ class MultiTurnStrategyFactory:
     @staticmethod
     def create(
         strategy_type: StrategyType = StrategyType.ADAPTIVE,
-        config: Optional[StrategyConfig] = None,
+        config: StrategyConfig | None = None,
         **kwargs
     ) -> MultiTurnStrategy:
         """创建 MultiTurnStrategy 实例"""
@@ -692,7 +690,7 @@ class MultiTurnStrategyFactory:
     @staticmethod
     def create_manager(
         strategy_type: StrategyType = StrategyType.ADAPTIVE,
-        config: Optional[StrategyConfig] = None,
+        config: StrategyConfig | None = None,
         **kwargs
     ) -> MultiTurnManager:
         """创建 MultiTurnManager 实例"""
@@ -704,7 +702,7 @@ class MultiTurnStrategyFactory:
 # 全局实例
 # =============================================================================
 
-_global_manager: Optional[MultiTurnManager] = None
+_global_manager: MultiTurnManager | None = None
 
 
 def get_manager() -> MultiTurnManager:

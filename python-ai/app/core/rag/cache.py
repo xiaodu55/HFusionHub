@@ -19,13 +19,13 @@ Cache Manager - 缓存管理器
 日期：2026-07-22
 """
 
-import time
 import hashlib
 import json
 import logging
-from typing import Any, Callable, Dict, Optional, Tuple
+import time
+from dataclasses import dataclass
 from functools import wraps
-from dataclasses import dataclass, field
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ class CacheStats:
         total = self.hits + self.misses
         return self.hits / total if total > 0 else 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "hits": self.hits,
@@ -106,10 +106,10 @@ class CacheManager:
         self.max_size = max_size
         self.name = name
 
-        self._cache: Dict[str, Tuple[Any, float]] = {}
+        self._cache: dict[str, tuple[Any, float]] = {}
         self._stats = CacheStats()
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """
         获取缓存值
 
@@ -205,8 +205,8 @@ class CacheManager:
 
     def cached(
         self,
-        key_func: Optional[Callable[..., str]] = None,
-        ttl: Optional[int] = None
+        key_func: Callable[..., str] | None = None,
+        ttl: int | None = None
     ):
         """
         缓存装饰器
@@ -250,7 +250,7 @@ class CacheManager:
             return wrapper
         return decorator
 
-    def get_with_ttl(self, key: str, ttl: int) -> Optional[Any]:
+    def get_with_ttl(self, key: str, ttl: int) -> Any | None:
         """
         获取缓存值（使用自定义 TTL）
 

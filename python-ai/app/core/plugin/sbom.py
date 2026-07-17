@@ -6,14 +6,12 @@ dependencies and enable vulnerability scanning.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
 import subprocess
-import tempfile
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +32,10 @@ class SBOMResult:
     format: str = "cyclonedx-json"
     version: str = "1.5"
     spec_version: str = "1.5"
-    components: List[SBOMComponent] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    components: list[SBOMComponent] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "bomFormat": "CycloneDX",
             "specVersion": self.spec_version,
@@ -89,7 +87,7 @@ class SBOMGenerator:
         """Generate SBOM from a requirements.txt file."""
         try:
             with open(requirements_path) as f:
-                lines = [l.strip() for l in f if l.strip() and not l.startswith("#")]
+                lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
 
             components = []
             for line in lines:
@@ -126,7 +124,7 @@ class SBOMGenerator:
             metadata={"source": wheel_path, "generator": "fallback"},
         )
 
-    def _parse_cyclonedx(self, data: Dict[str, Any]) -> SBOMResult:
+    def _parse_cyclonedx(self, data: dict[str, Any]) -> SBOMResult:
         result = SBOMResult()
         for comp in data.get("components", []):
             hashes = comp.get("hashes", [])

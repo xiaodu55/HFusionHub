@@ -15,26 +15,25 @@ ContextCompressor 单元测试
 日期：2026-07-22
 """
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock
 import time
-import hashlib
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from app.core.rag.context_compressor import (
-    CompressionResult,
-    CompressionConfig,
-    CompressionStrategyType,
-    CompressionStatus,
-    ExtractiveCompressionStrategy,
     AbstractiveCompressionStrategy,
-    HybridCompressionStrategy,
-    RecursiveCompressionStrategy,
+    CompressionConfig,
+    CompressionResult,
+    CompressionStatus,
+    CompressionStrategyType,
     ContextCompressor,
     ContextCompressorFactory,
+    ExtractiveCompressionStrategy,
+    HybridCompressionStrategy,
+    RecursiveCompressionStrategy,
     get_compressor,
     reset_compressor,
 )
-
 
 # ==================== 数据模型测试 ====================
 
@@ -563,7 +562,7 @@ class TestIntegration:
         result = await compressor.compress(text, config)
 
         assert result.status == CompressionStatus.COMPLETED
-        assert result.compressed_tokens < result.original_tokens, f"长文本应发生压缩"
+        assert result.compressed_tokens < result.original_tokens, "长文本应发生压缩"
         print(f"\n递归压缩：{result.original_tokens} -> {result.compressed_tokens} tokens")
 
     @pytest.mark.asyncio

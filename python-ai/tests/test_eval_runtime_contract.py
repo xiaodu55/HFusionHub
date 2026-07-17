@@ -13,18 +13,15 @@ These tests exercise the pure, network-free parts of ``scripts/eval_runtime.py``
 - gate thresholds and exit-code-driving failure list
 """
 
-import hashlib
 import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from eval_baseline import (
     CaseOutcome,
     EvalCase,
-    load_cases,
     verify_suite_integrity,
 )
 

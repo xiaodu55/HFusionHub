@@ -26,8 +26,8 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
 from enum import Enum
+from typing import Any
 
 import httpx
 
@@ -62,14 +62,14 @@ class MCPServerConnection:
     name: str
     url: str
     transport: TransportType = TransportType.SSE
-    api_key: Optional[str] = None
+    api_key: str | None = None
     status: ConnectionStatus = ConnectionStatus.DISCONNECTED
-    tools: List[Dict[str, Any]] = field(default_factory=list)
+    tools: list[dict[str, Any]] = field(default_factory=list)
     last_heartbeat: float = 0.0
     error_message: str = ""
     consecutive_failures: int = 0
     # Echoed on every subsequent request for stateful MCP servers.
-    session_id: Optional[str] = None
+    session_id: str | None = None
 
 
 @dataclass
@@ -77,7 +77,7 @@ class MCPToolSpec:
     """An MCP tool represented as a local ToolSpec-compatible dict."""
     name: str
     description: str
-    input_schema: Dict[str, Any]
+    input_schema: dict[str, Any]
     server_id: str
     server_name: str
 
@@ -89,9 +89,9 @@ class MCPClientManager:
     """
 
     def __init__(self):
-        self._servers: Dict[str, MCPServerConnection] = {}
-        self._heartbeat_task: Optional[asyncio.Task] = None
-        self._http_client: Optional[httpx.AsyncClient] = None
+        self._servers: dict[str, MCPServerConnection] = {}
+        self._heartbeat_task: asyncio.Task | None = None
+        self._http_client: httpx.AsyncClient | None = None
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
@@ -174,7 +174,7 @@ class MCPClientManager:
         except Exception as exc:
             logger.warning("MCP config persistence failed: %s", exc)
 
-    def add_server(self, cfg: Dict[str, Any]) -> MCPServerConnection:
+    def add_server(self, cfg: dict[str, Any]) -> MCPServerConnection:
         sid = cfg["id"]
         conn = MCPServerConnection(
             server_id=sid,
@@ -194,10 +194,10 @@ class MCPClientManager:
             return True
         return False
 
-    def get_server(self, server_id: str) -> Optional[MCPServerConnection]:
+    def get_server(self, server_id: str) -> MCPServerConnection | None:
         return self._servers.get(server_id)
 
-    def list_servers(self) -> List[MCPServerConnection]:
+    def list_servers(self) -> list[MCPServerConnection]:
         return list(self._servers.values())
 
     # ── Connection management ────────────────────────────────────────
@@ -281,7 +281,7 @@ class MCPClientManager:
         last parseable payload is the response to our request (intermediate
         events are progress pings).
         """
-        data_parts: List[str] = []
+        data_parts: list[str] = []
         for line in text.splitlines():
             line = line.strip()
             if line.startswith("data:"):
@@ -293,10 +293,10 @@ class MCPClientManager:
     async def _post_jsonrpc(
         self,
         conn: MCPServerConnection,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         *,
-        timeout: Optional[float] = None,
-    ) -> Dict[str, Any]:
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         """POST one JSON-RPC message to the server's base URL.
 
         Handles ``application/json`` and ``text/event-stream`` responses,
@@ -309,7 +309,7 @@ class MCPClientManager:
         headers["Accept"] = "application/json, text/event-stream"
         if conn.session_id:
             headers["Mcp-Session-Id"] = conn.session_id
-        kwargs: Dict[str, Any] = {"headers": headers}
+        kwargs: dict[str, Any] = {"headers": headers}
         if timeout is not None:
             kwargs["timeout"] = httpx.Timeout(timeout, connect=MCP_CONNECT_TIMEOUT)
 
@@ -333,9 +333,9 @@ class MCPClientManager:
 
     # ── Tool discovery ───────────────────────────────────────────────
 
-    def get_all_tools(self) -> List[MCPToolSpec]:
+    def get_all_tools(self) -> list[MCPToolSpec]:
         """Return all tools from all connected servers."""
-        tools: List[MCPToolSpec] = []
+        tools: list[MCPToolSpec] = []
         for conn in self._servers.values():
             if conn.status != ConnectionStatus.CONNECTED:
                 continue
@@ -349,7 +349,7 @@ class MCPClientManager:
                 ))
         return tools
 
-    def get_tools_for_server(self, server_id: str) -> List[MCPToolSpec]:
+    def get_tools_for_server(self, server_id: str) -> list[MCPToolSpec]:
         conn = self._servers.get(server_id)
         if not conn or conn.status != ConnectionStatus.CONNECTED:
             return []
@@ -367,10 +367,10 @@ class MCPClientManager:
         self,
         server_id: str,
         tool_name: str,
-        arguments: Dict[str, Any],
+        arguments: dict[str, Any],
         *,
         timeout: float = MCP_CALL_TIMEOUT,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Execute a tool on a remote MCP server (JSON-RPC ``tools/call``)."""
         conn = self._servers.get(server_id)
         if not conn or conn.status != ConnectionStatus.CONNECTED:
@@ -429,7 +429,7 @@ class MCPClientManager:
     # ── Helpers ──────────────────────────────────────────────────────
 
     @staticmethod
-    def _headers(conn: MCPServerConnection) -> Dict[str, str]:
+    def _headers(conn: MCPServerConnection) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
         if conn.api_key:
             headers["Authorization"] = f"Bearer {conn.api_key}"
@@ -438,7 +438,7 @@ class MCPClientManager:
 
 # ── Singleton ──────────────────────────────────────────────────────────
 
-_mcp_client_manager: Optional[MCPClientManager] = None
+_mcp_client_manager: MCPClientManager | None = None
 
 
 def get_mcp_client_manager() -> MCPClientManager:

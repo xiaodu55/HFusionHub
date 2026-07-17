@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import contextvars
 import uuid
-from typing import Optional
 
 # Request-scoped trace ID, set by TraceMiddleware and readable anywhere in the
 # same async task / thread.
-_trace_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+_trace_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "trace_id", default=None
 )
 
@@ -22,7 +21,7 @@ _trace_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
 HEADER_NAME = "X-Trace-ID"
 
 
-def get_trace_id() -> Optional[str]:
+def get_trace_id() -> str | None:
     """Return the current trace ID, or ``None`` if no request is active."""
     return _trace_id_var.get()
 

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from html import unescape
 from html.parser import HTMLParser
-from typing import List, Optional
 
 from app.core.parser.base import BaseParser, BlockType, ParsedBlock
 
@@ -29,14 +28,14 @@ _CONTAINER_TAGS = {"div", "section", "article", "blockquote"}
 class _TextExtractor(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self.blocks: List[ParsedBlock] = []
+        self.blocks: list[ParsedBlock] = []
         self._skip_depth = 0
         # 当前打开的块级结构栈（h1..h6/p/li/table/容器）
-        self._stack: List[str] = []
-        self._text_parts: List[str] = []
-        self._table_rows: List[List[str]] = []
-        self._current_row: Optional[List[str]] = None
-        self._list_stack: List[str] = []
+        self._stack: list[str] = []
+        self._text_parts: list[str] = []
+        self._table_rows: list[list[str]] = []
+        self._current_row: list[str] | None = None
+        self._list_stack: list[str] = []
 
     # ── 标签处理 ────────────────────────────────────────────────────
 
@@ -167,7 +166,7 @@ class _TextExtractor(HTMLParser):
 class HtmlParser(BaseParser):
     """Parse .html/.htm into blocks: headings, paragraphs, lists and tables."""
 
-    def parse(self, file_path: str) -> List[ParsedBlock]:
+    def parse(self, file_path: str) -> list[ParsedBlock]:
         from pathlib import Path
 
         raw = Path(file_path).read_bytes()

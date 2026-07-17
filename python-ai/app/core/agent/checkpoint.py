@@ -26,10 +26,10 @@ import json
 import logging
 import sqlite3
 import threading
-import time
 from dataclasses import asdict, dataclass, field
+from datetime import UTC
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.utils.config import config
 
@@ -44,20 +44,20 @@ class Checkpoint:
 
     run_id: str
     step_index: int
-    conversation_history: List[Dict[str, str]] = field(default_factory=list)
+    conversation_history: list[dict[str, str]] = field(default_factory=list)
     retrieved_context: str = ""
-    pending_tool_calls: List[Dict[str, Any]] = field(default_factory=list)
-    agent_state: Dict[str, Any] = field(default_factory=dict)
-    sources: List[Dict[str, Any]] = field(default_factory=list)
+    pending_tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    agent_state: dict[str, Any] = field(default_factory=dict)
+    sources: list[dict[str, Any]] = field(default_factory=list)
     style: str = "detailed"
     max_tool_steps: int = 5
     created_at: str = field(default_factory=lambda: _now_iso())
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_row(cls, row: sqlite3.Row) -> "Checkpoint":
+    def from_row(cls, row: sqlite3.Row) -> Checkpoint:
         return cls(
             run_id=row["run_id"],
             step_index=row["step_index"],
@@ -73,8 +73,8 @@ class Checkpoint:
 
 
 def _now_iso() -> str:
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat()
+    from datetime import datetime
+    return datetime.now(UTC).isoformat()
 
 
 class CheckpointManager:
@@ -84,7 +84,7 @@ class CheckpointManager:
     multi-node setups should replace the backend with a shared store (MySQL/Redis).
     """
 
-    def __init__(self, database_path: Optional[str] = None):
+    def __init__(self, database_path: str | None = None):
         self._path = Path(database_path or getattr(config, "CHECKPOINT_DB_PATH", None) or _CHECKPOINT_DB_DEFAULT)
         self._lock = threading.Lock()
         if str(self._path) != ":memory:":
@@ -152,7 +152,7 @@ class CheckpointManager:
         logger.debug("Checkpoint saved: run=%s step=%d id=%d", checkpoint.run_id, checkpoint.step_index, row_id)
         return row_id
 
-    def load(self, run_id: str) -> Optional[Checkpoint]:
+    def load(self, run_id: str) -> Checkpoint | None:
         """Load the latest checkpoint for a run."""
         with self._lock, self._connect() as conn:
             row = conn.execute(
@@ -163,7 +163,7 @@ class CheckpointManager:
             return None
         return Checkpoint.from_row(row)
 
-    def load_at_step(self, run_id: str, step_index: int) -> Optional[Checkpoint]:
+    def load_at_step(self, run_id: str, step_index: int) -> Checkpoint | None:
         """Load checkpoint at a specific step."""
         with self._lock, self._connect() as conn:
             row = conn.execute(
@@ -174,7 +174,7 @@ class CheckpointManager:
             return None
         return Checkpoint.from_row(row)
 
-    def list_for_run(self, run_id: str) -> List[Checkpoint]:
+    def list_for_run(self, run_id: str) -> list[Checkpoint]:
         """All checkpoints for a run, ordered by step."""
         with self._lock, self._connect() as conn:
             rows = conn.execute(
@@ -221,7 +221,7 @@ def build_checkpoint_from_agent(
     run_id: str,
     step_index: int,
     *,
-    extra_state: Optional[Dict[str, Any]] = None,
+    extra_state: dict[str, Any] | None = None,
 ) -> Checkpoint:
     """Build a Checkpoint from the current ReactAgent state.
 
@@ -242,7 +242,7 @@ def build_checkpoint_from_agent(
 
 # ── Singleton ──────────────────────────────────────────────────────────
 
-_checkpoint_manager: Optional[CheckpointManager] = None
+_checkpoint_manager: CheckpointManager | None = None
 
 
 def get_checkpoint_manager() -> CheckpointManager:

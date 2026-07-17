@@ -2,7 +2,7 @@
 Search Tool - Search knowledge base documents
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .base import BaseTool
 
@@ -18,9 +18,9 @@ class SearchTool(BaseTool):
         query: str,
         top_k: int = 5,
         knowledge_base_id: int = None,
-        metadata_filter: Dict[str, Any] = None,
+        metadata_filter: dict[str, Any] = None,
         **kwargs
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Search knowledge base
 

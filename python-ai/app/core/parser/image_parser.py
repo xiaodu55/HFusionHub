@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List
 
 from app.core.parser.base import BaseParser, BlockType, ParsedBlock
 
@@ -30,7 +29,7 @@ _MAX_OCR_CHARACTERS = 3000
 class ImageParser(BaseParser):
     """OCR a standalone image file into a single text block."""
 
-    def parse(self, file_path: str) -> List[ParsedBlock]:
+    def parse(self, file_path: str) -> list[ParsedBlock]:
         from app.utils.config import config
 
         if not config.RAG_MULTIMODAL_OCR_ENABLED:

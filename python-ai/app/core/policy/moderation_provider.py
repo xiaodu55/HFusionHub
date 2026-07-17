@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Protocol
 
 from app.utils.config import config
 
@@ -28,10 +28,10 @@ class ModerationVerdict:
     """外部审核结论。"""
 
     allowed: bool
-    category: Optional[str] = None  # 命中类别（porn/ad/politics 等，供应商自定义）
-    score: Optional[float] = None  # 风险分（0-1，供应商自定义尺度）
+    category: str | None = None  # 命中类别（porn/ad/politics 等，供应商自定义）
+    score: float | None = None  # 风险分（0-1，供应商自定义尺度）
     provider: str = "http"
-    raw: Optional[Dict[str, Any]] = None
+    raw: dict[str, Any] | None = None
 
 
 class ModerationProvider(Protocol):
@@ -42,7 +42,7 @@ class ModerationProvider(Protocol):
         ...  # pragma: no cover
 
 
-def _dot_path(data: Dict[str, Any], path: str) -> Any:
+def _dot_path(data: dict[str, Any], path: str) -> Any:
     """按 a.b.c 取嵌套字段；路径非法返回 None。"""
     current: Any = data
     for part in path.split("."):
@@ -103,7 +103,7 @@ class HttpModerationProvider:
         )
 
 
-def _as_float(value: Any) -> Optional[float]:
+def _as_float(value: Any) -> float | None:
     try:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
@@ -112,10 +112,10 @@ def _as_float(value: Any) -> Optional[float]:
 
 # ── 工厂（模块级单例）──────────────────────────────────────────────────────
 
-_provider: Optional[ModerationProvider] = None
+_provider: ModerationProvider | None = None
 
 
-def get_moderation_provider() -> Optional[ModerationProvider]:
+def get_moderation_provider() -> ModerationProvider | None:
     """按 MODERATION_PROVIDER 配置返回外部审核引擎；local/未配置返回 None。"""
     global _provider
     if _provider is not None:

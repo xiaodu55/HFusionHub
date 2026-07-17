@@ -16,20 +16,15 @@ ConversationMemory 模块
 - 单例模式：全局唯一实例
 """
 
+import hashlib
 import logging
-import json
 import time
 import uuid
-import hashlib
-from collections import OrderedDict
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
-from enum import Enum
-from typing import (
-    Any, Dict, List, Optional, Set, Tuple, Union, Callable
-)
+from collections import OrderedDict
 from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -85,11 +80,11 @@ class Message:
     timestamp: float
     token_count: int = 0
     importance_score: float = 0.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     is_summarized: bool = False
     summary: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转为字典"""
         return {
             "message_id": self.message_id,
@@ -104,7 +99,7 @@ class Message:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Message":
+    def from_dict(cls, data: dict[str, Any]) -> "Message":
         """从字典创建"""
         return cls(
             message_id=data["message_id"],
@@ -126,11 +121,11 @@ class ConversationSession:
     user_id: str
     created_at: float
     updated_at: float
-    messages: List[Message] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    messages: list[Message] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
     is_active: bool = True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转为字典"""
         return {
             "session_id": self.session_id,
@@ -143,7 +138,7 @@ class ConversationSession:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ConversationSession":
+    def from_dict(cls, data: dict[str, Any]) -> "ConversationSession":
         """从字典创建"""
         return cls(
             session_id=data["session_id"],
@@ -170,7 +165,7 @@ class MemoryConfig:
     enable_persistence: bool = True  # 启用持久化
     storage_path: str = "memory_storage"  # 存储路径
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转为字典"""
         return {
             "strategy_type": self.strategy_type.value,
@@ -186,7 +181,7 @@ class MemoryConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "MemoryConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "MemoryConfig":
         """从字典创建"""
         return cls(
             strategy_type=MemoryStrategyType(data.get("strategy_type", "sliding_window")),
@@ -210,7 +205,7 @@ class MemorySearchResult:
     session_id: str
     reason: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转为字典"""
         return {
             "message": self.message.to_dict(),
@@ -224,11 +219,11 @@ class MemorySearchResult:
 class MemorySearchResponse:
     """记忆搜索响应"""
     query: str
-    results: List[MemorySearchResult]
+    results: list[MemorySearchResult]
     total_results: int
     search_time_ms: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转为字典"""
         return {
             "query": self.query,
@@ -248,7 +243,7 @@ class MemoryStats:
     avg_tokens_per_message: float = 0.0
     memory_usage_bytes: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转为字典"""
         return {
             "total_sessions": self.total_sessions,
@@ -283,8 +278,8 @@ class BaseMemoryStrategy(ABC):
     def get_messages_for_context(
         self,
         session: ConversationSession,
-        max_tokens: Optional[int] = None
-    ) -> List[Message]:
+        max_tokens: int | None = None
+    ) -> list[Message]:
         """获取用于上下文的消息"""
         pass
 
@@ -292,7 +287,7 @@ class BaseMemoryStrategy(ABC):
     def compress_memory(
         self,
         session: ConversationSession
-    ) -> Tuple[List[Message], List[Message]]:
+    ) -> tuple[list[Message], list[Message]]:
         """压缩记忆，返回 (保留的消息, 被压缩的消息)"""
         pass
 
@@ -311,8 +306,8 @@ class SlidingWindowMemory(BaseMemoryStrategy):
     def get_messages_for_context(
         self,
         session: ConversationSession,
-        max_tokens: Optional[int] = None
-    ) -> List[Message]:
+        max_tokens: int | None = None
+    ) -> list[Message]:
         """获取最近的N条消息"""
         max_msgs = self.config.max_messages
         if max_tokens:
@@ -332,7 +327,7 @@ class SlidingWindowMemory(BaseMemoryStrategy):
     def compress_memory(
         self,
         session: ConversationSession
-    ) -> Tuple[List[Message], List[Message]]:
+    ) -> tuple[list[Message], list[Message]]:
         """压缩超出窗口的消息"""
         max_msgs = self.config.max_messages
         if len(session.messages) <= max_msgs:
@@ -358,8 +353,8 @@ class TokenBasedMemory(BaseMemoryStrategy):
     def get_messages_for_context(
         self,
         session: ConversationSession,
-        max_tokens: Optional[int] = None
-    ) -> List[Message]:
+        max_tokens: int | None = None
+    ) -> list[Message]:
         """获取不超过Token限制的消息"""
         limit = max_tokens or self.config.max_tokens
         messages = []
@@ -376,7 +371,7 @@ class TokenBasedMemory(BaseMemoryStrategy):
     def compress_memory(
         self,
         session: ConversationSession
-    ) -> Tuple[List[Message], List[Message]]:
+    ) -> tuple[list[Message], list[Message]]:
         """压缩超出Token限制的消息"""
         keep = []
         compress = []
@@ -406,8 +401,8 @@ class SummaryMemory(BaseMemoryStrategy):
     def get_messages_for_context(
         self,
         session: ConversationSession,
-        max_tokens: Optional[int] = None
-    ) -> List[Message]:
+        max_tokens: int | None = None
+    ) -> list[Message]:
         """获取消息，优先保留未摘要的消息"""
         limit = max_tokens or self.config.max_tokens
         messages = []
@@ -434,7 +429,7 @@ class SummaryMemory(BaseMemoryStrategy):
     def compress_memory(
         self,
         session: ConversationSession
-    ) -> Tuple[List[Message], List[Message]]:
+    ) -> tuple[list[Message], list[Message]]:
         """压缩旧消息为摘要"""
         if len(session.messages) <= self.config.summary_threshold:
             return session.messages, []
@@ -470,8 +465,8 @@ class ImportanceBasedMemory(BaseMemoryStrategy):
     def get_messages_for_context(
         self,
         session: ConversationSession,
-        max_tokens: Optional[int] = None
-    ) -> List[Message]:
+        max_tokens: int | None = None
+    ) -> list[Message]:
         """按重要性排序获取消息"""
         limit = max_tokens or self.config.max_tokens
 
@@ -497,7 +492,7 @@ class ImportanceBasedMemory(BaseMemoryStrategy):
     def compress_memory(
         self,
         session: ConversationSession
-    ) -> Tuple[List[Message], List[Message]]:
+    ) -> tuple[list[Message], list[Message]]:
         """移除低重要性的消息"""
         keep = []
         compress = []
@@ -536,8 +531,8 @@ class HybridMemory(BaseMemoryStrategy):
     def get_messages_for_context(
         self,
         session: ConversationSession,
-        max_tokens: Optional[int] = None
-    ) -> List[Message]:
+        max_tokens: int | None = None
+    ) -> list[Message]:
         """混合策略获取消息"""
         # 先用Token限制获取
         token_msgs = self.token_based.get_messages_for_context(session, max_tokens)
@@ -560,7 +555,7 @@ class HybridMemory(BaseMemoryStrategy):
     def compress_memory(
         self,
         session: ConversationSession
-    ) -> Tuple[List[Message], List[Message]]:
+    ) -> tuple[list[Message], list[Message]]:
         """混合压缩策略"""
         # 先用Token限制压缩
         keep, compress = self.token_based.compress_memory(session)
@@ -621,13 +616,13 @@ class MemoryEmbedder:
 
     def __init__(self, model_name: str = "bge-m3"):
         self.model_name = model_name
-        self._embedding_cache: "OrderedDict[str, List[float]]" = OrderedDict()
+        self._embedding_cache: OrderedDict[str, list[float]] = OrderedDict()
 
     def _get_cache_key(self, text: str) -> str:
         """获取缓存键"""
         return hashlib.md5(text.encode()).hexdigest()
 
-    async def embed_text(self, text: str) -> List[float]:
+    async def embed_text(self, text: str) -> list[float]:
         """将文本转换为向量"""
         cache_key = self._get_cache_key(text)
         if cache_key in self._embedding_cache:
@@ -661,13 +656,13 @@ class MemoryEmbedder:
         self._cache_put(cache_key, embedding)
         return embedding
 
-    def _cache_put(self, cache_key: str, embedding: List[float]) -> None:
+    def _cache_put(self, cache_key: str, embedding: list[float]) -> None:
         self._embedding_cache[cache_key] = embedding
         self._embedding_cache.move_to_end(cache_key)
         while len(self._embedding_cache) > self._EMBEDDING_CACHE_MAX:
             self._embedding_cache.popitem(last=False)
 
-    async def embed_messages(self, messages: List[Message]) -> List[Message]:
+    async def embed_messages(self, messages: list[Message]) -> list[Message]:
         """为消息列表添加向量"""
         for msg in messages:
             if not msg.metadata.get("embedding"):
@@ -675,7 +670,7 @@ class MemoryEmbedder:
                 msg.metadata["embedding"] = embedding
         return messages
 
-    def cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+    def cosine_similarity(self, vec1: list[float], vec2: list[float]) -> float:
         """计算余弦相似度"""
         if not vec1 or not vec2 or len(vec1) != len(vec2):
             return 0.0
@@ -703,8 +698,8 @@ class MemoryStorage:
 
     def __init__(self, storage_path: str = "memory_storage"):
         self.storage_path = storage_path
-        self._sessions: Dict[str, ConversationSession] = {}
-        self._user_sessions: Dict[str, List[str]] = {}  # user_id -> [session_ids]
+        self._sessions: dict[str, ConversationSession] = {}
+        self._user_sessions: dict[str, list[str]] = {}  # user_id -> [session_ids]
 
     def save_session(self, session: ConversationSession) -> bool:
         """保存会话"""
@@ -734,7 +729,7 @@ class MemoryStorage:
                 break
             self.delete_session(session.session_id)
 
-    def load_session(self, session_id: str) -> Optional[ConversationSession]:
+    def load_session(self, session_id: str) -> ConversationSession | None:
         """加载会话"""
         return self._sessions.get(session_id)
 
@@ -742,7 +737,7 @@ class MemoryStorage:
         self,
         user_id: str,
         active_only: bool = True
-    ) -> List[ConversationSession]:
+    ) -> list[ConversationSession]:
         """加载用户的所有会话"""
         session_ids = self._user_sessions.get(user_id, [])
         sessions = []
@@ -761,7 +756,7 @@ class MemoryStorage:
             self._user_sessions[session.user_id].remove(session_id)
         return session is not None
 
-    def get_all_sessions(self) -> List[ConversationSession]:
+    def get_all_sessions(self) -> list[ConversationSession]:
         """获取所有会话"""
         return list(self._sessions.values())
 
@@ -796,8 +791,8 @@ class MemoryRetriever:
     async def search(
         self,
         query: str,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
         top_k: int = 5
     ) -> MemorySearchResponse:
         """搜索相关记忆"""
@@ -816,7 +811,7 @@ class MemoryRetriever:
         query_embedding = await self.embedder.embed_text(query)
 
         # 搜索相似消息
-        results: List[MemorySearchResult] = []
+        results: list[MemorySearchResult] = []
 
         for session in sessions:
             for msg in session.messages:
@@ -858,7 +853,7 @@ class ConversationMemory:
     负责管理对话历史、提供多种记忆策略、支持上下文压缩和检索
     """
 
-    def __init__(self, config: Optional[MemoryConfig] = None):
+    def __init__(self, config: MemoryConfig | None = None):
         """
         初始化 ConversationMemory
 
@@ -875,7 +870,7 @@ class ConversationMemory:
         self.retriever = MemoryRetriever(self.embedder, self.storage)
 
         # 事件监听器
-        self._event_listeners: Dict[MemoryEventType, List[Callable]] = {}
+        self._event_listeners: dict[MemoryEventType, list[Callable]] = {}
 
         logger.info(
             f"ConversationMemory initialized with strategy: "
@@ -892,7 +887,7 @@ class ConversationMemory:
             self._event_listeners[event_type] = []
         self._event_listeners[event_type].append(listener)
 
-    def _emit_event(self, event_type: MemoryEventType, data: Dict[str, Any]):
+    def _emit_event(self, event_type: MemoryEventType, data: dict[str, Any]):
         """触发事件"""
         for listener in self._event_listeners.get(event_type, []):
             try:
@@ -903,7 +898,7 @@ class ConversationMemory:
     def create_session(
         self,
         user_id: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: dict[str, Any] | None = None
     ) -> ConversationSession:
         """创建新的对话会话"""
         now = time.time()
@@ -926,8 +921,8 @@ class ConversationMemory:
         role: MessageRole,
         content: str,
         importance_score: float = 0.5,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> Optional[Message]:
+        metadata: dict[str, Any] | None = None
+    ) -> Message | None:
         """
         添加消息到会话
 
@@ -986,8 +981,8 @@ class ConversationMemory:
     def get_context(
         self,
         session_id: str,
-        max_tokens: Optional[int] = None
-    ) -> List[Message]:
+        max_tokens: int | None = None
+    ) -> list[Message]:
         """
         获取会话上下文
 
@@ -1043,8 +1038,8 @@ class ConversationMemory:
     async def search_memory(
         self,
         query: str,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
         top_k: int = 5
     ) -> MemorySearchResponse:
         """
@@ -1081,11 +1076,11 @@ class ConversationMemory:
 
         return True
 
-    def get_session(self, session_id: str) -> Optional[ConversationSession]:
+    def get_session(self, session_id: str) -> ConversationSession | None:
         """获取会话"""
         return self.storage.load_session(session_id)
 
-    def get_user_sessions(self, user_id: str) -> List[ConversationSession]:
+    def get_user_sessions(self, user_id: str) -> list[ConversationSession]:
         """获取用户的所有会话"""
         return self.storage.load_user_sessions(user_id)
 
@@ -1112,17 +1107,17 @@ class ConversationMemoryFactory:
     """ConversationMemory 工厂"""
 
     @staticmethod
-    def create(config: Optional[MemoryConfig] = None) -> ConversationMemory:
+    def create(config: MemoryConfig | None = None) -> ConversationMemory:
         """创建 ConversationMemory 实例"""
         return ConversationMemory(config)
 
 
 # 全局实例
-_conversation_memory: Optional[ConversationMemory] = None
+_conversation_memory: ConversationMemory | None = None
 
 
 def get_conversation_memory(
-    config: Optional[MemoryConfig] = None
+    config: MemoryConfig | None = None
 ) -> ConversationMemory:
     """
     获取全局 ConversationMemory 实例

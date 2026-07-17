@@ -1,12 +1,10 @@
 """Tests for plugin health probing and circuit breaker."""
 
-import time
-import pytest
 
 from app.core.plugin.health import (
-    PluginHealthProbe,
-    PluginHealthConfig,
     HealthCheckResult,
+    PluginHealthConfig,
+    PluginHealthProbe,
     get_health_probe,
 )
 

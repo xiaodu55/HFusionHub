@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable
 
 from app.core.llm import get_llm
 from app.core.llm.structured_output import generate_structured
@@ -37,14 +37,14 @@ RETRIEVE_TOP_K = 4
 _RETRIEVAL_CONCURRENCY = 6
 
 # 默认分节结构（可被租户模板 section_defs 覆盖）
-DEFAULT_SECTIONS: List[Dict[str, str]] = [
+DEFAULT_SECTIONS: list[dict[str, str]] = [
     {"key": "commercial", "title": "商务标"},
     {"key": "technical", "title": "技术方案"},
     {"key": "qualification", "title": "资质文件"},
     {"key": "format", "title": "格式文件"},
 ]
 
-SECTION_SCHEMA: Dict[str, Any] = {
+SECTION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "section_key": {"type": "string"},
@@ -77,13 +77,13 @@ class BidWriteWorkflow:
         *,
         project_id: int,
         title: str,
-        tender_number: Optional[str],
-        requirements: List[Dict[str, Any]],
-        knowledge_base_ids: List[int],
-        section_defs: Optional[List[Dict[str, Any]]] = None,
-        on_section_start: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
-        on_section: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
-    ) -> Dict[str, Any]:
+        tender_number: str | None,
+        requirements: list[dict[str, Any]],
+        knowledge_base_ids: list[int],
+        section_defs: list[dict[str, Any]] | None = None,
+        on_section_start: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        on_section: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> dict[str, Any]:
         """生成全部分节草稿。
 
         :param requirements: 已确认需求清单 [{category, requirement, source_clause}]
@@ -96,7 +96,7 @@ class BidWriteWorkflow:
         context, chunk_map = self._build_context(corpus)
         sections = section_defs or DEFAULT_SECTIONS
 
-        produced: List[Dict[str, Any]] = []
+        produced: list[dict[str, Any]] = []
         for index, section in enumerate(sections):
             key = section.get("key")
             if on_section_start is not None:
@@ -125,13 +125,13 @@ class BidWriteWorkflow:
     async def _write_section(
         self,
         *,
-        section: Dict[str, Any],
-        requirements: List[Dict[str, Any]],
+        section: dict[str, Any],
+        requirements: list[dict[str, Any]],
         context: str,
-        chunk_map: Dict[str, str],
+        chunk_map: dict[str, str],
         title: str,
-        tender_number: Optional[str],
-    ) -> Dict[str, Any]:
+        tender_number: str | None,
+    ) -> dict[str, Any]:
         key = section.get("key")
         prompt = self._section_prompt(section, requirements, context, title, tender_number)
         try:
@@ -151,12 +151,12 @@ class BidWriteWorkflow:
             "section_title": section.get("title"),
             "content": content,
             "evidence_chunk_ids": self._resolve_evidence(data.get("evidence_chunk_ids"), chunk_map),
-            "error": None if content else f"本节生成失败，请人工补充",
+            "error": None if content else "本节生成失败，请人工补充",
         }
 
     # ── 检索 ──────────────────────────────────────────────────────
 
-    async def _retrieve_corpus(self, knowledge_base_ids: List[int], title: str) -> List[Dict[str, str]]:
+    async def _retrieve_corpus(self, knowledge_base_ids: list[int], title: str) -> list[dict[str, str]]:
         queries = [title] if title else []
         queries += [
             "资质要求 资格条件",
@@ -188,8 +188,8 @@ class BidWriteWorkflow:
 
         results = await asyncio.gather(*(_retrieve_one(kb_id, query) for kb_id, query in pairs))
 
-        seen: Dict[str, str] = {}
-        merged: List[Dict[str, str]] = []
+        seen: dict[str, str] = {}
+        merged: list[dict[str, str]] = []
         for result in results:
             if result is None:
                 continue
@@ -202,16 +202,16 @@ class BidWriteWorkflow:
         return merged
 
     @staticmethod
-    def _build_context(corpus: List[Dict[str, str]]) -> tuple[str, Dict[str, str]]:
-        parts: List[str] = []
-        chunk_map: Dict[str, str] = {}
+    def _build_context(corpus: list[dict[str, str]]) -> tuple[str, dict[str, str]]:
+        parts: list[str] = []
+        chunk_map: dict[str, str] = {}
         for i, chunk in enumerate(corpus):
             chunk_map[str(i)] = chunk["chunk_id"]
             parts.append(f"[{i}] {chunk['content']}")
         return "\n\n".join(parts), chunk_map
 
     @staticmethod
-    def _resolve_evidence(indices, chunk_map: Dict[str, str]):
+    def _resolve_evidence(indices, chunk_map: dict[str, str]):
         if not indices:
             return []
         resolved = []
@@ -224,11 +224,11 @@ class BidWriteWorkflow:
 
     @staticmethod
     def _section_prompt(
-        section: Dict[str, Any],
-        requirements: List[Dict[str, Any]],
+        section: dict[str, Any],
+        requirements: list[dict[str, Any]],
         context: str,
         title: str,
-        tender_number: Optional[str],
+        tender_number: str | None,
     ) -> str:
         key = section.get("key")
         section_title = section.get("title") or key

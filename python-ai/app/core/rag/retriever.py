@@ -7,15 +7,16 @@ Multi-Channel Retriever - 多通道检索器
 
 import logging
 import time
-from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
+from typing import Any
 
-from .query_rewriter import QueryRewriter, get_query_rewriter, RewriteResult
-from .postprocessor import Postprocessor, get_postprocessor, ProcessedResult
-from .query_router import QueryRouter, get_router
-from .observability import RetrievalTrace, get_trace_store
-from .reranker import Reranker, get_reranker
 from app.utils.config import config
+
+from .observability import RetrievalTrace, get_trace_store
+from .postprocessor import Postprocessor, ProcessedResult, get_postprocessor
+from .query_rewriter import QueryRewriter, RewriteResult, get_query_rewriter
+from .query_router import QueryRouter, get_router
+from .reranker import Reranker, get_reranker
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +25,9 @@ logger = logging.getLogger(__name__)
 class RetrievalResult:
     """检索结果"""
     query: str
-    results: List[ProcessedResult]
-    rewrite_result: Optional[RewriteResult] = None
-    metadata: Dict = field(default_factory=dict)
+    results: list[ProcessedResult]
+    rewrite_result: RewriteResult | None = None
+    metadata: dict = field(default_factory=dict)
 
 
 class MultiChannelRetriever:
@@ -34,9 +35,9 @@ class MultiChannelRetriever:
 
     def __init__(
         self,
-        query_rewriter: Optional[QueryRewriter] = None,
-        postprocessor: Optional[Postprocessor] = None,
-        reranker: Optional[Reranker] = None,
+        query_rewriter: QueryRewriter | None = None,
+        postprocessor: Postprocessor | None = None,
+        reranker: Reranker | None = None,
     ):
         """
         初始化多通道检索器
@@ -54,11 +55,11 @@ class MultiChannelRetriever:
     async def retrieve(
         self,
         query: str,
-        knowledge_base_id: Optional[int] = None,
-        conversation_history: Optional[List[Dict]] = None,
+        knowledge_base_id: int | None = None,
+        conversation_history: list[dict] | None = None,
         top_k: int = 5,
         enable_rewrite: bool = True,
-        metadata_filter: Optional[Dict[str, Any]] = None,
+        metadata_filter: dict[str, Any] | None = None,
     ) -> RetrievalResult:
         """
         多通道检索
@@ -75,14 +76,14 @@ class MultiChannelRetriever:
         """
         started_at = time.perf_counter()
         rewrite_result = None
-        routes: List[Dict[str, Any]] = []
-        processed: List[ProcessedResult] = []
+        routes: list[dict[str, Any]] = []
+        processed: list[ProcessedResult] = []
         queries = [query]
-        channel_candidates: List[Dict[str, Any]] = []
-        postprocessing: List[Dict[str, Any]] = []
-        stage_timings_ms: Dict[str, float] = {}
-        rerank_debug: Dict[str, Any] = {"applied": False, "reranker": "not_started"}
-        error: Optional[str] = None
+        channel_candidates: list[dict[str, Any]] = []
+        postprocessing: list[dict[str, Any]] = []
+        stage_timings_ms: dict[str, float] = {}
+        rerank_debug: dict[str, Any] = {"applied": False, "reranker": "not_started"}
+        error: str | None = None
 
         try:
             # 1. 问题重写
@@ -213,8 +214,8 @@ class MultiChannelRetriever:
     async def retrieve_for_prompt(
         self,
         query: str,
-        knowledge_base_id: Optional[int] = None,
-        conversation_history: Optional[List[Dict]] = None,
+        knowledge_base_id: int | None = None,
+        conversation_history: list[dict] | None = None,
         top_k: int = 3
     ) -> str:
         """
@@ -256,7 +257,7 @@ class MultiChannelRetriever:
 
 
 # 全局实例
-_retriever: Optional[MultiChannelRetriever] = None
+_retriever: MultiChannelRetriever | None = None
 
 
 def get_retriever() -> MultiChannelRetriever:

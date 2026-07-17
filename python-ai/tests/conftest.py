@@ -66,7 +66,7 @@ def mock_java_note_backend():
 
     return patch("httpx.AsyncClient.post", new=AsyncMock(side_effect=_fake_post))
 
-from app.core.tenant.context import set_tenant_id, clear_tenant_id
+from app.core.tenant.context import clear_tenant_id, set_tenant_id
 
 
 @pytest.fixture(autouse=True)

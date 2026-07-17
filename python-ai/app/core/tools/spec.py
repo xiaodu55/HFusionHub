@@ -8,8 +8,7 @@ uses these specs for validation, filtering, and documentation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # ── Risk levels ────────────────────────────────────────────────────────
 
@@ -56,12 +55,12 @@ class ToolSpec:
 
     name: str
     description: str
-    input_schema: Dict[str, Any]    # JSON Schema (properties, required, …)
-    output_schema: Dict[str, Any]   # JSON Schema for successful result
+    input_schema: dict[str, Any]    # JSON Schema (properties, required, …)
+    output_schema: dict[str, Any]   # JSON Schema for successful result
     risk_level: str = RiskLevel.READ_ONLY
     timeout_seconds: float = 10.0
-    required_permissions: List[str] = field(default_factory=lambda: [Permissions.KB_READ])
-    error_codes: Dict[str, str] = field(default_factory=lambda: {
+    required_permissions: list[str] = field(default_factory=lambda: [Permissions.KB_READ])
+    error_codes: dict[str, str] = field(default_factory=lambda: {
         ErrorCode.TIMEOUT: "工具调用超时",
         ErrorCode.SCOPE_DENIED: "无权访问该知识库",
         ErrorCode.PERMISSION_DENIED: "权限不足，操作被拒绝",
@@ -72,7 +71,7 @@ class ToolSpec:
     })
     agent_version: str = "1.0"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize for LLM tool description."""
         return {
             "name": self.name,
@@ -209,7 +208,7 @@ LIST_DOC_CHUNKS_SPEC = ToolSpec(
 
 # ── Lookup ─────────────────────────────────────────────────────────────
 
-V1_SPECS: Dict[str, ToolSpec] = {
+V1_SPECS: dict[str, ToolSpec] = {
     SEARCH_KB_SPEC.name: SEARCH_KB_SPEC,
     READ_CHUNK_SPEC.name: READ_CHUNK_SPEC,
     LIST_DOC_CHUNKS_SPEC.name: LIST_DOC_CHUNKS_SPEC,

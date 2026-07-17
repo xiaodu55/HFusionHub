@@ -2,26 +2,25 @@
 
 import json
 import os
-import tempfile
 import zipfile
 
 import pytest
 
 from app.core.plugin.signature import (
+    RevokedKeyError,
+    SignatureError,
+    SignatureNotFoundError,
+    UntrustedPublisherError,
     compute_artifact_hash,
     compute_manifest_hash,
-    register_trusted_key,
-    revoke_key,
     is_key_revoked,
     is_key_trusted,
     list_trusted_keys,
+    register_trusted_key,
     reset_policy,
+    revoke_key,
     sign_plugin,
     verify_signature,
-    SignatureError,
-    UntrustedPublisherError,
-    RevokedKeyError,
-    SignatureNotFoundError,
 )
 
 
@@ -51,9 +50,10 @@ def _make_wheel(tmp_path, name="test_plugin", version="1.0.0"):
 
 def _generate_keypair():
     """Generate Ed25519 keypair for testing."""
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from cryptography.hazmat.primitives import serialization
     import base64
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
     private_key = Ed25519PrivateKey.generate()
     private_pem = private_key.private_bytes(

@@ -20,12 +20,11 @@ import json
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
-
 
 # ---------------------------------------------------------------------------
 # Types
@@ -34,7 +33,7 @@ import httpx
 @dataclass
 class EvalCase:
     query: str
-    expected_documents: List[str] = field(default_factory=list)
+    expected_documents: list[str] = field(default_factory=list)
     expected_answer: str = ""
 
 
@@ -47,7 +46,7 @@ class EvalResult:
     hit_at_1: bool = False
     hit_at_5: bool = False
     latency_ms: float = 0.0
-    retrieved_docs: List[str] = field(default_factory=list)
+    retrieved_docs: list[str] = field(default_factory=list)
     answer: str = ""
     error: str = ""
 
@@ -56,9 +55,9 @@ class EvalResult:
 # Loader
 # ---------------------------------------------------------------------------
 
-def load_dataset(path: Path) -> List[EvalCase]:
+def load_dataset(path: Path) -> list[EvalCase]:
     cases = []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -80,10 +79,10 @@ async def run_evaluation(
     base_url: str,
     token: str,
     kb_id: int,
-    cases: List[EvalCase],
+    cases: list[EvalCase],
     top_k: int = 10,
-) -> List[EvalResult]:
-    results: List[EvalResult] = []
+) -> list[EvalResult]:
+    results: list[EvalResult] = []
     headers = {
         "X-Internal-Token": token,
         "Content-Type": "application/json",
@@ -141,7 +140,7 @@ async def run_evaluation(
 # Metrics
 # ---------------------------------------------------------------------------
 
-def compute_metrics(results: List[EvalResult]) -> Dict[str, Any]:
+def compute_metrics(results: list[EvalResult]) -> dict[str, Any]:
     valid = [r for r in results if not r.error]
     n = len(valid)
     if n == 0:
@@ -165,7 +164,7 @@ def compute_metrics(results: List[EvalResult]) -> Dict[str, Any]:
     }
 
 
-def find_failures(results: List[EvalResult]) -> List[EvalResult]:
+def find_failures(results: list[EvalResult]) -> list[EvalResult]:
     return [r for r in results if not r.error and r.mrr == 0.0]
 
 
@@ -174,25 +173,25 @@ def find_failures(results: List[EvalResult]) -> List[EvalResult]:
 # ---------------------------------------------------------------------------
 
 def generate_report(
-    results: List[EvalResult],
-    metrics: Dict[str, Any],
+    results: list[EvalResult],
+    metrics: dict[str, Any],
     kb_id: int,
     output: Path,
 ) -> str:
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     failures = find_failures(results)
 
     lines = [
-        f"# RAG Evaluation Report",
-        f"",
+        "# RAG Evaluation Report",
+        "",
         f"**Generated**: {timestamp}  ",
         f"**Knowledge Base ID**: {kb_id}  ",
         f"**Total Cases**: {metrics.get('total_cases', 0)}  ",
-        f"",
-        f"## Summary",
-        f"",
-        f"| Metric | Value | Target | Status |",
-        f"|--------|-------|--------|--------|",
+        "",
+        "## Summary",
+        "",
+        "| Metric | Value | Target | Status |",
+        "|--------|-------|--------|--------|",
     ]
 
     targets = {
@@ -214,32 +213,32 @@ def generate_report(
             lines.append(f"| {label} | {val:.3f} | ≥{target:.2f} | {status} |")
 
     lines += [
-        f"",
-        f"| Metric | Value |",
-        f"|--------|-------|",
+        "",
+        "| Metric | Value |",
+        "|--------|-------|",
         f"| Valid Cases | {metrics.get('valid_cases', 0)} |",
         f"| Errors | {metrics.get('error_count', 0)} |",
         f"| Avg Latency | {metrics.get('latency_avg_ms', 0):.0f}ms |",
         f"| P50 Latency | {metrics.get('latency_p50_ms', 0):.0f}ms |",
-        f"",
+        "",
     ]
 
     if failures:
         lines += [
             f"## Failures ({len(failures)} cases with MRR=0)",
-            f"",
+            "",
         ]
         for f in failures[:10]:
             lines.append(f"- **Query**: {f.case.query[:100]}")
             lines.append(f"  - Expected: {f.case.expected_documents}")
             lines.append(f"  - Retrieved: {f.retrieved_docs[:5]}")
-            lines.append(f"")
+            lines.append("")
 
     lines += [
-        f"## Per-Case Detail",
-        f"",
-        f"| # | Query | R@5 | MRR | Latency |",
-        f"|---|-------|-----|-----|---------|",
+        "## Per-Case Detail",
+        "",
+        "| # | Query | R@5 | MRR | Latency |",
+        "|---|-------|-----|-----|---------|",
     ]
     for i, r in enumerate(results, 1):
         status = "❌" if r.error else ("✅" if r.mrr > 0 else "⚠️")

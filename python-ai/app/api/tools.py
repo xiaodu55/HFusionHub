@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
@@ -21,13 +21,13 @@ router = APIRouter(prefix="/api/tools", tags=["tools"])
 
 # ── Risk level display helpers ──────────────────────────────────────────
 
-_RISK_LABELS: Dict[str, str] = {
+_RISK_LABELS: dict[str, str] = {
     RiskLevel.READ_ONLY: "只读",
     RiskLevel.READ_WRITE: "读写",
     "external": "外部调用",
 }
 
-_AGENT_VERSION_LABELS: Dict[str, str] = {
+_AGENT_VERSION_LABELS: dict[str, str] = {
     "1.0": "active",        # V1 默认可用
     "1.1": "beta",          # 需审批开启
     "0.0": "experimental",  # 仅 MCP / 开发中
@@ -39,7 +39,7 @@ def _tool_status(agent_version: str) -> str:
     return _AGENT_VERSION_LABELS.get(agent_version, "unknown")
 
 
-def _build_tool_entry(spec, instance) -> Dict[str, Any]:
+def _build_tool_entry(spec, instance) -> dict[str, Any]:
     """Serialize one ToolSpec into the frontend-facing shape."""
     return {
         "name": spec.name,
@@ -62,7 +62,7 @@ def _build_tool_entry(spec, instance) -> Dict[str, Any]:
 
 
 @router.get("/registry", dependencies=[Depends(require_internal_token)])
-async def tool_registry(tenant_id: int | None = Query(default=None, ge=1)) -> Dict[str, Any]:
+async def tool_registry(tenant_id: int | None = Query(default=None, ge=1)) -> dict[str, Any]:
     """返回 Tool Registry 中所有已注册工具的元数据。
 
     不依赖 knowledge_base_id——仅列出工具的声明式元数据（名称、用途、
@@ -80,7 +80,7 @@ async def tool_registry(tenant_id: int | None = Query(default=None, ge=1)) -> Di
             "error": f"无法加载工具注册表: {exc}",
         }
 
-    tools: List[Dict[str, Any]] = []
+    tools: list[dict[str, Any]] = []
     for name, spec in registry._specs.items():
         instance = registry._instances.get(name)
         try:

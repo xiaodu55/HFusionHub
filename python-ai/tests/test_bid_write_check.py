@@ -15,9 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import AsyncGenerator, Callable, Dict, List, Optional
-
-import pytest
+from typing import AsyncGenerator, Callable
 
 from app.core.bid.check_workflow import BidCheckWorkflow
 from app.core.bid.extractor import extract_scoring_points, merge_documents
@@ -26,18 +24,17 @@ from app.core.llm.base import BaseLLM, ChatMessage, LLMResponse
 from app.core.rag.postprocessor import ProcessedResult
 from app.core.rag.retriever import RetrievalResult
 
-
 # ── 假 LLM：按 user prompt 分派返回 schema 合规 JSON ──────────────────
 
 
 class FakeLLM(BaseLLM):
-    def __init__(self, responder: Callable[[str], Dict]):
+    def __init__(self, responder: Callable[[str], dict]):
         self.responder = responder
-        self.calls: List[str] = []
+        self.calls: list[str] = []
 
     async def chat(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs
@@ -54,7 +51,7 @@ class FakeLLM(BaseLLM):
 
     async def chat_stream(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs
@@ -67,7 +64,7 @@ class FakeLLM(BaseLLM):
         return True
 
 
-def _chunks(n: int = 4) -> List[ProcessedResult]:
+def _chunks(n: int = 4) -> list[ProcessedResult]:
     return [
         ProcessedResult(
             content=f"招标文件第{i}节内容",
@@ -88,7 +85,7 @@ _TENDER_TEXT = (
 )
 
 
-def _tender_chunks(n: int = 2) -> List[ProcessedResult]:
+def _tender_chunks(n: int = 2) -> list[ProcessedResult]:
     return [
         ProcessedResult(
             content=_TENDER_TEXT,
@@ -101,21 +98,21 @@ def _tender_chunks(n: int = 2) -> List[ProcessedResult]:
 
 
 class FakeRetriever:
-    def __init__(self, results: List[ProcessedResult]):
+    def __init__(self, results: list[ProcessedResult]):
         self._results = results
 
     async def retrieve(
         self,
         query: str,
-        knowledge_base_id: Optional[int] = None,
-        conversation_history: Optional[List[Dict]] = None,
+        knowledge_base_id: int | None = None,
+        conversation_history: list[dict] | None = None,
         top_k: int = 5,
         enable_rewrite: bool = True,
     ) -> RetrievalResult:
         return RetrievalResult(query=query, results=self._results[:top_k])
 
 
-def _write_responder(user_prompt: str) -> Dict:
+def _write_responder(user_prompt: str) -> dict:
     if "商务标" in user_prompt:
         return {
             "section_key": "commercial",
@@ -137,7 +134,7 @@ def _write_responder(user_prompt: str) -> Dict:
     return {"section_key": "format", "content": "格式文件正文：签章与份数安排。"}
 
 
-def _check_responder(user_prompt: str) -> Dict:
+def _check_responder(user_prompt: str) -> dict:
     return {
         "findings": [
             {
@@ -183,13 +180,13 @@ def test_write_callbacks_fire_in_order():
     workflow = BidWriteWorkflow(
         llm=FakeLLM(_write_responder), retriever=FakeRetriever(_chunks(2))
     )
-    started: List[str] = []
-    completed: List[str] = []
+    started: list[str] = []
+    completed: list[str] = []
 
-    async def on_start(section: Dict) -> None:
+    async def on_start(section: dict) -> None:
         started.append(section["section_key"])
 
-    async def on_section(payload: Dict) -> None:
+    async def on_section(payload: dict) -> None:
         completed.append(payload["section_key"])
 
     asyncio.run(workflow.run(
@@ -207,7 +204,7 @@ def test_write_callbacks_fire_in_order():
 
 
 def test_write_section_failure_degrades_without_aborting():
-    def responder(user_prompt: str) -> Dict:
+    def responder(user_prompt: str) -> dict:
         if "商务标" in user_prompt:
             raise RuntimeError("llm boom")
         return _write_responder(user_prompt)
@@ -357,7 +354,7 @@ def test_api_write_stream_sse_event_order(monkeypatch):
         section_defs=[{"key": "commercial", "title": "商务标"}],
     )
 
-    events: List[Dict] = []
+    events: list[dict] = []
 
     async def collect():
         resp = await bid_api.bid_write_stream(request)

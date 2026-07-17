@@ -4,9 +4,7 @@ import json
 import os
 import tempfile
 
-import pytest
-
-from app.core.plugin.sbom import SBOMGenerator, SBOMResult, SBOMComponent
+from app.core.plugin.sbom import SBOMComponent, SBOMGenerator, SBOMResult
 
 
 class TestSBOMComponent:

@@ -1,13 +1,12 @@
 """Tests for plugin manifest validation and SHA-256 integrity."""
 
 import pytest
+
 from app.core.plugin.manifest import (
+    ManifestError,
     compute_manifest_hash,
     validate_manifest,
-    ManifestError,
-    ManifestValidationError,
 )
-
 
 # ── Hash tests ───────────────────────────────────────────────────────
 

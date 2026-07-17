@@ -7,7 +7,7 @@ provider URLs, API keys, prompts, document content, or any other secret.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -16,11 +16,10 @@ from pydantic import BaseModel, Field
 
 from app.core.llm.base import ChatMessage
 from app.core.llm.custom_provider import build_user_llm
-from app.core.vectorstore.milvus_store import vector_store_status
 from app.core.llm.model_gateway import get_model_gateway
+from app.core.vectorstore.milvus_store import vector_store_status
 from app.utils.config import config
 from app.utils.feature_flag import feature_flags
-
 
 router = APIRouter(tags=["runtime"])
 
@@ -177,7 +176,7 @@ async def _status_payload() -> dict[str, Any]:
 
     return {
         "status": status,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "llm": llm,
         "embedding": embedding,
         "vector_store": {

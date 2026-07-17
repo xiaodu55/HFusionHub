@@ -14,14 +14,12 @@ Connect with MCP Inspector:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
-from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from ..core.tools.mcp_server import mcp_sse_endpoint
-from ..core.tools.mcp_server import get_mcp_tool_schemas
-from .internal_auth import require_internal_token
+from ..core.tools.mcp_server import get_mcp_tool_schemas, mcp_sse_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +32,11 @@ _PUBLIC_METHODS = {"initialize", "notifications/initialized", "tools/list"}
 class MCPRequest(BaseModel):
     jsonrpc: str = "2.0"
     method: str
-    params: Optional[Dict[str, Any]] = None
-    id: Optional[int | str] = None
+    params: dict[str, Any] | None = None
+    id: int | str | None = None
 
 
-def _extract_kb_id(http_request: Request) -> Optional[int]:
+def _extract_kb_id(http_request: Request) -> int | None:
     """Extract knowledge_base_id from X-HFusionHub-KB-ID header."""
     kb_header = http_request.headers.get("X-HFusionHub-KB-ID")
     if kb_header:
@@ -68,8 +66,9 @@ async def mcp_handler(request: MCPRequest, http_request: Request):
         token = http_request.headers.get("X-Internal-Token")
         if not token:
             raise HTTPException(status_code=401, detail="X-Internal-Token header required for tool execution")
-        from app.utils.config import config
         import hmac as _hmac
+
+        from app.utils.config import config
         expected = config.INTERNAL_API_TOKEN
         if not expected or not _hmac.compare_digest(token, expected):
             raise HTTPException(status_code=403, detail="Invalid internal token")

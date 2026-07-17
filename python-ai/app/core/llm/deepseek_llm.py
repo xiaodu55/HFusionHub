@@ -6,7 +6,7 @@ Uses DeepSeek API for chat completion
 import json
 import time
 from collections import OrderedDict
-from typing import List, AsyncGenerator, NoReturn, Optional
+from typing import AsyncGenerator, NoReturn
 
 import httpx
 
@@ -30,7 +30,7 @@ def _cache_key(
     temperature: float,
     max_tokens: int,
     api_key: str,
-    messages: List[ChatMessage],
+    messages: list[ChatMessage],
 ) -> tuple:
     return (
         model,
@@ -63,7 +63,7 @@ def _fuzzy_enabled() -> bool:
     return config.LLM_RESPONSE_CACHE_FUZZY_ENABLED
 
 
-def _cache_get(key: tuple) -> Optional[LLMResponse]:
+def _cache_get(key: tuple) -> LLMResponse | None:
     entry = _response_cache.get(key)
     if entry is None and _fuzzy_enabled():
         entry = _fuzzy_response_cache.get(_fuzzy_cache_key(key))
@@ -134,9 +134,9 @@ class DeepSeekLLM(BaseLLM):
         base_url: str = "https://api.deepseek.com",
         model: str = "deepseek-v4-flash",
         *,
-        timeout: Optional[float] = None,
-        max_retries: Optional[int] = None,
-        retry_backoff: Optional[float] = None,
+        timeout: float | None = None,
+        max_retries: int | None = None,
+        retry_backoff: float | None = None,
     ):
         from app.utils.config import config
 
@@ -177,7 +177,7 @@ class DeepSeekLLM(BaseLLM):
 
     async def chat(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs
@@ -247,7 +247,7 @@ class DeepSeekLLM(BaseLLM):
 
     async def chat_stream(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs
@@ -302,7 +302,7 @@ class DeepSeekLLM(BaseLLM):
         ) as response:
             self._ensure_success(response)
 
-            parts: List[str] = []
+            parts: list[str] = []
             async for line in response.aiter_lines():
                 if line.startswith("data: "):
                     data_str = line[6:]

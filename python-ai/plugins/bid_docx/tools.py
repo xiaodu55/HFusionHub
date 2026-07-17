@@ -21,13 +21,13 @@ from __future__ import annotations
 import base64
 import io
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 PLUGIN_VERSION = "1.0.0"
 PLUGIN_NAME = "bid_docx"
 
 
-def _iter_sections(sections: Any) -> List[Dict[str, Any]]:
+def _iter_sections(sections: Any) -> list[dict[str, Any]]:
     if isinstance(sections, str):
         try:
             sections = json.loads(sections)
@@ -45,9 +45,9 @@ def _normalize_text(value: Any) -> str:
 def bid_export_docx(
     sections: Any = None,
     title: str = "投标文件",
-    meta: Optional[Dict[str, Any]] = None,
+    meta: dict[str, Any] | None = None,
     **kwargs: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """把标书分节草稿渲染为 .docx，返回 base64 字节与元信息。"""
     try:
         from docx import Document

@@ -7,9 +7,8 @@ execution pipeline.  Set by TenantMiddleware from X-Tenant-Id header.
 from __future__ import annotations
 
 import contextvars
-from typing import Optional
 
-_tenant_id: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar(
+_tenant_id: contextvars.ContextVar[int | None] = contextvars.ContextVar(
     "tenant_id", default=None
 )
 
@@ -19,7 +18,7 @@ def set_tenant_id(tenant_id: int) -> None:
     _tenant_id.set(tenant_id)
 
 
-def get_tenant_id() -> Optional[int]:
+def get_tenant_id() -> int | None:
     """Get the current tenant ID, or None if not set."""
     return _tenant_id.get()
 

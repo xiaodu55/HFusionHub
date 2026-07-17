@@ -9,10 +9,9 @@ TABLE blocks of at most ``MAX_ROWS_PER_BLOCK`` data rows.
 
 import re
 import zipfile
-from typing import Dict, List, Optional, Tuple
 from xml.etree import ElementTree as ET
 
-from app.core.parser.base import BaseParser, ParsedBlock, BlockType
+from app.core.parser.base import BaseParser, BlockType, ParsedBlock
 
 MAX_ROWS_PER_BLOCK = 50
 
@@ -27,7 +26,7 @@ def _q(tag: str) -> str:
     return f"{{{_NS['main']}}}{tag}"
 
 
-def _cell_text(cell: ET.Element, shared_strings: List[str]) -> str:
+def _cell_text(cell: ET.Element, shared_strings: list[str]) -> str:
     """Extract the visible text of a worksheet cell."""
     cell_type = cell.get("t")
     if cell_type == "s":  # shared string
@@ -59,11 +58,11 @@ def _cell_text(cell: ET.Element, shared_strings: List[str]) -> str:
 class XlsxParser(BaseParser):
     """Parse XLSX workbooks into HEADING + TABLE blocks."""
 
-    def parse(self, file_path: str) -> List[ParsedBlock]:
+    def parse(self, file_path: str) -> list[ParsedBlock]:
         with zipfile.ZipFile(file_path) as zf:
             shared_strings = self._read_shared_strings(zf)
             sheets = self._read_sheet_names(zf)
-            blocks: List[ParsedBlock] = []
+            blocks: list[ParsedBlock] = []
             for sheet_id, (name, path) in enumerate(sheets, start=1):
                 rows = self._read_sheet_rows(zf, path, shared_strings)
                 if not rows:
@@ -78,7 +77,7 @@ class XlsxParser(BaseParser):
         return blocks
 
     @staticmethod
-    def _read_shared_strings(zf: zipfile.ZipFile) -> List[str]:
+    def _read_shared_strings(zf: zipfile.ZipFile) -> list[str]:
         if "xl/sharedStrings.xml" not in zf.namelist():
             return []
         root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
@@ -92,12 +91,12 @@ class XlsxParser(BaseParser):
         return result
 
     @staticmethod
-    def _read_sheet_names(zf: zipfile.ZipFile) -> List[Tuple[str, str]]:
+    def _read_sheet_names(zf: zipfile.ZipFile) -> list[tuple[str, str]]:
         """Return [(sheet_name, sheet_xml_path)] in workbook order."""
         root = ET.fromstring(zf.read("xl/workbook.xml"))
         rels = ET.fromstring(zf.read("xl/_rels/workbook.xml.rels"))
         # Map relationship id → target path
-        rel_map: Dict[str, str] = {}
+        rel_map: dict[str, str] = {}
         for rel in rels:
             rel_id = rel.get("Id")
             target = rel.get("Target", "")
@@ -120,12 +119,12 @@ class XlsxParser(BaseParser):
     def _read_sheet_rows(
         zf: zipfile.ZipFile,
         sheet_path: str,
-        shared_strings: List[str],
-    ) -> List[List[str]]:
+        shared_strings: list[str],
+    ) -> list[list[str]]:
         if sheet_path not in zf.namelist():
             return []
         root = ET.fromstring(zf.read(sheet_path))
-        rows: List[List[str]] = []
+        rows: list[list[str]] = []
         for row in root.iter(_q("row")):
             cells = {}
             for cell in row.findall(_q("c")):
@@ -142,10 +141,10 @@ class XlsxParser(BaseParser):
         return rows
 
     @staticmethod
-    def _rows_to_table_blocks(rows: List[List[str]], sheet_name: str) -> List[ParsedBlock]:
+    def _rows_to_table_blocks(rows: list[list[str]], sheet_name: str) -> list[ParsedBlock]:
         header = rows[0]
         data_rows = rows[1:]
-        blocks: List[ParsedBlock] = []
+        blocks: list[ParsedBlock] = []
         for start in range(0, len(data_rows), MAX_ROWS_PER_BLOCK):
             group = data_rows[start:start + MAX_ROWS_PER_BLOCK]
             content_lines = ["| " + " | ".join(_escape_cell(h) for h in header) + " |"]

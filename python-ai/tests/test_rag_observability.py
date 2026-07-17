@@ -7,8 +7,8 @@ from app.core.rag.evaluation_runs import EvaluationRunStore
 from app.core.rag.observability import RetrievalTrace, get_trace_store, reset_trace_store
 from app.core.rag.postprocessor import Postprocessor, ProcessedResult, get_postprocessor
 from app.core.rag.query_router import ChannelType, MergedResult, SearchResult
-from app.core.rag.retriever import MultiChannelRetriever, RetrievalResult
 from app.core.rag.reranker import LexicalReranker
+from app.core.rag.retriever import MultiChannelRetriever, RetrievalResult
 from app.main import create_app
 
 

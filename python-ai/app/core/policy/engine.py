@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, FrozenSet, Optional
+from typing import Any
 
 from app.core.tools.spec import RiskLevel
 
@@ -45,17 +45,17 @@ class PolicyContext:
     role: str = "user"
     environment: str = "development"
     mode: str = MODE_READ_ONLY
-    capability_profile: Optional[str] = None
-    flags: Dict[str, bool] = field(default_factory=dict)
-    permissions: FrozenSet[str] = frozenset()
+    capability_profile: str | None = None
+    flags: dict[str, bool] = field(default_factory=dict)
+    permissions: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
 class PolicyVerdict:
     action: str
     reason: str
-    rule: Optional[str] = None
-    risk_level: Optional[str] = None
+    rule: str | None = None
+    risk_level: str | None = None
 
 
 class PolicyEngine:
@@ -80,7 +80,7 @@ class PolicyEngine:
         *,
         tool_name: str,
         risk_level: str,
-        required_permissions: FrozenSet[str],
+        required_permissions: frozenset[str],
         ctx: PolicyContext,
     ) -> PolicyVerdict:
         env = (ctx.environment or "development").lower()
@@ -152,9 +152,9 @@ class PolicyEngine:
     def guard_tool_input(
         self,
         tool_name: str,
-        tool_input: Dict[str, Any],
+        tool_input: dict[str, Any],
         ctx: PolicyContext,
-    ) -> Optional[PolicyVerdict]:
+    ) -> PolicyVerdict | None:
         """Run content guardrails on tool arguments before execution.
 
         Returns a DENY verdict when the input is blocked (critical prompt
@@ -195,8 +195,8 @@ class PolicyEngine:
     def guard_model_output(
         self,
         content: str,
-        ctx: Optional[PolicyContext] = None,
-    ) -> tuple[str, Optional[PolicyVerdict]]:
+        ctx: PolicyContext | None = None,
+    ) -> tuple[str, PolicyVerdict | None]:
         """Run content guardrails on the model response before returning it.
 
         Returns ``(sanitized_content, verdict)``.  The verdict is None when

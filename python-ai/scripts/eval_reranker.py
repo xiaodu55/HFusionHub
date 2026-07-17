@@ -104,8 +104,8 @@ async def _arm_outcomes(arm: str, reranker, router, cases, candidates_k: int, to
 
 
 async def run(args: argparse.Namespace) -> list[dict]:
-    from app.core.rag.synthetic_index import SyntheticIndex, SyntheticRouter
     from app.core.rag.reranker import CrossEncoderReranker, LexicalReranker
+    from app.core.rag.synthetic_index import SyntheticIndex, SyntheticRouter
 
     kb_manifest = PROJECT_ROOT / "evaluation" / "kb" / "kb_manifest.json"
     cases = load_cases(PROJECT_ROOT / "evaluation" / "suite" / "cases.jsonl")

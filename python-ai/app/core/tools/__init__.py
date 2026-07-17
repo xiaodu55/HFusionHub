@@ -9,26 +9,32 @@ Legacy ``get_tools()`` / ``execute_tool()`` are kept for backward compat
 with MCP and non-agent callers but delegate to the Registry internally.
 """
 
-from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Set
-import json
 import asyncio
+import json
 import logging
-
-logger = logging.getLogger(__name__)
+from dataclasses import dataclass
+from typing import Any
 
 from .base import BaseTool
-from .search_tool import SearchTool
-from .time_tool import TimeTool
 from .calculator_tool import CalculatorTool
-from .web_search_tool import WebSearchTool
-from .read_chunk_tool import ReadChunkTool
 from .list_document_chunks_tool import ListDocumentChunksTool
-from .spec import ToolSpec, ErrorCode, RiskLevel, Permissions, V1_SPECS
+from .read_chunk_tool import ReadChunkTool
+from .registry import (
+    RegistryError,
+    ToolRegistry,
+    clear_expired_grants,
+    consume_scoped_grant,
+    create_full_registry,
+    create_v1_registry,
+    register_scoped_grant,
+)
 from .result import ToolResult
-from .registry import ToolRegistry, RegistryError, create_v1_registry, create_full_registry
-from .registry import register_scoped_grant, consume_scoped_grant, clear_expired_grants
+from .search_tool import SearchTool
+from .spec import ErrorCode, Permissions, RiskLevel, ToolSpec
+from .time_tool import TimeTool
+from .web_search_tool import WebSearchTool
 
+logger = logging.getLogger(__name__)
 
 __all__ = [
     # Models
@@ -50,7 +56,7 @@ __all__ = [
 
 
 # Agent V1 whitelist
-AGENT_V1_TOOL_NAMES: Set[str] = {
+AGENT_V1_TOOL_NAMES: set[str] = {
     "search_knowledge_base",
     "read_chunk",
     "list_document_chunks",
@@ -58,7 +64,7 @@ AGENT_V1_TOOL_NAMES: Set[str] = {
 
 # legacy 入口的「每进程一次」告警标记：execute_tool 是 ReAct Agent 的活跃热路径，
 # 逐次告警会淹没日志，仅在首次调用时记录用于退役流量评估
-_LEGACY_WARNED: Set[str] = set()
+_LEGACY_WARNED: set[str] = set()
 
 
 def _warn_legacy_once(entry: str) -> None:
@@ -79,13 +85,13 @@ class ToolPolicyError(ValueError):
 class ToolExecutionPolicy:
     """Legacy policy — still used for non-Registry paths (MCP)."""
 
-    allowed_names: Set[str]
-    knowledge_base_id: Optional[int] = None
+    allowed_names: set[str]
+    knowledge_base_id: int | None = None
     timeout_seconds: float = 10.0
     max_search_results: int = 5
     max_input_characters: int = 512
 
-    def normalize(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+    def normalize(self, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
         if tool_name not in self.allowed_names:
             raise ToolPolicyError(f"tool_not_allowed:{tool_name}")
         if not isinstance(tool_input, dict):
@@ -156,7 +162,7 @@ def get_tools(
     knowledge_base_id: int = None,
     v1_only: bool = True,
     **kwargs
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Get tool definitions with instance references.
 
     Returns tools from the Registry, each carrying an ``_registry``
@@ -184,10 +190,10 @@ def get_tools(
 
 async def execute_tool(
     tool_name: str,
-    tool_input: Dict[str, Any],
-    tools: List[Dict[str, Any]],
-    policy: Optional[ToolExecutionPolicy] = None,
-    context: Optional[Any] = None,  # AgentExecutionContext (lazy import)
+    tool_input: dict[str, Any],
+    tools: list[dict[str, Any]],
+    policy: ToolExecutionPolicy | None = None,
+    context: Any | None = None,  # AgentExecutionContext (lazy import)
 ) -> str:
     """Execute a tool through the Registry, returning a JSON string.
 
@@ -203,7 +209,7 @@ async def execute_tool(
 
     # Registry-attached 形式（审批流等场景在 tool dict 携带 _registry）走
     # Registry 执行（模式门/权限/KB 隔离生效）；否则回退 policy-based 执行。
-    registry: Optional[ToolRegistry] = None
+    registry: ToolRegistry | None = None
     for tool in tools:
         reg = tool.get("_registry")
         if reg is not None:
@@ -255,7 +261,7 @@ async def execute_tool(
             ensure_ascii=False, indent=2,
         )
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return json.dumps(
             ToolResult.failure(tool_name, ErrorCode.TIMEOUT, "工具调用超时").to_dict(),
             ensure_ascii=False,

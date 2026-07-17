@@ -2,8 +2,8 @@
 import pytest
 
 from app.core.vectorstore.factory import get_vector_store, reset_vector_store
-from app.core.vectorstore.milvus_lite import MilvusLiteStore
 from app.core.vectorstore.milvus_cluster import MilvusClusterStore
+from app.core.vectorstore.milvus_lite import MilvusLiteStore
 
 
 @pytest.fixture(autouse=True)

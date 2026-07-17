@@ -12,11 +12,12 @@ the "backend unreachable, no cache" branch:
 - availability flags fall back to their env-derived value.
 """
 
-import pytest
 from unittest.mock import patch
 
-from app.utils.feature_flag import FeatureFlagClient
+import pytest
+
 from app.utils.config import config
+from app.utils.feature_flag import FeatureFlagClient
 
 
 @pytest.fixture

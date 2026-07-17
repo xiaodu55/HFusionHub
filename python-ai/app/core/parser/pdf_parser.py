@@ -4,11 +4,10 @@ PDF document parser.
 
 import re
 import unicodedata
-from typing import Iterable, List
+from typing import Iterable
 
 from app.core.exceptions import ParsingException
-from app.core.parser.base import BaseParser, ParsedBlock, BlockType
-
+from app.core.parser.base import BaseParser, BlockType, ParsedBlock
 
 _CJK_RE = re.compile(r"[\u2e80-\u2eff\u2f00-\u2fdf\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 _DUPLICATE_ARTIFACT_RE = re.compile(r"([\u2e80-\u2eff\u2f00-\u2fdf\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff。、，,；;：:！？!?（）()])\1+")
@@ -18,7 +17,7 @@ _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 class PDFParser(BaseParser):
     """Parse PDF files into text blocks."""
 
-    def parse(self, file_path: str) -> List[ParsedBlock]:
+    def parse(self, file_path: str) -> list[ParsedBlock]:
         """Parse PDF file into paragraph blocks."""
         try:
             from pypdf import PdfReader
@@ -26,7 +25,7 @@ class PDFParser(BaseParser):
             raise ImportError("pypdf is required for PDF parsing. Install with: pip install pypdf") from exc
 
         reader = PdfReader(file_path)
-        blocks: List[ParsedBlock] = []
+        blocks: list[ParsedBlock] = []
 
         for page_num, page in enumerate(reader.pages, start=1):
             raw_text = page.extract_text() or ""
@@ -67,10 +66,10 @@ def clean_pdf_text(text: str) -> str:
     return _repair_duplicate_artifacts("\n".join(lines)).strip()
 
 
-def split_pdf_paragraphs(text: str) -> List[str]:
+def split_pdf_paragraphs(text: str) -> list[str]:
     """Split normalized PDF text into paragraph-sized blocks."""
-    paragraphs: List[str] = []
-    current: List[str] = []
+    paragraphs: list[str] = []
+    current: list[str] = []
 
     for line in text.split("\n"):
         stripped = line.strip()
@@ -115,9 +114,9 @@ def is_usable_pdf_text(text: str) -> bool:
     return True
 
 
-def _merge_fragment_lines(lines: Iterable[str]) -> List[str]:
-    merged: List[str] = []
-    fragment_buffer: List[str] = []
+def _merge_fragment_lines(lines: Iterable[str]) -> list[str]:
+    merged: list[str] = []
+    fragment_buffer: list[str] = []
 
     def flush_fragment_buffer() -> None:
         nonlocal fragment_buffer

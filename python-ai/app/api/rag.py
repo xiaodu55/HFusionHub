@@ -1,32 +1,31 @@
 """RAG observability and evaluation endpoints."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.rag.evaluation import EvaluationCase, RetrievalEvaluator
 from app.core.rag.evaluation_runs import get_evaluation_run_store
+from app.core.rag.intent_tree_router import resolve_intent_route
 from app.core.rag.observability import get_trace_store
 from app.core.rag.retriever import get_retriever
-from app.core.rag.intent_tree_router import resolve_intent_route
-from app.utils.config import config
 
 router = APIRouter(prefix="/api/rag", tags=["RAG Observability"])
 
 
 class EvaluationCaseRequest(BaseModel):
-    case_id: Optional[str] = None
+    case_id: str | None = None
     query: str = Field(min_length=1, max_length=4000)
-    expected_document_ids: List[str] = Field(min_length=1)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    expected_document_ids: list[str] = Field(min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class EvaluationRequest(BaseModel):
     knowledge_base_id: int = Field(ge=1)
     top_k: int = Field(default=5, ge=1, le=20)
-    label: Optional[str] = Field(default=None, max_length=120)
-    cases: List[EvaluationCaseRequest] = Field(min_length=1, max_length=200)
+    label: str | None = Field(default=None, max_length=120)
+    cases: list[EvaluationCaseRequest] = Field(min_length=1, max_length=200)
 
 
 class RetrievalDebugRequest(BaseModel):
@@ -35,22 +34,22 @@ class RetrievalDebugRequest(BaseModel):
     query: str = Field(min_length=1, max_length=4000)
     knowledge_base_id: int = Field(ge=1)
     top_k: int = Field(default=5, ge=1, le=20)
-    conversation_history: Optional[List[Dict[str, Any]]] = Field(default=None, max_length=50)
+    conversation_history: list[dict[str, Any]] | None = Field(default=None, max_length=50)
     enable_rewrite: bool = True
     # Batch 5：元数据等值过滤（如 {"block_type": "TABLE"}）
-    metadata_filter: Optional[Dict[str, str]] = Field(default=None)
+    metadata_filter: dict[str, str] | None = Field(default=None)
 
 
 class ProductionEvaluationRequest(BaseModel):
     """One production-equivalent retrieval run with all intermediate output."""
 
     query: str = Field(min_length=1, max_length=4000)
-    knowledge_base_id: Optional[int] = Field(default=None, ge=1)
-    top_k: Optional[int] = Field(default=None, ge=1, le=20)
-    conversation_history: Optional[List[Dict[str, Any]]] = Field(default=None, max_length=50)
-    intent_context: List[Dict[str, Any]] = Field(default_factory=list, max_length=500)
+    knowledge_base_id: int | None = Field(default=None, ge=1)
+    top_k: int | None = Field(default=None, ge=1, le=20)
+    conversation_history: list[dict[str, Any]] | None = Field(default=None, max_length=50)
+    intent_context: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
     enable_rewrite: bool = True
-    metadata_filter: Optional[Dict[str, str]] = Field(default=None)
+    metadata_filter: dict[str, str] | None = Field(default=None)
 
 
 @router.get("/traces")
@@ -59,8 +58,8 @@ async def list_traces(
     offset: int = Query(default=0, ge=0, le=1000),
     knowledge_base_id: int = Query(ge=1),
     error_only: bool = Query(default=False),
-    query: Optional[str] = Query(default=None, max_length=4000),
-    source: Optional[str] = Query(default=None, max_length=64),
+    query: str | None = Query(default=None, max_length=4000),
+    source: str | None = Query(default=None, max_length=64),
 ):
     trace_store = get_trace_store()
     return {
@@ -98,8 +97,8 @@ async def export_traces(
     format: str = Query(default="json", pattern="^(json|csv)$"),
     knowledge_base_id: int = Query(ge=1),
     error_only: bool = Query(default=False),
-    query: Optional[str] = Query(default=None, max_length=4000),
-    source: Optional[str] = Query(default=None, max_length=64),
+    query: str | None = Query(default=None, max_length=4000),
+    source: str | None = Query(default=None, max_length=64),
 ):
     try:
         return get_trace_store().export(
@@ -244,7 +243,7 @@ class AnswerJudgeRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=4000)
     answer: str = Field(..., min_length=1, max_length=8000)
     context: str = Field("", max_length=20000, description="检索到的参考上下文（可空）")
-    model: Optional[str] = Field(None, max_length=160, description="评测模型（空=系统默认）")
+    model: str | None = Field(None, max_length=160, description="评测模型（空=系统默认）")
 
 
 @router.post("/evaluate/answer-judge")

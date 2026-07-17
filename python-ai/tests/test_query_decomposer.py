@@ -4,23 +4,23 @@ QueryDecomposer 单元测试
 测试问题分解器的各种功能
 """
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
-from app.core.rag.models import IntentResult, IntentType, ComplexityLevel, DomainType
+
+from app.core.rag.models import ComplexityLevel, DomainType, IntentResult, IntentType
 from app.core.rag.query_decomposer import (
-    SubQuestion,
-    SubQuestionStatus,
     DecompositionResult,
-    QuestionTreeNode,
-    LLMDecompositionStrategy,
-    RuleDecompositionStrategy,
+    DecompositionStrategyType,
     HybridDecompositionStrategy,
+    LLMDecompositionStrategy,
     QueryDecomposer,
     QueryDecomposerFactory,
-    DecompositionStrategyType,
+    QuestionTreeNode,
+    RuleDecompositionStrategy,
+    SubQuestion,
+    SubQuestionStatus,
 )
-
 
 # ============================================================================
 # 测试数据模型

@@ -15,28 +15,25 @@ AnswerQualityEvaluator 单元测试
 日期：2026-07-22
 """
 
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
-import time
-import hashlib
 
 from app.core.rag.answer_quality_evaluator import (
-    EvaluationSample,
-    EvaluationResult,
-    MetricResult,
-    EvaluationConfig,
-    EvaluationStrategyType,
-    EvaluationDimension,
-    EvaluationStatus,
-    RuleBasedEvaluationStrategy,
-    LLMEvaluationStrategy,
-    HybridEvaluationStrategy,
     AnswerQualityEvaluator,
     AnswerQualityEvaluatorFactory,
+    EvaluationConfig,
+    EvaluationDimension,
+    EvaluationResult,
+    EvaluationSample,
+    EvaluationStatus,
+    EvaluationStrategyType,
+    HybridEvaluationStrategy,
+    LLMEvaluationStrategy,
+    MetricResult,
+    RuleBasedEvaluationStrategy,
     get_evaluator,
     reset_evaluator,
 )
-
 
 # ==================== 数据模型测试 ====================
 
@@ -342,13 +339,13 @@ class TestLLMEvaluationStrategy:
     async def test_evaluate_with_mock_llm(self):
         """测试使用模拟 LLM 评估"""
         # 这个测试需要模拟 LLM，实际运行时会跳过
-        sample = EvaluationSample(
+        EvaluationSample(
             query_id="test-001",
             query="测试问题",
             response="测试回答",
             context="测试上下文"
         )
-        config = EvaluationConfig()
+        EvaluationConfig()
 
         # 由于 LLM 调用需要实际的 API，这里只测试方法存在
         assert hasattr(self.strategy, 'evaluate')

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Protocol
 
 
 class RetrieverProtocol(Protocol):
@@ -14,24 +14,24 @@ class RetrieverProtocol(Protocol):
 @dataclass
 class EvaluationCase:
     query: str
-    expected_document_ids: List[str]
-    case_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    expected_document_ids: list[str]
+    case_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class EvaluationCaseResult:
-    case_id: Optional[str]
+    case_id: str | None
     query: str
-    retrieved_document_ids: List[str]
-    expected_document_ids: List[str]
+    retrieved_document_ids: list[str]
+    expected_document_ids: list[str]
     precision_at_k: float
     recall_at_k: float
     reciprocal_rank: float
     graph_hit: bool = False
     multimodal_hit: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -43,14 +43,14 @@ class RetrievalEvaluator:
 
     async def evaluate(
         self,
-        cases: List[EvaluationCase],
-        knowledge_base_id: Optional[int],
+        cases: list[EvaluationCase],
+        knowledge_base_id: int | None,
         top_k: int = 5,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if not cases:
             raise ValueError("at least one evaluation case is required")
 
-        results: List[EvaluationCaseResult] = []
+        results: list[EvaluationCaseResult] = []
         for case in cases:
             retrieval = await self.retriever.retrieve(
                 query=case.query,

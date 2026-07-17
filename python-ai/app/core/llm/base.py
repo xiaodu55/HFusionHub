@@ -3,8 +3,8 @@ LLM Base Module - Abstract base class and data models
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, AsyncGenerator
+from dataclasses import dataclass
+from typing import Any, AsyncGenerator
 
 
 @dataclass
@@ -24,7 +24,7 @@ class LLMResponse:
     # 原生 function calling：provider 返回的 tool_calls（OpenAI 形态
     # [{"id","type","function":{"name","arguments"}}]；arguments 为 JSON 字符串
     # 或 dict——Ollama 原生返回 dict，消费方需同时兼容）。文本 ReAct 降级时为 None。
-    tool_calls: Optional[List[Dict[str, Any]]] = None
+    tool_calls: list[dict[str, Any]] | None = None
 
 
 class BaseLLM(ABC):
@@ -47,7 +47,7 @@ class BaseLLM(ABC):
     @abstractmethod
     async def chat(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs
@@ -68,7 +68,7 @@ class BaseLLM(ABC):
     @abstractmethod
     async def chat_stream(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs

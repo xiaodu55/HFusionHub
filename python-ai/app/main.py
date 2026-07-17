@@ -2,9 +2,9 @@
 HFusionHub Python AI Engine - FastAPI Application
 """
 
+import logging
 import os
 import sys
-import logging
 from contextlib import asynccontextmanager
 
 # Add project root to Python path
@@ -32,35 +32,31 @@ logging.getLogger().addFilter(TraceFilter())
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from app.utils.config import config
-from app.api.vectorization import router as vectorization_router
-from app.api.ingest import router as ingest_router
-from app.api.chat import router as chat_router
-from app.api.rag import router as rag_router
-from app.api.eval_harness import router as eval_harness_router
-from app.api.bid import router as bid_router
 from app.api.agent_observability_api import router as agent_obs_router
+from app.api.bid import router as bid_router
+from app.api.chat import router as chat_router
+from app.api.deps import require_tenant
+from app.api.eval_harness import router as eval_harness_router
+from app.api.exception_handlers import general_exception_handler, hfusionhub_exception_handler, http_exception_handler
+from app.api.ingest import router as ingest_router
+from app.api.internal_auth import require_internal_token
 from app.api.mcp import router as mcp_router
-from app.api.metrics import router as metrics_router
-from app.api.runtime import router as runtime_router
-from app.api.tools import router as tools_router
-from app.api.plugin_admin import router as plugin_admin_router
 from app.api.mcp_admin import router as mcp_admin_router
 from app.api.memory_internal import router as memory_internal_router
-from app.api.voice import router as voice_router
-from app.api.exception_handlers import (
-    hfusionhub_exception_handler,
-    http_exception_handler,
-    general_exception_handler
-)
-from app.core.exceptions import HFusionHubException
-from app.api.internal_auth import require_internal_token
-from app.api.deps import require_tenant
-from app.api.trace_middleware import TraceMiddleware
+from app.api.metrics import router as metrics_router
+from app.api.plugin_admin import router as plugin_admin_router
+from app.api.rag import router as rag_router
+from app.api.runtime import router as runtime_router
 from app.api.tenant_middleware import TenantMiddleware
+from app.api.tools import router as tools_router
+from app.api.trace_middleware import TraceMiddleware
+from app.api.vectorization import router as vectorization_router
+from app.api.voice import router as voice_router
+from app.core.exceptions import HFusionHubException
+from app.utils.config import config
 
 # Optional feature modules
 try:
@@ -242,7 +238,7 @@ def main():
     # Create upload directory
     os.makedirs(config.UPLOAD_DIR, exist_ok=True)
 
-    print(f"Starting HFusionHub Python AI Engine...")
+    print("Starting HFusionHub Python AI Engine...")
     print(f"API documentation: http://{config.SERVER_HOST}:{config.SERVER_PORT}/docs")
     print(f"API host: {config.SERVER_HOST}, API port: {config.SERVER_PORT}")
     print(f"DeepSeek API: {config.DEEPSEEK_BASE_URL}")

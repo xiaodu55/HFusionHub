@@ -1,6 +1,5 @@
 """Tests for plugin execution metrics — Prometheus-compatible metrics."""
 
-import pytest
 
 from app.core.plugin.metrics import PluginMetrics, get_plugin_metrics
 

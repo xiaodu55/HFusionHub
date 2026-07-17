@@ -8,13 +8,14 @@ document content into operational telemetry.
 
 from __future__ import annotations
 
+import builtins
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 
@@ -22,16 +23,16 @@ from uuid import uuid4
 class EvaluationRun:
     run_id: str
     created_at: str
-    knowledge_base_id: Optional[int]
-    label: Optional[str]
+    knowledge_base_id: int | None
+    label: str | None
     top_k: int
     case_count: int
     precision_at_k: float
     recall_at_k: float
     mean_reciprocal_rank: float
-    failed_case_ids: List[str]
+    failed_case_ids: list[str]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
             "created_at": self.created_at,
@@ -58,7 +59,7 @@ class EvaluationRunStore:
     def __init__(self, database_path: str):
         self._path = Path(database_path)
         self._lock = Lock()
-        self._memory_connection: Optional[sqlite3.Connection] = None
+        self._memory_connection: sqlite3.Connection | None = None
         if database_path == ":memory:":
             self._memory_connection = sqlite3.connect(database_path, check_same_thread=False)
             self._memory_connection.row_factory = sqlite3.Row
@@ -106,10 +107,10 @@ class EvaluationRunStore:
 
     def record(
         self,
-        report: Dict[str, Any],
+        report: dict[str, Any],
         *,
-        knowledge_base_id: Optional[int],
-        label: Optional[str] = None,
+        knowledge_base_id: int | None,
+        label: str | None = None,
     ) -> EvaluationRun:
         summary = report["summary"]
         failed_case_ids = [
@@ -119,7 +120,7 @@ class EvaluationRunStore:
         ]
         run = EvaluationRun(
             run_id=str(uuid4()),
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             knowledge_base_id=knowledge_base_id,
             label=(label or "").strip() or None,
             top_k=int(summary["top_k"]),
@@ -150,11 +151,11 @@ class EvaluationRunStore:
         self,
         *,
         limit: int = 50,
-        knowledge_base_id: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        knowledge_base_id: int | None = None,
+    ) -> builtins.list[dict[str, Any]]:
         limit = max(1, min(limit, 200))
         query = "SELECT * FROM rag_evaluation_runs"
-        parameters: List[Any] = []
+        parameters: list[Any] = []
         if knowledge_base_id is not None:
             query += " WHERE knowledge_base_id = ?"
             parameters.append(knowledge_base_id)
@@ -180,10 +181,10 @@ class EvaluationRunStore:
         )
 
 
-_run_store: Optional[EvaluationRunStore] = None
+_run_store: EvaluationRunStore | None = None
 
 
-def get_evaluation_run_store(database_path: Optional[str] = None) -> EvaluationRunStore:
+def get_evaluation_run_store(database_path: str | None = None) -> EvaluationRunStore:
     global _run_store
     if _run_store is None:
         if database_path is None:

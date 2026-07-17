@@ -2,13 +2,12 @@
 Embedding 模块 - 支持 Ollama Embedding 服务
 策略: Ollama (BGE-M3 / qwen3-embedding) -> 随机向量（仅测试）
 """
+import asyncio
+import concurrent.futures
+import logging
 import os
 import random
 import time
-import logging
-import asyncio
-import concurrent.futures
-from typing import List, Optional
 
 from app.core.embedding.ollama import OllamaEmbedding
 from app.core.embedding.openai_compatible import OpenAICompatibleEmbedding
@@ -33,8 +32,8 @@ class EmbeddingService:
     def __init__(
         self,
         dimension: int = 1024,
-        ollama_base_url: Optional[str] = None,
-        ollama_model: Optional[str] = None
+        ollama_base_url: str | None = None,
+        ollama_model: str | None = None
     ):
         """
         初始化 Embedding 服务
@@ -65,7 +64,7 @@ class EmbeddingService:
         return (config.EMBEDDING_PROVIDER == "openai_compatible"
                 and self._openai_compatible.is_configured)
 
-    async def generate(self, text: str, model: str = None) -> List[float]:
+    async def generate(self, text: str, model: str = None) -> list[float]:
         """
         生成单个文本的 Embedding
         策略: Ollama -> (测试环境) 随机向量
@@ -109,7 +108,7 @@ class EmbeddingService:
         logger.error("Ollama embedding failed, no fallback available")
         raise EmbeddingException("无法生成向量嵌入：Ollama 服务不可用")
 
-    def get_embedding(self, text: str) -> List[float]:
+    def get_embedding(self, text: str) -> list[float]:
         """
         同步版本 - 获取单个文本的 Embedding
         用于非异步环境（如 Milvus search_similar）
@@ -133,7 +132,7 @@ class EmbeddingService:
             # 没有事件循环，创建一个新的
             return asyncio.run(self.generate(text))
 
-    def get_embedding_batch(self, texts: List[str]) -> List[List[float]]:
+    def get_embedding_batch(self, texts: list[str]) -> list[list[float]]:
         """
         同步版本 - 批量获取 Embedding
 
@@ -152,7 +151,7 @@ class EmbeddingService:
         except RuntimeError:
             return asyncio.run(self.generate_batch(texts))
 
-    async def generate_batch(self, texts: List[str]) -> List[List[float]]:
+    async def generate_batch(self, texts: list[str]) -> list[list[float]]:
         """
         批量生成 Embedding
 
@@ -194,7 +193,7 @@ class EmbeddingService:
         logger.error("Ollama embedding failed, no fallback available")
         raise EmbeddingException("无法生成向量嵌入：Ollama 服务不可用")
 
-    def _generate_random_vector(self) -> List[float]:
+    def _generate_random_vector(self) -> list[float]:
         """生成随机归一化向量（作为最终降级方案）"""
         vec = [random.gauss(0, 1) for _ in range(self.dimension)]
         norm = sum(x**2 for x in vec) ** 0.5
@@ -202,7 +201,7 @@ class EmbeddingService:
 
 
 # 全局 Embedding 服务实例
-_embedding_service: Optional[EmbeddingService] = None
+_embedding_service: EmbeddingService | None = None
 _last_probe_at: float = 0.0
 _PROBE_TTL_SECONDS = 60.0
 
@@ -237,8 +236,6 @@ def get_embedding_service() -> EmbeddingService:
     """获取全局 Embedding 服务"""
     global _embedding_service, _last_probe_at
     if _embedding_service is None:
-        from app.utils.config import config
-
         # 从环境变量获取配置
         dimension = int(os.getenv("EMBEDDING_DIMENSION", "1024"))
 

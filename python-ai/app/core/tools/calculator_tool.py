@@ -2,8 +2,7 @@
 Calculator Tool - Perform mathematical calculations
 """
 
-import re
-from typing import Any, Dict
+from typing import Any
 
 from .base import BaseTool
 
@@ -14,7 +13,7 @@ class CalculatorTool(BaseTool):
     # Allowed characters in math expressions
     ALLOWED_CHARS = set('0123456789+-*/().% ')
 
-    async def execute(self, expression: str, **kwargs) -> Dict[str, Any]:
+    async def execute(self, expression: str, **kwargs) -> dict[str, Any]:
         """
         Calculate mathematical expression
 

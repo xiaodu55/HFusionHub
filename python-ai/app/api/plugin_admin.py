@@ -7,30 +7,28 @@ uninstall, and manifest verification from the Java backend.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from app.core.plugin.registry import (
-    list_plugins,
-    list_all_tool_specs,
-    get_plugin,
-    enable_plugin,
-    disable_plugin,
-    load_and_register_wheel,
-    unregister_plugin,
-    verify_manifest_integrity,
-    clear_registry,
-)
 from app.core.plugin.audit import (
-    record_install,
-    record_enable,
-    record_disable,
-    record_uninstall,
     get_audit_log,
+    record_disable,
+    record_enable,
+    record_install,
+    record_uninstall,
 )
 from app.core.plugin.loader import PluginLoadError
+from app.core.plugin.registry import (
+    disable_plugin,
+    enable_plugin,
+    get_plugin,
+    list_all_tool_specs,
+    list_plugins,
+    load_and_register_wheel,
+    unregister_plugin,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,15 +39,15 @@ router = APIRouter(prefix="/api/plugin", tags=["Plugin Admin"])
 
 class PluginInstallRequest(BaseModel):
     wheel_path: str
-    plugin_id: Optional[str] = None
+    plugin_id: str | None = None
     expected_hash: str  # Mandatory SHA-256 hash of the wheel archive
-    operator_id: Optional[int] = None
+    operator_id: int | None = None
 
 
 class PluginActionRequest(BaseModel):
     plugin_id: str
-    reason: Optional[str] = None
-    operator_id: Optional[int] = None
+    reason: str | None = None
+    operator_id: int | None = None
 
 
 class PluginInfo(BaseModel):
@@ -62,13 +60,13 @@ class PluginInfo(BaseModel):
 
 
 class PluginListResponse(BaseModel):
-    plugins: List[PluginInfo]
+    plugins: list[PluginInfo]
     total: int
 
 
 # ── Auth helper ──────────────────────────────────────────────────────
 
-def _verify_internal_token(x_internal_token: Optional[str] = Header(None)) -> None:
+def _verify_internal_token(x_internal_token: str | None = Header(None)) -> None:
     """Verify the X-Internal-Token header matches the configured token."""
     import os
     expected = os.environ.get("HFUSIONHUB_INTERNAL_TOKEN", "")
@@ -80,7 +78,7 @@ def _verify_internal_token(x_internal_token: Optional[str] = Header(None)) -> No
 
 @router.get("/list", response_model=PluginListResponse)
 async def list_installed_plugins(
-    x_internal_token: Optional[str] = Header(None),
+    x_internal_token: str | None = Header(None),
 ) -> PluginListResponse:
     """List all registered plugins."""
     _verify_internal_token(x_internal_token)
@@ -102,8 +100,8 @@ async def list_installed_plugins(
 
 @router.get("/tool-specs")
 async def get_all_plugin_tool_specs(
-    x_internal_token: Optional[str] = Header(None),
-) -> Dict[str, Any]:
+    x_internal_token: str | None = Header(None),
+) -> dict[str, Any]:
     """Get all plugin tool specs (for ToolRegistry integration)."""
     _verify_internal_token(x_internal_token)
 
@@ -114,8 +112,8 @@ async def get_all_plugin_tool_specs(
 @router.post("/install")
 async def install_plugin(
     req: PluginInstallRequest,
-    x_internal_token: Optional[str] = Header(None),
-) -> Dict[str, Any]:
+    x_internal_token: str | None = Header(None),
+) -> dict[str, Any]:
     """Install a plugin from a wheel file."""
     _verify_internal_token(x_internal_token)
 
@@ -148,8 +146,8 @@ async def install_plugin(
 @router.post("/enable")
 async def enable(
     req: PluginActionRequest,
-    x_internal_token: Optional[str] = Header(None),
-) -> Dict[str, str]:
+    x_internal_token: str | None = Header(None),
+) -> dict[str, str]:
     """Enable a plugin."""
     _verify_internal_token(x_internal_token)
 
@@ -172,8 +170,8 @@ async def enable(
 @router.post("/disable")
 async def disable(
     req: PluginActionRequest,
-    x_internal_token: Optional[str] = Header(None),
-) -> Dict[str, str]:
+    x_internal_token: str | None = Header(None),
+) -> dict[str, str]:
     """Disable a plugin."""
     _verify_internal_token(x_internal_token)
 
@@ -197,8 +195,8 @@ async def disable(
 @router.post("/uninstall")
 async def uninstall(
     req: PluginActionRequest,
-    x_internal_token: Optional[str] = Header(None),
-) -> Dict[str, str]:
+    x_internal_token: str | None = Header(None),
+) -> dict[str, str]:
     """Uninstall a plugin."""
     _verify_internal_token(x_internal_token)
 
@@ -219,8 +217,8 @@ async def uninstall(
 @router.post("/verify")
 async def verify_integrity(
     req: PluginActionRequest,
-    x_internal_token: Optional[str] = Header(None),
-) -> Dict[str, Any]:
+    x_internal_token: str | None = Header(None),
+) -> dict[str, Any]:
     """Verify a plugin's manifest hash integrity."""
     _verify_internal_token(x_internal_token)
 
@@ -243,10 +241,10 @@ async def verify_integrity(
 
 @router.get("/audit-logs")
 async def audit_logs(
-    plugin_id: Optional[str] = None,
+    plugin_id: str | None = None,
     limit: int = 50,
-    x_internal_token: Optional[str] = Header(None),
-) -> Dict[str, Any]:
+    x_internal_token: str | None = Header(None),
+) -> dict[str, Any]:
     """Get plugin audit log entries."""
     _verify_internal_token(x_internal_token)
 

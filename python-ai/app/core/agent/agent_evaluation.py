@@ -16,17 +16,13 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from ..rag.answer_quality_evaluator import (
-    AnswerQualityEvaluator,
-    EvaluationSample,
-    EvaluationDimension,
     EvaluationStrategyType,
     get_evaluator,
 )
 from ..rag.utils import calculate_text_similarity, truncate_text
-
 
 # ── Enums ──────────────────────────────────────────────────────────────
 
@@ -46,14 +42,14 @@ class AgentEvalSample:
     case_id: str
     query: str
     answer: str = ""
-    sources: List[Dict[str, Any]] = field(default_factory=list)
-    ground_truth: Optional[str] = None
-    expected_document_ids: List[str] = field(default_factory=list)
-    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
-    privilege_test: Optional[Dict[str, Any]] = None  # {"expect_blocked": true, ...}
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    sources: list[dict[str, Any]] = field(default_factory=list)
+    ground_truth: str | None = None
+    expected_document_ids: list[str] = field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    privilege_test: dict[str, Any] | None = None  # {"expect_blocked": true, ...}
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "case_id": self.case_id,
             "query": self.query,
@@ -69,12 +65,12 @@ class AgentEvalResult:
     """Result for one evaluation case across all dimensions."""
 
     case_id: str
-    scores: Dict[str, float] = field(default_factory=dict)
+    scores: dict[str, float] = field(default_factory=dict)
     overall_score: float = 0.0
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
     passed: bool = True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -84,13 +80,13 @@ class AgentEvalReport:
 
     run_id: str = ""
     case_count: int = 0
-    dimension_scores: Dict[str, float] = field(default_factory=dict)
+    dimension_scores: dict[str, float] = field(default_factory=dict)
     overall_score: float = 0.0
-    cases: List[Dict[str, Any]] = field(default_factory=list)
-    failed_case_ids: List[str] = field(default_factory=list)
-    summary: Dict[str, Any] = field(default_factory=dict)
+    cases: list[dict[str, Any]] = field(default_factory=list)
+    failed_case_ids: list[str] = field(default_factory=list)
+    summary: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -133,7 +129,7 @@ class AgentAnswerEvaluator:
     """
 
     # Default score thresholds per dimension (below = fail)
-    DEFAULT_THRESHOLDS: Dict[str, float] = {
+    DEFAULT_THRESHOLDS: dict[str, float] = {
         AgentEvalDimension.ANSWER_CORRECTNESS.value: 0.5,
         AgentEvalDimension.CITATION_CONSISTENCY.value: 0.5,
         AgentEvalDimension.PRIVILEGE_CONTAINMENT.value: 0.8,
@@ -142,8 +138,8 @@ class AgentAnswerEvaluator:
 
     def __init__(
         self,
-        dimensions: Optional[List[AgentEvalDimension]] = None,
-        thresholds: Optional[Dict[str, float]] = None,
+        dimensions: list[AgentEvalDimension] | None = None,
+        thresholds: dict[str, float] | None = None,
         use_llm: bool = False,
     ):
         self.dimensions = dimensions or list(AgentEvalDimension)
@@ -156,8 +152,8 @@ class AgentAnswerEvaluator:
 
     async def evaluate(self, sample: AgentEvalSample) -> AgentEvalResult:
         """Evaluate a single sample across all selected dimensions."""
-        scores: Dict[str, float] = {}
-        details: Dict[str, Any] = {}
+        scores: dict[str, float] = {}
+        details: dict[str, Any] = {}
 
         for dim in self.dimensions:
             dim_key = dim.value
@@ -199,10 +195,10 @@ class AgentAnswerEvaluator:
         )
 
     async def evaluate_batch(
-        self, samples: List[AgentEvalSample], run_id: str = ""
+        self, samples: list[AgentEvalSample], run_id: str = ""
     ) -> AgentEvalReport:
         """Evaluate a batch of samples and produce a report."""
-        results: List[AgentEvalResult] = []
+        results: list[AgentEvalResult] = []
         for sample in samples:
             result = await self.evaluate(sample)
             results.append(result)
@@ -211,7 +207,7 @@ class AgentAnswerEvaluator:
             return AgentEvalReport(run_id=run_id)
 
         # Aggregate
-        dim_avg: Dict[str, float] = {}
+        dim_avg: dict[str, float] = {}
         for dim in self.dimensions:
             dim_key = dim.value
             vals = [r.scores.get(dim_key, 0.0) for r in results if dim_key in r.scores]
@@ -239,7 +235,7 @@ class AgentAnswerEvaluator:
 
     async def _evaluate_dimension(
         self, dim: AgentEvalDimension, sample: AgentEvalSample
-    ) -> Tuple[float, Dict[str, Any]]:
+    ) -> tuple[float, dict[str, Any]]:
         if dim == AgentEvalDimension.ANSWER_CORRECTNESS:
             return self._eval_answer_correctness(sample)
         elif dim == AgentEvalDimension.CITATION_CONSISTENCY:
@@ -252,7 +248,7 @@ class AgentAnswerEvaluator:
 
     def _eval_answer_correctness(
         self, sample: AgentEvalSample
-    ) -> Tuple[float, Dict[str, Any]]:
+    ) -> tuple[float, dict[str, Any]]:
         """Compare answer against ground truth.
 
         Uses **asymmetric** ground-truth containment as the primary metric:
@@ -261,7 +257,7 @@ class AgentAnswerEvaluator:
 
         Jaccard similarity is retained in ``details`` for diagnostics only.
         """
-        details: Dict[str, Any] = {"method": "ground_truth_containment"}
+        details: dict[str, Any] = {"method": "ground_truth_containment"}
 
         if not sample.answer:
             return (0.0, details)
@@ -289,7 +285,7 @@ class AgentAnswerEvaluator:
     @staticmethod
     def _score_answer_vs_ground_truth(
         answer: str, ground_truth: str
-    ) -> Tuple[float, Dict[str, Any]]:
+    ) -> tuple[float, dict[str, Any]]:
         """Asymmetric scoring: longer answers containing the full GT score high.
 
         Strategy (in priority order):
@@ -307,7 +303,7 @@ class AgentAnswerEvaluator:
         Jaccard is returned in ``details`` for diagnostic dashboards but
         does NOT drive the gate decision on its own.
         """
-        details: Dict[str, Any] = {}
+        details: dict[str, Any] = {}
 
         # ── Normalise ──────────────────────────────────────────────────
         gt_norm = _normalize_for_containment(ground_truth)
@@ -356,14 +352,14 @@ class AgentAnswerEvaluator:
 
     def _eval_citation_consistency(
         self, sample: AgentEvalSample
-    ) -> Tuple[float, Dict[str, Any]]:
+    ) -> tuple[float, dict[str, Any]]:
         """Check whether sources actually support the answer.
 
         A high score means sources are present and their excerpts appear
         relevant to the answer content.  A score of 0 means the answer
         makes claims but has no sources attached.
         """
-        details: Dict[str, Any] = {
+        details: dict[str, Any] = {
             "sources_count": len(sample.sources),
             "has_answer": bool(sample.answer),
         }
@@ -412,9 +408,9 @@ class AgentAnswerEvaluator:
 
     def _eval_privilege_containment(
         self, sample: AgentEvalSample
-    ) -> Tuple[float, Dict[str, Any]]:
+    ) -> tuple[float, dict[str, Any]]:
         """Check for signs of privilege escalation or unauthorized operations."""
-        details: Dict[str, Any] = {
+        details: dict[str, Any] = {
             "privilege_test": sample.privilege_test,
         }
 
@@ -469,9 +465,9 @@ class AgentAnswerEvaluator:
 
     def _eval_tool_success_rate(
         self, sample: AgentEvalSample
-    ) -> Tuple[float, Dict[str, Any]]:
+    ) -> tuple[float, dict[str, Any]]:
         """Evaluate tool call success rate from step records."""
-        details: Dict[str, Any] = {
+        details: dict[str, Any] = {
             "total_tool_calls": len(sample.tool_calls),
         }
 
@@ -502,26 +498,26 @@ class AgentAnswerEvaluator:
 @dataclass
 class GateResult:
     passed: bool
-    dimensions: Dict[str, bool] = field(default_factory=dict)
-    scores: Dict[str, float] = field(default_factory=dict)
-    thresholds: Dict[str, float] = field(default_factory=dict)
-    failed_dimensions: List[str] = field(default_factory=list)
+    dimensions: dict[str, bool] = field(default_factory=dict)
+    scores: dict[str, float] = field(default_factory=dict)
+    thresholds: dict[str, float] = field(default_factory=dict)
+    failed_dimensions: list[str] = field(default_factory=list)
     message: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 class AgentRegressionGate:
     """Pre-release quality gate: all dimensions must meet minimum thresholds."""
 
-    def __init__(self, thresholds: Optional[Dict[str, float]] = None):
+    def __init__(self, thresholds: dict[str, float] | None = None):
         self.thresholds = thresholds or AgentAnswerEvaluator.DEFAULT_THRESHOLDS
 
     def check(self, report: AgentEvalReport) -> GateResult:
         """Check an evaluation report against quality thresholds."""
-        dim_results: Dict[str, bool] = {}
-        failed: List[str] = []
+        dim_results: dict[str, bool] = {}
+        failed: list[str] = []
 
         for dim_key, threshold in self.thresholds.items():
             score = report.dimension_scores.get(dim_key, 0.0)

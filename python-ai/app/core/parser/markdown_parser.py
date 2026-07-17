@@ -4,8 +4,8 @@ Supports: headings, paragraphs, code blocks, tables, lists
 """
 
 import re
-from typing import List
-from app.core.parser.base import BaseParser, ParsedBlock, BlockType
+
+from app.core.parser.base import BaseParser, BlockType, ParsedBlock
 
 
 class MarkdownParser(BaseParser):
@@ -17,14 +17,14 @@ class MarkdownParser(BaseParser):
     TABLE_PATTERN = re.compile(r'^(\|.+\|)\n(\|[-|: ]+\|)\n((?:\|.+\|\n?)*)', re.MULTILINE)
     LIST_PATTERN = re.compile(r'^(\s*[-*+]\s+.+|\s*\d+\.\s+.+)$', re.MULTILINE)
 
-    def parse(self, file_path: str) -> List[ParsedBlock]:
+    def parse(self, file_path: str) -> list[ParsedBlock]:
         """Parse Markdown file into blocks"""
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, encoding='utf-8') as f:
             content = f.read()
 
         return self._parse_content(content)
 
-    def _parse_content(self, content: str) -> List[ParsedBlock]:
+    def _parse_content(self, content: str) -> list[ParsedBlock]:
         """Parse markdown content into blocks"""
         blocks = []
         lines = content.split('\n')
@@ -87,7 +87,7 @@ class MarkdownParser(BaseParser):
 
         return blocks
 
-    def _extract_code_block(self, lines: List[str], start: int) -> tuple:
+    def _extract_code_block(self, lines: list[str], start: int) -> tuple:
         """Extract code block starting at given line"""
         if not lines[start].strip().startswith('```'):
             return None, start
@@ -115,7 +115,7 @@ class MarkdownParser(BaseParser):
             metadata={"language": language}
         ), i - 1
 
-    def _extract_table(self, lines: List[str], start: int) -> tuple:
+    def _extract_table(self, lines: list[str], start: int) -> tuple:
         """Extract table starting at given line"""
         if not lines[start].strip().startswith('|'):
             return None, start
@@ -137,7 +137,7 @@ class MarkdownParser(BaseParser):
             metadata={"rows": len(table_lines) - 1}  # Exclude header separator
         ), i - 1
 
-    def _extract_list(self, lines: List[str], start: int) -> tuple:
+    def _extract_list(self, lines: list[str], start: int) -> tuple:
         """Extract list starting at given line"""
         list_lines = []
         i = start
@@ -161,10 +161,10 @@ class MarkdownParser(BaseParser):
         return ParsedBlock(
             content=content,
             block_type=BlockType.LIST,
-            metadata={"items": len([l for l in list_lines if l.strip()])}
+            metadata={"items": len([line for line in list_lines if line.strip()])}
         ), i - 1
 
-    def _extract_paragraph(self, lines: List[str], start: int) -> tuple:
+    def _extract_paragraph(self, lines: list[str], start: int) -> tuple:
         """Extract paragraph starting at given line"""
         paragraph_lines = []
         i = start

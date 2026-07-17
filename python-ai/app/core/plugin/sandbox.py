@@ -28,8 +28,7 @@ import logging
 import os
 import platform
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 from urllib.parse import urlparse
 
 # resource module is POSIX-only
@@ -44,15 +43,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class NetworkConfig:
-    allowed_domains: List[str] = field(default_factory=list)
-    blocked_domains: List[str] = field(default_factory=list)
+    allowed_domains: list[str] = field(default_factory=list)
+    blocked_domains: list[str] = field(default_factory=list)
     timeout_seconds: float = 30.0
 
 @dataclass(frozen=True)
 class FilesystemConfig:
-    allowed_paths: List[str] = field(default_factory=list)
-    blocked_paths: List[str] = field(default_factory=list)
-    read_only_paths: List[str] = field(default_factory=list)
+    allowed_paths: list[str] = field(default_factory=list)
+    blocked_paths: list[str] = field(default_factory=list)
+    read_only_paths: list[str] = field(default_factory=list)
 
 @dataclass(frozen=True)
 class ResourceConfig:
@@ -69,13 +68,13 @@ class RunnerConfig:
 
 @dataclass(frozen=True)
 class SandboxConfig:
-    network: Optional[NetworkConfig] = None
-    filesystem: Optional[FilesystemConfig] = None
-    resources: Optional[ResourceConfig] = None
-    runner: Optional[RunnerConfig] = None
+    network: NetworkConfig | None = None
+    filesystem: FilesystemConfig | None = None
+    resources: ResourceConfig | None = None
+    runner: RunnerConfig | None = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "SandboxConfig":
+    def from_dict(cls, data: dict[str, Any]) -> SandboxConfig:
         """Parse a sandbox config dict (as stored in manifest JSON)."""
         net_data = data.get("network")
         net = NetworkConfig(**net_data) if net_data else None
@@ -270,20 +269,20 @@ class PluginSandbox:
         self._resources = ResourceLimits(config.resources) if config.resources else None
 
     @classmethod
-    def from_config_dict(cls, data: Dict[str, Any]) -> "PluginSandbox":
+    def from_config_dict(cls, data: dict[str, Any]) -> PluginSandbox:
         config = SandboxConfig.from_dict(data)
         return cls(config)
 
     @property
-    def network(self) -> Optional[SandboxedHttpClient]:
+    def network(self) -> SandboxedHttpClient | None:
         return self._network
 
     @property
-    def filesystem(self) -> Optional[SandboxedPathResolver]:
+    def filesystem(self) -> SandboxedPathResolver | None:
         return self._filesystem
 
     @property
-    def resources(self) -> Optional[ResourceLimits]:
+    def resources(self) -> ResourceLimits | None:
         return self._resources
 
     def get_http_client(self) -> SandboxedHttpClient:
@@ -300,7 +299,7 @@ class PluginSandbox:
         if self._resources:
             self._resources.apply()
 
-    def check_all(self, url: Optional[str] = None, path: Optional[str] = None) -> None:
+    def check_all(self, url: str | None = None, path: str | None = None) -> None:
         """Run all configured sandbox checks.  Raises SandboxViolation on failure."""
         if url and self._network:
             self._network.check_url(url)

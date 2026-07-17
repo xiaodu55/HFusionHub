@@ -16,30 +16,29 @@
 """
 
 import asyncio
+import logging
 import math
 import re
 import time
-import logging
 from collections import defaultdict
-from enum import Enum
-from typing import Dict, List, Optional, Any, Set, Tuple
 from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
+
+from app.core.vectorstore.milvus_store import _matches_metadata_filter
+from app.utils.config import config as app_config
+from app.utils.feature_flag import feature_flags
 
 from .utils import (
-    DEFAULT_CHANNEL_WEIGHT,
     ADAPTIVE_THRESHOLD,
-    WEIGHT_MAX_VALUE,
-    WEIGHT_MIN_VALUE,
-    TIMEOUT_MIN_VALUE,
     CONFIDENCE_BASE_SCORE,
     CONFIDENCE_MAX_SCORE,
     CONFIDENCE_WEIGHT_FACTOR,
-    ENTITY_MATCH_BASE_SCORE,
-    NEIGHBOR_RELATION_SCORE,
+    DEFAULT_CHANNEL_WEIGHT,
+    TIMEOUT_MIN_VALUE,
+    WEIGHT_MAX_VALUE,
+    WEIGHT_MIN_VALUE,
 )
-from app.utils.config import config as app_config
-from app.utils.feature_flag import feature_flags
-from app.core.vectorstore.milvus_store import _matches_metadata_filter
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +84,7 @@ class ChannelConfig:
     enabled: bool = True
     timeout: float = 10.0
     max_results: int = 10
-    params: Dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         if not WEIGHT_MIN_VALUE <= self.weight <= WEIGHT_MAX_VALUE:
@@ -98,12 +97,12 @@ class ChannelConfig:
 class RouteResult:
     """路由结果"""
     query_type: QueryType
-    selected_channels: List[ChannelType]
-    channel_weights: Dict[ChannelType, float]
+    selected_channels: list[ChannelType]
+    channel_weights: dict[ChannelType, float]
     strategy: RouteStrategy
     confidence: float = 0.0
     reasoning: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -112,18 +111,18 @@ class SearchResult:
     content: str
     score: float
     source: ChannelType
-    document_id: Optional[int] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    document_id: int | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class MergedResult:
     """合并后的结果"""
-    results: List[SearchResult]
+    results: list[SearchResult]
     total_count: int
-    channels_used: List[ChannelType]
+    channels_used: list[ChannelType]
     merge_strategy: str = "score_based"
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # =============================================================================
@@ -142,7 +141,7 @@ class BaseChannel:
         knowledge_base_id: int,
         top_k: int = 10,
         **kwargs
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         """执行检索"""
         raise NotImplementedError
 
@@ -155,9 +154,9 @@ class VectorChannel(BaseChannel):
         query: str,
         knowledge_base_id: int,
         top_k: int = 10,
-        metadata_filter: Optional[Dict[str, Any]] = None,
+        metadata_filter: dict[str, Any] | None = None,
         **kwargs
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         """向量检索（兼容 Milvus Lite 的同步搜索接口）"""
         try:
             from app.core.vectorstore.milvus_store import search_similar
@@ -208,25 +207,25 @@ class KeywordChannel(BaseChannel):
     # 语料缓存：key = (id(store), knowledge_base_id)。value 同时持有 store
     # 引用，防止其被 GC 后 id() 复用导致误命中。store 内容变化（文件 mtime
     # 变化）会使 _load_chunks_store 返回新 dict → id 变化 → 缓存自动失效。
-    _corpus_cache: Dict[Tuple[int, int], Tuple[Dict, "_KeywordCorpus"]] = {}
+    _corpus_cache: dict[tuple[int, int], tuple[dict, "_KeywordCorpus"]] = {}
     _CORPUS_CACHE_MAX = 16
 
     @dataclass
     class _KeywordCorpus:
         """预解析后的 BM25 语料（一次构建、多次查询复用）。"""
-        documents: List[Tuple[str, Dict, List[str]]]          # (document_id, chunk, tokens)
-        chunks_by_document: Dict[str, List[Dict]]              # 全量按文档分组排序
-        token_to_doc_idx: Dict[str, Set[int]]                  # term → 文档索引（df 来源）
+        documents: list[tuple[str, dict, list[str]]]          # (document_id, chunk, tokens)
+        chunks_by_document: dict[str, list[dict]]              # 全量按文档分组排序
+        token_to_doc_idx: dict[str, set[int]]                  # term → 文档索引（df 来源）
         average_length: float
 
     @classmethod
-    def _corpus_for(cls, store: Dict[str, List[Dict]], knowledge_base_id: Optional[int]) -> "_KeywordCorpus":
+    def _corpus_for(cls, store: dict[str, list[dict]], knowledge_base_id: int | None) -> "_KeywordCorpus":
         key = (id(store), knowledge_base_id)
         cached = cls._corpus_cache.get(key)
         if cached is not None and cached[0] is store:
             return cached[1]
-        documents: List[Tuple[str, Dict, List[str]]] = []
-        token_to_doc_idx: Dict[str, Set[int]] = defaultdict(set)
+        documents: list[tuple[str, dict, list[str]]] = []
+        token_to_doc_idx: dict[str, set[int]] = defaultdict(set)
         for document_id, chunks in store.items():
             for chunk in chunks:
                 if (knowledge_base_id is not None and
@@ -264,9 +263,9 @@ class KeywordChannel(BaseChannel):
         query: str,
         knowledge_base_id: int,
         top_k: int = 10,
-        metadata_filter: Optional[Dict[str, Any]] = None,
+        metadata_filter: dict[str, Any] | None = None,
         **kwargs
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         """Return normalized BM25 candidates from the scoped local corpus."""
         try:
             from app.core.vectorstore.milvus_store import _load_chunks_store
@@ -290,7 +289,7 @@ class KeywordChannel(BaseChannel):
                 for term in terms
             }
             average_length = corpus.average_length
-            scored: List[Tuple[float, str, Dict]] = []
+            scored: list[tuple[float, str, dict]] = []
             for document_id, chunk, tokens in documents:
                 # 元数据过滤（Batch 5）：与向量通道同一谓词语义
                 if metadata_filter and not _matches_metadata_filter(
@@ -310,7 +309,7 @@ class KeywordChannel(BaseChannel):
                 return []
 
             max_score = max(score for score, _, _ in scored)
-            results: List[SearchResult] = []
+            results: list[SearchResult] = []
             for raw_score, document_id, chunk in sorted(scored, reverse=True, key=lambda item: item[0])[:top_k]:
                 content = chunk.get("content", "")
                 content, neighbor_chunk_ids = self._expand_heading_context(
@@ -350,16 +349,16 @@ class KeywordChannel(BaseChannel):
             return []
 
     @staticmethod
-    def _tokenize(text: str) -> List[str]:
+    def _tokenize(text: str) -> list[str]:
         """提取英文词、数字和单个中文字符，适配中英文混合文档。"""
         tokens = re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]", text.lower())
         return list(dict.fromkeys(token for token in tokens if len(token) > 1 or "\u4e00" <= token <= "\u9fff"))
 
     @staticmethod
     def _bm25_score(
-        terms: List[str],
-        tokens: List[str],
-        document_frequency: Dict[str, int],
+        terms: list[str],
+        tokens: list[str],
+        document_frequency: dict[str, int],
         document_count: int,
         average_length: float,
         k1: float = 1.5,
@@ -380,7 +379,7 @@ class KeywordChannel(BaseChannel):
         return score
 
     @staticmethod
-    def _metadata(value: Any) -> Dict[str, Any]:
+    def _metadata(value: Any) -> dict[str, Any]:
         if isinstance(value, dict):
             return value
         if isinstance(value, str):
@@ -393,7 +392,7 @@ class KeywordChannel(BaseChannel):
         return {}
 
     @staticmethod
-    def _outline_path(value: Any) -> List[str]:
+    def _outline_path(value: Any) -> list[str]:
         if isinstance(value, list):
             return value
         if isinstance(value, str):
@@ -406,7 +405,7 @@ class KeywordChannel(BaseChannel):
         return []
 
     @staticmethod
-    def _chunk_order(chunk: Dict[str, Any]) -> int:
+    def _chunk_order(chunk: dict[str, Any]) -> int:
         """Return a stable document-local order for JSON and cluster stores."""
         explicit_index = chunk.get("chunk_index")
         if isinstance(explicit_index, int):
@@ -418,12 +417,12 @@ class KeywordChannel(BaseChannel):
     @classmethod
     def _expand_heading_context(
         cls,
-        heading: Dict[str, Any],
-        document_chunks: List[Dict[str, Any]],
-        knowledge_base_id: Optional[int],
+        heading: dict[str, Any],
+        document_chunks: list[dict[str, Any]],
+        knowledge_base_id: int | None,
         max_neighbors: int = 2,
         max_chars: int = 1200,
-    ) -> Tuple[str, List[str]]:
+    ) -> tuple[str, list[str]]:
         """Attach the paragraph/list/code blocks immediately under a heading."""
         content = heading.get("content", "") or ""
         if str(heading.get("block_type", "")).upper() != "HEADING":
@@ -442,7 +441,7 @@ class KeywordChannel(BaseChannel):
             return content, []
 
         parts = [content]
-        neighbor_ids: List[str] = []
+        neighbor_ids: list[str] = []
         for neighbor in document_chunks[heading_position + 1:]:
             if (
                 knowledge_base_id is not None
@@ -475,10 +474,10 @@ class QueryRouter:
 
     def __init__(
         self,
-        channels: Optional[Dict[ChannelType, BaseChannel]] = None,
-        rrf_k: Optional[int] = None,
-        candidate_multiplier: Optional[int] = None,
-        max_candidates: Optional[int] = None,
+        channels: dict[ChannelType, BaseChannel] | None = None,
+        rrf_k: int | None = None,
+        candidate_multiplier: int | None = None,
+        max_candidates: int | None = None,
     ):
         self.rrf_k = rrf_k if rrf_k is not None else app_config.RAG_RRF_K
         self.candidate_multiplier = (
@@ -496,7 +495,7 @@ class QueryRouter:
         if self.candidate_multiplier < 1 or self.max_candidates < 1:
             raise ValueError("candidate limits must be positive")
         # 默认通道配置
-        self.channel_configs: Dict[ChannelType, ChannelConfig] = {
+        self.channel_configs: dict[ChannelType, ChannelConfig] = {
             ChannelType.VECTOR: ChannelConfig(
                 channel_type=ChannelType.VECTOR,
                 weight=DEFAULT_CHANNEL_WEIGHT
@@ -515,7 +514,7 @@ class QueryRouter:
         }
 
         # 查询类型与通道权重映射
-        self._channel_weights: Dict[QueryType, Dict[ChannelType, float]] = {
+        self._channel_weights: dict[QueryType, dict[ChannelType, float]] = {
             QueryType.FACTUAL: {
                 ChannelType.VECTOR: 0.7,
                 ChannelType.KEYWORD: 0.3,
@@ -543,7 +542,7 @@ class QueryRouter:
         }
 
         # 路由策略映射
-        self._strategy_map: Dict[QueryType, RouteStrategy] = {
+        self._strategy_map: dict[QueryType, RouteStrategy] = {
             QueryType.FACTUAL: RouteStrategy.MULTI,
             QueryType.COMPARISON: RouteStrategy.MULTI,
             QueryType.SUMMARY: RouteStrategy.MULTI,
@@ -592,8 +591,8 @@ class QueryRouter:
     def route(
         self,
         query: str,
-        query_type: Optional[QueryType] = None,
-        strategy: Optional[RouteStrategy] = None
+        query_type: QueryType | None = None,
+        strategy: RouteStrategy | None = None
     ) -> RouteResult:
         """
         根据查询选择检索通道
@@ -634,9 +633,9 @@ class QueryRouter:
 
     def _select_channels(
         self,
-        weights: Dict[ChannelType, float],
+        weights: dict[ChannelType, float],
         strategy: RouteStrategy
-    ) -> List[ChannelType]:
+    ) -> list[ChannelType]:
         """根据策略选择通道"""
         # Runtime switches are refreshed for every route decision. The client
         # keeps a short local cache, so UI changes do not require a restart.
@@ -677,7 +676,7 @@ class QueryRouter:
     def _calculate_confidence(
         self,
         query_type: QueryType,
-        weights: Dict[ChannelType, float]
+        weights: dict[ChannelType, float]
     ) -> float:
         """计算路由置信度"""
         # 根据权重集中度调整
@@ -694,8 +693,8 @@ class QueryRouter:
         self,
         query: str,
         knowledge_base_id: int,
-        query_type: Optional[QueryType] = None,
-        strategy: Optional[RouteStrategy] = None,
+        query_type: QueryType | None = None,
+        strategy: RouteStrategy | None = None,
         top_k: int = 10,
         **kwargs
     ) -> MergedResult:
@@ -728,8 +727,8 @@ class QueryRouter:
             max(top_k, top_k * self.candidate_multiplier),
             self.max_candidates,
         )
-        results_by_channel: Dict[ChannelType, List[SearchResult]] = {}
-        channel_latencies_ms: Dict[str, float] = {}
+        results_by_channel: dict[ChannelType, list[SearchResult]] = {}
+        channel_latencies_ms: dict[str, float] = {}
 
         if route_result.strategy == RouteStrategy.CASCADING:
             # 级联检索：只有第一个通道返回了实质证据才停止。标题块常会
@@ -754,7 +753,7 @@ class QueryRouter:
         else:
             # 并行检索
             import asyncio
-            tasks: List[Tuple[ChannelType, Any]] = []
+            tasks: list[tuple[ChannelType, Any]] = []
             for channel_type in route_result.selected_channels:
                 channel = self.channels.get(channel_type)
                 if channel:
@@ -790,7 +789,7 @@ class QueryRouter:
         return merged
 
     @staticmethod
-    def _has_sufficient_cascading_evidence(results: List[SearchResult]) -> bool:
+    def _has_sufficient_cascading_evidence(results: list[SearchResult]) -> bool:
         """Return whether a cascade stage has answer-bearing evidence.
 
         Candidate count alone is not a quality signal: BM25 can fill the whole
@@ -814,7 +813,7 @@ class QueryRouter:
         knowledge_base_id: int,
         top_k: int,
         **kwargs,
-    ) -> Tuple[List[SearchResult], float]:
+    ) -> tuple[list[SearchResult], float]:
         """Execute one channel and retain its latency for the debug trace."""
         started_at = time.perf_counter()
         results = await channel.search(
@@ -827,8 +826,8 @@ class QueryRouter:
 
     @staticmethod
     def _debug_candidates(
-        results_by_channel: Dict[ChannelType, List[SearchResult]],
-    ) -> Dict[str, List[Dict[str, Any]]]:
+        results_by_channel: dict[ChannelType, list[SearchResult]],
+    ) -> dict[str, list[dict[str, Any]]]:
         """Normalize raw channel candidates without exposing full chunk text."""
         return {
             channel_type.value: [
@@ -848,7 +847,7 @@ class QueryRouter:
 
     def _merge_results(
         self,
-        results_by_channel: Dict[ChannelType, List[SearchResult]],
+        results_by_channel: dict[ChannelType, list[SearchResult]],
         top_k: int,
         route_result: RouteResult
     ) -> MergedResult:
@@ -861,7 +860,7 @@ class QueryRouter:
                 merge_strategy="rrf",
             )
 
-        fused: Dict[str, Dict[str, Any]] = {}
+        fused: dict[str, dict[str, Any]] = {}
         active_weight = sum(
             route_result.channel_weights.get(channel_type, 1.0)
             for channel_type, results in results_by_channel.items()
@@ -886,7 +885,7 @@ class QueryRouter:
                 if channel_type not in entry["channels"]:
                     entry["channels"].append(channel_type)
 
-        final_results: List[SearchResult] = []
+        final_results: list[SearchResult] = []
         for entry in fused.values():
             result = entry["result"]
             channels = entry["channels"]
@@ -971,7 +970,7 @@ class QueryRouter:
             del self.channel_configs[channel_type]
         logger.info(f"Removed channel: {channel_type.value}")
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """获取路由器统计信息"""
         return {
             "channels": [ch.value for ch in self.channels.keys()],
@@ -989,7 +988,7 @@ class QueryRouterFactory:
 
     @staticmethod
     def create(
-        channels: Optional[Dict[ChannelType, BaseChannel]] = None,
+        channels: dict[ChannelType, BaseChannel] | None = None,
         **kwargs
     ) -> QueryRouter:
         """创建 QueryRouter 实例"""
@@ -1005,7 +1004,7 @@ class QueryRouterFactory:
 # 全局实例
 # =============================================================================
 
-_global_router: Optional[QueryRouter] = None
+_global_router: QueryRouter | None = None
 
 
 def get_router() -> QueryRouter:

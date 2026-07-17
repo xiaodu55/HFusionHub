@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 import types
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
@@ -25,7 +25,7 @@ def _reset_mode(monkeypatch):
     monkeypatch.setattr(config, "TASK_QUEUE_MODE", "inline")
 
 
-def _payload(**overrides) -> Dict[str, Any]:
+def _payload(**overrides) -> dict[str, Any]:
     base = {"document_id": "doc-1", "file_path": "/tmp/x.pdf", "file_type": "pdf"}
     base.update(overrides)
     return base
@@ -33,7 +33,7 @@ def _payload(**overrides) -> Dict[str, Any]:
 
 class _FakeBackgroundTasks:
     def __init__(self):
-        self.added: Dict[str, Any] = {}
+        self.added: dict[str, Any] = {}
 
     def add_task(self, fn, *args, **kwargs):
         self.added.update({"fn": fn, "args": args, "kwargs": kwargs})
@@ -65,7 +65,7 @@ class TestInlineMode:
     @pytest.mark.asyncio
     async def test_inline_executes_pipeline(self, monkeypatch):
         """_run_inline 正确转交 vectorization 后台处理函数（kwargs 全量传递）。"""
-        received: Dict[str, Any] = {}
+        received: dict[str, Any] = {}
 
         async def fake_process(**kwargs):
             received.update(kwargs)
@@ -78,7 +78,7 @@ class TestInlineMode:
 
 
 class _FakePool:
-    def __init__(self, sink: Dict[str, Any]):
+    def __init__(self, sink: dict[str, Any]):
         self._sink = sink
 
     async def enqueue_job(self, name, payload):
@@ -93,7 +93,7 @@ class TestArqMode:
     @pytest.fixture
     def fake_arq(self, monkeypatch):
         """向 sys.modules 注入假 arq / arq.connections 模块。"""
-        state: Dict[str, Any] = {}
+        state: dict[str, Any] = {}
 
         class _FakeRedisSettings:
             def __init__(self, dsn: str):
@@ -154,7 +154,7 @@ class TestArqMode:
 class TestArqTaskFunction:
     @pytest.mark.asyncio
     async def test_process_document_delegates_with_payload(self, monkeypatch):
-        received: Dict[str, Any] = {}
+        received: dict[str, Any] = {}
 
         async def fake_process(**kwargs):
             received.update(kwargs)

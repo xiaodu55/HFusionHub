@@ -4,9 +4,9 @@ RAG Data Models - 数据模型定义
 包含意图分类、复杂度评估、领域识别等核心数据结构
 """
 
-from enum import Enum
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
+from enum import Enum
+from typing import Any
 
 
 class IntentType(str, Enum):
@@ -56,7 +56,7 @@ class IntentResult:
     complexity: ComplexityLevel
     domain: DomainType
     confidence: float  # 0.0 - 1.0
-    entities: List[str] = field(default_factory=list)
+    entities: list[str] = field(default_factory=list)
     reasoning: str = ""
     processing_strategy: str = "simple_retrieval"
 
@@ -80,7 +80,7 @@ class IntentResult:
             IntentType.SUMMARY
         ]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "intent": self.intent.value,
@@ -93,7 +93,7 @@ class IntentResult:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "IntentResult":
+    def from_dict(cls, data: dict[str, Any]) -> "IntentResult":
         """从字典创建"""
         return cls(
             intent=IntentType(data["intent"]),

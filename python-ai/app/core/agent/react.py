@@ -12,33 +12,33 @@ Agent V1 changes:
 """
 
 import json
-import re
 import logging
+import re
 import time
-from typing import List, Dict, Any, Optional, AsyncGenerator, Tuple
+from typing import Any, AsyncGenerator
 
+from ..llm import BaseLLM, ChatMessage, get_llm
+from ..policy import build_arguments_summary
+from ..rag import (
+    CompressionConfig,
+    CompressionStrategyType,
+    EvaluationSample,
+    EvaluationStrategyType,
+    IntentResult,
+    ReflectionConfig,
+    ReflectionStrategyType,
+    SubQuestion,
+    SubQuestionStatus,
+    get_adaptive_retrieval_planner,
+    get_compressor,
+    get_evaluator,
+    get_query_decomposer,
+    get_reflector,
+    get_retriever,
+)
+from ..tools import ToolExecutionPolicy, ToolRegistry, create_v1_registry, execute_tool
 from .agent import Agent, AgentResponse, AgentStep
 from .citation import normalize_source
-from ..llm import get_llm, ChatMessage, BaseLLM
-from ..tools import execute_tool, ToolExecutionPolicy, ToolRegistry, create_v1_registry
-from ..rag import (
-    get_retriever,
-    get_query_decomposer,
-    get_compressor,
-    get_reflector,
-    get_evaluator,
-    IntentResult,
-    DecompositionResult,
-    SubQuestionStatus,
-    CompressionStrategyType,
-    CompressionConfig,
-    ReflectionStrategyType,
-    ReflectionConfig,
-    EvaluationStrategyType,
-    EvaluationSample,
-    get_adaptive_retrieval_planner,
-)
-from ..policy import build_arguments_summary
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def _approval_required_payload(
     action_input: Any,
     tools: list,
     message: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build the approval_required event payload for Java interception.
 
     Carries the tool's ``risk_level`` (from its spec) and a masked
@@ -143,13 +143,13 @@ class ReactAgent(Agent):
         self,
         knowledge_base_id: int = None,
         model: str = None,
-        max_steps: Optional[int] = None,
-        tool_policy: Optional[ToolExecutionPolicy] = None,
+        max_steps: int | None = None,
+        tool_policy: ToolExecutionPolicy | None = None,
         style: str = "detailed",
-        tool_registry: Optional[ToolRegistry] = None,
-        execution_context: Optional[Any] = None,  # AgentExecutionContext
-        retrieval_top_k: Optional[int] = None,
-        llm: Optional[BaseLLM] = None,
+        tool_registry: ToolRegistry | None = None,
+        execution_context: Any | None = None,  # AgentExecutionContext
+        retrieval_top_k: int | None = None,
+        llm: BaseLLM | None = None,
         **kwargs
     ):
         self.knowledge_base_id = knowledge_base_id
@@ -161,22 +161,22 @@ class ReactAgent(Agent):
         self.max_steps = max_steps
         self.tool_policy = tool_policy
         self.style = style if style in _STYLE_PROMPTS else "detailed"
-        self.llm: Optional[BaseLLM] = llm
-        self.tools: List[Dict[str, Any]] = []
+        self.llm: BaseLLM | None = llm
+        self.tools: list[dict[str, Any]] = []
 
         # Agent V1: Tool Registry is the SINGLE source of truth for tools.
         # Agents MUST NOT bypass the registry.
-        self._registry: Optional[ToolRegistry] = tool_registry
+        self._registry: ToolRegistry | None = tool_registry
 
         # Agent V1 Step 3: immutable execution context from Java (user_id,
         # permissions, mode, …).  Passed to the Registry at tool-execution
         # time for permission / mode / KB-scope enforcement.
-        self._context: Optional[Any] = execution_context
+        self._context: Any | None = execution_context
         self.retrieval_top_k = max(1, min(int(retrieval_top_k), 20)) if retrieval_top_k else None
 
         # Agent V1: track tool calls and sources for partial-result reporting.
         self._tool_calls_count: int = 0
-        self._last_sources: List[Dict[str, Any]] = []
+        self._last_sources: list[dict[str, Any]] = []
 
     def _get_llm(self) -> BaseLLM:
         """Get LLM instance (lazy initialization)"""
@@ -184,7 +184,7 @@ class ReactAgent(Agent):
             self.llm = get_llm(model=self.model)
         return self.llm
 
-    def _get_tools(self) -> List[Dict[str, Any]]:
+    def _get_tools(self) -> list[dict[str, Any]]:
         """Get available tools from the Tool Registry.
 
         The Registry is the single choke point — agents cannot get tools
@@ -249,7 +249,7 @@ class ReactAgent(Agent):
     async def _handle_chitchat(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]],
+        history: list[dict[str, str]] | None,
         llm: BaseLLM
     ) -> AgentResponse:
         """处理闲聊"""
@@ -292,12 +292,12 @@ class ReactAgent(Agent):
         except Exception:
             return False
 
-    def _native_tools_schema(self, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+    def _native_tools_schema(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
         """把 Registry 工具（含 _spec）转成 OpenAI function-calling 形态。
 
         无 spec 或无工具时返回 None（调用方直接走文本 ReAct）。
         """
-        payload: List[Dict[str, Any]] = []
+        payload: list[dict[str, Any]] = []
         for tool in tools or []:
             spec = tool.get("_spec")
             if spec is None:
@@ -315,9 +315,9 @@ class ReactAgent(Agent):
     async def _chat_step(
         self,
         llm: BaseLLM,
-        messages: List[ChatMessage],
-        tools: List[Dict[str, Any]],
-    ) -> Tuple[Any, Optional[Tuple[str, Dict[str, Any]]]]:
+        messages: list[ChatMessage],
+        tools: list[dict[str, Any]],
+    ) -> tuple[Any, tuple[str, dict[str, Any]] | None]:
         """ReAct 单步 LLM 调用：原生 tool-calls 优先，失败/不支持降级文本协议。
 
         返回 ``(response, native_action)``。native_action 为
@@ -387,8 +387,8 @@ class ReactAgent(Agent):
     async def _classify_intent_safely(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]],
-    ) -> Optional[IntentResult]:
+        history: list[dict[str, str]] | None,
+    ) -> IntentResult | None:
         """Classify before routing without making classification a hard dependency.
 
         A selected knowledge base narrows retrieval scope; it must not force
@@ -425,9 +425,9 @@ class ReactAgent(Agent):
     async def _handle_operation(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]],
+        history: list[dict[str, str]] | None,
         llm: BaseLLM,
-        tools: List[Dict[str, Any]]
+        tools: list[dict[str, Any]]
     ) -> AgentResponse:
         """处理操作指令"""
         system_prompt = REACT_SYSTEM_PROMPT.format(
@@ -502,8 +502,8 @@ class ReactAgent(Agent):
     async def _retrieve_context(
         self,
         query: str,
-        history: Optional[List[Dict]] = None,
-        intent_result: Optional[IntentResult] = None
+        history: list[dict] | None = None,
+        intent_result: IntentResult | None = None
     ) -> tuple:
         """
         检索相关上下文
@@ -601,8 +601,8 @@ class ReactAgent(Agent):
     async def _build_react_messages(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]],
-    ) -> List[ChatMessage]:
+        history: list[dict[str, str]] | None,
+    ) -> list[ChatMessage]:
         """Build the ReAct system prompt + memory injection + trimmed history.
 
         Shared by the non-streaming pipeline (run) and the streaming ReAct
@@ -628,9 +628,9 @@ class ReactAgent(Agent):
     async def _retrieve_and_compress(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]],
-        intent_result: Optional[Any],
-    ) -> Optional[tuple[str, List[Dict[str, Any]], Optional[int], str, bool]]:
+        history: list[dict[str, str]] | None,
+        intent_result: Any | None,
+    ) -> tuple[str, list[dict[str, Any]], int | None, str, bool] | None:
         """Retrieve + compress core shared by run() and _run_stream_react().
 
         Returns ``(raw_context, rag_sources, auto_detected_kb_id,
@@ -713,7 +713,7 @@ class ReactAgent(Agent):
         )
 
     @staticmethod
-    def _normalise_structured_action(payload: Any) -> Optional[tuple]:
+    def _normalise_structured_action(payload: Any) -> tuple | None:
         """Return ``(tool_name, arguments)`` for a supported tool-call shape.
 
         Providers expose function calls in slightly different JSON envelopes.
@@ -762,7 +762,7 @@ class ReactAgent(Agent):
         return action.strip(), action_input
 
     @classmethod
-    def _parse_structured_action(cls, text: str) -> Optional[tuple]:
+    def _parse_structured_action(cls, text: str) -> tuple | None:
         """Extract a structured function call without trusting free-form text.
 
         A response may contain markdown fences or an explanatory prefix.  We
@@ -781,7 +781,7 @@ class ReactAgent(Agent):
                 return action
         return None
 
-    def _parse_action(self, text: str) -> Optional[tuple]:
+    def _parse_action(self, text: str) -> tuple | None:
         """Parse a structured tool call first, then the legacy ReAct format."""
         # Some smaller models emit a complete ReAct transcript in one turn,
         # including both an Action and a Final Answer.  Once a final answer is
@@ -810,7 +810,7 @@ class ReactAgent(Agent):
 
         return action, action_input
 
-    def _parse_final_answer(self, text: str) -> Optional[str]:
+    def _parse_final_answer(self, text: str) -> str | None:
         """Parse final answer from text"""
         match = re.search(
             r'(?:Final\s+Answer|最终答案)\s*[:：]\s*(.+)',
@@ -822,13 +822,13 @@ class ReactAgent(Agent):
         return None
 
     @staticmethod
-    def _dedupe_sources(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _dedupe_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """按 chunk_id（或 document_id:excerpt 回退键）去重 sources。
 
         R15-20：run / run_stream / _run_stream_react 三条管线此前各有一份
         复制粘贴的相同实现，收敛于此（行为完全一致：首见优先）。
         """
-        unique: Dict[str, Dict[str, Any]] = {}
+        unique: dict[str, dict[str, Any]] = {}
         for source in sources:
             source_key = (
                 source.get("chunk_id")
@@ -838,7 +838,7 @@ class ReactAgent(Agent):
                 unique[source_key] = source
         return list(unique.values())
 
-    def _public_answer_or_fallback(self, text: Optional[str]) -> str:
+    def _public_answer_or_fallback(self, text: str | None) -> str:
         """Return user-facing answer text without exposing ReAct internals."""
         if not text or not text.strip():
             return "无法生成回答"
@@ -859,11 +859,11 @@ class ReactAgent(Agent):
     async def _decompose_and_handle(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]],
+        history: list[dict[str, str]] | None,
         intent_result: IntentResult,
         llm: BaseLLM,
-        tools: List[Dict[str, Any]]
-    ) -> Optional[AgentResponse]:
+        tools: list[dict[str, Any]]
+    ) -> AgentResponse | None:
         """分解复杂问题并处理子问题"""
         try:
             decomposer = get_query_decomposer()
@@ -939,9 +939,9 @@ class ReactAgent(Agent):
     async def _handle_sub_question(
         self,
         sub_question: "SubQuestion",
-        history: Optional[List[Dict[str, str]]],
+        history: list[dict[str, str]] | None,
         llm: BaseLLM,
-        tools: List[Dict[str, Any]]
+        tools: list[dict[str, Any]]
     ) -> tuple:
         """处理单个子问题"""
         sub_question.status = SubQuestionStatus.PROCESSING
@@ -974,10 +974,10 @@ class ReactAgent(Agent):
 
             return response.content, rag_sources
 
-        except Exception as e:
+        except Exception:
             raise
 
-    def _merge_sub_answers(self, original_query: str, sub_answers: List[str]) -> str:
+    def _merge_sub_answers(self, original_query: str, sub_answers: list[str]) -> str:
         """合并多个子问题的答案"""
         if not sub_answers:
             return "无法回答该问题"
@@ -996,7 +996,7 @@ class ReactAgent(Agent):
     async def run(
         self,
         query: str,
-        history: List[Dict[str, str]] = None,
+        history: list[dict[str, str]] = None,
         **kwargs
     ) -> AgentResponse:
         """Run ReAct agent — Agent V1."""
@@ -1207,7 +1207,8 @@ class ReactAgent(Agent):
             )
             try:
                 retry_prompt = self._build_rag_prompt(raw_context, query, self.style)
-                retry_messages = [ChatMessage(role="system", content=system_prompt)]
+                # 复用原 system 消息（含记忆注入），仅以未压缩上下文重建用户侧提示。
+                retry_messages = [messages[0]]
                 if history:
                     for msg in history[-10:]:
                         retry_messages.append(ChatMessage(role=msg["role"], content=msg["content"]))
@@ -1286,7 +1287,7 @@ class ReactAgent(Agent):
     async def run_stream(
         self,
         query: str,
-        history: List[Dict[str, str]] = None,
+        history: list[dict[str, str]] = None,
         **kwargs
     ) -> AsyncGenerator[str, None]:
         """Run ReAct agent with streaming support — Agent V1.
@@ -1311,7 +1312,7 @@ class ReactAgent(Agent):
         if "style" in kwargs:
             self.style = kwargs["style"] if kwargs["style"] in _STYLE_PROMPTS else self.style
 
-        from ..rag import get_query_decomposer, get_compressor, get_reflector
+        from ..rag import get_query_decomposer
 
         # Track step sequence counter for structured events.
         _step_seq = 0
@@ -1379,7 +1380,7 @@ class ReactAgent(Agent):
 
             context = ""
             raw_context = ""
-            sources: List[Dict[str, Any]] = []
+            sources: list[dict[str, Any]] = []
             was_compressed = False
             retrieval_duration_ms = 0.0
             retriever = get_retriever()
@@ -1625,9 +1626,9 @@ class ReactAgent(Agent):
     async def _run_stream_react(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]],
-        tools: List[Dict[str, Any]],
-        intent_result: Optional[Any] = None,
+        history: list[dict[str, str]] | None,
+        tools: list[dict[str, Any]],
+        intent_result: Any | None = None,
         **kwargs
     ) -> AsyncGenerator[str, None]:
         """Streaming ReAct loop — Agent V1 Step 5.
@@ -1650,7 +1651,7 @@ class ReactAgent(Agent):
         try:
             llm = self._get_llm()
             _step_seq = 0
-            sources: List[Dict[str, Any]] = []
+            sources: list[dict[str, Any]] = []
 
             # ── Phase 1: RAG retrieval ──────────────────────────────────
             retrieval_start = _time.monotonic()
@@ -1855,6 +1856,6 @@ class ReactAgent(Agent):
                 "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
             }, ensure_ascii=False)
 
-    def get_tools(self) -> List[Dict[str, Any]]:
+    def get_tools(self) -> list[dict[str, Any]]:
         """Get list of available tools"""
         return self._get_tools()

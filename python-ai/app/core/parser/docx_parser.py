@@ -2,14 +2,14 @@
 Word document parser (.docx)
 """
 
-from typing import List
-from app.core.parser.base import BaseParser, ParsedBlock, BlockType
+
+from app.core.parser.base import BaseParser, BlockType, ParsedBlock
 
 
 class DocxParser(BaseParser):
     """Parse Word documents (.docx) into blocks"""
 
-    def parse(self, file_path: str) -> List[ParsedBlock]:
+    def parse(self, file_path: str) -> list[ParsedBlock]:
         """Parse Word file into blocks"""
         try:
             from docx import Document

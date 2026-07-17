@@ -1,13 +1,13 @@
 # Models package
 from app.models.document import (
+    CallbackRequest,
+    ChunkResponse,
     ParseRequest,
     ParseResponse,
-    ChunkResponse,
-    VectorChunkResponse,
     SearchRequest,
     SearchResponse,
     SearchResult,
-    CallbackRequest
+    VectorChunkResponse,
 )
 
 __all__ = [

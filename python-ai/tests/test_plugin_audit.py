@@ -1,19 +1,21 @@
 """Tests for plugin audit trail."""
 
-import pytest
 from unittest.mock import patch
+
+import pytest
+
 from app.core.plugin.audit import (
-    record_audit,
-    get_audit_log,
+    VALID_ACTIONS,
+    AuditEntry,
     clear_buffer,
     flush_to_backend,
+    get_audit_log,
     get_sync_status,
-    record_install,
-    record_enable,
+    record_audit,
     record_disable,
+    record_enable,
+    record_install,
     record_uninstall,
-    AuditEntry,
-    VALID_ACTIONS,
 )
 
 

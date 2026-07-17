@@ -9,13 +9,12 @@ as markdown, so the normal Java → parse pipeline can index it unchanged.
 import logging
 import uuid
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.core.ingest.url_fetcher import fetch_and_extract
 from app.core.exceptions import ParsingException
+from app.core.ingest.url_fetcher import fetch_and_extract
 from app.utils.config import config
 
 router = APIRouter()
@@ -24,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 class UrlIngestRequest(BaseModel):
     url: str = Field(..., description="公开 HTTPS 网页地址")
-    title: Optional[str] = Field(None, description="可选标题覆盖（默认取自网页 <title>）")
+    title: str | None = Field(None, description="可选标题覆盖（默认取自网页 <title>）")
 
 
 class UrlIngestResponse(BaseModel):

@@ -9,15 +9,14 @@ gbk fallback, which covers the common cases of Chinese Excel exports.
 
 import csv
 import io
-from typing import List
 
-from app.core.parser.base import BaseParser, ParsedBlock, BlockType
+from app.core.parser.base import BaseParser, BlockType, ParsedBlock
 
 # Keep each emitted table block small enough to chunk cleanly.
 MAX_ROWS_PER_BLOCK = 50
 
 
-def _render_table(header: List[str], rows: List[List[str]]) -> str:
+def _render_table(header: list[str], rows: list[list[str]]) -> str:
     """Render a header + rows as a markdown-style table."""
     def cell(value) -> str:
         text = "" if value is None else str(value)
@@ -31,7 +30,7 @@ def _render_table(header: List[str], rows: List[List[str]]) -> str:
     return "\n".join(lines)
 
 
-def _read_csv_rows(file_path: str) -> List[List[str]]:
+def _read_csv_rows(file_path: str) -> list[list[str]]:
     """Read CSV rows with encoding fallback (utf-8 → gbk)."""
     raw = open(file_path, "rb").read()
     last_error = None
@@ -61,7 +60,7 @@ def _read_csv_rows(file_path: str) -> List[List[str]]:
 class CsvParser(BaseParser):
     """Parse CSV files into TABLE blocks."""
 
-    def parse(self, file_path: str) -> List[ParsedBlock]:
+    def parse(self, file_path: str) -> list[ParsedBlock]:
         rows = _read_csv_rows(file_path)
         if not rows:
             return []
@@ -69,7 +68,7 @@ class CsvParser(BaseParser):
         header = rows[0]
         data_rows = rows[1:]
 
-        blocks: List[ParsedBlock] = []
+        blocks: list[ParsedBlock] = []
         for start in range(0, len(data_rows), MAX_ROWS_PER_BLOCK):
             group = data_rows[start:start + MAX_ROWS_PER_BLOCK]
             blocks.append(ParsedBlock(

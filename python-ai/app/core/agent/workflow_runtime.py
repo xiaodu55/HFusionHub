@@ -11,18 +11,18 @@ list_document_chunks) and returns standardised status codes.
 from __future__ import annotations
 
 import asyncio
+import builtins
 import json
 import time
 from collections import deque
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Lock
-from typing import Any, AsyncGenerator, Deque, Dict, List, Optional
+from typing import Any, AsyncGenerator
 from uuid import uuid4
 
 from .agent import Agent, AgentResponse
 from .agent_observability import AgentTrace, get_agent_trace_store
-from ..tools.registry import ToolRegistry, create_v1_registry
 
 # ── Agent V1 status constants ──
 STATUS_COMPLETED = "completed"
@@ -46,21 +46,21 @@ class AgentRunEvent:
     status: str
     attempt: int = 0
     duration_ms: float = 0.0
-    error_code: Optional[str] = None
-    failed_tool: Optional[str] = None
+    error_code: str | None = None
+    failed_tool: str | None = None
 
 
 @dataclass
 class AgentRun:
     run_id: str
-    knowledge_base_id: Optional[int]
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    knowledge_base_id: int | None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     status: str = "running"
-    finish_reason: Optional[str] = None
+    finish_reason: str | None = None
     duration_ms: float = 0.0
-    events: List[AgentRunEvent] = field(default_factory=list)
+    events: list[AgentRunEvent] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["created_at"] = self.created_at.isoformat()
         return data
@@ -70,16 +70,16 @@ class AgentRunStore:
     """Thread-safe, bounded in-memory run store with no conversation content."""
 
     def __init__(self, max_runs: int = 500):
-        self._runs: Deque[AgentRun] = deque(maxlen=max(1, max_runs))
+        self._runs: deque[AgentRun] = deque(maxlen=max(1, max_runs))
         self._lock = Lock()
 
-    def start(self, knowledge_base_id: Optional[int]) -> AgentRun:
+    def start(self, knowledge_base_id: int | None) -> AgentRun:
         run = AgentRun(run_id=str(uuid4()), knowledge_base_id=knowledge_base_id)
         with self._lock:
             self._runs.appendleft(run)
         return run
 
-    def list(self, limit: int = 50, knowledge_base_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    def list(self, limit: int = 50, knowledge_base_id: int | None = None) -> builtins.list[dict[str, Any]]:
         safe_limit = max(1, min(limit, 200))
         with self._lock:
             runs = list(self._runs)
@@ -87,7 +87,7 @@ class AgentRunStore:
             runs = [run for run in runs if run.knowledge_base_id == knowledge_base_id]
         return [run.to_dict() for run in runs[:safe_limit]]
 
-    def get(self, run_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
             for run in self._runs:
                 if run.run_id == run_id:
@@ -129,12 +129,12 @@ class SingleAgentWorkflow(Agent):
     def __init__(
         self,
         delegate: Agent,
-        knowledge_base_id: Optional[int] = None,
+        knowledge_base_id: int | None = None,
         timeout_seconds: float = 45.0,
         max_retries: int = 1,
         retry_delay_seconds: float = 0.2,
-        run_store: Optional[AgentRunStore] = None,
-        allowed_tools: Optional[frozenset] = None,
+        run_store: AgentRunStore | None = None,
+        allowed_tools: frozenset | None = None,
     ):
         self.delegate = delegate
         self.knowledge_base_id = knowledge_base_id
@@ -150,7 +150,7 @@ class SingleAgentWorkflow(Agent):
 
     # ── Agent V1: tool whitelist enforcement ────────────────────────────
 
-    def _filter_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _filter_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Return only tools whose names are in the V1 whitelist."""
         return [t for t in tools if t.get("name") in self.allowed_tools]
 
@@ -179,7 +179,7 @@ class SingleAgentWorkflow(Agent):
     def _record_trace(
         self,
         run: AgentRun,
-        response: Optional[AgentResponse] = None,
+        response: AgentResponse | None = None,
     ) -> None:
         """Persist operational metadata to the AgentTraceStore."""
         try:
@@ -210,13 +210,13 @@ class SingleAgentWorkflow(Agent):
         self,
         content: str,
         status: str,
-        sources: Optional[List[Dict[str, Any]]] = None,
-        agent_run_id: Optional[str] = None,
-        token_usage: Optional[Dict[str, int]] = None,
+        sources: list[dict[str, Any]] | None = None,
+        agent_run_id: str | None = None,
+        token_usage: dict[str, int] | None = None,
         tool_calls_count: int = 0,
         max_tool_steps: int = 5,
-        error_detail: Optional[str] = None,
-        failed_tool: Optional[str] = None,
+        error_detail: str | None = None,
+        failed_tool: str | None = None,
         **kwargs,
     ) -> AgentResponse:
         return AgentResponse(
@@ -240,7 +240,7 @@ class SingleAgentWorkflow(Agent):
     async def run(
         self,
         query: str,
-        history: List[Dict[str, str]] = None,
+        history: list[dict[str, str]] = None,
         **kwargs: Any,
     ) -> AgentResponse:
         run = self.run_store.start(self.knowledge_base_id)
@@ -325,7 +325,7 @@ class SingleAgentWorkflow(Agent):
     async def run_stream(
         self,
         query: str,
-        history: List[Dict[str, str]] = None,
+        history: list[dict[str, str]] = None,
         **kwargs: Any,
     ) -> AsyncGenerator[str, None]:
         run = self.run_store.start(self.knowledge_base_id)
@@ -343,7 +343,7 @@ class SingleAgentWorkflow(Agent):
             run.events.append(AgentRunEvent(name="agent_stream", status="completed", attempt=0))
             self._finish(run, STATUS_COMPLETED, "stop", started)
             self._record_trace(run)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             run.events.append(AgentRunEvent(name="agent_stream", status="failed", error_code="timeout"))
             self._finish(run, STATUS_TIMEOUT, "agent_timeout", started)
             self._record_trace(run)
@@ -356,7 +356,7 @@ class SingleAgentWorkflow(Agent):
                 "error_code": "timeout",
                 "error_detail": None,
                 "failed_tool": None,
-                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+                "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S"),
             }, ensure_ascii=False)
         except Exception as error:
             code = self._error_code(error)
@@ -371,8 +371,8 @@ class SingleAgentWorkflow(Agent):
                 "error_code": code,
                 "error_detail": str(error)[:500],
                 "failed_tool": None,
-                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+                "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S"),
             }, ensure_ascii=False)
 
-    def get_tools(self) -> List[Dict[str, Any]]:
+    def get_tools(self) -> list[dict[str, Any]]:
         return self._filter_tools(self.delegate.get_tools())

@@ -14,7 +14,7 @@ import argparse
 import json
 import random
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -23,10 +23,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from eval_baseline import (
     EvaluationReport,
     aggregate_metrics,
+    load_cases,
     render_markdown,
     save_baseline,
     verify_suite_integrity,
-    load_cases,
 )
 
 SUITE_DIR = PROJECT_ROOT / "evaluation" / "suite"
@@ -87,7 +87,7 @@ def main():
     outcomes = [CaseOutcome(**o) for o in raw_outcomes]
 
     metrics = aggregate_metrics(outcomes, top_k=10, exclude_refusal_from_citation=True)
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     report = EvaluationReport(
         track="runtime",
@@ -106,7 +106,7 @@ def main():
         outcomes=outcomes,
     )
 
-    report_path = REPORT_DIR / f"runtime_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.json"
+    report_path = REPORT_DIR / f"runtime_{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         json.dumps(report.to_dict(), ensure_ascii=False, indent=2) + "\n",

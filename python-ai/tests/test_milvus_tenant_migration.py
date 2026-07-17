@@ -15,8 +15,8 @@ import json
 
 import pytest
 
-from app.core.vectorstore.milvus_lite import MilvusLiteStore
 from app.core.vectorstore.milvus_cluster import MilvusClusterStore
+from app.core.vectorstore.milvus_lite import MilvusLiteStore
 
 
 class FakeMigrationClient:
@@ -257,7 +257,7 @@ def test_lite_migrates_legacy_rows_into_v2(count, tmp_path, monkeypatch):
     assert {r["chunk_id"] for r in client.v2_records} == {r["chunk_id"] for r in client.legacy_records}
     # Active collection switched, marker persisted.
     assert store._collection_name == "chunks_v2"
-    marker = ml._load_active_collection() if hasattr(ml, "_load_active_collection") else None
+    ml._load_active_collection() if hasattr(ml, "_load_active_collection") else None
     assert json.loads((tmp_path / "milvus_test.db.active_collection.json").read_text(encoding="utf-8")) == {
         "active_collection": "chunks_v2"
     }

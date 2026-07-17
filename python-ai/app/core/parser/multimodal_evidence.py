@@ -10,17 +10,18 @@ must never fail the document's text indexing job.
 
 from __future__ import annotations
 
-import httpx
-from dataclasses import dataclass, field
-from hashlib import sha256
-from pathlib import Path
 import logging
 import os
 import shutil
 import subprocess
 import tempfile
-from typing import Dict, Iterable, List, Optional, Tuple
+from dataclasses import dataclass, field
+from hashlib import sha256
+from pathlib import Path
+from typing import Iterable
 from zipfile import BadZipFile, ZipFile
+
+import httpx
 
 from app.core.parser.base import BlockType, ParsedBlock
 
@@ -37,12 +38,12 @@ class MultimodalEnrichmentReport:
     image_blocks: int = 0
     ocr_characters: int = 0
     vlm_blocks: int = 0
-    skipped: Dict[str, int] = field(default_factory=dict)
+    skipped: dict[str, int] = field(default_factory=dict)
 
     def skip(self, reason: str) -> None:
         self.skipped[reason] = self.skipped.get(reason, 0) + 1
 
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "enabled": self.enabled,
             "table_blocks": self.table_blocks,
@@ -104,7 +105,7 @@ class MultimodalEvidenceExtractor:
         self.vlm_base_url = (vlm_base_url or "").rstrip("/")
         self.vlm_timeout_seconds = max(1, vlm_timeout_seconds)
 
-    def enrich(self, file_path: str, file_type: str, blocks: List[ParsedBlock]) -> Tuple[List[ParsedBlock], MultimodalEnrichmentReport]:
+    def enrich(self, file_path: str, file_type: str, blocks: list[ParsedBlock]) -> tuple[list[ParsedBlock], MultimodalEnrichmentReport]:
         """Return original blocks plus source-backed table/image evidence.
 
         The method never mutates the parser output in-place.  It is safe to
@@ -217,7 +218,7 @@ class MultimodalEvidenceExtractor:
         command = self.ocr_command.strip()
         return bool(command and (os.path.isabs(command) and os.path.isfile(command) or shutil.which(command)))
 
-    def _vlm_caption(self, image_bytes: bytes) -> Tuple[str, Optional[str]]:
+    def _vlm_caption(self, image_bytes: bytes) -> tuple[str, str | None]:
         """Describe the image with an Ollama vision model (synchronous, bounded).
 
         Runs inside the indexing thread (enrich is invoked via to_thread), so a
@@ -254,14 +255,14 @@ class MultimodalEvidenceExtractor:
             logger.warning("VLM caption failed: %s", exc)
             return "", "vlm_failed"
 
-    def _extract_images(self, file_path: Path, file_type: str) -> Iterable[Tuple[bytes, str, Dict[str, object]]]:
+    def _extract_images(self, file_path: Path, file_type: str) -> Iterable[tuple[bytes, str, dict[str, object]]]:
         if file_type == "docx":
             return self._extract_docx_images(file_path)
         if file_type == "pdf":
             return self._extract_pdf_images(file_path)
         return []
 
-    def _extract_docx_images(self, file_path: Path) -> Iterable[Tuple[bytes, str, Dict[str, object]]]:
+    def _extract_docx_images(self, file_path: Path) -> Iterable[tuple[bytes, str, dict[str, object]]]:
         try:
             with ZipFile(file_path) as archive:
                 images = []
@@ -279,7 +280,7 @@ class MultimodalEvidenceExtractor:
         except (BadZipFile, OSError) as exc:
             raise ValueError("invalid DOCX image archive") from exc
 
-    def _extract_pdf_images(self, file_path: Path) -> Iterable[Tuple[bytes, str, Dict[str, object]]]:
+    def _extract_pdf_images(self, file_path: Path) -> Iterable[tuple[bytes, str, dict[str, object]]]:
         """Use pypdf's documented ``page.images`` API.
 
         ``pypdf`` is also the baseline text parser (pdf_parser.py); the
@@ -306,7 +307,7 @@ class MultimodalEvidenceExtractor:
                 }))
         return images
 
-    def _ocr(self, image_bytes: bytes, suffix: str) -> Tuple[str, Optional[str]]:
+    def _ocr(self, image_bytes: bytes, suffix: str) -> tuple[str, str | None]:
         temp_path = None
         try:
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:

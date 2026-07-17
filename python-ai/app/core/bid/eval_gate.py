@@ -27,7 +27,7 @@ import asyncio
 import json
 import logging
 import re
-from typing import AsyncGenerator, Callable, Dict, List, Optional
+from typing import AsyncGenerator, Callable
 
 from app.core.bid.check_workflow import BidCheckWorkflow
 from app.core.bid.write_workflow import BidWriteWorkflow
@@ -38,7 +38,7 @@ from app.core.rag.retriever import RetrievalResult
 logger = logging.getLogger(__name__)
 
 # ── 合成招标语料（3 个 chunk，覆盖保证金/截止/密封/★/评分点）────────────
-TENDER_CHUNKS_TEXT: List[str] = [
+TENDER_CHUNKS_TEXT: list[str] = [
     "投标人须知：投标保证金人民币 20 万元，须在开标前缴纳。"
     "投标文件递交截止时间为 2026 年 6 月 18 日 9:30，逾期不予受理。",
     "未按招标文件要求密封的投标文件将视为废标。"
@@ -48,7 +48,7 @@ TENDER_CHUNKS_TEXT: List[str] = [
 
 # ── 撰写场景：已确认需求清单 ───────────────────────────────────────────
 # (requirement_key_phrase, category, 期望路由分节)
-CONFIRMED_REQUIREMENTS: List[Dict[str, str]] = [
+CONFIRMED_REQUIREMENTS: list[dict[str, str]] = [
     {"category": "qualification", "requirement": "投标人须具备建筑智能化工程专业承包资质二级以上"},
     {"category": "performance", "requirement": "近三年须有至少两项合同金额不低于 500 万元的同类业绩"},
     {"category": "technical", "requirement": "施工组织设计方案须满足评分标准并逐条响应"},
@@ -57,7 +57,7 @@ CONFIRMED_REQUIREMENTS: List[Dict[str, str]] = [
 ]
 
 # 与 write_workflow._section_prompt 的分节过滤一致（锁定路由正确性）
-EXPECTED_ROUTING: Dict[str, List[str]] = {
+EXPECTED_ROUTING: dict[str, list[str]] = {
     "commercial": ["commercial", "disqualification_risk", "performance"],
     "technical": ["technical", "performance"],
     "qualification": ["qualification"],
@@ -66,14 +66,14 @@ EXPECTED_ROUTING: Dict[str, List[str]] = {
 
 
 # ── 自检场景：植入风险的草稿（故意遗漏各废标点）─────────────────────────
-RISKY_SECTIONS: List[Dict[str, str]] = [
+RISKY_SECTIONS: list[dict[str, str]] = [
     {"section_key": "commercial", "content": "报价说明与商务承诺。"},
     {"section_key": "technical", "content": "技术方案正文。"},
     {"section_key": "format", "content": "格式文件正文。"},
 ]
 
 # 合规草稿：覆盖全部废标点，应零 critical
-COMPLIANT_SECTIONS: List[Dict[str, str]] = [
+COMPLIANT_SECTIONS: list[dict[str, str]] = [
     {
         "section_key": "commercial",
         "content": (
@@ -97,12 +97,12 @@ COMPLIANT_SECTIONS: List[Dict[str, str]] = [
 
 
 class FakeLLM(BaseLLM):
-    def __init__(self, responder: Callable[[str], Dict]):
+    def __init__(self, responder: Callable[[str], dict]):
         self.responder = responder
 
     async def chat(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs,
@@ -117,7 +117,7 @@ class FakeLLM(BaseLLM):
 
     async def chat_stream(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs,
@@ -132,22 +132,22 @@ class FakeLLM(BaseLLM):
 class FakeRetriever:
     """对任意查询都返回全部招标语料 chunk（检索行为不参与本门禁度量）。"""
 
-    def __init__(self, chunks: List[ProcessedResult]):
+    def __init__(self, chunks: list[ProcessedResult]):
         self._chunks = chunks
         self._content_by_chunk = {c.metadata.get("chunk_id"): c.content for c in chunks}
 
     async def retrieve(
         self,
         query: str,
-        knowledge_base_id: Optional[int] = None,
-        conversation_history: Optional[List[Dict]] = None,
+        knowledge_base_id: int | None = None,
+        conversation_history: list[dict] | None = None,
         top_k: int = 5,
         enable_rewrite: bool = True,
     ) -> RetrievalResult:
         return RetrievalResult(query=query, results=self._chunks[:top_k])
 
 
-def _tender_chunks() -> List[ProcessedResult]:
+def _tender_chunks() -> list[ProcessedResult]:
     return [
         ProcessedResult(
             content=TENDER_CHUNKS_TEXT[i],
@@ -164,7 +164,7 @@ def _tender_chunks() -> List[ProcessedResult]:
 _REQ_LINE_RE = re.compile(r"^\d+\.\s*\[([^\]]+)\]\s*(.+)$")
 
 
-def _write_responder(user_prompt: str) -> Dict:
+def _write_responder(user_prompt: str) -> dict:
     """按分节回显 prompt 中列出的需求清单，证据引用上下文前两条。
 
     content 直接引用需求原文 → requirement_coverage / section_routing_accuracy
@@ -183,7 +183,7 @@ def _write_responder(user_prompt: str) -> Dict:
     }
 
 
-def _run_write_scenario() -> Dict[str, float]:
+def _run_write_scenario() -> dict[str, float]:
     workflow = BidWriteWorkflow(
         llm=FakeLLM(_write_responder), retriever=FakeRetriever(_tender_chunks())
     )
@@ -244,7 +244,7 @@ def _run_write_scenario() -> Dict[str, float]:
 # ── 自检场景 ────────────────────────────────────────────────────────────
 
 
-def _run_check_scenario() -> Dict[str, float]:
+def _run_check_scenario() -> dict[str, float]:
     # LLM 返回空 findings：仅度量确定性规则层（可复现的核心）
     workflow = BidCheckWorkflow(
         llm=FakeLLM(lambda _: {"findings": []}), retriever=FakeRetriever(_tender_chunks())
@@ -283,7 +283,7 @@ def _run_check_scenario() -> Dict[str, float]:
 
 # ── 汇总与门槛 ──────────────────────────────────────────────────────────
 
-GATE_THRESHOLDS: Dict[str, float] = {
+GATE_THRESHOLDS: dict[str, float] = {
     "requirement_coverage": 1.0,
     "section_routing_accuracy": 1.0,
     "section_completeness": 1.0,
@@ -296,7 +296,7 @@ GATE_THRESHOLDS: Dict[str, float] = {
 }
 
 
-def run_all() -> Dict[str, float]:
+def run_all() -> dict[str, float]:
     """运行撰写 + 自检两个场景，返回全部指标。"""
     metrics = {}
     metrics.update(_run_write_scenario())
@@ -304,7 +304,7 @@ def run_all() -> Dict[str, float]:
     return metrics
 
 
-def check_gates(metrics: Dict[str, float], thresholds: Optional[Dict[str, float]] = None) -> List[str]:
+def check_gates(metrics: dict[str, float], thresholds: dict[str, float] | None = None) -> list[str]:
     """返回未达门槛的指标名列表（空=通过）。"""
     thresholds = thresholds or GATE_THRESHOLDS
     failures = []

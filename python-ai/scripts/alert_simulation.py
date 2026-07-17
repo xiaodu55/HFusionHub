@@ -15,9 +15,8 @@ from __future__ import annotations
 
 import json
 import random
-import time
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -26,12 +25,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from app.api.metrics import (
     get_metrics,
     record_chat_request,
-    record_rag_retrieval,
     record_embedding_request,
     record_eval_gate_failure,
+    record_rag_retrieval,
     set_citation_faithfulness,
 )
-from app.utils.trace import create_trace_id, set_trace_id, get_trace_id, clear_trace_id
+from app.utils.trace import clear_trace_id, create_trace_id
 
 
 def simulate_chat_errors(n_errors: int = 50, n_total: int = 100):
@@ -154,7 +153,7 @@ def print_alert_summary():
 
 def main():
     print("HFusionHub SLO Alert Simulation")
-    print(f"Time: {datetime.now(timezone.utc).isoformat()}")
+    print(f"Time: {datetime.now(UTC).isoformat()}")
 
     # Record baseline metrics
     for _ in range(100):
@@ -177,7 +176,7 @@ def main():
     report_path = PROJECT_ROOT.parent / "deploy" / "monitoring" / "alert_simulation_report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "metrics_snapshot": get_metrics().snapshot(),
         "alerts_triggered": n_alerts,
         "description": "Simulated metrics that would trigger SLO alerts in Prometheus/Grafana",

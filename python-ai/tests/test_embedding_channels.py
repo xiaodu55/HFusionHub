@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
-import app.core.embedding as embedding_pkg
 from app.core.embedding.openai_compatible import OpenAICompatibleEmbedding
 from app.core.vectorstore.milvus_store import _matches_metadata_filter
-
 
 # ── OpenAICompatibleEmbedding ─────────────────────────────────────────────
 
@@ -49,7 +47,7 @@ class TestOpenAICompatibleEmbedding:
 
     @pytest.mark.asyncio
     async def test_generate_parses_embedding(self, monkeypatch):
-        captured: List[Dict[str, Any]] = []
+        captured: list[dict[str, Any]] = []
         _patch_transport(monkeypatch, _payload(dim=4), captured)
         client = OpenAICompatibleEmbedding(
             base_url="https://api.test", api_key="sk-x", model="text-embedding-v3", dimension=4)
@@ -62,7 +60,7 @@ class TestOpenAICompatibleEmbedding:
 
     @pytest.mark.asyncio
     async def test_dimension_mismatch_fails_closed(self, monkeypatch):
-        captured: List[Dict[str, Any]] = []
+        captured: list[dict[str, Any]] = []
         _patch_transport(monkeypatch, _payload(dim=8), captured)
         client = OpenAICompatibleEmbedding(
             base_url="https://api.test", api_key="sk-x", model="m", dimension=4)

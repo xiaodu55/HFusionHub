@@ -14,7 +14,6 @@ from .base import BaseLLM
 from .deepseek_llm import DeepSeekLLM
 from .ollama_llm import OllamaLLM
 
-
 _BLOCKED_HOSTS = {
     "169.254.169.254",
     "metadata.google.internal",

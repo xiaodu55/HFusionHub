@@ -8,12 +8,11 @@ MCP Client 管理 API — 注册/查看/移除外部 MCP 服务器（B5）。
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter
 
 from app.core.tools.mcp_client import (
-    ConnectionStatus,
     get_mcp_client_manager,
 )
 
@@ -22,7 +21,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/mcp", tags=["mcp-admin"])
 
 
-def _server_payload(conn) -> Dict[str, Any]:
+def _server_payload(conn) -> dict[str, Any]:
     return {
         "id": conn.server_id,
         "name": conn.name,
@@ -35,13 +34,13 @@ def _server_payload(conn) -> Dict[str, Any]:
 
 
 @router.get("/servers")
-async def list_servers() -> Dict[str, Any]:
+async def list_servers() -> dict[str, Any]:
     manager = get_mcp_client_manager()
     return {"servers": [_server_payload(c) for c in manager.list_servers()]}
 
 
 @router.post("/servers")
-async def add_server(payload: Dict[str, Any]) -> Dict[str, Any]:
+async def add_server(payload: dict[str, Any]) -> dict[str, Any]:
     server_id = str(payload.get("id") or "").strip()
     url = str(payload.get("url") or "").strip()
     if not server_id or not url:
@@ -70,7 +69,7 @@ async def add_server(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @router.post("/servers/{server_id}/reconnect")
-async def reconnect(server_id: str) -> Dict[str, Any]:
+async def reconnect(server_id: str) -> dict[str, Any]:
     manager = get_mcp_client_manager()
     conn = manager.get_server(server_id)
     if conn is None:
@@ -84,7 +83,7 @@ async def reconnect(server_id: str) -> Dict[str, Any]:
 
 
 @router.delete("/servers/{server_id}")
-async def remove_server(server_id: str) -> Dict[str, Any]:
+async def remove_server(server_id: str) -> dict[str, Any]:
     manager = get_mcp_client_manager()
     await manager.disconnect(server_id)
     removed = manager.remove_server(server_id)

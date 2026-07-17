@@ -20,8 +20,7 @@ import json
 import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional, Sequence
-
+from typing import Any, Iterable, Sequence
 
 # ---------------------------------------------------------------------------
 # Suite case model
@@ -62,13 +61,13 @@ class EvalCase:
     key_facts: tuple[str, ...]
     refusal: str
     risk_labels: tuple[str, ...]
-    tool: Optional[dict[str, Any]] = None
+    tool: dict[str, Any] | None = None
     # 招投标领域事实（B2）：{metric_key: [期望事实子串, ...]}，用于确定性
     # 领域指标（在检索命中内容中做子串匹配，无需 LLM，保持离线轨密闭）。
-    bid_facts: Optional[dict[str, Any]] = None
+    bid_facts: dict[str, Any] | None = None
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "EvalCase":
+    def from_dict(cls, value: dict[str, Any]) -> EvalCase:
         required = {"id", "category", "query", "kb_id",
                     "expected_chunk_ids", "expected_document_names"}
         missing = required - value.keys()
@@ -145,18 +144,18 @@ class CaseOutcome:
     expected_chunk_ids: tuple[str, ...]
     expected_document_names: tuple[str, ...]
     scope_violations: int
-    citation_faithfulness: Optional[float]
+    citation_faithfulness: float | None
     refusal_expected: bool
-    refusal_correct: Optional[bool]
-    tool: Optional[dict[str, Any]]
+    refusal_correct: bool | None
+    tool: dict[str, Any] | None
     cited_chunk_ids: list[str] = field(default_factory=list)
-    latency_ms: Optional[float] = None
-    tokens: Optional[int] = None
-    cost_usd: Optional[float] = None
-    tool_success: Optional[bool] = None
-    error: Optional[str] = None
+    latency_ms: float | None = None
+    tokens: int | None = None
+    cost_usd: float | None = None
+    tool_success: bool | None = None
+    error: str | None = None
     # 招投标领域指标：{metric_key: 命中率(0-1)}，按 case 聚合为套件指标。
-    bid: Optional[dict[str, float]] = None
+    bid: dict[str, float] | None = None
 
     @property
     def has_expected(self) -> bool:
@@ -169,26 +168,26 @@ class CaseOutcome:
 
 @dataclass(frozen=True)
 class Metrics:
-    recall_at_5: Optional[float] = None
-    ndcg_at_10: Optional[float] = None
-    citation_accuracy: Optional[float] = None
-    citation_faithfulness: Optional[float] = None
-    refusal_correctness: Optional[float] = None
-    tool_success_rate: Optional[float] = None
-    p95_latency_ms: Optional[float] = None
-    avg_latency_ms: Optional[float] = None
-    p50_latency_ms: Optional[float] = None
-    tokens_per_task: Optional[float] = None
-    cost_usd_per_task: Optional[float] = None
+    recall_at_5: float | None = None
+    ndcg_at_10: float | None = None
+    citation_accuracy: float | None = None
+    citation_faithfulness: float | None = None
+    refusal_correctness: float | None = None
+    tool_success_rate: float | None = None
+    p95_latency_ms: float | None = None
+    avg_latency_ms: float | None = None
+    p50_latency_ms: float | None = None
+    tokens_per_task: float | None = None
+    cost_usd_per_task: float | None = None
     error_rate: float = 0.0
     scope_violations: int = 0
     # 招投标领域指标（B2 垂直化，离线轨确定性产出）
-    qualification_recall: Optional[float] = None
-    disqualification_clause_recall: Optional[float] = None
-    scoring_point_accuracy: Optional[float] = None
-    bid_terminology_accuracy: Optional[float] = None
+    qualification_recall: float | None = None
+    disqualification_clause_recall: float | None = None
+    scoring_point_accuracy: float | None = None
+    bid_terminology_accuracy: float | None = None
 
-    def to_dict(self) -> dict[str, Optional[float]]:
+    def to_dict(self) -> dict[str, float | None]:
         return asdict(self)
 
 
@@ -265,7 +264,7 @@ def aggregate_metrics(outcomes: Sequence[CaseOutcome], top_k: int = 10,
     cost_values = [o.cost_usd for o in valid if o.cost_usd is not None]
 
     # 招投标领域指标：按 case 的 bid 命中率取均值（无该指标的 case 跳过）
-    def _bid_average(metric_key: str) -> Optional[float]:
+    def _bid_average(metric_key: str) -> float | None:
         values = [o.bid[metric_key] for o in valid
                   if o.bid is not None and o.bid.get(metric_key) is not None]
         return (sum(values) / len(values)) if values else None
@@ -308,7 +307,7 @@ def _ndcg(retrieved: Sequence[str], expected: Iterable[str], top_k: int) -> floa
 
 def compute_citation_faithfulness(
     cited_chunk_ids: Sequence[str], expected_chunk_ids: Sequence[str]
-) -> Optional[float]:
+) -> float | None:
     cited = list(cited_chunk_ids)
     if not cited:
         return None
@@ -325,7 +324,7 @@ def runtime_citation_faithfulness(
     doc_text_by_title: dict[str, str],
     support_threshold: float = 0.5,
     answer_threshold: float = 0.5,
-) -> Optional[float]:
+) -> float | None:
     """Runtime citation faithfulness: fraction of key facts that the *answer*
     actually states **and** that are lexically supported by the cited documents.
 
@@ -383,8 +382,8 @@ class EvaluationReport:
     case_count: int
     category_counts: dict[str, int]
     metrics: Metrics
-    baseline_metrics: dict[str, Optional[float]] = field(default_factory=dict)
-    diffs: dict[str, Optional[float]] = field(default_factory=dict)
+    baseline_metrics: dict[str, float | None] = field(default_factory=dict)
+    diffs: dict[str, float | None] = field(default_factory=dict)
     regressions: list[str] = field(default_factory=list)
     gate_failures: list[str] = field(default_factory=list)
     outcomes: list[CaseOutcome] = field(default_factory=list)
@@ -475,12 +474,12 @@ def _is_higher_is_better(key: str) -> bool:
 
 def diff_against_baseline(
     current: Metrics,
-    baseline: dict[str, Optional[float]],
-) -> tuple[dict[str, Optional[float]], list[str]]:
+    baseline: dict[str, float | None],
+) -> tuple[dict[str, float | None], list[str]]:
     """Return ``(deltas, regressions)``.  A metric is only compared when both
     sides have a non-null value."""
     current_dict = current.to_dict()
-    deltas: dict[str, Optional[float]] = {}
+    deltas: dict[str, float | None] = {}
     regressions: list[str] = []
 
     for key, baseline_value in baseline.items():
@@ -509,8 +508,8 @@ def diff_against_baseline(
 
 def load_baseline(
     path: Any,
-    required_suite_sha256: Optional[str] = None,
-) -> Optional[dict[str, Optional[float]]]:
+    required_suite_sha256: str | None = None,
+) -> dict[str, float | None] | None:
     """Load a stored baseline ``metrics`` mapping, or ``None`` if absent.
 
     When ``required_suite_sha256`` is given, the baseline is only valid if it
@@ -571,7 +570,7 @@ def save_baseline(
 # Markdown rendering
 # ---------------------------------------------------------------------------
 
-def _fmt(value: Optional[float], digits: int = 3) -> str:
+def _fmt(value: float | None, digits: int = 3) -> str:
     if value is None:
         return "N/A"
     return f"{value:.{digits}f}"

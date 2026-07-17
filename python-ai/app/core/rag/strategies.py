@@ -7,20 +7,14 @@ Classification Strategies - 分类策略实现
 - HybridClassificationStrategy: 混合分类（推荐，平衡准确性和成本）
 """
 
-import re
-import json
 import hashlib
+import json
 import logging
+import re
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
 
-from .models import (
-    IntentType,
-    ComplexityLevel,
-    DomainType,
-    IntentResult
-)
 from ..llm import BaseLLM, ChatMessage, get_llm
+from .models import ComplexityLevel, DomainType, IntentResult, IntentType
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +30,7 @@ class ClassificationStrategy(ABC):
     async def classify(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: list[dict[str, str]] | None = None,
         **kwargs
     ) -> IntentResult:
         """
@@ -96,7 +90,7 @@ class LLMClassificationStrategy(ClassificationStrategy):
     使用大语言模型进行意图分类，准确但成本较高
     """
 
-    def __init__(self, llm: Optional[BaseLLM] = None):
+    def __init__(self, llm: BaseLLM | None = None):
         """
         初始化 LLM 分类策略
 
@@ -104,7 +98,7 @@ class LLMClassificationStrategy(ClassificationStrategy):
             llm: LLM 实例（可选，默认使用全局 LLM）
         """
         self.llm = llm
-        self._cache: Dict[str, IntentResult] = {}
+        self._cache: dict[str, IntentResult] = {}
 
     def _get_llm(self) -> BaseLLM:
         """获取 LLM 实例"""
@@ -115,7 +109,7 @@ class LLMClassificationStrategy(ClassificationStrategy):
     async def classify(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: list[dict[str, str]] | None = None,
         **kwargs
     ) -> IntentResult:
         """使用 LLM 分类"""
@@ -148,7 +142,7 @@ class LLMClassificationStrategy(ClassificationStrategy):
     def _build_prompt(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]]
+        history: list[dict[str, str]] | None
     ) -> str:
         """构建分类提示词"""
         history_text = ""
@@ -222,7 +216,7 @@ class LLMClassificationStrategy(ClassificationStrategy):
     def _get_cache_key(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]]
+        history: list[dict[str, str]] | None
     ) -> str:
         """生成缓存键"""
         key_data = {
@@ -248,7 +242,7 @@ class RuleClassificationStrategy(ClassificationStrategy):
         """初始化规则分类策略"""
 
         # 意图关键词映射
-        self.intent_keywords: Dict[IntentType, List[str]] = {
+        self.intent_keywords: dict[IntentType, list[str]] = {
             IntentType.FACTUAL: [
                 "是什么", "什么是", "定义", "含义", "解释", "介绍",
                 "怎么", "如何", "怎样"
@@ -274,7 +268,7 @@ class RuleClassificationStrategy(ClassificationStrategy):
         }
 
         # 复杂度关键词映射
-        self.complexity_keywords: Dict[ComplexityLevel, List[str]] = {
+        self.complexity_keywords: dict[ComplexityLevel, list[str]] = {
             ComplexityLevel.SIMPLE: [],  # 默认
             ComplexityLevel.MEDIUM: [
                 "和", "以及", "还有", "同时", "并且", "另外"
@@ -286,7 +280,7 @@ class RuleClassificationStrategy(ClassificationStrategy):
         }
 
         # 领域关键词映射
-        self.domain_keywords: Dict[DomainType, List[str]] = {
+        self.domain_keywords: dict[DomainType, list[str]] = {
             DomainType.TECH: [
                 "代码", "编程", "Python", "Java", "API", "数据库",
                 "服务器", "部署", "开发", "框架", "库", "函数"
@@ -300,7 +294,7 @@ class RuleClassificationStrategy(ClassificationStrategy):
     async def classify(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: list[dict[str, str]] | None = None,
         **kwargs
     ) -> IntentResult:
         """使用规则分类"""
@@ -362,7 +356,7 @@ class RuleClassificationStrategy(ClassificationStrategy):
 
         return DomainType.GENERAL
 
-    def _extract_entities(self, query: str) -> List[str]:
+    def _extract_entities(self, query: str) -> list[str]:
         """提取实体（简单实现）"""
         entities = []
 
@@ -388,7 +382,7 @@ class HybridClassificationStrategy(ClassificationStrategy):
     平衡准确性和成本
     """
 
-    def __init__(self, llm: Optional[BaseLLM] = None):
+    def __init__(self, llm: BaseLLM | None = None):
         """
         初始化混合分类策略
 
@@ -402,7 +396,7 @@ class HybridClassificationStrategy(ClassificationStrategy):
     async def classify(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: list[dict[str, str]] | None = None,
         **kwargs
     ) -> IntentResult:
         """混合分类：先规则，低置信度时用 LLM"""

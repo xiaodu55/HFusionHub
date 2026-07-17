@@ -19,7 +19,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Iterable
 
 from app.core.rag.query_router import ChannelType, MergedResult, SearchResult
 
@@ -44,7 +44,7 @@ def tokenize(text: str) -> list[str]:
 def _extract_sections(md_text: str) -> list[tuple[str, str]]:
     """Return ``(section_id, section_text)`` pairs from a Markdown document."""
     sections: list[tuple[str, str]] = []
-    current_id: Optional[str] = None
+    current_id: str | None = None
     buffer: list[str] = []
     for line in md_text.splitlines():
         match = re.match(r"^##\s+\[([a-z0-9-]+)\]\s*(.*)$", line)
@@ -73,7 +73,7 @@ class _Bm25Index:
     b: float = 0.75
 
     @classmethod
-    def build(cls, corpus: Iterable[Iterable[str]]) -> "_Bm25Index":
+    def build(cls, corpus: Iterable[Iterable[str]]) -> _Bm25Index:
         docs = tuple(tuple(tokens) for tokens in corpus)
         lengths = tuple(len(doc) for doc in docs)
         average_length = sum(lengths) / len(lengths) if lengths else 0.0
@@ -156,7 +156,7 @@ class SyntheticIndex:
         self.bm25 = _Bm25Index.build(chunk.tokens for chunk in chunks)
         self._content_by_chunk = {chunk.chunk_id: chunk.content for chunk in chunks}
 
-    def get_chunk_content(self, chunk_id: str) -> Optional[str]:
+    def get_chunk_content(self, chunk_id: str) -> str | None:
         """返回某 chunk 的原始内容（领域指标做确定性子串匹配用）。"""
         return self._content_by_chunk.get(chunk_id)
 
@@ -201,7 +201,7 @@ class SyntheticIndex:
 class SyntheticRouter:
     """Router-shaped facade satisfying ``retrieval_evaluator.Router``."""
 
-    def __init__(self, index: Optional[SyntheticIndex] = None, min_score: float = 0.0):
+    def __init__(self, index: SyntheticIndex | None = None, min_score: float = 0.0):
         if index is not None:
             self.index = index
         else:

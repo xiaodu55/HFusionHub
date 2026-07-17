@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +31,7 @@ def _flag_on(name: str) -> bool:
     return os.getenv(name, "false").lower() in ("true", "1", "yes")
 
 
-def resolve_judge_model(model: Optional[str]) -> Optional[str]:
+def resolve_judge_model(model: str | None) -> str | None:
     """返回 judge/评测用途应使用的模型名；开启强制模式且未配置内网模型时抛错。"""
     if not _flag_on(ENV_NO_EXTERNAL_JUDGE):
         return model

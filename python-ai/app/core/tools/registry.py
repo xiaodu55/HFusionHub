@@ -17,34 +17,38 @@ import concurrent.futures
 import hashlib
 import json
 import logging
-import time
 import threading
-from typing import Any, Dict, List, Optional
+import time
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+if TYPE_CHECKING:
+    # 仅注解引用：运行时 PolicyContext 在各方法内延迟导入，避免循环依赖。
+    from app.core.policy.engine import PolicyContext
+
 from .base import BaseTool
-from .spec import (
-    ToolSpec,
-    V1_SPECS,
-    ErrorCode,
-    RiskLevel,
-    Permissions,
-    SEARCH_KB_SPEC,
-    READ_CHUNK_SPEC,
-    LIST_DOC_CHUNKS_SPEC,
-)
+from .calculator_tool import CalculatorTool
+from .declarative_http_tool import DeclarativeHttpTool
+from .list_document_chunks_tool import ListDocumentChunksTool
+from .read_chunk_tool import ReadChunkTool
 from .result import ToolResult
 from .search_tool import SearchTool
-from .read_chunk_tool import ReadChunkTool
-from .list_document_chunks_tool import ListDocumentChunksTool
-from .calculator_tool import CalculatorTool
+from .spec import (
+    LIST_DOC_CHUNKS_SPEC,
+    READ_CHUNK_SPEC,
+    SEARCH_KB_SPEC,
+    V1_SPECS,
+    ErrorCode,
+    Permissions,
+    RiskLevel,
+    ToolSpec,
+)
 from .time_tool import TimeTool
 from .web_search_tool import WebSearchTool
-from .declarative_http_tool import DeclarativeHttpTool
 
 logger = logging.getLogger(__name__)
 
-_remote_tool_cache: Dict[int, Dict[str, Any]] = {}
+_remote_tool_cache: dict[int, dict[str, Any]] = {}
 _remote_tool_cache_lock = threading.Lock()
 _REMOTE_TOOL_CACHE_TTL = 10.0
 
@@ -58,9 +62,10 @@ _fetch_executor = concurrent.futures.ThreadPoolExecutor(
 )
 
 
-def _http_get_tool_specs(tenant_id: int) -> List[Dict[str, Any]]:
+def _http_get_tool_specs(tenant_id: int) -> list[dict[str, Any]]:
     """Perform the synchronous Java round-trip. Runs in a worker thread."""
     import httpx
+
     from app.utils.config import config
 
     response = httpx.get(
@@ -77,7 +82,7 @@ def _http_get_tool_specs(tenant_id: int) -> List[Dict[str, Any]]:
     return [dict(item) for item in specs if isinstance(item, dict)]
 
 
-def _fetch_remote_plugin_specs(tenant_id: Optional[int]) -> List[Dict[str, Any]]:
+def _fetch_remote_plugin_specs(tenant_id: int | None) -> list[dict[str, Any]]:
     """Fetch tenant-scoped declarative specs from Java with a short cache."""
     if not tenant_id or tenant_id < 1:
         return []
@@ -120,14 +125,14 @@ def _fetch_remote_plugin_specs(tenant_id: Optional[int]) -> List[Dict[str, Any]]
 #   4. Grant is in-process only; Python restart clears all grants.
 #      The authoritative approval record lives in MySQL agent_approval.
 
-_scoped_grants: Dict[str, Dict[str, Any]] = {}
+_scoped_grants: dict[str, dict[str, Any]] = {}
 _scoped_grants_lock = threading.Lock()
 _SCOPED_GRANT_TTL_SECONDS = 60
 
 
 def register_scoped_grant(
     tool_name: str,
-    tool_input: Dict[str, Any],
+    tool_input: dict[str, Any],
     user_id: int,
     knowledge_base_id: int,
 ) -> str:
@@ -158,7 +163,7 @@ def register_scoped_grant(
 
 def consume_scoped_grant(
     tool_name: str,
-    tool_input: Dict[str, Any],
+    tool_input: dict[str, Any],
     user_id: int,
     knowledge_base_id: int,
 ) -> bool:
@@ -257,9 +262,9 @@ class ToolRegistry:
 
     def __init__(
         self,
-        knowledge_base_id: Optional[int] = None,
+        knowledge_base_id: int | None = None,
         agent_version: str = "1.0",
-        tenant_id: Optional[int] = None,
+        tenant_id: int | None = None,
         enable_web_search: bool = False,
     ):
         self._knowledge_base_id = knowledge_base_id
@@ -271,8 +276,8 @@ class ToolRegistry:
         # mode, approval) so enabling the flag alone never bypasses policy.
         self._web_search_enabled = bool(enable_web_search)
         # spec name → (ToolSpec, BaseTool instance)
-        self._specs: Dict[str, ToolSpec] = {}
-        self._instances: Dict[str, BaseTool] = {}
+        self._specs: dict[str, ToolSpec] = {}
+        self._instances: dict[str, BaseTool] = {}
         # Policy engine instance (swappable in tests).
         from app.core.policy.engine import PolicyEngine
         self._policy_engine = PolicyEngine()
@@ -301,8 +306,8 @@ class ToolRegistry:
         # Gated behind agent_version="1.1" — NOT visible to default V1 agents
         # (which only see "1.0" tools).  The decide/resume endpoint creates a
         # "1.1" registry so the approved write tool is available for execution.
-        from .write_note_tool import WriteNoteTool
         from .spec import ToolSpec as TS
+        from .write_note_tool import WriteNoteTool
         write_note_spec = TS(
             name="write_note",
             description="Write a note to the knowledge base. Requires human approval.",
@@ -420,7 +425,6 @@ class ToolRegistry:
 
             plugin_id = pspec.get("_plugin_id", "")
             plugin_name = pspec.get("_plugin_name", "")
-            plugin_version = pspec.get("_plugin_version", "")
 
             spec = ToolSpec(
                 name=name,
@@ -466,7 +470,9 @@ class ToolRegistry:
         """
         try:
             from app.core.tools.mcp_client import get_mcp_client_manager
-            from .spec import ToolSpec as TS, RiskLevel, Permissions
+
+            from .spec import Permissions, RiskLevel
+            from .spec import ToolSpec as TS
 
             specs = get_mcp_client_manager().get_all_tools()
         except Exception as exc:
@@ -500,7 +506,7 @@ class ToolRegistry:
 
     # ── Tool discovery ────────────────────────────────────────────────
 
-    def get_spec(self, tool_name: str) -> Optional[ToolSpec]:
+    def get_spec(self, tool_name: str) -> ToolSpec | None:
         """Return the ToolSpec for *any* registered tool (including non-V1)."""
         return self._specs.get(tool_name)
 
@@ -517,9 +523,9 @@ class ToolRegistry:
 
     def get_tools(
         self,
-        agent_version: Optional[str] = None,
+        agent_version: str | None = None,
         v1_only: bool = True,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Return tool definitions visible to the given agent version.
 
         V1 agents (``agent_version="1.0"``) see only V1-whitelisted tools
@@ -531,7 +537,7 @@ class ToolRegistry:
         """
         version = agent_version or self._agent_version
         compatible = self._v1_compatible_versions(version) if v1_only else None
-        tools: List[Dict[str, Any]] = []
+        tools: list[dict[str, Any]] = []
         for name, spec in self._specs.items():
             if v1_only and spec.agent_version not in compatible:
                 # B4: web_search (agent_version="0.0") is exposed only when
@@ -551,9 +557,9 @@ class ToolRegistry:
     async def execute(
         self,
         tool_name: str,
-        tool_input: Dict[str, Any],
-        timeout_seconds: Optional[float] = None,
-        context: Optional[Any] = None,  # AgentExecutionContext (lazy import)
+        tool_input: dict[str, Any],
+        timeout_seconds: float | None = None,
+        context: Any | None = None,  # AgentExecutionContext (lazy import)
     ) -> ToolResult:
         """Execute a tool through the registry.
 
@@ -626,7 +632,7 @@ class ToolRegistry:
                     summary_input = dict(tool_input)
                     summary_input.pop("knowledge_base_id", None)
                     summary_input.pop("user_id", None)
-                    return ToolResult.approval_required(
+                    return ToolResult.approval(
                         tool_name=tool_name,
                         tool_input=summary_input,
                         message=verdict.reason,
@@ -784,7 +790,7 @@ class ToolRegistry:
                 duration_ms=elapsed,
             )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             elapsed = round((time.monotonic() - started) * 1000, 2)
             return ToolResult.failure(
                 tool_name=tool_name,
@@ -807,9 +813,9 @@ class ToolRegistry:
         self,
         plugin_id: str,
         tool_name: str,
-        safe_input: Dict[str, Any],
+        safe_input: dict[str, Any],
         timeout_seconds: float,
-        context: Optional[Any] = None,
+        context: Any | None = None,
     ) -> ToolResult:
         """Execute a plugin tool through the sandboxed subprocess runner.
 
@@ -915,9 +921,9 @@ class ToolRegistry:
         self,
         *,
         spec: ToolSpec,
-        config: Dict[str, Any],
-        safe_input: Dict[str, Any],
-        context: Optional[Any],
+        config: dict[str, Any],
+        safe_input: dict[str, Any],
+        context: Any | None,
     ) -> ToolResult:
         """Execute a tenant-scoped low-code GET tool."""
         expected_tenant = getattr(spec, "_tenant_id", None)
@@ -938,7 +944,7 @@ class ToolRegistry:
                 data,
                 round((time.monotonic() - started) * 1000, 2),
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return ToolResult.failure(spec.name, ErrorCode.TIMEOUT, "接口请求超时")
         except Exception as exc:
             logger.warning("低代码工具 %s 执行失败: %s", spec.name, exc)
@@ -948,7 +954,7 @@ class ToolRegistry:
         self,
         server_id: str,
         spec: ToolSpec,
-        safe_input: Dict[str, Any],
+        safe_input: dict[str, Any],
         timeout_seconds: float,
     ) -> ToolResult:
         """Execute an external MCP tool through the MCP client manager.
@@ -973,7 +979,7 @@ class ToolRegistry:
                 ),
                 timeout=max(0.1, timeout_seconds),
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return ToolResult.failure(spec.name, ErrorCode.TIMEOUT, "MCP 工具调用超时")
         except Exception as exc:
             logger.warning("MCP 工具 %s 执行失败: %s", spec.name, exc)
@@ -1022,8 +1028,8 @@ class ToolRegistry:
         # Resolve feature flags lazily; transparent/fail-open modes return True,
         # so the registry's policy defaults mirror current behavior in tests.
         from app.core.policy.engine import PolicyContext
-        from app.utils.feature_flag import feature_flags
         from app.utils.config import config
+        from app.utils.feature_flag import feature_flags
 
         user_id = getattr(context, "user_id", 0)
         kb_id = getattr(context, "knowledge_base_id", self._knowledge_base_id) or 0
@@ -1060,7 +1066,7 @@ class ToolRegistry:
         )
 
     @staticmethod
-    def _validate_input(spec: ToolSpec, tool_input: Dict[str, Any]) -> Optional[str]:
+    def _validate_input(spec: ToolSpec, tool_input: dict[str, Any]) -> str | None:
         """Validate input against the tool's input_schema.  Returns None on success."""
         input_schema = spec.input_schema
         if not isinstance(tool_input, dict):
@@ -1105,7 +1111,7 @@ class ToolRegistry:
 def create_v1_registry(
     knowledge_base_id: int,
     agent_version: str = "1.0",
-    tenant_id: Optional[int] = None,
+    tenant_id: int | None = None,
     enable_web_search: bool = False,
 ) -> ToolRegistry:
     """Create a ToolRegistry for Agent V1 with the given KB scope.
@@ -1125,8 +1131,8 @@ def create_v1_registry(
 
 
 def create_full_registry(
-    knowledge_base_id: Optional[int] = None,
-    tenant_id: Optional[int] = None,
+    knowledge_base_id: int | None = None,
+    tenant_id: int | None = None,
 ) -> ToolRegistry:
     """Create a ToolRegistry with all tools (for MCP / non-agent use)."""
     return ToolRegistry(knowledge_base_id=knowledge_base_id, agent_version="1.0", tenant_id=tenant_id)

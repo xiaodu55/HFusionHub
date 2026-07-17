@@ -7,10 +7,9 @@ No external dependencies — uses a lightweight thread-safe counter/registry.
 
 from __future__ import annotations
 
-import time
 import threading
+import time
 from collections import defaultdict, deque
-from typing import Dict
 
 from fastapi import APIRouter
 
@@ -32,12 +31,12 @@ class MetricsRegistry:
 
     def __init__(self):
         self._lock = threading.Lock()
-        self._counters: Dict[str, int] = defaultdict(int)
-        self._histograms: Dict[str, deque] = defaultdict(
+        self._counters: dict[str, int] = defaultdict(int)
+        self._histograms: dict[str, deque] = defaultdict(
             lambda: deque(maxlen=HISTOGRAM_MAX_SAMPLES)
         )
-        self._histogram_counts: Dict[str, int] = defaultdict(int)
-        self._histogram_sums: Dict[str, float] = defaultdict(float)
+        self._histogram_counts: dict[str, int] = defaultdict(int)
+        self._histogram_sums: dict[str, float] = defaultdict(float)
         self._start_time = time.time()
 
     def inc(self, name: str, value: int = 1):
@@ -50,7 +49,7 @@ class MetricsRegistry:
             self._histogram_counts[name] += 1
             self._histogram_sums[name] += value
 
-    def snapshot(self) -> Dict:
+    def snapshot(self) -> dict:
         with self._lock:
             return {
                 "counters": dict(self._counters),
@@ -66,8 +65,8 @@ class MetricsRegistry:
         lines = []
 
         # Uptime
-        lines.append(f"# HELP hfusionhub_uptime_seconds Service uptime in seconds")
-        lines.append(f"# TYPE hfusionhub_uptime_seconds gauge")
+        lines.append("# HELP hfusionhub_uptime_seconds Service uptime in seconds")
+        lines.append("# TYPE hfusionhub_uptime_seconds gauge")
         lines.append(f"hfusionhub_uptime_seconds {snapshot['uptime_seconds']:.1f}")
 
         # Counters
@@ -86,7 +85,6 @@ class MetricsRegistry:
             lifetime_count = snapshot["histogram_counts"].get(name, len(values))
             lifetime_sum = snapshot["histogram_sums"].get(name, sum(values))
             sorted_vals = sorted(values)
-            avg = sum(sorted_vals) / len(sorted_vals)
             p50 = sorted_vals[len(sorted_vals) // 2]
             p95 = sorted_vals[min(int(len(sorted_vals) * 0.95), len(sorted_vals) - 1)]
             p99 = sorted_vals[min(int(len(sorted_vals) * 0.99), len(sorted_vals) - 1)]

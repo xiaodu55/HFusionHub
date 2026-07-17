@@ -4,7 +4,7 @@ Fallback LLM for testing when no real LLM is available
 """
 
 import asyncio
-from typing import List, AsyncGenerator
+from typing import AsyncGenerator
 
 from .base import BaseLLM, ChatMessage, LLMResponse
 
@@ -17,7 +17,7 @@ class MockLLM(BaseLLM):
 
     async def chat(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs
@@ -42,7 +42,7 @@ class MockLLM(BaseLLM):
 
     async def chat_stream(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs

@@ -1,20 +1,21 @@
 """Tests for plugin registry (in-memory, no Java backend calls)."""
 
 import pytest
-from app.core.plugin.registry import (
-    register_plugin,
-    unregister_plugin,
-    get_plugin,
-    get_plugin_by_name,
-    list_plugins,
-    list_all_tool_specs,
-    enable_plugin,
-    disable_plugin,
-    verify_manifest_integrity,
-    clear_registry,
-)
+
 from app.core.plugin.loader import PluginDescriptor
 from app.core.plugin.manifest import compute_manifest_hash
+from app.core.plugin.registry import (
+    clear_registry,
+    disable_plugin,
+    enable_plugin,
+    get_plugin,
+    get_plugin_by_name,
+    list_all_tool_specs,
+    list_plugins,
+    register_plugin,
+    unregister_plugin,
+    verify_manifest_integrity,
+)
 
 
 @pytest.fixture(autouse=True)

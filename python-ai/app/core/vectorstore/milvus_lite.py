@@ -13,19 +13,19 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pymilvus import (
-    FieldSchema,
     CollectionSchema,
     DataType,
+    FieldSchema,
     MilvusClient,
 )
 
-from app.utils.config import config
-from app.core.vectorstore.base import VectorStoreProtocol, VectorStoreStatus
 from app.core.chunker.text_chunker import VectorChunk
 from app.core.tenant.context import require_tenant_id
+from app.core.vectorstore.base import VectorStoreProtocol, VectorStoreStatus
+from app.utils.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ CHUNKS_STORE_PATH = (
 )
 
 
-def _migrate_co_store_layout(store: Dict[str, Any]) -> Dict[str, Any]:
+def _migrate_co_store_layout(store: dict[str, Any]) -> dict[str, Any]:
     """Normalize the JSON co-store to the tenant-keyed physical layout.
 
     Legacy stores were keyed by ``document_id`` (value = list of chunks).  The
@@ -58,7 +58,7 @@ def _migrate_co_store_layout(store: Dict[str, Any]) -> Dict[str, Any]:
     is_legacy = any(isinstance(v, list) for v in store.values())
     if not is_legacy:
         return store
-    migrated: Dict[str, Any] = {}
+    migrated: dict[str, Any] = {}
     for doc_id, chunks in store.items():
         if not isinstance(chunks, list):
             continue
@@ -69,7 +69,7 @@ def _migrate_co_store_layout(store: Dict[str, Any]) -> Dict[str, Any]:
     return migrated
 
 
-def _co_store_tenant_root(store: Dict[str, Any], tenant_key: str) -> Dict[str, List[Dict]]:
+def _co_store_tenant_root(store: dict[str, Any], tenant_key: str) -> dict[str, list[dict]]:
     """Return the tenant-keyed root of the co-store for a concrete tenant id.
 
     Lazily creates the bucket so writes can anchor to an empty tenant without
@@ -91,13 +91,13 @@ class MilvusLiteStore(VectorStoreProtocol):
     def __init__(self) -> None:
         self._base_collection = config.MILVUS_COLLECTION
         self._collection_name = self._load_active_collection() or self._base_collection
-        self._client: Optional[MilvusClient] = None
+        self._client: MilvusClient | None = None
         self._lock = threading.RLock()
-        self._last_error: Optional[str] = None
+        self._last_error: str | None = None
 
     # ── Connection ───────────────────────────────────────────────────────────
 
-    def _get_client(self) -> Optional[MilvusClient]:
+    def _get_client(self) -> MilvusClient | None:
         with self._lock:
             if self._client is not None:
                 return self._client
@@ -146,7 +146,7 @@ class MilvusLiteStore(VectorStoreProtocol):
             logger.exception("Milvus Lite readiness check failed")
             return VectorStoreStatus(ready=False, collection=self._collection_name, mode="lite", error=str(exc))
 
-    def ensure_collection(self) -> Optional[MilvusClient]:
+    def ensure_collection(self) -> MilvusClient | None:
         client = self._get_client()
         if client is None:
             return None
@@ -262,12 +262,12 @@ class MilvusLiteStore(VectorStoreProtocol):
         client.create_collection(collection_name=name, schema=schema, index_params=index_params)
         logger.info("Created collection %s", name)
 
-    def _read_all_rows(self, client: MilvusClient, collection: str) -> List[Dict[str, Any]]:
+    def _read_all_rows(self, client: MilvusClient, collection: str) -> list[dict[str, Any]]:
         fields = [
             "chunk_id", "document_id", "knowledge_base_id",
             "content", "block_type", "outline_path", "metadata", "embedding",
         ]
-        rows: List[Dict[str, Any]] = []
+        rows: list[dict[str, Any]] = []
         offset = 0
         while True:
             page = client.query(
@@ -334,7 +334,7 @@ class MilvusLiteStore(VectorStoreProtocol):
     def _marker_path(self) -> Path:
         return Path(str(MILVUS_LITE_PATH) + self._ACTIVE_COLLECTION_MARKER)
 
-    def _load_active_collection(self) -> Optional[str]:
+    def _load_active_collection(self) -> str | None:
         try:
             p = self._marker_path()
             if p.exists():
@@ -365,7 +365,7 @@ class MilvusLiteStore(VectorStoreProtocol):
                 client.drop_collection(self._collection_name)
                 logger.info("Dropped collection: %s", self._collection_name)
             return True
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to drop collection")
             return False
 
@@ -373,8 +373,8 @@ class MilvusLiteStore(VectorStoreProtocol):
 
     _BACKFILL_PAGE_SIZE = 512
 
-    def _tenant_filter(self, knowledge_base_id: Optional[int] = None,
-                       document_id: Optional[str] = None) -> Optional[str]:
+    def _tenant_filter(self, knowledge_base_id: int | None = None,
+                       document_id: str | None = None) -> str | None:
         """Build a filter expression that ALWAYS scopes to the active tenant."""
         tenant_id = require_tenant_id()  # fail-closed: no default tenant
         parts = [f"tenant_id == {tenant_id}"]
@@ -393,10 +393,10 @@ class MilvusLiteStore(VectorStoreProtocol):
 
     def insert_chunks(
         self,
-        chunks: List[VectorChunk],
-        embeddings: List[List[float]],
+        chunks: list[VectorChunk],
+        embeddings: list[list[float]],
         document_id: str,
-        knowledge_base_id: Optional[int] = None,
+        knowledge_base_id: int | None = None,
     ) -> bool:
         tenant_id = require_tenant_id()  # fail-closed
         try:
@@ -438,7 +438,7 @@ class MilvusLiteStore(VectorStoreProtocol):
                 })
             self._save_to_co_store(document_id, store_records)
             return True
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to insert chunks")
             return False
 
@@ -457,11 +457,11 @@ class MilvusLiteStore(VectorStoreProtocol):
                 store.setdefault(str(tenant_id), {}).pop(str(document_id), None)
                 self._write_co_store(store)
             return True
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to delete document chunks")
             return False
 
-    def delete_chunk_ids(self, chunk_ids: List[str]) -> bool:
+    def delete_chunk_ids(self, chunk_ids: list[str]) -> bool:
         if not chunk_ids:
             return True
         try:
@@ -483,13 +483,13 @@ class MilvusLiteStore(VectorStoreProtocol):
 
     def search(
         self,
-        query_text: Optional[str] = None,
-        query_embedding: Optional[List[float]] = None,
+        query_text: str | None = None,
+        query_embedding: list[float] | None = None,
         top_k: int = 5,
-        document_id: Optional[str] = None,
-        knowledge_base_id: Optional[int] = None,
-        metadata_filter: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        document_id: str | None = None,
+        knowledge_base_id: int | None = None,
+        metadata_filter: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         try:
             client = self._get_client()
             if client is None:
@@ -522,19 +522,19 @@ class MilvusLiteStore(VectorStoreProtocol):
                         metadata_filter,
                     )
                 raise
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to search")
             return []
 
     def _filtered_search(
         self,
         client,
-        query_embedding: List[float],
+        query_embedding: list[float],
         top_k: int,
-        knowledge_base_id: Optional[int],
-        document_id: Optional[str],
-        metadata_filter: Optional[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
+        knowledge_base_id: int | None,
+        document_id: str | None,
+        metadata_filter: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
         """带元数据过滤的搜索：先超额召回再按谓词后过滤（Batch 5）。
 
         无 filter 时与原路径完全一致（top_k 直取）。
@@ -558,11 +558,11 @@ class MilvusLiteStore(VectorStoreProtocol):
     def _search_client(
         self,
         client,
-        query_embedding: List[float],
+        query_embedding: list[float],
         top_k: int,
-        knowledge_base_id: Optional[int],
-        document_id: Optional[str],
-    ) -> List[Dict[str, Any]]:
+        knowledge_base_id: int | None,
+        document_id: str | None,
+    ) -> list[dict[str, Any]]:
         # Tenant isolation: always scope retrieval to the active tenant.
         filter_expr = self._tenant_filter(
             knowledge_base_id=knowledge_base_id, document_id=document_id
@@ -599,8 +599,8 @@ class MilvusLiteStore(VectorStoreProtocol):
         return formatted
 
     def get_document_chunks(
-        self, document_id: str, page: int = 1, size: int = 20, block_type: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        self, document_id: str, page: int = 1, size: int = 20, block_type: str | None = None,
+    ) -> dict[str, Any]:
         try:
             tenant_id = require_tenant_id()
             store = self._load_co_store()
@@ -616,7 +616,7 @@ class MilvusLiteStore(VectorStoreProtocol):
             logger.exception("Failed to get document chunks")
             return {"code": 500, "message": str(exc)}
 
-    def get_chunk_detail(self, chunk_id: str) -> Optional[Dict[str, Any]]:
+    def get_chunk_detail(self, chunk_id: str) -> dict[str, Any] | None:
         try:
             tenant_id = require_tenant_id()
             client = self._get_client()
@@ -629,13 +629,13 @@ class MilvusLiteStore(VectorStoreProtocol):
                 output_fields=["chunk_id", "document_id", "knowledge_base_id", "tenant_id", "content", "block_type", "outline_path", "metadata"],
             )
             return results[0] if results else None
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to get chunk detail")
             return None
 
     # ── Reconciliation helpers ───────────────────────────────────────────────
 
-    def list_all_chunk_ids(self, knowledge_base_id: Optional[int] = None) -> List[str]:
+    def list_all_chunk_ids(self, knowledge_base_id: int | None = None) -> list[str]:
         try:
             client = self._get_client()
             if client is None:
@@ -649,7 +649,7 @@ class MilvusLiteStore(VectorStoreProtocol):
             logger.error("Failed to list chunk IDs: %s", exc)
             return []
 
-    def count_chunks(self, knowledge_base_id: Optional[int] = None) -> int:
+    def count_chunks(self, knowledge_base_id: int | None = None) -> int:
         try:
             client = self._get_client()
             if client is None:
@@ -663,11 +663,11 @@ class MilvusLiteStore(VectorStoreProtocol):
             logger.error("Failed to count chunks: %s", exc)
             return 0
 
-    def all_chunks(self, knowledge_base_id: Optional[int] = None) -> Dict[str, List[Dict[str, Any]]]:
+    def all_chunks(self, knowledge_base_id: int | None = None) -> dict[str, list[dict[str, Any]]]:
         """Return all chunks of the active tenant from the JSON co-store."""
         tenant_id = require_tenant_id()
         store = self._load_co_store()
-        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        grouped: dict[str, list[dict[str, Any]]] = {}
         for document_id, chunks in store.get(str(tenant_id), {}).items():
             for chunk in chunks:
                 if knowledge_base_id is not None and chunk.get("knowledge_base_id") != knowledge_base_id:
@@ -677,7 +677,7 @@ class MilvusLiteStore(VectorStoreProtocol):
 
     # ── JSON co-store (private) ──────────────────────────────────────────────
 
-    def _load_co_store(self) -> Dict[str, Any]:
+    def _load_co_store(self) -> dict[str, Any]:
         try:
             p = Path(CHUNKS_STORE_PATH)
             if p.exists():
@@ -688,7 +688,7 @@ class MilvusLiteStore(VectorStoreProtocol):
             logger.error("Co-store load error: %s", exc)
         return {}
 
-    def _write_co_store(self, store: Dict[str, Any]) -> None:
+    def _write_co_store(self, store: dict[str, Any]) -> None:
         try:
             p = Path(CHUNKS_STORE_PATH)
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -701,7 +701,7 @@ class MilvusLiteStore(VectorStoreProtocol):
         except Exception as exc:
             logger.error("Co-store save error: %s", exc)
 
-    def _save_to_co_store(self, document_id: str, chunks: List[Dict]) -> None:
+    def _save_to_co_store(self, document_id: str, chunks: list[dict]) -> None:
         # R15-13：读-改-写必须持锁——两个并发索引（或索引与删除）各自
         # load→modify→replace 会互相覆盖丢文档。锁只包 co-store 事务，
         # 不包 Milvus 客户端写入（已在锁外完成）。

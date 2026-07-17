@@ -13,7 +13,6 @@ import math
 from pathlib import Path
 
 import pytest
-
 from eval_baseline import (
     CaseOutcome,
     Metrics,
@@ -25,6 +24,7 @@ from eval_baseline import (
     load_cases,
     save_baseline,
 )
+
 from app.core.rag.synthetic_index import (
     SyntheticIndex,
     SyntheticRouter,

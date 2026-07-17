@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.core.bid.extractor import extract_disqualification_clauses, extract_scoring_points
 from app.core.llm import get_llm
@@ -33,7 +33,7 @@ RETRIEVE_TOP_K = 4
 
 # ── 高频废标点关键词：招标文件显式要求但标书未体现 → 触发 finding ─────
 # topic -> (keyword, category, severity)
-FORMAT_TOPICS: Dict[str, tuple[str, str, str]] = {
+FORMAT_TOPICS: dict[str, tuple[str, str, str]] = {
     "投标保证金": ("保证金", "bond", "warning"),
     "递交截止时间": ("截止", "deadline", "warning"),
     "开标时间": ("开标", "deadline", "warning"),
@@ -57,7 +57,7 @@ _DEADLINE_RE = re.compile(
 )
 _STAR_RE = re.compile(r"★|\*")
 
-CHECK_SCHEMA: Dict[str, Any] = {
+CHECK_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "findings": {
@@ -108,11 +108,11 @@ class BidCheckWorkflow:
         *,
         project_id: int,
         title: str,
-        tender_number: Optional[str],
-        sections: List[Dict[str, Any]],
-        knowledge_base_ids: List[int],
-        requirements: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
+        tender_number: str | None,
+        sections: list[dict[str, Any]],
+        knowledge_base_ids: list[int],
+        requirements: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         corpus = await self._retrieve_corpus(knowledge_base_ids, title)
         context, chunk_map = self._build_context(corpus)
         drafts = {
@@ -120,7 +120,7 @@ class BidCheckWorkflow:
         }
         draft_text = "\n".join(drafts.values())
 
-        findings: List[Dict[str, Any]] = []
+        findings: list[dict[str, Any]] = []
         # 1) 确定性规则
         findings.extend(self._deterministic_checks(context, draft_text, drafts))
         # 2) LLM 语义检查（上下文中含废标条款）
@@ -144,9 +144,9 @@ class BidCheckWorkflow:
     # ── 确定性规则检查（核心、可测试）─────────────────────────────
 
     def _deterministic_checks(
-        self, tender_text: str, draft_text: str, drafts: Dict[str, str]
-    ) -> List[Dict[str, Any]]:
-        findings: List[Dict[str, Any]] = []
+        self, tender_text: str, draft_text: str, drafts: dict[str, str]
+    ) -> list[dict[str, Any]]:
+        findings: list[dict[str, Any]] = []
         if not tender_text:
             return findings
 
@@ -236,7 +236,7 @@ class BidCheckWorkflow:
         return findings
 
     @staticmethod
-    def _locate_section(drafts: Dict[str, str], keyword: str) -> Optional[str]:
+    def _locate_section(drafts: dict[str, str], keyword: str) -> str | None:
         """粗定位关键词所在分节；找不到返回 None（项目级 finding）。"""
         for key, content in drafts.items():
             if content and keyword in content:
@@ -248,12 +248,12 @@ class BidCheckWorkflow:
     async def _llm_checks(
         self,
         context: str,
-        drafts: Dict[str, str],
-        requirements: Optional[List[Dict[str, Any]]],
-        chunk_map: Dict[str, str],
+        drafts: dict[str, str],
+        requirements: list[dict[str, Any]] | None,
+        chunk_map: dict[str, str],
         title: str,
-        tender_number: Optional[str],
-    ) -> List[Dict[str, Any]]:
+        tender_number: str | None,
+    ) -> list[dict[str, Any]]:
         draft_block = "\n\n".join(
             f"### {key}\n{content[:4000]}" for key, content in drafts.items() if content
         ) or "（标书草稿为空）"
@@ -285,7 +285,7 @@ class BidCheckWorkflow:
 
     # ── 检索 ──────────────────────────────────────────────────────
 
-    async def _retrieve_corpus(self, knowledge_base_ids: List[int], title: str) -> List[Dict[str, str]]:
+    async def _retrieve_corpus(self, knowledge_base_ids: list[int], title: str) -> list[dict[str, str]]:
         queries = [title] if title else []
         queries += [
             "废标 否决投标 无效投标 条款",
@@ -293,8 +293,8 @@ class BidCheckWorkflow:
             "保证金 截止时间 开标 密封",
             "格式 签章 份数 正本",
         ]
-        seen: Dict[str, str] = {}
-        merged: List[Dict[str, str]] = []
+        seen: dict[str, str] = {}
+        merged: list[dict[str, str]] = []
         for kb_id in knowledge_base_ids or []:
             for query in queries:
                 try:
@@ -313,16 +313,16 @@ class BidCheckWorkflow:
         return merged
 
     @staticmethod
-    def _build_context(corpus: List[Dict[str, str]]) -> tuple[str, Dict[str, str]]:
-        parts: List[str] = []
-        chunk_map: Dict[str, str] = {}
+    def _build_context(corpus: list[dict[str, str]]) -> tuple[str, dict[str, str]]:
+        parts: list[str] = []
+        chunk_map: dict[str, str] = {}
         for i, chunk in enumerate(corpus):
             chunk_map[str(i)] = chunk["chunk_id"]
             parts.append(f"[{i}] {chunk['content']}")
         return "\n\n".join(parts), chunk_map
 
     @staticmethod
-    def _resolve_evidence(indices, chunk_map: Dict[str, str]):
+    def _resolve_evidence(indices, chunk_map: dict[str, str]):
         if not indices:
             return []
         resolved = []

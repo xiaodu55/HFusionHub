@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.utils.config import config
 from app.utils.feature_flag import feature_flags
@@ -63,15 +63,15 @@ class LongTermMemoryService:
     """长期记忆的触发、持久化与上下文注入。全部方法失败静默降级，不阻塞主链路。"""
 
     def __init__(self):
-        self._turn_counters: Dict[int, int] = {}
+        self._turn_counters: dict[int, int] = {}
         self._counter_lock = threading.Lock()
 
     # ── 开关 ────────────────────────────────────────────────────────────
 
     def is_enabled(
         self,
-        user_id: Optional[int] = None,
-        tenant_id: Optional[int] = None,
+        user_id: int | None = None,
+        tenant_id: int | None = None,
     ) -> bool:
         """flag 默认关闭；DB 无该 flag 行时按降级策略回退 env 配置。"""
         try:
@@ -86,9 +86,9 @@ class LongTermMemoryService:
         self,
         user_id: int,
         query: str,
-        knowledge_base_id: Optional[int] = None,
-        limit: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        knowledge_base_id: int | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
         """从 Java 拉取与 query 相关的长期记忆（Java 侧已按重要性+词命中排序）。"""
         if not user_id or user_id <= 0:
             return []
@@ -110,7 +110,7 @@ class LongTermMemoryService:
             resp = await client.get(url, params=params, headers=headers)
         resp.raise_for_status()
         data = resp.json().get("data") or []
-        memories: List[Dict[str, Any]] = []
+        memories: list[dict[str, Any]] = []
         for item in data:
             content = (item.get("content") or "").strip()
             if not content:
@@ -128,8 +128,8 @@ class LongTermMemoryService:
         self,
         user_id: int,
         query: str,
-        knowledge_base_id: Optional[int] = None,
-        tenant_id: Optional[int] = None,
+        knowledge_base_id: int | None = None,
+        tenant_id: int | None = None,
     ) -> str:
         """构建注入提示词的记忆上下文块；关闭/无记忆/失败一律返回空串。"""
         if not self.is_enabled(user_id=user_id, tenant_id=tenant_id):
@@ -157,15 +157,15 @@ class LongTermMemoryService:
     async def persist_entries(
         self,
         user_id: int,
-        entries: List[Any],
-        conversation_id: Optional[int] = None,
-        knowledge_base_id: Optional[int] = None,
-        tenant_id: Optional[int] = None,
+        entries: list[Any],
+        conversation_id: int | None = None,
+        knowledge_base_id: int | None = None,
+        tenant_id: int | None = None,
     ) -> int:
         """把抽取结果批量落库到 Java（Java 侧按 user+content 去重）。返回保存条数。"""
         if not user_id or user_id <= 0:
             return 0
-        payload_entries: List[Dict[str, Any]] = []
+        payload_entries: list[dict[str, Any]] = []
         for entry in entries[:_MAX_BATCH_ENTRIES]:
             fact = str(_entry_field(entry, "fact") or "").strip()
             if not fact:
@@ -189,7 +189,7 @@ class LongTermMemoryService:
         import httpx
 
         url = f"{config.JAVA_BACKEND_URL}/api/internal/memory/entries"
-        payload: Dict[str, Any] = {"user_id": int(user_id), "entries": payload_entries}
+        payload: dict[str, Any] = {"user_id": int(user_id), "entries": payload_entries}
         if conversation_id:
             payload["conversation_id"] = int(conversation_id)
         if knowledge_base_id:
@@ -209,11 +209,11 @@ class LongTermMemoryService:
         self,
         conversation_id: int,
         user_id: int,
-        messages: List[Dict[str, str]],
-        knowledge_base_id: Optional[int] = None,
-        tenant_id: Optional[int] = None,
-        llm: Optional[Any] = None,
-    ) -> Optional[Dict[str, Any]]:
+        messages: list[dict[str, str]],
+        knowledge_base_id: int | None = None,
+        tenant_id: int | None = None,
+        llm: Any | None = None,
+    ) -> dict[str, Any] | None:
         """对一段完整对话跑 LLM 记忆抽取并落库。返回 {saved, summary} 或 None（关闭/无产出）。"""
         if not self.is_enabled(user_id=user_id, tenant_id=tenant_id):
             return None
@@ -244,11 +244,11 @@ class LongTermMemoryService:
 
     def schedule_turn_consolidation(
         self,
-        conversation_id: Optional[int],
-        user_id: Optional[int],
-        messages: List[Dict[str, str]],
-        knowledge_base_id: Optional[int] = None,
-        tenant_id: Optional[int] = None,
+        conversation_id: int | None,
+        user_id: int | None,
+        messages: list[dict[str, str]],
+        knowledge_base_id: int | None = None,
+        tenant_id: int | None = None,
     ) -> None:
         """对话每完成一轮调用一次；累计每 N 轮后台触发一次抽取。fire-and-forget。
 
@@ -292,7 +292,7 @@ _background_tasks: set = set()
 
 # ── Singleton ──────────────────────────────────────────────────────────────
 
-_long_term_memory: Optional[LongTermMemoryService] = None
+_long_term_memory: LongTermMemoryService | None = None
 
 
 def get_long_term_memory() -> LongTermMemoryService:

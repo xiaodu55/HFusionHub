@@ -3,8 +3,8 @@ Text chunker with block type identification and outline path tracking
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
-from app.core.parser.base import ParsedBlock, BlockType
+
+from app.core.parser.base import BlockType, ParsedBlock
 from app.utils.config import config
 
 
@@ -15,7 +15,7 @@ class VectorChunk:
     index: int
     content: str
     block_type: str
-    outline_path: List[str]
+    outline_path: list[str]
     metadata: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -44,7 +44,7 @@ class TextChunker:
         self.chunk_size = chunk_size or config.CHUNK_SIZE
         self.chunk_overlap = chunk_overlap or config.CHUNK_OVERLAP
 
-    def chunk(self, blocks: List[ParsedBlock], document_id: str) -> List[VectorChunk]:
+    def chunk(self, blocks: list[ParsedBlock], document_id: str) -> list[VectorChunk]:
         """
         Split blocks into chunks
 
@@ -77,7 +77,7 @@ class TextChunker:
 
         return chunks
 
-    def _update_outline_path(self, current_path: List[str], heading_block: ParsedBlock) -> List[str]:
+    def _update_outline_path(self, current_path: list[str], heading_block: ParsedBlock) -> list[str]:
         """
         Update outline path when encountering a heading
 
@@ -107,8 +107,8 @@ class TextChunker:
         block: ParsedBlock,
         document_id: str,
         chunk_index: int,
-        outline_path: List[str]
-    ) -> List[VectorChunk]:
+        outline_path: list[str]
+    ) -> list[VectorChunk]:
         """
         Create chunk(s) from a single block
 
@@ -197,8 +197,8 @@ class TextChunker:
         block: ParsedBlock,
         document_id: str,
         chunk_index: int,
-        outline_path: List[str],
-    ) -> List[VectorChunk]:
+        outline_path: list[str],
+    ) -> list[VectorChunk]:
         """表格按行打包：每块尽量容纳整数行，续块带表头前缀保持可解释性。
 
         单行超限时对该行硬切（极端长单元格的兜底），其余场景永不切断一行。
@@ -218,9 +218,9 @@ class TextChunker:
         header = lines[0] if lines else ""
         header_prefix = f"{header}\n（表格续，表头同上）\n" if header else "（表格续）\n"
 
-        chunks: List[VectorChunk] = []
+        chunks: list[VectorChunk] = []
         current_index = chunk_index
-        current_lines: List[str] = []
+        current_lines: list[str] = []
         current_len = 0
 
         def _flush() -> None:
@@ -261,11 +261,11 @@ class TextChunker:
         return chunks
 
 
-def _hard_split(text: str, size: int) -> List[str]:
+def _hard_split(text: str, size: int) -> list[str]:
     return [text[start:start + size] for start in range(0, len(text), size)]
 
 
-def chunk_blocks(blocks: List[ParsedBlock], document_id: str) -> List[VectorChunk]:
+def chunk_blocks(blocks: list[ParsedBlock], document_id: str) -> list[VectorChunk]:
     """
     Convenience function to chunk parsed blocks
 

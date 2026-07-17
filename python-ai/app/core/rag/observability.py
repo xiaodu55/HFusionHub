@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import builtins
 import csv
 import io
 import json
 from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from threading import Lock
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 
@@ -18,18 +19,18 @@ class RetrievalTrace:
     """A privacy-conscious record of one retrieval operation."""
 
     query: str
-    knowledge_base_id: Optional[int]
+    knowledge_base_id: int | None
     top_k: int
-    routes: List[Dict[str, Any]] = field(default_factory=list)
-    results: List[Dict[str, Any]] = field(default_factory=list)
-    debug: Dict[str, Any] = field(default_factory=dict)
+    routes: list[dict[str, Any]] = field(default_factory=list)
+    results: list[dict[str, Any]] = field(default_factory=list)
+    debug: dict[str, Any] = field(default_factory=dict)
     rewrite_count: int = 1
     latency_ms: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
     trace_id: str = field(default_factory=lambda: str(uuid4()))
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["created_at"] = self.created_at.isoformat()
         return data
@@ -45,7 +46,7 @@ class RetrievalTraceStore:
     def __init__(self, max_traces: int = 500):
         if max_traces < 1:
             raise ValueError("max_traces must be at least 1")
-        self._traces: Deque[RetrievalTrace] = deque(maxlen=max_traces)
+        self._traces: deque[RetrievalTrace] = deque(maxlen=max_traces)
         self._lock = Lock()
 
     def record(self, trace: RetrievalTrace) -> RetrievalTrace:
@@ -53,7 +54,7 @@ class RetrievalTraceStore:
             self._traces.appendleft(trace)
         return trace
 
-    def _snapshot(self) -> List[RetrievalTrace]:
+    def _snapshot(self) -> builtins.list[RetrievalTrace]:
         with self._lock:
             return list(self._traces)
 
@@ -61,10 +62,10 @@ class RetrievalTraceStore:
     def _matches(
         trace: RetrievalTrace,
         *,
-        query: Optional[str] = None,
-        knowledge_base_id: Optional[int] = None,
+        query: str | None = None,
+        knowledge_base_id: int | None = None,
         error_only: bool = False,
-        source: Optional[str] = None,
+        source: str | None = None,
     ) -> bool:
         if knowledge_base_id is not None and trace.knowledge_base_id != knowledge_base_id:
             return False
@@ -79,11 +80,11 @@ class RetrievalTraceStore:
     def _filtered(
         self,
         *,
-        query: Optional[str] = None,
-        knowledge_base_id: Optional[int] = None,
+        query: str | None = None,
+        knowledge_base_id: int | None = None,
         error_only: bool = False,
-        source: Optional[str] = None,
-    ) -> List[RetrievalTrace]:
+        source: str | None = None,
+    ) -> builtins.list[RetrievalTrace]:
         traces = self._snapshot()
         return [
             trace for trace in traces
@@ -100,11 +101,11 @@ class RetrievalTraceStore:
         self,
         limit: int = 50,
         offset: int = 0,
-        query: Optional[str] = None,
-        knowledge_base_id: Optional[int] = None,
+        query: str | None = None,
+        knowledge_base_id: int | None = None,
         error_only: bool = False,
-        source: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        source: str | None = None,
+    ) -> builtins.list[dict[str, Any]]:
         safe_limit = max(1, min(limit, 200))
         safe_offset = max(0, offset)
         traces = self._filtered(
@@ -118,10 +119,10 @@ class RetrievalTraceStore:
     def count(
         self,
         *,
-        query: Optional[str] = None,
-        knowledge_base_id: Optional[int] = None,
+        query: str | None = None,
+        knowledge_base_id: int | None = None,
         error_only: bool = False,
-        source: Optional[str] = None,
+        source: str | None = None,
     ) -> int:
         """Return the number of traces matching the same list filters."""
         return len(self._filtered(
@@ -131,7 +132,7 @@ class RetrievalTraceStore:
             source=source,
         ))
 
-    def get(self, trace_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, trace_id: str) -> dict[str, Any] | None:
         for trace in self._snapshot():
             if trace.trace_id == trace_id:
                 return trace.to_dict()
@@ -140,8 +141,8 @@ class RetrievalTraceStore:
     def stats(
         self,
         window_days: int = 7,
-        knowledge_base_id: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        knowledge_base_id: int | None = None,
+    ) -> dict[str, Any]:
         traces = self._filtered(knowledge_base_id=knowledge_base_id)
 
         total = len(traces)
@@ -165,9 +166,9 @@ class RetrievalTraceStore:
             for trace in failure_traces[:5]
         ]
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         start_day = (now - timedelta(days=max(window_days, 1) - 1)).date()
-        daily_metrics: Dict[str, Dict[str, Any]] = {}
+        daily_metrics: dict[str, dict[str, Any]] = {}
         for day_index in range(max(window_days, 1)):
             day = (start_day + timedelta(days=day_index)).isoformat()
             daily_metrics[day] = {
@@ -180,7 +181,7 @@ class RetrievalTraceStore:
             }
 
         for trace in traces:
-            day = trace.created_at.astimezone(timezone.utc).date().isoformat()
+            day = trace.created_at.astimezone(UTC).date().isoformat()
             if day not in daily_metrics:
                 continue
             metric = daily_metrics[day]
@@ -221,18 +222,18 @@ class RetrievalTraceStore:
         self,
         format: str = "json",
         *,
-        query: Optional[str] = None,
-        knowledge_base_id: Optional[int] = None,
+        query: str | None = None,
+        knowledge_base_id: int | None = None,
         error_only: bool = False,
-        source: Optional[str] = None,
-    ) -> Dict[str, str]:
+        source: str | None = None,
+    ) -> dict[str, str]:
         traces = self._filtered(
             query=query,
             knowledge_base_id=knowledge_base_id,
             error_only=error_only,
             source=source,
         )
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         normalized = format.lower()
 
         if normalized == "csv":
@@ -296,7 +297,7 @@ class RetrievalTraceStore:
         raise ValueError("format must be json or csv")
 
 
-_trace_store: Optional[RetrievalTraceStore] = None
+_trace_store: RetrievalTraceStore | None = None
 
 
 def get_trace_store() -> RetrievalTraceStore:

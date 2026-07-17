@@ -17,7 +17,7 @@ import argparse
 import asyncio
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +35,7 @@ from eval_baseline import (  # noqa: E402
     save_baseline,
     verify_suite_integrity,
 )
+
 from app.core.rag.synthetic_index import SyntheticRouter  # noqa: E402
 
 SUITE_DIR = PROJECT_ROOT / "evaluation" / "suite"
@@ -77,7 +78,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _compute_bid_metrics(case, retrieved_chunk_ids: list[str], router) -> Optional[dict[str, float]]:
+def _compute_bid_metrics(case, retrieved_chunk_ids: list[str], router) -> dict[str, float] | None:
     """招投标领域指标：对每条期望事实子串，在检索命中的 chunk 内容中做
     确定性子串匹配（无需 LLM，保持离线轨密闭）。返回 {metric_key: 命中率}。
     """
@@ -187,7 +188,7 @@ def main() -> int:
     if baseline:
         diffs, regressions = diff_against_baseline(metrics, baseline)
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     report = EvaluationReport(
         track="offline",
         suite_version=str(suite_manifest.get("suite_version", "?")),
@@ -206,7 +207,7 @@ def main() -> int:
     )
 
     report_path = args.report or (
-        REPORT_DIR / f"offline_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.json"
+        REPORT_DIR / f"offline_{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}.json"
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(

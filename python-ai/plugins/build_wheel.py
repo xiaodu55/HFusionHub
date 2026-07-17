@@ -33,7 +33,7 @@ META_FILES = ("README.md",)
 
 def _read_manifest(plugin_dir: str) -> dict:
     path = os.path.join(plugin_dir, "hfusion_plugin.json")
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         manifest = json.load(f)
     return manifest
 

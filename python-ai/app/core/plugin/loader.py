@@ -15,11 +15,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .manifest import (
     ManifestError,
@@ -29,7 +28,7 @@ from .manifest import (
 
 # Signature verification (optional dependency — graceful fallback)
 try:
-    from .signature import verify_signature, SignatureError, UntrustedPublisherError, RevokedKeyError
+    from .signature import RevokedKeyError, SignatureError, UntrustedPublisherError, verify_signature
     _HAS_SIGNATURE = True
 except ImportError:
     _HAS_SIGNATURE = False
@@ -47,13 +46,13 @@ class PluginDescriptor:
     plugin_id: str
     name: str
     version: str
-    manifest: Dict[str, Any]
+    manifest: dict[str, Any]
     manifest_hash: str
     archive_path: str
     archive_hash: str
     extract_dir: str  # Where the wheel was extracted (used by sandbox runner)
-    tool_specs: List[Dict[str, Any]] = field(default_factory=list)
-    sandbox_config: Optional[Dict[str, Any]] = None
+    tool_specs: list[dict[str, Any]] = field(default_factory=list)
+    sandbox_config: dict[str, Any] | None = None
 
 
 class PluginLoadError(Exception):
@@ -65,9 +64,9 @@ class PluginLoadError(Exception):
 
 def load_plugin_from_wheel(
     wheel_path: str,
-    plugin_id: Optional[str] = None,
+    plugin_id: str | None = None,
     require_hash: bool = True,
-    expected_hash: Optional[str] = None,
+    expected_hash: str | None = None,
     verify_sig: bool = True,
 ) -> PluginDescriptor:
     """Load plugin metadata from a wheel.  Does NOT execute any plugin code.
@@ -155,7 +154,7 @@ def load_plugin_from_wheel(
 
 def load_plugin_from_directory(
     dir_path: str,
-    plugin_id: Optional[str] = None,
+    plugin_id: str | None = None,
 ) -> PluginDescriptor:
     """Load plugin metadata from a directory.  Does NOT execute any plugin code."""
     dir_path = os.path.abspath(dir_path)
@@ -166,7 +165,7 @@ def load_plugin_from_directory(
     if not os.path.isfile(manifest_path):
         raise PluginLoadError("(unknown)", f"目录中未找到 {MANIFEST_FILENAME}")
 
-    with open(manifest_path, "r", encoding="utf-8") as f:
+    with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
 
     name = manifest.get("name", "unknown")
@@ -200,7 +199,7 @@ def load_plugin_from_directory(
 
 # ── Internal helpers ─────────────────────────────────────────────────
 
-def _read_manifest_from_zip(zip_path: str) -> Dict[str, Any]:
+def _read_manifest_from_zip(zip_path: str) -> dict[str, Any]:
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
             if MANIFEST_FILENAME not in zf.namelist():
@@ -246,8 +245,8 @@ def _extract_wheel(wheel_path: str, plugin_name: str) -> str:
 
 
 def _parse_tool_specs_from_extracted(
-    extract_dir: str, manifest: Dict[str, Any]
-) -> List[Dict[str, Any]]:
+    extract_dir: str, manifest: dict[str, Any]
+) -> list[dict[str, Any]]:
     """Parse tool specs from JSON files in the extracted directory.
 
     Looks for:
@@ -272,7 +271,7 @@ def _parse_tool_specs_from_extracted(
             if fname.startswith("tool_spec_") and fname.endswith(".json"):
                 try:
                     fpath = os.path.join(extract_dir, fname)
-                    with open(fpath, "r", encoding="utf-8") as f:
+                    with open(fpath, encoding="utf-8") as f:
                         spec = json.load(f)
                     if isinstance(spec, dict) and "name" in spec:
                         specs.append(spec)

@@ -1,6 +1,5 @@
 """P9 regression tests for the bounded single-agent runtime."""
 
-import asyncio
 
 import pytest
 
@@ -55,7 +54,7 @@ async def test_timeout_is_retried_once_then_completes():
         async def run(self, **kwargs):
             self.calls += 1
             if self.calls == 1:
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
             return AgentResponse(content="recovered")
 
     store = AgentRunStore()
@@ -94,7 +93,7 @@ async def test_stream_timeout_emits_structured_run_error_frame():
 
     class _StreamTimeout(_Agent):
         async def run_stream(self, **kwargs):
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
             yield  # pragma: no cover - make it an async generator
 
     store = AgentRunStore()

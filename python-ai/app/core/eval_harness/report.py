@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List
 
 from .schemas import MetricResult
 
 # 指标显示名与参考目标（HUMAN_READABLE 顺序即报告展示顺序）
-_DISPLAY: List[tuple] = [
+_DISPLAY: list[tuple] = [
     ("retrieval_hit@5", "检索 Hit@5", "≥ 0.90"),
     ("retrieval_recall@5", "检索 Recall@5", "≥ 0.90"),
     ("retrieval_mrr@5", "检索 MRR@5", "≥ 0.70"),

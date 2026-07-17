@@ -13,7 +13,7 @@ import logging
 import os
 
 from .base import BaseLLM, ChatMessage, LLMResponse
-from .deepseek_llm import DeepSeekLLM, _is_placeholder_key
+from .deepseek_llm import DeepSeekLLM
 from .gateway_llm import GatewayLLM
 from .mock_llm import MockLLM
 from .ollama_llm import OllamaLLM

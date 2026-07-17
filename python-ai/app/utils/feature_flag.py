@@ -11,13 +11,12 @@ Usage:
         ...  # hybrid retrieval on
 """
 
-import json
 import hashlib
+import json
 import logging
 import os
-import time
 import threading
-from typing import Optional
+import time
 
 from app.utils.config import config
 
@@ -118,10 +117,10 @@ class FeatureFlagClient:
     def is_enabled(
         self,
         flag_key: str,
-        user_id: Optional[int] = None,
-        knowledge_base_id: Optional[int] = None,
-        tenant_id: Optional[int] = None,
-        environment: Optional[str] = None,
+        user_id: int | None = None,
+        knowledge_base_id: int | None = None,
+        tenant_id: int | None = None,
+        environment: str | None = None,
     ) -> bool:
         """Return whether flag_key is enabled for the given context.
 
@@ -169,7 +168,7 @@ class FeatureFlagClient:
 
     # ── cache management ────────────────────────────────────
 
-    def _get_entry(self, flag_key: str) -> tuple[Optional[dict], bool]:
+    def _get_entry(self, flag_key: str) -> tuple[dict | None, bool]:
         """Return (entry, is_stale). entry=None means no cache at all."""
         with self._lock:
             entry = self._cache.get(flag_key)
@@ -242,10 +241,10 @@ class FeatureFlagClient:
     def _evaluate(
         self,
         entry: dict,
-        user_id: Optional[int],
-        knowledge_base_id: Optional[int],
-        tenant_id: Optional[int],
-        environment: Optional[str],
+        user_id: int | None,
+        knowledge_base_id: int | None,
+        tenant_id: int | None,
+        environment: str | None,
     ) -> bool:
         """Evaluate flag with deterministic order:
         time_window → blacklist → whitelist → percentage → default enabled.

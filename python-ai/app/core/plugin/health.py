@@ -6,13 +6,10 @@ and trigger circuit breaker logic.
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +20,7 @@ class HealthCheckResult:
     plugin_id: str
     check_type: str  # "liveness" | "readiness"
     status: str      # "healthy" | "unhealthy"
-    details: Optional[Dict[str, Any]] = None
+    details: dict[str, Any] | None = None
     duration_ms: float = 0.0
     checked_at: float = field(default_factory=time.time)
 
@@ -42,12 +39,12 @@ class PluginHealthProbe:
     """Periodic health checks for installed plugins."""
 
     def __init__(self):
-        self._history: Dict[str, List[HealthCheckResult]] = {}
-        self._failure_counts: Dict[str, int] = {}
-        self._configs: Dict[str, PluginHealthConfig] = {}
+        self._history: dict[str, list[HealthCheckResult]] = {}
+        self._failure_counts: dict[str, int] = {}
+        self._configs: dict[str, PluginHealthConfig] = {}
         self._running = False
 
-    def register_plugin(self, plugin_id: str, config: Optional[PluginHealthConfig] = None):
+    def register_plugin(self, plugin_id: str, config: PluginHealthConfig | None = None):
         """Register a plugin for health monitoring."""
         self._configs[plugin_id] = config or PluginHealthConfig()
         self._history.setdefault(plugin_id, [])
@@ -59,7 +56,7 @@ class PluginHealthProbe:
         self._history.pop(plugin_id, None)
         self._failure_counts.pop(plugin_id, None)
 
-    def check_liveness(self, plugin_id: str, check_fn: Optional[Callable] = None) -> HealthCheckResult:
+    def check_liveness(self, plugin_id: str, check_fn: Callable | None = None) -> HealthCheckResult:
         """Check if a plugin is alive (can be imported and basic functions work)."""
         start = time.monotonic()
         try:
@@ -92,7 +89,7 @@ class PluginHealthProbe:
         self._record_result(check_result)
         return check_result
 
-    def check_readiness(self, plugin_id: str, check_fn: Optional[Callable] = None) -> HealthCheckResult:
+    def check_readiness(self, plugin_id: str, check_fn: Callable | None = None) -> HealthCheckResult:
         """Check if a plugin is ready to serve requests."""
         start = time.monotonic()
         try:
@@ -125,7 +122,7 @@ class PluginHealthProbe:
         self._record_result(check_result)
         return check_result
 
-    def get_health_history(self, plugin_id: str, limit: int = 20) -> List[HealthCheckResult]:
+    def get_health_history(self, plugin_id: str, limit: int = 20) -> list[HealthCheckResult]:
         """Get recent health check history for a plugin."""
         return self._history.get(plugin_id, [])[-limit:]
 
@@ -155,7 +152,7 @@ class PluginHealthProbe:
             self._failure_counts[result.plugin_id] = 0
 
 
-_global_probe: Optional[PluginHealthProbe] = None
+_global_probe: PluginHealthProbe | None = None
 
 
 def get_health_probe() -> PluginHealthProbe:

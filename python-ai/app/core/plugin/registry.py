@@ -11,30 +11,28 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from .loader import PluginDescriptor, load_plugin_from_wheel, load_plugin_from_directory, PluginLoadError
-from .manifest import compute_manifest_hash
-from .sandbox import PluginSandbox, SandboxConfig
-from .sandbox_runner import SubprocessConfig, execute_in_sandbox, SubprocessResult
 from .audit import (
-    record_install, record_enable, record_disable, record_uninstall,
-    record_tool_execution, record_audit, ACTION_SANDBOX_VIOLATION,
+    record_tool_execution,
 )
+from .loader import PluginDescriptor, PluginLoadError, load_plugin_from_directory, load_plugin_from_wheel
+from .sandbox import PluginSandbox
+from .sandbox_runner import SubprocessConfig, SubprocessResult, execute_in_sandbox
 
 logger = logging.getLogger(__name__)
 
 _registry_lock = threading.Lock()
-_plugins: Dict[str, "RegisteredPlugin"] = {}
+_plugins: dict[str, RegisteredPlugin] = {}
 
 
 @dataclass
 class RegisteredPlugin:
     """A plugin registered in the runtime registry."""
     descriptor: PluginDescriptor
-    sandbox: Optional[PluginSandbox] = None
+    sandbox: PluginSandbox | None = None
     enabled: bool = True
-    tool_specs: List[Dict[str, Any]] = field(default_factory=list)
+    tool_specs: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def plugin_id(self) -> str:
@@ -56,7 +54,7 @@ class RegisteredPlugin:
     def extract_dir(self) -> str:
         return self.descriptor.extract_dir
 
-    def to_subprocess_config(self, user_id: Optional[int] = None) -> SubprocessConfig:
+    def to_subprocess_config(self, user_id: int | None = None) -> SubprocessConfig:
         """Convert sandbox config to SubprocessConfig for the runner."""
         cfg = SubprocessConfig()
         if self.sandbox and self.sandbox._config:
@@ -114,12 +112,12 @@ def unregister_plugin(plugin_id: str) -> bool:
     return False
 
 
-def get_plugin(plugin_id: str) -> Optional[RegisteredPlugin]:
+def get_plugin(plugin_id: str) -> RegisteredPlugin | None:
     with _registry_lock:
         return _plugins.get(plugin_id)
 
 
-def get_plugin_by_name(name: str) -> Optional[RegisteredPlugin]:
+def get_plugin_by_name(name: str) -> RegisteredPlugin | None:
     with _registry_lock:
         for p in _plugins.values():
             if p.name == name:
@@ -127,7 +125,7 @@ def get_plugin_by_name(name: str) -> Optional[RegisteredPlugin]:
     return None
 
 
-def list_plugins(enabled_only: bool = True) -> List[RegisteredPlugin]:
+def list_plugins(enabled_only: bool = True) -> list[RegisteredPlugin]:
     with _registry_lock:
         plugins = list(_plugins.values())
     if enabled_only:
@@ -135,7 +133,7 @@ def list_plugins(enabled_only: bool = True) -> List[RegisteredPlugin]:
     return plugins
 
 
-def list_all_tool_specs(enabled_only: bool = True) -> List[Dict[str, Any]]:
+def list_all_tool_specs(enabled_only: bool = True) -> list[dict[str, Any]]:
     specs = []
     for plugin in list_plugins(enabled_only=enabled_only):
         for spec in plugin.tool_specs:
@@ -177,8 +175,8 @@ def verify_manifest_integrity(plugin_id: str, expected_hash: str) -> bool:
 
 def load_and_register_wheel(
     wheel_path: str,
-    plugin_id: Optional[str] = None,
-    expected_hash: Optional[str] = None,
+    plugin_id: str | None = None,
+    expected_hash: str | None = None,
 ) -> RegisteredPlugin:
     """Load and register a plugin from a wheel.
 
@@ -196,7 +194,7 @@ def load_and_register_wheel(
 
 def load_and_register_directory(
     dir_path: str,
-    plugin_id: Optional[str] = None,
+    plugin_id: str | None = None,
 ) -> RegisteredPlugin:
     descriptor = load_plugin_from_directory(dir_path, plugin_id)
     return register_plugin(descriptor)
@@ -205,9 +203,9 @@ def load_and_register_directory(
 def execute_plugin_tool(
     plugin_id: str,
     tool_name: str,
-    tool_input: Dict[str, Any],
-    trace_id: Optional[str] = None,
-    user_id: Optional[int] = None,
+    tool_input: dict[str, Any],
+    trace_id: str | None = None,
+    user_id: int | None = None,
 ) -> SubprocessResult:
     """Execute a plugin tool in a sandboxed subprocess.
 

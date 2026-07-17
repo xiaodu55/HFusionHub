@@ -7,11 +7,10 @@ from __future__ import annotations
 
 from html import escape
 from pathlib import Path
-from typing import Dict, List
 
 from .schemas import MetricResult
 
-_LABELS: Dict[str, str] = {
+_LABELS: dict[str, str] = {
     "retrieval_hit@5": "检索 Hit@5",
     "retrieval_recall@5": "检索 Recall@5",
     "retrieval_mrr@5": "检索 MRR@5",
@@ -74,7 +73,7 @@ def _fmt(key: str, value: float) -> str:
 
 
 def render_slides(result: MetricResult, title: str = "") -> str:
-    slides: List[str] = []
+    slides: list[str] = []
     meta = result.meta
 
     # 封面

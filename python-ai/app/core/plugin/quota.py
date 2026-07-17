@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
 
 from app.utils.config import config
 
@@ -21,7 +20,7 @@ async def transition_plugin_execution(
     plugin_id: str,
     tool_name: str,
     http_client=None,
-    backend_url: Optional[str] = None,
+    backend_url: str | None = None,
 ) -> bool:
     """Apply one idempotent plugin-usage transition through Java."""
     normalized = str(operation or "").lower()

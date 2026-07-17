@@ -9,31 +9,18 @@ Intent Classifier Tests - 意图分类器单元测试
 - 集成测试
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-from app.core.rag.models import (
-    IntentType,
-    ComplexityLevel,
-    DomainType,
-    IntentResult
-)
+import pytest
+
+from app.core.rag import get_intent_classifier, reset_intent_classifier
+from app.core.rag.intent_classifier import ClassificationStrategyType, IntentClassifier, IntentClassifierFactory
+from app.core.rag.models import ComplexityLevel, DomainType, IntentResult, IntentType
 from app.core.rag.strategies import (
-    ClassificationStrategy,
+    HybridClassificationStrategy,
     LLMClassificationStrategy,
     RuleClassificationStrategy,
-    HybridClassificationStrategy
 )
-from app.core.rag.intent_classifier import (
-    IntentClassifierFactory,
-    ClassificationStrategyType,
-    IntentClassifier
-)
-from app.core.rag import (
-    get_intent_classifier,
-    reset_intent_classifier
-)
-
 
 # ==================== 数据模型测试 ====================
 

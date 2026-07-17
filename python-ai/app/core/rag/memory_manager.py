@@ -13,7 +13,7 @@ Memory types:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +26,13 @@ class MemoryManager:
     """Manages persistent memories for conversations."""
 
     def __init__(self):
-        self._pending_extractions: List[Dict[str, Any]] = []
+        self._pending_extractions: list[dict[str, Any]] = []
 
     async def extract_entities(
         self,
         user_message: str,
         assistant_response: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Extract entity facts from a conversation turn.
 
@@ -40,7 +40,7 @@ class MemoryManager:
 
         Returns a list of {type, content, entities, importance} dicts.
         """
-        facts: List[Dict[str, Any]] = []
+        facts: list[dict[str, Any]] = []
 
         # Heuristic 1: User preference detection
         preference_keywords = ["我喜欢", "我更喜欢", "我希望", "请记住", "记住", "偏好", "我习惯"]
@@ -77,7 +77,7 @@ class MemoryManager:
 
     def format_memories_for_context(
         self,
-        memories: List[Dict[str, Any]],
+        memories: list[dict[str, Any]],
         max_tokens: int = 2000,
     ) -> str:
         """
@@ -122,7 +122,7 @@ class MemoryManager:
 
 
 # Global singleton
-_memory_manager: Optional[MemoryManager] = None
+_memory_manager: MemoryManager | None = None
 
 
 def get_memory_manager() -> MemoryManager:

@@ -24,7 +24,7 @@ from __future__ import annotations
 import ipaddress
 import socket
 import threading
-from typing import Awaitable, Callable, Dict, Optional, Sequence
+from typing import Awaitable, Callable, Sequence
 from urllib.parse import urljoin, urlparse
 
 import anyio
@@ -101,8 +101,8 @@ class PublicNetworkBackend(httpcore.AsyncNetworkBackend):
 
     def __init__(
         self,
-        default: Optional[httpcore.AsyncNetworkBackend] = None,
-        resolver: Optional[Resolver] = None,
+        default: httpcore.AsyncNetworkBackend | None = None,
+        resolver: Resolver | None = None,
     ):
         self._default = default if default is not None else _default_network_backend()
         self._resolver: Resolver = resolver if resolver is not None else _default_resolver
@@ -111,9 +111,9 @@ class PublicNetworkBackend(httpcore.AsyncNetworkBackend):
         self,
         host: str,
         port: int,
-        timeout: Optional[float] = None,
-        local_address: Optional[str] = None,
-        socket_options: Optional[Sequence[httpcore.SOCKET_OPTION]] = None,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Sequence[httpcore.SOCKET_OPTION] | None = None,
     ) -> httpcore.AsyncNetworkStream:
         try:
             addresses = await self._resolver(host, port)
@@ -126,7 +126,7 @@ class PublicNetworkBackend(httpcore.AsyncNetworkBackend):
         for address in addresses:
             if not ipaddress.ip_address(address).is_global:
                 raise SSRFBlockedError(f"拒绝连接到非公网地址 {address}（host={host}）")
-        last_error: Optional[BaseException] = None
+        last_error: BaseException | None = None
         for address in addresses:
             try:
                 return await self._default.connect_tcp(
@@ -144,8 +144,8 @@ class PublicNetworkBackend(httpcore.AsyncNetworkBackend):
     async def connect_unix_socket(
         self,
         path: str,
-        timeout: Optional[float] = None,
-        socket_options: Optional[Sequence[httpcore.SOCKET_OPTION]] = None,
+        timeout: float | None = None,
+        socket_options: Sequence[httpcore.SOCKET_OPTION] | None = None,
     ) -> httpcore.AsyncNetworkStream:
         return await self._default.connect_unix_socket(
             path, timeout=timeout, socket_options=socket_options
@@ -168,7 +168,7 @@ class GuardedAsyncTransport(httpx.AsyncHTTPTransport):
         self._pool._network_backend = PublicNetworkBackend(self._pool._network_backend)  # type: ignore[attr-defined]
 
 
-_guarded_client: Optional[httpx.AsyncClient] = None
+_guarded_client: httpx.AsyncClient | None = None
 _guarded_client_lock = threading.Lock()
 
 
@@ -192,8 +192,8 @@ async def fetch_public_html(
     url: str,
     *,
     timeout: float = DEFAULT_TIMEOUT,
-    headers: Optional[Dict[str, str]] = None,
-    client: Optional[httpx.AsyncClient] = None,
+    headers: dict[str, str] | None = None,
+    client: httpx.AsyncClient | None = None,
 ) -> httpx.Response:
     """GET a public HTTPS URL, following redirects manually.
 

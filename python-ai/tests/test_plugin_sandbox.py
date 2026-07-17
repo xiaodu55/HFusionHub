@@ -1,18 +1,18 @@
 """Tests for plugin sandbox constraints."""
 
 import os
+
 import pytest
+
 from app.core.plugin.sandbox import (
-    PluginSandbox,
-    SandboxConfig,
-    NetworkConfig,
     FilesystemConfig,
+    NetworkConfig,
+    PluginSandbox,
     ResourceConfig,
     SandboxedHttpClient,
     SandboxedPathResolver,
     SandboxViolation,
 )
-
 
 # ── Network sandbox ──────────────────────────────────────────────────
 

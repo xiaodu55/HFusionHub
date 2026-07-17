@@ -4,7 +4,6 @@ Base parser class for document parsing
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Optional
 from enum import Enum
 
 
@@ -23,8 +22,8 @@ class ParsedBlock:
     """Parsed block from document"""
     content: str
     block_type: BlockType
-    level: Optional[int] = None  # For headings: 1, 2, 3...
-    metadata: Optional[dict] = None
+    level: int | None = None  # For headings: 1, 2, 3...
+    metadata: dict | None = None
 
     def __post_init__(self):
         if self.metadata is None:
@@ -35,7 +34,7 @@ class BaseParser(ABC):
     """Base class for document parsers"""
 
     @abstractmethod
-    def parse(self, file_path: str) -> List[ParsedBlock]:
+    def parse(self, file_path: str) -> list[ParsedBlock]:
         """
         Parse document and return list of blocks
 
@@ -58,15 +57,15 @@ class BaseParser(ABC):
         Returns:
             Parser instance
         """
-        from app.core.parser.markdown_parser import MarkdownParser
-        from app.core.parser.text_parser import TextParser
-        from app.core.parser.pdf_parser import PDFParser
-        from app.core.parser.docx_parser import DocxParser
         from app.core.parser.csv_parser import CsvParser
-        from app.core.parser.xlsx_parser import XlsxParser
-        from app.core.parser.pptx_parser import PptxParser
+        from app.core.parser.docx_parser import DocxParser
         from app.core.parser.html_parser import HtmlParser
         from app.core.parser.image_parser import ImageParser
+        from app.core.parser.markdown_parser import MarkdownParser
+        from app.core.parser.pdf_parser import PDFParser
+        from app.core.parser.pptx_parser import PptxParser
+        from app.core.parser.text_parser import TextParser
+        from app.core.parser.xlsx_parser import XlsxParser
 
         parsers = {
             "md": MarkdownParser,

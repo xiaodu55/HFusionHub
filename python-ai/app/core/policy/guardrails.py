@@ -43,7 +43,7 @@ import threading
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Pattern, Tuple
+from typing import Any, Callable, Pattern
 
 from app.utils.config import config
 from app.utils.feature_flag import feature_flags
@@ -68,7 +68,7 @@ def _worse(a: str, b: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 # Each entry: (pattern_name, compiled_regex, severity).
 
-INJECTION_PATTERNS: List[Tuple[str, Pattern[str], str]] = [
+INJECTION_PATTERNS: list[tuple[str, Pattern[str], str]] = [
     # ── Role switching ───────────────────────────────────────────────
     ("role_switch_dan",
      re.compile(r"\byou\s+are\s+now\s+(?:a\s+)?(?:DAN|jailbroken|uncensored)\b", re.IGNORECASE),
@@ -127,7 +127,7 @@ INJECTION_PATTERNS: List[Tuple[str, Pattern[str], str]] = [
 _ESCALATION_HIGH_COUNT = 2
 
 
-def _aggregate_severity(matched: List[Tuple[str, str]]) -> str:
+def _aggregate_severity(matched: list[tuple[str, str]]) -> str:
     """Aggregate per-pattern severities; escalate composites to critical."""
     worst = "low"
     for _name, sev in matched:
@@ -140,17 +140,17 @@ def _aggregate_severity(matched: List[Tuple[str, str]]) -> str:
     return worst
 
 
-def _remove_spans(text: str, spans: List[Tuple[int, int]]) -> str:
+def _remove_spans(text: str, spans: list[tuple[int, int]]) -> str:
     """Remove (start, end) spans from *text*, merging overlaps, preserving order."""
     if not spans:
         return text
-    merged: List[Tuple[int, int]] = []
+    merged: list[tuple[int, int]] = []
     for start, end in sorted(spans):
         if merged and start <= merged[-1][1]:
             merged[-1] = (merged[-1][0], max(merged[-1][1], end))
         else:
             merged.append((start, end))
-    parts: List[str] = []
+    parts: list[str] = []
     cursor = 0
     for start, end in merged:
         parts.append(text[cursor:start])
@@ -165,7 +165,7 @@ class InjectionResult:
 
     is_injection: bool
     severity: str = "low"
-    matched_patterns: List[str] = field(default_factory=list)
+    matched_patterns: list[str] = field(default_factory=list)
     sanitized_input: str = ""
 
 
@@ -181,8 +181,8 @@ class PromptInjectionDetector:
         """Scan *text* for injection patterns; return an :class:`InjectionResult`."""
         if not text:
             return InjectionResult(False, "low", [], "")
-        matched: List[Tuple[str, str]] = []
-        spans: List[Tuple[int, int]] = []
+        matched: list[tuple[str, str]] = []
+        spans: list[tuple[int, int]] = []
         for name, pattern, severity in INJECTION_PATTERNS:
             for m in pattern.finditer(text):
                 matched.append((name, severity))
@@ -191,7 +191,7 @@ class PromptInjectionDetector:
             return InjectionResult(False, "low", [], text)
         severity = _aggregate_severity(matched)
         # Deduplicate pattern names, preserving first-occurrence order.
-        names: List[str] = []
+        names: list[str] = []
         for name, _sev in matched:
             if name not in names:
                 names.append(name)
@@ -210,7 +210,7 @@ class PromptInjectionDetector:
 # patterns take priority when spans overlap (e.g. a credit card wins over the
 # more generic phone pattern).
 
-PII_PATTERNS: List[Tuple[str, Pattern[str], str]] = [
+PII_PATTERNS: list[tuple[str, Pattern[str], str]] = [
     # ── API keys / tokens (highest priority — longest distinctive runs) ──
     ("api_key", re.compile(r"\bsk(?:-|_)?[A-Za-z0-9]{16,}\b"), "[API_KEY]"),
     ("api_key", re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[API_KEY]"),
@@ -262,9 +262,9 @@ def _luhn_valid(digits: str) -> bool:
     return total % 10 == 0
 
 
-def _scan_pii_types(text: str) -> List[str]:
+def _scan_pii_types(text: str) -> list[str]:
     """Return ordered, deduplicated PII types present in *text* (pure scan)."""
-    found: List[str] = []
+    found: list[str] = []
     for ptype, pattern, _placeholder in PII_PATTERNS:
         for m in pattern.finditer(text):
             if ptype == "credit_card" and not _luhn_valid(re.sub(r"[^0-9]", "", m.group(0))):
@@ -286,13 +286,13 @@ class PIIMasker:
 
     def __init__(self, vault_capacity: int = 500, audit_capacity: int = 200):
         self._vault_capacity = vault_capacity
-        self._vault: Dict[str, str] = {}          # placeholder → original value
-        self._reverse: Dict[str, str] = {}        # original value → placeholder
-        self._counts: Dict[str, int] = defaultdict(int)  # placeholder_type → count
+        self._vault: dict[str, str] = {}          # placeholder → original value
+        self._reverse: dict[str, str] = {}        # original value → placeholder
+        self._counts: dict[str, int] = defaultdict(int)  # placeholder_type → count
         self._audit: deque = deque(maxlen=audit_capacity)
         self._lock = threading.RLock()
 
-    def mask(self, text: str) -> Tuple[str, List[Dict[str, Any]]]:
+    def mask(self, text: str) -> tuple[str, list[dict[str, Any]]]:
         """Mask all PII in *text*.
 
         Returns ``(masked_text, entries)`` where *entries* describes what was
@@ -301,7 +301,7 @@ class PIIMasker:
         """
         if not text:
             return text, []
-        accepted: List[Tuple[int, int, str, str]] = []  # start, end, value, type
+        accepted: list[tuple[int, int, str, str]] = []  # start, end, value, type
         for ptype, pattern, _placeholder in PII_PATTERNS:
             for m in pattern.finditer(text):
                 value = m.group(0)
@@ -312,8 +312,8 @@ class PIIMasker:
                 accepted.append((m.start(), m.end(), value, ptype))
 
         accepted.sort(key=lambda item: item[0])
-        entries: List[Dict[str, Any]] = []
-        parts: List[str] = []
+        entries: list[dict[str, Any]] = []
+        parts: list[str] = []
         cursor = 0
         for start, end, value, ptype in accepted:
             parts.append(text[cursor:start])
@@ -337,7 +337,7 @@ class PIIMasker:
                 text = text.replace(placeholder, value)
         return text
 
-    def audit_trail(self, limit: int = 50, include_values: bool = False) -> List[Dict[str, Any]]:
+    def audit_trail(self, limit: int = 50, include_values: bool = False) -> list[dict[str, Any]]:
         """Return the most recent masking audit entries (metadata only by default)."""
         with self._lock:
             entries = list(self._audit)[-limit:]
@@ -345,7 +345,7 @@ class PIIMasker:
             return entries
         return [{k: v for k, v in e.items() if k != "value"} for e in entries]
 
-    def summary(self) -> Dict[str, int]:
+    def summary(self) -> dict[str, int]:
         """Per-type masked-value counters."""
         with self._lock:
             return dict(self._counts)
@@ -385,22 +385,22 @@ class PIIMasker:
 
 # ASCII profanity / slurs / hate speech — matched with word boundaries so
 # "assassin" never triggers on "ass".
-_TOXIC_ASCII_KEYWORDS: Tuple[str, ...] = (
+_TOXIC_ASCII_KEYWORDS: tuple[str, ...] = (
     "fuck", "fucking", "motherfucker", "shit", "bitch", "bastard",
     "asshole", "dickhead", "wanker", "cunt",
     "nigger", "nigga", "faggot", "fag", "kike", "chink", "spic", "wetback",
     "retard", "kill yourself", "go die", "die in a fire", "kill all",
 )
-_TOXIC_CJK_KEYWORDS: Tuple[str, ...] = (
+_TOXIC_CJK_KEYWORDS: tuple[str, ...] = (
     "傻逼", "傻b", "妈的", "他妈的", "操你妈", "草泥马", "混蛋",
     "贱人", "王八蛋", "婊子", "去死", "滚蛋", "白痴", "弱智",
 )
-_TOXIC_ASCII_PATTERNS: Tuple[Pattern[str], ...] = tuple(
+_TOXIC_ASCII_PATTERNS: tuple[Pattern[str], ...] = tuple(
     re.compile(rf"\b{re.escape(kw)}\b", re.IGNORECASE) for kw in _TOXIC_ASCII_KEYWORDS
 )
 
 # Model-output "confidence without evidence" markers — flagged, not blocked.
-HALLUCINATION_MARKERS: Tuple[str, ...] = (
+HALLUCINATION_MARKERS: tuple[str, ...] = (
     "as an ai language model",
     "according to my training data",
     "based on my training data",
@@ -418,10 +418,10 @@ HALLUCINATION_MARKERS: Tuple[str, ...] = (
 )
 
 
-def _find_toxic_keywords(text: str) -> List[str]:
+def _find_toxic_keywords(text: str) -> list[str]:
     """Return the toxic keywords present in *text* (pure scan)."""
     lowered = text.lower()
-    hits: List[str] = []
+    hits: list[str] = []
     for keyword, pattern in zip(_TOXIC_ASCII_KEYWORDS, _TOXIC_ASCII_PATTERNS):
         if pattern.search(text) and keyword not in hits:
             hits.append(keyword)
@@ -431,7 +431,7 @@ def _find_toxic_keywords(text: str) -> List[str]:
     return hits
 
 
-def _find_hallucination_markers(text: str) -> List[str]:
+def _find_hallucination_markers(text: str) -> list[str]:
     """Return the hallucination markers present in *text* (pure scan)."""
     lowered = text.lower()
     return [marker for marker in HALLUCINATION_MARKERS if marker in lowered]
@@ -447,9 +447,9 @@ class ModerationResult:
     """
 
     passed: bool
-    flags: List[str] = field(default_factory=list)
+    flags: list[str] = field(default_factory=list)
     severity: str = "low"
-    sanitized: Optional[str] = None
+    sanitized: str | None = None
 
 
 class ContentModerator:
@@ -457,8 +457,8 @@ class ContentModerator:
 
     def __init__(
         self,
-        detector: Optional[PromptInjectionDetector] = None,
-        masker: Optional[PIIMasker] = None,
+        detector: PromptInjectionDetector | None = None,
+        masker: PIIMasker | None = None,
     ):
         self._detector = detector or PromptInjectionDetector()
         self._masker = masker or PIIMasker()
@@ -471,9 +471,9 @@ class ContentModerator:
         """Moderate a user message: injection, PII, toxic content."""
         if not text:
             return ModerationResult(True, [], "low", None)
-        flags: List[str] = []
+        flags: list[str] = []
         severity = "low"
-        sanitized: Optional[str] = None
+        sanitized: str | None = None
 
         if enable_injection:
             inj = self._detector.detect(text)
@@ -511,9 +511,9 @@ class ContentModerator:
         """Moderate an AI response: hallucination markers, leaks, toxicity."""
         if not text:
             return ModerationResult(True, [], "low", None)
-        flags: List[str] = []
+        flags: list[str] = []
         severity = "low"
-        sanitized: Optional[str] = None
+        sanitized: str | None = None
 
         if _find_hallucination_markers(text):
             flags.append("hallucination_marker")
@@ -548,7 +548,7 @@ class ContentModerator:
         )
         return ModerationResult(not hard_block, flags, severity, sanitized)
 
-    def _external_moderation(self, text: str, kind: str) -> Optional[str]:
+    def _external_moderation(self, text: str, kind: str) -> str | None:
         """外部审核引擎（Batch 7）。未配置返回 None；失败 fail-open 放行。"""
         if not text:
             return None
@@ -576,17 +576,17 @@ class ContentModerator:
 # Feature-flag resolution
 # ═══════════════════════════════════════════════════════════════════════════
 
-_FLAG_CONFIG_MAP: Dict[str, str] = {
+_FLAG_CONFIG_MAP: dict[str, str] = {
     "guardrails.enabled": "GUARDRAILS_ENABLED",
     "guardrails.prompt_injection.enabled": "GUARDRAILS_PROMPT_INJECTION_ENABLED",
     "guardrails.content_moderation.enabled": "GUARDRAILS_CONTENT_MODERATION_ENABLED",
     "guardrails.pii_masking.enabled": "GUARDRAILS_PII_MASKING_ENABLED",
 }
 
-GUARDRAIL_FLAG_KEYS: Tuple[str, ...] = tuple(_FLAG_CONFIG_MAP)
+GUARDRAIL_FLAG_KEYS: tuple[str, ...] = tuple(_FLAG_CONFIG_MAP)
 
 
-def _flag_enabled(flag_key: str, context: Optional[Dict[str, Any]] = None) -> bool:
+def _flag_enabled(flag_key: str, context: dict[str, Any] | None = None) -> bool:
     """Resolve a guardrail feature flag.
 
     Env-var kill-switch first (hard off), then the Java-managed flag scoped
@@ -607,9 +607,9 @@ def _flag_enabled(flag_key: str, context: Optional[Dict[str, Any]] = None) -> bo
     )
 
 
-def _dedupe(items: List[str]) -> List[str]:
+def _dedupe(items: list[str]) -> list[str]:
     """Deduplicate while preserving first-occurrence order."""
-    seen: List[str] = []
+    seen: list[str] = []
     for item in items:
         if item not in seen:
             seen.append(item)
@@ -622,11 +622,11 @@ class GuardResult:
 
     allowed: bool
     sanitized_content: str
-    flags: List[str] = field(default_factory=list)
-    blocked_reason: Optional[str] = None
+    flags: list[str] = field(default_factory=list)
+    blocked_reason: str | None = None
     severity: str = "low"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "allowed": self.allowed,
             "sanitized_content": self.sanitized_content,
@@ -651,16 +651,16 @@ class GuardrailsPipeline:
 
     def __init__(
         self,
-        detector: Optional[PromptInjectionDetector] = None,
-        masker: Optional[PIIMasker] = None,
-        moderator: Optional[ContentModerator] = None,
-        flag_resolver: Optional[Callable[[str, Optional[Dict[str, Any]]], bool]] = None,
+        detector: PromptInjectionDetector | None = None,
+        masker: PIIMasker | None = None,
+        moderator: ContentModerator | None = None,
+        flag_resolver: Callable[[str, dict[str, Any] | None], bool] | None = None,
     ):
         self._detector = detector or PromptInjectionDetector()
         self._masker = masker or PIIMasker()
         self._moderator = moderator or ContentModerator(self._detector, self._masker)
         self._flag_resolver = flag_resolver or _flag_enabled
-        self._stats: Dict[str, int] = {
+        self._stats: dict[str, int] = {
             "input_checks": 0,
             "output_checks": 0,
             "input_blocked": 0,
@@ -675,14 +675,14 @@ class GuardrailsPipeline:
 
     # ── Feature-flag helpers ──────────────────────────────────────────
 
-    def _enabled(self, flag_key: str, context: Optional[Dict[str, Any]]) -> bool:
+    def _enabled(self, flag_key: str, context: dict[str, Any] | None) -> bool:
         try:
             return bool(self._flag_resolver(flag_key, context))
         except Exception:
             logger.exception("Guardrail flag '%s' resolution failed — fail closed", flag_key)
             return False
 
-    def enabled_flags(self, context: Optional[Dict[str, Any]] = None) -> Dict[str, bool]:
+    def enabled_flags(self, context: dict[str, Any] | None = None) -> dict[str, bool]:
         """Resolved effective state of every guardrail flag (for status APIs)."""
         return {key: self._enabled(key, context) for key in GUARDRAIL_FLAG_KEYS}
 
@@ -692,14 +692,14 @@ class GuardrailsPipeline:
         with self._stats_lock:
             self._stats[key] += count
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         """Thread-safe snapshot of counters plus the masker's per-type summary."""
         with self._stats_lock:
             stats = dict(self._stats)
         stats["pii_mask_summary"] = self._masker.summary()
         return stats
 
-    def audit_trail(self, limit: int = 50, include_values: bool = False) -> List[Dict[str, Any]]:
+    def audit_trail(self, limit: int = 50, include_values: bool = False) -> list[dict[str, Any]]:
         """Delegate to the PII masker's audit trail (metadata only by default)."""
         return self._masker.audit_trail(limit=limit, include_values=include_values)
 
@@ -708,11 +708,11 @@ class GuardrailsPipeline:
     def check_input(
         self,
         user_message: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ) -> GuardResult:
         """Check a user message (or tool arguments) before use/execution."""
         text = str(user_message or "")
-        flags: List[str] = []
+        flags: list[str] = []
         severity = "low"
         context = context or {}
         self._bump("input_checks")
@@ -775,11 +775,11 @@ class GuardrailsPipeline:
     def check_output(
         self,
         ai_response: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ) -> GuardResult:
         """Check a model response before returning it to the caller."""
         text = str(ai_response or "")
-        flags: List[str] = []
+        flags: list[str] = []
         severity = "low"
         context = context or {}
         self._bump("output_checks")
@@ -843,7 +843,7 @@ guardrails_pipeline = GuardrailsPipeline()
 
 
 # ── Serialization helper for pipeline callers that need raw text -----------
-def serialize_tool_arguments(tool_input: Dict[str, Any]) -> str:
+def serialize_tool_arguments(tool_input: dict[str, Any]) -> str:
     """Serialize tool arguments for the guardrail input check."""
     if not tool_input:
         return ""

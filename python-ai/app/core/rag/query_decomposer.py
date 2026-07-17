@@ -13,15 +13,15 @@ Query Decomposer - 问题分解器
 
 import hashlib
 import time
-from enum import Enum
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any, Set, Tuple
+from enum import Enum
+from typing import Any
+
 from loguru import logger
 
-from .models import IntentResult, ComplexityLevel
-from .cache import CacheManager, decomposition_cache
 from .base import BaseDecompositionStrategy
+from .models import ComplexityLevel, IntentResult
 
 
 class DecompositionStrategyType(str, Enum):
@@ -59,22 +59,22 @@ class SubQuestion:
     """
     id: str
     content: str
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
     depth: int = 0
     priority: int = 0
-    dependencies: List[str] = field(default_factory=list)
+    dependencies: list[str] = field(default_factory=list)
     status: SubQuestionStatus = SubQuestionStatus.PENDING
-    answer: Optional[str] = None
+    answer: str | None = None
     confidence: float = 0.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def can_execute(self, completed_ids: Set[str]) -> bool:
+    def can_execute(self, completed_ids: set[str]) -> bool:
         """检查是否可以执行（依赖是否已满足）"""
         if self.status != SubQuestionStatus.PENDING:
             return False
         return all(dep_id in completed_ids for dep_id in self.dependencies)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "id": self.id,
@@ -90,7 +90,7 @@ class SubQuestion:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "SubQuestion":
+    def from_dict(cls, data: dict[str, Any]) -> "SubQuestion":
         """从字典创建"""
         return cls(
             id=data["id"],
@@ -118,16 +118,16 @@ class QuestionTreeNode:
     用于表示子问题间的依赖关系和执行顺序
     """
     question: SubQuestion
-    children: List["QuestionTreeNode"] = field(default_factory=list)
+    children: list["QuestionTreeNode"] = field(default_factory=list)
 
-    def get_execution_order(self) -> List[List[SubQuestion]]:
+    def get_execution_order(self) -> list[list[SubQuestion]]:
         """
         获取执行顺序（层级遍历）
 
         返回按层级组织的子问题列表，同一层级可以并行执行
         """
-        result: List[List[SubQuestion]] = []
-        queue: List[Tuple["QuestionTreeNode", int]] = [(self, 0)]
+        result: list[list[SubQuestion]] = []
+        queue: list[tuple[QuestionTreeNode, int]] = [(self, 0)]
 
         while queue:
             node, depth = queue.pop(0)
@@ -143,7 +143,7 @@ class QuestionTreeNode:
 
         return result
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "question": self.question.to_dict(),
@@ -167,8 +167,8 @@ class DecompositionResult:
         decomposition_time: 分解耗时（秒）
     """
     original_query: str
-    sub_questions: List[SubQuestion]
-    execution_plan: List[List[SubQuestion]]
+    sub_questions: list[SubQuestion]
+    execution_plan: list[list[SubQuestion]]
     strategy_used: str
     confidence: float
     reasoning: str = ""
@@ -190,7 +190,7 @@ class DecompositionResult:
         """可并行执行的组数"""
         return len(self.execution_plan)
 
-    def get_next_batch(self, completed_ids: Set[str]) -> List[SubQuestion]:
+    def get_next_batch(self, completed_ids: set[str]) -> list[SubQuestion]:
         """获取下一批可执行的子问题"""
         for level in self.execution_plan:
             batch = [
@@ -201,7 +201,7 @@ class DecompositionResult:
                 return batch
         return []
 
-    def update_status(self, question_id: str, status: SubQuestionStatus, answer: Optional[str] = None):
+    def update_status(self, question_id: str, status: SubQuestionStatus, answer: str | None = None):
         """更新子问题状态"""
         for level in self.execution_plan:
             for q in level:
@@ -211,7 +211,7 @@ class DecompositionResult:
                         q.answer = answer
                     return
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "original_query": self.original_query,
@@ -225,7 +225,7 @@ class DecompositionResult:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "DecompositionResult":
+    def from_dict(cls, data: dict[str, Any]) -> "DecompositionResult":
         """从字典创建"""
         sub_questions = [SubQuestion.from_dict(q) for q in data["sub_questions"]]
         execution_plan = [
@@ -265,8 +265,8 @@ class DecompositionStrategy(BaseDecompositionStrategy):
     async def decompose(
         self,
         query: str,
-        intent_result: Optional[IntentResult] = None,
-        history: Optional[List[Dict[str, str]]] = None,
+        intent_result: IntentResult | None = None,
+        history: list[dict[str, str]] | None = None,
         **kwargs,
     ) -> DecompositionResult:
         """
@@ -306,8 +306,8 @@ class LLMDecompositionStrategy(DecompositionStrategy):
     async def decompose(
         self,
         query: str,
-        intent_result: Optional[IntentResult] = None,
-        history: Optional[List[Dict[str, str]]] = None,
+        intent_result: IntentResult | None = None,
+        history: list[dict[str, str]] | None = None,
         **kwargs,
     ) -> DecompositionResult:
         """使用 LLM 分解查询"""
@@ -340,8 +340,8 @@ class LLMDecompositionStrategy(DecompositionStrategy):
     def _build_decomposition_prompt(
         self,
         query: str,
-        intent_result: Optional[IntentResult],
-        history: Optional[List[Dict[str, str]]],
+        intent_result: IntentResult | None,
+        history: list[dict[str, str]] | None,
     ) -> str:
         """构建分解提示"""
         context_parts = []
@@ -400,7 +400,7 @@ class LLMDecompositionStrategy(DecompositionStrategy):
 - 如果查询不需要分解，返回 needs_decomposition: false
 """
 
-    def _parse_llm_response(self, response: str, original_query: str) -> List[SubQuestion]:
+    def _parse_llm_response(self, response: str, original_query: str) -> list[SubQuestion]:
         """解析 LLM 响应"""
         try:
             import json
@@ -462,7 +462,7 @@ class LLMDecompositionStrategy(DecompositionStrategy):
                 priority=0,
             )]
 
-    def _build_execution_plan(self, sub_questions: List[SubQuestion]) -> List[List[SubQuestion]]:
+    def _build_execution_plan(self, sub_questions: list[SubQuestion]) -> list[list[SubQuestion]]:
         """构建执行计划"""
         if not sub_questions:
             return []
@@ -471,7 +471,7 @@ class LLMDecompositionStrategy(DecompositionStrategy):
         sorted_questions = sorted(sub_questions, key=lambda q: (q.depth, q.priority))
 
         # 构建层级执行计划
-        levels: List[List[SubQuestion]] = []
+        levels: list[list[SubQuestion]] = []
         remaining = set(q.id for q in sorted_questions)
         completed = set()
 
@@ -525,8 +525,8 @@ class RuleDecompositionStrategy(DecompositionStrategy):
     async def decompose(
         self,
         query: str,
-        intent_result: Optional[IntentResult] = None,
-        history: Optional[List[Dict[str, str]]] = None,
+        intent_result: IntentResult | None = None,
+        history: list[dict[str, str]] | None = None,
         **kwargs,
     ) -> DecompositionResult:
         """使用规则分解查询"""
@@ -546,7 +546,7 @@ class RuleDecompositionStrategy(DecompositionStrategy):
             decomposition_time=time.time() - start_time,
         )
 
-    def _rule_based_decompose(self, query: str) -> List[SubQuestion]:
+    def _rule_based_decompose(self, query: str) -> list[SubQuestion]:
         """基于规则分解"""
         sub_questions = []
 
@@ -578,7 +578,7 @@ class RuleDecompositionStrategy(DecompositionStrategy):
 
         return sub_questions
 
-    def _build_execution_plan(self, sub_questions: List[SubQuestion]) -> List[List[SubQuestion]]:
+    def _build_execution_plan(self, sub_questions: list[SubQuestion]) -> list[list[SubQuestion]]:
         """构建执行计划"""
         return [sub_questions]  # 规则分解通常没有依赖，可以并行执行
 
@@ -600,8 +600,8 @@ class HybridDecompositionStrategy(DecompositionStrategy):
     async def decompose(
         self,
         query: str,
-        intent_result: Optional[IntentResult] = None,
-        history: Optional[List[Dict[str, str]]] = None,
+        intent_result: IntentResult | None = None,
+        history: list[dict[str, str]] | None = None,
         **kwargs,
     ) -> DecompositionResult:
         """使用混合策略分解"""
@@ -652,7 +652,7 @@ class QueryDecomposer:
 
     def __init__(
         self,
-        strategy: Optional[DecompositionStrategy] = None,
+        strategy: DecompositionStrategy | None = None,
         cache_enabled: bool = True,
         cache_ttl: int = 3600,
     ):
@@ -667,9 +667,9 @@ class QueryDecomposer:
         self.strategy = strategy or HybridDecompositionStrategy()
         self.cache_enabled = cache_enabled
         self.cache_ttl = cache_ttl
-        self._cache: Dict[str, Tuple[DecompositionResult, float]] = {}
+        self._cache: dict[str, tuple[DecompositionResult, float]] = {}
 
-    def _get_cache_key(self, query: str, history: Optional[List[Dict[str, str]]]) -> str:
+    def _get_cache_key(self, query: str, history: list[dict[str, str]] | None) -> str:
         """生成缓存键"""
         content = query
         if history:
@@ -682,8 +682,8 @@ class QueryDecomposer:
     async def decompose(
         self,
         query: str,
-        intent_result: Optional[IntentResult] = None,
-        history: Optional[List[Dict[str, str]]] = None,
+        intent_result: IntentResult | None = None,
+        history: list[dict[str, str]] | None = None,
         **kwargs,
     ) -> DecompositionResult:
         """

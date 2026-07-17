@@ -14,14 +14,10 @@ Implements the minimal MCP lifecycle:
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from . import get_tools, execute_tool, ToolExecutionPolicy
-from ..rag.config import get_config
+from . import ToolExecutionPolicy, execute_tool, get_tools
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +29,7 @@ JSONRPC_VERSION = "2.0"
 PROTOCOL_VERSION = "2024-11-05"
 
 # Tool definitions in MCP schema format
-_MCP_TOOL_SCHEMAS: List[Dict[str, Any]] = []
+_MCP_TOOL_SCHEMAS: list[dict[str, Any]] = []
 
 # MCP is an external/public discovery surface.  High-risk tools such as
 # write_note are deliberately available only through the authenticated Agent
@@ -44,7 +40,7 @@ MCP_PUBLIC_TOOL_NAMES = {
 }
 
 
-def _build_tool_schemas() -> List[Dict[str, Any]]:
+def _build_tool_schemas() -> list[dict[str, Any]]:
     """Build MCP-compliant tool schemas from registered tools."""
     raw_tools = [
         tool for tool in get_tools(v1_only=False)
@@ -53,11 +49,11 @@ def _build_tool_schemas() -> List[Dict[str, Any]]:
     schemas = []
     for tool in raw_tools:
         params = tool.get("parameters", {})
-        properties: Dict[str, Any] = {}
-        required: List[str] = []
+        properties: dict[str, Any] = {}
+        required: list[str] = []
 
         for param_name, param_def in params.items():
-            prop: Dict[str, Any] = {"type": param_def.get("type", "string")}
+            prop: dict[str, Any] = {"type": param_def.get("type", "string")}
             if "description" in param_def:
                 prop["description"] = param_def["description"]
             if "default" in param_def:
@@ -67,7 +63,7 @@ def _build_tool_schemas() -> List[Dict[str, Any]]:
             if not param_def.get("optional", False):
                 required.append(param_name)
 
-        input_schema: Dict[str, Any] = {
+        input_schema: dict[str, Any] = {
             "type": "object",
             "properties": properties,
         }
@@ -83,7 +79,7 @@ def _build_tool_schemas() -> List[Dict[str, Any]]:
     return schemas
 
 
-def get_mcp_tool_schemas() -> List[Dict[str, Any]]:
+def get_mcp_tool_schemas() -> list[dict[str, Any]]:
     """Get (possibly cached) MCP tool schemas."""
     global _MCP_TOOL_SCHEMAS
     if not _MCP_TOOL_SCHEMAS:
@@ -95,12 +91,12 @@ def get_mcp_tool_schemas() -> List[Dict[str, Any]]:
 # JSON-RPC message helpers
 # ---------------------------------------------------------------------------
 
-def _jsonrpc_response(id: Any, result: Any) -> Dict[str, Any]:
+def _jsonrpc_response(id: Any, result: Any) -> dict[str, Any]:
     return {"jsonrpc": JSONRPC_VERSION, "id": id, "result": result}
 
 
-def _jsonrpc_error(id: Any, code: int, message: str, data: Any = None) -> Dict[str, Any]:
-    err: Dict[str, Any] = {"code": code, "message": message}
+def _jsonrpc_error(id: Any, code: int, message: str, data: Any = None) -> dict[str, Any]:
+    err: dict[str, Any] = {"code": code, "message": message}
     if data is not None:
         err["data"] = data
     return {"jsonrpc": JSONRPC_VERSION, "id": id, "error": err}
@@ -120,10 +116,10 @@ ERROR_INTERNAL = -32603
 
 async def handle_mcp_request(
     method: str,
-    params: Optional[Dict[str, Any]],
+    params: dict[str, Any] | None,
     request_id: Any,
-    knowledge_base_id: Optional[int] = None,
-) -> Dict[str, Any]:
+    knowledge_base_id: int | None = None,
+) -> dict[str, Any]:
     """Route a single MCP JSON-RPC request and return the response dict."""
 
     # === Lifecycle ===
@@ -195,9 +191,9 @@ async def handle_mcp_request(
 # ---------------------------------------------------------------------------
 
 async def mcp_sse_endpoint(
-    body: Dict[str, Any],
-    knowledge_base_id: Optional[int] = None,
-) -> Optional[Dict[str, Any]]:
+    body: dict[str, Any],
+    knowledge_base_id: int | None = None,
+) -> dict[str, Any] | None:
     """Process a single MCP JSON-RPC message received via HTTP POST.
 
     Returns the JSON-RPC response dict, or None for notifications.

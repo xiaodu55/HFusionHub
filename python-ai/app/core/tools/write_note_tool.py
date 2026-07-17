@@ -15,7 +15,7 @@ Security:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from app.core.tools.base import BaseTool
 
@@ -29,12 +29,12 @@ class WriteNoteTool(BaseTool):
         self,
         content: str,
         knowledge_base_id: int,
-        user_id: Optional[int] = None,
-        title: Optional[str] = None,
-        conversation_id: Optional[int] = None,
-        message_id: Optional[int] = None,
+        user_id: int | None = None,
+        title: str | None = None,
+        conversation_id: int | None = None,
+        message_id: int | None = None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Write a note to the knowledge base via the Java backend.
 
         Args:
@@ -104,7 +104,7 @@ class WriteNoteTool(BaseTool):
             logger.error("[write_note] persistence error: %s", exc)
             return {"error": f"笔记保存失败：{exc}"}
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": "write_note",
             "description": "把内容整理成笔记并保存到知识库。需要人工审批。",

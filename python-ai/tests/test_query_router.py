@@ -12,26 +12,26 @@ QueryRouter 模块单元测试
 - 全局实例管理
 """
 
-import pytest
-import sys
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from app.core.rag.query_router import (
-    ChannelType,
-    RouteStrategy,
-    QueryType,
-    ChannelConfig,
-    RouteResult,
-    SearchResult,
-    MergedResult,
     BaseChannel,
-    VectorChannel,
+    ChannelConfig,
+    ChannelType,
     KeywordChannel,
+    MergedResult,
     QueryRouter,
     QueryRouterFactory,
+    QueryType,
+    RouteResult,
+    RouteStrategy,
+    SearchResult,
+    VectorChannel,
     get_router,
     reset_router,
 )
-
 
 # =============================================================================
 # 数据模型测试

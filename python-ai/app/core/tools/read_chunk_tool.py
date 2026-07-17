@@ -5,7 +5,7 @@ Agent V1 whitelisted tool.  Only reads chunks in the currently selected
 knowledge base; the caller must pass knowledge_base_id for scope enforcement.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .base import BaseTool
 
@@ -13,15 +13,15 @@ from .base import BaseTool
 class ReadChunkTool(BaseTool):
     """Read the full text content of a specific document chunk."""
 
-    def __init__(self, knowledge_base_id: Optional[int] = None):
+    def __init__(self, knowledge_base_id: int | None = None):
         self.knowledge_base_id = knowledge_base_id
 
     async def execute(
         self,
         chunk_id: str,
-        knowledge_base_id: Optional[int] = None,
+        knowledge_base_id: int | None = None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Read a single chunk by its chunk_id.
 

@@ -7,10 +7,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-
 import logging
+from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -37,11 +36,11 @@ class _RunRequest(BaseModel):
     knowledge_base_id: int = Field(ge=1)
     top_k: int = Field(default=5, ge=1, le=20)
     # 二选一：内联样本，或 dataset_name（scripts/eval_sets/<name>.jsonl 白名单）
-    samples: Optional[List[Dict[str, Any]]] = Field(default=None, max_length=500)
-    dataset_name: Optional[str] = Field(default=None, max_length=120)
-    concurrency: Optional[int] = Field(default=None, ge=1, le=16)
+    samples: list[dict[str, Any]] | None = Field(default=None, max_length=500)
+    dataset_name: str | None = Field(default=None, max_length=120)
+    concurrency: int | None = Field(default=None, ge=1, le=16)
     enable_judge: bool = False
-    judge_runs: Optional[int] = Field(default=None, ge=1, le=5)
+    judge_runs: int | None = Field(default=None, ge=1, le=5)
 
 
 def _notify_java_record(run_file: str, request: _RunRequest, result: MetricResult) -> None:
@@ -87,7 +86,7 @@ def _notify_java_record(run_file: str, request: _RunRequest, result: MetricResul
         logger.warning("[eval-harness] Java record callback error: %s", exc)
 
 
-def _load_samples(request: _RunRequest) -> List[EvalSample]:
+def _load_samples(request: _RunRequest) -> list[EvalSample]:
     if request.samples:
         raw = request.samples
     elif request.dataset_name:
@@ -101,7 +100,7 @@ def _load_samples(request: _RunRequest) -> List[EvalSample]:
     else:
         raise HTTPException(status_code=422, detail="samples or dataset_name is required")
 
-    samples: List[EvalSample] = []
+    samples: list[EvalSample] = []
     for i, item in enumerate(raw):
         try:
             samples.append(EvalSample(
@@ -127,7 +126,7 @@ def _load_samples(request: _RunRequest) -> List[EvalSample]:
 
 
 @router.post("/run")
-async def start_run(request: _RunRequest) -> Dict[str, Any]:
+async def start_run(request: _RunRequest) -> dict[str, Any]:
     """驱动一次完整评估（同步执行；样本量大时耗时与并发配置相关）。"""
     samples = _load_samples(request)
     headers = {"X-Internal-Token": config.INTERNAL_API_TOKEN, "X-Tenant-Id": "1"}
@@ -162,13 +161,13 @@ async def start_run(request: _RunRequest) -> Dict[str, Any]:
 class _ScoreRequest(BaseModel):
     run_file: str = Field(max_length=160)
     enable_judge: bool = False
-    judge_model: Optional[str] = Field(default=None, max_length=120)
+    judge_model: str | None = Field(default=None, max_length=120)
     judge_runs: int = Field(default=1, ge=1, le=5)
     retrieval_k: int = Field(default=5, ge=1, le=20)
 
 
 @router.post("/score")
-async def score(request: _ScoreRequest) -> Dict[str, Any]:
+async def score(request: _ScoreRequest) -> dict[str, Any]:
     try:
         result = await score_mod.score_run(
             request.run_file, enable_judge=request.enable_judge,
@@ -183,12 +182,12 @@ async def score(request: _ScoreRequest) -> Dict[str, Any]:
 
 
 @router.get("/runs")
-async def list_runs() -> Dict[str, Any]:
+async def list_runs() -> dict[str, Any]:
     return {"runs": runner_mod.list_run_files()}
 
 
 @router.get("/slides")
-async def get_slides(run_file: str) -> Dict[str, Any]:
+async def get_slides(run_file: str) -> dict[str, Any]:
     if "/" in run_file or "\\" in run_file or ".." in run_file:
         raise HTTPException(status_code=422, detail="invalid run file name")
     slides_path = REPORTS_DIR / run_file.replace(".jsonl", "_slides.html")
@@ -198,7 +197,7 @@ async def get_slides(run_file: str) -> Dict[str, Any]:
 
 
 @router.get("/report")
-async def get_report(run_file: str) -> Dict[str, Any]:
+async def get_report(run_file: str) -> dict[str, Any]:
     if "/" in run_file or "\\" in run_file or ".." in run_file:
         raise HTTPException(status_code=422, detail="invalid run file name")
     report_path = REPORTS_DIR / run_file.replace(".jsonl", "_report.md")
@@ -213,7 +212,7 @@ class _DiffRequest(BaseModel):
 
 
 @router.post("/diff")
-async def diff(request: _DiffRequest) -> Dict[str, Any]:
+async def diff(request: _DiffRequest) -> dict[str, Any]:
     try:
         base = score_mod.load_scores(REPORTS_DIR, request.base_run)
         candidate = score_mod.load_scores(REPORTS_DIR, request.candidate_run)
@@ -229,7 +228,7 @@ async def diff(request: _DiffRequest) -> Dict[str, Any]:
 
 
 @router.get("/datasets")
-async def list_datasets() -> Dict[str, Any]:
+async def list_datasets() -> dict[str, Any]:
     if not DATASET_DIR.exists():
         return {"datasets": []}
     return {"datasets": sorted(p.name for p in DATASET_DIR.glob("*.jsonl"))}

@@ -10,26 +10,26 @@
 from __future__ import annotations
 
 import json
-from typing import AsyncGenerator, Callable, Dict, List, Optional
+from typing import AsyncGenerator, Callable
 
 import pytest
 
 from app.core.bid.workflow import BidInterpretWorkflow
 from app.core.llm.base import BaseLLM, ChatMessage, LLMResponse
-from app.core.rag.retriever import RetrievalResult
 from app.core.rag.postprocessor import ProcessedResult
+from app.core.rag.retriever import RetrievalResult
 
 # ── 假 LLM：按 user prompt 分派返回 schema 合规 JSON ──────────────────
 
 
 class FakeLLM(BaseLLM):
-    def __init__(self, responder: Callable[[str], Dict]):
+    def __init__(self, responder: Callable[[str], dict]):
         self.responder = responder
-        self.calls: List[str] = []
+        self.calls: list[str] = []
 
     async def chat(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs
@@ -46,7 +46,7 @@ class FakeLLM(BaseLLM):
 
     async def chat_stream(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
         **kwargs
@@ -59,7 +59,7 @@ class FakeLLM(BaseLLM):
         return True
 
 
-def _corpus_chunks(n: int = 4) -> List[ProcessedResult]:
+def _corpus_chunks(n: int = 4) -> list[ProcessedResult]:
     """构造 n 个带 chunk_id 的检索结果片段。"""
     return [
         ProcessedResult(
@@ -73,21 +73,21 @@ def _corpus_chunks(n: int = 4) -> List[ProcessedResult]:
 
 
 class FakeRetriever:
-    def __init__(self, results: List[ProcessedResult]):
+    def __init__(self, results: list[ProcessedResult]):
         self._results = results
 
     async def retrieve(
         self,
         query: str,
-        knowledge_base_id: Optional[int] = None,
-        conversation_history: Optional[List[Dict]] = None,
+        knowledge_base_id: int | None = None,
+        conversation_history: list[dict] | None = None,
         top_k: int = 5,
         enable_rewrite: bool = True,
     ) -> RetrievalResult:
         return RetrievalResult(query=query, results=self._results[:top_k])
 
 
-def _default_responder(user_prompt: str) -> Dict:
+def _default_responder(user_prompt: str) -> dict:
     if "关键要素" in user_prompt:
         return {
             "elements": [
@@ -208,7 +208,7 @@ async def test_interpret_empty_corpus_returns_warning():
 
 @pytest.mark.asyncio
 async def test_interpret_single_expert_failure_degrades_gracefully():
-    def flaky_responder(user_prompt: str) -> Dict:
+    def flaky_responder(user_prompt: str) -> dict:
         if "评分办法" in user_prompt:
             raise RuntimeError("scoring LLM unavailable")
         return _default_responder(user_prompt)

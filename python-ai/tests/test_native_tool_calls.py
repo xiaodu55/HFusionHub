@@ -12,17 +12,15 @@ flag 全部通过 monkeypatch feature_flags.is_enabled 控制，不依赖 Java�
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
-import app.core.agent.react as react_module
 import app.core.llm.model_gateway as gateway_module
 from app.core.agent.react import ReactAgent
 from app.core.llm.base import ChatMessage, LLMResponse
 from app.core.tools.spec import SEARCH_KB_SPEC
-
 
 # ── 测试替身 ───────────────────────────────────────────────────────────────
 
@@ -30,7 +28,7 @@ from app.core.tools.spec import SEARCH_KB_SPEC
 class _FakePostResponse:
     """httpx.Response 最小替身（is_error 为属性，与真实 httpx 一致）。"""
 
-    def __init__(self, payload: Dict[str, Any]):
+    def __init__(self, payload: dict[str, Any]):
         self._payload = payload
         self.status_code = 200
         self.text = ""
@@ -39,11 +37,11 @@ class _FakePostResponse:
     def is_error(self) -> bool:
         return False
 
-    def json(self) -> Dict[str, Any]:
+    def json(self) -> dict[str, Any]:
         return self._payload
 
 
-def _patch_transport(monkeypatch, payload: Dict[str, Any], captured: List[Dict[str, Any]]):
+def _patch_transport(monkeypatch, payload: dict[str, Any], captured: list[dict[str, Any]]):
     """patch gateway 内传输层；captured 收集每次请求的 json payload。"""
 
     async def fake_post_with_retry(client, url, headers=None, json=None):
@@ -73,7 +71,7 @@ def _ollama_provider() -> gateway_module.ProviderConfig:
 class TestOpenAICompatibleToolCalls:
     @pytest.mark.asyncio
     async def test_extracts_tool_calls(self, monkeypatch):
-        captured: List[Dict[str, Any]] = []
+        captured: list[dict[str, Any]] = []
         payload = {
             "choices": [{
                 "message": {
@@ -102,7 +100,7 @@ class TestOpenAICompatibleToolCalls:
 
     @pytest.mark.asyncio
     async def test_no_tool_calls_returns_none(self, monkeypatch):
-        captured: List[Dict[str, Any]] = []
+        captured: list[dict[str, Any]] = []
         payload = {
             "choices": [{"message": {"content": "答案"}, "finish_reason": "stop"}],
             "usage": {},
@@ -119,7 +117,7 @@ class TestOpenAICompatibleToolCalls:
 class TestOllamaToolCalls:
     @pytest.mark.asyncio
     async def test_normalizes_dict_arguments(self, monkeypatch):
-        captured: List[Dict[str, Any]] = []
+        captured: list[dict[str, Any]] = []
         payload = {
             "message": {
                 "content": "",
@@ -147,7 +145,7 @@ class TestOllamaToolCalls:
 
     @pytest.mark.asyncio
     async def test_without_tools_payload_unchanged(self, monkeypatch):
-        captured: List[Dict[str, Any]] = []
+        captured: list[dict[str, Any]] = []
         payload = {"message": {"content": "hello"}, "prompt_eval_count": 1, "eval_count": 1}
         _patch_transport(monkeypatch, payload, captured)
 
@@ -168,7 +166,7 @@ class _ScriptedLLM:
 
     def __init__(self, responses):
         self._responses = list(responses)
-        self.calls: List[Dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
         self.model = "scripted"
 
     async def chat(self, messages, temperature=0.7, max_tokens=2048, **kwargs):

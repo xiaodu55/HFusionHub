@@ -28,15 +28,13 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Deque, Dict, Iterable, List, Optional, Tuple
-
-import httpx
-
-from .http_client import get_shared_client
+from datetime import UTC, datetime
+from typing import Any, AsyncGenerator, Iterable
 
 from app.utils.config import config
+
 from .base import ChatMessage
+from .http_client import get_shared_client
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +58,7 @@ _DEEPSEEK_PRICE_PER_1K_OUTPUT = 0.00028
 
 # Default alias table: alias -> (provider_name, model). ``None`` model means
 # "use the provider's first configured model".
-_DEFAULT_ALIASES: Dict[str, Tuple[str, Optional[str]]] = {
+_DEFAULT_ALIASES: dict[str, tuple[str, str | None]] = {
     "deepseek": ("deepseek", None),
     "deepseek-chat": ("deepseek", "deepseek-chat"),
     "deepseek-reasoner": ("deepseek", "deepseek-reasoner"),
@@ -90,15 +88,15 @@ class ProviderConfig:
 
     name: str
     base_url: str
-    api_key: Optional[str] = None
-    models: List[str] = field(default_factory=list)
+    api_key: str | None = None
+    models: list[str] = field(default_factory=list)
     # Protocol used to talk to the provider: "openai" (OpenAI chat-completions
     # compatible, covers DeepSeek) or "ollama" (native /api/chat).
     provider_type: str = "openai"
     price_per_1k_input: float = 0.0
     price_per_1k_output: float = 0.0
     enabled: bool = True
-    rate_limit_tokens_per_min: Optional[int] = None
+    rate_limit_tokens_per_min: int | None = None
 
 
 @dataclass
@@ -109,7 +107,7 @@ class CircuitState:
     open_until: float = 0.0  # time.monotonic() deadline; 0.0 = closed
     total_failures: int = 0
     total_successes: int = 0
-    last_failure_at: Optional[float] = None  # wall-clock seconds
+    last_failure_at: float | None = None  # wall-clock seconds
 
 
 @dataclass
@@ -123,9 +121,9 @@ class ModelUsage:
     total_tokens: int = 0
     cost_usd: float = 0.0
     latency_ms: float = 0.0
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """JSON-serialisable representation (for the Java backend flush)."""
         return {
             "model": self.model,
@@ -147,10 +145,10 @@ class GatewayResult:
     model: str
     provider: str
     finish_reason: str = "stop"
-    usage: Optional[ModelUsage] = None
+    usage: ModelUsage | None = None
     fallback_used: bool = False
     # 原生 function calling：provider 返回的 tool_calls（OpenAI 形态），无则为 None
-    tool_calls: Optional[List[Dict[str, Any]]] = None
+    tool_calls: list[dict[str, Any]] | None = None
     # True when the request was served by the legacy ``get_llm()`` path
     # (gateway disabled, nothing to route with, or model unresolved).
     degraded: bool = False
@@ -214,8 +212,8 @@ class UsageAccumulator:
     """
 
     def __init__(self, max_records: int = 10_000):
-        self._records: Deque[ModelUsage] = deque(maxlen=max_records)
-        self._pending: List[ModelUsage] = []
+        self._records: deque[ModelUsage] = deque(maxlen=max_records)
+        self._pending: list[ModelUsage] = []
         self._lock = threading.Lock()
 
     def record(self, usage: ModelUsage) -> None:
@@ -224,7 +222,7 @@ class UsageAccumulator:
             self._records.append(usage)
             self._pending.append(usage)
 
-    def records(self, since: Optional[datetime] = None) -> List[ModelUsage]:
+    def records(self, since: datetime | None = None) -> list[ModelUsage]:
         """Snapshot of recorded usage, optionally filtered by timestamp."""
         with self._lock:
             records = list(self._records)
@@ -232,12 +230,12 @@ class UsageAccumulator:
             records = [r for r in records if r.timestamp >= since]
         return records
 
-    def summary(self, since: Optional[datetime] = None) -> Dict[str, Any]:
+    def summary(self, since: datetime | None = None) -> dict[str, Any]:
         """Aggregate usage since ``since``, broken down by model and provider."""
         records = self.records(since)
 
-        by_model: Dict[str, Dict[str, Any]] = {}
-        by_provider: Dict[str, Dict[str, Any]] = {}
+        by_model: dict[str, dict[str, Any]] = {}
+        by_provider: dict[str, dict[str, Any]] = {}
         totals = {"requests": 0, "prompt_tokens": 0, "completion_tokens": 0,
                   "total_tokens": 0, "cost_usd": 0.0}
 
@@ -290,7 +288,7 @@ class UsageAccumulator:
 
         url = f"{config.JAVA_BACKEND_URL}/api/internal/model-gateway/usage"
         payload = {
-            "flushed_at": datetime.now(timezone.utc).isoformat(),
+            "flushed_at": datetime.now(UTC).isoformat(),
             "count": len(batch),
             "records": [usage.to_dict() for usage in batch],
         }
@@ -327,8 +325,8 @@ class ModelGateway:
 
     def __init__(
         self,
-        providers: Optional[Iterable[ProviderConfig]] = None,
-        aliases: Optional[Dict[str, Tuple[str, Optional[str]]]] = None,
+        providers: Iterable[ProviderConfig] | None = None,
+        aliases: dict[str, tuple[str, str | None]] | None = None,
         enabled: bool = True,
         failover_enabled: bool = True,
         cost_tracking_enabled: bool = True,
@@ -341,10 +339,10 @@ class ModelGateway:
         self._failure_threshold = max(1, failure_threshold)
         self._cooldown_seconds = max(0.0, cooldown_seconds)
 
-        self._providers: Dict[str, ProviderConfig] = {}
-        self._circuits: Dict[str, CircuitState] = {}
-        self._limiters: Dict[str, Optional[TokenBucketRateLimiter]] = {}
-        self._aliases: Dict[str, Tuple[str, Optional[str]]] = dict(aliases or {})
+        self._providers: dict[str, ProviderConfig] = {}
+        self._circuits: dict[str, CircuitState] = {}
+        self._limiters: dict[str, TokenBucketRateLimiter | None] = {}
+        self._aliases: dict[str, tuple[str, str | None]] = dict(aliases or {})
         self._lock = threading.Lock()
 
         self.usage_accumulator = UsageAccumulator()
@@ -363,17 +361,17 @@ class ModelGateway:
             else None
         )
 
-    def add_alias(self, alias: str, provider: str, model: Optional[str] = None) -> None:
+    def add_alias(self, alias: str, provider: str, model: str | None = None) -> None:
         """Map an alias (e.g. ``"gpt-4"``) to a provider+model pair."""
         self._aliases[alias] = (provider, model)
 
     @property
-    def providers(self) -> Dict[str, ProviderConfig]:
+    def providers(self) -> dict[str, ProviderConfig]:
         return dict(self._providers)
 
     # -- routing ------------------------------------------------------------
 
-    def resolve(self, model: str) -> Tuple[str, str]:
+    def resolve(self, model: str) -> tuple[str, str]:
         """Resolve a model reference to a ``(provider_name, model_name)`` pair.
 
         Accepted forms, in priority order:
@@ -428,10 +426,10 @@ class ModelGateway:
     async def chat(
         self,
         model: str,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
-        fallbacks: Optional[List[str]] = None,
+        fallbacks: list[str] | None = None,
         **kwargs,
     ) -> GatewayResult:
         """Route a chat request through the provider chain.
@@ -456,7 +454,7 @@ class ModelGateway:
 
         provider_name, resolved_model = self.resolve(model)
 
-        errors: List[str] = []
+        errors: list[str] = []
         for candidate, candidate_model in self._build_chain(provider_name, resolved_model, fallbacks):
             if self._circuit_open(candidate):
                 errors.append(f"{candidate}: circuit open")
@@ -499,10 +497,10 @@ class ModelGateway:
     async def chat_stream(
         self,
         model: str,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
-        fallbacks: Optional[List[str]] = None,
+        fallbacks: list[str] | None = None,
         **kwargs,
     ) -> AsyncGenerator[str, None]:
         """Stream a chat response through the provider chain (async generator).
@@ -520,12 +518,17 @@ class ModelGateway:
         Yields:
             Content chunks (str).
         """
+        from app.utils.config import config
+
         from .deepseek_llm import (
             _cache_get as _response_cache_get,
+        )
+        from .deepseek_llm import (
             _cache_key as _response_cache_key,
+        )
+        from .deepseek_llm import (
             _cache_put as _response_cache_put,
         )
-        from app.utils.config import config
 
         if not self._can_route():
             raise GatewayError("No enabled provider available (gateway not routable)")
@@ -543,7 +546,7 @@ class ModelGateway:
                 return
 
         start = time.perf_counter()
-        errors: List[str] = []
+        errors: list[str] = []
         for candidate, candidate_model in self._build_chain(provider_name, resolved_model, fallbacks):
             if self._circuit_open(candidate):
                 errors.append(f"{candidate}: circuit open")
@@ -556,7 +559,7 @@ class ModelGateway:
                 continue
 
             provider = self._providers[candidate]
-            parts: List[str] = []
+            parts: list[str] = []
             emitted_first = False
             try:
                 async for chunk in self._stream_provider(
@@ -607,10 +610,10 @@ class ModelGateway:
         self,
         provider: ProviderConfig,
         model: str,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float,
         max_tokens: int,
-        kwargs: Dict[str, Any],
+        kwargs: dict[str, Any],
     ) -> AsyncGenerator[str, None]:
         """Yield content chunks from one provider's streaming endpoint.
 
@@ -628,10 +631,10 @@ class ModelGateway:
     async def _stream_openai_compatible(
         provider: ProviderConfig,
         model: str,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float,
         max_tokens: int,
-        kwargs: Dict[str, Any],
+        kwargs: dict[str, Any],
     ) -> AsyncGenerator[str, None]:
         """SSE chat-completions stream (DeepSeek, OpenAI-compatible endpoints)."""
         from .http_client import get_shared_client
@@ -683,7 +686,7 @@ class ModelGateway:
     async def _stream_ollama(
         provider: ProviderConfig,
         model: str,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float,
         max_tokens: int,
     ) -> AsyncGenerator[str, None]:
@@ -731,11 +734,11 @@ class ModelGateway:
         self,
         provider: ProviderConfig,
         model: str,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float,
         max_tokens: int,
-        kwargs: Dict[str, Any],
-    ) -> Tuple[str, str, Dict[str, Any], Optional[List[Dict[str, Any]]]]:
+        kwargs: dict[str, Any],
+    ) -> tuple[str, str, dict[str, Any], list[dict[str, Any]] | None]:
         """Invoke one provider; return ``(content, finish_reason, usage, tool_calls)``."""
         if provider.provider_type == "ollama":
             return await self._call_ollama(provider, model, messages, temperature, max_tokens, kwargs)
@@ -747,11 +750,11 @@ class ModelGateway:
     async def _call_openai_compatible(
         provider: ProviderConfig,
         model: str,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float,
         max_tokens: int,
-        kwargs: Dict[str, Any],
-    ) -> Tuple[str, str, Dict[str, Any], Optional[List[Dict[str, Any]]]]:
+        kwargs: dict[str, Any],
+    ) -> tuple[str, str, dict[str, Any], list[dict[str, Any]] | None]:
         """Chat-completions protocol (DeepSeek, OpenAI-compatible endpoints).
 
         Uses the shared connection pool and P3 bounded retry (429/5xx + jitter)
@@ -803,11 +806,11 @@ class ModelGateway:
     async def _call_ollama(
         provider: ProviderConfig,
         model: str,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         temperature: float,
         max_tokens: int,
-        kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[str, str, Dict[str, Any], Optional[List[Dict[str, Any]]]]:
+        kwargs: dict[str, Any] | None = None,
+    ) -> tuple[str, str, dict[str, Any], list[dict[str, Any]] | None]:
         """Native Ollama ``/api/chat`` protocol (shared client, bounded retry).
 
         Ollama ≥0.4 原生支持 ``tools``（OpenAI 同构形态）；不支持的旧版会返回
@@ -815,7 +818,7 @@ class ModelGateway:
         """
         from .http_client import get_shared_client, post_with_retry
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": model,
             "messages": [{"role": msg.role, "content": msg.content} for msg in messages],
             "stream": False,
@@ -844,7 +847,7 @@ class ModelGateway:
         raw_tool_calls = message.get("tool_calls") or None
         # Ollama 原生 tool_calls：[{"function": {"name": …, "arguments": {…}}}，
         # arguments 是 dict——归一化为 OpenAI 形态（arguments 序列化为 JSON 字符串）。
-        tool_calls: Optional[List[Dict[str, Any]]] = None
+        tool_calls: list[dict[str, Any]] | None = None
         if raw_tool_calls:
             tool_calls = []
             for call in raw_tool_calls:
@@ -903,10 +906,10 @@ class ModelGateway:
         self,
         primary: str,
         model: str,
-        fallbacks: Optional[List[str]],
-    ) -> List[Tuple[str, str]]:
+        fallbacks: list[str] | None,
+    ) -> list[tuple[str, str]]:
         """Primary first, then per-request fallbacks (deduplicated, only enabled)."""
-        chain: List[Tuple[str, str]] = []
+        chain: list[tuple[str, str]] = []
         seen: set = set()
 
         def append(provider_name: str, provider_model: str) -> None:
@@ -932,7 +935,7 @@ class ModelGateway:
         self,
         provider: ProviderConfig,
         model: str,
-        raw_usage: Dict[str, Any],
+        raw_usage: dict[str, Any],
         start: float,
     ) -> ModelUsage:
         prompt_tokens = int(raw_usage.get("prompt_tokens", 0) or 0)
@@ -949,7 +952,7 @@ class ModelGateway:
         )
 
     @staticmethod
-    def _estimate_tokens(messages: List[ChatMessage]) -> int:
+    def _estimate_tokens(messages: list[ChatMessage]) -> int:
         """Pre-flight token estimate for rate limiting（中文校准，同 _estimate_completion）。"""
         total = sum(ModelGateway._estimate_tokens_text(m.content or "") for m in messages)
         return max(1, total)
@@ -959,7 +962,7 @@ class ModelGateway:
         cjk = sum(1 for ch in text if "一" <= ch <= "鿿")
         return cjk + (len(text) - cjk + 3) // 4
 
-    def _default_provider(self) -> Optional[ProviderConfig]:
+    def _default_provider(self) -> ProviderConfig | None:
         for provider in self._providers.values():
             if provider.enabled:
                 return provider
@@ -975,12 +978,12 @@ class ModelGateway:
         provider = self._default_provider()
         return self._provider_default_model(provider) if provider else ""
 
-    def available_models(self) -> List[Dict[str, Any]]:
+    def available_models(self) -> list[dict[str, Any]]:
         """Catalogue of routable models with alias, provider and per-1K pricing."""
         seen: set = set()
-        models: List[Dict[str, Any]] = []
+        models: list[dict[str, Any]] = []
 
-        def add(alias: Optional[str], provider_name: str, model: str) -> None:
+        def add(alias: str | None, provider_name: str, model: str) -> None:
             provider = self._providers.get(provider_name)
             if provider is None or not provider.enabled:
                 return
@@ -1028,7 +1031,7 @@ class ModelGateway:
         except Exception as exc:
             logger.warning("Model gateway warmup failed: %s", exc)
 
-    async def health(self) -> Dict[str, Any]:
+    async def health(self) -> dict[str, Any]:
         """Per-provider operational state (never exposes URLs or keys).
 
         Circuit states: ``closed`` (healthy), ``open`` (temporarily disabled
@@ -1039,7 +1042,7 @@ class ModelGateway:
         now = time.monotonic()
         probe_results = await self._probe_all()
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "gateway_enabled": self.enabled,
             "failover_enabled": self._failover_enabled,
             "cost_tracking_enabled": self._cost_tracking_enabled,
@@ -1073,8 +1076,8 @@ class ModelGateway:
             })
         return payload
 
-    async def _probe_all(self) -> Dict[str, bool]:
-        async def probe_one(provider: ProviderConfig) -> Tuple[str, bool]:
+    async def _probe_all(self) -> dict[str, bool]:
+        async def probe_one(provider: ProviderConfig) -> tuple[str, bool]:
             if not provider.enabled:
                 return provider.name, False
             try:
@@ -1123,7 +1126,7 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-def _load_alias_overrides() -> Dict[str, Tuple[str, Optional[str]]]:
+def _load_alias_overrides() -> dict[str, tuple[str, str | None]]:
     """Optional ``MODEL_GATEWAY_ALIASES`` JSON: {"alias": "provider:model"}."""
     raw = os.getenv("MODEL_GATEWAY_ALIASES", "").strip()
     if not raw:
@@ -1134,7 +1137,7 @@ def _load_alias_overrides() -> Dict[str, Tuple[str, Optional[str]]]:
         logger.warning("MODEL_GATEWAY_ALIASES is not valid JSON; ignoring")
         return {}
 
-    overrides: Dict[str, Tuple[str, Optional[str]]] = {}
+    overrides: dict[str, tuple[str, str | None]] = {}
     for alias, target in parsed.items():
         if not isinstance(target, str):
             logger.warning("MODEL_GATEWAY_ALIASES entry %r is not a string; ignoring", alias)
@@ -1214,7 +1217,7 @@ def _build_gateway_from_config() -> ModelGateway:
     return gateway
 
 
-_gateway_instance: Optional[ModelGateway] = None
+_gateway_instance: ModelGateway | None = None
 _gateway_lock = threading.Lock()
 
 

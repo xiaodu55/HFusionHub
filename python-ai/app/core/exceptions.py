@@ -2,7 +2,7 @@
 Custom exceptions for HFusionHub Python AI Engine
 """
 
-from typing import Optional, Any
+from typing import Any
 
 
 class HFusionHubException(Exception):
@@ -12,7 +12,7 @@ class HFusionHubException(Exception):
         self,
         message: str,
         code: int = 500,
-        details: Optional[Any] = None
+        details: Any | None = None
     ):
         self.message = message
         self.code = code
@@ -33,7 +33,7 @@ class HFusionHubException(Exception):
 class ValidationException(HFusionHubException):
     """Validation error (400)"""
 
-    def __init__(self, message: str, details: Optional[Any] = None):
+    def __init__(self, message: str, details: Any | None = None):
         super().__init__(message, code=400, details=details)
 
 
@@ -70,28 +70,28 @@ class FileSizeException(HFusionHubException):
 class ParsingException(HFusionHubException):
     """Document parsing error (500)"""
 
-    def __init__(self, message: str, details: Optional[Any] = None):
+    def __init__(self, message: str, details: Any | None = None):
         super().__init__(f"文档解析失败: {message}", code=500, details=details)
 
 
 class VectorizationException(HFusionHubException):
     """Vectorization error (500)"""
 
-    def __init__(self, message: str, details: Optional[Any] = None):
+    def __init__(self, message: str, details: Any | None = None):
         super().__init__(f"向量化失败: {message}", code=500, details=details)
 
 
 class EmbeddingException(HFusionHubException):
     """Embedding generation error (500)"""
 
-    def __init__(self, message: str, details: Optional[Any] = None):
+    def __init__(self, message: str, details: Any | None = None):
         super().__init__(f"Embedding生成失败: {message}", code=500, details=details)
 
 
 class MilvusException(HFusionHubException):
     """Milvus operation error (500)"""
 
-    def __init__(self, message: str, details: Optional[Any] = None):
+    def __init__(self, message: str, details: Any | None = None):
         super().__init__(f"向量数据库操作失败: {message}", code=500, details=details)
 
 

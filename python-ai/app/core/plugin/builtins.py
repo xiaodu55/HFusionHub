@@ -16,7 +16,6 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 ENV_WHEELS_DIR = "PLUGIN_BUILTIN_WHEELS_DIR"
 
 
-def _plugin_id_from_wheel(filename: str) -> Optional[str]:
+def _plugin_id_from_wheel(filename: str) -> str | None:
     """从 wheel 文件名解析 plugin_id（<name>@<version>）。
 
     文件名形如 bid_docx-1.0.0-py3-none-any.whl（build_wheel.py 产物）。
@@ -43,7 +42,7 @@ def _plugin_id_from_wheel(filename: str) -> Optional[str]:
     return f"{name}@{version}"
 
 
-def _read_sidecar_sha256(wheel_path: Path) -> Optional[str]:
+def _read_sidecar_sha256(wheel_path: Path) -> str | None:
     sidecar = wheel_path.with_suffix(wheel_path.suffix + ".sha256")
     try:
         digest = sidecar.read_text(encoding="utf-8").strip()
@@ -52,7 +51,7 @@ def _read_sidecar_sha256(wheel_path: Path) -> Optional[str]:
     return digest if len(digest) == 64 and all(c in "0123456789abcdef" for c in digest) else None
 
 
-def load_builtin_wheels(wheels_dir: Optional[str] = None) -> List[str]:
+def load_builtin_wheels(wheels_dir: str | None = None) -> list[str]:
     """加载指定目录下的平台内建插件 wheel，返回成功加载的 plugin_id 列表。
 
     目录不存在/为空时返回空列表（幂等，不抛异常）。单个 wheel 加载失败仅告警，
@@ -66,7 +65,7 @@ def load_builtin_wheels(wheels_dir: Optional[str] = None) -> List[str]:
     if not dirs:
         return []
 
-    loaded: List[str] = []
+    loaded: list[str] = []
     for raw_dir in dirs:
         root = Path(raw_dir)
         if not root.is_dir():

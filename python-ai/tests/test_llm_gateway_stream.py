@@ -14,10 +14,11 @@ surrounds that call.
 """
 
 import inspect
-import os
 
 import pytest
 
+from app.core.llm import deepseek_llm as ds_mod
+from app.core.llm import get_llm
 from app.core.llm.base import ChatMessage, LLMResponse
 from app.core.llm.gateway_llm import GatewayLLM
 from app.core.llm.model_gateway import (
@@ -28,9 +29,6 @@ from app.core.llm.model_gateway import (
     ProviderConfig,
 )
 from app.utils.config import config
-
-from app.core.llm import deepseek_llm as ds_mod
-from app.core.llm import get_llm
 
 
 def _messages(*texts: str) -> list:
@@ -205,6 +203,7 @@ async def test_chat_stream_error_after_first_chunk_raises(monkeypatch):
 async def test_chat_stream_raises_when_gateway_disabled():
     """Gateway disabled → clear GatewayError instead of a silent legacy fallback."""
     import pytest as _pytest
+
     from app.core.llm.model_gateway import GatewayError
 
     gw = _gateway(_provider("p1"), enabled=False)
@@ -216,6 +215,7 @@ async def test_chat_stream_raises_when_gateway_disabled():
 async def test_chat_stream_resolve_failure_raises(monkeypatch):
     """A model the gateway cannot resolve surfaces GatewayError to the caller."""
     import pytest as _pytest
+
     from app.core.llm.model_gateway import GatewayError
 
     gw = _gateway(_provider("p1"))
@@ -325,8 +325,8 @@ def test_get_llm_mock_still_wins_over_gateway(monkeypatch):
 def test_token_estimation_calibrated_for_chinese():
     """A3: token 估算中文校准 — 中文 ~1 字/token，ASCII ~4 字符/token。
     旧实现 chars//4 会把中文成本低估约 4 倍。"""
-    from app.core.llm.model_gateway import ModelGateway
     from app.core.llm.base import ChatMessage
+    from app.core.llm.model_gateway import ModelGateway
 
     # 纯中文 12 字 → 12 tokens（旧算法得 3）
     text = "知识库问答助手测试通过"

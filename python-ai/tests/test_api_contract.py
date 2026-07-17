@@ -12,7 +12,6 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 
-
 AUTH_HEADERS = {"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "1"}
 
 

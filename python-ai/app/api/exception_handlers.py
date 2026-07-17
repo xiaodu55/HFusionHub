@@ -3,8 +3,10 @@ Global exception handlers for FastAPI
 """
 
 import logging
-from fastapi import Request, HTTPException
+
+from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
+
 from app.core.exceptions import HFusionHubException
 
 logger = logging.getLogger(__name__)

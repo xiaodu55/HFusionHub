@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from threading import Lock
-from typing import Any, Dict, Optional
+from typing import Any
 from uuid import uuid4
 
 logger = logging.getLogger(__name__)
@@ -28,24 +28,24 @@ class StoredApproval:
     run_id: int
     user_id: int
     tool_name: str
-    tool_input: Dict[str, Any]
+    tool_input: dict[str, Any]
     arguments_summary: str
     status: str = "pending"  # pending | approved | denied
-    reason: Optional[str] = None
+    reason: str | None = None
     expires_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc) + timedelta(minutes=APPROVAL_EXPIRY_MINUTES)
+        default_factory=lambda: datetime.now(UTC) + timedelta(minutes=APPROVAL_EXPIRY_MINUTES)
     )
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def is_expired(self) -> bool:
-        return datetime.now(timezone.utc) > self.expires_at
+        return datetime.now(UTC) > self.expires_at
 
     @property
     def is_approved(self) -> bool:
         return self.status == "approved" and not self.is_expired
 
-    def approve(self, reason: Optional[str] = None) -> None:
+    def approve(self, reason: str | None = None) -> None:
         if self.status != "pending":
             raise ValueError(f"Cannot approve: status is '{self.status}'")
         if self.is_expired:
@@ -54,13 +54,13 @@ class StoredApproval:
         self.status = "approved"
         self.reason = reason
 
-    def deny(self, reason: Optional[str] = None) -> None:
+    def deny(self, reason: str | None = None) -> None:
         if self.status != "pending":
             raise ValueError(f"Cannot deny: status is '{self.status}'")
         self.status = "denied"
         self.reason = reason
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "approval_id": self.approval_id,
             "task_id": self.task_id,
@@ -79,7 +79,7 @@ class ApprovalStore:
     """Thread-safe in-memory store for pending approvals."""
 
     def __init__(self, max_entries: int = 1000):
-        self._pending: Dict[str, StoredApproval] = {}
+        self._pending: dict[str, StoredApproval] = {}
         self._lock = Lock()
         self._max = max(1, max_entries)
 
@@ -89,7 +89,7 @@ class ApprovalStore:
         run_id: int,
         user_id: int,
         tool_name: str,
-        tool_input: Dict[str, Any],
+        tool_input: dict[str, Any],
         arguments_summary: str,
     ) -> StoredApproval:
         """Create a pending approval and return it."""
@@ -113,11 +113,11 @@ class ApprovalStore:
         logger.info("Approval created: id=%s tool=%s", approval_id, tool_name)
         return approval
 
-    def get(self, approval_id: str) -> Optional[StoredApproval]:
+    def get(self, approval_id: str) -> StoredApproval | None:
         with self._lock:
             return self._pending.get(approval_id)
 
-    def decide(self, approval_id: str, decision: str, user_id: int, reason: Optional[str] = None) -> StoredApproval:
+    def decide(self, approval_id: str, decision: str, user_id: int, reason: str | None = None) -> StoredApproval:
         """Approve or deny a pending approval.  Raises ValueError on invalid state."""
         with self._lock:
             approval = self._pending.get(approval_id)
@@ -143,7 +143,7 @@ class ApprovalStore:
         with self._lock:
             self._pending.pop(approval_id, None)
 
-    def list_pending(self, user_id: Optional[int] = None) -> list:
+    def list_pending(self, user_id: int | None = None) -> list:
         with self._lock:
             items = list(self._pending.values())
             if user_id is not None:
@@ -161,7 +161,7 @@ class ApprovalStore:
 
 
 # Module-level singleton
-_approval_store: Optional[ApprovalStore] = None
+_approval_store: ApprovalStore | None = None
 
 
 def get_approval_store() -> ApprovalStore:

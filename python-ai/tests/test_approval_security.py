@@ -21,17 +21,16 @@ import unittest
 # Add project root to path
 sys.path.insert(0, "..")
 
+from app.core.agent.execution_context import AgentExecutionContext
 from app.core.tools.registry import (
-    register_scoped_grant,
-    consume_scoped_grant,
-    create_v1_registry,
+    _SCOPED_GRANT_TTL_SECONDS,
     _scoped_grants,
     _scoped_grants_lock,
-    _SCOPED_GRANT_TTL_SECONDS,
+    consume_scoped_grant,
+    create_v1_registry,
+    register_scoped_grant,
 )
 from app.core.tools.write_note_tool import WriteNoteTool
-from app.core.agent.execution_context import AgentExecutionContext
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Test 1: Normal approve flow — grant matches, is consumed

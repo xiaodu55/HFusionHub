@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from statistics import median
-from typing import Any, Dict, Iterable, List
+from typing import Any, Iterable
 
 
 @dataclass(frozen=True)
@@ -23,9 +23,9 @@ class ChunkQualityReport:
     short_chunk_count: int
     duplicate_chunk_count: int
     chunks_with_outline_count: int
-    warnings: List[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -38,7 +38,7 @@ def assess_chunk_quality(blocks: Iterable[Any], chunks: Iterable[Any], *, short_
     duplicate_count = sum(count - 1 for count in Counter(non_empty).values() if count > 1)
     short_count = sum(0 < length < short_chunk_threshold for length in lengths)
     outlined = sum(bool(getattr(chunk, "outline_path", [])) for chunk in chunk_list)
-    warnings: List[str] = []
+    warnings: list[str] = []
     if not chunk_list:
         warnings.append("no_chunks_created")
     if chunk_list and not non_empty:

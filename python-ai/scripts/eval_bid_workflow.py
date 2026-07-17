@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -42,7 +42,7 @@ def main() -> int:
     metrics = run_all()
     failures = check_gates(metrics, GATE_THRESHOLDS)
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     report = {
         "track": "bid_workflow",
         "generated_at": now,

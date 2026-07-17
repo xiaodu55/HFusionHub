@@ -4,51 +4,44 @@ Handles document parsing, chunking, and vectorization
 """
 
 import asyncio
+import json
+import logging
 import os
 import time
-import logging
-import json
-import httpx
 from collections import OrderedDict
-from typing import List, Optional, Dict, Any
+from typing import Any
+
+import httpx
 from fastapi import APIRouter, BackgroundTasks
 
+from app.core.chunker.quality import assess_chunk_quality
+from app.core.chunker.text_chunker import chunk_blocks
+from app.core.embedding import get_embedding_service
+from app.core.exceptions import EmbeddingException, MilvusException, ParsingException, VectorizationException
+from app.core.parser.base import BaseParser
+from app.core.parser.multimodal_evidence import MultimodalEvidenceExtractor
+from app.core.tenant.context import clear_tenant_id, require_tenant_id, set_tenant_id
+from app.core.vectorstore.milvus_store import (
+    create_collection,
+    delete_chunk_ids,
+    delete_document_chunks,
+    get_document_chunks,
+    insert_chunks,
+    search_similar,
+)
 from app.models.document import (
+    ChunkResponse,
     ParseRequest,
     ParseResponse,
-    ChunkResponse,
-    VectorChunkResponse,
     SearchRequest,
     SearchResponse,
     SearchResult,
-    CallbackRequest,
     VectorChunk,
-    VectorCountsRequest
-)
-from app.core.parser.base import BaseParser
-from app.core.chunker.text_chunker import chunk_blocks
-from app.core.chunker.quality import assess_chunk_quality
-from app.core.parser.multimodal_evidence import MultimodalEvidenceExtractor
-from app.core.embedding import get_embedding_service
-from app.core.exceptions import (
-    ParsingException,
-    VectorizationException,
-    EmbeddingException,
-    MilvusException
-)
-from app.core.vectorstore.milvus_store import (
-    create_collection,
-    insert_chunks,
-    search_similar,
-    get_document_chunks,
-    delete_document_chunks, delete_chunk_ids
+    VectorChunkResponse,
+    VectorCountsRequest,
 )
 from app.utils.config import config
-from app.utils.validators import (
-    validate_file_upload,
-    validate_document_id
-)
-from app.core.tenant.context import set_tenant_id, clear_tenant_id, require_tenant_id
+from app.utils.validators import validate_document_id, validate_file_upload
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -58,10 +51,10 @@ logger = logging.getLogger(__name__)
 # M13: 有界 LRU — 长驻进程下每个 document_id 一条、只增不删会无限增长；
 # 上限 10000 条，写入时移到末尾，超出淘汰最旧条目（持久状态以 Java DB 为准）
 _TASK_STATUS_STORE_MAX = 10000
-_task_status_store: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+_task_status_store: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
 
 
-def _task_status_put(document_id: str, entry: Dict[str, Any]) -> None:
+def _task_status_put(document_id: str, entry: dict[str, Any]) -> None:
     _task_status_store[document_id] = entry
     _task_status_store.move_to_end(document_id)
     while len(_task_status_store) > _TASK_STATUS_STORE_MAX:
@@ -92,7 +85,7 @@ def _estimate_processing_seconds(file_path: str, file_type: str) -> int:
     return max(15, min(900, estimate))
 
 
-def _dynamic_estimated_seconds(status: Dict[str, Any], now: Optional[float] = None) -> int:
+def _dynamic_estimated_seconds(status: dict[str, Any], now: float | None = None) -> int:
     """Estimate total processing time from the observed progress.
 
     The initial estimate is intentionally conservative, but it cannot account
@@ -129,7 +122,7 @@ def _dynamic_estimated_seconds(status: Dict[str, Any], now: Optional[float] = No
     return int(round(min(900, max(15, dynamic_total))))
 
 
-def _remaining_seconds(status: Dict[str, Any], now: Optional[float] = None) -> int:
+def _remaining_seconds(status: dict[str, Any], now: float | None = None) -> int:
     if status.get("status") in ("COMPLETED", "FAILED"):
         return 0
     start_time = status.get("start_time")
@@ -282,11 +275,11 @@ async def _process_document_background(
     file_type: str,
     knowledge_base_id: int,
     tenant_id: int,
-    document_title: Optional[str] = None,
+    document_title: str | None = None,
     index_version: str = "",
     callback_url: str = None,
     callback_secret: str = None,
-    embedding_model: Optional[str] = None,
+    embedding_model: str | None = None,
 ):
     """Background task to process document parsing, chunking, and vectorization"""
     def _update_status(
@@ -294,12 +287,12 @@ async def _process_document_background(
         message: str,
         chunks_count: int = 0,
         error: str = None,
-        chunk_quality: Optional[Dict[str, Any]] = None,
-        multimodal: Optional[Dict[str, Any]] = None,
-        stage: Optional[str] = None,
-        progress: Optional[int] = None,
-        processed_chunks: Optional[int] = None,
-        total_chunks: Optional[int] = None,
+        chunk_quality: dict[str, Any] | None = None,
+        multimodal: dict[str, Any] | None = None,
+        stage: str | None = None,
+        progress: int | None = None,
+        processed_chunks: int | None = None,
+        total_chunks: int | None = None,
     ):
         """Update task status in the store"""
         previous = _task_status_store.get(document_id, {})
@@ -647,7 +640,7 @@ async def vector_counts(request: VectorCountsRequest):
     drift alarm from an unreadable store.
     """
     from app.core.vectorstore.milvus_store import count_chunks
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     for kb_id in request.knowledge_base_ids:
         try:
             counts[str(kb_id)] = await asyncio.to_thread(count_chunks, knowledge_base_id=kb_id)
@@ -667,7 +660,7 @@ async def remove_document_chunks(document_id: str):
     return {"success": True, "document_id": document_id}
 
 
-async def _generate_embedding(text: str, model: Optional[str] = None) -> List[float]:
+async def _generate_embedding(text: str, model: str | None = None) -> list[float]:
     """
     Generate embedding using multi-strategy service
     Strategy: Ollama BGE-M3 -> DeepSeek API
@@ -687,13 +680,13 @@ async def _notify_callback_async(
     message: str,
     chunks_count: int,
     index_version: str,
-    chunks: Optional[List[Dict[str, Any]]] = None,
+    chunks: list[dict[str, Any]] | None = None,
     callback_secret: str = None
 ) -> bool:
     """Notify Java backend about processing completion (async, non-blocking)"""
-    import hmac
-    import hashlib
     import base64
+    import hashlib
+    import hmac
 
     try:
         # Convert to Java backend expected format
@@ -763,7 +756,7 @@ async def _notify_callback_async(
         return False
 
 
-def _callback_chunk_metadata(chunks: List[VectorChunk]) -> List[Dict[str, Any]]:
+def _callback_chunk_metadata(chunks: list[VectorChunk]) -> list[dict[str, Any]]:
     """Build a bounded callback payload; full text stays in the vector store."""
     from app.utils.config import config
     return [
@@ -783,6 +776,6 @@ def _callback_chunk_metadata(chunks: List[VectorChunk]) -> List[Dict[str, Any]]:
     ]
 
 
-def _json_safe_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+def _json_safe_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     """Avoid losing the whole callback because one parser value is not JSON serializable."""
     return json.loads(json.dumps(metadata or {}, ensure_ascii=False, default=str))

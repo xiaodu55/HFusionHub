@@ -14,11 +14,9 @@ when write tools are introduced.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Optional, FrozenSet
+from datetime import UTC, datetime, timedelta
 
 from ..tools.spec import RiskLevel
-
 
 # ── Valid modes ────────────────────────────────────────────────────────────
 
@@ -63,13 +61,13 @@ class AgentExecutionContext:
 
     user_id: int
     knowledge_base_id: int
-    tenant_id: Optional[int] = None
-    permissions: FrozenSet[str] = field(default_factory=lambda: frozenset({"knowledge_base:read"}))
+    tenant_id: int | None = None
+    permissions: frozenset[str] = field(default_factory=lambda: frozenset({"knowledge_base:read"}))
     agent_run_id: str = ""
     mode: str = MODE_READ_ONLY
-    capability_profile: Optional[str] = None
+    capability_profile: str | None = None
     user_role: str = "user"
-    environment: Optional[str] = None
+    environment: str | None = None
 
     _VALID_PROFILES = {None, "approval_write"}
     _VALID_ROLES = {"user", "admin"}
@@ -155,8 +153,8 @@ class ApprovalRequest:
     tool_name: str
     arguments_summary: str       # Desensitised — never includes raw PII / full content.
     status: str = APPROVAL_PENDING
-    expires_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc) + timedelta(minutes=5))
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    expires_at: datetime = field(default_factory=lambda: datetime.now(UTC) + timedelta(minutes=5))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     # ── Status helpers ────────────────────────────────────────────────────
 
@@ -172,7 +170,7 @@ class ApprovalRequest:
     def is_expired(self) -> bool:
         if self.status == APPROVAL_EXPIRED:
             return True
-        if self.status == APPROVAL_PENDING and datetime.now(timezone.utc) > self.expires_at:
+        if self.status == APPROVAL_PENDING and datetime.now(UTC) > self.expires_at:
             self.status = APPROVAL_EXPIRED
             return True
         return False

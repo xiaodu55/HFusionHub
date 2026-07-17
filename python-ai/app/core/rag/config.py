@@ -17,12 +17,12 @@ RAG Configuration - RAG 配置管理
 日期：2026-07-22
 """
 
-import os
 import json
 import logging
+import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class CacheConfig:
     ttl: int = 3600
     max_size: int = 1000
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "enabled": self.enabled,
@@ -65,12 +65,12 @@ class CompressionConfig:
     """
     strategy: str = "extractive"
     target_ratio: float = 0.5
-    max_tokens: Optional[int] = None
-    preserve_keywords: Optional[List[str]] = None
+    max_tokens: int | None = None
+    preserve_keywords: list[str] | None = None
     language: str = "zh"
     min_sentence_length: int = 10
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "strategy": self.strategy,
@@ -97,7 +97,7 @@ class ReflectionConfig:
     strategy: str = "hybrid"
     quality_threshold: float = 0.7
     max_retries: int = 3
-    dimensions: Optional[Dict[str, float]] = None
+    dimensions: dict[str, float] | None = None
     confidence_threshold: float = 0.6
 
     def __post_init__(self):
@@ -110,7 +110,7 @@ class ReflectionConfig:
                 "clarity": 0.2,
             }
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "strategy": self.strategy,
@@ -139,7 +139,7 @@ class DecompositionConfig:
     parallel_threshold: float = 0.7
     merge_strategy: str = "concatenation"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "strategy": self.strategy,
@@ -166,7 +166,7 @@ class RoutingConfig:
     fallback_channel: str = "vector"
     enable_multi_channel: bool = True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "strategy": self.strategy,
@@ -194,7 +194,7 @@ class MemoryConfig:
     summary_threshold: int = 50
     importance_threshold: float = 0.5
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "strategy": self.strategy,
@@ -221,7 +221,7 @@ class EvaluatorConfig:
     faithfulness_threshold: float = 0.7
     relevancy_threshold: float = 0.7
     correctness_threshold: float = 0.7
-    dimensions: Optional[Dict[str, float]] = None
+    dimensions: dict[str, float] | None = None
 
     def __post_init__(self):
         """初始化默认值"""
@@ -233,7 +233,7 @@ class EvaluatorConfig:
                 "completeness": 0.2,
             }
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "strategy": self.strategy,
@@ -260,7 +260,7 @@ class WorkflowConfig:
     workflow_timeout: int = 3600
     enable_checkpoint: bool = True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "max_concurrent_nodes": self.max_concurrent_nodes,
@@ -317,7 +317,7 @@ class RAGConfig:
     # 工作流配置
     workflow: WorkflowConfig = field(default_factory=WorkflowConfig)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "cache": self.cache.to_dict(),
@@ -331,7 +331,7 @@ class RAGConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'RAGConfig':
+    def from_dict(cls, data: dict[str, Any]) -> 'RAGConfig':
         """从字典创建配置"""
         return cls(
             cache=CacheConfig(**data.get("cache", {})),
@@ -361,7 +361,7 @@ class RAGConfig:
             logger.warning(f"Config file not found: {file_path}, using defaults")
             return cls()
 
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             if path.suffix == ".json":
                 data = json.load(f)
             elif path.suffix in [".yaml", ".yml"]:
@@ -441,7 +441,7 @@ class RAGConfig:
 
 # ==================== 全局配置实例 ====================
 
-_global_config: Optional[RAGConfig] = None
+_global_config: RAGConfig | None = None
 
 
 def get_config() -> RAGConfig:

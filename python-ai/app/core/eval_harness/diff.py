@@ -7,10 +7,8 @@
 
 from __future__ import annotations
 
-from typing import Dict, List
-
 # 指标 → (方向, 回归阈值)；未登记的指标默认 HIGHER_IS_BETTER + 0.02
-RULES: Dict[str, tuple] = {
+RULES: dict[str, tuple] = {
     "retrieval_hit@5": ("higher", 0.03),
     "retrieval_recall@5": ("higher", 0.03),
     "retrieval_mrr@5": ("higher", 0.03),
@@ -30,8 +28,8 @@ IMPROVED = "improved"
 REGRESSED = "regressed"
 
 
-def diff_metrics(base: Dict[str, float], candidate: Dict[str, float]) -> List[dict]:
-    rows: List[dict] = []
+def diff_metrics(base: dict[str, float], candidate: dict[str, float]) -> list[dict]:
+    rows: list[dict] = []
     for key, candidate_value in candidate.items():
         if key not in base:
             continue
@@ -61,5 +59,5 @@ def diff_metrics(base: Dict[str, float], candidate: Dict[str, float]) -> List[di
     return rows
 
 
-def has_regression(rows: List[dict]) -> bool:
+def has_regression(rows: list[dict]) -> bool:
     return any(r["verdict"] == REGRESSED for r in rows)

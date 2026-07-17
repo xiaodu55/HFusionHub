@@ -5,7 +5,7 @@ failure rates) and stale-run detection.  Follows the same internal-token
 auth pattern as the other /api/* routers.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -20,19 +20,19 @@ router = APIRouter(prefix="/api/agent/observability", tags=["Agent Observability
 class AgentRunRecord(BaseModel):
     """Payload for explicitly recording a completed agent run trace."""
     run_uuid: str = Field(min_length=1, max_length=64)
-    knowledge_base_id: Optional[int] = None
+    knowledge_base_id: int | None = None
     status: str = Field(min_length=1, max_length=30)
     model: str = ""
     duration_ms: float = 0.0
-    token_usage: Optional[Dict[str, int]] = None
+    token_usage: dict[str, int] | None = None
     tool_calls_count: int = 0
     sources_count: int = 0
     step_count: int = 0
     approval_count: int = 0
     total_approval_duration_ms: float = 0.0
-    error_code: Optional[str] = None
-    error_detail: Optional[str] = None
-    failed_tool: Optional[str] = None
+    error_code: str | None = None
+    error_detail: str | None = None
+    failed_tool: str | None = None
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────
@@ -41,8 +41,8 @@ class AgentRunRecord(BaseModel):
 async def list_agent_runs(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0, le=1000),
-    knowledge_base_id: Optional[int] = Query(default=None, ge=1),
-    status: Optional[str] = Query(default=None, max_length=30),
+    knowledge_base_id: int | None = Query(default=None, ge=1),
+    status: str | None = Query(default=None, max_length=30),
     error_only: bool = Query(default=False),
 ):
     """List agent run traces with optional filters."""
@@ -77,7 +77,7 @@ async def get_agent_run(run_uuid: str):
 @router.get("/stats")
 async def agent_stats(
     days: int = Query(default=7, ge=1, le=30),
-    knowledge_base_id: Optional[int] = Query(default=None, ge=1),
+    knowledge_base_id: int | None = Query(default=None, ge=1),
 ):
     """Aggregated agent statistics for the given window."""
     return get_agent_trace_store().stats(
@@ -89,7 +89,7 @@ async def agent_stats(
 @router.get("/stale-runs")
 async def stale_runs(
     max_running_seconds: float = Query(default=120.0, ge=10.0, le=3600.0),
-    knowledge_base_id: Optional[int] = Query(default=None, ge=1),
+    knowledge_base_id: int | None = Query(default=None, ge=1),
 ):
     """Detect runs stuck in 'running' state beyond the threshold."""
     runs = get_agent_trace_store().stale_runs(
@@ -142,27 +142,27 @@ class AgentEvalCaseRequest(BaseModel):
     case_id: str = Field(min_length=1, max_length=128)
     query: str = Field(min_length=1, max_length=4000)
     answer: str = ""
-    sources: List[Dict[str, Any]] = Field(default_factory=list)
-    ground_truth: Optional[str] = None
-    expected_document_ids: List[str] = Field(default_factory=list)
-    tool_calls: List[Dict[str, Any]] = Field(default_factory=list)
-    privilege_test: Optional[Dict[str, Any]] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    user_id: Optional[int] = None
+    sources: list[dict[str, Any]] = Field(default_factory=list)
+    ground_truth: str | None = None
+    expected_document_ids: list[str] = Field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    privilege_test: dict[str, Any] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    user_id: int | None = None
 
 
 class AgentEvalRunRequest(BaseModel):
     """Run a batch evaluation."""
-    knowledge_base_id: Optional[int] = None
-    user_id: Optional[int] = None
-    label: Optional[str] = Field(default=None, max_length=120)
+    knowledge_base_id: int | None = None
+    user_id: int | None = None
+    label: str | None = Field(default=None, max_length=120)
     agent_timeout_seconds: float = Field(
         default=20.0,
         ge=0.1,
         le=120.0,
         description="Per-case Agent execution budget. Timed-out cases are scored as failures, not batch errors.",
     )
-    dimensions: List[str] = Field(
+    dimensions: list[str] = Field(
         default_factory=lambda: [
             "answer_correctness",
             "citation_consistency",
@@ -170,13 +170,13 @@ class AgentEvalRunRequest(BaseModel):
             "tool_success_rate",
         ]
     )
-    cases: List[AgentEvalCaseRequest] = Field(min_length=1, max_length=200)
+    cases: list[AgentEvalCaseRequest] = Field(min_length=1, max_length=200)
 
 
 class RegressionCheckRequest(BaseModel):
     """Check the latest evaluation results against regression gates."""
-    knowledge_base_id: Optional[int] = None
-    thresholds: Optional[Dict[str, float]] = None
+    knowledge_base_id: int | None = None
+    thresholds: dict[str, float] | None = None
 
 
 @router.post("/evaluate/run")
@@ -193,13 +193,13 @@ async def run_agent_evaluation(request: AgentEvalRunRequest):
     import uuid
 
     from app.core.agent import get_agent
-    from app.core.agent.execution_context import AgentExecutionContext
     from app.core.agent.agent_evaluation import (
         AgentAnswerEvaluator,
         AgentEvalDimension,
         AgentEvalSample,
         AgentRegressionGate,
     )
+    from app.core.agent.execution_context import AgentExecutionContext
 
     logger = logging.getLogger(__name__)
 
@@ -258,7 +258,7 @@ async def run_agent_evaluation(request: AgentEvalRunRequest):
                 if not real_tool_calls and response.tool_calls_count:
                     real_tool_calls = [{"action": "agent", "count": response.tool_calls_count}]
                 agent_status = response.status or "completed"
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 agent_status = "timeout"
                 agent_error = (
                     "Agent call timed out after "

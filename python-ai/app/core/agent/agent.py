@@ -4,16 +4,16 @@ Agent Base Module - Abstract base class and data models
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional, AsyncGenerator, Dict, Any
+from typing import Any, AsyncGenerator
 
 
 @dataclass
 class AgentStep:
     """Single step in agent execution"""
     thought: str
-    action: Optional[str] = None
-    action_input: Optional[Dict[str, Any]] = None
-    observation: Optional[str] = None
+    action: str | None = None
+    action_input: dict[str, Any] | None = None
+    observation: str | None = None
 
 
 @dataclass
@@ -30,28 +30,28 @@ class AgentResponse:
     finish_reason: str = "stop"
 
     # ── Sources ──
-    sources: List[Dict[str, Any]] = field(default_factory=list)
+    sources: list[dict[str, Any]] = field(default_factory=list)
 
     # ── Execution metadata ──
-    steps: List[AgentStep] = field(default_factory=list)
+    steps: list[AgentStep] = field(default_factory=list)
     model: str = ""
     token_count: int = 0
-    token_usage: Optional[Dict[str, int]] = None  # {prompt_tokens, completion_tokens, total_tokens}
+    token_usage: dict[str, int] | None = None  # {prompt_tokens, completion_tokens, total_tokens}
     tool_calls_count: int = 0
     style_used: str = "detailed"  # concise | detailed | report
     max_tool_steps: int = 5
 
     # ── Agent identity ──
-    agent_run_id: Optional[str] = None  # P9 workflow run ID (no prompt content)
+    agent_run_id: str | None = None  # P9 workflow run ID (no prompt content)
 
     # ── Error detail (only populated on tool_error / timeout) ──
-    error_detail: Optional[str] = None
-    failed_tool: Optional[str] = None
+    error_detail: str | None = None
+    failed_tool: str | None = None
 
     # ── Intent / decomposition (diagnostic) ──
-    intent: Optional[Dict[str, Any]] = None  # 意图分类结果
-    decomposition: Optional[Dict[str, Any]] = None  # 问题分解结果
-    auto_detected_kb_id: Optional[int] = None  # 自动检测的知识库 ID
+    intent: dict[str, Any] | None = None  # 意图分类结果
+    decomposition: dict[str, Any] | None = None  # 问题分解结果
+    auto_detected_kb_id: int | None = None  # 自动检测的知识库 ID
 
     def __post_init__(self):
         """Ensure content and answer stay in sync."""
@@ -60,7 +60,7 @@ class AgentResponse:
         elif self.content and not self.answer:
             self.answer = self.content
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to the Agent V1 JSON contract."""
         return {
             "answer": self.answer or self.content,
@@ -89,7 +89,7 @@ class Agent(ABC):
     async def run(
         self,
         query: str,
-        history: List[Dict[str, str]] = None,
+        history: list[dict[str, str]] = None,
         **kwargs
     ) -> AgentResponse:
         """
@@ -108,7 +108,7 @@ class Agent(ABC):
     async def run_stream(
         self,
         query: str,
-        history: List[Dict[str, str]] = None,
+        history: list[dict[str, str]] = None,
         **kwargs
     ) -> AsyncGenerator[str, None]:
         """
@@ -124,6 +124,6 @@ class Agent(ABC):
         pass
 
     @abstractmethod
-    def get_tools(self) -> List[Dict[str, Any]]:
+    def get_tools(self) -> list[dict[str, Any]]:
         """Get list of available tools"""
         pass

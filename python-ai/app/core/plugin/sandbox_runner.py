@@ -21,20 +21,16 @@ root access or ptrace can bypass these. But it prevents:
 
 from __future__ import annotations
 
-import io
 import json
 import logging
 import os
-import select
-import signal
-import struct
 import sys
 import tempfile
 import time
 import traceback
 from dataclasses import dataclass, field
-from multiprocessing import Process, Pipe
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from multiprocessing import Pipe, Process
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -47,18 +43,18 @@ class SubprocessConfig:
     memory_mb: int = 256
     timeout_seconds: float = 30.0
     max_open_files: int = 64
-    allowed_domains: List[str] = field(default_factory=list)
-    blocked_domains: List[str] = field(default_factory=list)
-    allowed_paths: List[str] = field(default_factory=list)
-    blocked_paths: List[str] = field(default_factory=list)
+    allowed_domains: list[str] = field(default_factory=list)
+    blocked_domains: list[str] = field(default_factory=list)
+    allowed_paths: list[str] = field(default_factory=list)
+    blocked_paths: list[str] = field(default_factory=list)
     runner_mode: str = "subprocess"  # "subprocess" | "container"
-    container_image: Optional[str] = None
-    plugin_id: Optional[str] = None
-    user_id: Optional[int] = None
-    container_digest: Optional[str] = None
+    container_image: str | None = None
+    plugin_id: str | None = None
+    user_id: int | None = None
+    container_digest: str | None = None
     fail_closed: bool = True  # Deprecated for container mode; container is ALWAYS fail-closed
-    java_backend_url: Optional[str] = None  # Java backend URL for canary version fetch
-    internal_token: Optional[str] = None    # Internal token for Java backend auth
+    java_backend_url: str | None = None  # Java backend URL for canary version fetch
+    internal_token: str | None = None    # Internal token for Java backend auth
 
 
 @dataclass
@@ -66,10 +62,10 @@ class SubprocessResult:
     """Result from subprocess execution."""
     success: bool
     data: Any = None
-    error: Optional[str] = None
-    error_code: Optional[str] = None
+    error: str | None = None
+    error_code: str | None = None
     duration_ms: float = 0.0
-    resource_usage: Optional[Dict[str, Any]] = None
+    resource_usage: dict[str, Any] | None = None
 
 
 def _apply_subprocess_limits(config: SubprocessConfig) -> None:
@@ -103,7 +99,7 @@ def _apply_subprocess_limits(config: SubprocessConfig) -> None:
         pass
 
 
-def _make_domain_check(allowed: List[str], blocked: List[str]) -> Callable[[str], None]:
+def _make_domain_check(allowed: list[str], blocked: list[str]) -> Callable[[str], None]:
     """Build the domain policy checker shared by all network guards.
 
     - allowed 非空：白名单模式，未匹配一律拒绝；
@@ -194,7 +190,7 @@ def _install_network_guard(config: SubprocessConfig) -> None:
         pass
 
 
-def _install_filesystem_guard(config: SubprocessConfig, default_allowed: Optional[List[str]] = None) -> None:
+def _install_filesystem_guard(config: SubprocessConfig, default_allowed: list[str] | None = None) -> None:
     """Monkey-patch builtins.open and os module to enforce path restrictions.
 
     default-deny 基线：manifest 未声明 allowed_paths 时，仅放行
@@ -247,8 +243,7 @@ def _install_filesystem_guard(config: SubprocessConfig, default_allowed: Optiona
     _original_walk = _os.walk
     def _sandboxed_walk(top, *args, **kwargs):
         _check_path(top)
-        for root, dirs, files in _original_walk(top, *args, **kwargs):
-            yield root, dirs, files
+        yield from _original_walk(top, *args, **kwargs)
     _os.walk = _sandboxed_walk  # type: ignore
 
     # Patch shutil
@@ -297,7 +292,7 @@ def _subprocess_worker(
     plugin_dir: str,
     plugin_name: str,
     tool_name: str,
-    tool_input: Dict[str, Any],
+    tool_input: dict[str, Any],
     config: SubprocessConfig,
 ) -> None:
     """Worker function that runs inside the subprocess.
@@ -404,7 +399,7 @@ def execute_in_sandbox(
     plugin_dir: str,
     plugin_name: str,
     tool_name: str,
-    tool_input: Dict[str, Any],
+    tool_input: dict[str, Any],
     config: SubprocessConfig,
 ) -> SubprocessResult:
     """Execute a plugin tool with sandbox constraints.
@@ -423,9 +418,9 @@ def execute_in_sandbox(
     if config.runner_mode == "container":
         try:
             from app.core.plugin.container_runner import (
+                ContainerConfig,
                 execute_in_container,
                 execute_with_canary,
-                ContainerConfig,
             )
 
             container_config = ContainerConfig(

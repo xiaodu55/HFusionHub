@@ -14,7 +14,7 @@ Java 交互全部通过 monkeypatch httpx.AsyncClient 模拟，不发真实网�
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pytest
 
@@ -26,12 +26,11 @@ from app.core.rag.long_term_memory import (
     reset_long_term_memory,
 )
 
-
 # ── httpx 假客户端 ─────────────────────────────────────────────────────────
 
 
 class FakeResponse:
-    def __init__(self, payload: Dict[str, Any], status_code: int = 200):
+    def __init__(self, payload: dict[str, Any], status_code: int = 200):
         self._payload = payload
         self.status_code = status_code
 
@@ -41,20 +40,20 @@ class FakeResponse:
 
             raise httpx.HTTPStatusError("error", request=None, response=None)
 
-    def json(self) -> Dict[str, Any]:
+    def json(self) -> dict[str, Any]:
         return self._payload
 
 
 class FakeAsyncClient:
     """记录请求并返回预置响应的 httpx.AsyncClient 替身。"""
 
-    requests: List[Dict[str, Any]] = []
-    response: Optional[FakeResponse] = None
+    requests: list[dict[str, Any]] = []
+    response: FakeResponse | None = None
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         pass
 
-    async def __aenter__(self) -> "FakeAsyncClient":
+    async def __aenter__(self) -> FakeAsyncClient:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -86,7 +85,7 @@ def _set_flag(monkeypatch: pytest.MonkeyPatch, enabled: bool) -> None:
     )
 
 
-def _use_fake_http(monkeypatch: pytest.MonkeyPatch, response: Optional[FakeResponse] = None):
+def _use_fake_http(monkeypatch: pytest.MonkeyPatch, response: FakeResponse | None = None):
     FakeAsyncClient.response = response
     monkeypatch.setattr("httpx.AsyncClient", FakeAsyncClient)
 
@@ -289,7 +288,7 @@ class TestScheduleTurnConsolidation:
         _set_flag(monkeypatch, enabled=True)
         monkeypatch.setattr(ltm_module.config, "MEMORY_CONSOLIDATE_EVERY_TURNS", 2)
 
-        calls: List[Dict[str, Any]] = []
+        calls: list[dict[str, Any]] = []
 
         async def fake_consolidate(**kwargs: Any) -> None:
             calls.append(kwargs)

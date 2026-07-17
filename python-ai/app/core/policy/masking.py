@@ -15,7 +15,7 @@ instead (``[MASKED]`` / ``***``).
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+from typing import Any
 
 # Field-name keys considered sensitive; matched case-insensitively and as a
 # suffix to tolerate prefixes (e.g. ``business_password``).
@@ -92,10 +92,10 @@ def mask_value(value: Any) -> str:
 
 
 def mask_sensitive_fields(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     *,
     depth: int = 0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return a deep copy of *data* with sensitive fields masked.
 
     Recurses into nested dicts / lists up to a bounded depth.  Leaf values
@@ -107,7 +107,7 @@ def mask_sensitive_fields(
             return dict(data) if isinstance(data, dict) else data
         except (TypeError, ValueError):
             return data
-    out: Dict[str, Any] = {}
+    out: dict[str, Any] = {}
     for key, value in data.items():
         if _is_sensitive_key(str(key)):
             out[key] = mask_value(value)
@@ -128,7 +128,7 @@ def _mask_item(item: Any, depth: int) -> Any:
     return item
 
 
-def build_arguments_summary(tool_input: Dict[str, Any], *, max_chars: int = 120) -> str:
+def build_arguments_summary(tool_input: dict[str, Any], *, max_chars: int = 120) -> str:
     """Produce a masked, truncated summary string for approval audit.
 
     Sensitive keys are masked; the result is truncated to ``max_chars``.

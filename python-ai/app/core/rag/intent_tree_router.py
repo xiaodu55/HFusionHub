@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 _SEPARATORS = re.compile(r"[\s\-_/\\,，。！？!?、:：;；()（）\[\]{}]+")
 _GREETING_TERMS = {
@@ -17,7 +17,7 @@ def _normalize(value: Any) -> str:
     return re.sub(r"\s+", "", str(value or "")).strip().lower()
 
 
-def _terms(value: Any) -> List[str]:
+def _terms(value: Any) -> list[str]:
     normalized = _normalize(value)
     if not normalized:
         return []
@@ -35,7 +35,7 @@ def is_greeting(query: str) -> bool:
     )
 
 
-def _score(query: str, candidate: Dict[str, Any]) -> float:
+def _score(query: str, candidate: dict[str, Any]) -> float:
     normalized_query = _normalize(query)
     name = _normalize(candidate.get("name"))
     code = _normalize(candidate.get("intent_code"))
@@ -65,9 +65,9 @@ def _score(query: str, candidate: Dict[str, Any]) -> float:
 
 def resolve_intent_route(
     query: str,
-    candidates: Optional[List[Dict[str, Any]]],
-    explicit_knowledge_base_id: Optional[int] = None,
-) -> Dict[str, Any]:
+    candidates: list[dict[str, Any]] | None,
+    explicit_knowledge_base_id: int | None = None,
+) -> dict[str, Any]:
     """Score authorized candidates and return a route decision."""
     if explicit_knowledge_base_id:
         return {"status": "explicit", "knowledge_base_id": explicit_knowledge_base_id, "top_k": None, "confidence": 1.0, "candidates": []}

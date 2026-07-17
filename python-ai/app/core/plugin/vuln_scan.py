@@ -8,11 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import subprocess
-import tempfile
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +30,10 @@ class Vulnerability:
 @dataclass
 class ScanResult:
     status: str = "clean"  # clean | vulnerable | error
-    vulnerabilities: List[Vulnerability] = field(default_factory=list)
+    vulnerabilities: list[Vulnerability] = field(default_factory=list)
     scan_time: float = 0.0
     scanner: str = "unknown"
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def max_severity(self) -> str:
@@ -52,7 +50,7 @@ class ScanResult:
     def high_count(self) -> int:
         return sum(1 for v in self.vulnerabilities if v.severity == "HIGH")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
             "vulnerability_count": len(self.vulnerabilities),

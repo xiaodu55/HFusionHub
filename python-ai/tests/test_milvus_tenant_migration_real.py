@@ -72,6 +72,7 @@ def _legacy_record(i):
 def _create_legacy_collection(client, collection):
     """Create a collection WITHOUT the tenant_id field and load legacy data."""
     from pymilvus import CollectionSchema, DataType, FieldSchema
+
     from app.core.vectorstore import milvus_lite as ml
     dim = ml.config.EMBEDDING_DIMENSION
 

@@ -32,7 +32,7 @@ from __future__ import annotations
 import base64
 import io
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 PLUGIN_VERSION = "1.0.0"
 PLUGIN_NAME = "bid_quote"
@@ -40,7 +40,7 @@ PLUGIN_NAME = "bid_quote"
 
 # ── 数值辅助（与 app/core/bid/tools.py 的 _to_number 保持一致）────────
 
-def _to_number(value: Any) -> Optional[float]:
+def _to_number(value: Any) -> float | None:
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -51,7 +51,7 @@ def _normalize_text(value: Any) -> str:
     return "" if value is None else str(value).strip()
 
 
-def _as_list(value: Any) -> List[Dict[str, Any]]:
+def _as_list(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, str):
         try:
             value = json.loads(value)
@@ -64,8 +64,8 @@ def _as_list(value: Any) -> List[Dict[str, Any]]:
 
 # ── 评分点计算（复用 app/core/bid/tools.py::BidCalcScoringTool 逻辑）────
 
-def _calc_scoring(points: List[Dict[str, Any]], scores: List[Dict[str, Any]]) -> Dict[str, Any]:
-    score_by_name: Dict[str, float] = {}
+def _calc_scoring(points: list[dict[str, Any]], scores: list[dict[str, Any]]) -> dict[str, Any]:
+    score_by_name: dict[str, float] = {}
     for item in scores:
         if not isinstance(item, dict) or "name" not in item:
             continue
@@ -73,7 +73,7 @@ def _calc_scoring(points: List[Dict[str, Any]], scores: List[Dict[str, Any]]) ->
         if val is not None:
             score_by_name[str(item["name"])] = val
 
-    items: List[Dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
     total = 0.0
     max_total = 0.0
     weighted = 0.0
@@ -122,8 +122,8 @@ def _calc_scoring(points: List[Dict[str, Any]], scores: List[Dict[str, Any]]) ->
 
 # ── 报价表计算 ────────────────────────────────────────────────────────
 
-def _calc_quote(items: List[Dict[str, Any]]) -> Dict[str, Any]:
-    lines: List[Dict[str, Any]] = []
+def _calc_quote(items: list[dict[str, Any]]) -> dict[str, Any]:
+    lines: list[dict[str, Any]] = []
     subtotal = 0.0
     tax_amount = 0.0
     for item in items:
@@ -173,12 +173,11 @@ def _calc_quote(items: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 # ── 渲染 .xlsx ────────────────────────────────────────────────────────
 
-def _render_xlsx(quote: Dict[str, Any], meta: Dict[str, Any], scoring: Optional[Dict[str, Any]]) -> bytes:
+def _render_xlsx(quote: dict[str, Any], meta: dict[str, Any], scoring: dict[str, Any] | None) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
-    currency = _normalize_text(meta.get("currency")) or "¥"
     wb = Workbook()
 
     # 报价明细
@@ -243,11 +242,11 @@ def _render_xlsx(quote: Dict[str, Any], meta: Dict[str, Any], scoring: Optional[
 
 def bid_export_quote(
     items: Any = None,
-    meta: Optional[Dict[str, Any]] = None,
+    meta: dict[str, Any] | None = None,
     points: Any = None,
     scores: Any = None,
     **kwargs: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """把投标报价明细渲染为 .xlsx 报价表（可含评分汇总），返回 base64 字节与元信息。"""
     try:
         from openpyxl import Workbook  # noqa: F401 — 镜像内已安装，提前校验

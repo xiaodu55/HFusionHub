@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
@@ -33,7 +32,7 @@ def _ensure_enabled() -> None:
         raise HTTPException(status_code=503, detail="语音能力未启用（VOICE_ENABLED=false）")
 
 
-def _auth_headers() -> Dict[str, str]:
+def _auth_headers() -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
     if config.VOICE_OPENAI_API_KEY:
         headers["Authorization"] = f"Bearer {config.VOICE_OPENAI_API_KEY}"
@@ -46,7 +45,7 @@ def _audio_suffix(filename: str) -> str:
 
 
 @router.post("/api/voice/transcribe")
-async def transcribe(request: Request, language: Optional[str] = None) -> Dict[str, str]:
+async def transcribe(request: Request, language: str | None = None) -> dict[str, str]:
     """语音转文本（STT）。音频为原始请求体；文件名经 X-Audio-Filename 头。返回 {"text": ...}。"""
     _ensure_enabled()
     data = await request.body()
@@ -63,7 +62,7 @@ async def transcribe(request: Request, language: Optional[str] = None) -> Dict[s
 
     url = f"{config.VOICE_OPENAI_BASE_URL.rstrip('/')}/v1/audio/transcriptions"
     files = {"file": (filename, data)}
-    form: Dict[str, str] = {"model": config.VOICE_STT_MODEL}
+    form: dict[str, str] = {"model": config.VOICE_STT_MODEL}
     if language:
         form["language"] = language
     headers = {}
@@ -84,7 +83,7 @@ async def transcribe(request: Request, language: Optional[str] = None) -> Dict[s
 
 class SynthesizeRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=2000)
-    voice: Optional[str] = Field(None, max_length=64)
+    voice: str | None = Field(None, max_length=64)
 
 
 @router.post("/api/voice/synthesize")
@@ -113,7 +112,7 @@ async def synthesize(request: SynthesizeRequest) -> Response:
 
 
 @router.get("/api/voice/status")
-async def status() -> Dict[str, bool]:
+async def status() -> dict[str, bool]:
     """前端按钮渲染依据（不需要暴露任何敏感配置）。"""
     return {
         "enabled": bool(config.VOICE_ENABLED),

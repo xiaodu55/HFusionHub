@@ -9,21 +9,17 @@ Also verifies that the evaluation endpoint invokes the real Agent (SingleAgentWo
 and NEVER substitutes ground_truth as the actual answer.
 """
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
-
-from app.core.agent.agent import AgentResponse, AgentStep
-
 
 # ---------------------------------------------------------------------------
 # FastAPI test app with agent observability router
 # ---------------------------------------------------------------------------
-
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from app.api.agent_observability_api import router as obs_router
+from app.core.agent.agent import AgentResponse, AgentStep
 
 app = FastAPI()
 app.include_router(obs_router)
@@ -227,7 +223,7 @@ class TestAgentEvaluationRealAgentCall:
             f"Scenario 1 FAIL: agent_call missing real sources. agent_call={agent_call}"
         )
         assert len(agent_call.get("real_answer", "")) > 0, (
-            f"Scenario 1 FAIL: agent_call missing real answer."
+            "Scenario 1 FAIL: agent_call missing real answer."
         )
 
     # ── Scenario 2: No-evidence → citation_consistency = 0 ─────────────
@@ -256,14 +252,9 @@ class TestAgentEvaluationRealAgentCall:
         assert resp.status_code == 200, f"Eval endpoint returned {resp.status_code}: {resp.text[:500]}"
         data = resp.json()
 
-        dim_scores = data.get("dimension_scores", {})
-        citation_score = dim_scores.get("citation_consistency", -1)
-
         # The agent correctly says "insufficient evidence" → citation_consistency = 1.0
         # (vacuously consistent — honest about gaps)
         # But the answer_correctness should still be measured
-        answer_score = dim_scores.get("answer_correctness", -1)
-        overall = data.get("overall_score", -1)
 
         # Verify the agent call captured the evidence-gap response
         cases = data.get("cases", [])
@@ -276,8 +267,8 @@ class TestAgentEvaluationRealAgentCall:
             f"Scenario 2 FAIL: expected insufficient_evidence status. agent_call={agent_call}"
         )
 
-        # Regression gate should flag this — no sources means no citation support
         gate = data.get("regression_gate", {})
+        # Regression gate should flag this — no sources means no citation support
         assert not gate.get("passed", True), (
             f"Scenario 2 FAIL: regression gate should fail due to low answer correctness. gate={gate}"
         )
@@ -517,7 +508,6 @@ class TestEvaluationBatchMultipleCases:
         )
 
         # Regression gate must fail (at least one dimension below threshold)
-        gate = data.get("regression_gate", {})
         # With our test data, privilege_containment from scenario 3 and
         # answer_correctness from scenario 2 should cause failures
         dim_scores = data.get("dimension_scores", {})

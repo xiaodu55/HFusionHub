@@ -22,18 +22,18 @@ Usage::
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from datetime import UTC
+from typing import Any
 
-from app.core.llm.base import BaseLLM, ChatMessage, LLMResponse
+from app.core.llm.base import BaseLLM
 from app.core.llm.structured_output import generate_structured
 
 logger = logging.getLogger(__name__)
 
-MEMORY_EXTRACTION_SCHEMA: Dict[str, Any] = {
+MEMORY_EXTRACTION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "memories": {
@@ -87,12 +87,12 @@ class MemoryEntry:
     category: str  # preference | fact | goal | context | decision
     importance: float  # 0.0–1.0
     confidence: float = 0.8  # 0.0–1.0
-    source_message_ids: List[str] = field(default_factory=list)
-    conversation_id: Optional[int] = None
-    user_id: Optional[int] = None
+    source_message_ids: list[str] = field(default_factory=list)
+    conversation_id: int | None = None
+    user_id: int | None = None
     extracted_at: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "fact": self.fact,
             "category": self.category,
@@ -107,20 +107,20 @@ class MemoryEntry:
 
 @dataclass
 class ConsolidationResult:
-    entries: List[MemoryEntry]
+    entries: list[MemoryEntry]
     total_tokens: int = 0
     extraction_time_ms: float = 0.0
     conversation_too_short: bool = False
 
     @property
-    def high_value_entries(self) -> List[MemoryEntry]:
+    def high_value_entries(self) -> list[MemoryEntry]:
         return [e for e in self.entries if e.importance >= 0.7]
 
     @property
     def summary(self) -> str:
         if not self.entries:
             return "No significant memories extracted"
-        categories: Dict[str, int] = {}
+        categories: dict[str, int] = {}
         for e in self.entries:
             categories[e.category] = categories.get(e.category, 0) + 1
         parts = [f"{v} {k}" for k, v in sorted(categories.items())]
@@ -128,8 +128,8 @@ class ConsolidationResult:
 
 
 def _now_iso() -> str:
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat()
+    from datetime import datetime
+    return datetime.now(UTC).isoformat()
 
 
 class MemoryConsolidator:
@@ -151,9 +151,9 @@ class MemoryConsolidator:
     async def extract_memories(
         self,
         conversation_id: int,
-        messages: List[Dict[str, str]],
-        user_id: Optional[int] = None,
-        llm: Optional[BaseLLM] = None,
+        messages: list[dict[str, str]],
+        user_id: int | None = None,
+        llm: BaseLLM | None = None,
     ) -> ConsolidationResult:
         """Extract memories from a conversation.
 
@@ -189,7 +189,7 @@ class MemoryConsolidator:
             return ConsolidationResult(entries=[])
 
         raw_memories = result.get("memories", [])
-        entries: List[MemoryEntry] = []
+        entries: list[MemoryEntry] = []
         for raw in raw_memories:
             fact = (raw.get("fact") or "").strip()
             if not fact or len(fact) < 5:
@@ -224,11 +224,11 @@ class MemoryConsolidator:
 
     async def merge_memories(
         self,
-        existing: List[MemoryEntry],
-        new_entries: List[MemoryEntry],
-    ) -> List[MemoryEntry]:
+        existing: list[MemoryEntry],
+        new_entries: list[MemoryEntry],
+    ) -> list[MemoryEntry]:
         """Merge new memories with existing ones, updating or replacing as needed."""
-        merged: Dict[str, MemoryEntry] = {}
+        merged: dict[str, MemoryEntry] = {}
 
         for e in existing:
             merged[e.fact.lower()[:80]] = e
@@ -248,9 +248,9 @@ class MemoryConsolidator:
         return sorted_entries[:200]
 
     @staticmethod
-    def _format_conversation(messages: List[Dict[str, str]]) -> str:
+    def _format_conversation(messages: list[dict[str, str]]) -> str:
         """Format conversation for the extraction prompt."""
-        lines: List[str] = []
+        lines: list[str] = []
         for i, msg in enumerate(messages):
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
@@ -270,7 +270,7 @@ class MemoryConsolidator:
 
 # ── Singleton ──────────────────────────────────────────────────────────
 
-_memory_consolidator: Optional[MemoryConsolidator] = None
+_memory_consolidator: MemoryConsolidator | None = None
 
 
 def get_memory_consolidator() -> MemoryConsolidator:

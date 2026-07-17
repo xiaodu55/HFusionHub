@@ -3,7 +3,7 @@ Time Tool - Get current date and time
 """
 
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any
 
 from .base import BaseTool
 
@@ -11,7 +11,7 @@ from .base import BaseTool
 class TimeTool(BaseTool):
     """Tool for getting current date and time"""
 
-    async def execute(self, **kwargs) -> Dict[str, Any]:
+    async def execute(self, **kwargs) -> dict[str, Any]:
         """
         Get current date and time
 

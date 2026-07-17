@@ -5,7 +5,7 @@ Agent V1 whitelisted tool.  Returns an excerpt (first 200 chars) per chunk
 without the full content, so the agent can decide which chunks to deep-read.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .base import BaseTool
 
@@ -16,15 +16,15 @@ _MAX_CHUNKS = 100
 class ListDocumentChunksTool(BaseTool):
     """List all chunk summaries (excerpts) for a single document."""
 
-    def __init__(self, knowledge_base_id: Optional[int] = None):
+    def __init__(self, knowledge_base_id: int | None = None):
         self.knowledge_base_id = knowledge_base_id
 
     async def execute(
         self,
         document_id: int,
-        knowledge_base_id: Optional[int] = None,
+        knowledge_base_id: int | None = None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         List chunk summaries for a document.
 
@@ -49,7 +49,7 @@ class ListDocumentChunksTool(BaseTool):
 
             # The local store returns paginated results.  Fetch all pages up to
             # the safety cap.
-            all_chunks: List[Dict[str, Any]] = []
+            all_chunks: list[dict[str, Any]] = []
             page = 1
             while len(all_chunks) < _MAX_CHUNKS:
                 result = get_document_chunks(
@@ -79,10 +79,6 @@ class ListDocumentChunksTool(BaseTool):
                         break
                 page += 1
 
-            total = sum(
-                1
-                for _ in all_chunks
-            )  # accurate after KB filter above, but re-count here
             return {
                 "document_id": document_id,
                 "chunks": all_chunks,

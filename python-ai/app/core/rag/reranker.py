@@ -13,7 +13,7 @@ import logging
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Dict, List, Protocol, Tuple
+from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class Reranker(Protocol):
     name: str
 
-    async def rerank(self, query: str, candidates: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    async def rerank(self, query: str, candidates: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         ...
 
 
@@ -30,7 +30,7 @@ class DisabledReranker:
     reason: str = "disabled"
     name: str = "disabled"
 
-    async def rerank(self, query: str, candidates: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    async def rerank(self, query: str, candidates: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         return candidates, {"applied": False, "reranker": self.name, "reason": self.reason}
 
 
@@ -49,9 +49,9 @@ class LexicalReranker:
     def _tokens(value: str) -> set[str]:
         return set(re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]", value.lower()))
 
-    async def rerank(self, query: str, candidates: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    async def rerank(self, query: str, candidates: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         terms = self._tokens(query)
-        ranked: List[Dict[str, Any]] = []
+        ranked: list[dict[str, Any]] = []
         for candidate in candidates:
             content_terms = self._tokens(str(candidate.get("content", "")))
             coverage = len(terms & content_terms) / len(terms) if terms else 0.0
@@ -76,10 +76,10 @@ class CrossEncoderReranker:
         self._model_name = model_name
         self._model = CrossEncoder(model_name)
 
-    async def rerank(self, query: str, candidates: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    async def rerank(self, query: str, candidates: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         pairs = [(query, str(candidate.get("content", ""))) for candidate in candidates]
         scores = await asyncio.to_thread(self._model.predict, pairs)
-        ranked: List[Dict[str, Any]] = []
+        ranked: list[dict[str, Any]] = []
         for candidate, score in zip(candidates, scores):
             item = {**candidate, "metadata": {**(candidate.get("metadata") or {})}}
             item["metadata"].update({
@@ -100,7 +100,7 @@ class CrossEncoderReranker:
 
 # 成功构造的 cross_encoder 按 (mode, model) 缓存；失败（依赖缺失/模型下载
 # 失败）不缓存 —— 否则装好依赖后必须重启进程才能生效。
-_cross_encoder_cache: Dict[str, CrossEncoderReranker] = {}
+_cross_encoder_cache: dict[str, CrossEncoderReranker] = {}
 
 
 def _get_configured_reranker(mode: str, model_name: str) -> Reranker:

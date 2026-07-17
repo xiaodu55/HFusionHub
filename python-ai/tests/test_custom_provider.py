@@ -1,9 +1,9 @@
 import pytest
 
+from app.api.runtime import _friendly_provider_error
 from app.core.llm.custom_provider import build_user_llm
 from app.core.llm.deepseek_llm import DeepSeekLLM
 from app.core.llm.ollama_llm import OllamaLLM
-from app.api.runtime import _friendly_provider_error
 
 
 def test_builds_openai_compatible_provider_and_accepts_v1_base_url():

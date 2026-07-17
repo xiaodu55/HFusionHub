@@ -1,7 +1,6 @@
 """Tests for the P2 non-streaming DeepSeekLLM exact-match response cache
 and its normalized (fuzzy) secondary lookup."""
 
-import time
 
 import pytest
 
@@ -176,7 +175,7 @@ async def test_fuzzy_hit_respects_ttl(monkeypatch):
     await llm.chat([ChatMessage("user", "Hello World")])
 
     # 将模糊索引条目回拨到 TTL 之外
-    from app.core.llm.deepseek_llm import _fuzzy_cache_key, _cache_key
+    from app.core.llm.deepseek_llm import _cache_key, _fuzzy_cache_key
     key = _cache_key("deepseek-test", 0.7, 2048, "sk-real-key", [ChatMessage("user", "Hello World")])
     fuzzy_key = _fuzzy_cache_key(key)
     assert fuzzy_key in _fuzzy_response_cache

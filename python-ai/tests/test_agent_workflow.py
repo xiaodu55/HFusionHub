@@ -13,43 +13,41 @@ AgentWorkflow 模块单元测试
 9. 集成测试
 """
 
-import pytest
 import time
-import asyncio
 from typing import Any
 
+import pytest
+
 from app.core.rag.agent_workflow import (
-    # 枚举
-    WorkflowStatus,
-    NodeType,
-    NodeStatus,
-    WorkflowEventType,
-    # 数据模型
-    WorkflowContext,
-    NodeResult,
-    WorkflowResult,
-    WorkflowConfig,
-    WorkflowEvent,
-    WorkflowHistory,
     # 节点
-    BaseWorkflowNode,
-    StartNode,
-    EndNode,
-    TaskNode,
     ConditionNode,
-    ParallelNode,
+    EndNode,
     LoopNode,
     MergeNode,
+    NodeResult,
+    NodeStatus,
+    NodeType,
+    ParallelNode,
+    StartNode,
+    TaskNode,
     # 工作流
     Workflow,
-    WorkflowEngine,
     WorkflowBuilder,
+    WorkflowConfig,
+    # 数据模型
+    WorkflowContext,
+    WorkflowEngine,
+    WorkflowEvent,
+    WorkflowEventType,
     WorkflowFactory,
+    WorkflowHistory,
+    WorkflowResult,
+    # 枚举
+    WorkflowStatus,
     # 全局实例
     get_workflow_engine,
     reset_workflow_engine,
 )
-
 
 # ============================================================
 # 1. 数据模型测试

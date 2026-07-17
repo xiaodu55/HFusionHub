@@ -18,8 +18,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any
 
 # ── Constants ────────────────────────────────────────────────────────
 
@@ -55,14 +55,14 @@ class ManifestValidationError:
 class ManifestError(Exception):
     """Raised when manifest validation fails.  Wraps one or more ManifestValidationError."""
 
-    def __init__(self, errors: List[ManifestValidationError]):
+    def __init__(self, errors: list[ManifestValidationError]):
         self.errors = errors
         super().__init__(f"Manifest 验证失败: {'; '.join(str(e) for e in errors)}")
 
 
 # ── Hash ─────────────────────────────────────────────────────────────
 
-def compute_manifest_hash(manifest: Dict[str, Any]) -> str:
+def compute_manifest_hash(manifest: dict[str, Any]) -> str:
     """Compute a deterministic SHA-256 hash of the manifest JSON.
 
     The canonical form sorts keys, uses compact separators, and ensures
@@ -74,7 +74,7 @@ def compute_manifest_hash(manifest: Dict[str, Any]) -> str:
 
 # ── Validation ───────────────────────────────────────────────────────
 
-def validate_manifest(manifest: Dict[str, Any]) -> None:
+def validate_manifest(manifest: dict[str, Any]) -> None:
     """Validate a plugin manifest.  Raises ManifestError on failure.
 
     Checks:
@@ -85,7 +85,7 @@ def validate_manifest(manifest: Dict[str, Any]) -> None:
       5. Sandbox config is valid dict (if present)
       6. Dependencies is list of dicts with 'name' key (if present)
     """
-    errors: List[ManifestValidationError] = []
+    errors: list[ManifestValidationError] = []
 
     # 1. Required fields
     for field_name in REQUIRED_MANIFEST_FIELDS:
@@ -135,7 +135,7 @@ def validate_manifest(manifest: Dict[str, Any]) -> None:
         raise ManifestError(errors)
 
 
-def _validate_sandbox(sandbox: Dict[str, Any], errors: List[ManifestValidationError]) -> None:
+def _validate_sandbox(sandbox: dict[str, Any], errors: list[ManifestValidationError]) -> None:
     """Validate sandbox constraint structure."""
     network = sandbox.get("network")
     if network is not None:
@@ -179,7 +179,7 @@ def _validate_sandbox(sandbox: Dict[str, Any], errors: List[ManifestValidationEr
 
 # ── Parsing helpers ──────────────────────────────────────────────────
 
-def parse_manifest_json(raw: str) -> Dict[str, Any]:
+def parse_manifest_json(raw: str) -> dict[str, Any]:
     """Parse a JSON string into a manifest dict.  Raises ManifestError on invalid JSON."""
     try:
         return json.loads(raw)

@@ -14,9 +14,8 @@ CallableExpertAgent）与 RAG 多路检索；每条要素携带 evidence_chunk_i
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.core.agent.collaboration import (
     CallableExpertAgent,
@@ -27,7 +26,7 @@ from app.core.agent.collaboration import (
 )
 from app.core.bid.extractor import detect_method_type
 from app.core.llm import get_llm
-from app.core.llm.structured_output import StructuredOutputError, generate_structured
+from app.core.llm.structured_output import generate_structured
 from app.core.rag.retriever import get_retriever
 
 logger = logging.getLogger(__name__)
@@ -48,7 +47,7 @@ _RETRIEVAL_CONCURRENCY = 5
 
 # ── JSON Schema（generate_structured 校验）─────────────────────────
 
-ELEMENTS_SCHEMA: Dict[str, Any] = {
+ELEMENTS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "elements": {
@@ -80,7 +79,7 @@ ELEMENTS_SCHEMA: Dict[str, Any] = {
     "required": ["elements"],
 }
 
-SCORING_SCHEMA: Dict[str, Any] = {
+SCORING_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "scoring_methods": {
@@ -112,7 +111,7 @@ SCORING_SCHEMA: Dict[str, Any] = {
     "required": ["scoring_methods"],
 }
 
-CLAUSES_SCHEMA: Dict[str, Any] = {
+CLAUSES_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "disqualification_clauses": {
@@ -142,7 +141,7 @@ CLAUSES_SCHEMA: Dict[str, Any] = {
     "required": ["disqualification_clauses", "substantive_response_clauses"],
 }
 
-REQUIREMENTS_SCHEMA: Dict[str, Any] = {
+REQUIREMENTS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "requirements": {
@@ -192,8 +191,8 @@ class BidInterpretWorkflow:
         project_id: int,
         knowledge_base_id: int,
         title: str,
-        tender_number: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        tender_number: str | None = None,
+    ) -> dict[str, Any]:
         corpus = await self._retrieve_corpus(knowledge_base_id, title)
         if not corpus:
             return {
@@ -237,7 +236,7 @@ class BidInterpretWorkflow:
 
     # ── 检索 ──────────────────────────────────────────────────────
 
-    async def _retrieve_corpus(self, knowledge_base_id: int, title: str) -> List[Dict[str, str]]:
+    async def _retrieve_corpus(self, knowledge_base_id: int, title: str) -> list[dict[str, str]]:
         queries = list(RETRIEVE_QUERIES)
         if title:
             queries.append(title)
@@ -258,8 +257,8 @@ class BidInterpretWorkflow:
 
         results = await asyncio.gather(*(_retrieve_one(query) for query in queries))
 
-        seen: Dict[str, str] = {}
-        merged: List[Dict[str, str]] = []
+        seen: dict[str, str] = {}
+        merged: list[dict[str, str]] = []
         for result in results:
             if result is None:
                 continue
@@ -272,9 +271,9 @@ class BidInterpretWorkflow:
         return merged
 
     @staticmethod
-    def _build_context(corpus: List[Dict[str, str]]) -> tuple[str, Dict[str, str]]:
-        parts: List[str] = []
-        chunk_map: Dict[str, str] = {}
+    def _build_context(corpus: list[dict[str, str]]) -> tuple[str, dict[str, str]]:
+        parts: list[str] = []
+        chunk_map: dict[str, str] = {}
         for i, chunk in enumerate(corpus):
             chunk_map[str(i)] = chunk["chunk_id"]
             parts.append(f"[{i}] {chunk['content']}")
@@ -282,8 +281,8 @@ class BidInterpretWorkflow:
 
     # ── 专家 ──────────────────────────────────────────────────────
 
-    async def _structured_with_empty_retry(self, prompt: str, schema: Dict[str, Any],
-                                           list_key: str) -> Dict[str, Any]:
+    async def _structured_with_empty_retry(self, prompt: str, schema: dict[str, Any],
+                                           list_key: str) -> dict[str, Any]:
         """generate_structured 只重试格式错误；schema 合法但列表为空的
         LLM 偶发输出（smoke-bid 曾因此间歇失败）在这里补一次重试。"""
         data = await generate_structured(self.llm, prompt, schema, system_prompt=_SYSTEM_PROMPT)
@@ -387,7 +386,7 @@ class BidInterpretWorkflow:
 
     @staticmethod
     async def _synthesize(task: CollaborationTask) -> ExpertContribution:
-        contributions: List[ExpertContribution] = task.context.get("contributions", [])
+        contributions: list[ExpertContribution] = task.context.get("contributions", [])
         summary = "；".join(
             f"{c.role.value}: {c.content}" for c in contributions if c.succeeded
         )
@@ -398,10 +397,10 @@ class BidInterpretWorkflow:
     # ── 汇总 ──────────────────────────────────────────────────────
 
     @staticmethod
-    def _assemble(result, chunk_map: Dict[str, str]) -> Dict[str, Any]:
-        elements: List[Dict[str, Any]] = []
-        scoring_methods: List[Dict[str, Any]] = []
-        requirements: List[Dict[str, Any]] = []
+    def _assemble(result, chunk_map: dict[str, str]) -> dict[str, Any]:
+        elements: list[dict[str, Any]] = []
+        scoring_methods: list[dict[str, Any]] = []
+        requirements: list[dict[str, Any]] = []
         for contribution in result.contributions:
             if not contribution.succeeded:
                 continue
@@ -430,7 +429,7 @@ class BidInterpretWorkflow:
         }
 
     @staticmethod
-    def _resolve_evidence(indices, chunk_map: Dict[str, str]):
+    def _resolve_evidence(indices, chunk_map: dict[str, str]):
         if not indices:
             return []
         resolved = []

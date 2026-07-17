@@ -20,7 +20,6 @@ calls cannot create duplicates), and closed once at shutdown via
 import asyncio
 import logging
 import random
-from typing import Dict, Optional
 
 import httpx
 
@@ -35,7 +34,7 @@ _LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20)
 
 # One shared client per owner (e.g. "deepseek" / "ollama") so pools and
 # defaults are not mixed across providers.
-_shared_clients: Dict[str, httpx.AsyncClient] = {}
+_shared_clients: dict[str, httpx.AsyncClient] = {}
 
 
 def get_shared_client(owner: str = "llm", timeout: float = 120.0) -> httpx.AsyncClient:
@@ -71,8 +70,8 @@ async def post_with_retry(
     client: httpx.AsyncClient,
     url: str,
     *,
-    headers: Optional[Dict[str, str]] = None,
-    json: Optional[dict] = None,
+    headers: dict[str, str] | None = None,
+    json: dict | None = None,
     timeout: float = 120.0,
     max_retries: int = 3,
     backoff: float = 0.5,

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Sequence
+from typing import Sequence
 
 from ..schemas import CaseMetric, EvalRecord
 
 
-def _norm(ids: Sequence[str]) -> List[str]:
+def _norm(ids: Sequence[str]) -> list[str]:
     return [str(x).strip() for x in ids if str(x).strip()]
 
 
@@ -45,14 +45,14 @@ def evaluate_case(record: EvalRecord, k: int = 5) -> CaseMetric:
     )
 
 
-def aggregate(records: List[EvalRecord], k: int = 5) -> Dict[str, float]:
+def aggregate(records: list[EvalRecord], k: int = 5) -> dict[str, float]:
     """仅聚合 requires_rag=true 的样本（与 ragenteval 口径一致）。"""
     rag_records = [r for r in records if r.requires_rag]
     if not rag_records:
         return {}
     cases = [evaluate_case(r, k) for r in rag_records]
     n = len(cases)
-    out: Dict[str, float] = {}
+    out: dict[str, float] = {}
     for key in (f"hit@{k}", f"recall@{k}", f"mrr@{k}"):
         out[key] = sum(c.metrics[key] for c in cases) / n
     return out

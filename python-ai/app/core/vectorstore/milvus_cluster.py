@@ -15,19 +15,19 @@ import json
 import logging
 import os
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pymilvus import (
-    FieldSchema,
     CollectionSchema,
     DataType,
+    FieldSchema,
     MilvusClient,
 )
 
-from app.utils.config import config
-from app.core.vectorstore.base import VectorStoreProtocol, VectorStoreStatus
 from app.core.chunker.text_chunker import VectorChunk
 from app.core.tenant.context import require_tenant_id
+from app.core.vectorstore.base import VectorStoreProtocol, VectorStoreStatus
+from app.utils.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +38,13 @@ class MilvusClusterStore(VectorStoreProtocol):
     def __init__(self) -> None:
         self._collection_name = config.MILVUS_COLLECTION
         self._uri = f"http://{config.MILVUS_HOST}:{config.MILVUS_PORT}"
-        self._client: Optional[MilvusClient] = None
+        self._client: MilvusClient | None = None
         self._lock = threading.RLock()
-        self._last_error: Optional[str] = None
+        self._last_error: str | None = None
 
     # ── Connection ───────────────────────────────────────────────────────────
 
-    def _get_client(self) -> Optional[MilvusClient]:
+    def _get_client(self) -> MilvusClient | None:
         with self._lock:
             if self._client is not None:
                 return self._client
@@ -91,7 +91,7 @@ class MilvusClusterStore(VectorStoreProtocol):
             logger.exception("Milvus cluster readiness check failed")
             return VectorStoreStatus(ready=False, collection=self._collection_name, mode="cluster", error=str(exc))
 
-    def ensure_collection(self) -> Optional[MilvusClient]:
+    def ensure_collection(self) -> MilvusClient | None:
         client = self._get_client()
         if client is None:
             return None
@@ -150,7 +150,7 @@ class MilvusClusterStore(VectorStoreProtocol):
             )
             logger.info("Created collection: %s", self._collection_name)
             return client
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to create collection")
             return None
 
@@ -166,7 +166,7 @@ class MilvusClusterStore(VectorStoreProtocol):
                 client.drop_collection(self._collection_name)
                 logger.info("Dropped collection: %s", self._collection_name)
             return True
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to drop collection")
             return False
 
@@ -244,8 +244,8 @@ class MilvusClusterStore(VectorStoreProtocol):
                 f"missing tenant_id in {self._collection_name}"
             )
 
-    def _tenant_filter(self, knowledge_base_id: Optional[int] = None,
-                       document_id: Optional[str] = None) -> Optional[str]:
+    def _tenant_filter(self, knowledge_base_id: int | None = None,
+                       document_id: str | None = None) -> str | None:
         """Build a filter expression that ALWAYS scopes to the active tenant."""
         tenant_id = require_tenant_id()  # fail-closed: no default tenant
         parts = [f"tenant_id == {tenant_id}"]
@@ -260,10 +260,10 @@ class MilvusClusterStore(VectorStoreProtocol):
 
     def insert_chunks(
         self,
-        chunks: List[VectorChunk],
-        embeddings: List[List[float]],
+        chunks: list[VectorChunk],
+        embeddings: list[list[float]],
         document_id: str,
-        knowledge_base_id: Optional[int] = None,
+        knowledge_base_id: int | None = None,
     ) -> bool:
         tenant_id = require_tenant_id()  # fail-closed
         try:
@@ -289,13 +289,13 @@ class MilvusClusterStore(VectorStoreProtocol):
             client.insert(collection_name=self._collection_name, data=data)
             logger.info("Inserted %d chunks into Milvus cluster (tenant %d)", len(data), tenant_id)
             return True
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to insert chunks into Milvus cluster")
             return False
 
     def delete_document_chunks(self, document_id: str) -> bool:
         try:
-            tenant_id = require_tenant_id()
+            require_tenant_id()  # fail-closed：删除前必须存在租户上下文（仅校验，值不参与）
             client = self._get_client()
             if client is not None and client.has_collection(self._collection_name):
                 client.delete(
@@ -303,11 +303,11 @@ class MilvusClusterStore(VectorStoreProtocol):
                     filter=self._tenant_filter(document_id=document_id),
                 )
             return True
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to delete document chunks from cluster")
             return False
 
-    def delete_chunk_ids(self, chunk_ids: List[str]) -> bool:
+    def delete_chunk_ids(self, chunk_ids: list[str]) -> bool:
         if not chunk_ids:
             return True
         try:
@@ -329,13 +329,13 @@ class MilvusClusterStore(VectorStoreProtocol):
 
     def search(
         self,
-        query_text: Optional[str] = None,
-        query_embedding: Optional[List[float]] = None,
+        query_text: str | None = None,
+        query_embedding: list[float] | None = None,
         top_k: int = 5,
-        document_id: Optional[str] = None,
-        knowledge_base_id: Optional[int] = None,
-        metadata_filter: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        document_id: str | None = None,
+        knowledge_base_id: int | None = None,
+        metadata_filter: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         try:
             client = self._get_client()
             if client is None:
@@ -408,13 +408,13 @@ class MilvusClusterStore(VectorStoreProtocol):
                     if _matches_metadata_filter(r.get("metadata"), metadata_filter)
                 ][:top_k]
             return formatted
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to search cluster")
             return []
 
     def get_document_chunks(
-        self, document_id: str, page: int = 1, size: int = 20, block_type: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        self, document_id: str, page: int = 1, size: int = 20, block_type: str | None = None,
+    ) -> dict[str, Any]:
         """In cluster mode, chunk browsing is served via Milvus query (no JSON co-store)."""
         try:
             client = self._get_client()
@@ -445,7 +445,7 @@ class MilvusClusterStore(VectorStoreProtocol):
             logger.exception("Failed to get document chunks from cluster")
             return {"code": 500, "message": str(exc)}
 
-    def get_chunk_detail(self, chunk_id: str) -> Optional[Dict[str, Any]]:
+    def get_chunk_detail(self, chunk_id: str) -> dict[str, Any] | None:
         try:
             tenant_id = require_tenant_id()
             client = self._get_client()
@@ -458,13 +458,13 @@ class MilvusClusterStore(VectorStoreProtocol):
                 output_fields=["chunk_id", "document_id", "knowledge_base_id", "tenant_id", "content", "block_type", "outline_path", "metadata"],
             )
             return results[0] if results else None
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to get chunk detail from cluster")
             return None
 
     # ── Reconciliation helpers ───────────────────────────────────────────────
 
-    def list_all_chunk_ids(self, knowledge_base_id: Optional[int] = None) -> List[str]:
+    def list_all_chunk_ids(self, knowledge_base_id: int | None = None) -> list[str]:
         try:
             client = self._get_client()
             if client is None:
@@ -482,7 +482,7 @@ class MilvusClusterStore(VectorStoreProtocol):
                     output_fields=["chunk_id"],
                     batch_size=1000,
                 )
-                ids: List[str] = []
+                ids: list[str] = []
                 while True:
                     batch = iterator.next()
                     if not batch:
@@ -505,7 +505,7 @@ class MilvusClusterStore(VectorStoreProtocol):
             logger.error("Failed to list chunk IDs from cluster: %s", exc)
             return []
 
-    def count_chunks(self, knowledge_base_id: Optional[int] = None) -> int:
+    def count_chunks(self, knowledge_base_id: int | None = None) -> int:
         try:
             client = self._get_client()
             if client is None:
@@ -525,7 +525,7 @@ class MilvusClusterStore(VectorStoreProtocol):
             logger.error("Failed to count chunks from cluster: %s", exc)
             return 0
 
-    def all_chunks(self, knowledge_base_id: Optional[int] = None) -> Dict[str, List[Dict[str, Any]]]:
+    def all_chunks(self, knowledge_base_id: int | None = None) -> dict[str, list[dict[str, Any]]]:
         """Return all chunks from Milvus, grouped by document_id.
 
         This provides BM25 / citation with the same scoped corpus the vector
@@ -545,7 +545,7 @@ class MilvusClusterStore(VectorStoreProtocol):
 
             output = ["chunk_id", "document_id", "knowledge_base_id", "tenant_id", "content",
                       "block_type", "outline_path", "metadata"]
-            grouped: Dict[str, List[Dict[str, Any]]] = {}
+            grouped: dict[str, list[dict[str, Any]]] = {}
             offset = 0
             page_size = 1000
             while True:

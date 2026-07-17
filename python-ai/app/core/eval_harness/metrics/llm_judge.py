@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from ...llm import ChatMessage, get_llm
 from ...llm.judge_gate import resolve_judge_model
@@ -42,7 +42,7 @@ def _clamp(value: float) -> float:
     return max(0.0, min(1.0, float(value)))
 
 
-def _parse_scores(text: str) -> Optional[Dict[str, float]]:
+def _parse_scores(text: str) -> dict[str, float] | None:
     """从评审模型输出中稳健提取三项分数（容忍代码块/前后缀文本）。"""
     match = re.search(r"\{[^{}]*\"faithfulness\"[^{}]*\}", text, re.S)
     if not match:
@@ -64,12 +64,12 @@ _CACHE_PATH = Path("data/eval_harness/judge_cache.json")
 _cache_lock = threading.Lock()
 
 
-def _cache_key(record: EvalRecord, model: Optional[str]) -> str:
+def _cache_key(record: EvalRecord, model: str | None) -> str:
     raw = f"{model or 'default'}|{record.query}|{record.answer}|{record.ground_truth or ''}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _cache_get(key: str) -> Optional[Dict[str, float]]:
+def _cache_get(key: str) -> dict[str, float] | None:
     try:
         with _cache_lock:
             if _CACHE_PATH.exists():
@@ -81,7 +81,7 @@ def _cache_get(key: str) -> Optional[Dict[str, float]]:
     return None
 
 
-def _cache_put(key: str, scores: Dict[str, float]) -> None:
+def _cache_put(key: str, scores: dict[str, float]) -> None:
     try:
         _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         with _cache_lock:
@@ -94,7 +94,7 @@ def _cache_put(key: str, scores: Dict[str, float]) -> None:
         pass  # 缓存写入失败不影响评分主流程
 
 
-async def judge_sample(record: EvalRecord, judge_model: Optional[str] = None,
+async def judge_sample(record: EvalRecord, judge_model: str | None = None,
                        runs: int = 1, temperature: float = 0.2) -> CaseMetric:
     """对单条记录执行 LLM 评审。异常/不可评审返回 skip_reason 而非抛错。"""
     contexts_text = "\n\n".join(f"[{i}] {c}" for i, c in enumerate(record.contexts, 1)) or "（无检索上下文）"
@@ -113,8 +113,8 @@ async def judge_sample(record: EvalRecord, judge_model: Optional[str] = None,
     if cached is not None:
         return CaseMetric(query_id=record.query_id, metrics=cached)
 
-    all_scores: List[Dict[str, float]] = []
-    skip_reason: Optional[str] = None
+    all_scores: list[dict[str, float]] = []
+    skip_reason: str | None = None
     for _ in range(max(1, runs)):
         try:
             llm = get_llm(model=resolved)
@@ -141,7 +141,7 @@ async def judge_sample(record: EvalRecord, judge_model: Optional[str] = None,
     return CaseMetric(query_id=record.query_id, metrics=averaged)
 
 
-def aggregate(cases: List[CaseMetric]) -> Dict[str, float]:
+def aggregate(cases: list[CaseMetric]) -> dict[str, float]:
     judged = [c for c in cases if c.metrics and not c.skip_reason]
     if not judged:
         return {}

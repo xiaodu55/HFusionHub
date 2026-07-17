@@ -17,27 +17,22 @@
 日期：2026-07-22
 """
 
+import hashlib
+import json
+import re
+import time
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple
-import time
-import hashlib
-from collections import OrderedDict
-import asyncio
-import re
-import json
+from typing import Any
 
 from .utils import (
-    estimate_tokens,
-    calculate_text_similarity,
-    truncate_text,
-    DEFAULT_QUALITY_THRESHOLD,
     CONFIDENCE_BASE_SCORE,
-    CONFIDENCE_MAX_SCORE,
-    CONFIDENCE_WEIGHT_FACTOR,
+    DEFAULT_QUALITY_THRESHOLD,
+    calculate_text_similarity,
+    estimate_tokens,
 )
-
 
 # ==================== 枚举定义 ====================
 
@@ -89,11 +84,11 @@ class EvaluationSample:
     query: str
     response: str
     context: str = ""
-    sources: List[Dict[str, Any]] = field(default_factory=list)
-    ground_truth: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    sources: list[dict[str, Any]] = field(default_factory=list)
+    ground_truth: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "query_id": self.query_id,
@@ -106,7 +101,7 @@ class EvaluationSample:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'EvaluationSample':
+    def from_dict(cls, data: dict[str, Any]) -> 'EvaluationSample':
         """从字典创建"""
         return cls(
             query_id=data.get("query_id", ""),
@@ -135,15 +130,15 @@ class EvaluationResult:
         error_message: 错误信息（如果失败）
     """
     sample_id: str
-    scores: Dict[str, float] = field(default_factory=dict)
+    scores: dict[str, float] = field(default_factory=dict)
     overall_score: float = 0.0
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
     strategy_used: str = ""
     status: EvaluationStatus = EvaluationStatus.COMPLETED
     timestamp: float = field(default_factory=time.time)
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "sample_id": self.sample_id,
@@ -157,7 +152,7 @@ class EvaluationResult:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'EvaluationResult':
+    def from_dict(cls, data: dict[str, Any]) -> 'EvaluationResult':
         """从字典创建"""
         return cls(
             sample_id=data.get("sample_id", ""),
@@ -184,12 +179,12 @@ class MetricResult:
         is_pct: 是否为百分比
     """
     name: str
-    overall: Optional[float]
-    per_sample: Dict[str, Optional[float]] = field(default_factory=dict)
-    meta: Dict[str, Any] = field(default_factory=dict)
+    overall: float | None
+    per_sample: dict[str, float | None] = field(default_factory=dict)
+    meta: dict[str, Any] = field(default_factory=dict)
     is_pct: bool = True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "name": self.name,
@@ -214,7 +209,7 @@ class EvaluationConfig:
         language: 语言（zh/en）
     """
     strategy: EvaluationStrategyType = EvaluationStrategyType.HYBRID
-    dimensions: List[EvaluationDimension] = field(default_factory=lambda: [
+    dimensions: list[EvaluationDimension] = field(default_factory=lambda: [
         EvaluationDimension.COMPLETENESS,
         EvaluationDimension.ACCURACY,
         EvaluationDimension.CLARITY,
@@ -298,7 +293,7 @@ class RuleBasedEvaluationStrategy(BaseEvaluationStrategy):
             status=EvaluationStatus.COMPLETED,
         )
 
-    def _evaluate_completeness(self, sample: EvaluationSample) -> Tuple[float, Dict[str, Any]]:
+    def _evaluate_completeness(self, sample: EvaluationSample) -> tuple[float, dict[str, Any]]:
         """
         评估完整性
 
@@ -344,7 +339,7 @@ class RuleBasedEvaluationStrategy(BaseEvaluationStrategy):
         details["score"] = score
         return score, details
 
-    def _evaluate_accuracy(self, sample: EvaluationSample) -> Tuple[float, Dict[str, Any]]:
+    def _evaluate_accuracy(self, sample: EvaluationSample) -> tuple[float, dict[str, Any]]:
         """
         评估准确性
 
@@ -390,7 +385,7 @@ class RuleBasedEvaluationStrategy(BaseEvaluationStrategy):
         details["score"] = score
         return score, details
 
-    def _evaluate_clarity(self, sample: EvaluationSample) -> Tuple[float, Dict[str, Any]]:
+    def _evaluate_clarity(self, sample: EvaluationSample) -> tuple[float, dict[str, Any]]:
         """
         评估清晰度
 
@@ -441,8 +436,8 @@ class RuleBasedEvaluationStrategy(BaseEvaluationStrategy):
 
     def _calculate_overall_score(
         self,
-        scores: Dict[str, float],
-        dimensions: List[EvaluationDimension]
+        scores: dict[str, float],
+        dimensions: list[EvaluationDimension]
     ) -> float:
         """
         计算综合得分
@@ -491,7 +486,7 @@ class LLMEvaluationStrategy(BaseEvaluationStrategy):
         """评估单个样本"""
         try:
             # 导入 LLM
-            from ..llm import get_llm, ChatMessage
+            from ..llm import ChatMessage, get_llm
 
             llm = get_llm(model=self.model)
 
@@ -581,7 +576,7 @@ class LLMEvaluationStrategy(BaseEvaluationStrategy):
         self,
         response: str,
         config: EvaluationConfig
-    ) -> Tuple[Dict[str, float], Dict[str, Any]]:
+    ) -> tuple[dict[str, float], dict[str, Any]]:
         """
         解析 LLM 响应
 
@@ -717,10 +712,10 @@ class AnswerQualityEvaluator:
         self.strategy_type = strategy_type
         self.config = config or EvaluationConfig(strategy=strategy_type)
         self.strategy = self._create_strategy(strategy_type, **kwargs)
-        self.cache: "OrderedDict[str, EvaluationResult]" = OrderedDict()
+        self.cache: OrderedDict[str, EvaluationResult] = OrderedDict()
         # M13: 评估缓存上限（LRU+TTL），长驻进程下无界增长会耗尽内存
         self._cache_max_size = 2000
-        self.cache_timestamps: Dict[str, float] = {}
+        self.cache_timestamps: dict[str, float] = {}
 
     def _create_strategy(
         self,
@@ -813,7 +808,7 @@ class AnswerQualityEvaluator:
 
         return result
 
-    async def evaluate_batch(self, samples: List[EvaluationSample]) -> List[EvaluationResult]:
+    async def evaluate_batch(self, samples: list[EvaluationSample]) -> list[EvaluationResult]:
         """
         批量评估
 
@@ -829,7 +824,7 @@ class AnswerQualityEvaluator:
             results.append(result)
         return results
 
-    def get_metrics(self, results: List[EvaluationResult]) -> List[MetricResult]:
+    def get_metrics(self, results: list[EvaluationResult]) -> list[MetricResult]:
         """
         计算指标
 
@@ -924,7 +919,7 @@ class AnswerQualityEvaluatorFactory:
 
 # ==================== 全局实例管理 ====================
 
-_evaluator: Optional[AnswerQualityEvaluator] = None
+_evaluator: AnswerQualityEvaluator | None = None
 
 
 def get_evaluator(

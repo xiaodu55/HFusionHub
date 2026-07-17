@@ -8,18 +8,16 @@ same public API so that existing callers continue to work unchanged.
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import threading
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-from app.utils.config import config
 from app.core.chunker.text_chunker import VectorChunk
-from app.core.vectorstore.milvus_lite import MILVUS_LITE_PATH as _LITE_PATH_DEFAULT
 from app.core.vectorstore.milvus_lite import CHUNKS_STORE_PATH as _CO_STORE_DEFAULT
+from app.core.vectorstore.milvus_lite import MILVUS_LITE_PATH as _LITE_PATH_DEFAULT
 from app.core.vectorstore.milvus_lite import _migrate_co_store_layout
+from app.utils.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +46,7 @@ def _get_store():
 # ── Public API — delegates to the configured backend ────────────────────────
 
 
-def vector_store_status() -> Dict[str, Any]:
+def vector_store_status() -> dict[str, Any]:
     """Return a safe readiness summary for health checks and diagnostics.
 
     In lite mode this also triggers the lazy ensure/migration so that a failed
@@ -101,10 +99,10 @@ def drop_collection() -> bool:
 
 
 def insert_chunks(
-    chunks: List[VectorChunk],
-    embeddings: List[List[float]],
+    chunks: list[VectorChunk],
+    embeddings: list[list[float]],
     document_id: str,
-    knowledge_base_id: Optional[int] = None,
+    knowledge_base_id: int | None = None,
 ) -> bool:
     """Insert chunks with embeddings into the vector store."""
     return _get_store().insert_chunks(chunks, embeddings, document_id, knowledge_base_id)
@@ -130,13 +128,13 @@ def _matches_metadata_filter(metadata: Any, metadata_filter: Any) -> bool:
     return True
 
 def search_similar(
-    query_text: Optional[str] = None,
-    query_embedding: Optional[List[float]] = None,
+    query_text: str | None = None,
+    query_embedding: list[float] | None = None,
     top_k: int = 5,
-    document_id: Optional[str] = None,
-    knowledge_base_id: Optional[int] = None,
-    metadata_filter: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
+    document_id: str | None = None,
+    knowledge_base_id: int | None = None,
+    metadata_filter: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     """Search for similar chunks.
 
     ``metadata_filter``（Batch 5）：{field: value} 等值过滤，作用于 chunk
@@ -151,13 +149,13 @@ def search_similar(
 
 
 def get_document_chunks(
-    document_id: str, page: int = 1, size: int = 20, block_type: Optional[str] = None,
-) -> Dict[str, Any]:
+    document_id: str, page: int = 1, size: int = 20, block_type: str | None = None,
+) -> dict[str, Any]:
     """Get paginated chunks for a document."""
     return _get_store().get_document_chunks(document_id, page, size, block_type)
 
 
-def get_chunk_detail(chunk_id: str) -> Optional[Dict[str, Any]]:
+def get_chunk_detail(chunk_id: str) -> dict[str, Any] | None:
     """Get single chunk detail."""
     return _get_store().get_chunk_detail(chunk_id)
 
@@ -167,12 +165,12 @@ def delete_document_chunks(document_id: str) -> bool:
     return _get_store().delete_document_chunks(document_id)
 
 
-def delete_chunk_ids(chunk_ids: List[str]) -> bool:
+def delete_chunk_ids(chunk_ids: list[str]) -> bool:
     """Delete specific chunks by ID (idempotent, no-op if empty)."""
     return _get_store().delete_chunk_ids(chunk_ids)
 
 
-def count_chunks(knowledge_base_id: Optional[int] = None) -> int:
+def count_chunks(knowledge_base_id: int | None = None) -> int:
     """Count vector entities, optionally scoped to a knowledge base.
 
     Used by the reconciliation endpoint that compares Milvus entity counts
@@ -193,12 +191,12 @@ def count_chunks(knowledge_base_id: Optional[int] = None) -> int:
 # 租户隔离（第十五轮 P0-2）：缓存值是「单个租户」的作用域语料，因此必须
 # 按租户分键——单键缓存在双租户交替读取（期间无写入）时会把 A 租户语料
 # 返回给 B 租户。按租户各持一份 (file_sig, scoped) 条目，LRU 上限封顶。
-_co_store_cache: "OrderedDict[str, Tuple[Tuple[int, int], Dict[str, List[Dict]]]]" = OrderedDict()
+_co_store_cache: OrderedDict[str, tuple[tuple[int, int], dict[str, list[dict]]]] = OrderedDict()
 _CO_STORE_CACHE_MAX = 8
 _co_store_lock = threading.Lock()
 
 
-def _load_chunks_store() -> Dict[str, List[Dict]]:
+def _load_chunks_store() -> dict[str, list[dict]]:
     """Return the active tenant's chunks grouped by ``document_id``.
 
     In cluster mode the corpus is read from Milvus (no per-pod JSON co-store).
@@ -244,7 +242,7 @@ def _load_chunks_store() -> Dict[str, List[Dict]]:
             if not isinstance(tenant_root, dict):
                 _co_store_cache.pop(tid, None)
                 return {}
-            scoped: Dict[str, List[Dict]] = {}
+            scoped: dict[str, list[dict]] = {}
             for doc_id, chunks in tenant_root.items():
                 for c in chunks:
                     scoped.setdefault(str(c.get("document_id", doc_id)), []).append(c)

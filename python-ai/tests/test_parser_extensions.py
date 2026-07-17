@@ -140,7 +140,7 @@ class TestHtmlParser:
         assert [h.level for h in headings] == [1, 2]
         assert headings[0].content == "退款政策"
         assert "自购买之日起 30 天内可申请退款。" in [p.content for p in paragraphs]
-        assert "拆封商品不支持" in [l.content for l in lists]
+        assert "拆封商品不支持" in [li.content for li in lists]
         assert len(tables) == 1
         assert tables[0].content.split("\n")[0] == "档位\t时限"
         assert tables[0].content.split("\n")[1] == "A\t7 天"
@@ -159,8 +159,8 @@ class TestHtmlParser:
 
 class TestImageParserGate:
     def test_disabled_ocr_raises_with_hint(self, tmp_path, monkeypatch):
-        from app.utils.config import config
         from app.core.parser.image_parser import ImageParser
+        from app.utils.config import config
 
         monkeypatch.setattr(config, "RAG_MULTIMODAL_OCR_ENABLED", False)
         path = tmp_path / "pic.png"
@@ -170,8 +170,8 @@ class TestImageParserGate:
             ImageParser().parse(str(path))
 
     def test_unsupported_suffix_rejected_when_ocr_enabled(self, tmp_path, monkeypatch):
-        from app.utils.config import config
         from app.core.parser.image_parser import ImageParser
+        from app.utils.config import config
 
         monkeypatch.setattr(config, "RAG_MULTIMODAL_OCR_ENABLED", True)
         path = tmp_path / "pic.bmp"

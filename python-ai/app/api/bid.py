@@ -33,8 +33,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -49,10 +49,10 @@ logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
-def _sse(payload: Dict[str, Any]) -> str:
+def _sse(payload: dict[str, Any]) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
@@ -63,13 +63,13 @@ class BidInterpretRequest(BaseModel):
     project_id: int = Field(..., description="投标项目 ID")
     knowledge_base_id: int = Field(..., description="招标文件知识库 ID（须已完成向量化）")
     title: str = Field(..., description="招标项目名称")
-    tender_number: Optional[str] = Field(None, description="招标编号（可选）")
+    tender_number: str | None = Field(None, description="招标编号（可选）")
 
 
 class BidRequirementItem(BaseModel):
     category: str = Field(..., description="需求类别")
     requirement: str = Field(..., description="需求描述")
-    source_clause: Optional[str] = Field(None, description="来源条款原文")
+    source_clause: str | None = Field(None, description="来源条款原文")
 
 
 class BidSectionDef(BaseModel):
@@ -80,25 +80,25 @@ class BidSectionDef(BaseModel):
 class BidWriteRequest(BaseModel):
     project_id: int = Field(..., description="投标项目 ID")
     title: str = Field(..., description="招标项目名称")
-    tender_number: Optional[str] = Field(None, description="招标编号（可选）")
-    knowledge_base_ids: List[int] = Field(default_factory=list, description="招标库+资质库+历史库 ID")
-    requirements: List[BidRequirementItem] = Field(default_factory=list, description="已确认需求清单")
-    section_defs: Optional[List[BidSectionDef]] = Field(None, description="分节定义（可空=默认四节）")
+    tender_number: str | None = Field(None, description="招标编号（可选）")
+    knowledge_base_ids: list[int] = Field(default_factory=list, description="招标库+资质库+历史库 ID")
+    requirements: list[BidRequirementItem] = Field(default_factory=list, description="已确认需求清单")
+    section_defs: list[BidSectionDef] | None = Field(None, description="分节定义（可空=默认四节）")
 
 
 class BidSectionItem(BaseModel):
     section_key: str = Field(..., description="分节键")
-    section_title: Optional[str] = Field(None, description="分节标题")
+    section_title: str | None = Field(None, description="分节标题")
     content: str = Field(default="", description="分节正文")
 
 
 class BidCheckRequest(BaseModel):
     project_id: int = Field(..., description="投标项目 ID")
     title: str = Field(..., description="招标项目名称")
-    tender_number: Optional[str] = Field(None, description="招标编号（可选）")
-    knowledge_base_ids: List[int] = Field(default_factory=list, description="招标文件知识库 ID")
-    sections: List[BidSectionItem] = Field(default_factory=list, description="待自检标书分节")
-    requirements: Optional[List[BidRequirementItem]] = Field(None, description="需求清单（可选）")
+    tender_number: str | None = Field(None, description="招标编号（可选）")
+    knowledge_base_ids: list[int] = Field(default_factory=list, description="招标文件知识库 ID")
+    sections: list[BidSectionItem] = Field(default_factory=list, description="待自检标书分节")
+    requirements: list[BidRequirementItem] | None = Field(None, description="需求清单（可选）")
 
 
 # ── 解读 ────────────────────────────────────────────────────────────
@@ -153,10 +153,10 @@ async def bid_write_stream(request: BidWriteRequest):
     async def event_generator():
         queue: asyncio.Queue = asyncio.Queue()
 
-        async def on_section_start(section: Dict[str, Any]) -> None:
+        async def on_section_start(section: dict[str, Any]) -> None:
             await queue.put({"event": "bid_section_started", **section, "timestamp": _now_iso()})
 
-        async def on_section(payload: Dict[str, Any]) -> None:
+        async def on_section(payload: dict[str, Any]) -> None:
             await queue.put({"event": "bid_section_completed", **payload, "timestamp": _now_iso()})
 
         async def consume() -> None:

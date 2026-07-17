@@ -1,13 +1,12 @@
 """Policy engine tri-state governance tests."""
 
-import pytest
 
 from app.core.policy import (
+    MODE_READ_ONLY,
+    MODE_READ_WRITE,
     PolicyAction,
     PolicyContext,
     PolicyEngine,
-    MODE_READ_ONLY,
-    MODE_READ_WRITE,
 )
 from app.core.tools.spec import RiskLevel
 

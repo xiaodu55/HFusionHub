@@ -10,7 +10,7 @@ import json
 import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable, List, Protocol, Sequence, Set
+from typing import Any, Iterable, Protocol, Sequence
 
 
 class Router(Protocol):
@@ -27,7 +27,7 @@ class RetrievalCase:
     case_id: str
     query: str
     knowledge_base_id: int
-    relevant_chunk_ids: Set[str]
+    relevant_chunk_ids: set[str]
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RetrievalCase":
@@ -48,7 +48,7 @@ class RetrievalCase:
 @dataclass(frozen=True)
 class CaseEvaluation:
     case_id: str
-    retrieved_chunk_ids: List[str]
+    retrieved_chunk_ids: list[str]
     relevant_retrieved: int
     first_relevant_rank: int | None
     scope_violations: int
@@ -62,16 +62,16 @@ class RetrievalReport:
     mrr_at_k: float
     ndcg_at_k: float
     scope_violation_count: int
-    cases: List[CaseEvaluation]
+    cases: list[CaseEvaluation]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-def load_cases(path: Path) -> List[RetrievalCase]:
+def load_cases(path: Path) -> list[RetrievalCase]:
     """Load a version-controlled JSONL ground-truth suite."""
-    cases: List[RetrievalCase] = []
-    seen_ids: Set[str] = set()
+    cases: list[RetrievalCase] = []
+    seen_ids: set[str] = set()
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
@@ -126,9 +126,9 @@ class RetrievalEvaluator:
             knowledge_base_id=case.knowledge_base_id,
             top_k=self.top_k,
         )
-        retrieved_chunk_ids: List[str] = []
+        retrieved_chunk_ids: list[str] = []
         scope_violations = 0
-        seen_chunk_ids: Set[str] = set()
+        seen_chunk_ids: set[str] = set()
         for result in merged.results:
             metadata = result.metadata or {}
             if metadata.get("knowledge_base_id") != case.knowledge_base_id:

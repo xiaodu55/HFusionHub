@@ -18,24 +18,23 @@
 日期：2026-07-22
 """
 
-from abc import ABC, abstractmethod
+import hashlib
+import logging
+import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple
-import time
-import hashlib
-import asyncio
-import re
+from typing import Any
 
+from .base import BaseReflectionStrategy
+from .cache import CacheManager
 from .utils import (
-    DEFAULT_QUALITY_THRESHOLD,
     DEFAULT_MAX_RETRIES,
-    CONFIDENCE_BASE_SCORE,
+    DEFAULT_QUALITY_THRESHOLD,
     calculate_text_similarity,
     truncate_text,
 )
-from .cache import CacheManager, reflection_cache
-from .base import BaseReflectionStrategy
+
+logger = logging.getLogger(__name__)
 
 
 # ==================== 枚举定义 ====================
@@ -81,7 +80,7 @@ class QualityCriteria:
     relevance: float = 0.2
     clarity: float = 0.2
 
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> dict[str, float]:
         """转换为字典"""
         return {
             "completeness": self.completeness,
@@ -91,7 +90,7 @@ class QualityCriteria:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, float]) -> 'QualityCriteria':
+    def from_dict(cls, data: dict[str, float]) -> 'QualityCriteria':
         """从字典创建"""
         return cls(
             completeness=data.get("completeness", 0.3),
@@ -121,15 +120,15 @@ class ReflectionResult:
     original_answer: str
     reflected_answer: str
     quality_score: float
-    dimension_scores: Dict[str, float] = field(default_factory=dict)
-    issues: List[str] = field(default_factory=list)
-    suggestions: List[str] = field(default_factory=list)
+    dimension_scores: dict[str, float] = field(default_factory=dict)
+    issues: list[str] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)
     retry_count: int = 0
     strategy_used: str = ""
     status: ReflectionStatus = ReflectionStatus.COMPLETED
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "original_answer": truncate_text(self.original_answer, 100),
@@ -145,7 +144,7 @@ class ReflectionResult:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ReflectionResult':
+    def from_dict(cls, data: dict[str, Any]) -> 'ReflectionResult':
         """从字典创建"""
         return cls(
             original_answer=data.get("original_answer", ""),
@@ -217,7 +216,7 @@ class LLMReflectionStrategy(BaseReflectionStrategy):
         query: str,
         answer: str,
         context: str,
-        config: Optional[ReflectionConfig] = None,
+        config: ReflectionConfig | None = None,
         **kwargs
     ) -> ReflectionResult:
         """
@@ -281,7 +280,7 @@ class LLMReflectionStrategy(BaseReflectionStrategy):
                 status=ReflectionStatus.COMPLETED,
             )
 
-        except Exception as e:
+        except Exception:
             # 降级到规则反思
             fallback = RuleBasedReflectionStrategy()
             return await fallback.reflect(query, answer, context, config, **kwargs)
@@ -360,8 +359,8 @@ Please return in JSON format:
         query: str,
         answer: str,
         context: str,
-        issues: List[str],
-        suggestions: List[str],
+        issues: list[str],
+        suggestions: list[str],
         config: ReflectionConfig
     ) -> str:
         """构建优化提示"""
@@ -421,7 +420,7 @@ Optimized answer:"""
         self,
         evaluation_text: str,
         criteria: QualityCriteria
-    ) -> Tuple[float, Dict[str, float], List[str], List[str]]:
+    ) -> tuple[float, dict[str, float], list[str], list[str]]:
         """解析评估结果"""
         try:
             # 尝试解析 JSON
@@ -435,7 +434,7 @@ Optimized answer:"""
                 issues = data.get("issues", [])
                 suggestions = data.get("suggestions", [])
                 return quality_score, dimension_scores, issues, suggestions
-        except:
+        except Exception:
             pass
 
         # 如果解析失败，使用简单评估
@@ -445,7 +444,7 @@ Optimized answer:"""
         self,
         text: str,
         criteria: QualityCriteria
-    ) -> Tuple[float, Dict[str, float], List[str], List[str]]:
+    ) -> tuple[float, dict[str, float], list[str], list[str]]:
         """简单评估"""
         # 基于文本长度和关键词评估
         length_score = min(len(text) / 200, 1.0)
@@ -512,7 +511,7 @@ class RuleBasedReflectionStrategy(BaseReflectionStrategy):
         query: str,
         answer: str,
         context: str,
-        config: Optional[ReflectionConfig] = None,
+        config: ReflectionConfig | None = None,
         **kwargs
     ) -> ReflectionResult:
         """执行反思"""
@@ -580,7 +579,7 @@ class RuleBasedReflectionStrategy(BaseReflectionStrategy):
         query: str,
         answer: str,
         config: ReflectionConfig
-    ) -> Tuple[float, List[str], List[str]]:
+    ) -> tuple[float, list[str], list[str]]:
         """评估完整性"""
         score = 1.0
         issues = []
@@ -609,7 +608,7 @@ class RuleBasedReflectionStrategy(BaseReflectionStrategy):
         answer: str,
         context: str,
         config: ReflectionConfig
-    ) -> Tuple[float, List[str], List[str]]:
+    ) -> tuple[float, list[str], list[str]]:
         """评估准确性"""
         score = 1.0
         issues = []
@@ -639,7 +638,7 @@ class RuleBasedReflectionStrategy(BaseReflectionStrategy):
         query: str,
         answer: str,
         config: ReflectionConfig
-    ) -> Tuple[float, List[str], List[str]]:
+    ) -> tuple[float, list[str], list[str]]:
         """评估相关性"""
         score = 1.0
         issues = []
@@ -659,7 +658,7 @@ class RuleBasedReflectionStrategy(BaseReflectionStrategy):
         self,
         answer: str,
         config: ReflectionConfig
-    ) -> Tuple[float, List[str], List[str]]:
+    ) -> tuple[float, list[str], list[str]]:
         """评估清晰度"""
         score = 1.0
         issues = []
@@ -717,7 +716,7 @@ class HybridReflectionStrategy(BaseReflectionStrategy):
         query: str,
         answer: str,
         context: str,
-        config: Optional[ReflectionConfig] = None,
+        config: ReflectionConfig | None = None,
         **kwargs
     ) -> ReflectionResult:
         """执行反思"""
@@ -776,7 +775,7 @@ class SelfReflector:
         cache_enabled: bool = True,
         cache_ttl: int = 3600,
         llm=None,
-        cache: Optional[CacheManager] = None,
+        cache: CacheManager | None = None,
         **kwargs
     ):
         """
@@ -837,7 +836,7 @@ class SelfReflector:
         query: str,
         answer: str,
         context: str,
-        config: Optional[ReflectionConfig] = None,
+        config: ReflectionConfig | None = None,
         **kwargs
     ) -> ReflectionResult:
         """
@@ -885,7 +884,7 @@ class SelfReflector:
         query: str,
         answer: str,
         context: str,
-        config: Optional[ReflectionConfig] = None,
+        config: ReflectionConfig | None = None,
         retriever=None,
         llm=None,
         **kwargs
@@ -944,7 +943,7 @@ class SelfReflector:
     async def _supplement_retrieval(
         self,
         query: str,
-        issues: List[str],
+        issues: list[str],
         retriever
     ) -> str:
         """补充检索"""
@@ -965,8 +964,8 @@ class SelfReflector:
     def _generate_supplement_queries(
         self,
         query: str,
-        issues: List[str]
-    ) -> List[str]:
+        issues: list[str]
+    ) -> list[str]:
         """生成补充查询"""
         queries = [query]  # 基础查询
 
@@ -1007,7 +1006,7 @@ class SelfReflector:
         self,
         query: str,
         answer: str,
-        config: Optional[ReflectionConfig]
+        config: ReflectionConfig | None
     ) -> str:
         """生成缓存键"""
         content = f"{query}:{answer}:{config.strategy.value if config else 'default'}"
@@ -1021,7 +1020,7 @@ class SelfReflector:
         """获取缓存大小"""
         return self._cache_manager.get_stats().size
 
-    def get_cache_stats(self) -> Dict[str, Any]:
+    def get_cache_stats(self) -> dict[str, Any]:
         """获取缓存统计"""
         return self._cache_manager.get_stats().to_dict()
 
@@ -1087,7 +1086,7 @@ class SelfReflectorFactory:
 
 # ==================== 全局实例 ====================
 
-_reflector: Optional[SelfReflector] = None
+_reflector: SelfReflector | None = None
 
 
 def get_reflector(

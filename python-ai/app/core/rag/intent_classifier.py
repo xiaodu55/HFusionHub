@@ -12,22 +12,20 @@ Intent Classifier - 意图分类器
 日期：2026-07-22
 """
 
-import time
 import logging
 import threading
 from enum import Enum
-from typing import Dict, Any, Optional, List
+from typing import Any
 
-from .models import IntentResult, IntentType, ComplexityLevel, DomainType
+from ..llm import BaseLLM
+from .cache import CacheManager
+from .models import IntentResult
 from .strategies import (
     ClassificationStrategy,
+    HybridClassificationStrategy,
     LLMClassificationStrategy,
     RuleClassificationStrategy,
-    HybridClassificationStrategy
 )
-from .cache import CacheManager, classification_cache
-from .config import get_config
-from ..llm import BaseLLM
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +54,7 @@ class IntentClassifierFactory:
     def create(
         cls,
         strategy_type: ClassificationStrategyType = ClassificationStrategyType.HYBRID,
-        llm: Optional[BaseLLM] = None,
+        llm: BaseLLM | None = None,
         **kwargs
     ) -> ClassificationStrategy:
         """
@@ -97,7 +95,7 @@ class IntentClassifierFactory:
         logger.info(f"Registered strategy: {strategy_type.value}")
 
     @classmethod
-    def get_available_strategies(cls) -> List[str]:
+    def get_available_strategies(cls) -> list[str]:
         """获取可用的策略列表"""
         return [st.value for st in cls._strategies.keys()]
 
@@ -143,10 +141,10 @@ class IntentClassifier:
 
     def __init__(
         self,
-        strategy: Optional[ClassificationStrategy] = None,
+        strategy: ClassificationStrategy | None = None,
         cache_enabled: bool = True,
         cache_ttl: int = 3600,
-        cache: Optional[CacheManager] = None
+        cache: CacheManager | None = None
     ):
         """
         初始化意图分类器
@@ -179,7 +177,7 @@ class IntentClassifier:
     async def classify(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: list[dict[str, str]] | None = None,
         **kwargs
     ) -> IntentResult:
         """
@@ -214,7 +212,7 @@ class IntentClassifier:
     def classify_sync(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: list[dict[str, str]] | None = None,
         **kwargs
     ) -> IntentResult:
         """
@@ -234,7 +232,6 @@ class IntentClassifier:
             if loop.is_running():
                 # 如果事件循环正在运行，使用共享线程池
                 # （M13: 不再每次调用新建 ThreadPoolExecutor 造成线程泄漏）
-                import concurrent.futures
                 return _get_classify_executor().submit(
                     asyncio.run,
                     self.classify(query, history, **kwargs)
@@ -249,7 +246,7 @@ class IntentClassifier:
     def _get_cache_key(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]]
+        history: list[dict[str, str]] | None
     ) -> str:
         """生成缓存键"""
         import hashlib
@@ -279,7 +276,7 @@ class IntentClassifier:
         self._cache_manager.clear()
         logger.debug("Intent classifier cache cleared")
 
-    def get_cache_stats(self) -> Dict[str, Any]:
+    def get_cache_stats(self) -> dict[str, Any]:
         """获取缓存统计"""
         return self._cache_manager.get_stats().to_dict()
 

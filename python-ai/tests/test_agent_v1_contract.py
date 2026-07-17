@@ -9,19 +9,20 @@ Verifies:
 """
 
 import json
+from datetime import UTC
 
 import pytest
-from fastapi.testclient import TestClient
-
-from app.api.chat import router, ChatResponse, AgentV1Request
-from app.core.tools import get_tools, AGENT_V1_TOOL_NAMES, ToolExecutionPolicy
-from app.core.agent import ReactAgent, AgentResponse
 
 # ---------------------------------------------------------------------------
 # FastAPI test app
 # ---------------------------------------------------------------------------
-
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.api.chat import AgentV1Request, ChatResponse, router
+from app.core.agent import AgentResponse, ReactAgent
+from app.core.tools import AGENT_V1_TOOL_NAMES, ToolExecutionPolicy, get_tools
+
 app = FastAPI()
 app.include_router(router)
 client = TestClient(app)
@@ -473,7 +474,7 @@ class TestToolSpec:
     """Every V1 tool must have a complete ToolSpec."""
 
     def test_search_kb_spec_is_complete(self):
-        from app.core.tools.spec import SEARCH_KB_SPEC, RiskLevel, Permissions
+        from app.core.tools.spec import SEARCH_KB_SPEC, Permissions, RiskLevel
         assert SEARCH_KB_SPEC.name == "search_knowledge_base"
         assert len(SEARCH_KB_SPEC.description) > 20
         assert "query" in SEARCH_KB_SPEC.input_schema.get("required", [])
@@ -810,11 +811,12 @@ class TestApprovalBoundary:
             req.deny()
 
     def test_expired_approval_is_detected(self):
+        from datetime import datetime, timedelta
+
         from app.core.agent.execution_context import ApprovalRequest
-        from datetime import datetime, timedelta, timezone
 
         # Create an approval that expired 1 hour ago.
-        past = datetime.now(timezone.utc) - timedelta(hours=1)
+        past = datetime.now(UTC) - timedelta(hours=1)
         req = ApprovalRequest(
             approval_id="ap-001",
             agent_run_id="run-1",
@@ -861,7 +863,7 @@ class TestScopedGrantSecurity:
 
     def test_same_params_consumed(self):
         """Same tool + same input consumes the grant."""
-        from app.core.tools.registry import register_scoped_grant, consume_scoped_grant
+        from app.core.tools.registry import consume_scoped_grant, register_scoped_grant
 
         tool_input = {"content": "test note"}
         token = register_scoped_grant("write_note", tool_input, user_id=1, knowledge_base_id=1)
@@ -875,7 +877,7 @@ class TestScopedGrantSecurity:
 
     def test_tampered_params_rejected(self):
         """Different content produces different hash — grant not consumed."""
-        from app.core.tools.registry import register_scoped_grant, consume_scoped_grant
+        from app.core.tools.registry import consume_scoped_grant, register_scoped_grant
 
         register_scoped_grant("write_note", {"content": "original"}, user_id=1, knowledge_base_id=1)
 
@@ -886,7 +888,7 @@ class TestScopedGrantSecurity:
 
     def test_replay_rejected(self):
         """Grant consumed once — second attempt with same params fails."""
-        from app.core.tools.registry import register_scoped_grant, consume_scoped_grant
+        from app.core.tools.registry import consume_scoped_grant, register_scoped_grant
 
         tool_input = {"content": "one-time note"}
         register_scoped_grant("write_note", tool_input, user_id=1, knowledge_base_id=1)
@@ -903,7 +905,7 @@ class TestScopedGrantSecurity:
 
     def test_wrong_tool_rejected(self):
         """Grant is scoped to a specific tool name."""
-        from app.core.tools.registry import register_scoped_grant, consume_scoped_grant
+        from app.core.tools.registry import consume_scoped_grant, register_scoped_grant
 
         register_scoped_grant("write_note", {"content": "note"}, user_id=1, knowledge_base_id=1)
 
@@ -915,7 +917,7 @@ class TestScopedGrantSecurity:
     def test_extra_fields_in_input(self):
         """Input with extra metadata keys (knowledge_base_id, user_id) still
         matches because those keys are stripped before hashing."""
-        from app.core.tools.registry import register_scoped_grant, consume_scoped_grant
+        from app.core.tools.registry import consume_scoped_grant, register_scoped_grant
 
         register_scoped_grant("write_note", {"content": "hello"}, user_id=1, knowledge_base_id=1)
 
@@ -928,7 +930,7 @@ class TestScopedGrantSecurity:
 
     def test_empty_input_still_works(self):
         """Empty dict params still get hashed and matched."""
-        from app.core.tools.registry import register_scoped_grant, consume_scoped_grant
+        from app.core.tools.registry import consume_scoped_grant, register_scoped_grant
 
         register_scoped_grant("ping", {}, user_id=1, knowledge_base_id=1)
         consumed = consume_scoped_grant("ping", {},
@@ -937,7 +939,7 @@ class TestScopedGrantSecurity:
 
     def test_input_key_order_irrelevant(self):
         """JSON canonicalisation (sort_keys) ensures key order doesn't matter."""
-        from app.core.tools.registry import register_scoped_grant, consume_scoped_grant
+        from app.core.tools.registry import consume_scoped_grant, register_scoped_grant
 
         register_scoped_grant("upsert", {"b": 2, "a": 1}, user_id=1, knowledge_base_id=1)
 
@@ -975,9 +977,9 @@ class TestStreamingErrorResilience:
     async def test_run_stream_fallback_emits_run_error(self):
         """When run_stream catches an exception in the KB path, it yields
         a run_error event before the fallback message."""
+        from app.core.agent.execution_context import AgentExecutionContext
         from app.core.agent.react import ReactAgent
         from app.core.tools.registry import create_v1_registry
-        from app.core.agent.execution_context import AgentExecutionContext
 
         ctx = AgentExecutionContext(
             user_id=1,
@@ -1092,8 +1094,8 @@ class TestPermissionEnforcement:
     @pytest.mark.asyncio
     async def test_cross_kb_access_denied(self):
         """Context KB=1, registry KB=2 → SCOPE_DENIED."""
-        from app.core.tools.registry import create_v1_registry
         from app.core.agent.execution_context import AgentExecutionContext
+        from app.core.tools.registry import create_v1_registry
 
         ctx = AgentExecutionContext(
             user_id=4,
@@ -1115,8 +1117,8 @@ class TestPermissionEnforcement:
     @pytest.mark.asyncio
     async def test_user_id_stripped_from_tool_input(self):
         """Model-supplied user_id is stripped before tool execution."""
-        from app.core.tools.registry import create_v1_registry
         from app.core.agent.execution_context import AgentExecutionContext
+        from app.core.tools.registry import create_v1_registry
 
         ctx = AgentExecutionContext(
             user_id=4,
@@ -1143,9 +1145,9 @@ class TestPermissionEnforcement:
         Agent V1 Step 5: high-risk tools no longer return a hard
         PERMISSION_DENIED — instead they signal approval_required so the
         human-in-the-loop flow can grant a one-shot scoped bypass."""
-        from app.core.tools.registry import ToolRegistry
-        from app.core.tools.spec import ToolSpec, RiskLevel, Permissions, ErrorCode
         from app.core.agent.execution_context import AgentExecutionContext
+        from app.core.tools.registry import ToolRegistry
+        from app.core.tools.spec import ErrorCode, Permissions, RiskLevel, ToolSpec
 
         # Register a write tool in a fresh registry.
         write_spec = ToolSpec(
@@ -1187,9 +1189,9 @@ class TestPermissionEnforcement:
     @pytest.mark.asyncio
     async def test_missing_permission_denied(self):
         """Tool requires knowledge_base:write but context only grants read."""
-        from app.core.tools.registry import ToolRegistry
-        from app.core.tools.spec import ToolSpec, RiskLevel, Permissions, ErrorCode
         from app.core.agent.execution_context import AgentExecutionContext
+        from app.core.tools.registry import ToolRegistry
+        from app.core.tools.spec import ErrorCode, Permissions, RiskLevel, ToolSpec
 
         write_spec = ToolSpec(
             name="update_kb",
@@ -1229,8 +1231,8 @@ class TestPermissionEnforcement:
     @pytest.mark.asyncio
     async def test_approved_context_allows_read_only_tool(self):
         """With valid context, read_only tools execute normally."""
-        from app.core.tools.registry import create_v1_registry
         from app.core.agent.execution_context import AgentExecutionContext
+        from app.core.tools.registry import create_v1_registry
 
         ctx = AgentExecutionContext(
             user_id=4,
@@ -1394,7 +1396,7 @@ class TestNormalizeSource:
 
     def test_all_keys_present(self):
         """Every canonical key is always present in the output."""
-        from app.core.agent.citation import normalize_source, CANONICAL_SOURCE_KEYS
+        from app.core.agent.citation import CANONICAL_SOURCE_KEYS, normalize_source
 
         for source in (
             {"document_id": 1, "chunk_id": "c1", "title": "T", "excerpt": "E", "score": 1.0},
@@ -1693,6 +1695,7 @@ class TestChunkStoreFallback:
     def test_lookup_chunk_finds_existing(self, tmp_path):
         """_lookup_chunk_in_store finds a chunk by its chunk_id."""
         import json
+
         from app.core.agent.citation import _lookup_chunk_in_store
         from app.core.vectorstore import milvus_store
 
@@ -1733,6 +1736,7 @@ class TestChunkStoreFallback:
     def test_normalize_source_recovers_title_from_store(self, tmp_path):
         """When metadata lacks document_title, title is recovered from chunk store."""
         import json
+
         from app.core.agent.citation import normalize_source
         from app.core.vectorstore import milvus_store
 
@@ -1767,6 +1771,7 @@ class TestChunkStoreFallback:
     def test_normalize_source_no_title_even_from_store(self, tmp_path):
         """When chunk store also lacks title, falls back to placeholder."""
         import json
+
         from app.core.agent.citation import normalize_source
         from app.core.vectorstore import milvus_store
 
@@ -1829,7 +1834,7 @@ def _make_stub_retriever():
     Used by API integration tests to avoid touching the real Milvus DB
     that the running service owns (prevents DataDirLockedError).
     """
-    from unittest.mock import MagicMock, AsyncMock
+    from unittest.mock import MagicMock
 
     class _StubRetriever:
         async def retrieve(self, *args, **kwargs):
@@ -1848,7 +1853,6 @@ def _make_stub_llm(answer_text: str = "测试回答"):
 
     Used by API integration tests to avoid making real LLM API calls.
     """
-    from unittest.mock import MagicMock, AsyncMock
 
     class _StubResponse:
         content = answer_text
@@ -1941,8 +1945,8 @@ class TestCapabilityProfileApi:
     def test_approval_write_context_has_v1_1_tools(self):
         """With capability_profile='approval_write', the execution context
         creates a V1.1 registry so write_note is visible."""
-        from app.core.agent.execution_context import AgentExecutionContext
         from app.core.agent import get_agent
+        from app.core.agent.execution_context import AgentExecutionContext
 
         ctx = AgentExecutionContext(
             user_id=1,
@@ -1998,8 +2002,8 @@ class TestApprovalWriteToolVisibility:
     @pytest.mark.asyncio
     async def test_write_note_returns_approval_required_in_read_only(self):
         """When mode=read_only, calling write_note returns approval_required."""
-        from app.core.tools.registry import create_v1_registry, _scoped_grants, _scoped_grants_lock
         from app.core.agent.execution_context import AgentExecutionContext
+        from app.core.tools.registry import _scoped_grants, _scoped_grants_lock, create_v1_registry
 
         # Prevent grant leakage from other tests.
         with _scoped_grants_lock:
@@ -2026,10 +2030,11 @@ class TestApprovalWriteToolVisibility:
     @pytest.mark.asyncio
     async def test_write_note_executes_after_scoped_grant(self):
         """With a scoped grant, write_note executes even in read_only mode."""
-        from app.core.tools.registry import (
-            create_v1_registry, register_scoped_grant, consume_scoped_grant,
-        )
         from app.core.agent.execution_context import AgentExecutionContext
+        from app.core.tools.registry import (
+            create_v1_registry,
+            register_scoped_grant,
+        )
 
         # Register a scoped grant (simulates the decide endpoint).
         tool_input = {"content": "approved note"}
@@ -2068,10 +2073,11 @@ class TestApprovalWriteToolVisibility:
         it).  But in read_only mode, once the grant is consumed, the next
         call is blocked again.
         """
-        from app.core.tools.registry import (
-            create_v1_registry, register_scoped_grant,
-        )
         from app.core.agent.execution_context import AgentExecutionContext
+        from app.core.tools.registry import (
+            create_v1_registry,
+            register_scoped_grant,
+        )
 
         tool_input = {"content": "one-shot note"}
         register_scoped_grant("write_note", tool_input, user_id=1, knowledge_base_id=1)
@@ -2283,7 +2289,8 @@ class TestEndToEndApprovalFlow:
         from app.core.agent.execution_context import AgentExecutionContext
         from app.core.agent.react import ReactAgent
         from app.core.tools.registry import (
-            create_v1_registry, register_scoped_grant,
+            create_v1_registry,
+            register_scoped_grant,
         )
 
         tool_input = {"content": "e2e full flow note"}

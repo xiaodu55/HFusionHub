@@ -14,27 +14,25 @@ SelfReflector 单元测试
 日期：2026-07-22
 """
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock
 import time
-import hashlib
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from app.core.rag.self_reflector import (
-    ReflectionResult,
-    ReflectionConfig,
-    QualityCriteria,
-    QualityDimension,
-    ReflectionStrategyType,
-    ReflectionStatus,
-    LLMReflectionStrategy,
-    RuleBasedReflectionStrategy,
     HybridReflectionStrategy,
+    LLMReflectionStrategy,
+    QualityCriteria,
+    ReflectionConfig,
+    ReflectionResult,
+    ReflectionStatus,
+    ReflectionStrategyType,
+    RuleBasedReflectionStrategy,
     SelfReflector,
     SelfReflectorFactory,
     get_reflector,
     reset_reflector,
 )
-
 
 # ==================== 数据模型测试 ====================
 

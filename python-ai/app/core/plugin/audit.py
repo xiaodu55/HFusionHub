@@ -21,8 +21,8 @@ import sqlite3
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -66,19 +66,19 @@ class AuditEntry:
     plugin_name: str = ""
     plugin_version: str = ""
     action: str = ""
-    operator_id: Optional[int] = None
-    old_value: Optional[str] = None
-    new_value: Optional[str] = None
-    reason: Optional[str] = None
-    manifest_hash: Optional[str] = None
-    archive_hash: Optional[str] = None
-    trace_id: Optional[str] = None
-    resource_usage: Optional[Dict[str, Any]] = None
+    operator_id: int | None = None
+    old_value: str | None = None
+    new_value: str | None = None
+    reason: str | None = None
+    manifest_hash: str | None = None
+    archive_hash: str | None = None
+    trace_id: str | None = None
+    resource_usage: dict[str, Any] | None = None
     timestamp: float = field(default_factory=time.time)
     synced: bool = False
     retry_count: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "plugin_id": self.plugin_id,
@@ -96,7 +96,7 @@ class AuditEntry:
             "timestamp": self.timestamp,
         }
 
-    def to_wire(self) -> Dict[str, Any]:
+    def to_wire(self) -> dict[str, Any]:
         """Format for Java backend POST."""
         return {
             "eventId": self.id,
@@ -146,7 +146,7 @@ def _init_db() -> sqlite3.Connection:
 
 
 _db_lock = threading.Lock()
-_db_conn: Optional[sqlite3.Connection] = None
+_db_conn: sqlite3.Connection | None = None
 
 
 def _get_db() -> sqlite3.Connection:
@@ -156,7 +156,7 @@ def _get_db() -> sqlite3.Connection:
     return _db_conn
 
 
-def _reset_db(new_dir: Optional[str] = None) -> None:
+def _reset_db(new_dir: str | None = None) -> None:
     """Reset the SQLite connection and optionally redirect to a new directory.
 
     Used by tests to isolate the audit database in a temp directory.
@@ -221,7 +221,7 @@ def _mark_dead_letter(entry_id: str) -> None:
         logger.error("SQLite 标记 dead-letter 失败: %s", e)
 
 
-def _get_unsynced_entries(limit: int = 100) -> List[AuditEntry]:
+def _get_unsynced_entries(limit: int = 100) -> list[AuditEntry]:
     try:
         db = _get_db()
         with _db_lock:
@@ -275,7 +275,7 @@ def _cleanup_synced() -> int:
 
 # ── Background flusher ──────────────────────────────────────────────
 
-_flush_thread: Optional[threading.Thread] = None
+_flush_thread: threading.Thread | None = None
 _flush_stop = threading.Event()
 
 
@@ -408,15 +408,15 @@ def record_audit(
     plugin_id: str,
     plugin_name: str,
     action: str,
-    operator_id: Optional[int] = None,
-    old_value: Optional[str] = None,
-    new_value: Optional[str] = None,
-    reason: Optional[str] = None,
-    plugin_version: Optional[str] = None,
-    manifest_hash: Optional[str] = None,
-    archive_hash: Optional[str] = None,
-    trace_id: Optional[str] = None,
-    resource_usage: Optional[Dict[str, Any]] = None,
+    operator_id: int | None = None,
+    old_value: str | None = None,
+    new_value: str | None = None,
+    reason: str | None = None,
+    plugin_version: str | None = None,
+    manifest_hash: str | None = None,
+    archive_hash: str | None = None,
+    trace_id: str | None = None,
+    resource_usage: dict[str, Any] | None = None,
 ) -> AuditEntry:
     """Record an audit event with full traceability.
 
@@ -455,7 +455,7 @@ def record_audit(
     return entry
 
 
-def get_audit_log(plugin_id: Optional[str] = None, limit: int = 50) -> List[AuditEntry]:
+def get_audit_log(plugin_id: str | None = None, limit: int = 50) -> list[AuditEntry]:
     """Get recent audit entries from SQLite (includes unsynced)."""
     try:
         db = _get_db()
@@ -500,7 +500,7 @@ def clear_buffer() -> int:
         return 0
 
 
-def get_sync_status() -> Dict[str, Any]:
+def get_sync_status() -> dict[str, Any]:
     """Get audit sync status for monitoring."""
     try:
         db = _get_db()
@@ -516,9 +516,9 @@ def get_sync_status() -> Dict[str, Any]:
 # ── Convenience functions ──────────────────────────────────────────
 
 def record_install(plugin_id: str, plugin_name: str, manifest_hash: str,
-                   operator_id: Optional[int] = None,
-                   plugin_version: Optional[str] = None,
-                   archive_hash: Optional[str] = None) -> AuditEntry:
+                   operator_id: int | None = None,
+                   plugin_version: str | None = None,
+                   archive_hash: str | None = None) -> AuditEntry:
     return record_audit(
         plugin_id=plugin_id, plugin_name=plugin_name,
         action=ACTION_INSTALL, operator_id=operator_id,
@@ -529,8 +529,8 @@ def record_install(plugin_id: str, plugin_name: str, manifest_hash: str,
 
 
 def record_enable(plugin_id: str, plugin_name: str,
-                  operator_id: Optional[int] = None,
-                  plugin_version: Optional[str] = None) -> AuditEntry:
+                  operator_id: int | None = None,
+                  plugin_version: str | None = None) -> AuditEntry:
     return record_audit(
         plugin_id=plugin_id, plugin_name=plugin_name,
         action=ACTION_ENABLE, operator_id=operator_id,
@@ -540,9 +540,9 @@ def record_enable(plugin_id: str, plugin_name: str,
     )
 
 
-def record_disable(plugin_id: str, plugin_name: str, reason: Optional[str] = None,
-                   operator_id: Optional[int] = None,
-                   plugin_version: Optional[str] = None) -> AuditEntry:
+def record_disable(plugin_id: str, plugin_name: str, reason: str | None = None,
+                   operator_id: int | None = None,
+                   plugin_version: str | None = None) -> AuditEntry:
     return record_audit(
         plugin_id=plugin_id, plugin_name=plugin_name,
         action=ACTION_DISABLE, operator_id=operator_id,
@@ -553,9 +553,9 @@ def record_disable(plugin_id: str, plugin_name: str, reason: Optional[str] = Non
     )
 
 
-def record_uninstall(plugin_id: str, plugin_name: str, reason: Optional[str] = None,
-                     operator_id: Optional[int] = None,
-                     plugin_version: Optional[str] = None) -> AuditEntry:
+def record_uninstall(plugin_id: str, plugin_name: str, reason: str | None = None,
+                     operator_id: int | None = None,
+                     plugin_version: str | None = None) -> AuditEntry:
     return record_audit(
         plugin_id=plugin_id, plugin_name=plugin_name,
         action=ACTION_UNINSTALL, operator_id=operator_id,
@@ -567,10 +567,10 @@ def record_uninstall(plugin_id: str, plugin_name: str, reason: Optional[str] = N
 
 def record_tool_execution(plugin_id: str, plugin_name: str, tool_name: str,
                           success: bool, duration_ms: float,
-                          plugin_version: Optional[str] = None,
-                          trace_id: Optional[str] = None,
-                          resource_usage: Optional[Dict[str, Any]] = None,
-                          error: Optional[str] = None) -> AuditEntry:
+                          plugin_version: str | None = None,
+                          trace_id: str | None = None,
+                          resource_usage: dict[str, Any] | None = None,
+                          error: str | None = None) -> AuditEntry:
     action = ACTION_TOOL_EXECUTED if success else ACTION_TOOL_FAILED
     return record_audit(
         plugin_id=plugin_id, plugin_name=plugin_name,

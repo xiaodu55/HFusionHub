@@ -2,24 +2,25 @@
 Agent Core Module - ReAct Loop Implementation
 """
 
-from .agent import Agent, AgentResponse
-from .react import ReactAgent
-from .workflow_runtime import SingleAgentWorkflow, get_agent_run_store
-from .multi_agent_runtime import BoundedMultiAgentWorkflow
-from .execution_context import AgentExecutionContext, ApprovalRequest
-from .citation import normalize_source
-from ..tools import ToolExecutionPolicy, create_v1_registry
 from app.utils.config import config
 from app.utils.feature_flag import feature_flags
+
+from ..tools import ToolExecutionPolicy, create_v1_registry
+from .agent import Agent, AgentResponse
+from .citation import normalize_source
 from .collaboration import (
-    ExpertRole,
-    CollaborationTask,
-    ExpertContribution,
-    CollaborationResult,
-    ExpertAgent,
     CallableExpertAgent,
+    CollaborationResult,
+    CollaborationTask,
+    ExpertAgent,
+    ExpertContribution,
+    ExpertRole,
     MultiAgentCoordinator,
 )
+from .execution_context import AgentExecutionContext, ApprovalRequest
+from .multi_agent_runtime import BoundedMultiAgentWorkflow
+from .react import ReactAgent
+from .workflow_runtime import SingleAgentWorkflow, get_agent_run_store
 
 __all__ = [
     'Agent', 'AgentResponse', 'ReactAgent', 'SingleAgentWorkflow', 'BoundedMultiAgentWorkflow', 'get_agent', 'get_agent_run_store',

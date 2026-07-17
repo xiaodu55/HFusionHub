@@ -11,15 +11,13 @@ Usage::
 from __future__ import annotations
 
 import logging
-import os
-from typing import Optional
 
-from app.core.vectorstore.base import VectorStoreProtocol, VectorStoreStatus
+from app.core.vectorstore.base import VectorStoreProtocol
 from app.utils.config import config
 
 logger = logging.getLogger(__name__)
 
-_store: Optional[VectorStoreProtocol] = None
+_store: VectorStoreProtocol | None = None
 
 
 def get_vector_store() -> VectorStoreProtocol:

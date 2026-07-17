@@ -19,7 +19,6 @@ is the single source of truth for one-time execution authorization.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from app.utils.config import config
 
@@ -35,7 +34,7 @@ async def consume_execution_token(
     execution_token,
     *,
     http_client=None,
-    backend_url: Optional[str] = None,
+    backend_url: str | None = None,
 ) -> bool:
     """Consume an execution token at the Java backend.  Fail-closed.
 

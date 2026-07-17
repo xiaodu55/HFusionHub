@@ -30,7 +30,6 @@ from app.utils.trace import (
     HEADER_NAME,
     clear_trace_id,
     create_trace_id,
-    get_trace_id,
     set_trace_id,
 )
 

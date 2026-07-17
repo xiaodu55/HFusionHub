@@ -13,44 +13,40 @@ ConversationMemory 模块单元测试
 9. 集成测试
 """
 
-import pytest
 import time
-import uuid
-from unittest.mock import AsyncMock, patch, MagicMock
+
+import pytest
 
 from app.core.rag.conversation_memory import (
-    # 枚举
-    MemoryType,
-    MemoryStrategyType,
-    MessageRole,
-    MemoryEventType,
-    # 数据模型
-    Message,
-    ConversationSession,
-    MemoryConfig,
-    MemorySearchResult,
-    MemorySearchResponse,
-    MemoryStats,
     # 策略
-    BaseMemoryStrategy,
-    SlidingWindowMemory,
-    TokenBasedMemory,
-    SummaryMemory,
-    ImportanceBasedMemory,
-    HybridMemory,
-    MemoryStrategyFactory,
-    # 组件
-    MemoryEmbedder,
-    MemoryStorage,
-    MemoryRetriever,
-    # 主类
     ConversationMemory,
     ConversationMemoryFactory,
+    ConversationSession,
+    HybridMemory,
+    ImportanceBasedMemory,
+    MemoryConfig,
+    # 组件
+    MemoryEmbedder,
+    MemoryEventType,
+    MemoryRetriever,
+    MemorySearchResponse,
+    MemorySearchResult,
+    MemoryStats,
+    MemoryStorage,
+    MemoryStrategyFactory,
+    MemoryStrategyType,
+    # 枚举
+    MemoryType,
+    # 数据模型
+    Message,
+    MessageRole,
+    SlidingWindowMemory,
+    SummaryMemory,
+    TokenBasedMemory,
     # 全局实例
     get_conversation_memory,
     reset_conversation_memory,
 )
-
 
 # ============================================================
 # 1. 数据模型测试

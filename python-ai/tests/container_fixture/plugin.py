@@ -5,7 +5,6 @@ discovered by /opt/plugin/run_tool.py. They exercise the fixed entry-point
 contract, network policy, and resource-limit introspection.
 """
 
-import json
 import os
 import time
 

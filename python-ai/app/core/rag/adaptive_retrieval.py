@@ -1,7 +1,7 @@
 """自适应检索规划：将查询复杂度和对话上下文转换为可执行的检索参数。"""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .models import ComplexityLevel, IntentResult
 from .multi_turn_strategy import (
@@ -19,11 +19,11 @@ class RetrievalPlan:
 
     query: str
     top_k: int
-    selected_channels: List[ChannelType]
+    selected_channels: list[ChannelType]
     complexity: ComplexityLevel
     adjustment: RetrievalAdjustment
     reasoning: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class AdaptiveRetrievalPlanner:
@@ -39,7 +39,7 @@ class AdaptiveRetrievalPlanner:
         ComplexityLevel.COMPLEX: 8,
     }
 
-    def __init__(self, router: Optional[QueryRouter] = None, max_top_k: int = 10):
+    def __init__(self, router: QueryRouter | None = None, max_top_k: int = 10):
         self.router = router or get_router()
         self.max_top_k = max_top_k
         self.strategy = AdaptiveMultiTurnStrategy()
@@ -47,8 +47,8 @@ class AdaptiveRetrievalPlanner:
     async def plan(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]] = None,
-        intent_result: Optional[IntentResult] = None,
+        history: list[dict[str, str]] | None = None,
+        intent_result: IntentResult | None = None,
     ) -> RetrievalPlan:
         complexity = intent_result.complexity if intent_result else self._infer_complexity(query)
         context = self._build_context(history, query)
@@ -79,7 +79,7 @@ class AdaptiveRetrievalPlanner:
 
     @staticmethod
     def _build_context(
-        history: Optional[List[Dict[str, str]]], query: str
+        history: list[dict[str, str]] | None, query: str
     ) -> ConversationContext:
         context = ConversationContext(conversation_id="request")
         for item in history or []:
@@ -101,7 +101,7 @@ class AdaptiveRetrievalPlanner:
         return ComplexityLevel.SIMPLE
 
 
-_planner: Optional[AdaptiveRetrievalPlanner] = None
+_planner: AdaptiveRetrievalPlanner | None = None
 
 
 def get_adaptive_retrieval_planner() -> AdaptiveRetrievalPlanner:

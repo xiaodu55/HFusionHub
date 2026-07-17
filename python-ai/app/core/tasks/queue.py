@@ -15,7 +15,7 @@ arq 是延迟导入：inline 模式（以及所有单元测试）无需安装 ar
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from app.utils.config import config
 
@@ -43,7 +43,7 @@ async def dispatch_document_processing(
     - ``inline``：任务挂到 FastAPI BackgroundTasks（响应后进程内执行）；
     - ``arq``：入队 arq（payload 为可 JSON 序列化 dict），失败降级 inline。
     """
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "document_id": document_id,
         "file_path": file_path,
         "file_type": file_type,
@@ -71,7 +71,7 @@ async def dispatch_document_processing(
     return "inline"
 
 
-async def _enqueue_arq(payload: Dict[str, Any]) -> None:
+async def _enqueue_arq(payload: dict[str, Any]) -> None:
     from arq import create_pool
     from arq.connections import RedisSettings
 
@@ -82,7 +82,7 @@ async def _enqueue_arq(payload: Dict[str, Any]) -> None:
         await pool.aclose()
 
 
-async def _run_inline(payload: Dict[str, Any]) -> None:
+async def _run_inline(payload: dict[str, Any]) -> None:
     """inline 模式执行体：直接复用 vectorization 的后台处理函数（async）。"""
     from app.api.vectorization import _process_document_background
 

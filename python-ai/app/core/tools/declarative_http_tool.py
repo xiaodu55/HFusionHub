@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from app.utils.ssrf_guard import get_guarded_client, validate_public_https
 
@@ -24,7 +24,7 @@ class DeclarativeHttpTool(BaseTool):
         # reference it directly).
         validate_public_https(url)
 
-    async def execute(self, **kwargs: Any) -> Dict[str, Any]:
+    async def execute(self, **kwargs: Any) -> dict[str, Any]:
         self._validate_public_https(self.endpoint_url)
         params = {key: str(value) for key, value in kwargs.items() if value is not None}
         # R15-14 moved this tool onto a shared connection pool; the LLM pool

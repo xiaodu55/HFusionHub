@@ -21,9 +21,8 @@ from __future__ import annotations
 
 import functools
 import logging
-import time
 from contextlib import contextmanager
-from typing import Any, Callable, Dict, Optional, TypeVar
+from typing import Any, Callable, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,7 @@ _meter_provider = None
 
 def init_telemetry(
     service_name: str = "hfusionhub-python-ai",
-    otlp_endpoint: Optional[str] = None,
+    otlp_endpoint: str | None = None,
     enabled: bool = False,
 ) -> None:
     """Initialise OpenTelemetry exporters.
@@ -53,9 +52,9 @@ def init_telemetry(
 
     try:
         from opentelemetry import trace
+        from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
-        from opentelemetry.sdk.resources import Resource
         from opentelemetry.semconv.resource import ResourceAttributes
 
         resource = Resource.create({
@@ -91,11 +90,12 @@ def get_tracer(name: str = "hfusionhub.ai"):
     return NoOpTracer()
 
 
-def traced(span_name: str, attrs: Optional[Dict[str, Any]] = None):
+def traced(span_name: str, attrs: dict[str, Any] | None = None):
     """Decorator: wrap an async function in a span."""
     def decorator(func: F) -> F:
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
+            from opentelemetry import trace  # 函数级导入：模块不可用时不影响正常路径
             tracer = get_tracer()
             with tracer.start_as_current_span(span_name, attributes=attrs or {}) as span:
                 try:
@@ -111,8 +111,9 @@ def traced(span_name: str, attrs: Optional[Dict[str, Any]] = None):
 
 
 @contextmanager
-def trace_span(name: str, attrs: Optional[Dict[str, Any]] = None):
+def trace_span(name: str, attrs: dict[str, Any] | None = None):
     """Context manager for a span."""
+    from opentelemetry import trace  # 函数级导入：模块不可用时不影响正常路径
     tracer = get_tracer()
     with tracer.start_as_current_span(name, attributes=attrs or {}) as span:
         try:

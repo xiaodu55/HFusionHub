@@ -4,22 +4,21 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
 
 from .metrics import behavior, llm_judge, retrieval, ttft
 from .runner import load_run_file
 from .schemas import EvalRecord, MetricResult
 
 
-async def score_run(run_file: str, runs_dir: Optional[Path] = None,
-                    enable_judge: bool = False, judge_model: Optional[str] = None,
+async def score_run(run_file: str, runs_dir: Path | None = None,
+                    enable_judge: bool = False, judge_model: str | None = None,
                     judge_runs: int = 1, retrieval_k: int = 5,
-                    judge_sample_limit: Optional[int] = None) -> MetricResult:
+                    judge_sample_limit: int | None = None) -> MetricResult:
     """重放一个 run 文件：检索/行为/TTFT 指标总是计算；LLM 评审按开关执行。
 
     judge_sample_limit 限制评审条数（评审调用有真实 token 成本）。
     """
-    records: List[EvalRecord] = load_run_file(run_file, runs_dir)
+    records: list[EvalRecord] = load_run_file(run_file, runs_dir)
     if not records:
         return MetricResult(run_file=run_file, overall={}, meta={"error": "run file is empty"})
 

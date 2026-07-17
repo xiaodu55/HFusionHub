@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Type
+from typing import Any
 
 from .base import BaseLLM, ChatMessage, LLMResponse
 
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 class StructuredOutputError(ValueError):
     """Raised when the model output fails schema validation after all retries."""
 
-    def __init__(self, message: str, raw_output: str = "", validation_errors: Optional[List[str]] = None):
+    def __init__(self, message: str, raw_output: str = "", validation_errors: list[str] | None = None):
         super().__init__(message)
         self.raw_output = raw_output
         self.validation_errors = validation_errors or []
@@ -47,8 +47,8 @@ class StructuredOutputError(ValueError):
 @dataclass
 class SchemaValidationResult:
     valid: bool
-    data: Optional[Any] = None
-    errors: List[str] = field(default_factory=list)
+    data: Any | None = None
+    errors: list[str] = field(default_factory=list)
 
 
 class JsonSchemaValidator:
@@ -70,9 +70,9 @@ class JsonSchemaValidator:
     defer to a post-processing step.
     """
 
-    def validate(self, instance: Any, schema: Dict[str, Any]) -> SchemaValidationResult:
+    def validate(self, instance: Any, schema: dict[str, Any]) -> SchemaValidationResult:
         """Validate *instance* against *schema*.  Returns a result object."""
-        errors: List[str] = []
+        errors: list[str] = []
         try:
             self._validate(instance, schema, "$", errors)
         except Exception as exc:
@@ -83,7 +83,7 @@ class JsonSchemaValidator:
 
     # ── internal ──────────────────────────────────────────────────────
 
-    def _validate(self, instance: Any, schema: Dict[str, Any], path: str, errors: List[str]) -> None:
+    def _validate(self, instance: Any, schema: dict[str, Any], path: str, errors: list[str]) -> None:
         if not isinstance(schema, dict):
             return
 
@@ -150,7 +150,7 @@ class JsonSchemaValidator:
             subschemas = schema.get(comb_key)
             if isinstance(subschemas, list):
                 match_count = 0
-                sub_errors: List[str] = []
+                sub_errors: list[str] = []
                 for i, subschema in enumerate(subschemas):
                     sub_result = self.validate(instance, subschema)
                     if sub_result.valid:
@@ -218,14 +218,14 @@ _MAX_STRUCTURED_RETRIES = 2
 async def generate_structured(
     llm: BaseLLM,
     prompt: str,
-    output_schema: Dict[str, Any],
+    output_schema: dict[str, Any],
     *,
-    system_prompt: Optional[str] = None,
+    system_prompt: str | None = None,
     temperature: float = 0.2,
     max_tokens: int = 4096,
     max_retries: int = _MAX_STRUCTURED_RETRIES,
-    validator: Optional[JsonSchemaValidator] = None,
-) -> Dict[str, Any]:
+    validator: JsonSchemaValidator | None = None,
+) -> dict[str, Any]:
     """Generate a structured JSON response from the LLM.
 
     Parameters
@@ -262,7 +262,7 @@ async def generate_structured(
     schema_desc = json.dumps(output_schema, ensure_ascii=False, indent=2)
     sys = system_prompt or f"{_STRUCTURED_SYSTEM_PROMPT}\n\nSchema:\n{schema_desc}"
 
-    messages: List[ChatMessage] = [
+    messages: list[ChatMessage] = [
         ChatMessage(role="system", content=sys),
         ChatMessage(role="user", content=prompt),
     ]
@@ -329,7 +329,7 @@ async def generate_structured(
     raise StructuredOutputError("Unexpected error", raw_output=last_raw)
 
 
-def _extract_json(text: str) -> Optional[Any]:
+def _extract_json(text: str) -> Any | None:
     """Extract a JSON object from model output that may include markdown fences or surrounding text.
 
     Tries (in order):

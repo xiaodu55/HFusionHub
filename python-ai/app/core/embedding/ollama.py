@@ -1,10 +1,10 @@
 """
 Ollama Embedding 模块 - 支持本地 BGE-M3 等模型
 """
-import os
 import asyncio
 import logging
-from typing import List, Optional
+import os
+
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -15,8 +15,8 @@ class OllamaEmbedding:
 
     def __init__(
         self,
-        base_url: Optional[str] = None,
-        model: Optional[str] = None,
+        base_url: str | None = None,
+        model: str | None = None,
         dimension: int = 1024  # BGE-M3 输出维度
     ):
         """
@@ -33,7 +33,7 @@ class OllamaEmbedding:
         # 默认不可用，启动时异步检查
         self._is_available = False
 
-    async def generate(self, text: str) -> List[float]:
+    async def generate(self, text: str) -> list[float]:
         """
         生成单个文本的 Embedding
 
@@ -50,7 +50,7 @@ class OllamaEmbedding:
             logger.error(f"Ollama embedding failed: {e}")
             raise
 
-    async def generate_batch(self, texts: List[str]) -> List[List[float]]:
+    async def generate_batch(self, texts: list[str]) -> list[list[float]]:
         """
         批量生成 Embedding
 
@@ -68,7 +68,7 @@ class OllamaEmbedding:
             logger.error(f"Ollama batch embedding failed: {e}")
             raise
 
-    async def _call_api(self, texts: List[str]) -> List[List[float]]:
+    async def _call_api(self, texts: list[str]) -> list[list[float]]:
         """Call Ollama's batch embedding API with retry and dimension checks."""
         url = f"{self.base_url}/api/embed"
 

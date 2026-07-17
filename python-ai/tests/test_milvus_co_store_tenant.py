@@ -8,7 +8,7 @@ never touch another tenant's fallback rows.
 
 import json
 
-from app.core.tenant.context import set_tenant_id, clear_tenant_id
+from app.core.tenant.context import clear_tenant_id, set_tenant_id
 from app.core.vectorstore import milvus_lite
 from app.core.vectorstore.milvus_lite import MilvusLiteStore
 

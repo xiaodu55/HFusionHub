@@ -7,12 +7,11 @@ Utils 模块边界测试
 日期：2026-07-22
 """
 
-import pytest
 from app.core.rag.utils import (
+    calculate_text_similarity,
     estimate_tokens,
     extract_key_phrases,
     split_sentences,
-    calculate_text_similarity,
     truncate_text,
 )
 

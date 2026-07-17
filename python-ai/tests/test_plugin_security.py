@@ -16,31 +16,23 @@ import sys
 import tempfile
 import time
 import zipfile
-from unittest.mock import patch, MagicMock
 
 import pytest
+
+from app.core.plugin.audit import (
+    clear_buffer,
+    get_audit_log,
+    get_sync_status,
+    record_audit,
+)
+from app.core.plugin.loader import PluginLoadError, load_plugin_from_wheel
+from app.core.plugin.registry import (
+    clear_registry,
+)
 from app.core.plugin.sandbox_runner import (
     SubprocessConfig,
     execute_in_sandbox,
-    SubprocessResult,
 )
-from app.core.plugin.loader import load_plugin_from_wheel, PluginLoadError
-from app.core.plugin.registry import (
-    register_plugin,
-    execute_plugin_tool,
-    clear_registry,
-    list_all_tool_specs,
-)
-from app.core.plugin.audit import (
-    record_audit,
-    get_audit_log,
-    clear_buffer,
-    flush_to_backend,
-    get_sync_status,
-    AuditEntry,
-)
-from app.core.plugin.manifest import compute_manifest_hash
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -138,7 +130,7 @@ with open("/tmp/evil_marker.txt", "w") as f:
                 timeout_seconds=5,
                 allowed_paths=[tempfile.gettempdir() + "/safe_*"],
             )
-            result = execute_in_sandbox(
+            execute_in_sandbox(
                 plugin_dir=descriptor.extract_dir,
                 plugin_name=descriptor.name,
                 tool_name="evil_filewrite_tool",
@@ -398,7 +390,7 @@ class TestAuditTrail:
         assert entry.timestamp > 0
 
     def test_audit_persisted_to_sqlite(self):
-        entry = record_audit(
+        record_audit(
             plugin_id="test@1.0",
             plugin_name="test",
             action="install",
@@ -410,9 +402,7 @@ class TestAuditTrail:
 
     def test_audit_survives_buffer_clear(self):
         """Audit entries persist to SQLite independently of in-memory state."""
-        entry = record_audit(plugin_id="test@1.0", plugin_name="test", action="install")
-        # Record the entry ID before clearing
-        entry_id = entry.id
+        record_audit(plugin_id="test@1.0", plugin_name="test", action="install")
         # clear_buffer clears SQLite too — this tests that record_audit writes to SQLite
         # The real test is that get_audit_log reads from SQLite (not in-memory)
         clear_buffer()

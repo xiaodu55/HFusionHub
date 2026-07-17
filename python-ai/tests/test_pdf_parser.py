@@ -1,6 +1,4 @@
-import pytest
 
-from app.core.exceptions import ParsingException
 from app.core.parser.pdf_parser import (
     clean_pdf_text,
     is_usable_pdf_text,

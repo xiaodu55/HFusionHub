@@ -12,7 +12,7 @@ worker 启动方式：
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from app.utils.config import config
 
@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover - 测试环境
     _ARQ_AVAILABLE = False
 
 
-async def process_document(ctx: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+async def process_document(ctx: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     """arq 任务：文档解析 + 分块 + 向量化 + Java 回调（payload 由 dispatch 构造）。"""
     from app.api.vectorization import _process_document_background
 
@@ -41,11 +41,11 @@ async def process_document(ctx: Dict[str, Any], payload: Dict[str, Any]) -> Dict
     return {"document_id": document_id, "status": "processed"}
 
 
-async def startup(ctx: Dict[str, Any]) -> None:
+async def startup(ctx: dict[str, Any]) -> None:
     logger.info("[arq] worker starting; vector store mode=%s", config.VECTOR_STORE_MODE)
 
 
-async def shutdown(ctx: Dict[str, Any]) -> None:
+async def shutdown(ctx: dict[str, Any]) -> None:
     logger.info("[arq] worker shutting down")
 
 

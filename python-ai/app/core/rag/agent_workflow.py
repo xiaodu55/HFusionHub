@@ -22,11 +22,8 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
-from typing import (
-    Any, Callable, Dict, List, Optional, Set, Tuple, Union
-)
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +85,10 @@ class WorkflowContext:
     """工作流上下文"""
     workflow_id: str
     run_id: str
-    variables: Dict[str, Any] = field(default_factory=dict)
-    node_outputs: Dict[str, Any] = field(default_factory=dict)
+    variables: dict[str, Any] = field(default_factory=dict)
+    node_outputs: dict[str, Any] = field(default_factory=dict)
     start_time: float = field(default_factory=time.time)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def set_variable(self, key: str, value: Any):
         """设置变量"""
@@ -116,12 +113,12 @@ class NodeResult:
     node_id: str
     status: NodeStatus
     output: Any = None
-    error: Optional[str] = None
+    error: str | None = None
     start_time: float = 0.0
     end_time: float = 0.0
     duration_ms: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转为字典"""
         return {
             "node_id": self.node_id,
@@ -140,14 +137,14 @@ class WorkflowResult:
     workflow_id: str
     run_id: str
     status: WorkflowStatus
-    node_results: List[NodeResult] = field(default_factory=list)
+    node_results: list[NodeResult] = field(default_factory=list)
     start_time: float = 0.0
     end_time: float = 0.0
     duration_ms: float = 0.0
-    error: Optional[str] = None
-    context: Optional[WorkflowContext] = None
+    error: str | None = None
+    context: WorkflowContext | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转为字典"""
         return {
             "workflow_id": self.workflow_id,
@@ -170,7 +167,7 @@ class WorkflowConfig:
     max_history: int = 100  # 最大历史记录数
     enable_logging: bool = True  # 启用日志
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转为字典"""
         return {
             "max_retries": self.max_retries,
@@ -181,7 +178,7 @@ class WorkflowConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "WorkflowConfig":
         """从字典创建"""
         return cls(
             max_retries=data.get("max_retries", 3),
@@ -198,11 +195,11 @@ class WorkflowEvent:
     event_type: WorkflowEventType
     workflow_id: str
     run_id: str
-    node_id: Optional[str] = None
+    node_id: str | None = None
     timestamp: float = field(default_factory=time.time)
-    data: Dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转为字典"""
         return {
             "event_type": self.event_type.value,
@@ -223,10 +220,10 @@ class WorkflowHistory:
     start_time: float
     end_time: float
     duration_ms: float
-    node_results: List[NodeResult] = field(default_factory=list)
-    error: Optional[str] = None
+    node_results: list[NodeResult] = field(default_factory=list)
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转为字典"""
         return {
             "run_id": self.run_id,
@@ -258,7 +255,7 @@ class BaseWorkflowNode(ABC):
         self.node_type = node_type
         self.name = name or node_id
         self.description = description
-        self._next_nodes: List[str] = []  # 下一个节点ID列表
+        self._next_nodes: list[str] = []  # 下一个节点ID列表
         self._status = NodeStatus.PENDING
         self._retry_count = 0
 
@@ -287,11 +284,11 @@ class BaseWorkflowNode(ABC):
         """执行节点"""
         pass
 
-    async def get_next_nodes(self, context: WorkflowContext) -> List[str]:
+    async def get_next_nodes(self, context: WorkflowContext) -> list[str]:
         """获取下一个节点ID列表"""
         return self._next_nodes.copy()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转为字典"""
         return {
             "node_id": self.node_id,
@@ -394,7 +391,7 @@ class ConditionNode(BaseWorkflowNode):
 
         return {"result": result}
 
-    async def get_next_nodes(self, context: WorkflowContext) -> List[str]:
+    async def get_next_nodes(self, context: WorkflowContext) -> list[str]:
         """根据条件结果获取下一个节点"""
         output = context.get_node_output(self.node_id)
         if output and output.get("result"):
@@ -409,7 +406,7 @@ class ParallelNode(BaseWorkflowNode):
     def __init__(
         self,
         node_id: str,
-        branch_nodes: List[str],
+        branch_nodes: list[str],
         name: str = "",
         description: str = ""
     ):
@@ -421,7 +418,7 @@ class ParallelNode(BaseWorkflowNode):
         logger.info(f"Starting parallel execution: {self.node_id}")
         return {"branches": self.branch_nodes}
 
-    async def get_next_nodes(self, context: WorkflowContext) -> List[str]:
+    async def get_next_nodes(self, context: WorkflowContext) -> list[str]:
         """获取所有分支节点"""
         return self.branch_nodes.copy()
 
@@ -432,7 +429,7 @@ class LoopNode(BaseWorkflowNode):
     def __init__(
         self,
         node_id: str,
-        loop_body: List[str],
+        loop_body: list[str],
         condition: Callable,
         max_iterations: int = 100,
         name: str = "",
@@ -458,7 +455,7 @@ class LoopNode(BaseWorkflowNode):
 
         return {"iteration": self._iteration, "continue": should_continue}
 
-    async def get_next_nodes(self, context: WorkflowContext) -> List[str]:
+    async def get_next_nodes(self, context: WorkflowContext) -> list[str]:
         """根据循环条件获取下一个节点"""
         output = context.get_node_output(self.node_id)
         if output and output.get("continue"):
@@ -483,7 +480,7 @@ class MergeNode(BaseWorkflowNode):
     ):
         super().__init__(node_id, NodeType.MERGE, name, description)
         self.expected_inputs = expected_inputs
-        self._received_inputs: Set[str] = set()
+        self._received_inputs: set[str] = set()
 
     def add_input_node(self, node_id: str):
         """添加输入节点"""
@@ -520,17 +517,17 @@ class Workflow:
         workflow_id: str,
         name: str = "",
         description: str = "",
-        config: Optional[WorkflowConfig] = None
+        config: WorkflowConfig | None = None
     ):
         self.workflow_id = workflow_id
         self.name = name or workflow_id
         self.description = description
         self.config = config or WorkflowConfig()
-        self._nodes: Dict[str, BaseWorkflowNode] = {}
-        self._start_node_id: Optional[str] = None
-        self._end_node_id: Optional[str] = None
+        self._nodes: dict[str, BaseWorkflowNode] = {}
+        self._start_node_id: str | None = None
+        self._end_node_id: str | None = None
         self._status = WorkflowStatus.PENDING
-        self._event_listeners: Dict[WorkflowEventType, List[Callable]] = {}
+        self._event_listeners: dict[WorkflowEventType, list[Callable]] = {}
 
     @property
     def status(self) -> WorkflowStatus:
@@ -563,7 +560,7 @@ class Workflow:
             if self._end_node_id == node_id:
                 self._end_node_id = None
 
-    def get_node(self, node_id: str) -> Optional[BaseWorkflowNode]:
+    def get_node(self, node_id: str) -> BaseWorkflowNode | None:
         """获取节点"""
         return self._nodes.get(node_id)
 
@@ -599,7 +596,7 @@ class Workflow:
             except Exception as e:
                 logger.error(f"Event listener error: {e}")
 
-    def get_all_nodes(self) -> List[BaseWorkflowNode]:
+    def get_all_nodes(self) -> list[BaseWorkflowNode]:
         """获取所有节点"""
         return list(self._nodes.values())
 
@@ -607,7 +604,7 @@ class Workflow:
         """获取节点数量"""
         return len(self._nodes)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转为字典"""
         return {
             "workflow_id": self.workflow_id,
@@ -620,7 +617,7 @@ class Workflow:
             "status": self._status.value
         }
 
-    def validate(self) -> Tuple[bool, str]:
+    def validate(self) -> tuple[bool, str]:
         """验证工作流"""
         # 检查是否有开始节点
         if not self._start_node_id:
@@ -664,15 +661,15 @@ class WorkflowEngine:
     负责执行工作流并管理状态
     """
 
-    def __init__(self, config: Optional[WorkflowConfig] = None):
+    def __init__(self, config: WorkflowConfig | None = None):
         self.config = config or WorkflowConfig()
-        self._history: List[WorkflowHistory] = []
-        self._running_workflows: Dict[str, WorkflowResult] = {}
+        self._history: list[WorkflowHistory] = []
+        self._running_workflows: dict[str, WorkflowResult] = {}
 
     async def execute(
         self,
         workflow: Workflow,
-        variables: Optional[Dict[str, Any]] = None
+        variables: dict[str, Any] | None = None
     ) -> WorkflowResult:
         """
         执行工作流
@@ -800,7 +797,7 @@ class WorkflowEngine:
                 data={"output": output}
             ))
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(f"Node {node.node_id} timed out after {self.config.timeout_seconds}s")
             node.status = NodeStatus.FAILED
             node_result.status = NodeStatus.FAILED
@@ -848,14 +845,14 @@ class WorkflowEngine:
         - 瞬时异常按 WorkflowConfig.max_retries 重试，退避 0.2s * attempt。
         - 超时不再重试（超时往往是稳态问题，重试只会拖长总时长）。
         """
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
         for attempt in range(self.config.max_retries + 1):
             try:
                 return await asyncio.wait_for(
                     node.execute(context),
                     timeout=self.config.timeout_seconds,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raise
             except Exception as e:  # noqa: BLE001 — 由 _execute_node 统一兜底
                 last_exc = e
@@ -872,7 +869,7 @@ class WorkflowEngine:
         context: WorkflowContext,
         result: WorkflowResult,
         node_id: str,
-        visited_nodes: Set[str],
+        visited_nodes: set[str],
     ) -> bool:
         """沿单链推进节点，直到结束、失败或无后继。
 
@@ -938,8 +935,8 @@ class WorkflowEngine:
         workflow: Workflow,
         context: WorkflowContext,
         result: WorkflowResult,
-        branch_ids: List[str],
-        visited_nodes: Set[str],
+        branch_ids: list[str],
+        visited_nodes: set[str],
     ) -> bool:
         """并发执行多个分支链，任一分支失败则整个工作流失败。"""
         async def run_branch(branch_id: str) -> bool:
@@ -978,8 +975,8 @@ class WorkflowEngine:
 
     def get_history(
         self,
-        workflow_id: Optional[str] = None
-    ) -> List[WorkflowHistory]:
+        workflow_id: str | None = None
+    ) -> list[WorkflowHistory]:
         """获取历史记录"""
         if workflow_id:
             return [h for h in self._history if h.workflow_id == workflow_id]
@@ -1021,7 +1018,7 @@ class WorkflowBuilder:
     def add_task(
         self,
         task: Callable,
-        node_id: Optional[str] = None,
+        node_id: str | None = None,
         name: str = "",
         **kwargs
     ) -> "WorkflowBuilder":
@@ -1036,7 +1033,7 @@ class WorkflowBuilder:
         condition: Callable,
         true_branch: str = "",
         false_branch: str = "",
-        node_id: Optional[str] = None,
+        node_id: str | None = None,
         name: str = ""
     ) -> "WorkflowBuilder":
         """添加条件节点"""
@@ -1047,8 +1044,8 @@ class WorkflowBuilder:
 
     def add_parallel(
         self,
-        branch_nodes: List[str],
-        node_id: Optional[str] = None,
+        branch_nodes: list[str],
+        node_id: str | None = None,
         name: str = ""
     ) -> "WorkflowBuilder":
         """添加并行节点"""
@@ -1059,10 +1056,10 @@ class WorkflowBuilder:
 
     def add_loop(
         self,
-        loop_body: List[str],
+        loop_body: list[str],
         condition: Callable,
         max_iterations: int = 100,
-        node_id: Optional[str] = None,
+        node_id: str | None = None,
         name: str = ""
     ) -> "WorkflowBuilder":
         """添加循环节点"""
@@ -1074,7 +1071,7 @@ class WorkflowBuilder:
     def add_merge(
         self,
         expected_inputs: int = 1,
-        node_id: Optional[str] = None,
+        node_id: str | None = None,
         name: str = ""
     ) -> "WorkflowBuilder":
         """添加合并节点"""
@@ -1105,25 +1102,25 @@ class WorkflowFactory:
         workflow_id: str,
         name: str = "",
         description: str = "",
-        config: Optional[WorkflowConfig] = None
+        config: WorkflowConfig | None = None
     ) -> Workflow:
         """创建工作流"""
         return Workflow(workflow_id, name, description, config)
 
     @staticmethod
     def create_engine(
-        config: Optional[WorkflowConfig] = None
+        config: WorkflowConfig | None = None
     ) -> WorkflowEngine:
         """创建工作流引擎"""
         return WorkflowEngine(config)
 
 
 # 全局实例
-_workflow_engine: Optional[WorkflowEngine] = None
+_workflow_engine: WorkflowEngine | None = None
 
 
 def get_workflow_engine(
-    config: Optional[WorkflowConfig] = None
+    config: WorkflowConfig | None = None
 ) -> WorkflowEngine:
     """
     获取全局工作流引擎实例

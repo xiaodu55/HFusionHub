@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +20,9 @@ class OpenAICompatibleEmbedding:
 
     def __init__(
         self,
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
         dimension: int = 1024,
     ):
         self.base_url = (base_url or "").rstrip("/")
@@ -35,16 +34,16 @@ class OpenAICompatibleEmbedding:
     def is_configured(self) -> bool:
         return bool(self.base_url and self.model and self.api_key)
 
-    async def generate(self, text: str) -> List[float]:
+    async def generate(self, text: str) -> list[float]:
         embeddings = await self._call_api([text])
         return embeddings[0]
 
-    async def generate_batch(self, texts: List[str]) -> List[List[float]]:
+    async def generate_batch(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
         return await self._call_api(texts)
 
-    async def _call_api(self, inputs: List[str]) -> List[List[float]]:
+    async def _call_api(self, inputs: list[str]) -> list[list[float]]:
         if not self.is_configured:
             raise ValueError(
                 "OpenAI 兼容 embedding 未配置：需要 EMBEDDING_OPENAI_BASE_URL / "
@@ -77,7 +76,7 @@ class OpenAICompatibleEmbedding:
             raise EmbeddingException(
                 f"Embedding 返回条数不匹配：期望 {len(inputs)}，实际 {len(items)}"
             )
-        embeddings: List[List[float]] = []
+        embeddings: list[list[float]] = []
         for item in items:
             vector = item.get("embedding") or []
             if self.dimension and len(vector) != self.dimension:

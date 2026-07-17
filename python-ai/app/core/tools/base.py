@@ -3,7 +3,7 @@ Base Tool - Abstract base class for tools
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any
 
 
 class BaseTool(ABC):
@@ -22,7 +22,7 @@ class BaseTool(ABC):
         """
         pass
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert tool to dictionary representation"""
         return {
             "name": self.__class__.__name__,

@@ -27,8 +27,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -75,16 +74,16 @@ class SignatureBundle:
 @dataclass
 class TrustPolicy:
     """Platform trust policy for plugin signatures."""
-    trusted_keys: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    revoked_keys: Set[str] = field(default_factory=set)
+    trusted_keys: dict[str, dict[str, Any]] = field(default_factory=dict)
+    revoked_keys: set[str] = field(default_factory=set)
     require_signature: bool = True  # enforce signature on install
     allow_self_signed: bool = False  # never in production
 
 
 # ── Trust policy persistence ────────────────────────────────────────
 
-_policy: Optional[TrustPolicy] = None
-_policy_path: Optional[str] = None
+_policy: TrustPolicy | None = None
+_policy_path: str | None = None
 
 
 def _get_policy_path() -> str:
@@ -108,7 +107,7 @@ def _load_policy() -> TrustPolicy:
 
     if os.path.exists(path):
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             policy.trusted_keys = data.get("trusted_keys", {})
             policy.revoked_keys = set(data.get("revoked_keys", []))
@@ -148,8 +147,8 @@ def reset_policy() -> None:
 def register_trusted_key(
     name: str,
     public_key_b64: str,
-    email: Optional[str] = None,
-    url: Optional[str] = None,
+    email: str | None = None,
+    url: str | None = None,
 ) -> None:
     """Register a publisher's public key in the trust allowlist.
 
@@ -198,7 +197,7 @@ def is_key_trusted(public_key_b64: str) -> bool:
     return public_key_b64.strip() in policy.trusted_keys
 
 
-def list_trusted_keys() -> Dict[str, Dict[str, Any]]:
+def list_trusted_keys() -> dict[str, dict[str, Any]]:
     """Return all trusted keys and their metadata."""
     policy = _load_policy()
     return dict(policy.trusted_keys)
@@ -215,7 +214,7 @@ def compute_artifact_hash(file_path: str) -> str:
     return sha256.hexdigest()
 
 
-def compute_manifest_hash(manifest: Dict[str, Any]) -> str:
+def compute_manifest_hash(manifest: dict[str, Any]) -> str:
     """Compute deterministic SHA-256 of manifest JSON (canonical form)."""
     canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -223,7 +222,7 @@ def compute_manifest_hash(manifest: Dict[str, Any]) -> str:
 
 def sign_plugin(
     wheel_path: str,
-    manifest: Dict[str, Any],
+    manifest: dict[str, Any],
     private_key_path: str,
 ) -> str:
     """Sign a plugin wheel + manifest hash using Ed25519.
@@ -239,8 +238,8 @@ def sign_plugin(
         Path to the created .sig file.
     """
     try:
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
         from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     except ImportError:
         raise SignatureError("需要安装 cryptography 库: pip install cryptography")
 
@@ -289,8 +288,8 @@ def sign_plugin(
 
 def verify_signature(
     wheel_path: str,
-    manifest: Dict[str, Any],
-    sig_path: Optional[str] = None,
+    manifest: dict[str, Any],
+    sig_path: str | None = None,
     enforce_trust: bool = True,
 ) -> bool:
     """Verify the signature of a plugin wheel.
@@ -311,7 +310,6 @@ def verify_signature(
     """
     try:
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-        from cryptography.hazmat.primitives import serialization
     except ImportError:
         raise SignatureError("需要安装 cryptography 库: pip install cryptography")
 
@@ -327,7 +325,7 @@ def verify_signature(
         return False
 
     # Load signature bundle
-    with open(sig_path, "r", encoding="utf-8") as f:
+    with open(sig_path, encoding="utf-8") as f:
         bundle = json.load(f)
 
     if bundle.get("algorithm") != "ed25519":
@@ -379,7 +377,7 @@ def verify_signature(
     return True
 
 
-def verify_at_load(wheel_path: str, manifest: Dict[str, Any]) -> bool:
+def verify_at_load(wheel_path: str, manifest: dict[str, Any]) -> bool:
     """Verify signature at load time (defense-in-depth).
 
     Called during plugin loading to catch post-install tampering.

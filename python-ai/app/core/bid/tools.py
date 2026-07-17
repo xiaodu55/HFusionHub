@@ -16,7 +16,7 @@ P0 工具数据一律以入参 JSON 传入（不直连 bid 库），保持确定
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.core.tools.base import BaseTool
 from app.core.tools.spec import Permissions, RiskLevel, ToolSpec
@@ -32,7 +32,7 @@ REQUIREMENT_CATEGORIES: tuple = (
 )
 
 
-def _to_number(value: Any) -> Optional[float]:
+def _to_number(value: Any) -> float | None:
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -42,7 +42,7 @@ def _to_number(value: Any) -> Optional[float]:
 class BidCalcScoringTool(BaseTool):
     """评分点计算：综合分/加权分/百分比。"""
 
-    async def execute(self, points=None, scores=None, **kwargs) -> Dict[str, Any]:
+    async def execute(self, points=None, scores=None, **kwargs) -> dict[str, Any]:
         if not isinstance(points, list) or not points:
             return {"error": "points 必须为非空数组"}
         if not isinstance(scores, list):
@@ -56,7 +56,7 @@ class BidCalcScoringTool(BaseTool):
             if val is not None:
                 score_by_name[str(item["name"])] = val
 
-        items: List[Dict[str, Any]] = []
+        items: list[dict[str, Any]] = []
         total = 0.0
         max_total = 0.0
         weighted = 0.0
@@ -106,12 +106,12 @@ class BidCalcScoringTool(BaseTool):
 class BidListRequirementsTool(BaseTool):
     """需求清单过滤/分组：按类别与最低置信度。"""
 
-    async def execute(self, requirements=None, category=None, min_confidence=None, **kwargs) -> Dict[str, Any]:
+    async def execute(self, requirements=None, category=None, min_confidence=None, **kwargs) -> dict[str, Any]:
         if not isinstance(requirements, list):
             return {"error": "requirements 必须为数组"}
 
         threshold = _to_number(min_confidence) if min_confidence is not None else None
-        filtered: List[Dict[str, Any]] = []
+        filtered: list[dict[str, Any]] = []
         for req in requirements:
             if not isinstance(req, dict):
                 continue
@@ -122,7 +122,7 @@ class BidListRequirementsTool(BaseTool):
                 continue
             filtered.append(req)
 
-        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        grouped: dict[str, list[dict[str, Any]]] = {}
         for cat in REQUIREMENT_CATEGORIES:
             grouped[cat] = [r for r in filtered if r.get("category") == cat]
         unclassified = [r for r in filtered if r.get("category") not in REQUIREMENT_CATEGORIES]
@@ -139,13 +139,13 @@ class BidRenderTemplateTool(BaseTool):
 
     _PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z0-9_\.]+)\s*\}\}")
 
-    async def execute(self, template=None, data=None, **kwargs) -> Dict[str, Any]:
+    async def execute(self, template=None, data=None, **kwargs) -> dict[str, Any]:
         if not isinstance(template, str) or not template.strip():
             return {"error": "template 必须为非空字符串"}
         data = data if isinstance(data, dict) else {}
 
-        missing: List[str] = []
-        unknown: List[str] = []
+        missing: list[str] = []
+        unknown: list[str] = []
 
         def repl(match: re.Match) -> str:
             key = match.group(1)
@@ -259,7 +259,7 @@ BID_RENDER_TEMPLATE_SPEC = ToolSpec(
     agent_version="0.0",
 )
 
-BID_TOOL_SPECS: List[ToolSpec] = [
+BID_TOOL_SPECS: list[ToolSpec] = [
     BID_CALC_SCORING_SPEC,
     BID_LIST_REQUIREMENTS_SPEC,
     BID_RENDER_TEMPLATE_SPEC,

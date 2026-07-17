@@ -11,7 +11,6 @@ import pytest
 
 from app.core.agent.execution_context import AgentExecutionContext
 from app.core.tools.registry import ToolRegistry
-from app.core.tools.result import ToolResult
 
 
 def _ctx(**overrides):

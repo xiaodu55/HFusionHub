@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List
+from typing import Any
 
 from .base import BaseTool
 
@@ -36,7 +36,7 @@ class WebSearchTool(BaseTool):
         query: str,
         max_results: int = 5,
         **kwargs,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Search the web using the configured backend.
 
@@ -55,7 +55,7 @@ class WebSearchTool(BaseTool):
             return await self._search_serper(query, max_results)
         return await self._search_duckduckgo(query, max_results)
 
-    async def _search_duckduckgo(self, query: str, max_results: int) -> List[Dict[str, Any]]:
+    async def _search_duckduckgo(self, query: str, max_results: int) -> list[dict[str, Any]]:
         """DuckDuckGo Instant Answer API (no key needed)."""
         try:
             import httpx
@@ -74,7 +74,7 @@ class WebSearchTool(BaseTool):
                 resp.raise_for_status()
                 data = resp.json()
 
-            results: List[Dict[str, Any]] = []
+            results: list[dict[str, Any]] = []
             if data.get("AbstractText"):
                 results.append({
                     "title": data.get("AbstractSource", "DuckDuckGo"),
@@ -84,8 +84,8 @@ class WebSearchTool(BaseTool):
                 })
             # DuckDuckGo groups related topics into nested categories
             # ({Text: …} leaves and {Topics: […]}) — flatten both levels.
-            def _flatten_topics(topics: List[Any]) -> List[Dict[str, Any]]:
-                flat: List[Dict[str, Any]] = []
+            def _flatten_topics(topics: list[Any]) -> list[dict[str, Any]]:
+                flat: list[dict[str, Any]] = []
                 for topic in topics:
                     if isinstance(topic, dict):
                         if "Text" in topic:
@@ -112,7 +112,7 @@ class WebSearchTool(BaseTool):
             logger.warning("DuckDuckGo web search failed: %s", e)
             return [{"error": f"Web search failed: {e}", "query": query}]
 
-    async def _search_duckduckgo_lite(self, query: str, max_results: int) -> List[Dict[str, Any]]:
+    async def _search_duckduckgo_lite(self, query: str, max_results: int) -> list[dict[str, Any]]:
         """DuckDuckGo Lite HTML search — real web results, no API key."""
         import re
 
@@ -127,7 +127,7 @@ class WebSearchTool(BaseTool):
                 )
                 resp.raise_for_status()
             html = resp.text
-            results: List[Dict[str, Any]] = []
+            results: list[dict[str, Any]] = []
             link_re = re.compile(r'<a rel="nofollow" href="([^"]+)"[^>]*>(.*?)</a>', re.S)
             snip_re = re.compile(r'class="result-snippet">(.*?)</td>', re.S)
             snippets = snip_re.findall(html)
@@ -149,7 +149,7 @@ class WebSearchTool(BaseTool):
             logger.warning("DuckDuckGo lite search failed: %s", e)
             return []
 
-    async def _search_tavily(self, query: str, max_results: int) -> List[Dict[str, Any]]:
+    async def _search_tavily(self, query: str, max_results: int) -> list[dict[str, Any]]:
         """Tavily Search API (needs WEB_SEARCH_API_KEY)."""
         if not self.api_key:
             return [{"error": "Tavily 需要配置 WEB_SEARCH_API_KEY", "query": query}]
@@ -183,7 +183,7 @@ class WebSearchTool(BaseTool):
             logger.warning("Tavily web search failed: %s", e)
             return [{"error": f"Web search failed: {e}", "query": query}]
 
-    async def _search_serper(self, query: str, max_results: int) -> List[Dict[str, Any]]:
+    async def _search_serper(self, query: str, max_results: int) -> list[dict[str, Any]]:
         """Serper.dev Google Search API (needs WEB_SEARCH_API_KEY)."""
         if not self.api_key:
             return [{"error": "Serper 需要配置 WEB_SEARCH_API_KEY", "query": query}]

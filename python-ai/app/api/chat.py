@@ -52,8 +52,8 @@ import hmac
 import json
 import logging
 import time as time_module
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Literal, Optional
+from datetime import UTC, datetime
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
@@ -64,16 +64,16 @@ from app.core.agent import get_agent, get_agent_run_store
 from app.core.agent.agent import AgentResponse
 from app.core.agent.execution_context import AgentExecutionContext
 from app.core.llm.custom_provider import build_user_llm
-from app.core.tenant.context import get_tenant_id
 from app.core.policy.engine import PolicyContext, PolicyEngine
 from app.core.policy.masking import build_arguments_summary
 from app.core.rag.intent_tree_router import resolve_intent_route
+from app.core.tenant.context import get_tenant_id
 from app.utils.config import config
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-active_requests: Dict[str, asyncio.Task] = {}
+active_requests: dict[str, asyncio.Task] = {}
 
 CHAT_MESSAGE_MAX_LENGTH = 4000
 CHAT_HISTORY_MAX_ITEMS = 50
@@ -95,7 +95,7 @@ _GUARD_POLICY_ENGINE = PolicyEngine()
 _GUARDED_RESPONSE = "抱歉，我无法提供该内容（内容安全校验未通过）。"
 
 
-def _truncate(text: Optional[str], max_len: int) -> Optional[str]:
+def _truncate(text: str | None, max_len: int) -> str | None:
     """Truncate text to max_len characters, adding ellipsis if truncated."""
     if text is None:
         return None
@@ -106,18 +106,18 @@ def _truncate(text: Optional[str], max_len: int) -> Optional[str]:
 
 def _now_iso() -> str:
     """Return current UTC timestamp as ISO 8601 string."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _build_step_event(
     sequence: int,
     step_type: str,
-    action: Optional[str] = None,
-    input_summary: Optional[str] = None,
-    output_summary: Optional[str] = None,
-    sources: Optional[List[Dict[str, Any]]] = None,
+    action: str | None = None,
+    input_summary: str | None = None,
+    output_summary: str | None = None,
+    sources: list[dict[str, Any]] | None = None,
     duration_ms: float = 0.0,
-    error_code: Optional[str] = None,
+    error_code: str | None = None,
 ) -> str:
     """Build a structured step_completed SSE event JSON string."""
     return json.dumps({
@@ -136,8 +136,8 @@ def _build_step_event(
 
 def _build_run_event(
     status: str,
-    agent_run_id: Optional[str] = None,
-    token_usage: Optional[Dict[str, int]] = None,
+    agent_run_id: str | None = None,
+    token_usage: dict[str, int] | None = None,
     tool_calls_count: int = 0,
 ) -> str:
     """Build a structured run_completed SSE event JSON string."""
@@ -154,9 +154,9 @@ def _build_run_event(
 def _build_run_error_event(
     status: str,
     error_code: str,
-    error_detail: Optional[str] = None,
-    failed_tool: Optional[str] = None,
-    agent_run_id: Optional[str] = None,
+    error_detail: str | None = None,
+    failed_tool: str | None = None,
+    agent_run_id: str | None = None,
 ) -> str:
     """Build a structured run_error SSE event JSON string."""
     return json.dumps({
@@ -179,7 +179,7 @@ def _build_run_started_event(agent_run_id: str) -> str:
     }, ensure_ascii=False)
 
 
-def _agent_chunk_to_sse(chunk: str) -> Optional[str]:
+def _agent_chunk_to_sse(chunk: str) -> str | None:
     """Convert one agent chunk into a browser-facing SSE event.
 
     Handles:
@@ -205,7 +205,7 @@ def _agent_chunk_to_sse(chunk: str) -> Optional[str]:
     return f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
 
 
-def _track_active_request(request_id: str) -> Optional[asyncio.Task]:
+def _track_active_request(request_id: str) -> asyncio.Task | None:
     task = asyncio.current_task()
     if task is not None:
         active_requests[request_id] = task
@@ -222,20 +222,20 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     """General chat request — knowledge_base_id is optional."""
     message: str = Field(..., min_length=1, max_length=CHAT_MESSAGE_MAX_LENGTH)
-    conversation_id: Optional[int] = Field(None, ge=1)
-    knowledge_base_id: Optional[int] = Field(None, ge=1)
-    user_id: Optional[int] = Field(None, ge=1, description="Authenticated user ID — from Java session")
-    history: List[ChatMessage] = Field(default_factory=list, max_length=CHAT_HISTORY_MAX_ITEMS)
-    system_prompt: Optional[str] = Field(None, max_length=SYSTEM_PROMPT_MAX_LENGTH,
+    conversation_id: int | None = Field(None, ge=1)
+    knowledge_base_id: int | None = Field(None, ge=1)
+    user_id: int | None = Field(None, ge=1, description="Authenticated user ID — from Java session")
+    history: list[ChatMessage] = Field(default_factory=list, max_length=CHAT_HISTORY_MAX_ITEMS)
+    system_prompt: str | None = Field(None, max_length=SYSTEM_PROMPT_MAX_LENGTH,
                                           description="System instruction prepended to history (max 8000 chars)")
-    model: Optional[str] = Field(None, max_length=CHAT_MODEL_MAX_LENGTH)
+    model: str | None = Field(None, max_length=CHAT_MODEL_MAX_LENGTH)
     stream: bool = Field(False)
-    request_id: Optional[str] = Field(None, max_length=CHAT_REQUEST_ID_MAX_LENGTH)
-    style: Optional[str] = Field("detailed")
-    max_tool_steps: Optional[int] = Field(5, ge=1, le=24)
-    temperature: Optional[float] = Field(0.3, ge=0.0, le=2.0)
-    intent_context: List[Dict[str, Any]] = Field(default_factory=list, max_length=500)
-    provider_config: Optional[Dict[str, Any]] = Field(
+    request_id: str | None = Field(None, max_length=CHAT_REQUEST_ID_MAX_LENGTH)
+    style: str | None = Field("detailed")
+    max_tool_steps: int | None = Field(5, ge=1, le=24)
+    temperature: float | None = Field(0.3, ge=0.0, le=2.0)
+    intent_context: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
+    provider_config: dict[str, Any] | None = Field(
         None, description="Request-scoped provider credentials from the Java backend"
     )
 
@@ -257,23 +257,23 @@ class AgentV1Request(BaseModel):
     message: str = Field(..., min_length=1, max_length=CHAT_MESSAGE_MAX_LENGTH)
     knowledge_base_id: int = Field(..., ge=1, description="REQUIRED — target knowledge base ID")
     user_id: int = Field(..., ge=1, description="REQUIRED — authenticated user ID from Java")
-    conversation_id: Optional[int] = Field(None, ge=1)
-    history: List[ChatMessage] = Field(default_factory=list, max_length=CHAT_HISTORY_MAX_ITEMS)
-    system_prompt: Optional[str] = Field(None, max_length=SYSTEM_PROMPT_MAX_LENGTH,
+    conversation_id: int | None = Field(None, ge=1)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=CHAT_HISTORY_MAX_ITEMS)
+    system_prompt: str | None = Field(None, max_length=SYSTEM_PROMPT_MAX_LENGTH,
                                           description="System instruction prepended to history (max 8000 chars)")
-    model: Optional[str] = Field(None, max_length=CHAT_MODEL_MAX_LENGTH)
+    model: str | None = Field(None, max_length=CHAT_MODEL_MAX_LENGTH)
     stream: bool = Field(False)
-    request_id: Optional[str] = Field(None, max_length=CHAT_REQUEST_ID_MAX_LENGTH)
-    style: Optional[str] = Field("detailed")
-    max_tool_steps: Optional[int] = Field(5, ge=1, le=24)
-    temperature: Optional[float] = Field(0.3, ge=0.0, le=2.0)
-    capability_profile: Optional[str] = Field(None, pattern="^(approval_write)$")
-    user_role: Optional[str] = Field(None, pattern="^(user|admin)$",
+    request_id: str | None = Field(None, max_length=CHAT_REQUEST_ID_MAX_LENGTH)
+    style: str | None = Field("detailed")
+    max_tool_steps: int | None = Field(5, ge=1, le=24)
+    temperature: float | None = Field(0.3, ge=0.0, le=2.0)
+    capability_profile: str | None = Field(None, pattern="^(approval_write)$")
+    user_role: str | None = Field(None, pattern="^(user|admin)$",
                                      description="Authenticated user role from Java (user|admin)")
-    environment: Optional[str] = Field(None, max_length=32,
+    environment: str | None = Field(None, max_length=32,
                                        description="Deployment environment override")
-    intent_context: List[Dict[str, Any]] = Field(default_factory=list, max_length=500)
-    provider_config: Optional[Dict[str, Any]] = Field(
+    intent_context: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
+    provider_config: dict[str, Any] | None = Field(
         None, description="Request-scoped provider credentials from the Java backend"
     )
 
@@ -291,30 +291,30 @@ class ChatResponse(BaseModel):
     content: str = Field("", description="Final answer text (Markdown) — Java primary field")
     model: str = Field("", description="LLM model used")
     token_count: int = Field(0, description="Token count — Java tokenCount via @JsonProperty")
-    sources: List[Dict[str, Any]] = Field(default_factory=list, description="Source citations")
-    steps: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Agent ReAct steps")
-    auto_detected_kb_id: Optional[int] = Field(None, description="Auto-detected knowledge base ID")
+    sources: list[dict[str, Any]] = Field(default_factory=list, description="Source citations")
+    steps: list[dict[str, Any]] | None = Field(default_factory=list, description="Agent ReAct steps")
+    auto_detected_kb_id: int | None = Field(None, description="Auto-detected knowledge base ID")
 
     # ── Agent V1 keys ──
     answer: str = Field("", description="V1 mirror of content")
     status: str = Field("completed", description="completed | insufficient_evidence | tool_error | timeout")
-    agent_run_id: Optional[str] = Field(None, description="UUID of the agent run")
-    token_usage: Optional[Dict[str, int]] = Field(None, description="{prompt_tokens, completion_tokens, total_tokens}")
+    agent_run_id: str | None = Field(None, description="UUID of the agent run")
+    token_usage: dict[str, int] | None = Field(None, description="{prompt_tokens, completion_tokens, total_tokens}")
     tool_calls_count: int = Field(0, description="Number of tool invocations")
     style_used: str = Field("detailed", description="concise | detailed | report")
     max_tool_steps: int = Field(5, description="Configured max ReAct steps")
-    error_detail: Optional[str] = Field(None, description="Error detail on tool_error / timeout")
-    failed_tool: Optional[str] = Field(None, description="Tool name that failed")
-    step_events: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Structured step events for Java persistence")
+    error_detail: str | None = Field(None, description="Error detail on tool_error / timeout")
+    failed_tool: str | None = Field(None, description="Tool name that failed")
+    step_events: list[dict[str, Any]] | None = Field(default_factory=list, description="Structured step events for Java persistence")
 
 
 # ── Helper ──────────────────────────────────────────────────────────────
 
 def _build_history_with_system_prompt(
-    history: List[Dict[str, str]],
-    system_prompt: Optional[str],
-    current_message: Optional[str] = None,
-) -> List[Dict[str, str]]:
+    history: list[dict[str, str]],
+    system_prompt: str | None,
+    current_message: str | None = None,
+) -> list[dict[str, str]]:
     """Prepend system_prompt to history if provided, bypassing the 4000-char
     ChatMessage limit (system prompts can be up to SYSTEM_PROMPT_MAX_LENGTH)."""
     normalized_history = list(history)
@@ -333,7 +333,7 @@ def _build_history_with_system_prompt(
     return normalized_history
 
 
-def _resolve_chat_route(request: ChatRequest) -> tuple[Dict[str, Any], Optional[int], Optional[int]]:
+def _resolve_chat_route(request: ChatRequest) -> tuple[dict[str, Any], int | None, int | None]:
     route = resolve_intent_route(
         request.message,
         request.intent_context,
@@ -345,10 +345,10 @@ def _resolve_chat_route(request: ChatRequest) -> tuple[Dict[str, Any], Optional[
 
 def _schedule_long_term_memory(
     *,
-    conversation_id: Optional[int],
-    user_id: Optional[int],
-    knowledge_base_id: Optional[int],
-    history: List[Any],
+    conversation_id: int | None,
+    user_id: int | None,
+    knowledge_base_id: int | None,
+    history: list[Any],
     message: str,
 ) -> None:
     """对话轮次收尾的长期记忆抽取调度（每 N 轮真正触发；flag 关闭时零开销）。
@@ -372,7 +372,7 @@ def _schedule_long_term_memory(
         logger.debug("long-term memory scheduling skipped: %s", e)
 
 
-def _clarification_response(route: Dict[str, Any], style: str) -> ChatResponse:
+def _clarification_response(route: dict[str, Any], style: str) -> ChatResponse:
     message = route.get("message") or "请先选择一个知识库作为回答范围。"
     return ChatResponse(
         content=message,
@@ -383,7 +383,7 @@ def _clarification_response(route: Dict[str, Any], style: str) -> ChatResponse:
     )
 
 
-def _build_chat_response(response, style: str, extra_step_events: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
+def _build_chat_response(response, style: str, extra_step_events: list[dict[str, Any]] | None = None) -> ChatResponse:
     """Build a ChatResponse from AgentResponse, syncing Java and V1 fields.
 
     When *extra_step_events* is provided (e.g. from the decide/resume flow),
@@ -459,7 +459,7 @@ def _build_chat_response(response, style: str, extra_step_events: Optional[List[
 
 async def _content_guarded_sse(
     inner,
-    knowledge_base_id: Optional[int],
+    knowledge_base_id: int | None,
 ):
     """流式输出的内容安全守卫（第十五轮 P0-5）。
 
@@ -469,7 +469,7 @@ async def _content_guarded_sse(
     事件：消费方（Java 桥接 / 前端）收到 ``content_replace=true`` 时须用
     该文本整段替换已累计内容，而非追加。
     """
-    accumulated: List[str] = []
+    accumulated: list[str] = []
     done_sentinel = "data: [DONE]\n\n"
     done_seen = False
     async for event in inner:
@@ -745,8 +745,6 @@ async def agent_v1_chat_stream(request: AgentV1Request):
 
         async def event_generator():
             serving_task = _track_active_request(request_id)
-            # Track run-level metrics for run_completed event.
-            run_start_time = time_module.monotonic()
             total_tool_calls = 0
             # Track whether a terminal event was already emitted by the agent
             # (run_error from exception handlers, or approval_required).
@@ -781,8 +779,7 @@ async def agent_v1_chat_stream(request: AgentV1Request):
 
                 # Emit run_completed ONLY if no terminal event was emitted.
                 if not _terminal_event_emitted:
-                    run_duration = (time_module.monotonic() - run_start_time) * 1000
-                    yield _agent_chunk_to_sse(_build_run_event(
+                        yield _agent_chunk_to_sse(_build_run_event(
                         status="completed",
                         agent_run_id=agent_run_id,
                         token_usage=None,  # Will be populated by Java from final response
@@ -944,22 +941,22 @@ class AgentResumeRequest(BaseModel):
     """
     approval_id: str = Field(..., min_length=1, max_length=36)
     decision: str = Field(..., pattern="^(approved|denied)$")
-    reason: Optional[str] = Field(None, max_length=500)
+    reason: str | None = Field(None, max_length=500)
     user_id: int = Field(..., ge=1, description="Authenticated user ID making the decision")
     knowledge_base_id: int = Field(..., ge=1)
     tool_name: str = Field(..., min_length=1, max_length=50)
-    tool_input: Dict[str, Any] = Field(..., description="Original tool parameters (for hash verification)")
-    expected_tool_input_hash: Optional[str] = Field(None, min_length=64, max_length=64,
+    tool_input: dict[str, Any] = Field(..., description="Original tool parameters (for hash verification)")
+    expected_tool_input_hash: str | None = Field(None, min_length=64, max_length=64,
                                                      pattern="^[0-9a-fA-F]{64}$")
     query: str = Field(..., min_length=1, max_length=CHAT_MESSAGE_MAX_LENGTH,
                        description="Original user query (to re-run agent)")
-    history: List[ChatMessage] = Field(default_factory=list, max_length=CHAT_HISTORY_MAX_ITEMS)
-    conversation_id: Optional[int] = Field(None, ge=1)
-    model: Optional[str] = Field(None, max_length=CHAT_MODEL_MAX_LENGTH)
-    execution_token: Optional[str] = Field(None, max_length=64,
+    history: list[ChatMessage] = Field(default_factory=list, max_length=CHAT_HISTORY_MAX_ITEMS)
+    conversation_id: int | None = Field(None, ge=1)
+    model: str | None = Field(None, max_length=CHAT_MODEL_MAX_LENGTH)
+    execution_token: str | None = Field(None, max_length=64,
                                            description="One-time DB token issued by Java on approval (REQUIRED for approved executions)")
-    user_role: Optional[str] = Field(None, pattern="^(user|admin)$")
-    environment: Optional[str] = Field(None, max_length=32)
+    user_role: str | None = Field(None, pattern="^(user|admin)$")
+    environment: str | None = Field(None, max_length=32)
 
 
 @router.post("/api/agent/v1/chat/decide")
@@ -980,7 +977,7 @@ async def agent_v1_decide(request: AgentResumeRequest):
     **Denied flow:**
       Return ``{status: "denied"}`` — Java has already updated MySQL.
     """
-    from app.core.tools.registry import register_scoped_grant, create_v1_registry, consume_scoped_grant
+    from app.core.tools.registry import create_v1_registry, register_scoped_grant
     from app.core.tools.result import ToolResult
 
     if request.decision == "denied":
@@ -1036,7 +1033,7 @@ async def agent_v1_decide(request: AgentResumeRequest):
         agent_version="1.1",
         tenant_id=get_tenant_id(),
     )
-    grant_token = register_scoped_grant(
+    register_scoped_grant(
         tool_name=request.tool_name,
         tool_input=request.tool_input,
         user_id=request.user_id,
@@ -1070,7 +1067,7 @@ async def agent_v1_decide(request: AgentResumeRequest):
             ),
             timeout=30.0,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         elapsed_ms = round((time_module.monotonic() - started) * 1000, 2)
         logger.error(
             "Approval tool execution TIMEOUT: approval=%s tool=%s timeout_ms=%s",
@@ -1189,7 +1186,7 @@ def _warn_legacy_agent_runs() -> None:
 
 
 @router.get("/api/chat/agent-runs")
-async def list_agent_runs(limit: int = 50, knowledge_base_id: Optional[int] = None):
+async def list_agent_runs(limit: int = 50, knowledge_base_id: int | None = None):
     """Operational metadata only; prompts and retrieved text are never stored."""
     _warn_legacy_agent_runs()
     return {"items": get_agent_run_store().list(limit=limit, knowledge_base_id=knowledge_base_id)}

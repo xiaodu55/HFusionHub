@@ -11,7 +11,6 @@ only need the URL-level check.
 import html as html_lib
 import re
 from html.parser import HTMLParser
-from typing import Optional, Tuple
 
 from app.utils.ssrf_guard import (
     fetch_public_html,
@@ -88,7 +87,7 @@ class _TextExtractor(HTMLParser):
         return "".join(self.parts).strip()
 
 
-def extract_title_from_html(raw: bytes) -> Optional[str]:
+def extract_title_from_html(raw: bytes) -> str | None:
     """Quick title extraction without a full parse (for the fetch response)."""
     match = re.search(rb"<title[^>]*>(.*?)</title>", raw, re.IGNORECASE | re.DOTALL)
     if not match:
@@ -97,7 +96,7 @@ def extract_title_from_html(raw: bytes) -> Optional[str]:
     return " ".join(title.split())[:200] or None
 
 
-async def fetch_and_extract(url: str) -> Tuple[str, str]:
+async def fetch_and_extract(url: str) -> tuple[str, str]:
     """Fetch a public HTTPS URL and return ``(title, extracted_text)``.
 
     Raises ``ValueError`` for SSRF/validation failures (including a

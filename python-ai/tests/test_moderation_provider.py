@@ -8,18 +8,18 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
 import app.core.policy.moderation_provider as mp
+from app.core.policy.guardrails import ContentModerator
 from app.core.policy.moderation_provider import (
     HttpModerationProvider,
     ModerationVerdict,
     get_moderation_provider,
     reset_moderation_provider,
 )
-from app.core.policy.guardrails import ContentModerator
 
 
 @pytest.fixture(autouse=True)
@@ -67,7 +67,7 @@ class TestFactory:
 class TestHttpProvider:
     @pytest.mark.asyncio
     async def test_check_posts_and_parses_dot_path(self, monkeypatch):
-        captured: Dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
         class _FakeClient:
             def __init__(self, *a, **kw):

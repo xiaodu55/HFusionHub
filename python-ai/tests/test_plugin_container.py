@@ -11,25 +11,21 @@ Tests are organized into:
   7. Docker integration tests (require Docker daemon — skipped otherwise)
 """
 
-import hashlib
-import json
 import os
 import sys
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 
 from app.core.plugin.container_runner import (
     ContainerConfig,
     ContainerResult,
     PluginVersionInfo,
     compute_sticky_version,
-    select_canary_version,
     execute_in_container,
     execute_with_canary,
-    fetch_plugin_versions,
+    select_canary_version,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # 1. Sticky version routing
@@ -90,7 +86,7 @@ class TestStickyVersion:
         versions = ["1.0.0", "2.0.0"]
         weights = [0.5, 0.5]
         r1 = compute_sticky_version("plugin-a", 42, versions, weights)
-        r2 = compute_sticky_version("plugin-b", 42, versions, weights)
+        compute_sticky_version("plugin-b", 42, versions, weights)
         assert compute_sticky_version("plugin-a", 42, versions, weights) == r1
 
 
@@ -325,6 +321,7 @@ class TestExecuteInContainerDigest:
     def test_runner_unreachable_fail_closed(self):
         """When runner is unreachable, returns runner_unreachable error."""
         import asyncio
+
         import httpx as httpx_mod
 
         # Simulate connection refused by patching the httpx.AsyncClient
@@ -355,6 +352,7 @@ class TestExecuteInContainerDigest:
     def test_runner_unreachable_production_mode_no_fallback(self):
         """P0-3: Runner unreachable → fail_closed, no fallback to subprocess."""
         import asyncio
+
         import httpx as httpx_mod
 
         async def _raise_connect_error(*args, **kwargs):
@@ -451,6 +449,7 @@ class TestExecuteWithCanary:
     def test_canary_java_backend_unreachable(self):
         """When Java backend is unreachable, canary fails gracefully."""
         import asyncio
+
         import httpx as httpx_mod
 
         async def _raise_connect_error(*args, **kwargs):
@@ -482,7 +481,7 @@ class TestFetchPluginVersions:
     def test_fetch_parses_correctly(self):
         """Verify that fetch_plugin_versions correctly parses Java response."""
         import asyncio
-        import httpx as httpx_mod
+
 
         java_data = [
             {
@@ -563,8 +562,8 @@ class TestRunnerIntegration:
     @pytest.fixture(autouse=True)
     def setup_runner(self):
         """Start plugin-runner + prepare a local test image (NO Docker Hub)."""
-        import subprocess, time
-        import docker as docker_lib
+        import subprocess
+        import time
 
         # 1. Kill anything already on our port
         try:
@@ -668,11 +667,11 @@ class TestRunnerIntegration:
         run_tool_src = os.path.join(
             os.path.dirname(__file__), "..", "..", "docker", "plugin-runner", "run_tool.py"
         )
-        with open(run_tool_src, "r", encoding="utf-8") as f:
+        with open(run_tool_src, encoding="utf-8") as f:
             run_tool = f.read()
 
         fixture_dir = os.path.join(os.path.dirname(__file__), "container_fixture")
-        with open(os.path.join(fixture_dir, "plugin.py"), "r", encoding="utf-8") as f:
+        with open(os.path.join(fixture_dir, "plugin.py"), encoding="utf-8") as f:
             plugin_py = f.read()
 
         build_dir = os.path.join(os.path.dirname(__file__), ".tmp-plugin-build")
@@ -957,8 +956,9 @@ class TestContainerFailClosedNoSubprocess:
     @staticmethod
     def _patch_runner_unreachable():
         """Patch container_runner httpx to raise ConnectError (runner down)."""
-        import httpx as httpx_mod
         from unittest.mock import AsyncMock
+
+        import httpx as httpx_mod
 
         async def _raise_connect_error(*args, **kwargs):
             raise httpx_mod.ConnectError("Connection refused")

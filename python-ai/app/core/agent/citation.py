@@ -12,7 +12,7 @@ twice on the same input produces the same output.
 
 import json
 import logging
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ CANONICAL_SOURCE_KEYS = frozenset({
 })
 
 # Sentinel returned when every extraction path fails.
-_EMPTY_CITATION: Dict[str, Any] = {
+_EMPTY_CITATION: dict[str, Any] = {
     "document_id": None,
     "chunk_id": None,
     "title": "",
@@ -33,12 +33,12 @@ _EMPTY_CITATION: Dict[str, Any] = {
 }
 
 
-def _is_canonical(source: Dict[str, Any]) -> bool:
+def _is_canonical(source: dict[str, Any]) -> bool:
     """Return True when *source* is already in canonical Agent V1 format."""
     return CANONICAL_SOURCE_KEYS.issubset(source.keys())
 
 
-def _extract_document_id(source: Dict[str, Any]) -> Optional[int]:
+def _extract_document_id(source: dict[str, Any]) -> int | None:
     raw = source.get("document_id")
     if raw is not None:
         try:
@@ -48,7 +48,7 @@ def _extract_document_id(source: Dict[str, Any]) -> Optional[int]:
     return None
 
 
-def _extract_chunk_id(source: Dict[str, Any]) -> Optional[str]:
+def _extract_chunk_id(source: dict[str, Any]) -> str | None:
     chunk_id = source.get("chunk_id")
     if chunk_id is not None:
         return str(chunk_id)
@@ -61,7 +61,7 @@ def _extract_chunk_id(source: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _lookup_chunk_in_store(chunk_id: Optional[str]) -> Optional[Dict[str, Any]]:
+def _lookup_chunk_in_store(chunk_id: str | None) -> dict[str, Any] | None:
     """Look up a single chunk in the persistent JSON store.
 
     Used as a last-resort fallback when the in-memory metadata carried
@@ -85,7 +85,7 @@ def _lookup_chunk_in_store(chunk_id: Optional[str]) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _extract_title(source: Dict[str, Any], doc_id: Optional[int]) -> str:
+def _extract_title(source: dict[str, Any], doc_id: int | None) -> str:
     """Extract the best available title, logging when we must fall back."""
     # Prefer document_title from metadata (the raw retrieval path).
     meta = source.get("metadata")
@@ -134,7 +134,7 @@ def _extract_title(source: Dict[str, Any], doc_id: Optional[int]) -> str:
     return f"文档 #{doc_id}" if doc_id else "未知文档"
 
 
-def _extract_excerpt(source: Dict[str, Any]) -> str:
+def _extract_excerpt(source: dict[str, Any]) -> str:
     """Extract the best available excerpt (first 300 chars)."""
     # Already-normalized.
     excerpt = source.get("excerpt")
@@ -170,14 +170,14 @@ def _extract_excerpt(source: Dict[str, Any]) -> str:
     return ""
 
 
-def _extract_score(source: Dict[str, Any]) -> float:
+def _extract_score(source: dict[str, Any]) -> float:
     try:
         return float(source.get("score", 0.0) or 0.0)
     except (TypeError, ValueError):
         return 0.0
 
 
-def _extract_kb_id(source: Dict[str, Any]) -> Optional[int]:
+def _extract_kb_id(source: dict[str, Any]) -> int | None:
     """Extract the knowledge-base id, preferring metadata then top level.
 
     Present on retrieval results produced inside a knowledge base scope.
@@ -201,8 +201,8 @@ def _extract_kb_id(source: Dict[str, Any]) -> Optional[int]:
 
 
 def normalize_source(
-    source: Union[Dict[str, Any], Any],
-) -> Dict[str, Any]:
+    source: dict[str, Any] | Any,
+) -> dict[str, Any]:
     """Normalise a single retrieval result into canonical Agent V1 format.
 
     This is the **single choke point** for source citations.  Every code

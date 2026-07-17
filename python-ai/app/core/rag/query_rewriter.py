@@ -9,7 +9,6 @@ Query Rewriter - 问题重写模块
 """
 
 import re
-from typing import List, Dict, Optional
 from dataclasses import dataclass
 
 
@@ -17,7 +16,7 @@ from dataclasses import dataclass
 class RewriteResult:
     """重写结果"""
     original_query: str
-    rewritten_queries: List[str]
+    rewritten_queries: list[str]
     context_added: bool = False
     split_count: int = 1
 
@@ -41,7 +40,7 @@ class QueryRewriter:
     def rewrite(
         self,
         query: str,
-        conversation_history: Optional[List[Dict]] = None
+        conversation_history: list[dict] | None = None
     ) -> RewriteResult:
         """
         重写用户查询
@@ -71,7 +70,7 @@ class QueryRewriter:
     def _add_context(
         self,
         query: str,
-        history: List[Dict]
+        history: list[dict]
     ) -> str:
         """
         添加上下文（处理指代问题）
@@ -98,7 +97,7 @@ class QueryRewriter:
 
         return context_query
 
-    def _extract_recent_entities(self, history: List[Dict]) -> List[str]:
+    def _extract_recent_entities(self, history: list[dict]) -> list[str]:
         """从对话历史中提取最近的实体"""
         entities = []
 
@@ -115,7 +114,7 @@ class QueryRewriter:
 
         return entities[:3]  # 返回最近3个实体
 
-    def _split_query(self, query: str) -> List[str]:
+    def _split_query(self, query: str) -> list[str]:
         """
         拆分复合问题
 
@@ -146,8 +145,8 @@ class QueryRewriter:
     def expand_terms(
         self,
         query: str,
-        term_mapping: Optional[Dict[str, List[str]]] = None
-    ) -> List[str]:
+        term_mapping: dict[str, list[str]] | None = None
+    ) -> list[str]:
         """
         术语扩展
 
@@ -172,7 +171,7 @@ class QueryRewriter:
 
 
 # 全局实例
-_query_rewriter: Optional[QueryRewriter] = None
+_query_rewriter: QueryRewriter | None = None
 
 
 def get_query_rewriter() -> QueryRewriter:

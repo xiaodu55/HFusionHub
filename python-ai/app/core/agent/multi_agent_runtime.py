@@ -12,12 +12,11 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator
 
 from .agent import Agent, AgentResponse
 from .workflow_runtime import (
     NO_SUFFICIENT_EVIDENCE_REPLY,
-    SERVICE_UNAVAILABLE_REPLY,
     AgentRun,
     AgentRunEvent,
     AgentRunStore,
@@ -27,7 +26,7 @@ from .workflow_runtime import (
 logger = logging.getLogger(__name__)
 
 
-def _parse_stream_event(chunk: str) -> Optional[Dict[str, Any]]:
+def _parse_stream_event(chunk: str) -> dict[str, Any] | None:
     """Return a structured SSE event dict if ``chunk`` is one, else ``None``.
 
     The delegate emits JSON-serialised ``{"event": ...}`` objects alongside
@@ -69,9 +68,9 @@ class BoundedMultiAgentWorkflow(Agent):
     def __init__(
         self,
         delegate: Agent,
-        knowledge_base_id: Optional[int],
+        knowledge_base_id: int | None,
         timeout_seconds: float = 60.0,
-        run_store: Optional[AgentRunStore] = None,
+        run_store: AgentRunStore | None = None,
         mode: str = "pipeline",
         max_handoffs: int = 1,
     ):
@@ -95,7 +94,7 @@ class BoundedMultiAgentWorkflow(Agent):
         run.duration_ms = round((time.monotonic() - started) * 1000, 2)
 
     @staticmethod
-    def _event(run: AgentRun, name: str, status: str, started: float, error_code: Optional[str] = None) -> None:
+    def _event(run: AgentRun, name: str, status: str, started: float, error_code: str | None = None) -> None:
         run.events.append(AgentRunEvent(
             name=name,
             status=status,
@@ -103,7 +102,7 @@ class BoundedMultiAgentWorkflow(Agent):
             error_code=error_code,
         ))
 
-    def _validate_sources(self, sources: List[Dict[str, Any]]) -> Tuple[bool, str]:
+    def _validate_sources(self, sources: list[dict[str, Any]]) -> tuple[bool, str]:
         """Reject a citation list not backed by chunks from the authorised KB."""
         if not sources:
             return False, "missing_evidence"
@@ -116,14 +115,14 @@ class BoundedMultiAgentWorkflow(Agent):
                 return False, "invalid_citation"
         return True, "accepted"
 
-    def _validate_evidence(self, response: AgentResponse) -> Tuple[bool, str]:
+    def _validate_evidence(self, response: AgentResponse) -> tuple[bool, str]:
         """Reject anything not backed by chunks from the authorised KB."""
         if response.finish_reason == "insufficient_evidence":
             return False, "insufficient_evidence"
         return self._validate_sources(response.sources)
 
     def _insufficient(self, run: AgentRun, started: float, reason: str,
-                      original: Optional[AgentResponse] = None) -> AgentResponse:
+                      original: AgentResponse | None = None) -> AgentResponse:
         self._finish(run, "insufficient_evidence", reason, started)
         # The delegate (ReactAgent) already produces a tailored reply for the
         # insufficient_evidence case (e.g. "knowledge base is empty / still
@@ -148,7 +147,7 @@ class BoundedMultiAgentWorkflow(Agent):
     async def run(
         self,
         query: str,
-        history: List[Dict[str, str]] = None,
+        history: list[dict[str, str]] = None,
         **kwargs: Any,
     ) -> AgentResponse:
         # P10 is meaningful only with an explicit Java-authorised KB.  Preserve
@@ -166,7 +165,7 @@ class BoundedMultiAgentWorkflow(Agent):
     async def _run_pipeline(
         self,
         query: str,
-        history: List[Dict[str, str]] = None,
+        history: list[dict[str, str]] = None,
         **kwargs: Any,
     ) -> AgentResponse:
 
@@ -179,7 +178,7 @@ class BoundedMultiAgentWorkflow(Agent):
                 timeout=self.timeout_seconds,
             )
             self._event(run, "retrieval_agent", "completed", research_started)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._event(run, "retrieval_agent", "failed", research_started, "timeout")
             self._finish(run, "failed", "multi_agent_timeout", started)
             return AgentResponse(
@@ -221,9 +220,9 @@ class BoundedMultiAgentWorkflow(Agent):
         run: AgentRun,
         event_name: str,
         query: str,
-        history: List[Dict[str, str]] = None,
+        history: list[dict[str, str]] = None,
         **kwargs: Any,
-    ) -> Optional[AgentResponse]:
+    ) -> AgentResponse | None:
         """单次 delegate 调用：超时/异常只记事件并返回 None（专家失败隔离）。"""
         stage_started = time.monotonic()
         try:
@@ -233,7 +232,7 @@ class BoundedMultiAgentWorkflow(Agent):
             )
             self._event(run, event_name, "completed", stage_started)
             return response
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._event(run, event_name, "failed", stage_started, "timeout")
             return None
         except Exception:
@@ -241,10 +240,10 @@ class BoundedMultiAgentWorkflow(Agent):
             return None
 
     @staticmethod
-    def _merge_sources(*source_lists: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _merge_sources(*source_lists: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """按 (document_id, chunk_id) 去重合并多棒来源，保持出现顺序。"""
         seen = set()
-        merged: List[Dict[str, Any]] = []
+        merged: list[dict[str, Any]] = []
         for sources in source_lists:
             for source in sources or []:
                 if not isinstance(source, dict):
@@ -259,7 +258,7 @@ class BoundedMultiAgentWorkflow(Agent):
     async def _run_supervisor(
         self,
         query: str,
-        history: List[Dict[str, str]] = None,
+        history: list[dict[str, str]] = None,
         **kwargs: Any,
     ) -> AgentResponse:
         """supervisor 模式：检索研究员 → 确定性分派补充分析 → 确定性合并。
@@ -331,7 +330,7 @@ class BoundedMultiAgentWorkflow(Agent):
     async def _run_handoff(
         self,
         query: str,
-        history: List[Dict[str, str]] = None,
+        history: list[dict[str, str]] = None,
         **kwargs: Any,
     ) -> AgentResponse:
         """handoff 模式：顺序移交——证据不足时移交扩展检索棒（次数硬上限）。
@@ -341,7 +340,7 @@ class BoundedMultiAgentWorkflow(Agent):
         run = self.run_store.start(self.knowledge_base_id)
         started = time.monotonic()
         current_query = query
-        last_response: Optional[AgentResponse] = None
+        last_response: AgentResponse | None = None
         last_reason = "missing_evidence"
 
         for hop in range(1 + self.max_handoffs):
@@ -377,7 +376,7 @@ class BoundedMultiAgentWorkflow(Agent):
     async def run_stream(
         self,
         query: str,
-        history: List[Dict[str, str]] = None,
+        history: list[dict[str, str]] = None,
         **kwargs: Any,
     ) -> AsyncGenerator[str, None]:
         """Stream delegate output incrementally with a streaming evidence gate.
@@ -423,7 +422,7 @@ class BoundedMultiAgentWorkflow(Agent):
             }, ensure_ascii=False)
             return
 
-        sources: List[Dict[str, Any]] = []
+        sources: list[dict[str, Any]] = []
         gated = False
         async for chunk in self.delegate.run_stream(query=query, history=history, **kwargs):
             event = _parse_stream_event(chunk)
@@ -451,5 +450,5 @@ class BoundedMultiAgentWorkflow(Agent):
                         return
             yield chunk
 
-    def get_tools(self) -> List[Dict[str, Any]]:
+    def get_tools(self) -> list[dict[str, Any]]:
         return self.delegate.get_tools()

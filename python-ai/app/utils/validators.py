@@ -3,10 +3,10 @@ File and request validators
 """
 
 from pathlib import Path
-from typing import Optional, Tuple
-from fastapi import HTTPException
-from app.utils.config import config
 
+from fastapi import HTTPException
+
+from app.utils.config import config
 
 # Supported file types
 SUPPORTED_FILE_TYPES = {
@@ -125,7 +125,7 @@ def validate_file_path(file_path: str) -> str:
     return str(resolved_path)
 
 
-def validate_file_size(file_path: str, max_size: Optional[int] = None) -> None:
+def validate_file_size(file_path: str, max_size: int | None = None) -> None:
     """
     Validate file size is within limits
 
@@ -161,7 +161,7 @@ def validate_file_size(file_path: str, max_size: Optional[int] = None) -> None:
         )
 
 
-def validate_filename(filename: Optional[str]) -> None:
+def validate_filename(filename: str | None) -> None:
     """
     Validate filename length and characters
 
@@ -184,7 +184,7 @@ def validate_filename(filename: Optional[str]) -> None:
         )
 
 
-def validate_document_id(document_id: Optional[str]) -> None:
+def validate_document_id(document_id: str | None) -> None:
     """
     Validate document ID
 
@@ -217,9 +217,9 @@ def validate_document_id(document_id: Optional[str]) -> None:
 def validate_file_upload(
     file_path: str,
     file_type: str,
-    filename: Optional[str] = None,
+    filename: str | None = None,
     check_size: bool = True
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """
     Comprehensive file upload validation
 
