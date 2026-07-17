@@ -128,6 +128,57 @@ def check_internal_token_keys() -> None:
     else:
         print("[ok] 内部 token 键一致性：所有 internal-token 使用标准键")
 
+    check_internal_header_names()
+
+
+# Java↔Python 内部契约锚点：头名/回调路径字符串必须两侧同时存在。
+# 上一段的键名检查只覆盖 Java @Value 的配置键；头名字符串散落在
+# AiClient / CallbackSignatureFilter 与 Python 的 internal_auth /
+# vectorization 回调里——任一侧改名属于破坏性契约变更，CI 必须拦住。
+CONTRACT_ANCHORS = [
+    (
+        REPO / "java-backend" / "src/main/java/com/hfusionhub/client/AiClient.java",
+        ["X-Internal-Token"],
+        "Java→Python 调用头",
+    ),
+    (
+        REPO / "java-backend" / "src/main/java/com/hfusionhub/tenant/CallbackSignatureFilter.java",
+        ["X-Callback-Signature", "X-Callback-Secret"],
+        "Python→Java 回调验签头",
+    ),
+    (
+        REPO / "python-ai" / "app/api/internal_auth.py",
+        ["X-Internal-Token"],
+        "Python 侧内部鉴权头",
+    ),
+    (
+        REPO / "python-ai" / "app/api/vectorization.py",
+        ["X-Callback-Secret", "X-Callback-Signature", "/api/documents/{document_id}/chunks"],
+        "Python→Java 回调签名头与回调目标路径",
+    ),
+    (
+        REPO / "java-backend" / "src/main/java/com/hfusionhub/service/impl/VectorizationServiceImpl.java",
+        ["/api/documents/", "/chunks"],
+        "Java 侧调用的 Python 删除端点路径",
+    ),
+]
+
+
+def check_internal_header_names() -> None:
+    bad: list[str] = []
+    for path, needles, desc in CONTRACT_ANCHORS:
+        if not path.exists():
+            bad.append(f"{path}: 文件不存在（契约锚点被移动？请同步更新 static-checks.py）")
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for needle in needles:
+            if needle not in text:
+                bad.append(f"{path.name}: 未找到契约字符串 '{needle}'（{desc}）")
+    if bad:
+        problems.append("Java↔Python 内部契约锚点缺失:\n    " + "\n    ".join(bad))
+    else:
+        print(f"[ok] 内部契约锚点：{len(CONTRACT_ANCHORS)} 处头名/路径两侧一致")
+
 
 # ── 检查 3：测试计数文档同步 ────────────────────────────────────────────
 

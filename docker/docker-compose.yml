@@ -1,6 +1,6 @@
 services:
   mysql8:
-    image: mysql:8.0
+    image: mysql:8.0.36
     container_name: mysql8
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
@@ -27,7 +27,7 @@ services:
       - backend
 
   redis7:
-    image: redis:7-alpine
+    image: redis:7.2-alpine
     container_name: redis7
     ports:
       - "127.0.0.1:6379:6379"
@@ -131,7 +131,7 @@ services:
   # 与 staging-rehearsal.sh 的独立 dind（hfusionhub-rehearsal-dind）同占 127.0.0.1:2376，勿同时运行。
   dind:
     # 与 staging-rehearsal.sh 使用同一本地镜像（离线可用，避免依赖代理拉取）
-    image: docker:dind
+    image: docker:27-dind
     container_name: dind
     privileged: true
     ports:

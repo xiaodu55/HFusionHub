@@ -60,15 +60,14 @@ public class LoginRateLimiter {
     /**
      * Record a failed login attempt for the given IP.
      * Locks out the IP if the threshold is exceeded.
+     *
+     * <p>INCR 与 EXPIRE 通过 Lua 脚本原子执行（仅首次失败设置窗口 TTL），
+     * 修复两步之间进程崩溃导致计数键永不过期、失败计数跨窗口累积的问题。</p>
      */
     public void recordFailedAttempt(String ip) {
         String key = attemptKey(ip);
-        long attempts = redisUtils.increment(key, 1);
-        if (attempts == 1) {
-            redisUtils.expire(key, WINDOW_SECONDS, TimeUnit.SECONDS);
-        }
-
-        if (attempts >= MAX_ATTEMPTS) {
+        Long attempts = redisUtils.incrementWithTtlIfAbsent(key, 1, WINDOW_SECONDS, TimeUnit.SECONDS);
+        if (attempts != null && attempts >= MAX_ATTEMPTS) {
             String lockKey = lockoutKey(ip);
             redisUtils.set(lockKey, String.valueOf(System.currentTimeMillis()), LOCKOUT_SECONDS, TimeUnit.SECONDS);
             log.warn("LOGIN_RATE_LIMIT_LOCKED_OUT ip={} attempts={}", ip, attempts);

@@ -9,12 +9,19 @@ from __future__ import annotations
 
 import time
 import threading
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import Dict
 
 from fastapi import APIRouter
 
 router = APIRouter(tags=["metrics"])
+
+# Bounded sample window per histogram. TraceMiddleware observes EVERY request,
+# so an unbounded per-name list grows with process lifetime and every
+# /metrics scrape re-sorts the whole history (slow scrape + memory leak).
+# Quantiles are computed over the most recent window; lifetime count/sum are
+# tracked separately so Prometheus _count/_sum stay monotonic.
+HISTOGRAM_MAX_SAMPLES = 4096
 
 # ---------------------------------------------------------------------------
 # Lightweight metrics registry
@@ -26,7 +33,11 @@ class MetricsRegistry:
     def __init__(self):
         self._lock = threading.Lock()
         self._counters: Dict[str, int] = defaultdict(int)
-        self._histograms: Dict[str, list] = defaultdict(list)
+        self._histograms: Dict[str, deque] = defaultdict(
+            lambda: deque(maxlen=HISTOGRAM_MAX_SAMPLES)
+        )
+        self._histogram_counts: Dict[str, int] = defaultdict(int)
+        self._histogram_sums: Dict[str, float] = defaultdict(float)
         self._start_time = time.time()
 
     def inc(self, name: str, value: int = 1):
@@ -36,12 +47,16 @@ class MetricsRegistry:
     def observe(self, name: str, value: float):
         with self._lock:
             self._histograms[name].append(value)
+            self._histogram_counts[name] += 1
+            self._histogram_sums[name] += value
 
     def snapshot(self) -> Dict:
         with self._lock:
             return {
                 "counters": dict(self._counters),
                 "histograms": dict(self._histograms),
+                "histogram_counts": dict(self._histogram_counts),
+                "histogram_sums": dict(self._histogram_sums),
                 "uptime_seconds": time.time() - self._start_time,
             }
 
@@ -62,11 +77,14 @@ class MetricsRegistry:
             lines.append(f"# TYPE hfusionhub_{safe_name}_total counter")
             lines.append(f"hfusionhub_{safe_name}_total {value}")
 
-        # Histogram summaries (avg, p50, p95, max)
+        # Histogram summaries (avg, p50, p95, max) over the recent window;
+        # _count/_sum use lifetime totals so they stay monotonic.
         for name, values in snapshot["histograms"].items():
             safe_name = name.replace("-", "_").replace(" ", "_")
             if not values:
                 continue
+            lifetime_count = snapshot["histogram_counts"].get(name, len(values))
+            lifetime_sum = snapshot["histogram_sums"].get(name, sum(values))
             sorted_vals = sorted(values)
             avg = sum(sorted_vals) / len(sorted_vals)
             p50 = sorted_vals[len(sorted_vals) // 2]
@@ -78,8 +96,8 @@ class MetricsRegistry:
             lines.append(f"hfusionhub_{safe_name}_seconds{{quantile=\"0.5\"}} {p50:.4f}")
             lines.append(f"hfusionhub_{safe_name}_seconds{{quantile=\"0.95\"}} {p95:.4f}")
             lines.append(f"hfusionhub_{safe_name}_seconds{{quantile=\"0.99\"}} {p99:.4f}")
-            lines.append(f"hfusionhub_{safe_name}_seconds_count {len(values)}")
-            lines.append(f"hfusionhub_{safe_name}_seconds_sum {sum(values):.4f}")
+            lines.append(f"hfusionhub_{safe_name}_seconds_count {lifetime_count}")
+            lines.append(f"hfusionhub_{safe_name}_seconds_sum {lifetime_sum:.4f}")
 
         lines.append("")
         return "\n".join(lines)

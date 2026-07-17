@@ -25,8 +25,37 @@ import com.hfusionhub.service.VectorizationService;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
 
 class DeletionServiceImplTest {
+
+    /**
+     * 生产构造器新增 TransactionTemplate 后的测试适配：返回一个把回调
+     * 原地同步执行的模板（无真实事务资源），使被测逻辑与生产路径一致。
+     */
+    private static TransactionTemplate passThroughTxTemplate() {
+        PlatformTransactionManager noopManager = new PlatformTransactionManager() {
+            @Override
+            public TransactionStatus getTransaction(TransactionDefinition definition) {
+                return new SimpleTransactionStatus();
+            }
+
+            @Override
+            public void commit(TransactionStatus status) {
+                // no-op
+            }
+
+            @Override
+            public void rollback(TransactionStatus status) {
+                // no-op
+            }
+        };
+        return new TransactionTemplate(noopManager);
+    }
 
     @Test
     void getPendingTasksRecoversStaleProcessingTasksBeforeSelectingPending() {
@@ -47,7 +76,8 @@ class DeletionServiceImplTest {
                 documentIndexJobMapper,
                 conversationMapper,
                 messageMapper,
-                vectorizationService);
+                vectorizationService,
+                passThroughTxTemplate());
 
         DeletionTask pending = new DeletionTask();
         pending.setId(99L);
@@ -81,7 +111,8 @@ class DeletionServiceImplTest {
                 documentIndexJobMapper,
                 conversationMapper,
                 messageMapper,
-                vectorizationService);
+                vectorizationService,
+                passThroughTxTemplate());
 
         KnowledgeBase kb = new KnowledgeBase();
         kb.setId(11L);
@@ -122,7 +153,8 @@ class DeletionServiceImplTest {
                 documentIndexJobMapper,
                 conversationMapper,
                 messageMapper,
-                vectorizationService);
+                vectorizationService,
+                passThroughTxTemplate());
 
         Document document = new Document();
         document.setId(7L);
@@ -166,7 +198,8 @@ class DeletionServiceImplTest {
                 documentIndexJobMapper,
                 conversationMapper,
                 messageMapper,
-                vectorizationService);
+                vectorizationService,
+                passThroughTxTemplate());
 
         Document document = new Document();
         document.setId(7L);
@@ -211,7 +244,8 @@ class DeletionServiceImplTest {
                 documentIndexJobMapper,
                 conversationMapper,
                 messageMapper,
-                vectorizationService);
+                vectorizationService,
+                passThroughTxTemplate());
 
         Document document = new Document();
         document.setId(7L);
@@ -251,7 +285,8 @@ class DeletionServiceImplTest {
                 documentIndexJobMapper,
                 conversationMapper,
                 messageMapper,
-                vectorizationService);
+                vectorizationService,
+                passThroughTxTemplate());
 
         KnowledgeBase kb = new KnowledgeBase();
         kb.setId(11L);

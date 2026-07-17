@@ -90,3 +90,31 @@ class TestTraceMiddleware:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/health")
             assert HEADER_NAME in resp.headers
+
+
+class TestTraceIdValidation:
+    """客户端提供的 trace ID 会进入日志与响应头——必须做格式校验防注入。"""
+
+    @pytest.mark.asyncio
+    async def test_rejects_injection_style_id(self, transport):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/health",
+                headers={HEADER_NAME: "inject me <script>alert(1)</script>"},
+            )
+            tid = resp.headers[HEADER_NAME]
+            assert "<script>" not in tid
+            assert len(tid) == 32
+
+    @pytest.mark.asyncio
+    async def test_rejects_oversized_id(self, transport):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/health", headers={HEADER_NAME: "a" * 300})
+            assert len(resp.headers[HEADER_NAME]) == 32
+
+    @pytest.mark.asyncio
+    async def test_accepts_max_length_legal_id(self, transport):
+        legal = "A-b_09" * 10 + "x"  # 61 chars, alnum+dash+underscore
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/health", headers={HEADER_NAME: legal})
+            assert resp.headers[HEADER_NAME] == legal

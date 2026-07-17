@@ -46,9 +46,9 @@ import static org.junit.jupiter.api.Assertions.*;
  *       无 Docker 时整体跳过。</li>
  * </ul></p>
  *
- * <p>运行方式：{@code mvn test -Pitest -Dtest=TenantInterceptorIsolationIT}</p>
+ * <p>运行方式：{@code mvn test（已随 surefire 收集；Docker 不可用时自动跳过）}</p>
  */
-class TenantInterceptorIsolationIT {
+class TenantInterceptorIsolationTest {
 
     static final String JDBC_URL = System.getenv("HFH_IT_JDBC_URL");
     static final String JDBC_USER = System.getenv().getOrDefault("HFH_IT_JDBC_USER", "itest");

@@ -23,7 +23,7 @@ services:
   # Infrastructure
   # -----------------------------------------------------------------------
   mysql8:
-    image: mysql:8.0
+    image: mysql:8.0.36
     container_name: hfusionhub-mysql
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
@@ -48,7 +48,7 @@ services:
     restart: unless-stopped
 
   redis7:
-    image: redis:7-alpine
+    image: redis:7.2-alpine
     container_name: hfusionhub-redis
     ports:
       - "127.0.0.1:6379:6379"

@@ -55,7 +55,8 @@ public class RagIntentNodeServiceImpl implements RagIntentNodeService {
 
         RagIntentNode node = new RagIntentNode();
         node.setUserId(userId);
-        node.setTenantId(TenantContext.getTenantId() == null ? 1L : TenantContext.getTenantId());
+        // fail-closed：上下文缺失时显式报错，而不是静默落到租户 1
+        node.setTenantId(TenantContext.requireTenantId());
         node.setParentId(parent == null ? null : parent.getId());
         node.setIntentCode(dto.getIntentCode().trim());
         node.setName(dto.getName().trim());

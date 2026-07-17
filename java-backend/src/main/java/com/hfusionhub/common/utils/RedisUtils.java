@@ -1,5 +1,6 @@
 package com.hfusionhub.common.utils;
 
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,6 +39,31 @@ public class RedisUtils {
      */
     public void set(String key, String value, long timeout, TimeUnit unit) {
         redisTemplate.opsForValue().set(key, value, timeout, unit);
+    }
+
+    private static final org.springframework.data.redis.core.script.RedisScript<Long> ATOMIC_INCREMENT_WITH_TTL =
+            org.springframework.data.redis.core.script.RedisScript.of(
+                    "local v = redis.call('INCRBY', KEYS[1], ARGV[1]) "
+                            + "if redis.call('TTL', KEYS[1]) < 0 then "
+                            + "redis.call('EXPIRE', KEYS[1], ARGV[2]) end return v",
+                    Long.class);
+
+    /**
+     * 原子递增；仅当键尚无 TTL（首次递增或历史遗留的无 TTL 键）时补设过期时间。
+     *
+     * <p>用 Lua 脚本把 INCRBY 与 EXPIRE 合并为一次原子操作，修复
+     * "INCR 后进程崩溃、EXPIRE 未执行" 导致的计数键永不过期问题
+     * （该键永存会让 IP 的失败计数跨窗口累积、被一次旧失败触发锁定）。</p>
+     *
+     * @param key     键
+     * @param delta   递增量
+     * @param timeout 过期时间（仅当键当前无 TTL 时生效）
+     * @param unit    时间单位
+     * @return 递增后的值
+     */
+    public Long incrementWithTtlIfAbsent(String key, long delta, long timeout, TimeUnit unit) {
+        return redisTemplate.execute(ATOMIC_INCREMENT_WITH_TTL, List.of(key),
+                String.valueOf(delta), String.valueOf(unit.toSeconds(timeout)));
     }
 
     /**

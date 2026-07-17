@@ -58,7 +58,9 @@ public class AiClient {
     /**
      * Chat with AI agent — general path (knowledge_base_id optional).
      *
-     * <p>自动重试：网络连接失败或 5xx 服务器错误时最多重试 3 次，指数退避（1s → 2s → 4s）。</p>
+     * <p>不自动重试：/api/chat 是非幂等调用（Python 侧已有完整的 LLM
+     * 重试预算与用量结算），Java 侧整体重发会造成 LLM 重复消费与
+     * 对话状态重复写入。瞬时连接失败会直接抛给调用方/前端显式重试。
      *
      * @param message User message
      * @param conversationId Conversation ID
@@ -66,10 +68,6 @@ public class AiClient {
      * @param history Chat history
      * @return AI response
      */
-    @Retryable(
-            retryFor = {ResourceAccessException.class, HttpServerErrorException.class},
-            maxAttempts = 3,
-            backoff = @Backoff(delay = 1000, multiplier = 2, maxDelay = 10000))
     public ChatResponse chat(
             String message, Long conversationId, Long knowledgeBaseId, List<Map<String, String>> history) {
         return doChat(
@@ -88,10 +86,6 @@ public class AiClient {
                 null);
     }
 
-    @Retryable(
-            retryFor = {ResourceAccessException.class, HttpServerErrorException.class},
-            maxAttempts = 3,
-            backoff = @Backoff(delay = 1000, multiplier = 2, maxDelay = 10000))
     public ChatResponse chat(
             String message,
             Long conversationId,
@@ -117,11 +111,9 @@ public class AiClient {
 
     /**
      * Chat with AI agent — general path with style control.
+     *
+     * <p>非幂等调用，不自动重试（同上）。</p>
      */
-    @Retryable(
-            retryFor = {ResourceAccessException.class, HttpServerErrorException.class},
-            maxAttempts = 3,
-            backoff = @Backoff(delay = 1000, multiplier = 2, maxDelay = 10000))
     public ChatResponse chat(
             String message,
             Long conversationId,

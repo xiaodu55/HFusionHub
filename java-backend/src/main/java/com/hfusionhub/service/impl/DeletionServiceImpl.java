@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 异步删除任务服务实现 — 支持步骤化级联删除、失败重试
@@ -34,6 +35,7 @@ public class DeletionServiceImpl implements DeletionService {
     private final ConversationMapper conversationMapper;
     private final MessageMapper messageMapper;
     private final VectorizationService vectorizationService;
+    private final TransactionTemplate transactionTemplate;
 
     private static final int DEFAULT_MAX_RETRIES = 5;
     private static final int TASK_BATCH_SIZE = 10;
@@ -91,27 +93,43 @@ public class DeletionServiceImpl implements DeletionService {
     }
 
     @Override
-    @Transactional
     public void executeStep(DeletionTask task) {
         task.setStatus("PROCESSING");
         deletionTaskMapper.updateById(task);
 
         try {
-            if ("KB_DELETE".equals(task.getTaskType())) {
-                executeKbDeleteStep(task);
-            } else if ("KB_PURGE".equals(task.getTaskType())) {
-                executeKbPurgeStep(task);
-            } else if ("KB_DISABLE".equals(task.getTaskType())) {
-                executeKbDisableStep(task);
-            } else if ("DOCUMENT_DELETE".equals(task.getTaskType())) {
-                executeDocumentDeleteStep(task);
-            } else if ("DOCUMENT_PURGE".equals(task.getTaskType())) {
-                executeDocumentPurgeStep(task);
+            Runnable step = switch (task.getTaskType()) {
+                case "KB_DELETE" -> () -> executeKbDeleteStep(task);
+                case "KB_PURGE" -> () -> executeKbPurgeStep(task);
+                case "KB_DISABLE" -> () -> executeKbDisableStep(task);
+                case "DOCUMENT_DELETE" -> () -> executeDocumentDeleteStep(task);
+                case "DOCUMENT_PURGE" -> () -> executeDocumentPurgeStep(task);
+                default -> throw new BusinessException("未知删除任务类型: " + task.getTaskType());
+            };
+            if (isVectorStep(task.getTaskType(), task.getStepIndex())) {
+                // 同步调 Python（最长 120s/次）——绝不进事务
+                step.run();
+            } else {
+                transactionTemplate.executeWithoutResult(status -> step.run());
             }
         } catch (Exception e) {
             log.error("删除任务执行失败: taskId={}, step={}", task.getId(), task.getStepIndex(), e);
             markFailed(task, truncate(e.getMessage(), 2000));
         }
+    }
+
+    /**
+     * 向量删除步骤会同步调用 Python 服务（读超时最长 120s/次），必须运行在
+     * <b>事务之外</b>，否则一次慢调用就会占住 Hikari 连接并拖垮连接池。
+     * 其余纯 DB 步骤保持原子性（TransactionTemplate）。所有删除语句均幂等，
+     * 步骤部分应用后由状态机重试收敛（recoverStaleProcessingTasks 兜底）。
+     */
+    private boolean isVectorStep(String taskType, int stepIndex) {
+        return ("KB_DELETE".equals(taskType) && stepIndex == 1)
+                || ("KB_PURGE".equals(taskType) && stepIndex == 0)
+                || ("KB_DISABLE".equals(taskType) && stepIndex == 0)
+                || ("DOCUMENT_DELETE".equals(taskType) && stepIndex == 0)
+                || ("DOCUMENT_PURGE".equals(taskType) && stepIndex == 0);
     }
 
     // ──────────────── KB 删除级联步骤 ────────────────

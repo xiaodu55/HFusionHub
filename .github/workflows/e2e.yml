@@ -237,6 +237,8 @@ jobs:
           PYTHON_AI_BASE_URL: "http://localhost:9000"
           PYTHON_AI_INTERNAL_TOKEN: "e2e-internal-token"
           SA_TOKEN_NAME: "satoken"
+          SA_TOKEN_TIMEOUT: "86400"
+          SA_TOKEN_ACTIVE_TIMEOUT: "1800"
         run: mvn --batch-mode spring-boot:run &
 
       - name: Wait for Java backend

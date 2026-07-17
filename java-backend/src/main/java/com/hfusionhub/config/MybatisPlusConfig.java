@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerIntercept
 import com.baomidou.mybatisplus.extension.plugins.inner.TenantLineInnerInterceptor;
 import com.hfusionhub.tenant.TenantContext;
 import java.util.Set;
+import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.LongValue;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,6 +19,7 @@ import org.springframework.context.annotation.Configuration;
  *
  * @author HFusionHub Team
  */
+@Slf4j
 @Configuration
 public class MybatisPlusConfig {
 
@@ -92,16 +94,23 @@ public class MybatisPlusConfig {
             tenantInterceptor.setTenantLineHandler(new TenantLineHandler() {
                 @Override
                 public Expression getTenantId() {
-                    // Return a safe default when no tenant context is set.
+                    // Fail-closed: when no tenant context is set, return a
+                    // sentinel (-1) that matches NO real tenant's rows.
                     // MyBatis Plus calls getTenantId() before ignoreTable(),
                     // so tables like sys_user (in TENANT_IGNORE_TABLES) would
-                    // otherwise throw before ignoreTable can skip them.
-                    // Tenant isolation is enforced at the HTTP layer by
-                    // TenantContextInterceptor, which rejects unauthenticated /
-                    // unresolved requests in strict mode.
+                    // otherwise throw before ignoreTable can skip them — hence
+                    // a sentinel instead of an exception. With the sentinel:
+                    // context-less READs return nothing and context-less
+                    // WRITEs stamp tenant_id=-1 (visible garbage, never
+                    // another tenant's data). Legitimate context-less paths
+                    // must opt in via TenantContext.runAsSystem() /
+                    // runAs(); HTTP-layer isolation is enforced by
+                    // TenantContextInterceptor (strict mode).
                     Long tenantId = TenantContext.getTenantId();
                     if (tenantId == null) {
-                        return new LongValue(1);
+                        log.warn("租户上下文缺失，SQL 已按 fail-closed 哨兵 tenant_id=-1 处理"
+                                + "（如来自定时任务/异步线程，请用 TenantContext.runAs/runAsSystem 包裹）");
+                        return new LongValue(-1);
                     }
                     return new LongValue(tenantId);
                 }

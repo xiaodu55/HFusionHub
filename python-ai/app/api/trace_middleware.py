@@ -18,6 +18,7 @@ The middleware also:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Callable
 
@@ -35,16 +36,26 @@ from app.utils.trace import (
 
 logger = logging.getLogger("hfusionhub.trace")
 
+# Client-supplied trace IDs flow into log lines AND response headers, so a
+# crafted header must not inject newlines/control characters (log forgery)
+# or unbounded junk.  Accept only short alnum/underscore/dash IDs (covers the
+# 32-hex IDs generated here and UUID-style IDs from other services); anything
+# else is discarded and a fresh ID is generated.
+_TRACE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
 
 class TraceMiddleware(BaseHTTPMiddleware):
     """Extract / generate ``X-Trace-ID`` and attach it to the request context."""
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        trace_id = request.headers.get(HEADER_NAME)
-        if not trace_id or not trace_id.strip():
-            trace_id = create_trace_id()
-        else:
+        raw = request.headers.get(HEADER_NAME)
+        if raw and raw.strip() and _TRACE_ID_PATTERN.fullmatch(raw.strip()):
+            trace_id = raw.strip()
             set_trace_id(trace_id)
+        else:
+            # 缺失或格式非法（日志注入风险）——生成新 ID（create_trace_id
+            # 内部会安装 contextvar）。
+            trace_id = create_trace_id()
 
         # Make trace_id available in logging via LoggerAdapter or directly
         request.state.trace_id = trace_id

@@ -106,7 +106,7 @@ if [[ "$USE_DIND" == "1" ]]; then
       dind_args+=(-e "HTTP_PROXY=$dind_proxy_host" -e "HTTPS_PROXY=$dind_proxy_host"
         -e "NO_PROXY=localhost,127.0.0.1,host.docker.internal")
     fi
-    dind_args+=(docker:dind)
+    dind_args+=(docker:27-dind)
     if ! docker "${dind_args[@]}" >/dev/null 2>&1 || ! wait_for_dind; then
       docker rm -f "$DIND_NAME" >/dev/null 2>&1 || true
       echo "::warning::dind TLS handshake failed; runner will remain unavailable." >&2

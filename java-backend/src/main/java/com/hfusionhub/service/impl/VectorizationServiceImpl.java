@@ -335,8 +335,11 @@ public class VectorizationServiceImpl implements VectorizationService {
     }
 
     @Override
-    @Transactional(noRollbackFor = BusinessException.class)
     public void deleteDocumentIndex(Long documentId) {
+        // 故意不加 @Transactional：上面的远程 HTTP 调用（读超时最长 120s）
+        // 绝不能占住数据库连接。调用方（DeletionService 状态机）已按
+        // "向量步骤在事务外执行" 的约定组织流程，且对远程失败逐条
+        // try/catch 继续；本地两条删除幂等，各自短事务即可。
         try {
             HttpHeaders headers = internalHeaders();
             Long tenantId = resolveDeletedDocumentTenantById(documentId);

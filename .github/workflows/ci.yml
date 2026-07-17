@@ -362,6 +362,8 @@ jobs:
           cache-dependency-path: hfusionhub-frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Lint
+        run: npm run lint
       - name: Type-check and build
         run: npm run build
       - name: Run frontend tests
