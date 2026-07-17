@@ -43,7 +43,7 @@
 
 ### 🧪 测试验证
 
-- [ ] **冒烟测试通过** — `.\scripts\smoke-test.ps1` 全部 PASS（当前 48 PASS / 0 FAIL）
+- [ ] **冒烟测试通过** — `.\scripts\smoke-test.ps1` 全部 PASS / 0 FAIL
 - [ ] **E2E 测试通过** — `cd hfusionhub-frontend && npx playwright test`
 - [ ] **压力测试** — 并发用户 100（JMeter/Locust）；文档上传→解析→检索链路稳定性；数据库连接池无泄漏
 

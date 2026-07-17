@@ -33,10 +33,10 @@ logs/
 *~
 
 # --- OS junk ---
+# 注意：不 blanket 忽略 *.bat / *.cmd —— 全忽略会静默吞掉合法的 Windows
+# 批处理脚本；OS 产生的临时文件应由具体文件名（如下的桌面垃圾）处理。
 .DS_Store
 Thumbs.db
-*.bat
-*.cmd
 
 # --- Python ---
 __pycache__/

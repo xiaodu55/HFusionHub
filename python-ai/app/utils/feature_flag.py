@@ -13,13 +13,18 @@ Usage:
 
 import json
 import hashlib
+import logging
 import os
 import time
 import threading
 from typing import Optional
-from loguru import logger
 
 from app.utils.config import config
+
+# stdlib logging（非 loguru）：本模块的日志必须经过 main.py 的 TraceFilter /
+# SafeFormatter，带上请求级 trace_id；loguru 自带的 sink 会绕过这套体系，
+# 导致旗标降级/刷新日志丢失调用链关联。
+logger = logging.getLogger("hfusionhub.feature_flag")
 
 SCOPE_PRIORITY = {"environment": 5, "kb": 4, "user": 3, "tenant": 2, "global": 1}
 

@@ -5,6 +5,7 @@ HFusionHub Python AI Engine - FastAPI Application
 import os
 import sys
 import logging
+from contextlib import asynccontextmanager
 
 # Add project root to Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -77,12 +78,73 @@ except ImportError:
     gateway_router = None  # type: ignore
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Lifespan handler（替代已弃用的 @app.on_event）。
+
+    初始化需要异步启动的子系统；各子系统尽力而为，失败只记录告警
+    不阻断启动——但必须是显式日志而不是静默吞掉。
+    """
+    # ── startup ──────────────────────────────────────────────────────
+    import os as _os
+
+    # ── OpenTelemetry ─────────────────────────────────────────────────
+    from app.utils.telemetry import init_telemetry
+    init_telemetry(
+        service_name="hfusionhub-python-ai",
+        otlp_endpoint=_os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"),
+        enabled=_os.environ.get("OTEL_ENABLED", "").lower() in ("1", "true", "yes"),
+    )
+
+    # ── MCP Client ────────────────────────────────────────────────────
+    try:
+        from app.core.tools.mcp_client import get_mcp_client_manager
+        await get_mcp_client_manager().startup()
+    except Exception as exc:  # MCP is best-effort on startup
+        logging.getLogger("hfusionhub.startup").warning("MCP client startup failed: %s", exc)
+
+    # ── 平台内建插件（P2-3：bid_docx/bid_quote 容器插件）──
+    # wheel 由 scripts/plugin-provision.sh 构建到 PLUGIN_BUILTIN_WHEELS_DIR，
+    # 带 .sha256 sidecar 校验后加载进本地 registry，供容器沙箱执行。
+    try:
+        from app.core.plugin.builtins import load_builtin_wheels
+        load_builtin_wheels()
+    except Exception as exc:  # 平台内建插件加载尽力而为，不阻断启动
+        logging.getLogger("hfusionhub.startup").warning("Builtin plugin wheels failed to load: %s", exc)
+
+    # ── Model Gateway ─────────────────────────────────────────────────
+    try:
+        from app.core.llm.model_gateway import get_model_gateway
+        gw = get_model_gateway()
+        if gw.enabled:
+            await gw.warmup()
+    except Exception as exc:
+        logging.getLogger("hfusionhub.startup").warning("Model gateway warmup failed: %s", exc)
+
+    yield
+
+    # ── shutdown ──────────────────────────────────────────────────────
+    try:
+        from app.core.tools.mcp_client import get_mcp_client_manager
+        await get_mcp_client_manager().shutdown()
+    except Exception as exc:
+        logging.getLogger("hfusionhub.startup").warning("MCP client shutdown failed: %s", exc)
+    # Close the shared LLM HTTP clients so keepalive connections are released
+    # cleanly on shutdown (best-effort, like the other subsystems above).
+    try:
+        from app.core.llm.http_client import aclose_shared_clients
+        await aclose_shared_clients()
+    except Exception as exc:
+        logging.getLogger("hfusionhub.startup").warning("Shared HTTP client close failed: %s", exc)
+
+
 def create_app() -> FastAPI:
     """Create FastAPI application"""
     app = FastAPI(
         title="HFusionHub Python AI Engine",
         description="Document vectorization and RAG processing service",
-        version="1.0.0"
+        version="1.0.0",
+        lifespan=lifespan,
     )
 
     # Browsers reject credentialed requests with a wildcard origin. Keep the
@@ -173,62 +235,6 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    """Initialise subsystems that need async initialisation."""
-    import os as _os
-
-    # ── OpenTelemetry ─────────────────────────────────────────────────
-    from app.utils.telemetry import init_telemetry
-    init_telemetry(
-        service_name="hfusionhub-python-ai",
-        otlp_endpoint=_os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"),
-        enabled=_os.environ.get("OTEL_ENABLED", "").lower() in ("1", "true", "yes"),
-    )
-
-    # ── MCP Client ────────────────────────────────────────────────────
-    try:
-        from app.core.tools.mcp_client import get_mcp_client_manager
-        await get_mcp_client_manager().startup()
-    except Exception:
-        pass  # MCP is best-effort on startup
-
-    # ── 平台内建插件（P2-3：bid_docx/bid_quote 容器插件）──
-    # wheel 由 scripts/plugin-provision.sh 构建到 PLUGIN_BUILTIN_WHEELS_DIR，
-    # 带 .sha256 sidecar 校验后加载进本地 registry，供容器沙箱执行。
-    try:
-        from app.core.plugin.builtins import load_builtin_wheels
-        load_builtin_wheels()
-    except Exception:
-        pass  # 平台内建插件加载尽力而为，不阻断启动
-
-    # ── Model Gateway ─────────────────────────────────────────────────
-    try:
-        from app.core.llm.model_gateway import get_model_gateway
-        gw = get_model_gateway()
-        if gw.enabled:
-            await gw.warmup()
-    except Exception:
-        pass
-
-
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
-    """Gracefully tear down background subsystems."""
-    try:
-        from app.core.tools.mcp_client import get_mcp_client_manager
-        await get_mcp_client_manager().shutdown()
-    except Exception:
-        pass
-    # Close the shared LLM HTTP clients so keepalive connections are released
-    # cleanly on shutdown (best-effort, like the other subsystems above).
-    try:
-        from app.core.llm.http_client import aclose_shared_clients
-        await aclose_shared_clients()
-    except Exception:
-        pass
 
 
 def main():

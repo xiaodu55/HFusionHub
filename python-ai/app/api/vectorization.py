@@ -711,6 +711,15 @@ async def _notify_callback_async(
         payload_json = json.dumps(payload, ensure_ascii=False)
 
         headers = {"Content-Type": "application/json"}
+        # 透传请求级 trace_id：Java TraceFilter 会把入站 X-Trace-ID 记入
+        # MDC，回调若不带此头，Java 侧的日志/审计无法与原请求关联。
+        try:
+            from app.utils.trace import get_trace_id
+            trace_id = get_trace_id()
+            if trace_id:
+                headers["X-Trace-ID"] = trace_id
+        except Exception:
+            pass
         if callback_secret:
             headers["X-Callback-Secret"] = callback_secret
             # Compute HMAC-SHA256 signature over the raw JSON body
