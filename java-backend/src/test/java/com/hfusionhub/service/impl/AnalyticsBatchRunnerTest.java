@@ -64,6 +64,8 @@ class AnalyticsBatchRunnerTest {
                 "spark-submit quality_check.py --dt {date}");
         ReflectionTestUtils.setField(runner, "adsCommand",
                 "spark-submit ads_build.py --dt {date}");
+        ReflectionTestUtils.setField(runner, "chSyncCommand",
+                "spark-submit ch_sync.py");
     }
 
     @Test
@@ -110,12 +112,13 @@ class AnalyticsBatchRunnerTest {
 
         List<Long> ids = runner.runPipeline(DATE, null);
 
-        // stepIds = 5 步(full/dwd/dws/quality/ads);仅 full-import 真执行
-        assertThat(ids).hasSize(5);
+        // stepIds = 6 步(full/dwd/dws/quality/ads/ch-sync);仅 full-import 真执行
+        assertThat(ids).hasSize(6);
         assertThat(executed).hasSize(1);
         assertThat(store.get(ids.get(0)).getStatus()).isEqualTo("FAILED");
         assertThat(store.get(ids.get(1)).getStatus()).isEqualTo("SKIPPED");
         assertThat(store.get(ids.get(4)).getStatus()).isEqualTo("SKIPPED");
+        assertThat(store.get(ids.get(5)).getStatus()).isEqualTo("SKIPPED");
     }
 
     @Test
@@ -150,8 +153,10 @@ class AnalyticsBatchRunnerTest {
     void pipelineSucceedsWhenAllStepsPass() {
         List<Long> ids = runner.runPipeline(DATE, null);
 
-        assertThat(ids).hasSize(5);
-        assertThat(executed).hasSize(5);
+        assertThat(ids).hasSize(6);
+        assertThat(executed).hasSize(6);
+        // ch-sync 是标准档可选收尾步,排在 ads-build 之后
+        assertThat(String.join(" ", executed.get(5))).contains("ch_sync");
         // 全部步骤 SUCCESS(状态落库由 updateById 覆盖)
         assertThat(store.values().stream()
                 .filter(l -> !"pipeline".equals(l.getJobName()))

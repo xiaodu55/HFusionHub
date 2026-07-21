@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<!--
+  HFusionData Analytics — Capacity Scheduler 配置。
+
+  背景: hadoop-client/analytics-spark 等容器以只读挂载本目录覆盖镜像自带的
+  /opt/hadoop/etc/hadoop,镜像默认的 capacity-scheduler.xml 因此缺失,导致
+  ResourceManager 启动即抛 "Queue configuration missing child queue names
+  for root" 并循环重启(2026-08-31 起 YARN 实际从未可用)。本文件补齐单队列
+  default 的最小可用配置。
+-->
+<configuration>
+  <property>
+    <name>yarn.scheduler.capacity.maximum-applications</name>
+    <value>10000</value>
+  </property>
+  <property>
+    <name>yarn.scheduler.capacity.maximum-am-resource-percent</name>
+    <value>0.2</value>
+  </property>
+  <property>
+    <name>yarn.scheduler.capacity.root.queues</name>
+    <value>default</value>
+  </property>
+  <property>
+    <name>yarn.scheduler.capacity.root.default.capacity</name>
+    <value>100</value>
+  </property>
+  <property>
+    <name>yarn.scheduler.capacity.root.default.maximum-capacity</name>
+    <value>100</value>
+  </property>
+  <property>
+    <name>yarn.scheduler.capacity.root.default.user-limit-factor</name>
+    <value>1</value>
+  </property>
+  <property>
+    <name>yarn.scheduler.capacity.root.default.state</name>
+    <value>RUNNING</value>
+  </property>
+  <property>
+    <name>yarn.scheduler.capacity.root.default.acl_submit_applications</name>
+    <value>*</value>
+  </property>
+  <property>
+    <name>yarn.scheduler.capacity.root.default.acl_administer_queue</name>
+    <value>*</value>
+  </property>
+  <property>
+    <name>yarn.scheduler.capacity.node-locality-delay</name>
+    <value>-1</value>
+  </property>
+</configuration>

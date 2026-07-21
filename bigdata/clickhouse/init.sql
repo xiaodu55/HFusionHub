@@ -25,24 +25,28 @@ ENGINE = ReplacingMergeTree(version)
 PARTITION BY toYYYYMM(window_start)
 ORDER BY (window_start, tenant_id, model);
 
--- ── 租户 × 模型 × 日 ADS 镜像(可选:由 clickhouse-jdbc 从 Hive 同步;标准档
---    Superset 直查 Hive,此表供大屏高频查询降载) ─────────────────────────────
+-- ── 租户 × 模型 × 日聚合镜像(由 ch_sync.py 从 HDFS DWS 层同步;供大屏高频
+--    查询降载与 OLAP 对比实验)。注意:ReplacingMergeTree 的 version 列必须
+--    在建表时内联声明——曾放在 CREATE 之后的 ALTER 里补,首启校验即报
+--    "Version column version does not exist"(NO_SUCH_COLUMN_IN_TABLE)。
 CREATE TABLE IF NOT EXISTS analytics.ads_tenant_model_daily
 (
     stat_date         Date,
     tenant_id         Int64,
     model             String,
     call_count        UInt64,
+    prompt_tokens     UInt64,
+    completion_tokens UInt64,
     total_tokens      UInt64,
     cost_usd          Decimal(12, 6),
     avg_latency_ms    UInt64,
-    p95_latency_ms    UInt64
+    p95_latency_ms    UInt64,
+    version           UInt64 MATERIALIZED toUnixTimestamp(now())
 )
 ENGINE = ReplacingMergeTree(version)
 PARTITION BY toYYYYMM(stat_date)
 ORDER BY (stat_date, tenant_id, model)
 ;
-ALTER TABLE analytics.ads_tenant_model_daily ADD COLUMN IF NOT EXISTS version UInt64 MATERIALIZED toUnixTimestamp(now());
 
 -- ── 大屏常用查询(物化视图:按天预聚合请求量与成本速率) ─────────────────────
 CREATE MATERIALIZED VIEW IF NOT EXISTS analytics.mv_realtime_per_min
@@ -57,3 +61,27 @@ AS SELECT
     sum(total_cost)               AS total_cost
 FROM analytics.realtime_metrics
 GROUP BY minute, tenant_id;
+
+-- ── DWD 明细镜像(由 ch_sync.py 从 HDFS Parquet 同步;OLAP 加速对比实验用) ──
+CREATE TABLE IF NOT EXISTS analytics.dwd_llm_call
+(
+    dt                LowCardinality(String),
+    tenant_id         Int64,
+    user_id           Nullable(Int64),
+    conversation_id   Nullable(Int64),
+    agent_task_id     Nullable(Int64),
+    model             LowCardinality(String),
+    provider          LowCardinality(String),
+    request_type      LowCardinality(String),
+    prompt_tokens     Nullable(Int64),
+    completion_tokens Nullable(Int64),
+    total_tokens      Nullable(Int64),
+    cost_usd          Nullable(Decimal(12, 6)),
+    latency_ms        Nullable(Int64),
+    created_at        DateTime,
+    event_date        Date,
+    version           UInt64 MATERIALIZED toUnixTimestamp(now())
+)
+ENGINE = ReplacingMergeTree(version)
+PARTITION BY toYYYYMM(event_date)
+ORDER BY (event_date, tenant_id, model, created_at);

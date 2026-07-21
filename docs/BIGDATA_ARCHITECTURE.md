@@ -120,6 +120,8 @@ BIGDATA_JOB_DWD_TRANSFORM=docker exec hadoop-client spark-submit --master yarn /
 BIGDATA_JOB_DWS_AGGREGATE=docker exec hadoop-client spark-submit --master yarn /opt/bigdata/spark-jobs/dws_aggregate.py --dt {date}
 BIGDATA_JOB_QUALITY_CHECK=docker exec hadoop-client spark-submit --master yarn /opt/bigdata/spark-jobs/quality_check.py --dt {date}
 BIGDATA_JOB_ADS_BUILD=docker exec hadoop-client spark-submit --master yarn --jars /opt/bigdata/jars/mysql-connector-j-8.0.33.jar /opt/bigdata/spark-jobs/ads_build.py --dt {date}
+# 标准档(analytics-full)可选收尾:数仓结果同步 ClickHouse;精简档留空,该步自动 SKIPPED
+BIGDATA_JOB_CH_SYNC=docker exec analytics-spark /opt/spark/bin/spark-submit --master yarn --conf spark.driver.host=analytics-spark --conf spark.driver.bindAddress=0.0.0.0 --driver-class-path /opt/bigdata/jars/clickhouse-jdbc-0.6.3-all.jar --jars /opt/bigdata/jars/clickhouse-jdbc-0.6.3-all.jar,/opt/bigdata/jars/mysql-connector-j-8.0.33.jar /opt/bigdata/spark-jobs/ch_sync.py
 # 6) 重启 java-backend 使配置生效;浏览器打开 /analytics
 ```
 

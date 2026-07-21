@@ -83,7 +83,9 @@ services:
       YARN_NODEMANAGER_OPTS: "-Xmx768m"
     volumes:
       - ../bigdata/hadoop:/opt/hadoop/etc/hadoop:ro
-    networks: [analytics-net]
+    # 同时接入 core 网络:mysql8 在主 compose 网络,Spark 执行器(运行于本
+    # 容器)需经 JDBC 直读 analytics_realtime_metrics / 直写 ADS 镜像。
+    networks: [analytics-net, core]
     depends_on:
       - yarn-resourcemanager
 

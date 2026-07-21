@@ -46,10 +46,12 @@ public class AnalyticsBatchRunner {
     public static final String JOB_DWS = "dws-aggregate";
     public static final String JOB_QUALITY = "quality-check";
     public static final String JOB_ADS = "ads-build";
+    /** 标准档(analytics-full)可选收尾:数仓结果同步 ClickHouse;模板未配置即 SKIPPED。 */
+    public static final String JOB_CH_SYNC = "ch-sync";
     public static final String JOB_PIPELINE = "pipeline";
 
     private static final String[] PIPELINE_ORDER = {
-            JOB_FULL_IMPORT, JOB_DWD, JOB_DWS, JOB_QUALITY, JOB_ADS};
+            JOB_FULL_IMPORT, JOB_DWD, JOB_DWS, JOB_QUALITY, JOB_ADS, JOB_CH_SYNC};
 
     private static final int LOG_TAIL_CHARS = 1800;
 
@@ -70,6 +72,9 @@ public class AnalyticsBatchRunner {
 
     @Value("${bigdata.batch.jobs.ads-build:}")
     private String adsCommand;
+
+    @Value("${bigdata.batch.jobs.ch-sync:}")
+    private String chSyncCommand;
 
     @Autowired
     public AnalyticsBatchRunner(BigDataBatchRunLogMapper batchLogMapper) {
@@ -101,6 +106,7 @@ public class AnalyticsBatchRunner {
             case JOB_DWS -> dwsCommand;
             case JOB_QUALITY -> qualityCommand;
             case JOB_ADS -> adsCommand;
+            case JOB_CH_SYNC -> chSyncCommand;
             default -> "";
         };
     }

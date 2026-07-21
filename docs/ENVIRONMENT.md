@@ -34,7 +34,7 @@ Copy `docker/.env.example` to `docker/.env`:
 | `BIGDATA_BATCH_ENABLED` | `false` | 大数据日结调度开关（默认关闭，主产品零依赖） |
 | `BIGDATA_BATCH_CRON` | `0 0 4 * * ?` | 日结管线触发时间（UTC 由 JVM 时区决定） |
 | `BIGDATA_BATCH_OFFSET_DAYS` | `1` | 日结处理的数据日期偏移（1=T-1） |
-| `BIGDATA_JOB_FULL_IMPORT` 等 5 个 | 空 | 日结各步骤命令模板（`{date}` 占位；留空=该步 SKIPPED）。完整示例见 docs/BIGDATA_ARCHITECTURE.md §5.1 |
+| `BIGDATA_JOB_FULL_IMPORT` 等 6 个 | 空 | 日结各步骤命令模板（`{date}` 占位；留空=该步 SKIPPED）。第 6 个 `BIGDATA_JOB_CH_SYNC` 为标准档 ClickHouse 同步（精简档留空）。完整示例见 docs/BIGDATA_ARCHITECTURE.md §5.1 |
 | `MINIO_ROOT_PASSWORD` | `minioadmin` | MinIO object storage password |
 | `PLUGIN_RUNNER_TOKEN` | *(random)* | Plugin sandbox runner auth token (required — compose fails without it) |
 
