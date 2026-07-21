@@ -1,12 +1,20 @@
 #!/bin/sh
 set -eu
 
+# Git Bash / MSYS 会把 openssl 的 "-subj /CN=..." 参数改写成 Windows 路径
+# （如 D:/Git/CN=...）导致签发失败。仅豁免 /CN= 前缀的参数，其余 POSIX
+# 路径（如绝对路径形式的 OUT_DIR）保持正常转换。
+export MSYS2_ARG_CONV_EXCL="/CN="
+
 OUT_DIR="${1:-deploy/runner-tls}"
 MODE="${2:-generate}"
 DAYS=825
 CA_DAYS=3650
 CN="${TLS_CLIENT_CN:-hfusionhub-plugin-runner}"
-SERVER_SAN="${TLS_SERVER_SAN:-DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1}"
+# 默认 SAN 必须包含 DNS:dind：compose 里 plugin-runner 通过
+# DOCKER_HOST=tcp://dind:2376 连接并做主机名校验，缺 dind 会导致
+# TLS 握手报 Hostname mismatch（2026-09-02 实际发生）。
+SERVER_SAN="${TLS_SERVER_SAN:-DNS:dind,DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1}"
 
 mkdir -p "$OUT_DIR"
 
