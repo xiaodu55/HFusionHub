@@ -1,0 +1,26 @@
+engine,query,run,latency_ms,rows
+clickhouse,Q1,1,269,35
+clickhouse,Q1,2,226,35
+clickhouse,Q1,3,220,35
+clickhouse,Q2,1,244,32
+clickhouse,Q2,2,226,32
+clickhouse,Q2,3,217,32
+clickhouse,Q3,1,223,5
+clickhouse,Q3,2,222,5
+clickhouse,Q3,3,216,5
+clickhouse,Q4,1,237,690
+clickhouse,Q4,2,210,690
+clickhouse,Q4,3,215,690
+spark,Q1,run1,885,35
+spark,Q1,run2,751,35
+spark,Q1,run3,792,35
+spark,Q2,run1,894,32
+spark,Q2,run2,750,32
+spark,Q2,run3,698,32
+spark,Q3,run1,433,5
+spark,Q3,run2,408,5
+spark,Q3,run3,434,5
+spark,Q4,run1,692,690
+spark,Q4,run2,611,690
+spark,Q4,run3,598,690
+hive,Q1,1,N/A(Tez 计算引擎不可用,见 docs/BIGDATA_ARCHITECTURE.md 踩坑 #6;生产口径为 Spark 计算引擎)

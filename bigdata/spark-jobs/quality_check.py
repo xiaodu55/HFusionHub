@@ -108,18 +108,24 @@ def main():
     record("dwd_usage_event", "commit_over_reserve", over_commit, 0, over_commit == 0)
 
     # ── 落库 quality_report ─────────────────────────────────────────────────
-    from pyspark.sql.types import (BooleanType, DoubleType, StringType,
-                                   StructField, StructType)
-    schema = StructType([
-        StructField("stat_date", StringType()),
-        StructField("table_name", StringType()),
-        StructField("rule_name", StringType()),
-        StructField("metric_value", DoubleType()),
-        StructField("threshold", DoubleType()),
-        StructField("passed", BooleanType()),
-        StructField("detail", StringType()),
-    ])
-    report = spark.createDataFrame(results, schema)
+    # 注意: 不能用 spark.createDataFrame(本地列表) —— 那会在执行器上拉起
+    # Python worker,要求所有 NodeManager 装有 python3(本栈 NM 为 CentOS 7,
+    # 无 python3)。这里改用驱动端 VALUES SQL 构造 DataFrame,执行器零 Python 依赖。
+    def esc(text: str) -> str:
+        return str(text).replace("\\", "\\\\").replace("'", "\\'")
+
+    tuples = ", ".join(
+        "('{}', '{}', '{}', {}, {}, {}, '{}')".format(
+            esc(r[0]), esc(r[1]), esc(r[2]), float(r[3]), float(r[4]),
+            "true" if r[5] else "false", esc(r[6] if len(r) > 6 else ""))
+        for r in results
+    )
+    report = spark.sql(
+        "SELECT stat_date, table_name, rule_name, metric_value, threshold, "
+        "passed, detail FROM VALUES "
+        f"{tuples} AS t(stat_date, table_name, rule_name, "
+        "metric_value, threshold, passed, detail)"
+    )
     write_partitioned(report, "quality", "quality_report", dt)
     report.orderBy("passed", "table_name").show(truncate=False)
 

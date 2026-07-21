@@ -1,0 +1,14 @@
+engine,query,run,latency_ms,rows
+clickhouse,Q1,1,248,35
+clickhouse,Q1,2,242,35
+clickhouse,Q1,3,218,35
+clickhouse,Q2,1,243,32
+clickhouse,Q2,2,228,32
+clickhouse,Q2,3,237,32
+clickhouse,Q3,1,212,5
+clickhouse,Q3,2,217,5
+clickhouse,Q3,3,225,5
+clickhouse,Q4,1,223,690
+clickhouse,Q4,2,211,690
+clickhouse,Q4,3,215,690
+hive,Q1,1,N/A(Tez 计算引擎不可用,见 docs/BIGDATA_ARCHITECTURE.md 踩坑 #6;生产口径为 Spark 计算引擎)

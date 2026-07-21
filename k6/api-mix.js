@@ -39,7 +39,9 @@ export function setup() {
 export default function (token) {
   const headers = { 'Content-Type': 'application/json', satoken: token }
 
-  const health = http.get(`${HOST}/api/actuator/health`)
+  // /health 是 8080 上的公开 liveness 端点;actuator 已移至 9092 独立管理端口
+  // 且受认证保护,从这里探活只会得到 401。
+  const health = http.get(`${BASE}/health`)
   check(health, { 'health 200': r => r.status === 200 })
 
   const docs = http.get(`${BASE}/document/list?page=1&pageSize=5`, { headers })

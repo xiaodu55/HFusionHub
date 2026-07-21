@@ -1,0 +1,10 @@
+stage,seconds
+seed,23
+dt,2026-09-02
+full-import,53
+dwd-transform,52
+dws-aggregate,50
+quality-check,52
+ads-build,57
+ods_rows,359846
+ch-sync,51
