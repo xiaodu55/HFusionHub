@@ -1,5 +1,24 @@
 # HFusionData Analytics — Superset 部署与看板配置
 
+## 0. 看板一键引导(推荐)
+
+```bash
+export SUPERSET_PASSWORD=<管理员密码,与 docker/.env ADMIN_PASSWORD 一致>
+export MYSQL_PASSWORD=<docker/.env 的 MYSQL_PASSWORD>
+python bigdata/superset/bootstrap_superset.py
+```
+
+幂等创建:2 个数据库连接(MySQL ADS 镜像 + ClickHouse)、6 个数据集、6 张图表、
+6 个看板(成本趋势/模型占比/租户TopN/步骤成功率/评测质量/实时窗口)。
+已存在的同名对象自动复用;需重建看板请先删除再重跑。
+
+实现备注(Superset 4.0.1 的三个坑):
+- 本机代理(Clash 等)会劫持 urllib 对 localhost 的请求,脚本内已用空 ProxyHandler 绕过;
+- `POST/PUT /api/v1/dashboard` 均不接受 slices 字段,图表↔看板关联经元库
+  `dashboard_slices` 表直写(dev 口径);
+- `superset_config.py` 已关 `WTF_CSRF_ENABLED`(API 写操作需要,而该版本
+  `/api/v1/security/csrf/` 端点未注册)。端口仅绑 127.0.0.1,生产必须移除。
+
 ## 1. 首启初始化
 
 ```bash

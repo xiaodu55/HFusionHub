@@ -29,3 +29,9 @@ LANGUAGES = {
 # ClickHouse(标准档):
 #   clickhousedb+connect://analytics:***@analytics-clickhouse:8123/analytics
 # 生产建议:为 Superset 建只读账号,并在 Hive 侧行列级权限(Ranger)收敛。
+
+# 开发环境(端口仅绑 127.0.0.1)关闭 CSRF:bootstrap_superset.py 经 REST API
+# 批量建看板,而 4.0.1 部署里 /api/v1/security/csrf/ 端点未注册,写操作会被
+# "The CSRF token is missing." 拦截。生产/集群档必须移除此项。
+WTF_CSRF_ENABLED = False
+

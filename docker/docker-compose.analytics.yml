@@ -282,7 +282,8 @@ services:
     volumes:
       - ../bigdata/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
       - superset-home:/app/superset_home
-    networks: [analytics-net]
+    # 同时接入 core 网络:看板数据源包含 MySQL ADS 镜像(ads_*,V82)
+    networks: [analytics-net, core]
     depends_on:
       - hive-server2
 
