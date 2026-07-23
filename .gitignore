@@ -132,3 +132,6 @@ bigdata/flink-jobs/_run_*.sql
 bigdata/flink-jobs/_exec_*.sql
 bigdata/flink-jobs/_t[0-9]*.sql
 bigdata/flink-jobs/_test_part.sql
+
+# --- DolphinScheduler worker 的静态 docker CLI(34MB,下载方式见 README) ---
+bigdata/dolphinscheduler/docker

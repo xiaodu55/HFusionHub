@@ -287,6 +287,52 @@ services:
     depends_on:
       - hive-server2
 
+  # ── DolphinScheduler 3.2(标准档;日结 DAG 编排/重试/补数 UI) ─────────────
+  # standalone 单机档(master/worker/api/alert + H2 元库一体)。worker 挂载
+  # docker.sock:任务经 docker exec 复用 analytics-spark 的 spark-submit 路径
+  # (与 Java AnalyticsBatchRunner 同一命令模板,dev 单机口径,生产换集群执行器)。
+  dolphinscheduler:
+    image: apache/dolphinscheduler-standalone-server:3.2.1
+    container_name: analytics-dolphinscheduler
+    profiles: ["analytics-full"]
+    environment:
+      # UI 默认账号 admin / ***REMOVED-BY-REWRITE***,首登改密
+      DOLPHINSCHEDULER_OPTS: "-Xms512m -Xmx768m"
+    ports:
+      - "127.0.0.1:12345:12345"
+    volumes:
+      - dolphinscheduler-data:/opt/dolphinscheduler/data
+      # 静态 docker CLI(bigdata/dolphinscheduler/docker,见 .gitignore;下载方式见
+      # bigdata/dolphinscheduler/README.md):任务经 docker exec 复用主栈提交路径
+      - ../bigdata/dolphinscheduler/docker:/usr/local/bin/docker:ro
+      # 覆盖镜像默认 application.yaml:H2 文件库(落 data 卷)+ 关闭 master/worker
+      # 过载保护(宿主机常驻开发栈 CPU 饱和会误触发,master 拒绝消费命令队列)
+      - ../bigdata/dolphinscheduler/application.yaml:/opt/dolphinscheduler/conf/application.yaml:ro
+      - ../bigdata/dolphinscheduler/Init.java:/opt/dolphinscheduler/Init.java:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    # 首次编译 Init.java → 空库自动灌 schema → 再起服务(文件库缺表会启动失败)
+    command: >
+      sh -c "if [ ! -f /opt/dolphinscheduler/data/Init.class ]; then
+               javac -d /opt/dolphinscheduler/data /opt/dolphinscheduler/Init.java;
+             fi;
+             java -cp /opt/dolphinscheduler/libs/master-server/h2-2.2.220.jar:/opt/dolphinscheduler/data Init;
+             exec /bin/start.sh"
+    ulimits:
+      nofile: 65536
+    networks: [analytics-net, core]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:12345/dolphinscheduler/actuator/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          # standalone 四合一 JVM(master+worker+api+alert)堆外开销大,
+          # 1.5g 会被 OOM kill(137);3g 为实测下限
+          memory: 3g
+
 networks:
   analytics-net:
     name: hfusionhub-analytics
@@ -302,3 +348,4 @@ volumes:
   flink-checkpoints:
   clickhouse-data:
   superset-home:
+  dolphinscheduler-data:
