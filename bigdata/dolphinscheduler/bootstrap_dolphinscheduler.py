@@ -106,9 +106,10 @@ def main() -> int:
     SESSION["id"] = login["data"]["sessionId"]
     print("[ok] DS 登录成功")
 
-    # ── 项目 ───────────────────────────────────────────────────────────────
+    # ── 项目(DS UI API 走表单编码) ─────────────────────────────────────────
     resp = call("POST", "/projects", {"projectName": "HFusionData",
-                                      "description": "多租户 AI 平台运营数据分析"})
+                                      "description": "多租户 AI 平台运营数据分析"},
+                form=True)
     if resp.get("code") == 0:
         project_code = resp["data"]["code"]
         print(f"  [create] 项目 HFusionData code={project_code}")

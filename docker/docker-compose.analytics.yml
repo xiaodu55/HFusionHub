@@ -305,18 +305,12 @@ services:
       # 静态 docker CLI(bigdata/dolphinscheduler/docker,见 .gitignore;下载方式见
       # bigdata/dolphinscheduler/README.md):任务经 docker exec 复用主栈提交路径
       - ../bigdata/dolphinscheduler/docker:/usr/local/bin/docker:ro
-      # 覆盖镜像默认 application.yaml:H2 文件库(落 data 卷)+ 关闭 master/worker
-      # 过载保护(宿主机常驻开发栈 CPU 饱和会误触发,master 拒绝消费命令队列)
+      # 覆盖镜像默认 application.yaml:仅关闭 master/worker 过载保护
+      # (宿主机常驻开发栈 CPU 饱和会误触发,master 拒绝消费命令队列)。
+      # 注意: H2 保持镜像默认 mem 库 —— 文件库与 DS 3.2.1 的 MySQL 模式 DDL
+      # 存在 schema 兼容问题,DS 重启后重跑 bootstrap 脚本重建元数据(约 30s)。
       - ../bigdata/dolphinscheduler/application.yaml:/opt/dolphinscheduler/conf/application.yaml:ro
-      - ../bigdata/dolphinscheduler/Init.java:/opt/dolphinscheduler/Init.java:ro
       - /var/run/docker.sock:/var/run/docker.sock
-    # 首次编译 Init.java → 空库自动灌 schema → 再起服务(文件库缺表会启动失败)
-    command: >
-      sh -c "if [ ! -f /opt/dolphinscheduler/data/Init.class ]; then
-               javac -d /opt/dolphinscheduler/data /opt/dolphinscheduler/Init.java;
-             fi;
-             java -cp /opt/dolphinscheduler/libs/master-server/h2-2.2.220.jar:/opt/dolphinscheduler/data Init;
-             exec /bin/start.sh"
     ulimits:
       nofile: 65536
     networks: [analytics-net, core]

@@ -135,3 +135,6 @@ bigdata/flink-jobs/_test_part.sql
 
 # --- DolphinScheduler worker 的静态 docker CLI(34MB,下载方式见 README) ---
 bigdata/dolphinscheduler/docker
+
+# --- 本地 compose override(见文件头注释,网络恢复后删除) ---
+docker/docker-compose.override.yml

@@ -39,8 +39,7 @@ spring:
       schema-locations: classpath:sql/dolphinscheduler_h2.sql
   datasource:
     driver-class-name: org.h2.Driver
-    # 文件库落在 data 卷(内存库 mem: 每次重启清空全部项目/工作流/调度!)
-    url: jdbc:h2:file:/opt/dolphinscheduler/data/h2db/dolphinscheduler;MODE=MySQL;AUTO_SERVER=TRUE;DATABASE_TO_LOWER=true
+    url: jdbc:h2:mem:dolphinscheduler;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=true
     username: sa
     password: ""
   quartz:
