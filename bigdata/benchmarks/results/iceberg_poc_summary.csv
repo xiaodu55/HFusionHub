@@ -1,0 +1,8 @@
+[poc] stage=iceberg-init rows=1050026 seconds=9.2
+[poc] stage=updates rows=10539 seconds=0
+[poc] stage=overwrite-rep1 rows=1050026 seconds=6.9
+[poc] stage=merge-rep1 rows=10539 seconds=12.8
+[poc] stage=overwrite-rep2 rows=1050026 seconds=6.1
+[poc] stage=merge-rep2 rows=10539 seconds=10.4
+[poc] stage=time-travel old_visible=100 new_visible=100 seconds=0
+[poc] stage=schema-evolution has_new_column=True columns=17
