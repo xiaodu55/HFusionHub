@@ -217,7 +217,7 @@ services:
       - "127.0.0.1:8000:3000"
     environment:
       # 浏览器端 JS 直连 Milvus：用 IPv4 字面量，避免 localhost 解析到 ::1 导致连接被拒
-      MILVUS_URL: http://127.0.0.1:19530
+      MILVUS_URL: http://milvus:19530
     depends_on:
       milvus:
         condition: service_healthy
