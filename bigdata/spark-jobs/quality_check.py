@@ -16,11 +16,52 @@
 """
 
 import argparse
+import json
+import os
 import sys
 
 import pyspark.sql.functions as F
 
 from _common import build_spark, WAREHOUSE, write_partitioned
+
+# 规则配置(枚举域/开关/阈值)外置为本文件同目录的 quality_rules.json:
+# 枚举域必须与 Java 侧 UsageRequestType/UsageOperation/UsageMeter 枚举一致,
+# 新增计量项由"改代码发版"降级为"改配置"。缺文件/缺键时回退内置默认。
+_DEFAULT_CONFIG = {
+    "enums": {
+        "request_type": ["chat", "embedding", "agent", "evaluation"],
+        "operation": ["RESERVE", "COMMIT", "RELEASE"],
+        "meter": ["chat_tokens", "agent_tokens", "index_chunks", "plugin_executions",
+                  "bid_projects", "tender_elements", "bid_draft_chars", "bid_check_reports"],
+    },
+    "enabled": {
+        "r1_ods_partition_nonempty": True,
+        "r2_tenant_null_rate": True,
+        "r3_enum_domains": True,
+        "r4_negative_values": True,
+        "r5_ods_dwd_row_drift": True,
+        "r6_ledger_commit_over_reserve": True,
+    },
+    "thresholds": {"ods_dwd_row_drift_ratio": 0.01},
+}
+
+
+def load_rules_config() -> dict:
+    here = os.path.dirname(os.path.abspath(__file__))
+    merged = json.loads(json.dumps(_DEFAULT_CONFIG))
+    for path in (os.path.join(here, "quality_rules.json"),
+                 "/opt/bigdata/spark-jobs/quality_rules.json"):
+        try:
+            with open(path, encoding="utf-8") as f:
+                overlay = json.load(f)
+            for section, values in overlay.items():
+                if isinstance(values, dict):
+                    merged.setdefault(section, {}).update(values)
+                else:
+                    merged[section] = values
+        except (OSError, ValueError):
+            continue
+    return merged
 
 
 def read_ods(spark, table, dt):
@@ -40,72 +81,79 @@ def main():
     spark = build_spark("HFusionData-Quality")
     spark.sparkContext.setLogLevel("WARN")
 
+    config = load_rules_config()
+    enabled = config["enabled"]
+    enums = config["enums"]
+
     results = []  # (table, rule, value, threshold, passed, detail)
 
     def record(table, rule, value, threshold, passed, detail=""):
         results.append((dt, table, rule, float(value), float(threshold), bool(passed), detail))
 
     # ── R1 完整性 ───────────────────────────────────────────────────────────
-    for table in ("model_usage_record", "agent_step", "usage_event", "agent_task"):
-        try:
-            cnt = read_ods(spark, table, dt).count()
-            record(table, "ods_partition_nonempty", cnt, 0, cnt > 0,
-                   f"ODS {table} dt={dt} 行数={cnt}")
-        except Exception as exc:  # noqa: BLE001 — 分区不存在也记为不通过
-            record(table, "ods_partition_nonempty", 0, 0, False, f"读取失败: {exc}")
+    if enabled["r1_ods_partition_nonempty"]:
+        for table in ("model_usage_record", "agent_step", "usage_event", "agent_task"):
+            try:
+                cnt = read_ods(spark, table, dt).count()
+                record(table, "ods_partition_nonempty", cnt, 0, cnt > 0,
+                       f"ODS {table} dt={dt} 行数={cnt}")
+            except Exception as exc:  # noqa: BLE001 — 分区不存在也记为不通过
+                record(table, "ods_partition_nonempty", 0, 0, False, f"读取失败: {exc}")
 
     # ── R2 租户归属 ─────────────────────────────────────────────────────────
-    for table in ("dwd_llm_call", "dwd_agent_step", "dwd_agent_run"):
-        df = read_dwd(spark, table, dt)
-        total = df.count()
-        nulls = df.where(F.col("tenant_id").isNull()).count()
-        null_rate = nulls / total if total else 0.0
-        record(table, "tenant_null_rate", null_rate, 0.0, null_rate == 0.0,
-               f"空租户 {nulls}/{total}")
+    if enabled["r2_tenant_null_rate"]:
+        for table in ("dwd_llm_call", "dwd_agent_step", "dwd_agent_run"):
+            df = read_dwd(spark, table, dt)
+            total = df.count()
+            nulls = df.where(F.col("tenant_id").isNull()).count()
+            null_rate = nulls / total if total else 0.0
+            record(table, "tenant_null_rate", null_rate, 0.0, null_rate == 0.0,
+                   f"空租户 {nulls}/{total}")
 
-    # ── R3 枚举域 ───────────────────────────────────────────────────────────
+    # ── R3 枚举域(域清单来自 quality_rules.json) ────────────────────────────
     calls = read_dwd(spark, "dwd_llm_call", dt)
-    bad_type = calls.where(
-        ~F.col("request_type").isin("chat", "embedding", "agent", "evaluation")).count()
-    record("dwd_llm_call", "request_type_enum_violation", bad_type, 0, bad_type == 0)
-
     usage = read_dwd(spark, "dwd_usage_event", dt)
-    bad_op = usage.where(~F.col("operation").isin("RESERVE", "COMMIT", "RELEASE")).count()
-    record("dwd_usage_event", "operation_enum_violation", bad_op, 0, bad_op == 0)
-    # 枚举全集与 Java UsageMeter 一致(含招投标线 4 项;新增计量项需同步)
-    bad_meter = usage.where(
-        ~F.col("meter").isin("chat_tokens", "agent_tokens", "index_chunks",
-                             "plugin_executions", "bid_projects", "tender_elements",
-                             "bid_draft_chars", "bid_check_reports")).count()
-    record("dwd_usage_event", "meter_enum_violation", bad_meter, 0, bad_meter == 0)
+    if enabled["r3_enum_domains"]:
+        bad_type = calls.where(
+            ~F.col("request_type").isin(enums["request_type"])).count()
+        record("dwd_llm_call", "request_type_enum_violation", bad_type, 0, bad_type == 0)
+
+        bad_op = usage.where(~F.col("operation").isin(enums["operation"])).count()
+        record("dwd_usage_event", "operation_enum_violation", bad_op, 0, bad_op == 0)
+        bad_meter = usage.where(~F.col("meter").isin(enums["meter"])).count()
+        record("dwd_usage_event", "meter_enum_violation", bad_meter, 0, bad_meter == 0)
 
     # ── R4 数值域 ───────────────────────────────────────────────────────────
-    neg = calls.where((F.col("total_tokens") < 0) | (F.col("cost_usd") < 0)
-                      | (F.col("latency_ms") < 0)).count()
-    record("dwd_llm_call", "negative_values", neg, 0, neg == 0)
-    neg_usage = usage.where(F.col("amount") < 0).count()
-    record("dwd_usage_event", "negative_amount", neg_usage, 0, neg_usage == 0)
+    if enabled["r4_negative_values"]:
+        neg = calls.where((F.col("total_tokens") < 0) | (F.col("cost_usd") < 0)
+                          | (F.col("latency_ms") < 0)).count()
+        record("dwd_llm_call", "negative_values", neg, 0, neg == 0)
+        neg_usage = usage.where(F.col("amount") < 0).count()
+        record("dwd_usage_event", "negative_amount", neg_usage, 0, neg_usage == 0)
 
     # ── R5 跨表对账(ODS 与 DWD 行数一致,允许租户回补丢弃少量不可归属行) ────
-    ods_calls = read_ods(spark, "model_usage_record", dt).count()
-    dwd_calls = calls.count()
-    drift = ods_calls - dwd_calls
-    drift_ratio = drift / ods_calls if ods_calls else 0.0
-    record("dwd_llm_call", "ods_dwd_row_drift_ratio", drift_ratio, 0.01,
-           drift_ratio <= 0.01, f"ODS {ods_calls} -> DWD {dwd_calls}")
+    if enabled["r5_ods_dwd_row_drift"]:
+        ods_calls = read_ods(spark, "model_usage_record", dt).count()
+        dwd_calls = calls.count()
+        drift = ods_calls - dwd_calls
+        drift_ratio = drift / ods_calls if ods_calls else 0.0
+        drift_threshold = config["thresholds"]["ods_dwd_row_drift_ratio"]
+        record("dwd_llm_call", "ods_dwd_row_drift_ratio", drift_ratio, drift_threshold,
+               drift_ratio <= drift_threshold, f"ODS {ods_calls} -> DWD {dwd_calls}")
 
     # ── R6 账本逻辑(COMMIT <= RESERVE,同 request_id+meter) ────────────────
-    ledger = (
-        usage.groupBy("request_id", "meter")
-        .agg(
-            F.sum(F.when(F.col("operation") == "RESERVE", F.col("amount")).otherwise(0))
-            .alias("reserved"),
-            F.sum(F.when(F.col("operation") == "COMMIT", F.col("amount")).otherwise(0))
-            .alias("committed"),
+    if enabled["r6_ledger_commit_over_reserve"]:
+        ledger = (
+            usage.groupBy("request_id", "meter")
+            .agg(
+                F.sum(F.when(F.col("operation") == "RESERVE", F.col("amount")).otherwise(0))
+                .alias("reserved"),
+                F.sum(F.when(F.col("operation") == "COMMIT", F.col("amount")).otherwise(0))
+                .alias("committed"),
+            )
         )
-    )
-    over_commit = ledger.where(F.col("committed") > F.col("reserved")).count()
-    record("dwd_usage_event", "commit_over_reserve", over_commit, 0, over_commit == 0)
+        over_commit = ledger.where(F.col("committed") > F.col("reserved")).count()
+        record("dwd_usage_event", "commit_over_reserve", over_commit, 0, over_commit == 0)
 
     # ── 落库 quality_report ─────────────────────────────────────────────────
     # 注意: 不能用 spark.createDataFrame(本地列表) —— 那会在执行器上拉起

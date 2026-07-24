@@ -1,0 +1,37 @@
+{
+  "_comment": "HFusionData Analytics — 质量门禁规则配置(quality_check.py 读取)。枚举域必须与 Java 侧 UsageRequestType/UsageOperation/UsageMeter 枚举保持一致,新增枚举值时先改这里再发版。",
+  "enums": {
+    "request_type": [
+      "chat",
+      "embedding",
+      "agent",
+      "evaluation"
+    ],
+    "operation": [
+      "RESERVE",
+      "COMMIT",
+      "RELEASE"
+    ],
+    "meter": [
+      "chat_tokens",
+      "agent_tokens",
+      "index_chunks",
+      "plugin_executions",
+      "bid_projects",
+      "tender_elements",
+      "bid_draft_chars",
+      "bid_check_reports"
+    ]
+  },
+  "enabled": {
+    "r1_ods_partition_nonempty": true,
+    "r2_tenant_null_rate": true,
+    "r3_enum_domains": true,
+    "r4_negative_values": true,
+    "r5_ods_dwd_row_drift": true,
+    "r6_ledger_commit_over_reserve": true
+  },
+  "thresholds": {
+    "ods_dwd_row_drift_ratio": 0.01
+  }
+}

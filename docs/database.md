@@ -6,7 +6,7 @@
 
 数据库 `hfusionhub` 由 Flyway 管理，迁移脚本位于 `java-backend/src/main/resources/db/migration/`，当前已应用到 **V82**。
 
-## 迁移历史（V1–V82）
+## 迁移历史（V1–V83）
 
 | 版本 | 文件 | 说明 |
 |------|------|------|
@@ -67,8 +67,8 @@
 
 ## 迁移规则
 
-1. **历史迁移（V1–V82）不可修改**——修改会导致 Flyway checksum mismatch。
-2. **所有新表结构变更必须使用 V83+ 脚本**。
+1. **历史迁移（V1–V83）不可修改**——修改会导致 Flyway checksum mismatch。
+2. **所有新表结构变更必须使用 V84+ 脚本**。
 3. **新表必须包含 `tenant_id` 列**（除非加入 `MybatisPlusConfig.TENANT_IGNORE_TABLES`）——租户拦截器会对非忽略表自动注入 `WHERE tenant_id=?`，缺列会导致整表功能 500（V52/V53 曾因此出问题，`scripts/static-checks.py` 在 CI 中静态校验）。
 4. **生产环境**：禁止手动修改 `flyway_schema_history`。
 5. **本地重置**：`cd docker && docker compose down -v && docker compose up -d`。

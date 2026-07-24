@@ -1,0 +1,85 @@
+# HFusionData Analytics — 表级血缘注册表(轻量实现)
+#
+# 数据流向的唯一权威声明:load_lineage.py 读取本文件写入
+# MySQL table_lineage 表(V83)并渲染 Mermaid 图(lineage.md)。
+# 流水线步骤变更时同步维护本文件(与 Spark 作业实际读写保持一致)。
+
+project: HFusionData
+edges:
+  # ── 采集层:业务库 → ODS ──────────────────────────────────────────────
+  - job: full-import(Spark JDBC 全量)/ flink-cdc(Flink CDC 增量)
+    layer: 采集
+    inputs: [mysql:model_usage_record, mysql:agent_step, mysql:agent_task,
+             mysql:agent_run, mysql:usage_event, mysql:sys_user]
+    outputs: [ods:model_usage_record, ods:agent_step, ods:agent_task,
+              ods:agent_run, ods:usage_event, ods:sys_user]
+  - job: jsonl_to_hdfs(评测 JSONL 推送)
+    layer: 采集
+    inputs: [file:evaluation_jsonl]
+    outputs: [ods:eval_record]
+
+  # ── 维度层 ────────────────────────────────────────────────────────────
+  - job: dwd-transform(dim 派生)
+    layer: 维度
+    inputs: [ods:sys_user]
+    outputs: [dim:dim_date, dim:dim_model, dim:dim_user]
+
+  # ── 明细层:清洗 + 租户回补 ────────────────────────────────────────────
+  - job: dwd-transform(清洗/回补/派生 hit_ratio)
+    layer: 明细
+    inputs: [ods:model_usage_record, ods:agent_step, ods:agent_task,
+             ods:agent_run, ods:usage_event, ods:eval_record]
+    outputs: [dwd:dwd_llm_call, dwd:dwd_agent_step, dwd:dwd_usage_event,
+              dwd:dwd_agent_run, dwd:dwd_eval_record]
+
+  # ── 汇总层 ────────────────────────────────────────────────────────────
+  - job: dws-aggregate
+    layer: 汇总
+    inputs: [dwd:dwd_llm_call, dwd:dwd_agent_step, dwd:dwd_usage_event,
+             dwd:dwd_agent_run]
+    outputs: [dws:dws_tenant_model_daily, dws:dws_tenant_step_daily,
+              dws:dws_tenant_meter_daily, dws:dws_model_daily]
+
+  # ── 应用层(ADS + 回写) ────────────────────────────────────────────────
+  - job: ads-build
+    layer: 应用
+    inputs: [dws:dws_tenant_model_daily, dws:dws_tenant_step_daily,
+             dws:dws_tenant_meter_daily, dws:dws_model_daily, dwd:dwd_llm_call,
+             dwd:dwd_agent_step, dwd:dwd_eval_record]
+    outputs: [ads:ads_cost_daily, ads:ads_model_share, ads:ads_tenant_topn,
+              ads:ads_tool_success, ads:ads_eval_quality,
+              mysql:ads_cost_daily, mysql:ads_model_share,
+              mysql:ads_tenant_topn, mysql:ads_tool_success,
+              mysql:ads_eval_quality]
+
+  # ── 质量门禁(不合格阻断下游) ─────────────────────────────────────────
+  - job: quality-check(14 条规则)
+    layer: 质量
+    inputs: [ods:model_usage_record, ods:agent_step, ods:usage_event,
+             ods:agent_task, dwd:dwd_llm_call, dwd:dwd_usage_event]
+    outputs: [ads:quality_report]
+
+  # ── 实时链路(Flink CDC) ───────────────────────────────────────────────
+  - job: flink-cdc-realtime(binlog → upsert-kafka → 1min TVF 窗口)
+    layer: 实时
+    inputs: [mysql:model_usage_record, kafka:model_usage_record,
+             kafka:usage_event]
+    outputs: [mysql:analytics_realtime_metrics, clickhouse:realtime_metrics]
+
+  # ── 湖表层(Iceberg PoC) ───────────────────────────────────────────────
+  - job: iceberg-poc(湖表格式实验)
+    layer: 湖表
+    inputs: [dwd:dwd_llm_call]
+    outputs: [iceberg:dwd_llm_call_poc]
+
+  # ── 消费层 ────────────────────────────────────────────────────────────
+  - job: analytics-controller(Java /analytics 大屏)
+    layer: 消费
+    inputs: [mysql:ads_cost_daily, mysql:ads_model_share,
+             mysql:ads_tenant_topn, mysql:ads_tool_success,
+             mysql:ads_eval_quality, mysql:analytics_realtime_metrics]
+    outputs: [ui:/analytics 大屏]
+  - job: superset(BI 报表)
+    layer: 消费
+    inputs: [hive:ads_*, clickhouse:realtime_metrics]
+    outputs: [superset:5 张看板]
