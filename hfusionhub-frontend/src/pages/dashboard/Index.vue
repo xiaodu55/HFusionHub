@@ -17,6 +17,17 @@ import {
   Search,
   Sparkles,
   UploadCloud,
+  Cpu,
+  Wrench,
+  Fingerprint,
+  User,
+  StickyNote,
+  DollarSign,
+  Cable,
+  Rocket,
+  GitBranch,
+  Megaphone,
+  Package,
 } from 'lucide-vue-next'
 import * as knowledgeBaseApi from '@/api/knowledgeBase'
 import * as documentApi from '@/api/document'
@@ -157,6 +168,21 @@ const onboardingSteps = computed(() => [
 
 const nextStep = computed(() => onboardingSteps.value.find((step) => !step.done) || onboardingSteps.value[2])
 
+const moreLinks = [
+  { label: '我的模型', path: '/builder/models', icon: Cpu },
+  { label: 'AI 能力', path: '/builder/tools', icon: Wrench },
+  { label: 'MCP 服务', path: '/builder/mcp', icon: Cable },
+  { label: '应用发布', path: '/builder/apps', icon: Rocket },
+  { label: '运行记录', path: '/agent', icon: Sparkles },
+  { label: '待确认操作', path: '/approvals', icon: Fingerprint },
+  { label: '我的记忆', path: '/memory', icon: User },
+  { label: '我的笔记', path: '/notes', icon: StickyNote },
+  { label: '模型用量', path: '/cost', icon: DollarSign },
+  { label: '问题分流', path: '/admin/intent-tree', icon: GitBranch },
+  { label: '公告管理', path: '/admin/notices', icon: Megaphone },
+  { label: '套餐管理', path: '/admin/plans', icon: Package },
+]
+
 const quickActions = [
   { label: '新建知识库', path: '/knowledge-base', icon: Plus },
   { label: '上传文档', path: '/document', icon: UploadCloud },
@@ -222,6 +248,19 @@ onMounted(async () => {
           {{ action.label }}
         </Button>
       </div>
+    </section>
+
+    <section class="flex flex-wrap items-center gap-2">
+      <span class="text-xs text-muted-foreground">更多功能</span>
+      <router-link
+        v-for="link in moreLinks"
+        :key="link.path"
+        :to="link.path"
+        class="flex items-center gap-1.5 rounded-full border border-border/60 px-3 py-1 text-xs text-muted-foreground transition hover:border-border hover:text-foreground"
+      >
+        <component :is="link.icon" class="h-3 w-3" />
+        {{ link.label }}
+      </router-link>
     </section>
 
     <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
