@@ -218,6 +218,16 @@ function Start-Module {
             Start-Process -FilePath $pyVenv -ArgumentList '-m', 'app.main' `
                 -WorkingDirectory (Join-Path $RepoRoot 'python-ai') -WindowStyle Minimized `
                 -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+            # arq 任务队列 worker —— 文档解析为异步任务,没有 worker 消费
+            # 会导致上传的文档永远停在"排队中"。与 API 同 venv/Redis。
+            $arqOut = Join-Path $logDir 'arq-live.log'
+            $arqErr = Join-Path $logDir 'arq-live-err.log'
+            Rotate-LogFile -Path $arqOut
+            Rotate-LogFile -Path $arqErr
+            Write-Host "[start] arq worker (app.core.tasks.arq_tasks.WorkerSettings, redis db2)"
+            Start-Process -FilePath $pyVenv -ArgumentList '-m', 'arq', 'app.core.tasks.arq_tasks.WorkerSettings' `
+                -WorkingDirectory (Join-Path $RepoRoot 'python-ai') -WindowStyle Minimized `
+                -RedirectStandardOutput $arqOut -RedirectStandardError $arqErr
         }
         'runner' {
             Write-Host "[start] Plugin Runner (uvicorn app:app, port 9100)"
