@@ -250,17 +250,26 @@ onMounted(async () => {
       </div>
     </section>
 
-    <section class="flex flex-wrap items-center gap-2">
-      <span class="text-xs text-muted-foreground">更多功能</span>
-      <router-link
-        v-for="link in moreLinks"
-        :key="link.path"
-        :to="link.path"
-        class="flex items-center gap-1.5 rounded-full border border-border/60 px-3 py-1 text-xs text-muted-foreground transition hover:border-border hover:text-foreground"
-      >
-        <component :is="link.icon" class="h-3 w-3" />
-        {{ link.label }}
-      </router-link>
+    <section class="glass-panel-soft rounded-2xl p-4">
+      <div class="mb-3 flex items-center justify-between">
+        <h3 class="text-sm font-medium text-foreground">更多功能</h3>
+        <span class="text-xs text-muted-foreground">{{ moreLinks.length }} 项</span>
+      </div>
+      <div class="grid grid-cols-3 gap-1.5 sm:grid-cols-4 lg:grid-cols-6">
+        <router-link
+          v-for="link in moreLinks"
+          :key="link.path"
+          :to="link.path"
+          class="group flex flex-col items-center gap-2 rounded-xl border border-transparent px-2 py-3 text-muted-foreground transition hover:border-border/60 hover:bg-accent/40 hover:text-foreground"
+        >
+          <span
+            class="flex h-9 w-9 items-center justify-center rounded-lg bg-foreground/5 transition group-hover:bg-background group-hover:text-emerald-600 dark:group-hover:text-emerald-300"
+          >
+            <component :is="link.icon" class="h-4 w-4" />
+          </span>
+          <span class="text-center text-xs leading-none">{{ link.label }}</span>
+        </router-link>
+      </div>
     </section>
 
     <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
