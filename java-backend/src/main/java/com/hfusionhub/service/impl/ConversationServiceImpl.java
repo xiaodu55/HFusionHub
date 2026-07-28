@@ -82,6 +82,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final com.hfusionhub.service.RagIntentNodeService ragIntentNodeService;
     private final com.hfusionhub.service.KbShareService kbShareService;
     private final ChatUsageRecorder chatUsageRecorder;
+    private final MessagePersistenceService messagePersistence;
 
     private static final int REQUEST_ID_MAX_LENGTH = 64;
     public static final String ASSISTANT_REQUEST_SUFFIX = ":assistant";
@@ -313,9 +314,9 @@ public class ConversationServiceImpl implements ConversationService {
         // 幂等检查：如果 requestId 已存在，直接返回已保存的响应
         String requestId = normalizeRequestId(dto.getRequestId());
         String assistantRequestId = assistantRequestId(requestId);
-        Message existingAssistant = findAssistantByRequestId(assistantRequestId);
+        Message existingAssistant = messagePersistence.findAssistantByRequestId(assistantRequestId);
         if (existingAssistant != null) {
-            return convertToMessageInfoDTO(existingAssistant);
+            return messagePersistence.convertToMessageInfoDTO(existingAssistant);
         }
 
         // M7: 用量预占先于用户消息落库 — 超配额抛 400 时不再留下"有问无答"的孤立消息
@@ -326,7 +327,7 @@ public class ConversationServiceImpl implements ConversationService {
         usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, usageKey, reserveTokens, "message", requestId);
 
         // 阶段 1: 验证 + 保存用户消息（短事务）
-        Message userMessage = saveUserMessage(dto, requestId);
+        Message userMessage = messagePersistence.saveUserMessage(dto, requestId);
         Conversation conversation = conversationMapper.selectById(dto.getConversationId());
         Long currentUserId = JwtUtils.getCurrentUserId();
         List<Map<String, String>> history = getChatHistory(conversation.getId());
@@ -381,7 +382,7 @@ public class ConversationServiceImpl implements ConversationService {
         } catch (Exception e) {
             log.error("Failed to get AI response: {}", e.getMessage(), e);
             usageLedgerService.release(UsageMeter.CHAT_TOKENS, usageKey);
-            return saveAssistantMessage(
+            return messagePersistence.saveAssistantMessage(
                     dto.getConversationId(),
                     aiUnavailableMessage(e),
                     "fallback",
@@ -399,175 +400,10 @@ public class ConversationServiceImpl implements ConversationService {
         usageLedgerService.settle(UsageMeter.CHAT_TOKENS, usageKey, chargeTokens, "message", requestId);
         // 模型用量落账（model_usage_record）：同步聊天路径记录真实 token 用量。
         chatUsageRecorder.recordChatModelUsage(currentUserId, dto.getConversationId(), aiResponse);
-        return saveAssistantMessageV1(
+        return messagePersistence.saveAssistantMessageV1(
                 dto.getConversationId(), aiResponse, conversation, dto.getContent(), assistantRequestId);
     }
 
-    /**
-     * 阶段 1: 短事务保存用户消息
-     */
-    @Transactional
-    public Message saveUserMessage(MessageSendDTO dto) {
-        return saveUserMessage(dto, normalizeRequestId(dto.getRequestId()));
-    }
-
-    @Transactional
-    public Message saveUserMessage(MessageSendDTO dto, String requestId) {
-        Long currentUserId = JwtUtils.getCurrentUserId();
-        Conversation conversation = conversationMapper.selectById(dto.getConversationId());
-        if (conversation == null) throw new BusinessException("对话不存在");
-        if (!conversation.getUserId().equals(currentUserId)) throw new BusinessException("无权发送消息");
-        if (conversation.getKnowledgeBaseId() != null) {
-            KnowledgeBase kb = knowledgeBaseMapper.selectById(conversation.getKnowledgeBaseId());
-            if (kb == null || kb.getDeleted() == 1 || kb.getStatus() != 0) throw new BusinessException("关联的知识库已被删除或禁用");
-            if (!kb.getUserId().equals(currentUserId) && !kbShareService.canRead(currentUserId, kb.getId()))
-                throw new BusinessException("无权访问关联的知识库");
-        }
-        Message existingUser = findUserByRequestId(requestId);
-        if (existingUser != null) {
-            return existingUser;
-        }
-        Message userMessage = new Message();
-        userMessage.setConversationId(dto.getConversationId());
-        userMessage.setRole("user");
-        userMessage.setContent(dto.getContent());
-        userMessage.setRequestId(requestId);
-        try {
-            messageMapper.insert(userMessage);
-        } catch (DuplicateKeyException e) {
-            existingUser = findUserByRequestId(requestId);
-            if (existingUser != null) {
-                return existingUser;
-            }
-            throw e;
-        }
-        return userMessage;
-    }
-
-    /**
-     * 阶段 3: 短事务保存助手消息并更新对话标题
-     */
-    @Transactional
-    public MessageInfoDTO saveAssistantMessage(
-            Long conversationId,
-            String content,
-            String model,
-            int tokenCount,
-            List<Map<String, Object>> sources,
-            Conversation conversation,
-            String userContent) {
-        return saveAssistantMessage(
-                conversationId, content, model, tokenCount, sources, conversation, userContent, null);
-    }
-
-    @Transactional
-    public MessageInfoDTO saveAssistantMessage(
-            Long conversationId,
-            String content,
-            String model,
-            int tokenCount,
-            List<Map<String, Object>> sources,
-            Conversation conversation,
-            String userContent,
-            String requestId) {
-        Message existingAssistant = findAssistantByRequestId(requestId);
-        if (existingAssistant != null) {
-            return convertToMessageInfoDTO(existingAssistant);
-        }
-        Message msg = new Message();
-        msg.setConversationId(conversationId);
-        msg.setRole("assistant");
-        msg.setContent(content);
-        msg.setModel(model);
-        msg.setTokenCount(tokenCount);
-        msg.setSources(sources);
-        msg.setRequestId(requestId);
-        try {
-            messageMapper.insert(msg);
-        } catch (DuplicateKeyException e) {
-            existingAssistant = findAssistantByRequestId(requestId);
-            if (existingAssistant != null) {
-                return convertToMessageInfoDTO(existingAssistant);
-            }
-            throw e;
-        }
-        if ("新对话".equals(conversation.getTitle()) && StringUtils.hasText(userContent)) {
-            conversation.setTitle(userContent.length() > 50 ? userContent.substring(0, 50) + "..." : userContent);
-            conversationMapper.updateById(conversation);
-        }
-        return convertToMessageInfoDTO(msg);
-    }
-
-    /**
-     * Save assistant message from a full AiClient.ChatResponse, preserving
-     * Agent V1 metadata (status, agent_run_id, tool_calls_count,
-     * token_usage) alongside the core answer + sources.
-     */
-    @Transactional
-    public MessageInfoDTO saveAssistantMessageV1(
-            Long conversationId,
-            AiClient.ChatResponse aiResponse,
-            Conversation conversation,
-            String userContent,
-            String requestId) {
-        Message existingAssistant = findAssistantByRequestId(requestId);
-        if (existingAssistant != null) {
-            return convertToMessageInfoDTO(existingAssistant);
-        }
-        // Primary content: prefer answer if content is null (V1 path sends both).
-        String primaryContent = aiResponse.getContent() != null ? aiResponse.getContent() : aiResponse.getAnswer();
-
-        Message msg = new Message();
-        msg.setConversationId(conversationId);
-        msg.setRole("assistant");
-        msg.setContent(primaryContent != null ? primaryContent : "");
-        msg.setModel(aiResponse.getModel());
-        msg.setTokenCount(aiResponse.getTokenCount());
-        msg.setSources(aiResponse.getSources());
-        msg.setRequestId(requestId);
-
-        // Agent V1 metadata — stored as sources extension.
-        // Existing sources already contain citations; append V1 run metadata
-        // as a reserved entry so the frontend can render status badges.
-        if (aiResponse.getStatus() != null || aiResponse.getAgentRunId() != null) {
-            List<Map<String, Object>> enrichedSources =
-                    new java.util.ArrayList<>(msg.getSources() != null ? msg.getSources() : List.of());
-            Map<String, Object> v1Meta = new HashMap<>();
-            v1Meta.put("_v1", true);
-            if (aiResponse.getStatus() != null) {
-                v1Meta.put("status", aiResponse.getStatus());
-            }
-            if (aiResponse.getAgentRunId() != null) {
-                v1Meta.put("agent_run_id", aiResponse.getAgentRunId());
-            }
-            if (aiResponse.getToolCallsCount() > 0) {
-                v1Meta.put("tool_calls_count", aiResponse.getToolCallsCount());
-            }
-            if (aiResponse.getTokenUsage() != null) {
-                v1Meta.put("token_usage", aiResponse.getTokenUsage());
-            }
-            if (aiResponse.getErrorDetail() != null) {
-                v1Meta.put("error_detail", aiResponse.getErrorDetail());
-            }
-            enrichedSources.add(v1Meta);
-            msg.setSources(enrichedSources);
-        }
-
-        try {
-            messageMapper.insert(msg);
-        } catch (DuplicateKeyException e) {
-            existingAssistant = findAssistantByRequestId(requestId);
-            if (existingAssistant != null) {
-                return convertToMessageInfoDTO(existingAssistant);
-            }
-            throw e;
-        }
-        if ("新对话".equals(conversation.getTitle()) && StringUtils.hasText(userContent)) {
-            conversation.setTitle(userContent.length() > 50 ? userContent.substring(0, 50) + "..." : userContent);
-            conversationMapper.updateById(conversation);
-        }
-        return convertToMessageInfoDTO(msg);
-    }
 
     static String normalizeRequestId(String requestId) {
         if (!StringUtils.hasText(requestId)) {
@@ -608,22 +444,6 @@ public class ConversationServiceImpl implements ConversationService {
         } catch (Exception e) {
             throw new IllegalStateException("Unable to hash request id", e);
         }
-    }
-
-    private Message findUserByRequestId(String requestId) {
-        return findMessageByRequestId("user", requestId);
-    }
-
-    private Message findAssistantByRequestId(String requestId) {
-        return findMessageByRequestId("assistant", requestId);
-    }
-
-    private Message findMessageByRequestId(String role, String requestId) {
-        if (!StringUtils.hasText(requestId)) {
-            return null;
-        }
-        return messageMapper.selectOne(
-                new LambdaQueryWrapper<Message>().eq(Message::getRole, role).eq(Message::getRequestId, requestId));
     }
 
     @Override
@@ -667,7 +487,7 @@ public class ConversationServiceImpl implements ConversationService {
 
     private boolean saveStreamAssistantMessage(
             Long conversationId, String content, String model, List<Map<String, Object>> sources, String requestId) {
-        Message existingAssistant = findAssistantByRequestId(requestId);
+        Message existingAssistant = messagePersistence.findAssistantByRequestId(requestId);
         if (existingAssistant != null) {
             return true;
         }
@@ -688,7 +508,7 @@ public class ConversationServiceImpl implements ConversationService {
             chatUsageRecorder.recordStreamUsageEstimate(conversationId, content);
             return true;
         } catch (DuplicateKeyException e) {
-            existingAssistant = findAssistantByRequestId(requestId);
+            existingAssistant = messagePersistence.findAssistantByRequestId(requestId);
             if (existingAssistant != null) {
                 return true;
             }
@@ -843,7 +663,7 @@ public class ConversationServiceImpl implements ConversationService {
         List<Message> messages = messageMapper.selectByConversationId(conversationId);
 
         // 4. 转换为 DTO
-        return messages.stream().map(this::convertToMessageInfoDTO).collect(Collectors.toList());
+        return messages.stream().map(messagePersistence::convertToMessageInfoDTO).collect(Collectors.toList());
     }
 
     @Override
@@ -890,7 +710,7 @@ public class ConversationServiceImpl implements ConversationService {
             requestId = rawRequestId;
         }
         final String assistantRequestId = assistantRequestId(requestId);
-        Message existingAssistant = findAssistantByRequestId(assistantRequestId);
+        Message existingAssistant = messagePersistence.findAssistantByRequestId(assistantRequestId);
         if (existingAssistant != null) {
             log.info(
                     "Idempotent: assistant message already exists for requestId={}, returning taskId from message",
@@ -900,7 +720,7 @@ public class ConversationServiceImpl implements ConversationService {
         }
 
         // 5. 保存用户消息
-        Message userMessage = findUserByRequestId(requestId);
+        Message userMessage = messagePersistence.findUserByRequestId(requestId);
         if (userMessage == null) {
             userMessage = new Message();
             userMessage.setConversationId(dto.getConversationId());
@@ -910,7 +730,7 @@ public class ConversationServiceImpl implements ConversationService {
             try {
                 messageMapper.insert(userMessage);
             } catch (DuplicateKeyException e) {
-                userMessage = findUserByRequestId(requestId);
+                userMessage = messagePersistence.findUserByRequestId(requestId);
                 if (userMessage == null) {
                     throw e;
                 }
@@ -976,7 +796,7 @@ public class ConversationServiceImpl implements ConversationService {
             requestId = rawRequestId;
         }
         final String assistantRequestId = assistantRequestId(requestId);
-        Message existingAssistant = findAssistantByRequestId(assistantRequestId);
+        Message existingAssistant = messagePersistence.findAssistantByRequestId(assistantRequestId);
         if (existingAssistant != null) {
             sendExistingAssistantAndComplete(emitter, existingAssistant);
             return;
@@ -990,7 +810,7 @@ public class ConversationServiceImpl implements ConversationService {
         String streamingCapability = resolveCapabilityProfile(dto.getCapabilityProfile(), conversation, currentUserId);
 
         // 4. 保存用户消息
-        Message userMessage = findUserByRequestId(requestId);
+        Message userMessage = messagePersistence.findUserByRequestId(requestId);
         if (userMessage == null) {
             userMessage = new Message();
             userMessage.setConversationId(dto.getConversationId());
@@ -1000,7 +820,7 @@ public class ConversationServiceImpl implements ConversationService {
             try {
                 messageMapper.insert(userMessage);
             } catch (DuplicateKeyException e) {
-                userMessage = findUserByRequestId(requestId);
+                userMessage = messagePersistence.findUserByRequestId(requestId);
                 if (userMessage == null) {
                     throw e;
                 }
@@ -1548,47 +1368,6 @@ public class ConversationServiceImpl implements ConversationService {
                 .lastMessage(lastMessage != null ? lastMessage.getContent() : null)
                 .createdAt(conversation.getCreatedAt())
                 .updatedAt(conversation.getUpdatedAt())
-                .build();
-    }
-
-    /**
-     * Message → MessageInfoDTO, extracting Agent V1 metadata from sources
-     * when present.
-     */
-    private MessageInfoDTO convertToMessageInfoDTO(Message message) {
-        List<Map<String, Object>> rawSources = message.getSources();
-        List<Map<String, Object>> visibleSources = new java.util.ArrayList<>();
-        String v1Status = null;
-        String v1AgentRunId = null;
-        Integer v1ToolCallsCount = null;
-
-        if (rawSources != null) {
-            for (Map<String, Object> entry : rawSources) {
-                if (Boolean.TRUE.equals(entry.get("_v1"))) {
-                    v1Status = (String) entry.get("status");
-                    v1AgentRunId = (String) entry.get("agent_run_id");
-                    Object tcc = entry.get("tool_calls_count");
-                    if (tcc instanceof Number n) {
-                        v1ToolCallsCount = n.intValue();
-                    }
-                } else {
-                    visibleSources.add(entry);
-                }
-            }
-        }
-
-        return MessageInfoDTO.builder()
-                .id(message.getId())
-                .conversationId(message.getConversationId())
-                .role(message.getRole())
-                .content(message.getContent())
-                .tokenCount(message.getTokenCount())
-                .model(message.getModel())
-                .sources(visibleSources.isEmpty() ? null : visibleSources)
-                .createdAt(message.getCreatedAt())
-                .status(v1Status)
-                .agentRunId(v1AgentRunId)
-                .toolCallsCount(v1ToolCallsCount)
                 .build();
     }
 }
