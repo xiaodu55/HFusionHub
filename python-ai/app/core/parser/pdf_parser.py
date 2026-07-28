@@ -101,7 +101,7 @@ def is_usable_pdf_text(text: str) -> bool:
     if printable < 20:
         return False
 
-    bad_chars = stripped.count("\ufffd") + stripped.count("□") + stripped.count("�")
+    bad_chars = stripped.count("\ufffd") + stripped.count("□")
     if printable and bad_chars / printable > 0.05:
         return False
 

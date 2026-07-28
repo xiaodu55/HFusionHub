@@ -1,11 +1,11 @@
 -- =====================================================
--- HFusionHub �?H2 Test Schema (MySQL-compatible mode)
+-- HFusionHub —H2 Test Schema (MySQL-compatible mode)
 -- Combines V1–V7 migrations into a single H2-compatible DDL.
 -- Used by Spring's sql.init when Flyway is disabled in tests.
 -- =====================================================
 
 -- =====================================================
--- 用户�?(sys_user)
+-- 用户表(sys_user)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS sys_user (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -58,7 +58,7 @@ CREATE INDEX IF NOT EXISTS idx_kb_created_at ON knowledge_base (created_at);
 CREATE INDEX IF NOT EXISTS idx_knowledge_base_recycle_expires ON knowledge_base (deleted, recycle_expires_at);
 
 -- =====================================================
--- 文档�?(document)
+-- 文档表(document)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS document (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -87,7 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_doc_created_at ON document (created_at);
 CREATE INDEX IF NOT EXISTS idx_document_recycle_expires ON document (deleted, recycle_expires_at);
 
 -- =====================================================
--- 对话�?(conversation)
+-- 对话表(conversation)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS conversation (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -109,7 +109,7 @@ CREATE INDEX IF NOT EXISTS idx_conv_prompt_template ON conversation (prompt_temp
 CREATE INDEX IF NOT EXISTS idx_conv_created_at ON conversation (created_at);
 
 -- =====================================================
--- Prompt templates �?V16
+-- Prompt templates —V16
 -- =====================================================
 CREATE TABLE IF NOT EXISTS prompt_template (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -133,7 +133,7 @@ CREATE TABLE IF NOT EXISTS prompt_template (
 CREATE INDEX IF NOT EXISTS idx_prompt_template_user_status ON prompt_template (user_id, status, updated_at);
 
 -- =====================================================
--- Prompt template version history �?V17
+-- Prompt template version history —V17
 -- =====================================================
 CREATE TABLE IF NOT EXISTS prompt_template_version (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -154,7 +154,7 @@ CREATE TABLE IF NOT EXISTS prompt_template_version (
 CREATE INDEX IF NOT EXISTS idx_ptv_template_version ON prompt_template_version (template_id, version);
 
 -- =====================================================
--- 消息�?(message) �?includes V4 request_id column
+-- 消息表(message) —includes V4 request_id column
 -- =====================================================
 CREATE TABLE IF NOT EXISTS message (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -177,7 +177,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_msg_request_id ON message (request_id);
 CREATE INDEX IF NOT EXISTS idx_msg_conv_created_id ON message (conversation_id, created_at, id);
 
 -- =====================================================
--- 工具�?(tool)
+-- 工具表(tool)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS tool (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -196,7 +196,7 @@ CREATE TABLE IF NOT EXISTS tool (
 CREATE INDEX IF NOT EXISTS idx_tool_status ON tool (status);
 
 -- =====================================================
--- 文档索引任务�?(document_index_job) �?V2
+-- 文档索引任务表(document_index_job) —V2
 -- =====================================================
 CREATE TABLE IF NOT EXISTS document_index_job (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -222,7 +222,7 @@ CREATE INDEX IF NOT EXISTS idx_dij_document_status ON document_index_job (docume
 CREATE INDEX IF NOT EXISTS idx_dij_status_created ON document_index_job (status, created_at);
 
 -- =====================================================
--- 文档分块元数据表 (document_chunk) �?V2
+-- 文档分块元数据表 (document_chunk) —V2
 -- =====================================================
 CREATE TABLE IF NOT EXISTS document_chunk (
     chunk_id VARCHAR(128) NOT NULL,
@@ -243,7 +243,7 @@ CREATE INDEX IF NOT EXISTS idx_chunk_doc_version ON document_chunk (document_id,
 CREATE INDEX IF NOT EXISTS idx_chunk_kb_doc ON document_chunk (knowledge_base_id, document_id);
 
 -- =====================================================
--- 异步删除任务�?(deletion_task) �?V3
+-- 异步删除任务表(deletion_task) —V3
 -- =====================================================
 CREATE TABLE IF NOT EXISTS deletion_task (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -264,7 +264,7 @@ CREATE INDEX IF NOT EXISTS idx_dt_status_created ON deletion_task (status, creat
 CREATE INDEX IF NOT EXISTS idx_dt_target ON deletion_task (task_type, target_id);
 
 -- =====================================================
--- Flyway schema history �?required for baseline-on-migrate
+-- Flyway schema history —required for baseline-on-migrate
 -- =====================================================
 CREATE TABLE IF NOT EXISTS flyway_schema_history (
     installed_rank INT NOT NULL,
@@ -283,7 +283,7 @@ CREATE TABLE IF NOT EXISTS flyway_schema_history (
 CREATE INDEX IF NOT EXISTS idx_flyway_history_success ON flyway_schema_history (success);
 
 -- =====================================================
--- Agent 任务�?(agent_task) �?V10 + V13
+-- Agent 任务表(agent_task) —V10 + V13
 -- =====================================================
 CREATE TABLE IF NOT EXISTS agent_task (
     id                BIGINT NOT NULL AUTO_INCREMENT,
@@ -310,7 +310,7 @@ CREATE INDEX IF NOT EXISTS idx_task_created_at ON agent_task (created_at);
 CREATE INDEX IF NOT EXISTS idx_task_status_updated ON agent_task (status, updated_at);
 
 -- =====================================================
--- Agent 运行记录�?(agent_run) �?V10 + V13
+-- Agent 运行记录表(agent_run) —V10 + V13
 -- =====================================================
 CREATE TABLE IF NOT EXISTS agent_run (
     id                BIGINT NOT NULL AUTO_INCREMENT,
@@ -350,7 +350,7 @@ CREATE INDEX IF NOT EXISTS idx_run_holder ON agent_run (lease_holder);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_run_task_attempt ON agent_run (task_id, attempt_number);
 
 -- =====================================================
--- Agent 步骤记录�?(agent_step) �?V10
+-- Agent 步骤记录表(agent_step) —V10
 -- =====================================================
 CREATE TABLE IF NOT EXISTS agent_step (
     id              BIGINT NOT NULL AUTO_INCREMENT,
@@ -371,7 +371,7 @@ CREATE TABLE IF NOT EXISTS agent_step (
 CREATE INDEX IF NOT EXISTS idx_step_run_seq ON agent_step (run_id, sequence);
 
 -- =====================================================
--- Agent 审批�?(agent_approval) �?V11
+-- Agent 审批表(agent_approval) —V11
 -- =====================================================
 CREATE TABLE IF NOT EXISTS agent_approval (
     id                BIGINT NOT NULL AUTO_INCREMENT,
@@ -407,7 +407,7 @@ CREATE INDEX IF NOT EXISTS idx_approval_task ON agent_approval (task_id);
 CREATE INDEX IF NOT EXISTS idx_approval_user_status ON agent_approval (user_id, status);
 
 -- =====================================================
--- Agent 状态事件表 (agent_status_event) �?V13
+-- Agent 状态事件表 (agent_status_event) —V13
 -- =====================================================
 CREATE TABLE IF NOT EXISTS agent_status_event (
     id          BIGINT NOT NULL AUTO_INCREMENT,
@@ -424,7 +424,7 @@ CREATE TABLE IF NOT EXISTS agent_status_event (
 CREATE INDEX IF NOT EXISTS idx_ase_task ON agent_status_event (task_id, id);
 
 -- =====================================================
--- Agent 恢复审计�?(agent_recovery_event) �?V13
+-- Agent 恢复审计表(agent_recovery_event) —V13
 -- =====================================================
 CREATE TABLE IF NOT EXISTS agent_recovery_event (
     id          BIGINT NOT NULL AUTO_INCREMENT,
@@ -440,7 +440,7 @@ CREATE INDEX IF NOT EXISTS idx_are_run ON agent_recovery_event (run_id);
 CREATE INDEX IF NOT EXISTS idx_are_created ON agent_recovery_event (created_at);
 
 -- =====================================================
--- Prompt test sets �?V18
+-- Prompt test sets —V18
 -- =====================================================
 CREATE TABLE IF NOT EXISTS prompt_test_set (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -473,7 +473,7 @@ CREATE TABLE IF NOT EXISTS prompt_test_case (
 CREATE INDEX IF NOT EXISTS idx_ptc_set_order ON prompt_test_case (set_id, sort_order);
 
 -- =====================================================
--- Prompt test set run history �?V19
+-- Prompt test set run history —V19
 -- =====================================================
 CREATE TABLE IF NOT EXISTS prompt_test_set_run (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -592,7 +592,7 @@ CREATE INDEX IF NOT EXISTS idx_ff_audit_flag ON feature_flag_audit_log (flag_id)
 CREATE INDEX IF NOT EXISTS idx_ff_audit_time ON feature_flag_audit_log (created_at);
 
 -- =====================================================
--- 工具插件�?(plugin) �?V29
+-- 工具插件表(plugin) —V29
 -- =====================================================
 CREATE TABLE IF NOT EXISTS plugin (
     id                     BIGINT       NOT NULL AUTO_INCREMENT,
@@ -641,7 +641,7 @@ CREATE INDEX IF NOT EXISTS idx_plugin_name ON plugin (name);
 CREATE INDEX IF NOT EXISTS idx_plugin_status ON plugin (status);
 
 -- =====================================================
--- 插件审计日志�?(plugin_audit_log) �?V29
+-- 插件审计日志表(plugin_audit_log) —V29
 -- =====================================================
 CREATE TABLE IF NOT EXISTS plugin_audit_log (
     id          BIGINT       NOT NULL AUTO_INCREMENT,
@@ -663,7 +663,7 @@ CREATE INDEX IF NOT EXISTS idx_plugin_audit_plugin ON plugin_audit_log (plugin_i
 CREATE INDEX IF NOT EXISTS idx_plugin_audit_time ON plugin_audit_log (created_at);
 
 -- =====================================================
--- 插件依赖�?(plugin_dependency) �?V29
+-- 插件依赖表(plugin_dependency) —V29
 -- =====================================================
 CREATE TABLE IF NOT EXISTS plugin_dependency (
     id                 BIGINT       NOT NULL AUTO_INCREMENT,
@@ -679,7 +679,7 @@ CREATE TABLE IF NOT EXISTS plugin_dependency (
 CREATE INDEX IF NOT EXISTS idx_plugin_dep_plugin ON plugin_dependency (plugin_id);
 
 -- =====================================================
--- 插件执行指标�?(plugin_execution_metric) �?V30
+-- 插件执行指标表(plugin_execution_metric) —V30
 -- =====================================================
 CREATE TABLE IF NOT EXISTS plugin_execution_metric (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -691,7 +691,7 @@ CREATE TABLE IF NOT EXISTS plugin_execution_metric (
 );
 
 -- =====================================================
--- 插件健康检查日志表 (plugin_health_log) �?V30
+-- 插件健康检查日志表 (plugin_health_log) —V30
 -- =====================================================
 CREATE TABLE IF NOT EXISTS plugin_health_log (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -704,7 +704,7 @@ CREATE TABLE IF NOT EXISTS plugin_health_log (
 );
 
 -- =====================================================
--- 插件版本历史�?(plugin_version_history) �?V30
+-- 插件版本历史表(plugin_version_history) —V30
 -- =====================================================
 CREATE TABLE IF NOT EXISTS plugin_version_history (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -718,7 +718,7 @@ CREATE TABLE IF NOT EXISTS plugin_version_history (
 );
 
 -- =====================================================
--- V32 �?Tenant, Organization Member & Role-Permission
+-- V32 —Tenant, Organization Member & Role-Permission
 -- =====================================================
 CREATE TABLE IF NOT EXISTS tenant (
     id          BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -785,7 +785,7 @@ INSERT INTO role_permission (role, permission) VALUES ('member', 'plugin:install
 INSERT INTO role_permission (role, permission) VALUES ('viewer', 'kb:read') ON DUPLICATE KEY UPDATE role = role;
 INSERT INTO role_permission (role, permission) VALUES ('viewer', 'conversation:read') ON DUPLICATE KEY UPDATE role = role;
 
--- V34 �?tenant_audit_log (global, not tenant-scoped)
+-- V34 —tenant_audit_log (global, not tenant-scoped)
 CREATE TABLE IF NOT EXISTS tenant_audit_log (
     id          BIGINT AUTO_INCREMENT PRIMARY KEY,
     operator_id BIGINT NOT NULL,
@@ -824,7 +824,7 @@ ALTER TABLE message ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1
 ALTER TABLE agent_run ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;
 ALTER TABLE agent_step ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;
 
--- V35 �?usage ledger: usage_event + usage_reservation + usage_counter + tenant_quota
+-- V35 —usage ledger: usage_event + usage_reservation + usage_counter + tenant_quota
 CREATE TABLE IF NOT EXISTS usage_event (
     id          BIGINT AUTO_INCREMENT PRIMARY KEY,
     tenant_id   BIGINT NOT NULL,
@@ -1117,7 +1117,7 @@ CREATE TABLE IF NOT EXISTS rag_answer_feedback (
 CREATE INDEX IF NOT EXISTS idx_rag_feedback_tenant_created ON rag_answer_feedback (tenant_id, created_at);
 
 -- =====================================================
--- Ӧ�÷����� API Key (V52)
+-- 应用发布的 API Key (V52)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS app (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -1167,7 +1167,7 @@ CREATE INDEX IF NOT EXISTS idx_call_app ON app_call_log (app_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_call_key ON app_call_log (api_key_id);
 
 -- =====================================================
--- ֪ʶ�⹲�� (V53)
+-- 知识库共享 (V53)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS kb_share (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -1182,7 +1182,7 @@ CREATE TABLE IF NOT EXISTS kb_share (
 CREATE INDEX IF NOT EXISTS idx_share_user ON kb_share (shared_user_id);
 
 -- =====================================================
--- ���������־ (V54)
+-- 操作审计日志 (V54)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS audit_log (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
