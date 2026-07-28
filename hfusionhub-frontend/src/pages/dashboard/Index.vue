@@ -183,6 +183,17 @@ const moreLinks = [
   { label: '套餐管理', path: '/admin/plans', icon: Package },
 ]
 
+// 六色柔和渐变循环:每个功能磁贴有专属色调,呼应统计卡的彩色圆点
+const TILE_TINTS = [
+  "from-emerald-500/20 to-emerald-500/5 text-emerald-600 dark:text-emerald-300",
+  "from-sky-500/20 to-sky-500/5 text-sky-600 dark:text-sky-300",
+  "from-violet-500/20 to-violet-500/5 text-violet-600 dark:text-violet-300",
+  "from-amber-500/20 to-amber-500/5 text-amber-600 dark:text-amber-300",
+  "from-rose-500/20 to-rose-500/5 text-rose-600 dark:text-rose-300",
+  "from-cyan-500/20 to-cyan-500/5 text-cyan-600 dark:text-cyan-300",
+]
+const tileTint = (i: number) => TILE_TINTS[i % TILE_TINTS.length]
+
 const quickActions = [
   { label: '新建知识库', path: '/knowledge-base', icon: Plus },
   { label: '上传文档', path: '/document', icon: UploadCloud },
@@ -250,24 +261,32 @@ onMounted(async () => {
       </div>
     </section>
 
-    <section class="glass-panel-soft rounded-2xl p-4">
-      <div class="mb-3 flex items-center justify-between">
-        <h3 class="text-sm font-medium text-foreground">更多功能</h3>
-        <span class="text-xs text-muted-foreground">{{ moreLinks.length }} 项</span>
+    <section class="glass-panel-soft rounded-2xl p-5">
+      <div class="mb-4 flex items-center justify-between">
+        <h3 class="flex items-center gap-2 text-sm font-medium text-foreground">
+          <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px] shadow-emerald-400/50" />
+          更多功能
+        </h3>
+        <span class="rounded-full bg-foreground/5 px-2.5 py-0.5 text-xs text-muted-foreground">
+          {{ moreLinks.length }} 项
+        </span>
       </div>
-      <div class="grid grid-cols-3 gap-1.5 sm:grid-cols-4 lg:grid-cols-6">
+      <div class="grid grid-cols-3 gap-2.5 sm:grid-cols-4 lg:grid-cols-6">
         <router-link
-          v-for="link in moreLinks"
+          v-for="(link, i) in moreLinks"
           :key="link.path"
           :to="link.path"
-          class="group flex flex-col items-center gap-2 rounded-xl border border-transparent px-2 py-3 text-muted-foreground transition hover:border-border/60 hover:bg-accent/40 hover:text-foreground"
+          class="group flex flex-col items-center gap-2.5 rounded-2xl border border-border/40 bg-card/50 px-2 py-4 text-muted-foreground shadow-sm backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-border hover:bg-card hover:text-foreground hover:shadow-lg hover:shadow-foreground/5"
         >
           <span
-            class="flex h-9 w-9 items-center justify-center rounded-lg bg-foreground/5 transition group-hover:bg-background group-hover:text-emerald-600 dark:group-hover:text-emerald-300"
+            :class="[
+              'flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br shadow-sm transition-transform duration-300 group-hover:scale-110',
+              tileTint(i),
+            ]"
           >
-            <component :is="link.icon" class="h-4 w-4" />
+            <component :is="link.icon" class="h-[18px] w-[18px]" />
           </span>
-          <span class="text-center text-xs leading-none">{{ link.label }}</span>
+          <span class="text-center text-xs font-medium leading-none">{{ link.label }}</span>
         </router-link>
       </div>
     </section>
