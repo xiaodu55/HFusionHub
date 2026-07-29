@@ -251,7 +251,7 @@ onMounted(load)
           </div>
           <div class="space-y-2">
             <Label>模块开关（JSON）</Label>
-            <Input v-model="form.moduleFlags" class="font-mono text-xs" placeholder='{"draft":1,"check":1,"docx":0,"openapi":0}' />
+            <Input v-model="form.moduleFlags" class="font-mono text-xs" placeholder="{&quot;draft&quot;:1,&quot;check&quot;:1,&quot;docx&quot;:0,&quot;openapi&quot;:0}" />
           </div>
         </div>
         <DialogFooter>

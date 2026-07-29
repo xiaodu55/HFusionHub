@@ -1,4 +1,4 @@
-#restart-modules.ps1
+﻿#restart-modules.ps1
 # Restart HFusionHub dev modules safely.
 #
 # Safety rules:

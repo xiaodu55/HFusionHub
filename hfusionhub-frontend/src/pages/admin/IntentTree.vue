@@ -428,7 +428,7 @@ onMounted(() => {
 
             <label class="block space-y-1.5 text-sm">
               <span class="text-muted-foreground">高级参数 JSON（一般不用填写）</span>
-              <textarea v-model="form.routeConfig" rows="3" class="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:border-primary" placeholder='例如：{"rerank": true}' />
+              <textarea v-model="form.routeConfig" rows="3" class="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:border-primary" placeholder="例如：{&quot;rerank&quot;: true}" />
             </label>
           </div>
 

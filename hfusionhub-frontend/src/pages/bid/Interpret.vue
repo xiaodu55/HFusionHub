@@ -256,8 +256,10 @@ onMounted(loadDetail)
             <CardContent class="p-4">
               <div class="mb-1 flex items-center justify-between gap-2">
                 <h3 class="text-sm font-medium text-muted-foreground">{{ elementLabel(element) }}</h3>
-                <span v-if="element.confidence !== null && element.confidence !== undefined"
-                      class="text-xs" :class="element.confidence >= 0.6 ? 'text-emerald-600' : 'text-amber-600'">
+                <span
+                  v-if="element.confidence !== null && element.confidence !== undefined"
+                  class="text-xs" :class="element.confidence >= 0.6 ? 'text-emerald-600' : 'text-amber-600'"
+                >
                   置信 {{ formatConfidence(element.confidence) }}
                 </span>
               </div>
@@ -301,8 +303,10 @@ onMounted(loadDetail)
                 <h3 class="text-sm font-medium">
                   {{ method.methodType === 'comprehensive' ? '综合评分法' : method.methodType === 'lowest_price' ? '经评审最低价法' : method.methodType }}
                 </h3>
-                <span v-if="method.totalScore !== null && method.totalScore !== undefined"
-                      class="text-sm font-semibold text-primary">总分 {{ method.totalScore }}</span>
+                <span
+                  v-if="method.totalScore !== null && method.totalScore !== undefined"
+                  class="text-sm font-semibold text-primary"
+                >总分 {{ method.totalScore }}</span>
               </div>
               <div v-if="parsePoints(method).length" class="space-y-1.5">
                 <div

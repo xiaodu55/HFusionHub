@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第二十一批（2026-09-04：全仓巡检修复——编码/构建/文档）
+
+#### Fixed
+- **5 个 PowerShell 脚本缺 UTF-8 BOM**（`restart-modules.ps1`/`run-all-benchmarks.ps1`/
+  `backup-data.ps1`/`plugin-builtins-e2e.ps1`/`plugin-e2e-acceptance.ps1`）——Windows
+  PowerShell 5.1 按 ANSI 解析中文脚本，字节错拆导致 `run-all-benchmarks.ps1` 直接解析
+  失败（"哈希文本不完整"/未终止字符串）；补 BOM 后全部 ps1 语法校验通过
+- **前端 `npm run build` 是坏的**：`MainLayout.vue` 菜单项对象使用 `sidebar` 属性但内联
+  类型未声明（侧边栏瘦身提交引入，dev 模式不做类型检查故未暴露，4 个 TS2353/TS2339）；
+  补 `sidebar?: boolean` 类型，build 恢复通过
+- eslint 自动修复 93 → 25 警告（0 错误；剩余为 no-explicit-any 类非自动可修项），
+  修复后 build + vitest 49/49 复验通过
+
+#### Changed
+- CLAUDE.md 结构性计数对齐实测：Controllers 53→55（`bot/` 3 个 IM bot）、Services
+  40→41 接口 + 3→4 独立 @Service、Entities 64→71
+- ACCESS_MAP.md 补监控栈（Grafana 3001 / Prometheus 9090 / Tempo 3200）访问入口与端口速查
+- TROUBLESHOOTING.md 新增两条实测故障：dind 元数据卷损坏（bbolt panic）重建、
+  hive-server2 残留 PID force-recreate
+- 监控 compose：mysqld/redis exporter 加 `profiles: ["exporters"]`（独立启动监控栈时
+  无 mysql8/redis7 网络可连，原会进重启循环）
+
 ### 第二十批（2026-09-04：P0 补强三连——分布式追踪 / H2 漂移防护 / 备份异地化）
 
 #### Added

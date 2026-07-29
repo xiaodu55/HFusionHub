@@ -482,15 +482,17 @@ onMounted(async () => {
             <div v-if="diffRows.length" class="mt-5 space-y-2">
               <p v-if="diffHasRegression" class="rounded-lg border border-rose-400/25 bg-rose-400/[0.07] px-3 py-2 text-sm text-rose-200">存在回归指标 —— 请检查改动是否劣化了回答质量。</p>
               <div class="overflow-hidden rounded-xl border border-border">
-                <table class="w-full text-sm"><thead class="bg-muted/40 text-left text-xs text-muted-foreground"><tr><th class="px-3 py-2">指标</th><th class="px-3 py-2 text-right">基线</th><th class="px-3 py-2 text-right">候选</th><th class="px-3 py-2 text-right">变化</th><th class="px-3 py-2 text-center">结论</th></tr></thead><tbody>
-                  <tr v-for="row in diffRows" :key="row.metric" class="border-t border-border/70">
-                    <td class="px-3 py-2">{{ HARNESS_METRIC_LABELS[row.metric] || row.metric }}</td>
-                    <td class="px-3 py-2 text-right tabular-nums">{{ row.base === null ? '—' : formatMetric(row.metric, row.base) }}</td>
-                    <td class="px-3 py-2 text-right tabular-nums">{{ row.candidate === null ? '—' : formatMetric(row.metric, row.candidate) }}</td>
-                    <td class="px-3 py-2 text-right tabular-nums" :class="row.verdict === 'regressed' ? 'text-rose-300' : row.verdict === 'improved' ? 'text-emerald-300' : 'text-muted-foreground'">{{ row.delta === null ? '—' : (row.delta > 0 ? '+' : '') + row.delta }}</td>
-                    <td class="px-3 py-2 text-center"><span :class="row.verdict === 'regressed' ? 'rounded-full bg-rose-400/15 px-2 py-0.5 text-xs text-rose-300' : row.verdict === 'improved' ? 'rounded-full bg-emerald-400/15 px-2 py-0.5 text-xs text-emerald-300' : 'text-xs text-muted-foreground'">{{ ({ improved: '改善', regressed: '回归', neutral: '持平', missing_in_candidate: '候选缺失' } as Record<string, string>)[row.verdict] }}</span></td>
-                  </tr>
-                </tbody></table>
+                <table class="w-full text-sm">
+                  <thead class="bg-muted/40 text-left text-xs text-muted-foreground"><tr><th class="px-3 py-2">指标</th><th class="px-3 py-2 text-right">基线</th><th class="px-3 py-2 text-right">候选</th><th class="px-3 py-2 text-right">变化</th><th class="px-3 py-2 text-center">结论</th></tr></thead><tbody>
+                    <tr v-for="row in diffRows" :key="row.metric" class="border-t border-border/70">
+                      <td class="px-3 py-2">{{ HARNESS_METRIC_LABELS[row.metric] || row.metric }}</td>
+                      <td class="px-3 py-2 text-right tabular-nums">{{ row.base === null ? '—' : formatMetric(row.metric, row.base) }}</td>
+                      <td class="px-3 py-2 text-right tabular-nums">{{ row.candidate === null ? '—' : formatMetric(row.metric, row.candidate) }}</td>
+                      <td class="px-3 py-2 text-right tabular-nums" :class="row.verdict === 'regressed' ? 'text-rose-300' : row.verdict === 'improved' ? 'text-emerald-300' : 'text-muted-foreground'">{{ row.delta === null ? '—' : (row.delta > 0 ? '+' : '') + row.delta }}</td>
+                      <td class="px-3 py-2 text-center"><span :class="row.verdict === 'regressed' ? 'rounded-full bg-rose-400/15 px-2 py-0.5 text-xs text-rose-300' : row.verdict === 'improved' ? 'rounded-full bg-emerald-400/15 px-2 py-0.5 text-xs text-emerald-300' : 'text-xs text-muted-foreground'">{{ ({ improved: '改善', regressed: '回归', neutral: '持平', missing_in_candidate: '候选缺失' } as Record<string, string>)[row.verdict] }}</span></td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
           </template>

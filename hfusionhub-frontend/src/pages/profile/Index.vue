@@ -230,9 +230,11 @@ onMounted(() => {
           <div class="flex flex-wrap items-center gap-2.5">
             <h3 class="truncate text-xl font-semibold">{{ displayName }}</h3>
             <Badge variant="outline" :class="roleMeta.class">{{ roleMeta.label }}</Badge>
-            <Badge variant="outline" :class="isAccountActive
-              ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-600 dark:text-emerald-300'
-              : 'border-red-400/40 bg-red-400/10 text-red-600 dark:text-red-300'">
+            <Badge
+              variant="outline" :class="isAccountActive
+                ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-600 dark:text-emerald-300'
+                : 'border-red-400/40 bg-red-400/10 text-red-600 dark:text-red-300'"
+            >
               <component :is="isAccountActive ? ShieldCheck : ShieldAlert" class="mr-1 h-3 w-3" />
               {{ isAccountActive ? '账户正常' : '已禁用' }}
             </Badge>

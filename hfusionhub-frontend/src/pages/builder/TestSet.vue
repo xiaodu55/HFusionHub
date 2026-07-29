@@ -1172,16 +1172,16 @@ const closeDialogOnEscape = (event: KeyboardEvent) => {
             <div class="mt-3 space-y-3 border-t border-border/60 pt-3">
               <div class="space-y-1.5">
                 <Label>模板变量（可选）</Label>
-                <textarea v-model="caseForm.variables" rows="4" class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 font-mono text-xs leading-6 outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder='{"role":"客服","topic":"退款"}' />
+                <textarea v-model="caseForm.variables" rows="4" class="block w-full resize-y rounded-xl border border-input bg-background/60 px-3.5 py-3 font-mono text-xs leading-6 outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="{&quot;role&quot;:&quot;客服&quot;,&quot;topic&quot;:&quot;退款&quot;}" />
                 <p class="text-xs text-muted-foreground" :class="caseVariablesValid ? '' : 'text-red-400'">
                   {{ caseVariablesValid ? `用于替换回答方案中的 ${varBraces}` : '格式错误，请输入 JSON 对象，例如 {"role":"客服"}' }}
                 </p>
               </div>
-            <div class="space-y-1.5">
-              <Label>必须引用的文档 ID（可选）</Label>
-              <input v-model="caseForm.requiredDocumentIds" type="text" class="block w-full rounded-xl border border-input bg-background/60 px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="例如：11, 22" />
-              <p class="text-xs text-muted-foreground">仅用于严格检查知识库来源，多个 ID 用逗号分开。</p>
-            </div>
+              <div class="space-y-1.5">
+                <Label>必须引用的文档 ID（可选）</Label>
+                <input v-model="caseForm.requiredDocumentIds" type="text" class="block w-full rounded-xl border border-input bg-background/60 px-3.5 py-2.5 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20" placeholder="例如：11, 22" />
+                <p class="text-xs text-muted-foreground">仅用于严格检查知识库来源，多个 ID 用逗号分开。</p>
+              </div>
             </div>
           </details>
           <div class="flex justify-end gap-2 pt-1">

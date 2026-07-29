@@ -125,12 +125,14 @@ onMounted(loadData)
 
     <template v-else-if="summary">
       <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <div v-for="card in [
-          { icon: CircleDollarSign, tone: 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-400', label: '累计费用', value: formatCost(summary.totalCost), caption: '最近 ' + days + ' 天实际产生' },
-          { icon: BarChart3, tone: 'bg-cyan-500/12 text-cyan-600 dark:text-cyan-400', label: '预估月费', value: formatCost(summary.estimatedMonthCost), caption: '按当前使用速度估算' },
-          { icon: Zap, tone: 'bg-violet-500/12 text-violet-600 dark:text-violet-400', label: 'Token 用量', value: summary.totalTokens.toLocaleString(), caption: '模型处理的文本单位' },
-          { icon: Bot, tone: 'bg-amber-500/12 text-amber-600 dark:text-amber-400', label: 'AI 请求', value: summary.totalRequests.toLocaleString(), caption: '平均 ' + formatCost(avgCostPerRequest) + ' / 次' },
-        ]" :key="card.label" class="group rounded-xl border border-border bg-card/80 p-5 transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-lg">
+        <div
+          v-for="card in [
+            { icon: CircleDollarSign, tone: 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-400', label: '累计费用', value: formatCost(summary.totalCost), caption: '最近 ' + days + ' 天实际产生' },
+            { icon: BarChart3, tone: 'bg-cyan-500/12 text-cyan-600 dark:text-cyan-400', label: '预估月费', value: formatCost(summary.estimatedMonthCost), caption: '按当前使用速度估算' },
+            { icon: Zap, tone: 'bg-violet-500/12 text-violet-600 dark:text-violet-400', label: 'Token 用量', value: summary.totalTokens.toLocaleString(), caption: '模型处理的文本单位' },
+            { icon: Bot, tone: 'bg-amber-500/12 text-amber-600 dark:text-amber-400', label: 'AI 请求', value: summary.totalRequests.toLocaleString(), caption: '平均 ' + formatCost(avgCostPerRequest) + ' / 次' },
+          ]" :key="card.label" class="group rounded-xl border border-border bg-card/80 p-5 transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-lg"
+        >
           <div class="flex items-center justify-between">
             <span class="text-sm text-muted-foreground">{{ card.label }}</span>
             <span class="flex h-8 w-8 items-center justify-center rounded-lg transition-transform group-hover:scale-105" :class="card.tone"><component :is="card.icon" class="h-4 w-4" /></span>
@@ -228,14 +230,18 @@ onMounted(loadData)
 
         <section class="overflow-hidden rounded-lg border border-border bg-card/35">
           <div class="border-b border-border p-5"><h2 class="font-medium">模型用量明细</h2><p class="mt-1 text-sm text-muted-foreground">用于核对具体模型的 Token 和费用</p></div>
-          <div class="overflow-x-auto"><table class="w-full min-w-[620px] text-sm"><thead class="bg-muted/30 text-left text-xs uppercase tracking-wider text-muted-foreground"><tr><th class="px-5 py-3 font-medium">模型</th><th class="px-5 py-3 text-right font-medium">Token</th><th class="px-5 py-3 text-right font-medium">费用</th><th class="px-5 py-3 text-right font-medium">占比</th></tr></thead><tbody>
-            <tr v-for="(model, index) in modelBreakdown" :key="model.model" class="border-t border-border/60 transition-colors odd:bg-muted/10 hover:bg-primary/5">
-              <td class="px-5 py-3.5"><span class="inline-flex items-center gap-2"><span class="h-2 w-2 rounded-full" :class="modelColor(index)" /><span class="font-mono text-[13px] font-medium">{{ model.model }}</span></span></td>
-              <td class="px-5 py-3.5 text-right tabular-nums">{{ model.totalTokens.toLocaleString() }}</td>
-              <td class="px-5 py-3.5 text-right tabular-nums font-medium">{{ formatCost(model.totalCost) }}</td>
-              <td class="px-5 py-3.5 text-right tabular-nums text-muted-foreground">{{ modelPercentage(model.totalTokens).toFixed(1) }}%</td>
-            </tr>
-          </tbody></table></div>
+          <div class="overflow-x-auto">
+            <table class="w-full min-w-[620px] text-sm">
+              <thead class="bg-muted/30 text-left text-xs uppercase tracking-wider text-muted-foreground"><tr><th class="px-5 py-3 font-medium">模型</th><th class="px-5 py-3 text-right font-medium">Token</th><th class="px-5 py-3 text-right font-medium">费用</th><th class="px-5 py-3 text-right font-medium">占比</th></tr></thead><tbody>
+                <tr v-for="(model, index) in modelBreakdown" :key="model.model" class="border-t border-border/60 transition-colors odd:bg-muted/10 hover:bg-primary/5">
+                  <td class="px-5 py-3.5"><span class="inline-flex items-center gap-2"><span class="h-2 w-2 rounded-full" :class="modelColor(index)" /><span class="font-mono text-[13px] font-medium">{{ model.model }}</span></span></td>
+                  <td class="px-5 py-3.5 text-right tabular-nums">{{ model.totalTokens.toLocaleString() }}</td>
+                  <td class="px-5 py-3.5 text-right tabular-nums font-medium">{{ formatCost(model.totalCost) }}</td>
+                  <td class="px-5 py-3.5 text-right tabular-nums text-muted-foreground">{{ modelPercentage(model.totalTokens).toFixed(1) }}%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
       </template>
     </template>

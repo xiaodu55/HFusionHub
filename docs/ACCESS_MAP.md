@@ -26,6 +26,9 @@
 | Python OpenAPI JSON | http://localhost:9000/openapi.json | 机器可读 |
 | MinIO 控制台 | http://localhost:9001 | 对象存储管理（API 端口 :9002） |
 | Attu（Milvus 管理台） | http://localhost:8000 | 向量库可视化，连接 `127.0.0.1:19530` |
+| **Grafana 监控**（可选栈） | http://127.0.0.1:3001 | 看板 + Tempo 调用链；`docker compose -f deploy/docker-compose.monitoring.yml up -d` 启动；账号 `admin` / `deploy\.env` 的 `GRAFANA_ADMIN_PASSWORD` |
+| Prometheus（可选栈） | http://127.0.0.1:9090 | 指标与 targets 状态 |
+| Tempo API（可选栈） | http://127.0.0.1:3200 | 分布式追踪查询（OTLP 接收 4318） |
 
 ### 纯 API（无界面，供脚本/健康检查）
 
@@ -132,6 +135,7 @@
 | milvus | 19530（gRPC）/ 9091（HTTP） | healthy |
 | attu | 8000 | healthy |
 | plugin-runner | 9100 | dev compose dind sidecar 下 healthy（引擎不可用时 503 = fail-closed 设计行为） |
+| tempo（可选栈） | 3200（查询）/ 4318（OTLP） | 分布式追踪后端，仅绑 127.0.0.1 |
 
 ## 8. 相关文档
 

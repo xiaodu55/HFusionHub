@@ -1,4 +1,4 @@
-#backup-data.ps1
+﻿#backup-data.ps1
 # Backup HFusionHub demo/dev data: local uploaded documents + MySQL dump.
 #
 # Why: java-backend/uploads/documents/ is plain local files — they are lost if

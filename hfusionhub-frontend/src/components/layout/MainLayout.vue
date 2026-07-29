@@ -83,6 +83,8 @@ const menuItems: Array<{
   roles?: UserRole[]
   group: 'use' | 'personal' | 'build' | 'admin'
   keywords: string[]
+  /** false = 侧边栏瘦身时降级出侧边栏（仅「更多功能」/搜索可达） */
+  sidebar?: boolean
 }> = [
   { path: '/', label: '首页', description: '查看当前工作', icon: Home, group: 'use', keywords: ['首页', '工作台'] },
   { path: '/knowledge-base', label: '知识库', description: '管理知识资料', icon: BookOpen, group: 'use', keywords: ['知识', '知识库', 'kb'] },
@@ -526,7 +528,6 @@ onBeforeUnmount(() => {
           <router-view />
         </div>
       </main>
-
     </div>
 
     <Dialog v-model:open="serviceDialogOpen">
@@ -563,25 +564,27 @@ onBeforeUnmount(() => {
                 class="rounded-xl border p-3.5"
                 :class="readNoticeIds.has(notice.id) ? 'border-border bg-muted/20 opacity-70' : 'border-amber-400/20 bg-amber-400/[0.04]'"
               >
-              <div class="flex items-start justify-between gap-3">
-                <div class="min-w-0">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="text-sm font-medium">{{ notice.title }}</span>
-                    <span class="rounded-full border px-2 py-0.5 text-[11px]" :class="noticeLevelClass(notice.level)">{{ noticeLevelLabel(notice.level) }}</span>
-                    <span v-if="!readNoticeIds.has(notice.id)" class="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] text-primary">未读</span>
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="text-sm font-medium">{{ notice.title }}</span>
+                      <span class="rounded-full border px-2 py-0.5 text-[11px]" :class="noticeLevelClass(notice.level)">{{ noticeLevelLabel(notice.level) }}</span>
+                      <span v-if="!readNoticeIds.has(notice.id)" class="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] text-primary">未读</span>
+                    </div>
+                    <p class="mt-2 whitespace-pre-wrap break-words text-sm leading-5 text-muted-foreground">{{ notice.content }}</p>
+                    <p class="mt-2 text-xs text-muted-foreground">{{ formatDateTime(notice.createdAt) }} · {{ notice.publisher || '系统' }}</p>
                   </div>
-                  <p class="mt-2 whitespace-pre-wrap break-words text-sm leading-5 text-muted-foreground">{{ notice.content }}</p>
-                  <p class="mt-2 text-xs text-muted-foreground">{{ formatDateTime(notice.createdAt) }} · {{ notice.publisher || '系统' }}</p>
+                  <Button
+                    v-if="!readNoticeIds.has(notice.id)"
+                    variant="outline"
+                    size="sm"
+                    class="shrink-0"
+                    @click="markNoticeRead(notice.id)"
+                  >
+                    标记已读
+                  </Button>
                 </div>
-                <Button
-                  v-if="!readNoticeIds.has(notice.id)"
-                  variant="outline"
-                  size="sm"
-                  class="shrink-0"
-                  @click="markNoticeRead(notice.id)"
-                >标记已读</Button>
-              </div>
-            </article>
+              </article>
             </template>
           </section>
 

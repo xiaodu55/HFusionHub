@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   E2E acceptance for the P2-3 platform built-in plugins (bid_docx / bid_quote)
   against a live plugin-runner + isolated dind engine.

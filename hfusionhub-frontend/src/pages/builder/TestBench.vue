@@ -538,8 +538,10 @@ onMounted(() => {
                 <span class="font-normal text-muted-foreground">({{ result.sources.length }} 条)</span>
               </h3>
               <div class="space-y-1.5">
-                <div v-for="(source, index) in result.sources" :key="index"
-                     class="rounded-lg bg-secondary-foreground/5 px-3 py-2">
+                <div
+                  v-for="(source, index) in result.sources" :key="index"
+                  class="rounded-lg bg-secondary-foreground/5 px-3 py-2"
+                >
                   <div class="flex items-center justify-between gap-2">
                     <span class="text-xs font-medium truncate flex-1" :title="source.document_name || source.title">
                       {{ source.document_name || source.title || `文档 #${source.document_id ?? '未知'}` }}

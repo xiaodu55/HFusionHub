@@ -224,6 +224,37 @@ npm ci
 
 ---
 
+#### 4b. dind 容器反复重启（插件沙箱不可用，plugin-runner unhealthy）
+
+**现象**：`docker ps` 中 dind 一直 Restarting，`docker logs dind` 见
+`panic: page 2 already freed`（bbolt freelist 崩溃）；plugin-runner 随之 unhealthy
+（沙箱引擎不可用 → 503，fail-closed 设计）。
+
+**原因**：宿主机带 Docker 强制关机/睡眠，dind 的元数据库
+（卷 `docker_dind-data`，bbolt）写一半被截断损坏，重启无法自愈。
+
+**解决**（重建卷；代价：沙箱内缓存的插件镜像会重新拉取/构建）：
+```bash
+cd docker && docker compose stop dind && docker compose rm -f dind
+docker volume rm docker_dind-data && docker compose up -d dind
+```
+预防：关机/睡眠前先退出 Docker Desktop。
+
+#### 4c. hive-server2 Exited(1)："HiveServer2 running as process N. Stop it first."
+
+**现象**：analytics 栈其余容器 Up，仅 hive-server2 退出码 1，日志末尾提示
+已有实例在运行。
+
+**原因**：上次异常退出在容器文件系统里留下残留 PID 文件，启动脚本误判
+实例已存在。
+
+**解决**（重建容器即得干净文件系统）：
+```bash
+cd docker && docker compose -f docker-compose.analytics.yml up -d --force-recreate hive-server2
+```
+
+---
+
 ### 🟠 P1 — 功能异常
 
 #### 5. 登录失败（403 / 401）

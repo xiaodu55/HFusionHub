@@ -1,4 +1,4 @@
-<#!
+﻿<#!
 .SYNOPSIS
   Exercises plugin-runner against the isolated TLS Docker Engine created by
   staging-rehearsal.ps1. It never talks to the host Docker socket from Runner.

@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 # run-all-benchmarks.ps1 — 运行完整性能基线测试套件
 # 用法：.\scripts\run-all-benchmarks.ps1 > baseline-v1.0.0.txt
 

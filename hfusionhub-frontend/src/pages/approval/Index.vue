@@ -271,8 +271,10 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="flex items-center gap-3">
-          <span class="flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs"
-            :class="connected ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-700 dark:text-emerald-300' : 'border-border bg-foreground/5 text-muted-foreground'">
+          <span
+            class="flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs"
+            :class="connected ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-700 dark:text-emerald-300' : 'border-border bg-foreground/5 text-muted-foreground'"
+          >
             <span class="h-1.5 w-1.5 rounded-full" :class="connected ? 'bg-emerald-400' : 'bg-muted-foreground'" />
             {{ connected ? '实时同步中' : '连接已断开，正在重连…' }}
           </span>

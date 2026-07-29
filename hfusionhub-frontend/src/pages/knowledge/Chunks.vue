@@ -291,18 +291,24 @@ onMounted(() => {
               <div
                 v-if="chunk.block_type === 'CODE'"
                 class="overflow-x-auto rounded-md bg-zinc-900 p-3.5 font-mono text-[13px] leading-relaxed text-zinc-100 whitespace-pre-wrap dark:bg-zinc-950"
-              >{{ displayContent(chunk) }}</div>
+              >
+                {{ displayContent(chunk) }}
+              </div>
               <div
                 v-else-if="chunk.block_type === 'TABLE'"
                 class="overflow-x-auto rounded-md bg-muted/60 p-3.5 font-mono text-[13px] leading-relaxed whitespace-pre-wrap"
-              >{{ displayContent(chunk) }}</div>
+              >
+                {{ displayContent(chunk) }}
+              </div>
               <p
                 v-else
                 :class="[
                   'whitespace-pre-wrap text-sm leading-relaxed text-foreground/90',
                   chunk.block_type === 'HEADING' && 'font-semibold text-foreground'
                 ]"
-              >{{ displayContent(chunk) }}</p>
+              >
+                {{ displayContent(chunk) }}
+              </p>
 
               <!-- 展开收起 -->
               <div v-if="isLongContent(chunk)" class="mt-2">
