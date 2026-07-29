@@ -207,7 +207,7 @@
 
 - **统一 SSE 解析**：[utils/sse.ts](../hfusionhub-frontend/src/utils/sse.ts) 未在 approval 流复用（两处重复 buffer/line 解析）；`MainLayout` 30s 审批轮询 + 60s 公告轮询 → 全局 SSE。
 - **Vite 分包**：显式 `manualChunks` 归并 vue/pinia/router/axios/marked/dompurify（当前 ~200 小 chunk）。
-- **chat 断线重连**：流中断目前只保留部分内容+提示，可基于幂等 requestId 自动重试；`scrollToBottom` 100ms 硬 sleep 改用 rAF。
+- **chat 断线重连** ✅ 已落地（R15-29）：流中断时若尚未收到内容且为网络类错误，以幂等 requestId 自动重试一次；`scrollToBottom` 已改用 rAF（`chat/Detail.vue`）。
 
 ---
 
@@ -301,9 +301,9 @@
 |---|---|---|---|
 | R15-20 | react.py 1648 行，run / run_stream / _run_stream_react 三份重复检索/压缩/组装/容错循环 | `app/core/agent/react.py:790, 1087, 1433` | 抽取共享管线，stream/非 stream 单循环 |
 | R15-21 | API 层几乎零测试：bid/ingest/rag/mcp/tools/gateway/guardrails 等约 10 个路由无任何测试 | `python-ai/tests/` 对照 `app/api/` | FastAPI TestClient 契约测试（对齐 `tests/test_chat_api.py` 模式） |
-| R15-22 | 测试基座漂移：H2 schema 手维护停在 V70、Flyway 关闭、tenant 拦截器在测试中关闭（核心隔离机制未被测试覆盖） | `application-test.yml`、`schema-h2.sql` | Testcontainers-MySQL（依赖已在 pom）抽样集成 + 至少一条 tenant 拦截器真实链路 |
+| R15-22 | 测试基座漂移：H2 schema 手维护停在 V70、Flyway 关闭、tenant 拦截器在测试中关闭（核心隔离机制未被测试覆盖） | `application-test.yml`、`schema-h2.sql` | Testcontainers-MySQL（依赖已在 pom）抽样集成 + 至少一条 tenant 拦截器真实链路。✅ 2026-09-03 真机复跑：`TenantInterceptorIsolationTest` 连真实 MySQL（完整 Flyway V1–V83 链）2/2 通过 |
 | R15-23 | 内部 token guard 复制粘贴 6 份；`allow-circular-references: true` 掩盖循环依赖；manifest hash 拼接歧义 | 6 个 Internal*Controller、`application.yml:8`、`PluginServiceImpl.java:628-644` | 收敛为 servlet filter；解循环；规范化 JSON 重算 |
-| R15-24 | God classes：ConversationServiceImpl 1595 / AgentTaskServiceImpl 约1360 / VectorizationServiceImpl 1222 | java-backend service/impl | 按职责拆分（渐进，随触碰随拆）。✅ 第一批（2026-08-30）：`AgentRunLifecycleService`（守卫迁移+账本结算+租户归属）、`ChatUsageRecorder`（聊天账本+模型用量落账）收口 |
+| R15-24 | God classes：ConversationServiceImpl 1595 / AgentTaskServiceImpl 约1360 / VectorizationServiceImpl 1222 | java-backend service/impl | 按职责拆分（渐进，随触碰随拆）。✅ 第一批（2026-08-30）：`AgentRunLifecycleService`（守卫迁移+账本结算+租户归属）、`ChatUsageRecorder`（聊天账本+模型用量落账）收口；✅ 第二批（2026-09-03）：`MessagePersistenceService`（用户/助手消息落库 requestId 幂等 + Message→MessageInfoDTO 转换 + requestId 幂等查找）自 ConversationServiceImpl 收口，1595→1373 行，会话相关 15 测试全过 |
 
 ## R15-P3 文档 / 运维（✅ 已完成 2026-08-28；R15-28 以最小落地实现，R15-27/30 已文档化待真机执行）
 
@@ -313,5 +313,5 @@
 | R15-26 | **生产安全上线阻断清单（TODO.md P0 五项全未勾）**：默认密码轮换、HTTPS+Nginx/Let's Encrypt、CORS 收紧（去 `*`）、prod 关 Swagger、MySQL 每日备份 + Milvus 快照 | `TODO.md` P0 1-5、`docs/PRODUCTION_OPS.md §0` | 产出轮换脚本 + HTTPS 反代样例 + 备份 cron 脚本 + 告警启用文档（不在真实环境直接执行） |
 | R15-27 | eval-nightly 依赖 cpolar 免费隧道随机子域名且需 02:00 在线 | `docs/ROADMAP.md:97` | 固定子域名或注册为 Windows 服务 |
 | R15-28 | P2-8 私有部署加固：✅ MinIO per-tenant bucket 隔离已落地（2026-08-30 第十七批：插件工件写 `hfusionhub-t<tenantId>` 租户桶，读取回退默认桶兼容旧对象）；敏感标书禁外部 LLM-as-judge 已由 judge_gate 覆盖 | `docs/BID_COMPLIANCE.md:31, 81` | 私有化部署模式开关 + 存储隔离 |
-| R15-29 | 前端 chat 断线重连遗留（幂等 requestId 自动重试；scrollToBottom 改 rAF） | 本文 §3 P2 遗留项 | F2 模式收尾 |
+| R15-29 | ✅ 前端 chat 断线重连已落地（`chat/Detail.vue`：尚未收到内容且网络类错误时以同一 requestId 自动重试一次，后端幂等不产生重复消息；`scrollToBottom` 已改 rAF；2026-09-03 复核确认） | 本文 §3 P2 遗留项 | F2 模式收尾 |
 | R15-30 | staging 真机验证缺口：隔离 Docker Engine / K8s runner 未在 staging 机器演练 | CHANGELOG 验收记录、`docs/PRODUCTION_OPS.md §9` | staging 机器跑 dind rehearsal + `plugin-e2e-acceptance.ps1` |

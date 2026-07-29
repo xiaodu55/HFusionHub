@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第十九批（2026-09-03：修复收尾 + 运维脚本补齐）
+
+#### Fixed
+- **全仓乱码清零**：`StatusCode.java`「分块不存在」注释截断修复；`schema-h2.sql` 32 处注释乱码（29 处 UTF-8 截断 + V52/V53/V54 三行 GBK 串码，经字节级正向模拟还原原文：应用发布的 API Key / 知识库共享 / 操作审计日志）；`pdf_parser.py` 坏字符统计 U+FFFD 双重计数 bug（约 2.5% 替换符即被误判到 5% 拒稿阈值）
+- **backup-mysql.sh 校验环节 SIGPIPE 误判**：pipefail 下 `zcat|head|grep -q` 恒返回 141，成功备份会被误判损坏而删除；改为先截取头部字节再匹配
+
+#### Changed
+- **R15-24 第二批 God class 拆分**：`MessagePersistenceService` 自 ConversationServiceImpl 收口（用户/助手消息落库 requestId 幂等 + Message→MessageInfoDTO 转换 + 幂等查找），1595→1373 行；会话相关 15 测试全过
+- **R15-22 真机复核**：`TenantInterceptorIsolationTest` 连真实 MySQL（完整 Flyway V1–V83 链）2/2 通过
+- **R15-29 状态确认**：前端 chat 断线重连（幂等 requestId 重试 + rAF 滚动）此前已实现，文档补记
+
+#### Added
+- `scripts/restore-mysql.sh`：MySQL 备份恢复/演练脚本（重建库→灌 dump→关键表行数核验）；开发栈真实演练通过（78 表、9 张关键表行数逐一吻合）
+- `scripts/rotate-db-password.sh`：数据库密码轮换"落实"脚本（.env 新密码经 stdin ALTER 到 root/hfusionhub 账户，`--check` 重启后复核；开发栈跳过/复核路径实测正常）
+
 ### 大数据扩展包批（2026-08-31 第十八批：HFusionData Analytics）
 
 #### Added（毕设 + 可上线产品双形态的分析扩展包）

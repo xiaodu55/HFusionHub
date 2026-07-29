@@ -13,7 +13,7 @@
 
 ### 🔐 安全配置（必需项，上线前必须完成）
 
-- [ ] **修改所有默认密码** — 运行 `bash scripts/rotate-secrets.sh` 生成全部密钥并按指引同步两侧 `.env`（第十五轮 R15-26 落地脚本；`--check` 可扫描弱默认值与缺失的 `MODEL_CREDENTIAL_ENCRYPTION_KEY`）
+- [ ] **修改所有默认密码** — 运行 `bash scripts/rotate-secrets.sh` 生成全部密钥并按指引同步两侧 `.env`（第十五轮 R15-26 落地脚本；`--check` 可扫描弱默认值与缺失的 `MODEL_CREDENTIAL_ENCRYPTION_KEY`）；MySQL 密码的库内落实用 `bash scripts/rotate-db-password.sh --apply --yes`（经 stdin ALTER，root/hfusionhub 账户），重启栈后 `--check` 复核
 - [ ] **配置真实 DeepSeek API Key** — `python-ai/.env` → `DEEPSEEK_API_KEY`（当前已配置真实 key，聊天默认 DeepSeek 优先，Ollama 降级为 embedding/离线）
 - [ ] **更新内部通信令牌** — `docker/.env` → `PYTHON_AI_INTERNAL_TOKEN`、`PLUGIN_RUNNER_SECRET_KEY`（32 字符随机字符串，两端一致）
 - [ ] **启用 HTTPS** — 参考落地样例 `deploy/nginx-https.conf.example`（第十五轮 R15-26：Let's Encrypt certbot 全流程 + SSE 透传 + HSTS + 管理端口/runner 端口不对外清单）
@@ -49,7 +49,7 @@
 
 ### 🔧 运维工具
 
-- [ ] **备份恢复演练** — 模拟 MySQL 数据丢失 → 从备份恢复 → 验证数据完整性；模拟 Milvus 数据损坏 → 重建向量索引
+- [ ] **备份恢复演练** — 模拟 MySQL 数据丢失 → 从备份恢复 → 验证数据完整性；模拟 Milvus 数据损坏 → 重建向量索引。MySQL 恢复脚本：`bash scripts/restore-mysql.sh <dump.sql.gz> --yes --dev`（演练，重建库→灌 dump→关键表核验；生产侧去掉 `--dev`）——2026-09-03 已在开发栈完成一次真实演练（78 表恢复，9 张关键表行数与恢复前一致）
 - [ ] **日志轮转** — Docker 日志 `max-size: 100m, max-file: 3`；应用日志 Logback 每日切分（保留 30 天）
 - [ ] **灾难恢复计划** — RTO（恢复时间目标）< 4 小时；RPO（恢复点目标）< 24 小时
 
