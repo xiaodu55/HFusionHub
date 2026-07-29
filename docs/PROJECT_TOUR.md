@@ -1,6 +1,8 @@
 # HFusionHub 项目介绍（功能全览）
 
 > 面向新用户与评估者的**逐页功能导览**：每个页面做什么、怎么用，均附实际运行截图（暗色主题、1440×900）。
+> 截图摄于「侧边栏瘦身」改版前：改版后侧边栏仅保留高频入口，被降级的 12 个页面经侧边栏
+> 「更多功能」磁贴页进入（功能本身不变，下文各节描述仍有效）。
 > 快速开始请看 [README](../README.md)；配置项全集见 [ENVIRONMENT.md](ENVIRONMENT.md)；常见问题见 [FAQ.md](FAQ.md)。
 
 HFusionHub 是一个**企业级多租户 AI Agent 平台**：Java（Spring Boot 3，写路径与业务治理）+ Python（FastAPI，RAG/Agent 智能层）+ Vue 3（前端）三层架构，支持知识库问答（RAG）、智能对话、工具审批（Agent）、招投标垂直场景（招标解读/标书撰写/废标自检）与套餐计费。
@@ -19,6 +21,7 @@ HFusionHub 是一个**企业级多租户 AI Agent 平台**：Java（Spring Boot 
 8. [记忆与笔记](#8-记忆与笔记)
 9. [系统管理（管理员）](#9-系统管理管理员)（能力开关 / 问题分流 / 账号权限 / 公告管理 / 审计日志 / 套餐管理）
 10. [设置与个人中心](#10-设置与个人中心)
+11. [运维与可观测（部署侧）](#11-运维与可观测部署侧)（监控栈 / 分布式追踪 / 备份恢复）
 
 ---
 
@@ -95,7 +98,7 @@ HFusionHub 是一个**企业级多租户 AI Agent 平台**：Java（Spring Boot 
 
 ### 4.2 会话详情
 
-多轮问答界面：流式回答、引用来源展示、每条回答可复制/重新生成/点赞点踩（反馈进入回答质量分析）。回答基于知识库时优先引用原文，不会编造资料外内容（证据不足时会明确提示）。
+多轮问答界面：流式回答、引用来源展示、每条回答可复制/重新生成/点赞点踩（反馈进入回答质量分析）。网络闪断时若尚未收到内容会以同一请求 id 自动重试一次（服务端幂等，不产生重复消息）。回答基于知识库时优先引用原文，不会编造资料外内容（证据不足时会明确提示）。
 
 ![会话详情](images/tour/09-chat-detail.png)
 
@@ -286,6 +289,46 @@ Agent 的结构化笔记本：手动创建，或 Agent 在执行任务时自动�
 身份概览与账户安全：渐变头像（点击上传，JPG/PNG/WEBP/GIF ≤2MB）、角色与账户状态徽标、注册/最近登录时间；个人信息（昵称/邮箱/手机号）编辑；修改密码。
 
 ![个人中心](images/tour/35-profile.png)
+
+---
+
+## 11. 运维与可观测（部署侧）
+
+面向部署者/评估者的平台外围能力（不影响普通用户页面，答辩演示时是加分项）。
+
+### 11.1 监控栈（Grafana / Prometheus / Tempo）
+
+一键启动独立监控 compose：
+
+```powershell
+docker compose -f deploy\docker-compose.monitoring.yml up -d
+```
+
+- **Grafana** http://127.0.0.1:3001 —— 预置看板 + 告警规则（账号 `admin`，密码见 `deploy\.env` 的 `GRAFANA_ADMIN_PASSWORD`）；
+- **Prometheus** http://127.0.0.1:9090 —— 抓取 Java/Python 指标与各 exporter；
+- **Tempo** http://127.0.0.1:3200 —— 分布式追踪后端（OTLP 4318 接收，本地存储保留 72h）。
+
+### 11.2 分布式追踪（一次问答的完整调用链）
+
+`deploy\.env` 设 `TRACING_ENABLED=true` + `OTEL_ENABLED=true` +
+`OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318/v1/traces` 后重启应用：
+Java（micrometer-tracing）与 Python（OTel）自动上报 span，RestTemplate/WebClient 调
+Python 自动传播 `traceparent`。在 Grafana → Explore → Tempo 按时间或 trace id 查看
+"前端请求 → Java → Python → LLM/Milvus" 的完整链路与耗时分解。默认关闭（零开销），
+高流量生产建议采样率 `TRACING_SAMPLING=0.1`。
+
+### 11.3 备份 / 恢复 / 密钥轮换（一键脚本）
+
+```bash
+bash scripts/backup-mysql.sh                    # MySQL 一致性备份（可 BACKUP_REMOTE_CMD 推异地）
+bash scripts/restore-mysql.sh <dump> --yes --dev # 恢复 + 关键表核验（演练实测通过）
+bash scripts/rotate-secrets.sh                  # 全套密钥轮换助手
+bash scripts/rotate-db-password.sh --apply --dev --yes   # MySQL 新密码落实进库
+bash scripts/backup_milvus.sh                   # Milvus 向量卷快照
+```
+
+另有静态一致性门禁 `scripts/static-checks.py`（租户列/内部令牌键/测试计数/Flyway 版本窗口/
+H2 schema 漂移防护五项），CI 与本地提交前均可运行。
 
 ---
 
