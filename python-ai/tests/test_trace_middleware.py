@@ -92,6 +92,68 @@ class TestTraceMiddleware:
             assert HEADER_NAME in resp.headers
 
 
+class TestOtelTraceparentPropagation:
+    """W3C traceparent 提取 → OTel 服务端 span（OTEL 启用时才生效）。"""
+
+    @pytest.mark.asyncio
+    async def test_traceparent_creates_child_server_span(self, transport, monkeypatch):
+        from opentelemetry import trace as otel_trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        from app.utils import telemetry as telemetry_mod
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        otel_trace.set_tracer_provider(provider)
+        # TraceMiddleware 经 telemetry.is_enabled() 判断是否启用 OTel
+        monkeypatch.setattr(telemetry_mod, "_enabled", True)
+
+        remote_trace_id = "1" * 32
+        remote_parent_id = "2" * 16
+        traceparent = f"00-{remote_trace_id}-{remote_parent_id}-01"
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/health", headers={"traceparent": traceparent})
+            assert resp.status_code == 200
+
+        spans = exporter.get_finished_spans()
+        assert any("GET /health" in s.name for s in spans), \
+            f"未创建服务端 span: {[s.name for s in spans]}"
+        span = next(s for s in spans if "GET /health" in s.name)
+        # 父级 = Java 侧传入的 remote parent——同一 trace id 连成一条调用链
+        assert span.context.trace_id == int(remote_trace_id, 16)
+        assert span.parent is not None
+        assert span.parent.span_id == int(remote_parent_id, 16)
+
+    @pytest.mark.asyncio
+    async def test_traceparent_ignored_when_otel_disabled(self, transport, monkeypatch):
+        from opentelemetry import trace as otel_trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        from app.utils import telemetry as telemetry_mod
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        otel_trace.set_tracer_provider(provider)
+        monkeypatch.setattr(telemetry_mod, "_enabled", False)
+
+        traceparent = "00-" + "1" * 32 + "-" + "2" * 16 + "-01"
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/health", headers={"traceparent": traceparent})
+            assert resp.status_code == 200
+
+        assert len(exporter.get_finished_spans()) == 0
+
+
 class TestTraceIdValidation:
     """客户端提供的 trace ID 会进入日志与响应头——必须做格式校验防注入。"""
 

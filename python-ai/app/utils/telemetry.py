@@ -55,11 +55,10 @@ def init_telemetry(
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
-        from opentelemetry.semconv.resource import ResourceAttributes
 
-        resource = Resource.create({
-            ResourceAttributes.SERVICE_NAME: service_name,
-        })
+        # "service.name" 用字符串键——semconv.resource.ResourceAttributes 在
+        # 新版 SDK 中已弃用/移除，字符串键全版本稳定。
+        resource = Resource.create({"service.name": service_name})
 
         provider = TracerProvider(resource=resource)
 

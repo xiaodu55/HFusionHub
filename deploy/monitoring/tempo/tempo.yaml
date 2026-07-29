@@ -1,0 +1,28 @@
+# Tempo — HFusionHub 分布式追踪后端（单机本地存储最小配置）
+#
+# OTLP HTTP 接收端口 4318（Java micrometer-tracing / Python telemetry.py 推送），
+# 查询 API 3200（Grafana 数据源）。监控栈仅内网/127.0.0.1 暴露，勿对公网发布。
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 72h
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/traces
+    wal:
+      path: /var/tempo/wal

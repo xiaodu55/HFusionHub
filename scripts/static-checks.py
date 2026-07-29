@@ -22,6 +22,11 @@
   README.md / docs/java-backend.md / docs/database.md 中的区间写法
   "V1–V<n>" 与新脚本窗口写法 "V<n+1>+" 是否与实际一致。
 
+检查 5：H2 测试 schema 漂移防护（R15-22 收尾）
+  解析 V1..V<latest> 迁移链得到最终表-列集合，与 schema-h2.sql 静态对比；
+  漂移超出 scripts/h2_schema_drift_baseline.json 基线（即新增漂移）时
+  报错，防止手维护的 H2 schema 与真实迁移继续漂移。
+
 用法:
   python scripts/static-checks.py --tenant-columns
   python scripts/static-checks.py --internal-token-keys
@@ -33,6 +38,7 @@
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -300,16 +306,39 @@ def check_flyway_doc_sync() -> None:
         print(f"[ok] Flyway 版本窗口同步：最新迁移 V{latest}，新脚本窗口 V{latest + 1}+")
 
 
+def check_h2_schema_drift() -> None:
+    """H2 测试 schema 与 Flyway 迁移链的漂移防护（R15-22 收尾）。
+
+    逻辑在 scripts/check-h2-schema-drift.py（基线模式：只拦"新增"漂移）。
+    """
+    script = REPO / "scripts" / "check-h2-schema-drift.py"
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    output = (result.stdout or result.stderr or "").strip()
+    if result.returncode != 0:
+        problems.append(f"H2 schema 出现基线之外的新增漂移:\n    {output}")
+    else:
+        for line in output.splitlines():
+            cleaned = re.sub(r"^\[(?:ok|info)\]\s*", "", line)
+            if cleaned:
+                print(f"[ok] {cleaned}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
     parser.add_argument("--internal-token-keys", action="store_true")
     parser.add_argument("--test-counts", action="store_true")
     parser.add_argument("--flyway-doc-sync", action="store_true")
+    parser.add_argument("--h2-schema-drift", action="store_true")
     args = parser.parse_args()
 
-    if not (args.tenant_columns or args.internal_token_keys or args.test_counts or args.flyway_doc_sync):
-        args.tenant_columns = args.internal_token_keys = args.test_counts = args.flyway_doc_sync = True
+    if not (args.tenant_columns or args.internal_token_keys or args.test_counts
+            or args.flyway_doc_sync or args.h2_schema_drift):
+        args.tenant_columns = args.internal_token_keys = args.test_counts = \
+            args.flyway_doc_sync = args.h2_schema_drift = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -319,6 +348,8 @@ def main() -> int:
         check_test_counts()
     if args.flyway_doc_sync:
         check_flyway_doc_sync()
+    if args.h2_schema_drift:
+        check_h2_schema_drift()
 
     if problems:
         print("\n发现问题:")

@@ -39,12 +39,18 @@ public class WebClientConfig {
      */
     private static final Duration RESPONSE_TIMEOUT = Duration.ofSeconds(300);
 
+    /**
+     * 注入 Boot 自动定制的 {@link WebClient.Builder}（含 ObservationWebClientCustomizer
+     * 等定制器）：TRACING_ENABLED=true 时流式调 Python 自动携带 traceparent；
+     * 直接 {@code WebClient.builder()} 裸构建会绕过这些定制器导致追踪断链。
+     * 追踪关闭时该定制器不存在，行为与旧实现完全一致。
+     */
     @Bean
-    public WebClient webClient() {
+    public WebClient webClient(WebClient.Builder builder) {
         HttpClient httpClient = HttpClient.create()
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, CONNECT_TIMEOUT_MS)
                 .responseTimeout(RESPONSE_TIMEOUT);
-        return WebClient.builder()
+        return builder
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(10 * 1024 * 1024)) // 10MB
                 .build();

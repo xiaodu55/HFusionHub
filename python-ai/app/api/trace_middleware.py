@@ -43,6 +43,26 @@ logger = logging.getLogger("hfusionhub.trace")
 _TRACE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
+def _extract_w3c_context(request: Request):
+    """提取 W3C traceparent（Java micrometer-tracing 自动注入），供 OTel
+    服务端 span 作为其子 span——同一条调用链在 Tempo 中连贯可见。
+
+    仅在 OTEL_ENABLED 且包可用时返回非 None；其余情况返回 None（零开销）。
+    """
+    traceparent = request.headers.get("traceparent")
+    if not traceparent:
+        return None
+    try:
+        from opentelemetry.trace.propagation.tracecontext import (
+            TraceContextTextMapPropagator,
+        )
+
+        return TraceContextTextMapPropagator().extract(
+            {"traceparent": traceparent})
+    except Exception:
+        return None
+
+
 class TraceMiddleware(BaseHTTPMiddleware):
     """Extract / generate ``X-Trace-ID`` and attach it to the request context."""
 
@@ -59,9 +79,35 @@ class TraceMiddleware(BaseHTTPMiddleware):
         # Make trace_id available in logging via LoggerAdapter or directly
         request.state.trace_id = trace_id
 
+        # OTel 分布式追踪：traceparent 存在且 OTel 已启用时，开一个服务端
+        # span 包住整个请求（父级 = Java 侧 span，同一 trace id）。
+        server_span_ctx = None
+        try:
+            from app.utils import telemetry as _telemetry
+            if _telemetry.is_enabled():
+                server_span_ctx = _extract_w3c_context(request)
+        except Exception:
+            server_span_ctx = None
+
         start = time.perf_counter()
         try:
-            response = await call_next(request)
+            if server_span_ctx is not None:
+                tracer = _telemetry.get_tracer("hfusionhub.http")
+                span_cm = tracer.start_as_current_span(
+                    f"{request.method} {request.url.path}",
+                    context=server_span_ctx,
+                    attributes={"http.request.method": request.method,
+                                "url.path": request.url.path},
+                )
+                span_cm.__enter__()
+                try:
+                    response = await call_next(request)
+                except Exception as exc:
+                    span_cm.__exit__(type(exc), exc, exc.__traceback__)
+                    raise
+                span_cm.__exit__(None, None, None)
+            else:
+                response = await call_next(request)
         except Exception:
             # Re-raise; the global exception handler will deal with it
             raise

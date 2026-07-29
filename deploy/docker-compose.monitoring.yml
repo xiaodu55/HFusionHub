@@ -1,7 +1,10 @@
 # HFusionHub Monitoring Stack
 #
 # Usage:
-#   docker compose -f deploy/docker-compose.prod.yml -f deploy/docker-compose.monitoring.yml up -d
+#   docker compose -f deploy/docker-compose.monitoring.yml up -d
+#       # 独立启动：Grafana + Prometheus + Alertmanager + Tempo（Grafana 密码见 deploy/.env）
+#   docker compose -f deploy/docker-compose.prod.yml -f deploy/docker-compose.monitoring.yml #     --profile exporters up -d
+#       # 生产 overlay 全量（额外拉起 mysqld/redis exporter，需同网络可达 mysql8/redis7）
 #
 # Services:
 #   - Prometheus (scrapes Python AI /metrics + Java /actuator/prometheus)
@@ -52,9 +55,27 @@ services:
       - alertmanager-data:/alertmanager
     restart: unless-stopped
 
+  # Tempo — 分布式追踪后端（OTLP HTTP 4318 接收，查询 API 3200）。
+  # Java（TRACING_ENABLED=true）与 Python（OTEL_ENABLED=true）的 span 都推到这里；
+  # 4318 绑定 127.0.0.1 是为了宿主机直跑的 Java/Python 开发进程能推送。
+  tempo:
+    image: grafana/tempo:2.7.0
+    container_name: hfusionhub-tempo
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    ports:
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:3200:3200"
+    volumes:
+      - ./monitoring/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    restart: unless-stopped
+
   # MySQL exporter — scrape mysqld_* metrics into Prometheus.
   # Requires MYSQL_ROOT_PASSWORD from deploy/.env (shared with the prod compose).
   mysqld-exporter:
+    # profiles: 仅生产 overlay（与 docker-compose.prod.yml 同启）时拉起——
+    # 独立启动监控栈时无 mysql8/redis7 网络可连，会进入重启循环
+    profiles: ["exporters"]
     image: prom/mysqld-exporter:v0.15.1
     container_name: hfusionhub-mysqld-exporter
     environment:
@@ -69,6 +90,9 @@ services:
 
   # Redis exporter — scrape redis_* metrics into Prometheus.
   redis-exporter:
+    # profiles: 仅生产 overlay（与 docker-compose.prod.yml 同启）时拉起——
+    # 独立启动监控栈时无 mysql8/redis7 网络可连，会进入重启循环
+    profiles: ["exporters"]
     image: oliver006/redis_exporter:v1.62.0
     container_name: hfusionhub-redis-exporter
     environment:
@@ -84,3 +108,4 @@ volumes:
   prometheus-data:
   grafana-data:
   alertmanager-data:
+  tempo-data:

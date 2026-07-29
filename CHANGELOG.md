@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第二十批（2026-09-04：P0 补强三连——分布式追踪 / H2 漂移防护 / 备份异地化）
+
+#### Added
+- **跨服务分布式追踪（全链路打通）**：
+  - Java：`micrometer-tracing-bridge-otel` + `opentelemetry-exporter-otlp`（Boot BOM 管版本），
+    `TRACING_ENABLED` 默认关（零开销）；开启后 RestTemplate/WebClient 调 Python 自动注入
+    `traceparent`，span 经 OTLP 导出到 Tempo
+  - **WebClientConfig 修复**：改注入 Boot 自动定制的 `WebClient.Builder`（原裸
+    `WebClient.builder()` 会绕过 ObservationWebClientCustomizer，SSE 流式链路追踪断链）
+  - Python：`TraceMiddleware` 新增 W3C `traceparent` 提取——OTEL 启用时开服务端 span
+    并入 Java 同一调用链；`requirements.txt` 补 otel 三件套（1.29.0，未安装则优雅降级）；
+    `telemetry.py` 弃用 API（semconv ResourceAttributes）替换为稳定字符串键
+  - 监控栈：新增 Tempo 2.7.0（OTLP 4318 / 查询 3200，本地存储 72h）+ Grafana Tempo
+    数据源自动装配；`docker-compose.monitoring.yml` 校验通过
+  - 生产 compose：java/python 服务透传 `TRACING_ENABLED`/`OTEL_ENABLED`/
+    `OTEL_EXPORTER_OTLP_ENDPOINT`/`TRACING_SAMPLING`（`deploy/.env.example` 带注释样例）
+  - **实弹验证（Tempo 真机）**：Java 与 Python 的 span 均导入 Tempo；以同一 W3C
+    traceparent 分别请求两侧，`/api/traces/{id}` 返回**同一条 trace 内同时含
+    hfusionhub-backend 与 hfusionhub-python-ai**，两侧 server span 的 parentSpanId
+    均正确指向上游 context——跨服务调用链组装闭环
+- **H2 测试 schema 漂移防护（R15-22 收尾）**：`scripts/check-h2-schema-drift.py` 静态解析
+  V1–V83 迁移链（CREATE/ALTER 全语义，含反引号/字符串内逗号）对比 schema-h2.sql；
+  现存 23 条历史漂移（6 张缺表 + 17 缺列）已入 `h2_schema_drift_baseline.json` 基线，
+  **新增漂移即 CI 报错**；已挂进 `static-checks.py`（`--h2-schema-drift`，默认开启）
+- **备份异地化**：`backup-mysql.sh` 支持 `BACKUP_REMOTE_CMD`（`{}` 占位文件路径，
+  rclone/rsync/scp 皆可）推第二存储；`COMPOSE_FILE` 可环境变量覆盖（开发栈也能备份）；
+  顺手 `--no-tablespaces` 消除 mysqldump PROCESS 权限警告。实测：开发栈真实备份 +
+  模拟异地推送成功
+
+#### Changed
+- 测试：新增 2 个 traceparent→OTel span 集成测试（含父级/trace id 断言），
+  Python 1409 → **1411**（README/AGENTS/CLAUDE 计数同步）
+
 ### 第十九批（2026-09-03：修复收尾 + 运维脚本补齐）
 
 #### Fixed

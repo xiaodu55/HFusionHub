@@ -79,7 +79,10 @@ Copy `deploy/.env.example` to `deploy/.env` for production Docker Compose:
 | `SPRINGDOC_SWAGGER_UI_ENABLED` | No | `true`（dev）/ `false`（prod compose） | Swagger UI 开关。生产默认关闭；临时开启在 `deploy/.env` 显式设置 |
 | `APP_CORS_ALLOWED_ORIGINS` | No | ``（fail-closed 同源） | Java CORS 白名单（逗号分隔，如 `https://hub.example.com`）。生产 compose 读取 `CORS_ALLOWED_ORIGINS`；**禁止 `*`**（allowCredentials=true 拒绝通配且属安全隐患）；留空时仅同源。开发/内网穿透用 `APP_CORS_ALLOW_ANY_ORIGIN=true` 显式放行 |
 | `AGENT_STATUS_EVENT_SSE_POLL_THREADS` | No | `0`（自动） | 任务 SSE 轮询线程池大小；0 = max(4, CPU/2)。慢连接不再拖垮全局轮询（M8） |
-| `APP_AVATAR_DIR` | No | `uploads/avatars` | 用户头像落盘目录（相对应用工作目录；Docker 下在 uploads-data 卷内持久化）。上传接口校验 JPG/PNG/WEBP/GIF 魔数、≤2MB |
+| `APP_AVATAR_DIR` | No | `uploads/avatars` |
+| `TRACING_ENABLED` | No | `false` | 分布式追踪总开关（默认关，零开销）。开启后 RestTemplate/WebClient 调 Python 自动携带 `traceparent`，span 经 OTLP 导出到 Tempo（监控栈）；实测见 CHANGELOG 第二十批 |
+| `TRACING_SAMPLING` | No | `1.0` | 追踪采样率（0–1）；高流量生产可调 0.1 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4318/v1/traces` | OTLP HTTP 导出端点；监控栈 Tempo 为 `http://tempo:4318/v1/traces`（容器内）/ `127.0.0.1:4318`（宿主机直跑） | 用户头像落盘目录（相对应用工作目录；Docker 下在 uploads-data 卷内持久化）。上传接口校验 JPG/PNG/WEBP/GIF 魔数、≤2MB |
 
 > Redis 密码：dev compose 已在 `docker/docker-compose.yml` 通过 `redis-server ... --requirepass "$REDIS_PASSWORD"` 启用（2026-08-21 起生效）。Java 侧 `application.yml` 读取 `REDIS_PASSWORD`，**两端必须一致**，否则 Java 启动报 NOAUTH。生产若 Redis 关闭 requirepass，将 `REDIS_PASSWORD` 留空即可。
 
@@ -122,7 +125,9 @@ Copy `python-ai/.env.example` to `python-ai/.env`:
 | `OPENAI_COMPATIBLE_API_KEY` | No | `` | OpenAI 兼容备用供应商（B2）：加入 FailoverLLM 链，主供应商故障时切换 |
 | `OPENAI_COMPATIBLE_BASE_URL` | No | `` | 同上，chat-completions 兼容端点（OpenAI/通义/Kimi 等） |
 | `OPENAI_COMPATIBLE_MODEL` | No | `` | 同上，模型名（空则用 DEEPSEEK_MODEL） |
-| `WEB_SEARCH_PROVIDER` | No | `duckduckgo` | 联网搜索后端：`duckduckgo`（免 Key）/ `tavily` / `serper` |
+| `WEB_SEARCH_PROVIDER` | No | `duckduckgo` |
+| `OTEL_ENABLED` | No | `false` | Python 侧 OpenTelemetry 开关（`app/utils/telemetry.py`；未装 otel 包时优雅降级 no-op）。开启且带 `traceparent` 的请求（Java 传来）会并入同一调用链 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | —（console） | OTLP HTTP 导出端点；留空退化为控制台输出。监控栈 Tempo 为 `http://tempo:4318/v1/traces` | 联网搜索后端：`duckduckgo`（免 Key）/ `tavily` / `serper` |
 | `WEB_SEARCH_API_KEY` | No | `` | Tavily / Serper 的 API Key |
 | `WEB_SEARCH_BASE_URL` | No | `` | 搜索 API 地址覆盖（可选） |
 | `MCP_SERVERS_CONFIG` | No | `` | MCP 客户端启动配置（JSON 数组）；运行时变更持久化到 `MCP_SERVERS_CONFIG_FILE` |

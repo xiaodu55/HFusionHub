@@ -20,7 +20,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-COMPOSE_FILE="$REPO_ROOT/deploy/docker-compose.prod.yml"
+# 默认对生产 compose 备份；COMPOSE_FILE=docker/docker-compose.yml 可切开发栈
+COMPOSE_FILE="${COMPOSE_FILE:-$REPO_ROOT/deploy/docker-compose.prod.yml}"
 BACKUP_DIR="${BACKUP_DIR:-$REPO_ROOT/backups/mysql}"
 BACKUP_KEEP="${BACKUP_KEEP:-7}"
 STAMP="$(date +%Y%m%d_%H%M%S)"
@@ -30,7 +31,7 @@ mkdir -p "$BACKUP_DIR"
 echo "[$(date '+%F %T')] 开始 MySQL 备份 -> $BACKUP_DIR/hfusionhub_$STAMP.sql.gz"
 
 docker compose -f "$COMPOSE_FILE" exec -T mysql8 sh -c \
-  'exec mysqldump -uhfusionhub -p"$MYSQL_PASSWORD" --single-transaction --routines --triggers hfusionhub' \
+  'exec mysqldump -uhfusionhub -p"$MYSQL_PASSWORD" --single-transaction --no-tablespaces --routines --triggers hfusionhub' \
   | gzip > "$BACKUP_DIR/hfusionhub_$STAMP.sql.gz"
 
 SIZE=$(du -h "$BACKUP_DIR/hfusionhub_$STAMP.sql.gz" | cut -f1)
@@ -51,6 +52,22 @@ fi
 OLD_COUNT=$(find "$BACKUP_DIR" -name "hfusionhub_*.sql.gz" -mtime +"$BACKUP_KEEP" | wc -l)
 find "$BACKUP_DIR" -name "hfusionhub_*.sql.gz" -mtime +"$BACKUP_KEEP" -delete
 echo "[$(date '+%F %T')] 清理 $OLD_COUNT 个超过 ${BACKUP_KEEP} 天的旧备份"
+
+# 异地备份（可选）：设置 BACKUP_REMOTE_CMD 后，把最新备份推到远端第二存储，
+# 避免本机磁盘故障连带备份丢失（灾难恢复 RPO 依赖此步骤）。
+# 命令模板中用 {} 代替备份文件路径，例如：
+#   BACKUP_REMOTE_CMD='rclone copy {} r2:hfusionhub-backups/mysql' ./scripts/backup-mysql.sh
+#   BACKUP_REMOTE_CMD='rsync -z {} backup@nas:/volume1/backups/mysql' ./scripts/backup-mysql.sh
+if [[ -n "${BACKUP_REMOTE_CMD:-}" ]]; then
+  REMOTE_CMD="${BACKUP_REMOTE_CMD/\{\}/"$BACKUP_DIR/hfusionhub_$STAMP.sql.gz"}"
+  echo "[$(date '+%F %T')] 推送异地备份: $REMOTE_CMD"
+  if bash -c "$REMOTE_CMD"; then
+    echo "[$(date '+%F %T')] 异地备份完成"
+  else
+    echo "[$(date '+%F %T')] 错误: 异地备份推送失败（本地备份已保留）" >&2
+    exit 1
+  fi
+fi
 
 # 提醒: Milvus 向量卷快照见 scripts/backup_milvus.sh / restore_milvus.sh
 echo "[$(date '+%F %T')] 完成。Milvus 快照请另行运行 scripts/backup_milvus.sh"
