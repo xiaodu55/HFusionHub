@@ -37,8 +37,11 @@ SIZE=$(du -h "$BACKUP_DIR/hfusionhub_$STAMP.sql.gz" | cut -f1)
 echo "[$(date '+%F %T')] 备份完成: hfusionhub_$STAMP.sql.gz ($SIZE)"
 
 # 验证 dump 非空且以 MySQL dump 头开始
+# 注意: 不能写 `zcat | head | grep -q` —— pipefail 下 grep -q 提前退出会让
+# zcat 吃 SIGPIPE(141)，把成功的备份误判为损坏而删除；先截取头部字节再匹配。
+DUMP_HEAD="$(zcat "$BACKUP_DIR/hfusionhub_$STAMP.sql.gz" 2>/dev/null | head -c 4096 || true)"
 if ! gzip -t "$BACKUP_DIR/hfusionhub_$STAMP.sql.gz" || \
-   ! zcat "$BACKUP_DIR/hfusionhub_$STAMP.sql.gz" | head -5 | grep -q "MySQL dump"; then
+   ! printf '%s\n' "$DUMP_HEAD" | grep -q "MySQL dump"; then
   echo "[$(date '+%F %T')] 错误: 备份文件校验失败" >&2
   rm -f "$BACKUP_DIR/hfusionhub_$STAMP.sql.gz"
   exit 1
