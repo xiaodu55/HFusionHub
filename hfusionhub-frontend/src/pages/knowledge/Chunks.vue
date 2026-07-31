@@ -5,7 +5,7 @@ import * as vectorizationApi from '@/api/vectorization'
 import * as documentApi from '@/api/document'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, FileText, Code, Table, List, Heading, AlignLeft, ChevronDown, ChevronUp, Copy, Check } from 'lucide-vue-next'
+import { ArrowLeft, FileText, Code, Table, List, MessagesSquare, Heading, AlignLeft, ChevronDown, ChevronUp, Copy, Check } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -42,6 +42,7 @@ const blockTypes = [
   { value: 'CODE', label: '代码' },
   { value: 'TABLE', label: '表格' },
   { value: 'LIST', label: '列表' },
+  { value: 'QA', label: '问答' },
 ]
 
 // 长内容折叠阈值（字符）
@@ -106,6 +107,7 @@ const getBlockTypeIcon = (type: string) => {
     case 'CODE': return Code
     case 'TABLE': return Table
     case 'LIST': return List
+    case 'QA': return MessagesSquare
     default: return FileText
   }
 }
@@ -117,6 +119,7 @@ const getBlockTypeLabel = (type: string) => {
     case 'CODE': return '代码'
     case 'TABLE': return '表格'
     case 'LIST': return '列表'
+    case 'QA': return '问答'
     default: return type
   }
 }
@@ -132,6 +135,8 @@ const getBlockTypeTheme = (type: string): { badge: string; bar: string } => {
       return { badge: 'bg-purple-50 text-purple-700 dark:bg-purple-400/15 dark:text-purple-300', bar: 'bg-purple-400 dark:bg-purple-500' }
     case 'LIST':
       return { badge: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300', bar: 'bg-emerald-400 dark:bg-emerald-500' }
+    case 'QA':
+      return { badge: 'bg-amber-50 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300', bar: 'bg-amber-400 dark:bg-amber-500' }
     case 'PARAGRAPH':
       return { badge: 'bg-slate-100 text-slate-700 dark:bg-slate-400/15 dark:text-slate-300', bar: 'bg-slate-300 dark:bg-slate-500' }
     default:

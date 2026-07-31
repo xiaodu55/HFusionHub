@@ -15,6 +15,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
@@ -24,6 +25,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
@@ -39,6 +42,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public class ConversationController {
 
     private final ConversationService conversationService;
+    private final com.hfusionhub.service.impl.ChatImageStorage chatImageStorage;
     private final Executor sseTaskExecutor;
     private final TaskEventSseManager taskEventSseManager;
 
@@ -50,6 +54,30 @@ public class ConversationController {
     public R<ConversationInfoDTO> create(@Valid @RequestBody ConversationCreateDTO dto) {
         ConversationInfoDTO info = conversationService.create(dto);
         return R.ok("创建成功", info);
+    }
+
+    /**
+     * 上传对话图片（对话图片输入，实验特性）。JPG/PNG/WEBP ≤5MB，≤4 张/消息。
+     * 返回相对 URL；发送消息时放入 MessageSendDTO.images。
+     */
+    @Operation(summary = "上传对话图片", description = "JPG/PNG/WEBP ≤5MB；返回相对 URL，发送消息时放入 images")
+    @PostMapping(value = "/chat-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public R<Map<String, String>> uploadChatImage(@RequestParam("file") MultipartFile file) {
+        return R.ok("上传成功", Map.of("url", chatImageStorage.save(file)));
+    }
+
+    /**
+     * 读取对话图片（需登录态；前端经 fetch+blob 携带 satoken 头加载——与头像同模式，
+     * 端点不可免鉴权，避免连带放开 POST 上传）。
+     */
+    @Operation(summary = "读取对话图片", description = "按签发文件名回源图片字节")
+    @GetMapping("/chat-image/{name}")
+    public ResponseEntity<byte[]> getChatImage(@PathVariable String name) {
+        byte[] bytes = chatImageStorage.read(name);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(chatImageStorage.contentType(name)))
+                .cacheControl(org.springframework.http.CacheControl.maxAge(java.time.Duration.ofHours(1)))
+                .body(bytes);
     }
 
     @Operation(summary = "删除对话", description = "删除指定对话")

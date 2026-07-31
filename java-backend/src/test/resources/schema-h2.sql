@@ -1442,3 +1442,6 @@ CREATE TABLE IF NOT EXISTS bigdata_batch_run_log (
     log_excerpt VARCHAR(2000) DEFAULT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- V84: 对话图片输入（message.images）
+ALTER TABLE message ADD COLUMN IF NOT EXISTS images CLOB;

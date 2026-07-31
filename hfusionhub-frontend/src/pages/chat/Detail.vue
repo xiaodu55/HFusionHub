@@ -9,7 +9,7 @@ import { useUserStore } from '@/stores/user'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import * as voiceApi from '@/api/voice'
-import { ArrowLeft, BookOpen, Check, Copy, Download, Eraser, Mic, Pencil, Send, User, Bot, Loader2, Square, RefreshCw, ThumbsUp, ThumbsDown, Volume2, X } from 'lucide-vue-next'
+import { ArrowLeft, BookOpen, Check, Copy, Download, Eraser, Image as ImageIcon, Mic, Pencil, Send, User, Bot, Loader2, Square, RefreshCw, ThumbsUp, ThumbsDown, Volume2, X } from 'lucide-vue-next'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useToast } from '@/composables/useToast'
 import { formatDateTime, formatTime } from '@/utils/date'
@@ -40,6 +40,50 @@ const loading = ref(false)
 const sending = ref(false)
 const inputMessage = ref('')
 const isComposing = ref(false) // 中文输入法组合态：组合期间按 Enter 不发送
+
+// 对话图片输入（实验特性）：url = 服务端相对地址（随消息发送/持久化），
+// preview = 本地 objectURL（即时预览；随气泡展示，页面卸载时由浏览器回收）
+const pendingImages = ref<Array<{ url: string; preview: string }>>([])
+const imageInputRef = ref<HTMLInputElement | null>(null)
+const uploadingImage = ref(false)
+
+const triggerImagePick = () => imageInputRef.value?.click()
+
+const onImagesChosen = async (e: Event) => {
+  const input = e.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  input.value = ''
+  const allowed = ['image/jpeg', 'image/png', 'image/webp']
+  for (const f of files) {
+    if (!allowed.includes(f.type)) {
+      alert('仅支持 JPG / PNG / WEBP 图片')
+      continue
+    }
+    if (f.size > 5 * 1024 * 1024) {
+      alert('单张图片不能超过5MB')
+      continue
+    }
+    if (pendingImages.value.length >= 4) {
+      alert('每次最多携带4张图片')
+      break
+    }
+    uploadingImage.value = true
+    try {
+      const res = await conversationApi.uploadChatImage(f)
+      pendingImages.value.push({ url: res.data.url, preview: URL.createObjectURL(f) })
+    } catch (err) {
+      console.error('图片上传失败:', err)
+      alert('图片上传失败，请重试')
+    } finally {
+      uploadingImage.value = false
+    }
+  }
+}
+
+const removePendingImage = (i: number) => {
+  const [removed] = pendingImages.value.splice(i, 1)
+  if (removed) URL.revokeObjectURL(removed.preview)
+}
 
 // ── 语音输入/播报（Batch 10：VOICE_ENABLED 默认关闭，按钮按 /voice/status 渲染）──
 const voiceStatus = ref<voiceApi.VoiceStatus>({ enabled: false, stt: false, tts: false })
@@ -187,6 +231,14 @@ const loadMessages = async (silent = false) => {
   const id = Number(route.params.id)
   try {
     const res = await conversationApi.getConversationMessages(id)
+    // 对话图片输入：服务端存相对 URL，<img> 无法带登录态——统一转 objectURL
+    for (const m of res.data) {
+      if (m.role === 'user' && m.images?.length) {
+        m.images = await Promise.all(
+          m.images.map(u => conversationApi.fetchChatImageBlobUrl(u).catch(() => u)),
+        )
+      }
+    }
     messages.value = res.data
     try {
       const feedback = await getAnswerFeedback(id)
@@ -196,15 +248,22 @@ const loadMessages = async (silent = false) => {
     } catch {
       feedbackByMessage.value = {}
     }
-    if (silent) {
-      await nextTick()
-      await nextTick()
+    const stickNow = () => {
       if (messagesContainer.value) {
         messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
       }
+    }
+    if (silent) {
+      await nextTick()
+      await nextTick()
+      stickNow()
     } else {
       await scrollToBottom()
     }
+    // Markdown 与图片为异步渲染，容器高度在首帧滚动后仍会增长——
+    // 二次/三次校正，确保「点进会话即定位到最新消息」而不是停在顶部
+    setTimeout(stickNow, 200)
+    setTimeout(stickNow, 600)
   } catch (error) {
     console.error('加载消息失败:', error)
   } finally {
@@ -214,10 +273,12 @@ const loadMessages = async (silent = false) => {
 
 const handleSend = async () => {
   if (isComposing.value) return
-  if (!inputMessage.value.trim() || sending.value) return
+  if ((!inputMessage.value.trim() && pendingImages.value.length === 0) || sending.value) return
 
   const content = inputMessage.value.trim()
   inputMessage.value = ''
+  const imageUrls = pendingImages.value.map(p => p.url)
+  const imagePreviews = pendingImages.value.map(p => p.preview)
   sending.value = true
 
   // 创建新的 AbortController
@@ -237,9 +298,12 @@ const handleSend = async () => {
       conversationId: Number(route.params.id),
       role: 'user',
       content,
+      images: imagePreviews.length ? imagePreviews : undefined,
       createdAt: timeStr,
     }
     messages.value.push(userMessage)
+    // 预览 objectURL 已挂到气泡上——不 revoke，页面卸载时由浏览器统一回收
+    pendingImages.value = []
     await scrollToBottom()
 
     // 2. 立即添加一个"思考中"的 assistant 消息占位符（使用北京时间）
@@ -274,6 +338,7 @@ const handleSend = async () => {
             conversationId: Number(route.params.id),
             content,
             requestId,
+            images: imageUrls.length ? imageUrls : undefined,
             // KB 会话启用写能力：模型可见 write_note（写工具），调用前会请求人工审批
             capabilityProfile: conversation.value?.knowledgeBaseId ? 'approval_write' : undefined,
           }),
@@ -415,6 +480,7 @@ const handleSend = async () => {
         conversationId: Number(route.params.id),
         content,
         requestId,
+        images: imageUrls.length ? imageUrls : undefined,
         capabilityProfile: conversation.value?.knowledgeBaseId ? 'approval_write' : undefined,
       })
       // 如果占位消息还在（有部分内容），替换为新完整回复
@@ -465,6 +531,15 @@ const scrollToBottom = async () => {
   await new Promise(resolve => requestAnimationFrame(() => resolve(null)))
   if (messagesContainer.value) {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+  }
+}
+
+// 仅当视口本就贴近底部时才贴底——图片等异步资源加载完成时高度增长，
+// 不把主动上翻阅读历史 long 内容的用户拽回底部
+const stickIfNearBottom = () => {
+  const el = messagesContainer.value
+  if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) {
+    el.scrollTop = el.scrollHeight
   }
 }
 
@@ -925,7 +1000,17 @@ onMounted(() => {
                   <MarkdownRenderer :content="message.content" class="text-sm" />
                 </template>
                 <template v-else>
-                  <p class="whitespace-pre-wrap text-sm">{{ message.content }}</p>
+                  <div v-if="message.images?.length" class="mb-1 flex flex-wrap gap-1.5">
+                    <img
+                      v-for="(src, i) in message.images"
+                      :key="i"
+                      :src="src"
+                      class="max-h-36 rounded border border-background/20"
+                      alt="用户上传的图片"
+                      @load="stickIfNearBottom"
+                    />
+                  </div>
+                  <p v-if="message.content" class="whitespace-pre-wrap text-sm">{{ message.content }}</p>
                 </template>
                 <div class="flex items-center justify-between gap-2 mt-1">
                   <p class="text-xs opacity-70">
@@ -1064,7 +1149,37 @@ onMounted(() => {
 
     <!-- 输入区域 -->
     <div class="border-t pt-4">
+      <!-- 对话图片输入（实验特性）：待发送图片预览 -->
+      <div v-if="pendingImages.length" class="mb-2 flex flex-wrap gap-2">
+        <div v-for="(img, i) in pendingImages" :key="img.url" class="relative">
+          <img :src="img.preview" class="h-16 w-16 rounded border object-cover" alt="待发送图片" />
+          <button
+            class="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-xs leading-none text-destructive-foreground"
+            title="移除"
+            @click="removePendingImage(i)"
+          >
+            ×
+          </button>
+        </div>
+      </div>
       <div class="flex gap-2">
+        <input
+          ref="imageInputRef"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          multiple
+          class="hidden"
+          @change="onImagesChosen"
+        />
+        <Button
+          variant="outline"
+          :disabled="sending || uploadingImage"
+          title="添加图片（实验特性）"
+          @click="triggerImagePick"
+        >
+          <Loader2 v-if="uploadingImage" class="mr-2 h-4 w-4 animate-spin" />
+          <ImageIcon v-else class="h-4 w-4" />
+        </Button>
         <Input
           id="chat-input"
           v-model="inputMessage"

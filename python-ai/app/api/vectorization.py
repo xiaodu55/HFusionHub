@@ -369,6 +369,28 @@ async def _process_document_background(
         for chunk in chunks:
             chunk.metadata["document_title"] = document_title or f"文档 #{document_id}"
         logger.info(f"[Vectorization] Created {len(chunks)} chunks")
+        # Step 2.5: QA 对生成（实验特性，RAG_QA_GENERATION_ENABLED 门控）。
+        # 用对话 LLM 从分块生成问答对并并入索引；任何失败只告警，绝不阻断索引。
+        if config.RAG_QA_GENERATION_ENABLED and chunks:
+            try:
+                from app.core.llm import get_llm
+                from app.core.rag.qa_generator import generate_qa_chunks
+
+                qa_chunks = await generate_qa_chunks(
+                    chunks,
+                    document_id=str(document_id),
+                    document_title=document_title or f"文档 #{document_id}",
+                    llm=get_llm(),
+                    max_total=config.RAG_QA_MAX_PER_DOC,
+                )
+                if qa_chunks:
+                    chunks.extend(qa_chunks)
+                    for _i, _c in enumerate(chunks):
+                        _c.index = _i
+                    logger.info(f"[Vectorization] Generated {len(qa_chunks)} QA chunks")
+            except Exception as exc:
+                logger.warning(f"[Vectorization] QA 对生成失败（不影响索引）: {exc}")
+
         quality_suffix = f"；质量告警：{', '.join(quality['warnings'])}" if quality["warnings"] else ""
         _update_status(
             "PROCESSING",

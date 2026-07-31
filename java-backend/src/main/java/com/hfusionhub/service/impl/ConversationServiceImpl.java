@@ -83,6 +83,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final com.hfusionhub.service.KbShareService kbShareService;
     private final ChatUsageRecorder chatUsageRecorder;
     private final MessagePersistenceService messagePersistence;
+    private final ChatImageStorage chatImageStorage;
 
     private static final int REQUEST_ID_MAX_LENGTH = 64;
     public static final String ASSISTANT_REQUEST_SUFFIX = ":assistant";
@@ -352,6 +353,10 @@ public class ConversationServiceImpl implements ConversationService {
                     throw new BusinessException(
                             "Agent V1 配置错误：知识库会话需要已认证的用户上下文，但当前会话无法解析用户 ID。" + "请确认 JWT 令牌有效且包含 subject 声明。");
                 }
+                // 无图片时传 null：命中既有 AiClient 重载，请求体不含 images 键
+                List<String> imagePayloads = (dto.getImages() == null || dto.getImages().isEmpty())
+                        ? null
+                        : chatImageStorage.toDataUrls(dto.getImages());
                 aiResponse = aiClient.agentV1Chat(
                         dto.getContent(),
                         dto.getConversationId(),
@@ -363,7 +368,8 @@ public class ConversationServiceImpl implements ConversationService {
                         currentUserId,
                         effectiveCapability,
                         JwtUtils.hasRole(CommonConstants.ROLE_ADMIN) ? "admin" : "user",
-                        intentContext);
+                        intentContext,
+                        imagePayloads);
             } else {
                 aiResponse = aiClient.chat(
                         dto.getContent(),
@@ -371,7 +377,8 @@ public class ConversationServiceImpl implements ConversationService {
                         conversation.getKnowledgeBaseId(),
                         history,
                         currentUserId,
-                        intentContext);
+                        intentContext,
+                        chatImageStorage.toDataUrls(dto.getImages()));
             }
         } catch (BusinessException e) {
             // Re-throw BusinessExceptions directly — they represent explicit
@@ -727,6 +734,11 @@ public class ConversationServiceImpl implements ConversationService {
             userMessage.setRole("user");
             userMessage.setContent(dto.getContent());
             userMessage.setRequestId(requestId);
+            if (dto.getImages() != null && !dto.getImages().isEmpty()) {
+                // 对话图片输入：校验并以 JSON 数组落库（与同步路径一致）
+                chatImageStorage.validateAndResolve(dto.getImages());
+                userMessage.setImages(chatImageStorage.toJson(dto.getImages()));
+            }
             try {
                 messageMapper.insert(userMessage);
             } catch (DuplicateKeyException e) {
@@ -817,6 +829,11 @@ public class ConversationServiceImpl implements ConversationService {
             userMessage.setRole("user");
             userMessage.setContent(dto.getContent());
             userMessage.setRequestId(requestId);
+            if (dto.getImages() != null && !dto.getImages().isEmpty()) {
+                // 对话图片输入：校验并以 JSON 数组落库（与同步路径一致）
+                chatImageStorage.validateAndResolve(dto.getImages());
+                userMessage.setImages(chatImageStorage.toJson(dto.getImages()));
+            }
             try {
                 messageMapper.insert(userMessage);
             } catch (DuplicateKeyException e) {
@@ -870,6 +887,10 @@ public class ConversationServiceImpl implements ConversationService {
         usageLedgerService.reserve(UsageMeter.CHAT_TOKENS, usageKey, streamReserveTokens, "message", requestId);
 
         reactor.core.publisher.Flux<String> sseFlux;
+        // 无图片时传 null：命中既有 AiClient 重载，请求体不含 images 键
+        List<String> imagePayloads = (dto.getImages() == null || dto.getImages().isEmpty())
+                ? null
+                : chatImageStorage.toDataUrls(dto.getImages());
         if (isKbBound) {
             sseFlux = aiClient.agentV1ChatStream(
                     dto.getContent(),
@@ -879,7 +900,8 @@ public class ConversationServiceImpl implements ConversationService {
                     requestId,
                     currentUserId,
                     streamingCapability,
-                    intentContext);
+                    intentContext,
+                    imagePayloads);
         } else {
             sseFlux = aiClient.streamChat(
                     dto.getContent(),
@@ -888,7 +910,8 @@ public class ConversationServiceImpl implements ConversationService {
                     history,
                     requestId,
                     currentUserId,
-                    intentContext);
+                    intentContext,
+                    imagePayloads);
         }
 
         sseFlux = sseFlux.doFinally(signalType -> {

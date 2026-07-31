@@ -85,4 +85,7 @@ public class Message {
      */
     @Schema(description = "客户端请求幂等ID")
     private String requestId;
+
+    /** 用户消息附带图片的相对 URL JSON 数组（对话图片输入, V84）；null = 无图片 */
+    private String images;
 }

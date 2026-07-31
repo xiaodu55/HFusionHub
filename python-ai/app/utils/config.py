@@ -184,8 +184,19 @@ class Config:
     RAG_MULTIMODAL_VLM_MODEL = os.getenv("RAG_MULTIMODAL_VLM_MODEL", "qwen2.5vl:3b")
     RAG_MULTIMODAL_VLM_BASE_URL = os.getenv("RAG_MULTIMODAL_VLM_BASE_URL", "")
     RAG_MULTIMODAL_VLM_TIMEOUT_SECONDS = int(
-        os.getenv("RAG_MULTIMODAL_VLM_TIMEOUT_SECONDS", "90")
+        os.getenv("RAG_MULTIMODAL_VLM_TIMEOUT_SECONDS", "180")
     )
+
+    # 对话图片输入（实验档，默认关）：开启后 /api/chat/stream 的消息可携带
+    # 图片 data URL，经 Ollama 视觉模型转中文描述后并入提问上下文。
+    CHAT_MULTIMODAL_INPUT_ENABLED = os.getenv(
+        "CHAT_MULTIMODAL_INPUT_ENABLED", "false"
+    ).lower() in ("1", "true", "yes")
+
+    # 知识库 QA 对生成（实验档，默认关）：文档解析入库时用对话 LLM 从分块
+    # 生成问答对并并入索引，提升"用户问法≠原文表述"场景的召回率。
+    RAG_QA_GENERATION_ENABLED = os.getenv("RAG_QA_GENERATION_ENABLED", "false").lower() in ("1", "true", "yes")
+    RAG_QA_MAX_PER_DOC = int(os.getenv("RAG_QA_MAX_PER_DOC", "20"))
 
     # P9 is an explicit rollout switch for the bounded single-agent runtime.
     # It wraps the existing read-only React agent; it does not add write tools.

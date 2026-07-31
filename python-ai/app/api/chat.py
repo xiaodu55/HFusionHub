@@ -238,6 +238,11 @@ class ChatRequest(BaseModel):
     provider_config: dict[str, Any] | None = Field(
         None, description="Request-scoped provider credentials from the Java backend"
     )
+    images: list[str] = Field(
+        default_factory=list, max_length=8,
+        description="Optional image data URLs (JPG/PNG/WEBP); "
+                    "gated by CHAT_MULTIMODAL_INPUT_ENABLED",
+    )
 
 
 class AgentV1Request(BaseModel):
@@ -275,6 +280,11 @@ class AgentV1Request(BaseModel):
     intent_context: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
     provider_config: dict[str, Any] | None = Field(
         None, description="Request-scoped provider credentials from the Java backend"
+    )
+    images: list[str] = Field(
+        default_factory=list, max_length=8,
+        description="Optional image data URLs (JPG/PNG/WEBP); "
+                    "gated by CHAT_MULTIMODAL_INPUT_ENABLED",
     )
 
 
@@ -331,6 +341,38 @@ def _build_history_with_system_prompt(
     if system_prompt and system_prompt.strip():
         return [{"role": "system", "content": system_prompt}] + normalized_history
     return normalized_history
+
+
+async def _resolve_image_context(images: list[str]) -> str:
+    """对话图片输入（实验特性）：校验 + VLM 中文描述，返回并入提问的上下文块。
+
+    必须在端点的大 try 之外调用——校验失败以 400/502 返回用户可读文案，
+    不被端点兜底 except 转成 500。
+    """
+    if not images:
+        return ""
+    from app.utils import vision as chat_vision
+    if not chat_vision.is_enabled():
+        raise HTTPException(
+            status_code=400,
+            detail="图片输入功能未开启（实验特性，需 CHAT_MULTIMODAL_INPUT_ENABLED=true）",
+        )
+    try:
+        return await asyncio.to_thread(chat_vision.build_image_context, images)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve)) from ve
+    except Exception as e:
+        logger.warning("图片解析失败: %s", e)
+        raise HTTPException(
+            status_code=502, detail="图片解析服务暂不可用，请稍后重试或去掉图片"
+        ) from e
+
+
+def _compose_effective_message(image_context: str, message: str) -> str:
+    if not image_context:
+        return message
+    nl = chr(10)
+    return image_context + nl + nl + message
 
 
 def _resolve_chat_route(request: ChatRequest) -> tuple[dict[str, Any], int | None, int | None]:
@@ -525,6 +567,7 @@ async def chat(request: ChatRequest):
     import time as _time
     _start = _time.perf_counter()
     _is_error = False
+    image_context = await _resolve_image_context(request.images)
     try:
         style = request.style if request.style in _VALID_STYLES else "detailed"
         route, routed_knowledge_base_id, route_top_k = _resolve_chat_route(request)
@@ -561,7 +604,7 @@ async def chat(request: ChatRequest):
             async def sse_generator():
                 try:
                     async for chunk in agent.run_stream(
-                        query=request.message,
+                        query=_compose_effective_message(image_context, request.message),
                         history=history,
                         style=style,
                         max_tool_steps=request.max_tool_steps,
@@ -581,7 +624,7 @@ async def chat(request: ChatRequest):
             )
 
         response = await agent.run(
-            query=request.message,
+            query=_compose_effective_message(image_context, request.message),
             history=history,
             style=style,
             max_tool_steps=request.max_tool_steps,
@@ -620,6 +663,7 @@ async def agent_v1_chat(request: AgentV1Request):
     import time as _time
     _start = _time.perf_counter()
     _is_error = False
+    image_context = await _resolve_image_context(request.images)
     try:
         style = request.style if request.style in _VALID_STYLES else "detailed"
 
@@ -656,7 +700,7 @@ async def agent_v1_chat(request: AgentV1Request):
             async def sse_generator():
                 try:
                     async for chunk in agent.run_stream(
-                        query=request.message,
+                        query=_compose_effective_message(image_context, request.message),
                         history=history,
                         style=style,
                         max_tool_steps=request.max_tool_steps,
@@ -676,7 +720,7 @@ async def agent_v1_chat(request: AgentV1Request):
             )
 
         response = await agent.run(
-            query=request.message,
+            query=_compose_effective_message(image_context, request.message),
             history=history,
             style=style,
             max_tool_steps=request.max_tool_steps,
@@ -711,6 +755,7 @@ async def agent_v1_chat_stream(request: AgentV1Request):
     Emits structured agent events (run_started, step_completed, run_completed,
     run_error) alongside content chunks for Java backend persistence.
     """
+    image_context = await _resolve_image_context(request.images)
     try:
         _t0 = time_module.monotonic()
         logger.info("[stream-timing] V1 endpoint entered at %.3fs", _t0)
@@ -755,8 +800,9 @@ async def agent_v1_chat_stream(request: AgentV1Request):
             yield _agent_chunk_to_sse(_build_run_started_event(agent_run_id))
 
             try:
+                effective_message = _compose_effective_message(image_context, request.message)
                 async for chunk in agent.run_stream(
-                    query=request.message,
+                    query=effective_message,
                     history=history,
                     style=style,
                     max_tool_steps=request.max_tool_steps,
@@ -841,6 +887,8 @@ async def agent_v1_chat_stream(request: AgentV1Request):
 @router.post("/api/chat/stream")
 async def chat_stream(request: ChatRequest):
     """Chat with AI agent (streaming only)."""
+    image_context = await _resolve_image_context(request.images)
+
     try:
         style = request.style if request.style in _VALID_STYLES else "detailed"
         route, routed_knowledge_base_id, route_top_k = _resolve_chat_route(request)
@@ -883,7 +931,7 @@ async def chat_stream(request: ChatRequest):
             serving_task = _track_active_request(request_id)
             try:
                 async for chunk in agent.run_stream(
-                    query=request.message,
+                    query=_compose_effective_message(image_context, request.message),
                     history=history,
                     style=style,
                     max_tool_steps=request.max_tool_steps,

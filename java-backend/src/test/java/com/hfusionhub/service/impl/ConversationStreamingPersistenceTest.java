@@ -167,6 +167,19 @@ class ConversationStreamingPersistenceTest {
                                         + "\"tool_calls_count\":2,\"token_usage\":{\"prompt_tokens\":100,"
                                         + "\"completion_tokens\":40,\"total_tokens\":140}}\n\n",
                                 "data: [DONE]\n\n")
+                        .subscribeOn(Schedulers.single()));;
+
+        // 新增 8 参重载（对话图片输入）：与 7 参等价
+        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any(), any()))
+                .thenReturn(Flux.just(
+                                "data: {\"content\":\"Hello persistence\"}\n\n",
+                                "data: {\"event\":\"step_completed\",\"sequence\":1,"
+                                        + "\"step_type\":\"retrieval\",\"action\":\"search\","
+                                        + "\"input_summary\":\"q\",\"output_summary\":\"docs\"}\n\n",
+                                "data: {\"event\":\"run_completed\",\"status\":\"completed\","
+                                        + "\"tool_calls_count\":2,\"token_usage\":{\"prompt_tokens\":100,"
+                                        + "\"completion_tokens\":40,\"total_tokens\":140}}\n\n",
+                                "data: [DONE]\n\n")
                         .subscribeOn(Schedulers.single()));
 
         MessageSendDTO dto = new MessageSendDTO();
@@ -220,6 +233,14 @@ class ConversationStreamingPersistenceTest {
         String assistantRequestId = "persist-content-1:assistant";
 
         when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any()))
+                .thenReturn(Flux.just(
+                                "data: {\"content\":\"Hello from pure content\"}\n\n",
+                                "data: {\"content\":\" stream\"}\n\n",
+                                "data: [DONE]\n\n")
+                        .subscribeOn(Schedulers.single()));;
+
+        // 新增 8 参重载（对话图片输入）：与 7 参等价
+        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any(), any()))
                 .thenReturn(Flux.just(
                                 "data: {\"content\":\"Hello from pure content\"}\n\n",
                                 "data: {\"content\":\" stream\"}\n\n",

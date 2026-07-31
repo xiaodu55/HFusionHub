@@ -127,6 +127,9 @@ Copy `python-ai/.env.example` to `python-ai/.env`:
 | `OPENAI_COMPATIBLE_MODEL` | No | `` | 同上，模型名（空则用 DEEPSEEK_MODEL） |
 | `WEB_SEARCH_PROVIDER` | No | `duckduckgo` |
 | `OTEL_ENABLED` | No | `false` | Python 侧 OpenTelemetry 开关（`app/utils/telemetry.py`；未装 otel 包时优雅降级 no-op）。开启且带 `traceparent` 的请求（Java 传来）会并入同一调用链 |
+| `CHAT_MULTIMODAL_INPUT_ENABLED` | No | `false` | **对话图片输入**（实验档）：开启后聊天消息可携带图片（≤4 张、单张 ≤5MB），经 Ollama 视觉模型（`RAG_MULTIMODAL_VLM_MODEL`，默认 qwen2.5vl）转中文描述并入提问上下文；关闭时带图请求返回 400 |
+| `RAG_QA_GENERATION_ENABLED` | No | `false` | **知识库 QA 对生成**（实验档）：文档解析入库时用对话 LLM 从分块生成问答对（≤4 条/问答块，`RAG_QA_MAX_PER_DOC` 总量上限）并并入索引，提升"用户问法≠原文表述"场景的召回率；生成失败只跳过，不阻断索引 |
+| `RAG_QA_MAX_PER_DOC` | No | `20` | 单文档 QA 分块总量上限 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | No | —（console） | OTLP HTTP 导出端点；留空退化为控制台输出。监控栈 Tempo 为 `http://tempo:4318/v1/traces` | 联网搜索后端：`duckduckgo`（免 Key）/ `tavily` / `serper` |
 | `WEB_SEARCH_API_KEY` | No | `` | Tavily / Serper 的 API Key |
 | `WEB_SEARCH_BASE_URL` | No | `` | 搜索 API 地址覆盖（可选） |

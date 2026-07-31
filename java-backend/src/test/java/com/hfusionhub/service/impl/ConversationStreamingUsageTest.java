@@ -137,6 +137,10 @@ class ConversationStreamingUsageTest {
     void streamingCompletionSettlesUsageOnContextlessReactorThread() {
         // 异步 Flux：在 Schedulers.single 线程上发出 [DONE]，模拟无租户上下文的回调线程
         when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any()))
+                .thenReturn(Flux.just("data: [DONE]\n\n").subscribeOn(Schedulers.single()));;
+
+        // 新增 8 参重载（对话图片输入）：与 7 参等价
+        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any(), any()))
                 .thenReturn(Flux.just("data: [DONE]\n\n").subscribeOn(Schedulers.single()));
 
         MessageSendDTO dto = new MessageSendDTO();
@@ -162,6 +166,11 @@ class ConversationStreamingUsageTest {
     void streamingErrorReleasesReservationOnContextlessReactorThread() {
         // Flux 立即报错：onError 在调度线程执行，必须 runAs 恢复上下文后 RELEASE
         when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any()))
+                .thenReturn(Flux.<String>error(new RuntimeException("simulated stream failure"))
+                        .subscribeOn(Schedulers.single()));;
+
+        // 新增 8 参重载（对话图片输入）：与 7 参等价
+        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any(), any()))
                 .thenReturn(Flux.<String>error(new RuntimeException("simulated stream failure"))
                         .subscribeOn(Schedulers.single()));
 

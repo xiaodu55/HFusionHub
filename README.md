@@ -9,7 +9,7 @@
 ![Java](https://img.shields.io/badge/Java-17%2B-orange)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883)
-![Tests](https://img.shields.io/badge/Tests-Python%201411%20%7C%20Java%20693%20%7C%20Frontend%2049-success)
+![Tests](https://img.shields.io/badge/Tests-Python%201431%20%7C%20Java%20701%20%7C%20Frontend%2049-success)
 
 ## 🚀 项目简介
 
@@ -323,7 +323,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 | KnowledgeGraph | 知识图谱 | 59 |
 | Utils | 公共工具 | 36 |
 
-**Python AI 总计：1411 测试函数（2026-09-01 实测）| Java 后端：693 测试 | 前端：49 单测 + 73 E2E**
+**Python AI 总计：1431 测试函数（2026-09-01 实测）| Java 后端：701 测试 | 前端：49 单测 + 73 E2E**
 
 ## 🚀 启动指南
 
@@ -345,7 +345,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 
 > 所有文档位于 [docs/](docs/) 目录。按用途分四类：**入口**、**开发**、**运维**、**治理**。
 > 2026-08-19 已做文档体系整合：合并 5 份为 3 份权威，删除 1 份冗余，统一关键事实基线
-> （Java 693 测试 / Python 1411 / 前端 49 单测 + 73 E2E / Flyway V82 / DeepSeek 已配置）。
+> （Java 701 测试 / Python 1431 / 前端 49 单测 + 73 E2E / Flyway V82 / DeepSeek 已配置）。
 
 ### 入口类
 
@@ -362,10 +362,10 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 |------|------|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **架构全景**（原 ARCHITECTURE + WHITEPAPER 合并）。CQRS 三层架构图、数据流、关键设计决策、安全边界、设计模式、与 Dify/Ragent/LangChain 对比 |
 | [docs/PROJECT_TOUR.md](docs/PROJECT_TOUR.md) | **项目功能全览**（带截图）：每个页面的功能说明与使用方法，新用户与评估者首选入口 |
-| [docs/java-backend.md](docs/java-backend.md) | Java 后端开发指南：项目结构、设计模式、环境变量、Flyway 规则（V1–V83）、测试与构建 |
+| [docs/java-backend.md](docs/java-backend.md) | Java 后端开发指南：项目结构、设计模式、环境变量、Flyway 规则（V1–V84）、测试与构建 |
 | [docs/BIGDATA_ARCHITECTURE.md](docs/BIGDATA_ARCHITECTURE.md) | **HFusionData Analytics**（分析扩展包）：Hadoop 运营数仓架构、数据字典、部署/运维手册、演示动线 |
 | [docs/python-ai.md](docs/python-ai.md) | Python AI 开发指南：模块结构、RAG 管线、Feature Flags、SSE 输出格式、Provider 说明 |
-| [docs/database.md](docs/database.md) | 数据库设计：V1–V83 全部迁移历史、核心表、实体关系、迁移规则 |
+| [docs/database.md](docs/database.md) | 数据库设计：V1–V84 全部迁移历史、核心表、实体关系、迁移规则 |
 | [docs/api.md](docs/api.md) | API 接口参考：模块列表、公开端点、调用约定 |
 | [docs/agent-v1-scope.md](docs/agent-v1-scope.md) | Agent V1 软件契约：只读研究型 Agent 的能力边界、输入/输出 JSON 契约 |
 | [docs/SWAGGER_UI.md](docs/SWAGGER_UI.md) | Swagger UI 配置指南：访问地址、生产关闭/IP 白名单/Basic Auth 策略、注解规范、常见问题 |

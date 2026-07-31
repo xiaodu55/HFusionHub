@@ -953,8 +953,17 @@ class ModelGateway:
 
     @staticmethod
     def _estimate_tokens(messages: list[ChatMessage]) -> int:
-        """Pre-flight token estimate for rate limiting（中文校准，同 _estimate_completion）。"""
-        total = sum(ModelGateway._estimate_tokens_text(m.content or "") for m in messages)
+        """Pre-flight token estimate for rate limiting（中文校准，同 _estimate_completion）。
+
+        消息元素兼容对象（.content）与 dict（{"content": ...}）两种形态——
+        QA 生成等模块以标准 dict messages 调用，不能假定一律是 ChatMessage。
+        """
+        total = sum(
+            ModelGateway._estimate_tokens_text(
+                (m.get("content") if isinstance(m, dict) else m.content) or ""
+            )
+            for m in messages
+        )
         return max(1, total)
 
     @staticmethod

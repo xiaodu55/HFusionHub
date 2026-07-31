@@ -51,4 +51,6 @@ public class MessageInfoDTO {
 
     @Schema(description = "Agent V1 工具调用次数")
     private Integer toolCallsCount;
+    /** 用户消息附带图片的相对 URL 列表（对话图片输入）；null = 无图片 */
+    private java.util.List<String> images;
 }

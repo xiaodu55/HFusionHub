@@ -13,6 +13,8 @@ import com.hfusionhub.mapper.ConversationMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.MessageMapper;
 import com.hfusionhub.service.KbShareService;
+import com.fasterxml.jackson.core.type.TypeReference;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +41,9 @@ public class MessagePersistenceService {
     private final ConversationMapper conversationMapper;
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final KbShareService kbShareService;
+    private final ChatImageStorage chatImageStorage;
+    private final com.fasterxml.jackson.databind.ObjectMapper imageMapper =
+            new com.fasterxml.jackson.databind.ObjectMapper();
 
     @Transactional
     public Message saveUserMessage(MessageSendDTO dto, String requestId) {
@@ -61,6 +66,11 @@ public class MessagePersistenceService {
         userMessage.setRole("user");
         userMessage.setContent(dto.getContent());
         userMessage.setRequestId(requestId);
+        if (dto.getImages() != null && !dto.getImages().isEmpty()) {
+            // 对话图片输入：校验数量/归属（本类签发的相对 URL），以 JSON 数组落库
+            chatImageStorage.validateAndResolve(dto.getImages());
+            userMessage.setImages(chatImageStorage.toJson(dto.getImages()));
+        }
         try {
             messageMapper.insert(userMessage);
         } catch (DuplicateKeyException e) {
@@ -240,6 +250,17 @@ public class MessagePersistenceService {
             }
         }
 
+        List<String> images = null;
+        if (message.getImages() != null && !message.getImages().isBlank()) {
+            try {
+                images = imageMapper.readValue(
+                        message.getImages(),
+                        new TypeReference<List<String>>() {});
+            } catch (Exception e) {
+                log.warn("message.images 反序列化失败，按无图片处理: {}", e.getMessage());
+            }
+        }
+
         return MessageInfoDTO.builder()
                 .id(message.getId())
                 .conversationId(message.getConversationId())
@@ -252,6 +273,7 @@ public class MessagePersistenceService {
                 .status(v1Status)
                 .agentRunId(v1AgentRunId)
                 .toolCallsCount(v1ToolCallsCount)
+                .images(images)
                 .build();
     }
 }

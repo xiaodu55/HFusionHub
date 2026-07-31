@@ -188,6 +188,8 @@ export interface Message {
     source?: string
   }>
   createdAt: string
+  /** 用户消息附带图片（对话图片输入，实验特性） */
+  images?: string[]
 }
 
 export interface ConversationCreateDTO {
@@ -202,4 +204,6 @@ export interface MessageSendDTO {
   requestId?: string
   /** 能力档位："approval_write" 时 Agent 可见 write_note 工具（服务端校验）。 */
   capabilityProfile?: string
+  /** 附带图片的相对URL列表（先经 /conversation/chat-image 上传） */
+  images?: string[]
 }

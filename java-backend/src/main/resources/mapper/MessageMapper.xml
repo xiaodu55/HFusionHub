@@ -13,11 +13,14 @@
         <result column="sources" property="sources" typeHandler="com.hfusionhub.handler.JsonTypeHandler"/>
         <result column="created_at" property="createdAt"/>
         <result column="updated_at" property="updatedAt"/>
+        <result column="request_id" property="requestId"/>
+        <!-- 对话图片输入（V84）：相对 URL JSON 数组 -->
+        <result column="images" property="images"/>
     </resultMap>
 
     <!-- 通用查询结果列 -->
     <sql id="Base_Column_List">
-        id, conversation_id, role, content, token_count, model, sources, created_at, updated_at
+        id, conversation_id, role, content, token_count, model, sources, created_at, updated_at, request_id, images
     </sql>
 
     <!-- 按对话ID查询消息列表（使用 BaseResultMap 以正确反序列化 sources JSON） -->

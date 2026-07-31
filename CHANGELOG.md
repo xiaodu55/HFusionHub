@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第二十二批（2026-09-04：A 档改进——对话图片输入 / QA 对生成 / 演示脚本）
+
+#### Added
+- **对话图片输入（实验档，三端贯通）**：
+  - Python：`/api/chat/stream` 等四个聊天端点的消息体新增 `images`（data URL，≤4 张、单张 ≤5MB）；
+    新增 `app/utils/vision.py`（魔数/大小校验 + Ollama 视觉模型逐图中文描述 + 上下文组装），
+    `CHAT_MULTIMODAL_INPUT_ENABLED` 门控（默认关；关闭时带图请求 400 用户可读文案，不被兜底转 500）。
+    路线为"图片→VLM 中文描述→并入提问"——不要求对话模型自身具备视觉能力
+  - Java：`V84` 迁移（`message.images` TEXT，相对 URL JSON 数组）+ schema-h2 同步（漂移防护零新增）；
+    新增 `ChatImageStorage`（魔数校验/UUID 签发/路径穿越防护/URL→base64）+ `ConversationController`
+    上传与回源端点（回源需登录态，fetch+blob 模式与头像一致）+ `AiClient` 四条链路 images 透传
+    （doChat 委托化，既有调用方零改动）
+  - 前端：聊天输入区图片选择/预览/移除（≤4 张），用户气泡渲染图片（乐观渲染用 objectURL，
+    历史加载经登录态 fetch 转.objectURL），普通与流式发送体携带 images
+  - 测试：Python 12 个（校验/门控/组装/端点 400 与 query 组装）+ Java 8 个（存储组件全覆盖）
+- **知识库 QA 对生成（实验档，RAG_QA_GENERATION_ENABLED）**：`app/core/rag/qa_generator.py`
+  ——文档解析入库时用对话 LLM 从分块生成问答对（问句入 BM25/向量双通道），`block_type="QA"`
+  独立分块类型（前端 amber chip）；去重（标点不敏感）/总量上限/失败软化（单分块失败只跳过）；
+  新增 8 个纯逻辑测试；`Chunks.vue` 类型筛选与主题新增"问答"
+- **演示/运维脚本**：`scripts/demo-trace.ps1`（追踪一键演示：带 W3C traceparent 发请求→
+  Tempo 按 id 检索→打印 Grafana 查看指引）+ `scripts/eval-report.ps1`（离线评测门禁一键运行，
+  JSON+Markdown 报告；实跑通过）
+
+#### Fixed
+- **会话图片不持久显示（双根因，E2E 发现）**：①流式/队列路径内联保存用户消息，
+  绕过 `saveUserMessage`——`images` 从未落库；②`MessageMapper.xml` 的
+  resultMap/列清单缺 `images`（连带 `request_id`）映射——落库后也查不出。两处补齐后，
+  回答完成与历史加载均正常显示图片（objectURL 双保险 + `<img>` 同源 cookie 可加载）
+- **会话打开滚动定位停在顶部**：Markdown/图片异步渲染导致首帧滚动后容器高度继续增长——
+  加载后 200/600ms 校正滚动 + 消息图片 `@load` 贴底（near-bottom 保护，不拉扯上翻阅读）
+
+#### Changed
+- Flyway 版本窗口 V83→**V84**（`message.images`），文档五处同步；Python 测试 1411→**1431**（多模态 12 + QA 生成 8 + 计数同步）、
+  Java 693→**701**（图片存储组件 8 个测试）
+
+### 第二十一批（2026-09-04：全仓巡检修复——编码/构建/文档）
+
 ### 第二十一批（2026-09-04：全仓巡检修复——编码/构建/文档）
 
 #### Fixed

@@ -93,6 +93,18 @@ public class AiClient {
             List<Map<String, String>> history,
             Long userId,
             List<Map<String, Object>> intentContext) {
+        return chat(message, conversationId, knowledgeBaseId, history, userId, intentContext, null);
+    }
+
+    /** 对话图片输入变体：images 为 base64 data URL 列表（可为空）。 */
+    public ChatResponse chat(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            Long userId,
+            List<Map<String, Object>> intentContext,
+            List<String> images) {
         return doChat(
                 "/api/chat",
                 message,
@@ -262,6 +274,25 @@ public class AiClient {
             String capabilityProfile,
             String userRole,
             List<Map<String, Object>> intentContext) {
+        return agentV1Chat(
+                message, conversationId, knowledgeBaseId, history, style, maxToolSteps,
+                requestId, userId, capabilityProfile, userRole, intentContext, null);
+    }
+
+    /** 对话图片输入变体：images 为 base64 data URL 列表（可为空）。 */
+    public ChatResponse agentV1Chat(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String style,
+            int maxToolSteps,
+            String requestId,
+            Long userId,
+            String capabilityProfile,
+            String userRole,
+            List<Map<String, Object>> intentContext,
+            List<String> images) {
         if (knowledgeBaseId == null || knowledgeBaseId <= 0) {
             throw new BusinessException(StatusCode.BAD_REQUEST, "Agent V1 requires a non-null knowledge_base_id");
         }
@@ -340,12 +371,36 @@ public class AiClient {
             String systemPrompt,
             String userRole,
             List<Map<String, Object>> intentContext) {
+        return doChatInternal(
+                path, message, conversationId, knowledgeBaseId, history, style, maxToolSteps,
+                requestId, userId, capabilityProfile, systemPrompt, userRole, intentContext, null);
+    }
+
+    /** 对话图片输入：images 为 base64 data URL 列表（由 ConversationServiceImpl 从本地文件读取）。 */
+    private ChatResponse doChatInternal(
+            String path,
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String style,
+            int maxToolSteps,
+            String requestId,
+            Long userId,
+            String capabilityProfile,
+            String systemPrompt,
+            String userRole,
+            List<Map<String, Object>> intentContext,
+            List<String> images) {
         try {
             Map<String, Object> request = new HashMap<>();
             request.put("message", message);
             request.put("conversation_id", conversationId);
             request.put("knowledge_base_id", knowledgeBaseId);
             request.put("history", history != null ? history : List.of());
+            if (images != null && !images.isEmpty()) {
+                request.put("images", images);
+            }
             request.put("stream", false);
             request.put("style", style != null ? style : "detailed");
             request.put("max_tool_steps", Math.max(1, Math.min(maxToolSteps, 10)));
@@ -439,6 +494,19 @@ public class AiClient {
             String requestId,
             Long userId,
             List<Map<String, Object>> intentContext) {
+        return streamChat(message, conversationId, knowledgeBaseId, history, requestId, userId, intentContext, null);
+    }
+
+    /** 对话图片输入变体：images 为 base64 data URL 列表（可为空）。 */
+    public reactor.core.publisher.Flux<String> streamChat(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String requestId,
+            Long userId,
+            List<Map<String, Object>> intentContext,
+            List<String> images) {
         // Build request body
         Map<String, Object> request = new HashMap<>();
         request.put("message", message);
@@ -452,6 +520,9 @@ public class AiClient {
         }
         if (intentContext != null && !intentContext.isEmpty()) {
             request.put("intent_context", intentContext);
+        }
+        if (images != null && !images.isEmpty()) {
+            request.put("images", images);
         }
         addUserProviderConfig(request, userId);
 
@@ -547,6 +618,22 @@ public class AiClient {
             Long userId,
             String capabilityProfile,
             List<Map<String, Object>> intentContext) {
+        return agentV1ChatStream(
+                message, conversationId, knowledgeBaseId, history, requestId, userId,
+                capabilityProfile, intentContext, null);
+    }
+
+    /** 对话图片输入变体：images 为 base64 data URL 列表（可为空）。 */
+    public reactor.core.publisher.Flux<String> agentV1ChatStream(
+            String message,
+            Long conversationId,
+            Long knowledgeBaseId,
+            List<Map<String, String>> history,
+            String requestId,
+            Long userId,
+            String capabilityProfile,
+            List<Map<String, Object>> intentContext,
+            List<String> images) {
         if (knowledgeBaseId == null || knowledgeBaseId <= 0) {
             throw new BusinessException(
                     StatusCode.BAD_REQUEST, "Agent V1 streaming requires a non-null knowledge_base_id");
@@ -572,6 +659,9 @@ public class AiClient {
         }
         if (intentContext != null && !intentContext.isEmpty()) {
             request.put("intent_context", intentContext);
+        }
+        if (images != null && !images.isEmpty()) {
+            request.put("images", images);
         }
         addUserProviderConfig(request, userId);
 
