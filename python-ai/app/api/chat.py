@@ -63,6 +63,7 @@ from pydantic import BaseModel, Field
 from app.core.agent import get_agent, get_agent_run_store
 from app.core.agent.agent import AgentResponse
 from app.core.agent.execution_context import AgentExecutionContext
+from app.core.llm import get_llm
 from app.core.llm.custom_provider import build_user_llm
 from app.core.policy.engine import PolicyContext, PolicyEngine
 from app.core.policy.masking import build_arguments_summary
@@ -373,6 +374,45 @@ def _compose_effective_message(image_context: str, message: str) -> str:
         return message
     nl = chr(10)
     return image_context + nl + nl + message
+
+
+# 与 react.py _GROUNDLESS_MARKERS 对齐的拒答识别（KB 证据门控拒答的文案特征）
+_IMAGE_REFUSAL_MARKERS = (
+    "未检索到足够依据", "未检索到依据", "证据不足", "无法基于资料",
+    "未找到相关", "没有相关信息", "资料中未提及", "资料中未包含",
+)
+
+
+def _is_kb_refusal(text: str) -> bool:
+    return any(m in text for m in _IMAGE_REFUSAL_MARKERS)
+
+
+async def _vision_direct_answer(image_context: str, question: str, provider_config) -> str | None:
+    """图片消息在 KB 检索无果时的兜底：让 LLM 基于 VLM 图片描述直答（不查知识库）。
+
+    失败返回 None（此时保留 KB 原拒答文案）。
+    """
+    try:
+        llm = build_user_llm(provider_config) or get_llm()
+        nl = chr(10)
+        resp = await llm.chat(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "用户上传了一张图片，以下是视觉模型对图片的中文描述。"
+                        "请结合描述与用户的问题直接回答；这与知识库检索无关，不要引用不存在的资料。"
+                    ),
+                },
+                {"role": "user", "content": image_context + nl + nl + question},
+            ],
+            temperature=0.2,
+        )
+        text = getattr(resp, "content", None) or (resp.get("content") if isinstance(resp, dict) else "") or ""
+        return str(text).strip() or None
+    except Exception as e:
+        logger.warning("视觉直答生成失败（保留 KB 原回答）: %s", e)
+        return None
 
 
 def _resolve_chat_route(request: ChatRequest) -> tuple[dict[str, Any], int | None, int | None]:
@@ -756,6 +796,13 @@ async def agent_v1_chat_stream(request: AgentV1Request):
     run_error) alongside content chunks for Java backend persistence.
     """
     image_context = await _resolve_image_context(request.images)
+    vision_direct_answer = None
+    if image_context:
+        # 图片消息预计算"视觉直答"：若 KB 证据门控最终拒答，则用它替换拒答文案，
+        # 避免绑库会话发无关图片时只能得到"未检索到依据"
+        vision_direct_answer = await _vision_direct_answer(
+            image_context, request.message, request.provider_config
+        )
     try:
         _t0 = time_module.monotonic()
         logger.info("[stream-timing] V1 endpoint entered at %.3fs", _t0)
@@ -801,6 +848,10 @@ async def agent_v1_chat_stream(request: AgentV1Request):
 
             try:
                 effective_message = _compose_effective_message(image_context, request.message)
+                # 图片消息：内容先缓冲（步骤/来源事件照常透传）——
+                # 流结束时若 KB 门控拒答，则用视觉直答替换后再输出
+                buffered_content: list[str] = []
+                use_vision_fallback = vision_direct_answer is not None
                 async for chunk in agent.run_stream(
                     query=effective_message,
                     history=history,
@@ -820,8 +871,26 @@ async def agent_v1_chat_stream(request: AgentV1Request):
                         pass
 
                     event = _agent_chunk_to_sse(chunk)
-                    if event is not None:
-                        yield event
+                    if event is None:
+                        continue
+                    payload = None
+                    try:
+                        payload = json.loads(event.removeprefix("data: ").strip())
+                    except Exception:
+                        payload = None
+                    if use_vision_fallback and payload and payload.get("content"):
+                        # 图片消息：内容先缓冲（步骤/来源事件照常透传）——
+                        # 流结束时若 KB 门控拒答，则替换为基于图片描述的直答
+                        buffered_content.append(str(payload["content"]))
+                        continue
+                    yield event
+
+                if use_vision_fallback:
+                    kb_answer = "".join(buffered_content)
+                    if kb_answer.strip() and not _is_kb_refusal(kb_answer):
+                        yield "data: " + json.dumps({"content": kb_answer}, ensure_ascii=False) + "\\n\\n"
+                    else:
+                        yield "data: " + json.dumps({"content": vision_direct_answer}, ensure_ascii=False) + "\\n\\n"
 
                 # Emit run_completed ONLY if no terminal event was emitted.
                 if not _terminal_event_emitted:

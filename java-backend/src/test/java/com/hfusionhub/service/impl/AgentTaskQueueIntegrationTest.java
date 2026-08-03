@@ -40,6 +40,7 @@ class AgentTaskQueueIntegrationTest {
     private AgentRetryPolicy retryPolicy;
     private AiClient aiClient;
     private MessageMapper messageMapper;
+    private ChatImageStorage chatImageStorage = new ChatImageStorage(java.nio.file.Path.of("target", "test-chat-images").toString());
     private TaskEventSseManager sseManager;
     private com.hfusionhub.common.utils.RedisUtils redisUtils;
     private com.hfusionhub.service.UsageLedgerService usageLedgerService;
@@ -104,6 +105,7 @@ class AgentTaskQueueIntegrationTest {
                 aiClient,
                 redisUtils,
                 messageMapper,
+                chatImageStorage,
                 sseManager,
                 syncExecutor);
         ReflectionTestUtils.setField(queueService, "leaseSeconds", 120);
@@ -271,7 +273,7 @@ class AgentTaskQueueIntegrationTest {
         reactor.core.publisher.Flux<String> contentFlux = reactor.core.publisher.Flux.just(
                 "data: {\"content\":\"Hello\"}", "data: {\"content\":\" World\"}", "data: [DONE]");
         when(aiClient.streamChat(
-                        eq("test query"), eq(50L), isNull(), anyList(), eq(pendingRun.getRunUuid()), anyLong(), any()))
+                        eq("test query"), eq(50L), isNull(), anyList(), eq(pendingRun.getRunUuid()), anyLong(), any(), any()))
                 .thenReturn(contentFlux);
 
         // Act — SyncTaskExecutor makes executeRun complete within pollAndDispatch
@@ -361,7 +363,7 @@ class AgentTaskQueueIntegrationTest {
 
         String sourcesJson = "data: {\"sources\":[{\"title\":\"doc1.pdf\",\"page\":3}]}";
         reactor.core.publisher.Flux<String> flux = reactor.core.publisher.Flux.just(sourcesJson, "data: [DONE]");
-        when(aiClient.streamChat(anyString(), anyLong(), isNull(), anyList(), anyString(), anyLong(), any()))
+        when(aiClient.streamChat(anyString(), anyLong(), isNull(), anyList(), anyString(), anyLong(), any(), any()))
                 .thenReturn(flux);
 
         queueService.pollAndDispatch();
@@ -415,7 +417,7 @@ class AgentTaskQueueIntegrationTest {
                         "data: {\"content\":\"partial\"}")
                 .concatWith(reactor.core.publisher.Flux.never());
         when(aiClient.streamChat(
-                        eq("stuck query"), isNull(), isNull(), anyList(), eq(run.getRunUuid()), anyLong(), any()))
+                        eq("stuck query"), isNull(), isNull(), anyList(), eq(run.getRunUuid()), anyLong(), any(), any()))
                 .thenReturn(neverEnding);
 
         assertEquals(1, queueService.pollAndDispatch());
@@ -463,7 +465,7 @@ class AgentTaskQueueIntegrationTest {
         reactor.core.publisher.Flux<String> v1Flux = reactor.core.publisher.Flux.just(
                 "data: {\"event\":\"step_completed\",\"data\":{}}", "data: {\"event\":\"run_completed\",\"data\":{}}");
         when(aiClient.agentV1ChatStream(
-                        eq("kb query"), eq(52L), eq(5L), anyList(), eq(pendingRun.getRunUuid()), eq(1L), isNull()))
+                        eq("kb query"), eq(52L), eq(5L), anyList(), eq(pendingRun.getRunUuid()), eq(1L), isNull(), any(), any()))
                 .thenReturn(v1Flux);
 
         queueService.pollAndDispatch();
@@ -504,7 +506,7 @@ class AgentTaskQueueIntegrationTest {
 
         reactor.core.publisher.Flux<String> flux =
                 reactor.core.publisher.Flux.just("data: {\"content\":\"Hello\"}", "data: {\"content\":\" World\"}");
-        when(aiClient.streamChat(anyString(), anyLong(), isNull(), anyList(), anyString(), anyLong(), any()))
+        when(aiClient.streamChat(anyString(), anyLong(), isNull(), anyList(), anyString(), anyLong(), any(), any()))
                 .thenReturn(flux);
         when(aiClient.cancelRequest(anyString())).thenReturn(true);
 

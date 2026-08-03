@@ -40,6 +40,7 @@ class AgentTaskQueueServiceTest {
     private RedisUtils redisUtils;
     private ThreadPoolTaskExecutor workerExecutor;
     private MessageMapper messageMapper;
+    private ChatImageStorage chatImageStorage = new ChatImageStorage(java.nio.file.Path.of("target", "test-chat-images").toString());
     private TaskEventSseManager sseManager;
 
     @BeforeEach
@@ -75,6 +76,7 @@ class AgentTaskQueueServiceTest {
                 aiClient,
                 redisUtils,
                 messageMapper,
+                chatImageStorage,
                 sseManager,
                 workerExecutor);
         ReflectionTestUtils.setField(queueService, "leaseSeconds", 120);

@@ -37,8 +37,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **会话打开滚动定位停在顶部**：Markdown/图片异步渲染导致首帧滚动后容器高度继续增长——
   加载后 200/600ms 校正滚动 + 消息图片 `@load` 贴底（near-bottom 保护，不拉扯上翻阅读）
 
+#### Fixed
+- **模型网关 dict 消息崩溃**：`_estimate_tokens` 假定消息必为 ChatMessage 对象，标准 dict
+  messages 调用 GatewayLLM 直接 AttributeError——已兼容对象/dict 两种形态（E2E 自验发现）
+- **qa_generator**：prompt 模板含 JSON 花括号示例，`str.format` KeyError——改 replace；
+  消息改用项目原生 `ChatMessage`（Gateway 链路原生类型）
+- **VLM 超时过紧**：CPU 冷启动（模型卸载后重载）实测超 90s 默认值——放宽到 180s
+
+#### Added
+- **队列模式图片透传**：`AgentTaskQueueServiceImpl` Worker 按 task.requestId 取回用户消息，
+  解析 images → base64 → agentV1ChatStream/streamChat 新重载（构造器与测试桩同步）；
+  队列模式下图片同样进入视觉管线
+- **绑库会话图片拒答回退**：V1 流式对图片消息缓冲内容，KB 证据门控拒答时替换为
+  基于图片描述的直答（不再对无关图片一律"未检索到依据"）；KB 正常作答时原样保留；
+  新增 2 个端点测试（拒答替换 / 正常保留）
+- **Enter 偶发不发送结论**：非 bug——上一轮流式生成期间输入框设计性禁用（防并发流），
+  生成完成即恢复；浏览器 5 轮复现测试 2 轮成功、第 3 轮超时即该锁所致
+
 #### Changed
-- Flyway 版本窗口 V83→**V84**（`message.images`），文档五处同步；Python 测试 1411→**1431**（多模态 12 + QA 生成 8 + 计数同步）、
+- Flyway 版本窗口 V83→**V84**（`message.images`），文档五处同步；Python 测试 1411→**1433**（多模态 12 + QA 生成 8 + 回退 2 + 计数同步）、
   Java 693→**701**（图片存储组件 8 个测试）
 
 ### 第二十一批（2026-09-04：全仓巡检修复——编码/构建/文档）

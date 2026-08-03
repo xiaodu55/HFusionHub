@@ -5,6 +5,7 @@
 """
 
 import base64
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -168,3 +169,73 @@ def test_stream_without_images_keeps_original_query(monkeypatch, mock_agent_quer
 
     assert response.status_code == 200
     assert mock_agent_query["query"] == "纯文本提问"
+
+
+# ── 绑库会话图片拒答 → 视觉直答回退（V1 流式） ──────────────────────────
+
+
+@pytest.fixture
+def mock_v1_refusal_agent(monkeypatch):
+    """KB 证据门控拒答形态的 mock agent：输出拒答文案。"""
+
+    class _MockAgent:
+        async def run_stream(self, **kwargs):
+            captured = kwargs.get("query")
+            yield json.dumps({"content": "我在当前知识库中未检索到足够依据，无法基于资料回答这个问题。"}, ensure_ascii=False)
+
+    monkeypatch.setattr("app.api.chat.get_agent", lambda **kw: _MockAgent())
+    return None
+
+
+@pytest.fixture
+def mock_vision_llm(monkeypatch):
+    """build_user_llm 返回固定"视觉直答"的假 LLM。"""
+
+    class _FakeLLM:
+        async def chat(self, messages=None, temperature=None):
+            class _R:
+                content = "这张截图是 HFusionHub 的首页工作台，左侧有导航栏。"
+
+            return _R()
+
+    monkeypatch.setattr("app.api.chat.build_user_llm", lambda cfg: _FakeLLM())
+
+
+def test_stream_kb_image_refusal_falls_back_to_vision_answer(
+    monkeypatch, mock_v1_refusal_agent, mock_vision_llm
+):
+    _enable(monkeypatch)
+    client = _client()
+
+    response = client.post(
+        "/api/agent/v1/chat/stream",
+        json={
+            "message": "这张截图里展示了什么？",
+            "knowledge_base_id": 2,
+            "user_id": 1,
+            "images": [VALID_PNG],
+        },
+    )
+
+    assert response.status_code == 200
+    assert "首页工作台" in response.text
+    assert "未检索到足够依据" not in response.text
+
+
+def test_stream_kb_image_normal_answer_kept(monkeypatch, mock_agent_query, mock_vision_llm):
+    """KB 正常作答（非拒答）时不注入视觉回退。"""
+    _enable(monkeypatch)
+    client = _client()
+
+    response = client.post(
+        "/api/agent/v1/chat/stream",
+        json={
+            "message": "这张截图里展示了什么？",
+            "knowledge_base_id": 2,
+            "user_id": 1,
+            "images": [VALID_PNG],
+        },
+    )
+
+    assert response.status_code == 200
+    assert "未检索到足够依据" not in response.text

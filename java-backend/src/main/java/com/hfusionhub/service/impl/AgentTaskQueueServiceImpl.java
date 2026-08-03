@@ -56,6 +56,7 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
     private final AiClient aiClient;
     private final RedisUtils redisUtils;
     private final MessageMapper messageMapper;
+    private final ChatImageStorage chatImageStorage;
     private final TaskEventSseManager sseManager;
 
     @Qualifier("agentWorkerExecutor")
@@ -75,6 +76,7 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
             AiClient aiClient,
             RedisUtils redisUtils,
             MessageMapper messageMapper,
+            ChatImageStorage chatImageStorage,
             @Lazy TaskEventSseManager sseManager,
             @Qualifier("agentWorkerExecutor") java.util.concurrent.Executor agentWorkerExecutor) {
         this.taskMapper = taskMapper;
@@ -89,6 +91,7 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
         this.aiClient = aiClient;
         this.redisUtils = redisUtils;
         this.messageMapper = messageMapper;
+        this.chatImageStorage = chatImageStorage;
         this.sseManager = sseManager;
         this.agentWorkerExecutor = agentWorkerExecutor;
     }
@@ -249,6 +252,21 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
                     task.getId(),
                     run.getAttemptNumber());
 
+            // 3.5 对话图片输入：取回用户消息附带的图片并转 base64（队列模式同样走视觉管线）
+            List<String> imagePayloads = List.of();
+            if (task.getRequestId() != null) {
+                Message queuedUserMessage = messageMapper.selectOne(
+                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Message>()
+                                .eq(Message::getRequestId, task.getRequestId())
+                                .eq(Message::getRole, "user")
+                                .last("LIMIT 1"));
+                if (queuedUserMessage != null && queuedUserMessage.getImages() != null
+                        && !queuedUserMessage.getImages().isBlank()) {
+                    imagePayloads = chatImageStorage.toDataUrls(
+                            chatImageStorage.fromJson(queuedUserMessage.getImages()));
+                }
+            }
+
             // 4. Call Python via SSE stream — choose endpoint based on KB binding
             final boolean isKbBound = task.getKnowledgeBaseId() != null && task.getKnowledgeBaseId() > 0;
             reactor.core.publisher.Flux<String> sseFlux;
@@ -260,8 +278,9 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
                         history,
                         run.getRunUuid(), // run_uuid as request_id for Python cancel/tracking
                         task.getUserId(),
-                        null // capability profile — worker uses default read-only
-                        );
+                        null, // capability profile — worker uses default read-only
+                        null,
+                        imagePayloads);
             } else {
                 // Non-KB chat: use standard /api/chat/stream
                 sseFlux = aiClient.streamChat(
@@ -271,7 +290,8 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
                         history,
                         run.getRunUuid(), // run_uuid as request_id
                         task.getUserId(),
-                        null);
+                        null,
+                        imagePayloads);
             }
 
             sseFlux = sseFlux.timeout(java.time.Duration.ofSeconds(timeoutSeconds));
