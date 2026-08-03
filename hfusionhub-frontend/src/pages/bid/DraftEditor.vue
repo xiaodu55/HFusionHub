@@ -207,11 +207,21 @@ const approveAll = async () => {
     toast.success('所有分节均已通过')
     return
   }
+  let approvedCount = 0
   for (const draft of pending) {
-    await bidApi.updateBidDraftStatus(draft.id, 'approved')
-    draft.status = 'approved'
+    try {
+      await bidApi.updateBidDraftStatus(draft.id, 'approved')
+      draft.status = 'approved'
+      approvedCount += 1
+    } catch (error) {
+      // 单节失败不静默中断：提示并继续其余分节
+      console.error('分节审批失败:', error)
+      toast.error(`分节「${sectionTitle(draft.sectionKey)}」审批失败，请重试`)
+    }
   }
-  toast.success(`已通过 ${pending.length} 节，可执行废标自检`)
+  if (approvedCount > 0) {
+    toast.success(`已通过 ${approvedCount} 节，可执行废标自检`)
+  }
 }
 
 const sectionTitle = (key: string) => bidApi.BID_SECTION_LABELS[key] || key

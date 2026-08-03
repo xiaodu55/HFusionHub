@@ -279,6 +279,8 @@ class LongTermMemoryService:
         )
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
+        # 触发 consolidate 后重置该会话计数，避免 _turn_counters 无界增长
+        self._turn_counters.pop(int(conversation_id), None)
 
     async def _safe_consolidate(self, **kwargs: Any) -> None:
         try:

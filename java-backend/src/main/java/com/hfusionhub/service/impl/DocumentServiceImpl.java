@@ -161,7 +161,8 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     @Override
-    @Transactional
+    // 无 @Transactional：方法内同步调用 Python 抓取网页（读超时 120s），
+    // 长事务会占死连接；唯一的写操作是末尾单条 document insert（自动提交即可）
     public DocumentInfoDTO createFromUrl(String url, String title, Long kbId) {
         // 1. 验证知识库存在且属于当前用户
         Long currentUserId = JwtUtils.getCurrentUserId();

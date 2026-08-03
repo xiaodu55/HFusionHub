@@ -149,8 +149,8 @@ async def get_models():
     """
     models = []
 
-    # 获取嵌入服务
-    service = get_embedding_service()
+    # 获取嵌入服务（内部含 Ollama 可用性探测的同步 HTTP——挪出事件循环）
+    service = await asyncio.to_thread(get_embedding_service)
 
     # 检查 Ollama 模型
     if service._ollama.is_available:
@@ -415,7 +415,7 @@ async def _process_document_background(
         # 仅当调用方显式指定了单模型时回退逐条生成以保持行为兼容。
         chunks_with_embeddings = []
         batch_size = 16
-        service = get_embedding_service()
+        service = await asyncio.to_thread(get_embedding_service)
         for start in range(0, len(chunks), batch_size):
             batch = chunks[start:start + batch_size]
             if embedding_model:
@@ -467,7 +467,12 @@ async def _process_document_background(
         if not await asyncio.to_thread(insert_chunks, chunks, embeddings, document_id, knowledge_base_id):
             raise MilvusException(f"Failed to insert chunks for document {document_id}")
         new_ids = {str(chunk.chunk_id) for chunk in chunks if chunk.chunk_id}
-        if not await asyncio.to_thread(delete_chunk_ids, sorted(old_ids - new_ids)):
+        stale_ids = sorted(old_ids - new_ids)
+        removed = bool(await asyncio.to_thread(delete_chunk_ids, stale_ids)) if stale_ids else True
+        if not removed:
+            # 瞬时失败重试一次；仍失败才判 FAILED（下次幂等重析会收敛残留）
+            removed = bool(await asyncio.to_thread(delete_chunk_ids, stale_ids))
+        if not removed:
             raise MilvusException(f"Failed to remove stale chunks for document {document_id}")
 
         # Step 6: Notify Java backend

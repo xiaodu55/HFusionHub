@@ -39,6 +39,8 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Agent 任务状态机服务实现
@@ -811,57 +813,77 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             }
         }
 
-        // ── Phase 2: Call Python (outside any transaction — recordStep
-        //        and completeRun manage their own transactions). ──
+        // ── Phase 2: Call Python AFTER COMMIT ──
+        // M2 的三表同事务保证只覆盖 Phase 1。LLM/工具执行（读超时 120s）绝不能
+        // 留在事务内——否则 agent_approval/task/run 的行锁在整个工具执行期间被
+        // 占用，并发 expireApprovals/cancelTask 全部阻塞，慢审批会拖垮连接池。
+        // afterCommit 在提交（行锁已释放）后执行；无事务上下文（单测直调）时内联执行。
         if ("approved".equals(decision) && task != null && run != null) {
-            try {
-                resumeAgentAfterApproval(approval, task, run, executionToken);
-            } catch (Exception e) {
-                String errorMsg = e.getClass().getSimpleName() + ": "
-                        + (e.getMessage() != null ? e.getMessage() : "(null message)");
-                log.error("Failed to resume agent after approval {}: {}", approvalId, errorMsg, e);
-                // Converge run and task to failed so nothing is stuck
-                // in 'running' after a failed Python resume call.
+            final AgentApproval fApproval = approval;
+            final AgentTask fTask = task;
+            final AgentRun fRun = run;
+            final String fExecutionToken = executionToken;
+            Runnable resumeTask = () -> {
                 try {
-                    AgentRun checkRun = runMapper.selectById(run.getId());
-                    if (checkRun != null) {
-                        // M3 行锁升级：条件 UPDATE 仅在仍处非终态时收敛为 failed，
-                        // 重读与写入之间即使 run 真实完成也不会被覆盖
-                        boolean transitioned = runLifecycle.failUnlessTerminal(
-                                checkRun.getId(), "internal_error", "审批后恢复执行失败: " + errorMsg);
-                        if (transitioned) {
-                            finalizeAgentRunUsage(checkRun.getId(), AgentConstants.STATUS_FAILED, null);
-                            AgentTask checkTask = taskMapper.selectById(checkRun.getTaskId());
-                            if (checkTask != null
-                                    && !AgentConstants.TERMINAL_STATUSES.contains(checkTask.getStatus())) {
-                                checkTask.setStatus(AgentConstants.STATUS_FAILED);
-                                taskMapper.updateById(checkTask);
+                    resumeAgentAfterApproval(fApproval, fTask, fRun, fExecutionToken);
+                } catch (Exception e) {
+                    String errorMsg = e.getClass().getSimpleName() + ": "
+                            + (e.getMessage() != null ? e.getMessage() : "(null message)");
+                    log.error("Failed to resume agent after approval {}: {}", approvalId, errorMsg, e);
+                    // Converge run and task to failed so nothing is stuck
+                    // in 'running' after a failed Python resume call.
+                    try {
+                        AgentRun checkRun = runMapper.selectById(fRun.getId());
+                        if (checkRun != null) {
+                            // M3 行锁升级：条件 UPDATE 仅在仍处非终态时收敛为 failed，
+                            // 重读与写入之间即使 run 真实完成也不会被覆盖
+                            boolean transitioned = runLifecycle.failUnlessTerminal(
+                                    checkRun.getId(), "internal_error", "审批后恢复执行失败: " + errorMsg);
+                            if (transitioned) {
+                                finalizeAgentRunUsage(checkRun.getId(), AgentConstants.STATUS_FAILED, null);
+                                AgentTask checkTask = taskMapper.selectById(checkRun.getTaskId());
+                                if (checkTask != null
+                                        && !AgentConstants.TERMINAL_STATUSES.contains(checkTask.getStatus())) {
+                                    checkTask.setStatus(AgentConstants.STATUS_FAILED);
+                                    taskMapper.updateById(checkTask);
+                                }
+                            }
+                        } else {
+                            // Even if the run can't be found now, converge the
+                            // original reference via the guarded transition.
+                            log.warn(
+                                    "Could not re-read run {} after resume failure — converging original reference",
+                                    fRun.getId());
+                            boolean transitioned = runLifecycle.failUnlessTerminal(
+                                    fRun.getId(), "internal_error", "审批后恢复执行失败: " + errorMsg);
+                            if (transitioned) {
+                                finalizeAgentRunUsage(fRun.getId(), AgentConstants.STATUS_FAILED, null);
+                            }
+                            if (fTask != null && !AgentConstants.TERMINAL_STATUSES.contains(fTask.getStatus())) {
+                                fTask.setStatus(AgentConstants.STATUS_FAILED);
+                                taskMapper.updateById(fTask);
                             }
                         }
-                    } else {
-                        // Even if the run can't be found now, converge the
-                        // original run reference via the guarded transition.
-                        log.warn(
-                                "Could not re-read run {} after resume failure — converging original reference",
-                                run.getId());
-                        boolean transitioned = runLifecycle.failUnlessTerminal(
-                                run.getId(), "internal_error", "审批后恢复执行失败: " + errorMsg);
-                        if (transitioned) {
-                            finalizeAgentRunUsage(run.getId(), AgentConstants.STATUS_FAILED, null);
-                        }
-                        if (task != null && !AgentConstants.TERMINAL_STATUSES.contains(task.getStatus())) {
-                            task.setStatus(AgentConstants.STATUS_FAILED);
-                            taskMapper.updateById(task);
-                        }
+                    } catch (Exception convergenceError) {
+                        log.error(
+                                "CRITICAL: Failed to converge run/task to failed after approval error. "
+                                        + "Run {} may be stuck in non-terminal state. Error: {}",
+                                fRun.getId(),
+                                convergenceError.getMessage(),
+                                convergenceError);
                     }
-                } catch (Exception convergenceError) {
-                    log.error(
-                            "CRITICAL: Failed to converge run/task to failed after approval error. "
-                                    + "Run {} may be stuck in non-terminal state. Error: {}",
-                            run.getId(),
-                            convergenceError.getMessage(),
-                            convergenceError);
                 }
+            };
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        resumeTask.run();
+                    }
+                });
+            } else {
+                // 无事务上下文（单元测试直调）：保持既有同步语义
+                resumeTask.run();
             }
         }
 
@@ -870,7 +892,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
 
     /**
      * Call Python /api/agent/v1/chat/decide to execute the approved tool
-     * and complete the agent run.  Runs OUTSIDE the @Transactional boundary
+     * and complete the agent run.  Invoked via afterCommit — AFTER the
+     * approval/task/run transaction has committed (M2 保证不受影响).
      * so that the MySQL approval update is committed before the (potentially
      * slow) tool execution.
      */
@@ -985,15 +1008,26 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         }
 
         long actualDuration = clampDuration(0L, freshRun.getStartedAt());
-        freshRun.setStatus(mappedStatus);
-        if (tokenUsage != null) freshRun.setTokenUsage(tokenUsage);
-        freshRun.setToolCallsCount(aiResponse.getToolCallsCount());
-        freshRun.setDurationMs(actualDuration);
-        freshRun.setCompletedAt(LocalDateTime.now());
-        runMapper.updateById(freshRun);
-
-        // 用量账本：审批恢复直接写终态，绕过 completeRun，需显式结算/退回
-        finalizeAgentRunUsage(freshRun.getId(), mappedStatus, tokenUsage);
+        // 守护终态迁移（同 completeRun 约定）：仅当 run 仍处 running/waiting_approval
+        // 时写入 completed/failed——无条件 updateById 会覆盖并发完成/取消的终态，
+        // 且账本按被覆盖后的状态结算，导致账本与真实终态不一致
+        boolean won = runMapper.completeRunGuarded(
+                        freshRun.getId(), mappedStatus, null, null, null, LocalDateTime.now())
+                == 1;
+        if (won) {
+            runMapper.updateCompletionMetadata(
+                    freshRun.getId(),
+                    aiResponse.getModel(),
+                    tokenUsage,
+                    aiResponse.getToolCallsCount(),
+                    actualDuration);
+            // 用量账本：仅真正赢得终态迁移的一方结算/退回（同 runLifecycle 约定）
+            finalizeAgentRunUsage(freshRun.getId(), mappedStatus, tokenUsage);
+        } else {
+            log.warn(
+                    "Run {} terminal state was settled concurrently — skipping overwrite/usage settle",
+                    freshRun.getId());
+        }
 
         AgentTask freshTask = taskMapper.selectById(freshRun.getTaskId());
         if (freshTask != null) {

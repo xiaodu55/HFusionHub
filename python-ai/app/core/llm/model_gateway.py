@@ -660,6 +660,8 @@ class ModelGateway:
             json=payload,
         ) as response:
             if response.is_error:
+                # 流式响应体内文未读——先 aread 再取 text/json，否则 ResponseNotRead
+                await response.aread()
                 detail = response.text[:1000]
                 try:
                     detail = (response.json().get("error", {}).get("message") or detail)[:1000]
@@ -707,6 +709,7 @@ class ModelGateway:
             json=payload,
         ) as response:
             if response.is_error:
+                await response.aread()
                 raise RuntimeError(
                     f"Provider {provider.name} stream request failed ({response.status_code}): {response.text[:1000]}"
                 )

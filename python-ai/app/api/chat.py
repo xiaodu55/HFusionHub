@@ -200,6 +200,9 @@ def _agent_chunk_to_sse(chunk: str) -> str | None:
                 return f"data: {json.dumps({'sources': sources}, ensure_ascii=False)}\n\n"
             if "evaluation" in parsed:
                 return None
+            # 流式重试协议：content_reset 通知前端清空当前气泡（替换语义）
+            if parsed.get("content_reset"):
+                return f"data: {json.dumps({'content_reset': True}, ensure_ascii=False)}\n\n"
     except (json.JSONDecodeError, TypeError, ValueError):
         pass
 
@@ -632,7 +635,8 @@ async def chat(request: ChatRequest):
                 mode="read_only",
             )
 
-        agent = get_agent(
+        agent = await asyncio.to_thread(
+            get_agent,
             knowledge_base_id=routed_knowledge_base_id,
             model=request.model,
             execution_context=execution_context,
@@ -729,7 +733,8 @@ async def agent_v1_chat(request: AgentV1Request):
         )
 
         # Agent V1: knowledge_base_id is always present (enforced by Pydantic).
-        agent = get_agent(
+        agent = await asyncio.to_thread(
+            get_agent,
             knowledge_base_id=request.knowledge_base_id,
             model=request.model,
             execution_context=execution_context,
@@ -826,7 +831,8 @@ async def agent_v1_chat_stream(request: AgentV1Request):
             environment=request.environment,
         )
 
-        agent = get_agent(
+        agent = await asyncio.to_thread(
+            get_agent,
             knowledge_base_id=request.knowledge_base_id,
             model=request.model,
             execution_context=execution_context,
@@ -888,9 +894,9 @@ async def agent_v1_chat_stream(request: AgentV1Request):
                 if use_vision_fallback:
                     kb_answer = "".join(buffered_content)
                     if kb_answer.strip() and not _is_kb_refusal(kb_answer):
-                        yield "data: " + json.dumps({"content": kb_answer}, ensure_ascii=False) + "\\n\\n"
+                        yield "data: " + json.dumps({"content": kb_answer}, ensure_ascii=False) + "\n\n"
                     else:
-                        yield "data: " + json.dumps({"content": vision_direct_answer}, ensure_ascii=False) + "\\n\\n"
+                        yield "data: " + json.dumps({"content": vision_direct_answer}, ensure_ascii=False) + "\n\n"
 
                 # Emit run_completed ONLY if no terminal event was emitted.
                 if not _terminal_event_emitted:
@@ -989,7 +995,10 @@ async def chat_stream(request: ChatRequest):
                 mode="read_only",
             )
 
-        agent = get_agent(
+        # get_agent 构造含租户工具注册表的同步 HTTP 预取（最长 3.5s）——
+        # 挪到线程池，避免冷未命中时卡住事件循环
+        agent = await asyncio.to_thread(
+            get_agent,
             knowledge_base_id=routed_knowledge_base_id,
             model=request.model,
             execution_context=execution_context,

@@ -57,6 +57,7 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
     private final RedisUtils redisUtils;
     private final MessageMapper messageMapper;
     private final ChatImageStorage chatImageStorage;
+    private final AgentRunLifecycleService agentRunLifecycle;
     private final TaskEventSseManager sseManager;
 
     @Qualifier("agentWorkerExecutor")
@@ -77,6 +78,7 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
             RedisUtils redisUtils,
             MessageMapper messageMapper,
             ChatImageStorage chatImageStorage,
+            AgentRunLifecycleService agentRunLifecycle,
             @Lazy TaskEventSseManager sseManager,
             @Qualifier("agentWorkerExecutor") java.util.concurrent.Executor agentWorkerExecutor) {
         this.taskMapper = taskMapper;
@@ -92,6 +94,7 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
         this.redisUtils = redisUtils;
         this.messageMapper = messageMapper;
         this.chatImageStorage = chatImageStorage;
+        this.agentRunLifecycle = agentRunLifecycle;
         this.sseManager = sseManager;
         this.agentWorkerExecutor = agentWorkerExecutor;
     }
@@ -141,13 +144,27 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
                     statusEventService.record(
                             task.getId(), run.getId(), "RUN_STARTED", AgentConstants.STATUS_RUNNING, null);
                 }
-                inflightRuns.put(run.getId(), workerId);
-                final Long runIdToExecute = run.getId();
-                final Long runTenantId = run.getTenantId();
-                java.util.concurrent.CompletableFuture.runAsync(
-                        () -> TenantContext.runAs(runTenantId, () -> executeRun(runIdToExecute, workerId)),
-                        agentWorkerExecutor);
-                dispatched++;
+                // 存量 run 可能无 tenant_id（V32 仅回填未设 NOT NULL）：先经任务归属
+                // 解析；仍无法归属则死信——否则派发后查询被哨兵租户过滤成空，
+                // run 卡死并被恢复扫描反复重派
+                final Long runTenantId = agentRunLifecycle.resolveRunTenant(run, task);
+                if (runTenantId == null) {
+                    log.warn("Run {} tenant unresolvable (legacy row) — dead-lettering", run.getId());
+                    agentTaskService.failRun(
+                            run.getId(), "tenant_unresolvable", "run.tenant_id 为空且无法经任务归属解析", null);
+                    if (task != null) {
+                        // task 为 null 时（测试/孤儿 run）只死信 run 本身
+                        handleTerminalFailure(task, run, "tenant_unresolvable", "run.tenant_id 为空且无法经任务归属解析");
+                    }
+                    dispatched++;
+                } else {
+                    inflightRuns.put(run.getId(), workerId);
+                    final Long runIdToExecute = run.getId();
+                    java.util.concurrent.CompletableFuture.runAsync(
+                            () -> TenantContext.runAs(runTenantId, () -> executeRun(runIdToExecute, workerId)),
+                            agentWorkerExecutor);
+                    dispatched++;
+                }
                 log.info(
                         "Worker {} claimed run id={} uuid={} taskId={}",
                         workerId,
@@ -406,8 +423,11 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
 
             // 6. Save assistant message if content was accumulated (non-KB chat)
             if (responseBuilder.length() > 0 && executingTask.getConversationId() != null) {
-                String assistantRequestId =
-                        executingTask.getRequestId() + ConversationServiceImpl.ASSISTANT_REQUEST_SUFFIX;
+                // 对齐同步/流式路径：超长 requestId 必须哈希为 64 字符，
+                // 否则 message.request_id(VARCHAR 64) 严格模式下 Data too long，
+                // 助手回复不落库（Answer lost）
+                String assistantRequestId = ConversationServiceImpl.assistantRequestId(
+                        executingTask.getRequestId());
                 try {
                     Message existing = messageMapper.selectOne(
                             new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Message>()

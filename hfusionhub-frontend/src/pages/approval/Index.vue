@@ -110,8 +110,11 @@ const canDecide = computed(() => isPending.value && !approving.value)
 
 const formatDate = (value?: string) => (value ? value.replace('T', ' ').slice(0, 16) : '—')
 const formatExpires = (value?: string) => (value ? value.replace('T', ' ').slice(0, 16) : '—')
-const isExpiredRow = (a: approvalApi.AgentApproval) =>
-  a.status === 'pending' && a.expiresAt != null && new Date(a.expiresAt).getTime() < Date.now()
+const isExpiredRow = (a: approvalApi.AgentApproval) => {
+  // Safari 不支持 'yyyy-MM-dd HH:mm:ss' 构造——手动解析
+  const expires = a.expiresAt ? new Date(a.expiresAt.replace(' ', 'T')).getTime() : NaN
+  return a.status === 'pending' && a.expiresAt != null && !Number.isNaN(expires) && expires < Date.now()
+}
 
 const load = async () => {
   loading.value = true

@@ -180,7 +180,6 @@ def mock_v1_refusal_agent(monkeypatch):
 
     class _MockAgent:
         async def run_stream(self, **kwargs):
-            captured = kwargs.get("query")
             yield json.dumps({"content": "我在当前知识库中未检索到足够依据，无法基于资料回答这个问题。"}, ensure_ascii=False)
 
     monkeypatch.setattr("app.api.chat.get_agent", lambda **kw: _MockAgent())

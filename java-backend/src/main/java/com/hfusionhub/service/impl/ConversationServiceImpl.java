@@ -313,7 +313,12 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     public MessageInfoDTO sendMessage(MessageSendDTO dto) {
         // 幂等检查：如果 requestId 已存在，直接返回已保存的响应
+        // 缺省时生成 UUID：usageKey="chat:null" 会让同租户所有无 requestId 的请求
+        // 共享同一条用量预占（配额校验被绕过、失败释放互相干扰），与流式路径对齐
         String requestId = normalizeRequestId(dto.getRequestId());
+        if (requestId == null) {
+            requestId = java.util.UUID.randomUUID().toString();
+        }
         String assistantRequestId = assistantRequestId(requestId);
         Message existingAssistant = messagePersistence.findAssistantByRequestId(assistantRequestId);
         if (existingAssistant != null) {
@@ -922,7 +927,8 @@ public class ConversationServiceImpl implements ConversationService {
                 if (usageFinalized.compareAndSet(false, true)) {
                     if (signalType == reactor.core.publisher.SignalType.ON_COMPLETE) {
                         long charge = Math.min(streamReserveTokens, streamInputEstimate + responseBuilder.length() / 4);
-                        usageLedgerService.settle(UsageMeter.CHAT_TOKENS, usageKey, charge, "message", usageKey);
+                        // refId 与 reserve 对齐为 requestId（usageKey 只作状态迁移键）
+                        usageLedgerService.settle(UsageMeter.CHAT_TOKENS, usageKey, charge, "message", requestId);
                     } else {
                         usageLedgerService.release(UsageMeter.CHAT_TOKENS, usageKey);
                     }

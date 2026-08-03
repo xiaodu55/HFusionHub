@@ -12,7 +12,7 @@ import * as voiceApi from '@/api/voice'
 import { ArrowLeft, BookOpen, Check, Copy, Download, Eraser, Image as ImageIcon, Mic, Pencil, Send, User, Bot, Loader2, Square, RefreshCw, ThumbsUp, ThumbsDown, Volume2, X } from 'lucide-vue-next'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useToast } from '@/composables/useToast'
-import { formatDateTime, formatTime } from '@/utils/date'
+import { formatDateTime, formatTime, parseServerTime } from '@/utils/date'
 import { friendlyErrorMessage } from '@/utils/errorMessage'
 import { SseDataParser, type SseDataEvent } from '@/utils/sse'
 import {
@@ -138,16 +138,28 @@ const toggleRecording = async () => {
   }
 }
 
+let currentAudioUrl: string | null = null
+
+const releaseCurrentAudio = () => {
+  try {
+    currentAudio?.pause()
+    if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl)
+  } catch { /* 忽略 */ }
+  currentAudio = null
+  currentAudioUrl = null
+}
+
 const speakMessage = async (messageId: string, content: string) => {
   if (speakingMessageId.value === messageId) {
-    currentAudio?.pause()
+    releaseCurrentAudio()
     speakingMessageId.value = null
     return
   }
+  releaseCurrentAudio() // 切换播报时释放上一个音频 blob URL（泄漏修复）
   try {
-    currentAudio?.pause()
     const audioUrl = await voiceApi.synthesizeSpeech(content)
     currentAudio = new Audio(audioUrl)
+    currentAudioUrl = audioUrl
     speakingMessageId.value = messageId
     currentAudio.onended = () => {
       speakingMessageId.value = null
@@ -155,6 +167,7 @@ const speakMessage = async (messageId: string, content: string) => {
     }
     await currentAudio.play()
   } catch (error) {
+    releaseCurrentAudio()
     speakingMessageId.value = null
     toast.error(error instanceof Error ? error.message : '语音播报失败')
   }
@@ -176,8 +189,9 @@ const maybeCheckApproval = async () => {
     const res = await listPendingApprovals()
     const pending = (res.data || []).filter(a => {
       if (a.status !== 'pending') return false
-      const created = new Date(a.createdAt).getTime()
-      return now - created < 3 * 60 * 1000 // 最近 3 分钟
+      // Safari 不支持 'yyyy-MM-dd HH:mm:ss' 构造——用项目统一的手动解析
+      const created = parseServerTime(a.createdAt)?.getTime()
+      return created != null && now - created < 3 * 60 * 1000 // 最近 3 分钟
     })
     // 优先展示 write_note 相关的审批
     const target = pending.find(a => a.toolName === 'write_note') || pending[0]
@@ -386,6 +400,12 @@ const handleSend = async () => {
 
         try {
           const parsed = JSON.parse(event.data)
+          // 流式重试协议：content_reset 清空当前气泡（groundedness 重试替换语义）
+          if (parsed.content_reset === true) {
+            const resetMsg = messages.value.find(m => m.id === pendingId)
+            if (resetMsg) resetMsg.content = ''
+            return
+          }
           const contentDelta = parsed.content || ''
           const sources = parsed.sources || []
 
@@ -573,13 +593,26 @@ const handleStopGeneration = async () => {
 // 重试消息（先在服务端删除失败轮次，避免重复）
 const handleRetryMessage = async (message: Message) => {
   if (sending.value) return
+  sending.value = true // 双击竞态防护：删除请求在途期间禁止二次进入（handleSend 会重置）
 
   // 找到这条消息的前一条用户消息
   const messageIndex = messages.value.findIndex(m => m.id === message.id)
-  if (messageIndex <= 0) return
+  if (messageIndex <= 0) { sending.value = false; return }
 
   const userMessage = messages.value[messageIndex - 1]
-  if (!userMessage || userMessage.role !== 'user') return
+  if (!userMessage || userMessage.role !== 'user') { sending.value = false; return }
+
+  // 对话图片输入：把原消息图片恢复为待发送状态（blob/相对地址均可重上传）
+  try {
+    for (const u of userMessage.images || []) {
+      try {
+        const blob = await (await fetch(u)).blob()
+        const res = await conversationApi.uploadChatImage(
+          new File([blob], 'retry.png', { type: blob.type || 'image/png' }))
+        pendingImages.value.push({ url: res.data.url, preview: u })
+      } catch { /* 单图恢复失败忽略 */ }
+    }
+  } catch { /* 忽略恢复失败 */ }
 
   // 服务端删除旧轮次（失败回答 + 对应提问），防止重试后重复
   const conversationId = Number(route.params.id)
@@ -598,17 +631,30 @@ const handleRetryMessage = async (message: Message) => {
   // 移除用户消息（因为 handleSend 会重新添加）
   messages.value.splice(messageIndex - 1, 1)
   await handleSend()
+  sending.value = false
 }
 
 // 重新生成：服务端删除旧问答对后重新发送提问（不产生重复轮次）
 const regenerateMessage = async (message: Message) => {
   if (sending.value) return
+  sending.value = true
 
   const messageIndex = messages.value.findIndex(m => m.id === message.id)
-  if (messageIndex <= 0) return
+  if (messageIndex <= 0) { sending.value = false; return }
 
   const userMessage = messages.value[messageIndex - 1]
-  if (!userMessage || userMessage.role !== 'user') return
+  if (!userMessage || userMessage.role !== 'user') { sending.value = false; return }
+
+  try {
+    for (const u of userMessage.images || []) {
+      try {
+        const blob = await (await fetch(u)).blob()
+        const res = await conversationApi.uploadChatImage(
+          new File([blob], 'retry.png', { type: blob.type || 'image/png' }))
+        pendingImages.value.push({ url: res.data.url, preview: u })
+      } catch { /* 单图恢复失败忽略 */ }
+    }
+  } catch { /* 忽略恢复失败 */ }
 
   const conversationId = Number(route.params.id)
   if (message.id > 0) {
@@ -622,6 +668,7 @@ const regenerateMessage = async (message: Message) => {
   messages.value.splice(messageIndex - 1, 1)
   inputMessage.value = userMessage.content
   await handleSend()
+  sending.value = false
 }
 
 // 复制消息内容（优先 Clipboard API，失败时降级到 execCommand）
@@ -813,6 +860,9 @@ const cancelOngoingRequests = async () => {
 // 组件卸载时取消请求
 onUnmounted(() => {
   cancelOngoingRequests()
+  // 离开页面：停止录音（麦克风释放）并暂停语音播报
+  try { mediaRecorder?.stop() } catch { /* 未在录音 */ }
+  releaseCurrentAudio()
 })
 
 // 路由离开时取消请求

@@ -189,9 +189,9 @@ public class TaskEventSseManager {
         Set<SseEmitter> emitters = taskEmitters.get(taskId);
         if (emitters != null) {
             emitters.remove(emitter);
-            if (emitters.isEmpty()) {
-                taskEmitters.remove(taskId);
-            }
+            // 原子清理：check-then-act（isEmpty 后整键 remove）会把恰在判断后
+            // 经 computeIfAbsent 进入的新订阅者连同键一起孤立，后续广播静默丢失
+            taskEmitters.compute(taskId, (k, set) -> (set == null || set.isEmpty()) ? null : set);
         }
         try {
             emitter.complete();

@@ -215,6 +215,8 @@ const handleFileSelect = (event: Event) => {
   if (input.files && input.files[0]) {
     uploadFile.value = input.files[0]
   }
+  // 重置以便同一文件可再次选择
+  input.value = ''
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB

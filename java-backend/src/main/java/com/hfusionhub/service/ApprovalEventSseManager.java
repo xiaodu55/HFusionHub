@@ -3,6 +3,7 @@ package com.hfusionhub.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hfusionhub.entity.AgentApproval;
 import com.hfusionhub.mapper.AgentApprovalMapper;
+import com.hfusionhub.tenant.TenantContext;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -48,6 +49,12 @@ public class ApprovalEventSseManager {
     public SseEmitter register(Long userId) {
         SseEmitter emitter = new SseEmitter(300_000L);
 
+        // 轮询跑在共享调度线程上（无租户上下文）。agent_approval 带 tenant_id 且
+        // 不在 TENANT_IGNORE_TABLES——不恢复租户时轮询查询被哨兵 tenant 过滤成
+        // 空列表，pending→approved 的实时事件全部丢失（只在 HTTP 线程的 snapshot
+        // 正常）。在 HTTP 线程捕获租户，轮询体按其执行。
+        final Long pollTenantId = TenantContext.getTenantId();
+
         // Last-known status per approvalId — only diffs are pushed afterwards.
         Map<String, String> known = new ConcurrentHashMap<>();
 
@@ -68,17 +75,25 @@ public class ApprovalEventSseManager {
         ScheduledFuture<?> pollTask = pollScheduler.scheduleWithFixedDelay(
                 () -> {
                     try {
-                        List<AgentApproval> fresh = approvalMapper.selectRecentByUserId(userId, SNAPSHOT_LIMIT);
-                        for (AgentApproval a : fresh) {
-                            String prev = known.put(a.getApprovalId(), a.getStatus());
-                            if (prev == null || !prev.equals(a.getStatus())) {
-                                emitter.send(SseEmitter.event()
-                                        .name("approval")
-                                        .data(objectMapper.writeValueAsString(Map.of("type", "approval", "data", a))));
+                        TenantContext.runAs(pollTenantId, () -> {
+                            try {
+                                List<AgentApproval> fresh =
+                                        approvalMapper.selectRecentByUserId(userId, SNAPSHOT_LIMIT);
+                                for (AgentApproval a : fresh) {
+                                    String prev = known.put(a.getApprovalId(), a.getStatus());
+                                    if (prev == null || !prev.equals(a.getStatus())) {
+                                        emitter.send(SseEmitter.event()
+                                                .name("approval")
+                                                .data(objectMapper.writeValueAsString(
+                                                        Map.of("type", "approval", "data", a))));
+                                    }
+                                }
+                            } catch (Exception e) {
+                                log.debug("Approvals SSE poll error for user {}: {}", userId, e.getMessage());
                             }
-                        }
+                        });
                     } catch (Exception e) {
-                        log.debug("Approvals SSE poll error for user {}: {}", userId, e.getMessage());
+                        log.debug("Approvals SSE poll scope error for user {}: {}", userId, e.getMessage());
                     }
                 },
                 0,

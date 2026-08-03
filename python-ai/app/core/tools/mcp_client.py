@@ -149,7 +149,13 @@ class MCPClientManager:
 
     def _config_file_path(self) -> str:
         import os
-        return os.environ.get("MCP_SERVERS_CONFIG_FILE", "mcp_servers.json")
+
+        path = os.environ.get("MCP_SERVERS_CONFIG_FILE", "mcp_servers.json")
+        if not os.path.isabs(path):
+            # 锚定到 python-ai 根目录：避免落盘位置随启动目录漂移
+            base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            path = os.path.join(base, path)
+        return path
 
     def _persist_config(self) -> None:
         """Persist the current server list to the config file (B5).
@@ -171,6 +177,10 @@ class MCPClientManager:
             path = self._config_file_path()
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
+            # 含 api_key 时限制权限（含 api_key 的明文配置不应对组/其他用户可读）
+            import os as _os
+
+            _os.chmod(path, 0o600)
         except Exception as exc:
             logger.warning("MCP config persistence failed: %s", exc)
 

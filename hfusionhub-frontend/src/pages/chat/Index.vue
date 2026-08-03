@@ -148,12 +148,16 @@ const startWithExample = async (question: string) => {
   }
 }
 
+const creating = ref(false)
+
 const openCreateDialog = () => {
   createForm.value = { title: '', knowledgeBaseId: undefined, promptTemplateId: undefined }
   isCreateDialogOpen.value = true
 }
 
 const handleCreate = async () => {
+  if (creating.value) return
+  creating.value = true
   const title = createForm.value.title.trim()
 
   try {
@@ -171,6 +175,8 @@ const handleCreate = async () => {
   } catch (error) {
     console.error('创建对话失败:', error)
     toast.error('创建对话失败，请稍后重试')
+  } finally {
+    creating.value = false
   }
 }
 

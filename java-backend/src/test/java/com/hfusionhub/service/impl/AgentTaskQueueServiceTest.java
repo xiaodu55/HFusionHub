@@ -40,6 +40,7 @@ class AgentTaskQueueServiceTest {
     private RedisUtils redisUtils;
     private ThreadPoolTaskExecutor workerExecutor;
     private MessageMapper messageMapper;
+    private AgentRunLifecycleService agentRunLifecycle;
     private ChatImageStorage chatImageStorage = new ChatImageStorage(java.nio.file.Path.of("target", "test-chat-images").toString());
     private TaskEventSseManager sseManager;
 
@@ -57,6 +58,16 @@ class AgentTaskQueueServiceTest {
         aiClient = mock(AiClient.class);
         redisUtils = mock(RedisUtils.class);
         messageMapper = mock(MessageMapper.class);
+        agentRunLifecycle = mock(AgentRunLifecycleService.class);
+        // 测试透传：run 已带 tenant_id 时原样返回（生产由任务归属解析）
+        try {
+            when(agentRunLifecycle.resolveRunTenant(any(), any())).thenAnswer(inv -> {
+                Object run = inv.getArgument(0);
+                return run == null ? null
+                        : (Long) run.getClass().getMethod("getTenantId").invoke(run);
+            });
+        } catch (Exception ignored) {
+        }
         sseManager = mock(TaskEventSseManager.class);
         workerExecutor = new ThreadPoolTaskExecutor();
         workerExecutor.setCorePoolSize(1);
@@ -77,6 +88,7 @@ class AgentTaskQueueServiceTest {
                 redisUtils,
                 messageMapper,
                 chatImageStorage,
+                agentRunLifecycle,
                 sseManager,
                 workerExecutor);
         ReflectionTestUtils.setField(queueService, "leaseSeconds", 120);

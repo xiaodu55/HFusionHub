@@ -40,6 +40,7 @@ class AgentTaskQueueIntegrationTest {
     private AgentRetryPolicy retryPolicy;
     private AiClient aiClient;
     private MessageMapper messageMapper;
+    private AgentRunLifecycleService agentRunLifecycle;
     private ChatImageStorage chatImageStorage = new ChatImageStorage(java.nio.file.Path.of("target", "test-chat-images").toString());
     private TaskEventSseManager sseManager;
     private com.hfusionhub.common.utils.RedisUtils redisUtils;
@@ -92,6 +93,14 @@ class AgentTaskQueueIntegrationTest {
         ReflectionTestUtils.setField(agentTaskService, "leaseSeconds", 120);
         ReflectionTestUtils.setField(agentTaskService, "cancelFlagTtlSeconds", 3600);
 
+        agentRunLifecycle = mock(AgentRunLifecycleService.class);
+        when(agentRunLifecycle.resolveRunTenant(any(), any()))
+                .thenAnswer(inv -> {
+                    Object run = inv.getArgument(0);
+                    return run == null ? null
+                            : (Long) run.getClass().getMethod("getTenantId").invoke(run);
+                });
+
         queueService = new AgentTaskQueueServiceImpl(
                 taskMapper,
                 runMapper,
@@ -106,6 +115,7 @@ class AgentTaskQueueIntegrationTest {
                 redisUtils,
                 messageMapper,
                 chatImageStorage,
+                agentRunLifecycle,
                 sseManager,
                 syncExecutor);
         ReflectionTestUtils.setField(queueService, "leaseSeconds", 120);

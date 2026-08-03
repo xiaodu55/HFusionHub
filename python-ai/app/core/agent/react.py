@@ -11,6 +11,7 @@ Agent V1 changes:
   WorkflowRuntime to read partial results on timeout.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -646,15 +647,20 @@ class ReactAgent(Agent):
         rag_context, was_compressed = await self._safe_compress(raw_context)
         return raw_context, rag_sources, auto_detected_kb_id, rag_context, was_compressed
 
-    def _empty_context_reply(self) -> str:
+    async def _empty_context_reply(self) -> str:
         """Reply used when retrieval returned nothing for a selected KB.
 
         Distinguishes "KB empty / still parsing" from "no relevant content"
         so the user gets an actionable hint.
         """
         try:
+            # cluster 模式下 all_chunks 是同步分页网络 IO——必须挪出事件循环
             from app.core.vectorstore.milvus_store import _get_store
-            corpus = _get_store().all_chunks(knowledge_base_id=self.knowledge_base_id)
+
+            def _all_chunks() -> list:
+                return _get_store().all_chunks(knowledge_base_id=self.knowledge_base_id)
+
+            corpus = await asyncio.to_thread(_all_chunks)
             has_content = bool(corpus)
         except Exception:
             has_content = True  # 无法确认时按普通无依据处理
@@ -893,7 +899,6 @@ class ReactAgent(Agent):
                 if not batch:
                     continue
 
-                import asyncio
                 tasks = [
                     self._handle_sub_question(q, history, llm, tools)
                     for q in batch
@@ -1069,7 +1074,7 @@ class ReactAgent(Agent):
                 and getattr(t["_spec"], "risk_level", "read_only") != "read_only"
             ]
             if not non_retrieval_tools:
-                reply = self._empty_context_reply()
+                reply = await self._empty_context_reply()
                 self._last_sources = []
                 return AgentResponse(
                     content=reply,
@@ -1485,7 +1490,7 @@ class ReactAgent(Agent):
             self._last_sources = sources
 
             if has_selected_kb and not context:
-                yield self._empty_context_reply()
+                yield await self._empty_context_reply()
                 return
 
             prompt = self._build_rag_prompt(context, query, self.style) if context else query
@@ -1529,6 +1534,8 @@ class ReactAgent(Agent):
                     "Retrying with uncompressed context."
                 )
                 try:
+                    # 替换协议：通知前端清空已流出的无依据回答，重试内容整段替换
+                    yield json.dumps({"content_reset": True}, ensure_ascii=False)
                     retry_prompt = self._build_rag_prompt(raw_context, query, self.style)
                     retry_messages = [
                         ChatMessage(role="system", content="你是一个智能助手，请回答用户的问题。"),
