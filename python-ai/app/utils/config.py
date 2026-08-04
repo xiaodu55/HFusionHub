@@ -198,6 +198,10 @@ class Config:
     RAG_QA_GENERATION_ENABLED = os.getenv("RAG_QA_GENERATION_ENABLED", "false").lower() in ("1", "true", "yes")
     RAG_QA_MAX_PER_DOC = int(os.getenv("RAG_QA_MAX_PER_DOC", "20"))
 
+    # Parent-Child 父子分块检索（实验档，默认关）：同块多窗口子块附带块级父内容，
+    # 检索命中子块后替换为父正文并按父去重——小块精准召回 + 大块完整上下文。
+    RAG_PARENT_CHILD_ENABLED = os.getenv("RAG_PARENT_CHILD_ENABLED", "false").lower() in ("1", "true", "yes")
+
     # P9 is an explicit rollout switch for the bounded single-agent runtime.
     # It wraps the existing read-only React agent; it does not add write tools.
     RAG_AGENT_WORKFLOW_ENABLED = os.getenv("RAG_AGENT_WORKFLOW_ENABLED", "false").lower() == "true"

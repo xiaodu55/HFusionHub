@@ -2,6 +2,7 @@
 Text chunker with block type identification and outline path tracking
 """
 
+import json
 from dataclasses import dataclass, field
 
 from app.core.parser.base import BlockType, ParsedBlock
@@ -58,6 +59,7 @@ class TextChunker:
         chunks = []
         chunk_index = 0
         outline_path = []  # Track current heading hierarchy
+        block_seq = 0
 
         for block in blocks:
             # Update outline path based on headings
@@ -73,6 +75,21 @@ class TextChunker:
             )
 
             chunks.extend(block_chunks)
+
+            # Parent-Child（实验特性，RAG_PARENT_CHILD_ENABLED）：同一 block 切出
+            # 多个窗口时，为各子块附带块级父内容——检索命中子块（精准），
+            # 回答上下文用父块（完整）。单窗口块不加（子块≈父块，无增益且省配额）。
+            # metadata 预算守卫：Milvus metadata 字段上限 4000 字符，超限降级丢弃。
+            if config.RAG_PARENT_CHILD_ENABLED and len(block_chunks) > 1:
+                parent_content = block.content.strip()[:2600]
+                parent_id = f"{document_id}_parent_{block_seq:03d}"
+                for c in block_chunks:
+                    c.metadata["parent_id"] = parent_id
+                    c.metadata["parent_content"] = parent_content
+                    if len(json.dumps(c.metadata, ensure_ascii=False)) > 3900:
+                        c.metadata.pop("parent_content", None)
+
+            block_seq += 1
             chunk_index += len(block_chunks)
 
         return chunks

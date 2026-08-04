@@ -205,17 +205,6 @@ public interface AgentTaskService {
             String riskLevel);
 
     /**
-     * 审批决定（批准/拒绝）
-     *
-     * @param approvalId 审批UUID
-     * @param decision   "approved" | "denied"
-     * @param decidedBy  审批人用户ID
-     * @param reason     决定原因
-     * @return 更新后的审批记录
-     */
-    AgentApproval decideApproval(String approvalId, String decision, Long decidedBy, String reason);
-
-    /**
      * 查询用户的待审批列表
      * @param userId 用户ID
      */

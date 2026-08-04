@@ -35,7 +35,6 @@ class AgentTaskExecutionTokenTest {
     private AgentTaskMapper taskMapper;
     private AgentRunMapper runMapper;
     private AgentStepMapper stepMapper;
-    private MessageMapper messageMapper;
     private UserMapper userMapper;
     private AiClient aiClient;
     private AgentTaskQueueService queueService;
@@ -48,7 +47,6 @@ class AgentTaskExecutionTokenTest {
         runMapper = mock(AgentRunMapper.class);
         stepMapper = mock(AgentStepMapper.class);
         approvalMapper = mock(AgentApprovalMapper.class);
-        messageMapper = mock(MessageMapper.class);
         userMapper = mock(UserMapper.class);
         aiClient = mock(AiClient.class);
         queueService = mock(AgentTaskQueueService.class);
@@ -60,7 +58,6 @@ class AgentTaskExecutionTokenTest {
                 runMapper,
                 stepMapper,
                 approvalMapper,
-                messageMapper,
                 userMapper,
                 aiClient,
                 queueService,

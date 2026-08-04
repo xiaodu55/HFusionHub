@@ -10,6 +10,7 @@ import com.hfusionhub.entity.AgentRun;
 import com.hfusionhub.service.AgentStatusEventService;
 import com.hfusionhub.service.AgentTaskService;
 import com.hfusionhub.service.ApprovalEventSseManager;
+import com.hfusionhub.service.impl.AgentTaskDecisionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -33,6 +34,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public class AgentTaskController {
 
     private final AgentTaskService agentTaskService;
+    private final AgentTaskDecisionService agentTaskDecisionService;
     private final AgentStatusEventService statusEventService;
     private final ApprovalEventSseManager approvalEventSseManager;
 
@@ -122,7 +124,7 @@ public class AgentTaskController {
         if (!approval.getTaskId().equals(taskId)) return R.fail("审批记录不属于此任务");
         if (!approval.getUserId().equals(userId)) return R.fail("无权审批：审批目标用户不匹配");
 
-        return R.ok(agentTaskService.decideApproval(approvalId, decision, userId, reason));
+        return R.ok(agentTaskDecisionService.decideApproval(approvalId, decision, userId, reason));
     }
 
     @Operation(summary = "当前用户的待审批列表")

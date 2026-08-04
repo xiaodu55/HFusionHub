@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第二十四批（2026-09-04：A 档深化——Parent-Child 检索 + schema-h2 真对齐 + God class 第三批·Agent 决策链路）
+
+> God class 第三批本批完成 **AgentTaskServiceImpl 审批决策链路拆分**；
+> VectorizationServiceImpl 回调持久化分离仍顺延下一批首项（渐进拆分惯例）。
+
+#### Added
+- **Parent-Child 父子分块检索（实验档，RAG_PARENT_CHILD_ENABLED 默认关）**：
+  - chunker：同一 block 切出多窗口时，各子块 metadata 附着块级父内容
+    （`parent_id` + `parent_content`，截断 2600 字；metadata 预算守卫超限自动降级丢弃）
+  - postprocessor：rerank/top_k 之后做父展开——子块 content 替换为父正文 +
+    同父去重（只保留最高分子块）；门控/去重仍按子块粒度评估（插在 top_k 之后，语义不变）
+  - citation 保持子块 chunk_id（溯源与"知识来源"面板不变）
+  - 测试 10 个（附着/预算守卫/展开/去重/flag 关直通）
+  - eval 离线门禁实测零回归（regressions: [], gate_failures: []）
+- **schema-h2 真对齐 V84（漂移零容忍）**：补齐 6 张缺失表（memory_entry/note/
+  system_notice/notice_recipient/eval_harness_runs/table_lineage，H2 兼容翻译：
+  剥内联索引/ENGINE 尾缀/FK/ON UPDATE）+ 10 表 tenant_id 列 + 5 个 embedding 列 +
+  tenant_plan_binding.deleted + V74 全部租户索引；漂移基线清空为**零容忍**
+  （此后任何新迁移不同步 schema-h2 直接 CI 红）
+- **God class 第三批（Agent 决策链路）**：`AgentTaskServiceImpl` 1414→**975 行**——
+  - `decideApproval`/`resumeAgentAfterApproval`/`getChatHistoryForTask`
+    拆入新 `AgentTaskDecisionService`（M2 afterCommit 语义原样迁移，含并发结算
+    守卫告警；Controller 直连决策服务，`AgentTaskService` 接口删除 decideApproval）
+  - 审批令牌哈希（签名/校验必须同源）与时长钳制收口 `AgentTaskSupport`
+    共享纯函数，消除拆分副本（哈希规则漂移会导致全部审批恢复失败）
+  - impl 顺带移除不再使用的 messageMapper 依赖（13 构造参数）
+  - 测试同步：RaceGuard 直测决策服务；Clamp 换 AgentTaskSupport 静态引用；
+    其余构造器同步；行为零变化（35 个定向测试全绿）
+
+#### Changed
+- Python 测试 1411→**1443**（多模态 12 + QA 生成 8 + 回退 2 + Parent-Child 10 + 计数同步）
+- Flyway 窗口语义不变（仍 V84，本批只补 schema-h2 与索引）
+
+### 第二十三批（2026-09-04：全功能审查修复——25 项真 bug）
+
 ### 第二十二批（2026-09-04：A 档改进——对话图片输入 / QA 对生成 / 演示脚本）
 
 #### Added

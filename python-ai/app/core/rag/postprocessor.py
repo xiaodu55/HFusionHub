@@ -332,7 +332,33 @@ class Postprocessor:
             else:
                 decisions[index]["decision"] = "trimmed_top_k"
 
+        # 6. Parent-Child 展开（实验特性，RAG_PARENT_CHILD_ENABLED）：
+        # 子块命中 → 替换为父正文 + 同父去重（只保留最高分子块）。
+        # 置于门控/去重/top_k 之后：门控与去重语义仍按子块粒度评估，不受影响。
+        if config.RAG_PARENT_CHILD_ENABLED and accepted:
+            accepted = self._expand_parents(accepted)
+
         return accepted, decisions
+
+    @staticmethod
+    def _expand_parents(accepted: list[ProcessedResult]) -> list[ProcessedResult]:
+        """Parent-Child 展开：子块 content 替换为父正文，同父去重。
+
+        citation 保持子块 chunk_id（溯源不变）；excerpt 随父正文（更完整的开头）。
+        """
+        expanded: list[ProcessedResult] = []
+        seen_parents: set[str] = set()
+        for result in accepted:
+            parent_id = result.metadata.get("parent_id")
+            parent_content = result.metadata.get("parent_content")
+            if parent_id and parent_content:
+                if parent_id in seen_parents:
+                    continue  # 同父的低分子块由最高分子块代表
+                seen_parents.add(parent_id)
+                result.content = parent_content
+                result.metadata["parent_expanded"] = True
+            expanded.append(result)
+        return expanded
 
     def _to_processed(self, result: dict) -> ProcessedResult:
         """将字典转换为 ProcessedResult"""

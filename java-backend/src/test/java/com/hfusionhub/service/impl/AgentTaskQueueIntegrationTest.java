@@ -76,7 +76,6 @@ class AgentTaskQueueIntegrationTest {
                 runMapper,
                 stepMapper,
                 approvalMapper,
-                messageMapper,
                 mock(com.hfusionhub.mapper.UserMapper.class),
                 aiClient,
                 queueServiceRef,

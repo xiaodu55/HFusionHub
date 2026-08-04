@@ -82,6 +82,7 @@ class AgentApprovalRaceGuardTest {
     private AgentRunLifecycleService runLifecycle;
 
     private AgentTaskServiceImpl service;
+    private AgentTaskDecisionService decisionService;
 
     @BeforeEach
     void setUp() {
@@ -90,7 +91,6 @@ class AgentApprovalRaceGuardTest {
                 runMapper,
                 stepMapper,
                 approvalMapper,
-                messageMapper,
                 userMapper,
                 aiClient,
                 queueService,
@@ -100,6 +100,18 @@ class AgentApprovalRaceGuardTest {
                 quotaProperties,
                 costTrackingService,
                 runLifecycle);
+        // 拆分后 decideApproval 归属 AgentTaskDecisionService（同第二十四批）；
+        // agentTaskService 传真实 impl，recordStep 走 impl 的 stepMapper mock
+        decisionService = new AgentTaskDecisionService(
+                stepMapper,
+                approvalMapper,
+                taskMapper,
+                runMapper,
+                runLifecycle,
+                statusEventService,
+                aiClient,
+                messageMapper,
+                service);
     }
 
     private AgentApproval pendingApproval() {
@@ -140,7 +152,7 @@ class AgentApprovalRaceGuardTest {
         when(runLifecycle.failFromWaitingApproval(eq(RUN_ID), eq("approval_denied"), anyString()))
                 .thenReturn(true);
 
-        service.decideApproval("appr-1", "denied", DECIDER_ID, "不要执行");
+        decisionService.decideApproval("appr-1", "denied", DECIDER_ID, "不要执行");
 
         verify(runLifecycle).failFromWaitingApproval(eq(RUN_ID), eq("approval_denied"), anyString());
         verify(runLifecycle).finalizeAgentRunUsage(RUN_ID, AgentConstants.STATUS_FAILED, null);
@@ -153,7 +165,7 @@ class AgentApprovalRaceGuardTest {
         when(runLifecycle.failFromWaitingApproval(eq(RUN_ID), eq("approval_denied"), anyString()))
                 .thenReturn(false);
 
-        service.decideApproval("appr-1", "denied", DECIDER_ID, "不要执行");
+        decisionService.decideApproval("appr-1", "denied", DECIDER_ID, "不要执行");
 
         verify(runLifecycle).failFromWaitingApproval(eq(RUN_ID), eq("approval_denied"), anyString());
         verify(runLifecycle, never()).finalizeAgentRunUsage(anyLong(), anyString(), any());
@@ -174,7 +186,7 @@ class AgentApprovalRaceGuardTest {
         when(runLifecycle.failUnlessTerminal(eq(RUN_ID), eq("internal_error"), anyString()))
                 .thenReturn(true);
 
-        service.decideApproval("appr-1", "approved", DECIDER_ID, null);
+        decisionService.decideApproval("appr-1", "approved", DECIDER_ID, null);
 
         verify(runLifecycle).resumeFromWaitingApproval(RUN_ID);
         // M3：恢复失败必须把 run 收敛为 failed，并结算用量
@@ -197,7 +209,7 @@ class AgentApprovalRaceGuardTest {
         when(runLifecycle.failUnlessTerminal(eq(RUN_ID), eq("internal_error"), anyString()))
                 .thenReturn(false);
 
-        service.decideApproval("appr-1", "approved", DECIDER_ID, null);
+        decisionService.decideApproval("appr-1", "approved", DECIDER_ID, null);
 
         verify(runLifecycle, never()).finalizeAgentRunUsage(RUN_ID, AgentConstants.STATUS_FAILED, null);
     }

@@ -1445,3 +1445,143 @@ CREATE TABLE IF NOT EXISTS bigdata_batch_run_log (
 
 -- V84: 对话图片输入（message.images）
 ALTER TABLE message ADD COLUMN IF NOT EXISTS images CLOB;
+
+-- ═══ 第二十四批：schema-h2 真对齐 V84（V8/V9/V14/V26/V55/V56/V74/V76/V79/V83 补齐）═══
+-- 翻译惯例：剥反引号/列注释/内联 INDEX/ENGINE 尾缀/FK；ON UPDATE CURRENT_TIMESTAMP
+-- 不翻译（updatedAt 由 MyBatis-Plus 字段填充显式维护）。漂移基线已清空——零容忍。
+
+-- V8+V14: memory_entry（长期记忆）
+CREATE TABLE IF NOT EXISTS memory_entry (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    type VARCHAR(32) NOT NULL DEFAULT 'entity_fact',
+    content TEXT NOT NULL,
+    entities JSON NULL,
+    conversation_id BIGINT NULL,
+    knowledge_base_id BIGINT NULL,
+    importance DOUBLE NOT NULL DEFAULT 0.5,
+    expires_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    tenant_id BIGINT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memory_user ON memory_entry (user_id);
+CREATE INDEX IF NOT EXISTS idx_memory_conv ON memory_entry (conversation_id);
+CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_entry (type);
+CREATE INDEX IF NOT EXISTS idx_memory_user_expiry ON memory_entry (user_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_memory_user_kb ON memory_entry (user_id, knowledge_base_id);
+
+-- V55: note（用户笔记）
+CREATE TABLE IF NOT EXISTS note (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    tenant_id BIGINT NULL,
+    knowledge_base_id BIGINT NULL,
+    conversation_id BIGINT NULL,
+    message_id BIGINT NULL,
+    title VARCHAR(200) NOT NULL DEFAULT '',
+    content TEXT NOT NULL,
+    source VARCHAR(32) NOT NULL DEFAULT 'manual',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_note_user ON note (user_id, deleted, created_at);
+CREATE INDEX IF NOT EXISTS idx_note_kb ON note (knowledge_base_id, deleted);
+CREATE INDEX IF NOT EXISTS idx_note_tenant ON note (tenant_id);
+
+-- V9: system_notice（系统公告）
+CREATE TABLE IF NOT EXISTS system_notice (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(256) NOT NULL,
+    content TEXT NOT NULL,
+    level VARCHAR(16) NOT NULL DEFAULT 'info',
+    publisher VARCHAR(64) NULL,
+    scope VARCHAR(32) NOT NULL DEFAULT 'all',
+    expires_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_notice_created ON system_notice (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notice_expires ON system_notice (expires_at);
+
+CREATE TABLE IF NOT EXISTS notice_recipient (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    notice_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    is_read TINYINT(1) NOT NULL DEFAULT 0,
+    read_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_notice_user ON notice_recipient (notice_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_recipient_user_unread ON notice_recipient (user_id, is_read);
+
+-- V79: eval_harness_runs（评估中枢运行记录）
+CREATE TABLE IF NOT EXISTS eval_harness_runs (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    run_file VARCHAR(160) NOT NULL,
+    label VARCHAR(64) DEFAULT NULL,
+    knowledge_base_id BIGINT DEFAULT NULL,
+    top_k INT DEFAULT 5,
+    record_count INT DEFAULT 0,
+    requires_rag_count INT DEFAULT 0,
+    judge_enabled TINYINT NOT NULL DEFAULT 0,
+    judge_cases INT DEFAULT 0,
+    overall JSON DEFAULT NULL,
+    failed_case_ids JSON DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    tenant_id BIGINT DEFAULT NULL,
+    deleted TINYINT NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_eval_harness_run_file ON eval_harness_runs (run_file);
+CREATE INDEX IF NOT EXISTS idx_eval_harness_created ON eval_harness_runs (created_at);
+CREATE INDEX IF NOT EXISTS idx_eval_harness_tenant ON eval_harness_runs (tenant_id);
+
+-- V83: table_lineage（表级血缘，平台口径 tenant_id=-1）
+CREATE TABLE IF NOT EXISTS table_lineage (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    tenant_id BIGINT NOT NULL DEFAULT -1,
+    job_name VARCHAR(200) NOT NULL,
+    layer VARCHAR(20) NOT NULL,
+    source_table VARCHAR(200) NOT NULL,
+    target_table VARCHAR(200) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_lineage_job_src_tgt UNIQUE (job_name, source_table, target_table)
+);
+CREATE INDEX IF NOT EXISTS idx_lineage_source ON table_lineage (source_table);
+CREATE INDEX IF NOT EXISTS idx_lineage_target ON table_lineage (target_table);
+
+-- V26 补齐：embedding 元数据列（实体含字段而 H2 缺失——插入路径未覆盖的真实风险）
+ALTER TABLE document_chunk ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(100) NULL;
+ALTER TABLE document_chunk ADD COLUMN IF NOT EXISTS embedding_dimension INT NULL;
+ALTER TABLE document_chunk ADD COLUMN IF NOT EXISTS embedding_version VARCHAR(64) NULL;
+ALTER TABLE document_index_job ADD COLUMN IF NOT EXISTS embedding_dimension INT NULL;
+ALTER TABLE document_index_job ADD COLUMN IF NOT EXISTS embedding_version VARCHAR(64) NULL;
+-- V56 补齐：kb_share / app_api_key 的 tenant_id
+ALTER TABLE kb_share ADD COLUMN IF NOT EXISTS tenant_id BIGINT NULL;
+ALTER TABLE app_api_key ADD COLUMN IF NOT EXISTS tenant_id BIGINT NULL;
+-- V76 补齐：tenant_plan_binding.deleted
+ALTER TABLE tenant_plan_binding ADD COLUMN IF NOT EXISTS deleted TINYINT NOT NULL DEFAULT 0;
+-- V74 补齐：存量表的租户索引（note 已随上表创建）
+-- V32 补齐：上述 10 表的 tenant_id（BIGINT DEFAULT NULL，与生产 ADD COLUMN 一致）
+ALTER TABLE agent_alert_event ADD COLUMN IF NOT EXISTS tenant_id BIGINT DEFAULT NULL;
+ALTER TABLE agent_alert_rule ADD COLUMN IF NOT EXISTS tenant_id BIGINT DEFAULT NULL;
+ALTER TABLE agent_evaluation_dataset ADD COLUMN IF NOT EXISTS tenant_id BIGINT DEFAULT NULL;
+ALTER TABLE bid_check_report ADD COLUMN IF NOT EXISTS tenant_id BIGINT DEFAULT NULL;
+ALTER TABLE bid_draft ADD COLUMN IF NOT EXISTS tenant_id BIGINT DEFAULT NULL;
+ALTER TABLE bid_project ADD COLUMN IF NOT EXISTS tenant_id BIGINT DEFAULT NULL;
+ALTER TABLE bid_requirement ADD COLUMN IF NOT EXISTS tenant_id BIGINT DEFAULT NULL;
+ALTER TABLE bid_scoring_method ADD COLUMN IF NOT EXISTS tenant_id BIGINT DEFAULT NULL;
+ALTER TABLE bid_template ADD COLUMN IF NOT EXISTS tenant_id BIGINT DEFAULT NULL;
+ALTER TABLE tender_element ADD COLUMN IF NOT EXISTS tenant_id BIGINT DEFAULT NULL;
+-- V74 补齐：存量表的租户索引（置于文末：此时全部相关表均已创建）
+CREATE INDEX IF NOT EXISTS idx_aar_tenant ON agent_alert_rule (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_aae_tenant ON agent_alert_event (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_aed_tenant ON agent_evaluation_dataset (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_pts_tenant ON prompt_test_set (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_ptsr_tenant ON prompt_test_set_run (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_acl_tenant ON app_call_log (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_whs_tenant ON webhook_subscription (tenant_id);

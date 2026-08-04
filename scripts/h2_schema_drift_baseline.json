@@ -1,27 +1,3 @@
 {
- "allowed": [
-  "agent_alert_event.tenant_id",
-  "agent_alert_rule.tenant_id",
-  "agent_evaluation_dataset.tenant_id",
-  "app_api_key.tenant_id",
-  "bid_check_report.tenant_id",
-  "bid_draft.tenant_id",
-  "bid_project.tenant_id",
-  "bid_requirement.tenant_id",
-  "bid_scoring_method.tenant_id",
-  "bid_template.tenant_id",
-  "document_chunk.embedding_dimension",
-  "document_chunk.embedding_model",
-  "document_chunk.embedding_version",
-  "document_index_job.embedding_dimension",
-  "document_index_job.embedding_version",
-  "eval_harness_runs.*",
-  "kb_share.tenant_id",
-  "memory_entry.*",
-  "note.*",
-  "notice_recipient.*",
-  "system_notice.*",
-  "table_lineage.*",
-  "tender_element.tenant_id"
- ]
+ "allowed": []
 }

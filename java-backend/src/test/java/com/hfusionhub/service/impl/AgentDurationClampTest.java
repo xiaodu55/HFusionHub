@@ -20,7 +20,6 @@ import com.hfusionhub.mapper.AgentApprovalMapper;
 import com.hfusionhub.mapper.AgentRunMapper;
 import com.hfusionhub.mapper.AgentStepMapper;
 import com.hfusionhub.mapper.AgentTaskMapper;
-import com.hfusionhub.mapper.MessageMapper;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.AgentStatusEventService;
 import com.hfusionhub.service.AgentTaskQueueService;
@@ -56,8 +55,6 @@ class AgentDurationClampTest {
     @Mock
     private AgentApprovalMapper approvalMapper;
     @Mock
-    private MessageMapper messageMapper;
-    @Mock
     private UserMapper userMapper;
     @Mock
     private AiClient aiClient;
@@ -81,7 +78,7 @@ class AgentDurationClampTest {
     @BeforeEach
     void setUp() {
         service = new AgentTaskServiceImpl(
-                taskMapper, runMapper, stepMapper, approvalMapper, messageMapper,
+                taskMapper, runMapper, stepMapper, approvalMapper,
                 userMapper, aiClient, queueService, statusEventService, redisUtils,
                 usageLedgerService, quotaProperties, costTrackingService, runLifecycle);
     }
@@ -143,26 +140,26 @@ class AgentDurationClampTest {
     @Test
     void clampKeepsPositiveCallerProvidedDuration() {
         LocalDateTime past = LocalDateTime.now().minusSeconds(30);
-        assertThat(AgentTaskServiceImpl.clampDuration(5000L, past)).isEqualTo(5000L);
-        assertThat(AgentTaskServiceImpl.clampDuration(5000L, null)).isEqualTo(5000L);
+        assertThat(AgentTaskSupport.clampDuration(5000L, past)).isEqualTo(5000L);
+        assertThat(AgentTaskSupport.clampDuration(5000L, null)).isEqualTo(5000L);
     }
 
     @Test
     void clampReturnsZeroWhenCallerPassesNegativeAndNoStartedAt() {
-        assertThat(AgentTaskServiceImpl.clampDuration(-5L, null)).isZero();
+        assertThat(AgentTaskSupport.clampDuration(-5L, null)).isZero();
     }
 
     @Test
     void clampReturnsZeroOnClockRollback() {
         // 时钟回拨：startedAt 晚于当前墙钟 → 相减为负 → 钳为 0
         LocalDateTime future = LocalDateTime.now().plusMinutes(10);
-        assertThat(AgentTaskServiceImpl.clampDuration(0L, future)).isZero();
-        assertThat(AgentTaskServiceImpl.clampDuration(-5L, future)).isZero();
+        assertThat(AgentTaskSupport.clampDuration(0L, future)).isZero();
+        assertThat(AgentTaskSupport.clampDuration(-5L, future)).isZero();
     }
 
     @Test
     void clampFallbackFromStartedAtIsNonNegative() {
         LocalDateTime past = LocalDateTime.now().minusSeconds(30);
-        assertThat(AgentTaskServiceImpl.clampDuration(0L, past)).isGreaterThanOrEqualTo(0L);
+        assertThat(AgentTaskSupport.clampDuration(0L, past)).isGreaterThanOrEqualTo(0L);
     }
 }
