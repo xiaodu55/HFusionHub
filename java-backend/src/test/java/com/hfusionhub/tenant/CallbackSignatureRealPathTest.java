@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hfusionhub.controller.VectorizationController;
 import com.hfusionhub.dto.DocumentIndexCallbackDTO;
 import com.hfusionhub.service.VectorizationService;
+import com.hfusionhub.service.impl.VectorizationCallbackService;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import javax.crypto.Mac;
@@ -34,16 +35,19 @@ class CallbackSignatureRealPathTest {
     private static final String SECRET = "test-callback-secret";
 
     private VectorizationService vectorizationService;
+    private VectorizationCallbackService vectorizationCallbackService;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         vectorizationService = mock(VectorizationService.class);
+        vectorizationCallbackService = mock(VectorizationCallbackService.class);
 
         CallbackSignatureFilter filter = new CallbackSignatureFilter();
         ReflectionTestUtils.setField(filter, "callbackSecret", SECRET);
 
-        VectorizationController controller = new VectorizationController(vectorizationService, new ObjectMapper());
+        VectorizationController controller =
+                new VectorizationController(vectorizationService, vectorizationCallbackService, new ObjectMapper());
         ReflectionTestUtils.setField(controller, "callbackSecret", SECRET);
 
         mockMvc = MockMvcBuilders.standaloneSetup(controller).addFilters(filter).build();
@@ -61,7 +65,7 @@ class CallbackSignatureRealPathTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
 
-        verify(vectorizationService).updateDocumentStatus(eq(42L), any(DocumentIndexCallbackDTO.class));
+        verify(vectorizationCallbackService).updateDocumentStatus(eq(42L), any(DocumentIndexCallbackDTO.class));
     }
 
     @Test
@@ -78,7 +82,7 @@ class CallbackSignatureRealPathTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(500));
 
-        verify(vectorizationService, org.mockito.Mockito.never()).updateDocumentStatus(any(), any());
+        verify(vectorizationCallbackService, org.mockito.Mockito.never()).updateDocumentStatus(any(), any());
     }
 
     private static String hmac(String body) {

@@ -2,7 +2,6 @@ package com.hfusionhub.service;
 
 import com.hfusionhub.dto.ChunkDTO;
 import com.hfusionhub.dto.ChunkPageDTO;
-import com.hfusionhub.dto.DocumentIndexCallbackDTO;
 
 /**
  * 向量化服务接口
@@ -40,15 +39,6 @@ public interface VectorizationService {
      * @return 分块详情
      */
     ChunkDTO getChunkDetail(String chunkId);
-
-    /**
-     * 回调：更新文档处理状态
-     *
-     * @param documentId 文档ID
-     * @param status     状态
-     * @param chunkCount 分块数量
-     */
-    void updateDocumentStatus(Long documentId, DocumentIndexCallbackDTO callback);
 
     /** Remove a document's vector entries and durable chunk metadata. */
     void deleteDocumentIndex(Long documentId);

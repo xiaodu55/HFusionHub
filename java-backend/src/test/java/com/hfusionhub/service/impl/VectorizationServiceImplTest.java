@@ -44,7 +44,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -85,8 +84,9 @@ class VectorizationServiceImplTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @InjectMocks
     private VectorizationServiceImpl vectorizationService;
+    private VectorizationCallbackService callbackService;
+    private IndexChunkLedger indexChunkLedger;
 
     private MockedStatic<JwtUtils> jwtUtilsMock;
 
@@ -99,11 +99,24 @@ class VectorizationServiceImplTest {
                 com.hfusionhub.entity.DocumentIndexJob.class);
         // V77/S5: TransactionTemplate 直接持有 mock 的 PlatformTransactionManager，
         // getTransaction 返回 null / commit 为 no-op，回调会真实执行
-        ReflectionTestUtils.setField(vectorizationService, "objectMapper", objectMapper);
+        // 拆分后（第二十五批）：编排服务与回调服务共享同一 IndexChunkLedger 实例
+        indexChunkLedger = new IndexChunkLedger(usageLedgerService, knowledgeBaseMapper, userMapper);
+        vectorizationService = new VectorizationServiceImpl(
+                documentMapper,
+                knowledgeBaseMapper,
+                documentIndexJobMapper,
+                documentChunkMapper,
+                userMapper,
+                restTemplate,
+                objectMapper,
+                indexChunkLedger,
+                transactionManager);
+        callbackService = new VectorizationCallbackService(
+                documentMapper, documentIndexJobMapper, documentChunkMapper, indexChunkLedger, objectMapper);
         ReflectionTestUtils.setField(vectorizationService, "internalApiToken", "test-token");
         ReflectionTestUtils.setField(vectorizationService, "callbackSecret", "test-secret");
         ReflectionTestUtils.setField(vectorizationService, "pythonEngineUrl", "http://localhost:9000");
-        ReflectionTestUtils.setField(vectorizationService, "bytesPerChunkEstimate", 300L);
+        ReflectionTestUtils.setField(indexChunkLedger, "bytesPerChunkEstimate", 300L);
         // Signed callbacks without X-Tenant-Id derive the tenant through
         // document -> knowledge base -> owner before processing the payload.
         // Keep that durable ownership available to callback-focused tests.
@@ -186,7 +199,7 @@ class VectorizationServiceImplTest {
         when(documentMapper.selectById(10L)).thenReturn(document);
         when(documentIndexJobMapper.selectLatestByDocumentId(10L)).thenReturn(job);
 
-        vectorizationService.updateDocumentStatus(10L, callback);
+        callbackService.updateDocumentStatus(10L, callback);
 
         verify(documentMapper, never()).updateById(document);
         verify(documentIndexJobMapper, never()).updateById(job);
@@ -200,7 +213,7 @@ class VectorizationServiceImplTest {
         when(documentMapper.selectById(10L)).thenReturn(document);
         when(documentIndexJobMapper.selectLatestByDocumentId(10L)).thenReturn(job);
 
-        assertThrows(BusinessException.class, () -> vectorizationService.updateDocumentStatus(10L, callback));
+        assertThrows(BusinessException.class, () -> callbackService.updateDocumentStatus(10L, callback));
     }
 
     @Test
@@ -212,7 +225,7 @@ class VectorizationServiceImplTest {
         when(documentMapper.selectById(10L)).thenReturn(document);
         when(documentIndexJobMapper.selectLatestByDocumentId(10L)).thenReturn(job);
 
-        assertThrows(BusinessException.class, () -> vectorizationService.updateDocumentStatus(10L, callback));
+        assertThrows(BusinessException.class, () -> callbackService.updateDocumentStatus(10L, callback));
         verify(documentChunkMapper, never()).deleteByDocumentId(10L);
     }
 
@@ -225,7 +238,7 @@ class VectorizationServiceImplTest {
         when(documentMapper.selectById(10L)).thenReturn(document);
         when(documentIndexJobMapper.selectLatestByDocumentId(10L)).thenReturn(job);
 
-        vectorizationService.updateDocumentStatus(10L, callback);
+        callbackService.updateDocumentStatus(10L, callback);
 
         assertEquals(DocumentStatus.COMPLETED.getCode(), document.getStatus());
         assertEquals(1, document.getChunkCount());
@@ -247,7 +260,7 @@ class VectorizationServiceImplTest {
         when(documentMapper.selectById(10L)).thenReturn(document);
         when(documentIndexJobMapper.selectLatestByDocumentId(10L)).thenReturn(job);
 
-        vectorizationService.updateDocumentStatus(10L, callback);
+        callbackService.updateDocumentStatus(10L, callback);
 
         assertEquals(500, document.getErrorMessage().length());
         assertEquals(1000, job.getErrorMessage().length());
@@ -318,7 +331,7 @@ class VectorizationServiceImplTest {
         ArgumentCaptor<com.hfusionhub.entity.DocumentChunk> captor =
                 ArgumentCaptor.forClass(com.hfusionhub.entity.DocumentChunk.class);
 
-        assertDoesNotThrow(() -> vectorizationService.updateDocumentStatus(10L, callback));
+        assertDoesNotThrow(() -> callbackService.updateDocumentStatus(10L, callback));
 
         verify(documentChunkMapper).insert(captor.capture());
         assertEquals("chunk-1", captor.getValue().getChunkId());
@@ -415,7 +428,7 @@ class VectorizationServiceImplTest {
         when(knowledgeBaseMapper.selectById(20L)).thenReturn(ownedKnowledgeBase());
         when(userMapper.selectById(1L)).thenReturn(ownerUser(7L));
 
-        vectorizationService.updateDocumentStatus(10L, callback);
+        callbackService.updateDocumentStatus(10L, callback);
 
         verify(usageLedgerService)
                 .settle(
@@ -438,7 +451,7 @@ class VectorizationServiceImplTest {
         when(knowledgeBaseMapper.selectById(20L)).thenReturn(ownedKnowledgeBase());
         when(userMapper.selectById(1L)).thenReturn(ownerUser(7L));
 
-        vectorizationService.updateDocumentStatus(10L, callback);
+        callbackService.updateDocumentStatus(10L, callback);
 
         verify(usageLedgerService).release(eq(UsageMeter.INDEX_CHUNKS), eq("INDEX_CHUNKS:version-1"));
         verify(usageLedgerService, never()).settle(any(), any(), anyLong(), any(), any());

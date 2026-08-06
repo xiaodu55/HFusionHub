@@ -6,6 +6,7 @@ import com.hfusionhub.dto.ChunkDTO;
 import com.hfusionhub.dto.ChunkPageDTO;
 import com.hfusionhub.dto.DocumentIndexCallbackDTO;
 import com.hfusionhub.service.VectorizationService;
+import com.hfusionhub.service.impl.VectorizationCallbackService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -37,6 +38,7 @@ import org.springframework.web.bind.annotation.*;
 public class VectorizationController {
 
     private final VectorizationService vectorizationService;
+    private final VectorizationCallbackService vectorizationCallbackService;
     private final ObjectMapper objectMapper;
 
     @Value("${python-ai.callback-secret:}")
@@ -118,7 +120,7 @@ public class VectorizationController {
         // 3. 反序列化并处理
         try {
             DocumentIndexCallbackDTO body = objectMapper.readValue(rawBody, DocumentIndexCallbackDTO.class);
-            vectorizationService.updateDocumentStatus(documentId, body);
+            vectorizationCallbackService.updateDocumentStatus(documentId, body);
             return ResponseEntity.ok(R.ok("状态已更新"));
         } catch (Exception e) {
             log.error("回调请求体反序列化失败: documentId={}", documentId, e);

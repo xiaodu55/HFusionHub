@@ -6,10 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第二十五批（2026-09-04：God class 收尾——Vectorization 回调持久化分离）
+
+- **`VectorizationServiceImpl` 1104→892 行，God class 三批拆分全部收官**：
+  - 回调持久化（`updateDocumentStatus` 链路：签名回调→job/document 终态落库→
+    V2 分块元数据整体替换）拆入新 `VectorizationCallbackService`；
+    `VectorizationService` 接口删除 `updateDocumentStatus`，回调 Controller 直连
+  - INDEX_CHUNKS 账本生命周期（预占/结算/退回 + 估算 + 预占键 + 租户解析）
+    收口新 `IndexChunkLedger`——预占键格式贯穿 reserve→settle/release 三方，
+    必须单点维护（编排侧失败退回与回调侧终态结算共用同源实现）
+  - 行为零变化：ImplTest 32 个（编排/回调全保留，手动构造双服务+共享账本）、
+    CallbackSignatureRealPath 换目标验证回调直达新服务
+- 上一批（第二十四批）顺延说明作废：God class 三批已全部完成
+
 ### 第二十四批（2026-09-04：A 档深化——Parent-Child 检索 + schema-h2 真对齐 + God class 第三批·Agent 决策链路）
 
 > God class 第三批本批完成 **AgentTaskServiceImpl 审批决策链路拆分**；
-> VectorizationServiceImpl 回调持久化分离仍顺延下一批首项（渐进拆分惯例）。
+> ~~VectorizationServiceImpl 回调持久化分离仍顺延下一批首项~~（已于第二十五批完成）。
 
 #### Added
 - **Parent-Child 父子分块检索（实验档，RAG_PARENT_CHILD_ENABLED 默认关）**：
