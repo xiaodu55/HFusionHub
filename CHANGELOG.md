@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第二十六批（2026-09-04：P1 收官——语义分块 + content_reset 桥接 + i18n 骨架 + 语音贯通）
+
+#### Added
+- **语义分块（实验档，RAG_SEMANTIC_CHUNK_ENABLED 默认关）**：
+  - text_chunker：入库时按相邻句 embedding 余弦相似度找语义断点
+    （`RAG_SEMANTIC_SIM_THRESHOLD=0.55` / `RAG_SEMANTIC_MIN_CHUNK=120`），
+    替代固定窗口——句子永不切断，单句超长硬切兜底
+  - embedding 失败/向量错位自动回退固定窗口，ingestion 绝不因实验特性失败；
+    TABLE 块保持行对齐；与 Parent-Child 正交（可叠加）
+  - 测试 8 个（断点/回退/最小长度/表格/硬切/零向量/直通）
+- **content_reset Java 桥接（第二十四批遗留回归项）**：Python groundedness 重试
+  路径的 `{"content_reset":true}` 此前在 Java SSE 桥被静默丢弃（无 event/content
+  键掉出解析块）——现重置持久化缓冲并转发清空事件，前端气泡清空后重试内容
+  替换重放；回归测试断言持久化只含重试文本 + 事件转发次数
+- **前端 i18n 骨架（开源向）**：vue-i18n 10 + `useLocale`（localStorage 持久化，
+  镜像 useTheme 模式）+ zh-CN/en-US 语言包（导航 27 项/分组/聊天输入/页头键，
+  键结构一致性有单测守卫）+ 页头语言切换按钮；侧边栏与聊天输入区已接线，
+  其余页面按需增量迁移
+- **英文 README**（README_EN.md，与主 README 互链）
+- **语音 STT language 贯通**：`transcribeAudio` 增加浏览器语言提示参数
+  （`navigator.language` → `/voice/transcribe?language=`）+ API 单测 4 个。
+  语音链路 Batch 10 已全端接线（前端麦克风/朗读按钮→Java 转发→Python
+  OpenAI 兼容引擎），启用方式：`VOICE_ENABLED=true` + OpenAI 兼容语音凭据
+
+#### Changed
+- 测试计数：Java 701→**702** · Python 1443→**1451** · 前端单测 49→**57**
+
 ### 第二十五批（2026-09-04：God class 收尾——Vectorization 回调持久化分离）
 
 - **`VectorizationServiceImpl` 1104→892 行，God class 三批拆分全部收官**：

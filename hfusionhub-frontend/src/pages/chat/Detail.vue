@@ -12,6 +12,7 @@ import * as voiceApi from '@/api/voice'
 import { ArrowLeft, BookOpen, Check, Copy, Download, Eraser, Image as ImageIcon, Mic, Pencil, Send, User, Bot, Loader2, Square, RefreshCw, ThumbsUp, ThumbsDown, Volume2, X } from 'lucide-vue-next'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useToast } from '@/composables/useToast'
+import { useI18n } from 'vue-i18n'
 import { formatDateTime, formatTime, parseServerTime } from '@/utils/date'
 import { friendlyErrorMessage } from '@/utils/errorMessage'
 import { SseDataParser, type SseDataEvent } from '@/utils/sse'
@@ -27,6 +28,7 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const toast = useToast()
+const { t } = useI18n()
 
 const conversation = ref<Conversation | null>(null)
 const messages = ref<Message[]>([])
@@ -122,7 +124,7 @@ const toggleRecording = async () => {
       const blob = new Blob(recordedChunks, { type: 'audio/webm' })
       transcribing.value = true
       try {
-        const text = await voiceApi.transcribeAudio(blob, 'audio.webm')
+        const text = await voiceApi.transcribeAudio(blob, 'audio.webm', navigator.language)
         if (text) inputMessage.value = inputMessage.value ? `${inputMessage.value} ${text}` : text
       } catch (error) {
         toast.error(error instanceof Error ? error.message : '语音识别失败')
@@ -1224,7 +1226,7 @@ onMounted(() => {
         <Button
           variant="outline"
           :disabled="sending || uploadingImage"
-          title="添加图片（实验特性）"
+          :title="t('chat.addImage')"
           @click="triggerImagePick"
         >
           <Loader2 v-if="uploadingImage" class="mr-2 h-4 w-4 animate-spin" />
@@ -1233,7 +1235,7 @@ onMounted(() => {
         <Input
           id="chat-input"
           v-model="inputMessage"
-          placeholder="输入消息...（Enter 发送，Shift+Enter 换行）"
+          :placeholder="t('chat.inputPlaceholder')"
           :disabled="sending"
           @compositionstart="isComposing = true"
           @compositionend="isComposing = false"
@@ -1245,12 +1247,12 @@ onMounted(() => {
           variant="outline"
           :disabled="sending"
           :class="recording ? 'text-rose-500 border-rose-400' : ''"
-          :title="recording ? '停止录音' : '语音输入'"
+          :title="recording ? t('chat.stopRecording') : t('chat.voiceInput')"
           @click="toggleRecording"
         >
           <Loader2 v-if="transcribing" class="h-4 w-4 mr-2 animate-spin" />
           <Mic v-else class="h-4 w-4" :class="recording ? 'animate-pulse' : ''" />
-          {{ recording ? '停止' : '语音' }}
+          {{ recording ? t('chat.stop') : t('chat.voice') }}
         </Button>
         <!-- 停止生成按钮 -->
         <Button
@@ -1259,7 +1261,7 @@ onMounted(() => {
           @click="handleStopGeneration"
         >
           <Square class="h-4 w-4 mr-2" />
-          停止生成
+          {{ t('chat.stopGenerating') }}
         </Button>
         <!-- 发送按钮 -->
         <Button v-else :disabled="!inputMessage.trim()" @click="handleSend">

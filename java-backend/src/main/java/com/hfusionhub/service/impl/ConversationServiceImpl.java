@@ -999,6 +999,18 @@ public class ConversationServiceImpl implements ConversationService {
                             return;
                         }
 
+                        // 语义重试重置信号（content_reset=true，Python groundedness 重试路径）：
+                        // 重置已累计的持久化内容并原样转发清空事件——前端收到后清空气泡，
+                        // 后续 content 分片以替换语义重放。此前该事件无 event/content 键，
+                        // 会掉落到下方解析块被静默丢弃（第二十五批修复）。
+                        if (jsonNode.has("content_reset") && jsonNode.get("content_reset").asBoolean()) {
+                            responseBuilder.setLength(0);
+                            Map<String, Object> resetEvent = new HashMap<>();
+                            resetEvent.put("content_reset", true);
+                            emitter.send(SseEmitter.event().data(resetEvent, MediaType.APPLICATION_JSON));
+                            return;
+                        }
+
                         String content = jsonNode.has("content")
                                 ? jsonNode.get("content").asText()
                                 : "";

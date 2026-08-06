@@ -2,6 +2,8 @@
 
 > Java + Python 混合架构的 AI Agent 智能助手平台
 
+[English](./README_EN.md) | 简体中文
+
 <!-- 注意：GitHub Actions 因账户计费暂停期间，以下徽章会显示 failing；恢复计费后自动转绿 -->
 ![CI](https://github.com/xiaodu55/HFusionHub1/actions/workflows/ci.yml/badge.svg)
 ![E2E](https://github.com/xiaodu55/HFusionHub1/actions/workflows/e2e.yml/badge.svg)
@@ -9,7 +11,7 @@
 ![Java](https://img.shields.io/badge/Java-17%2B-orange)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883)
-![Tests](https://img.shields.io/badge/Tests-Python%201443%20%7C%20Java%20701%20%7C%20Frontend%2049-success)
+![Tests](https://img.shields.io/badge/Tests-Python%201451%20%7C%20Java%20702%20%7C%20Frontend%2057-success)
 
 ## 🚀 项目简介
 
@@ -323,7 +325,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 | KnowledgeGraph | 知识图谱 | 59 |
 | Utils | 公共工具 | 36 |
 
-**Python AI 总计：1443 测试函数（2026-09-01 实测）| Java 后端：701 测试 | 前端：49 单测 + 73 E2E**
+**Python AI 总计：1451 测试函数（2026-09-04 实测）| Java 后端：702 测试 | 前端：57 单测 + 73 E2E**
 
 ## 🚀 启动指南
 
@@ -345,7 +347,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 
 > 所有文档位于 [docs/](docs/) 目录。按用途分四类：**入口**、**开发**、**运维**、**治理**。
 > 2026-08-19 已做文档体系整合：合并 5 份为 3 份权威，删除 1 份冗余，统一关键事实基线
-> （Java 701 测试 / Python 1443 / 前端 49 单测 + 73 E2E / Flyway V82 / DeepSeek 已配置）。
+> （Java 702 测试 / Python 1451 / 前端 57 单测 + 73 E2E / Flyway V84 / DeepSeek 已配置）。
 
 ### 入口类
 

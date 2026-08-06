@@ -3,10 +3,14 @@ Text chunker with block type identification and outline path tracking
 """
 
 import json
+import math
+import re
 from dataclasses import dataclass, field
 
 from app.core.parser.base import BlockType, ParsedBlock
 from app.utils.config import config
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？!?])|(?<=\n)")
 
 
 @dataclass
@@ -162,6 +166,17 @@ class TextChunker:
                 }
             )]
 
+        # 语义分块（实验特性，RAG_SEMANTIC_CHUNK_ENABLED）：按相邻句 embedding
+        # 余弦相似度找语义断点。embedding 调用失败或句子少于 2 时返回 None，
+        # 回退下方固定窗口——ingestion 绝不因实验特性失败。TABLE 块保持行对齐。
+        if config.RAG_SEMANTIC_CHUNK_ENABLED:
+            semantic_chunks = self._chunk_semantic(
+                block=block, document_id=document_id, chunk_index=chunk_index,
+                outline_path=outline_path,
+            )
+            if semantic_chunks is not None:
+                return semantic_chunks
+
         # Split large content into multiple chunks
         chunks = []
         start = 0
@@ -208,6 +223,97 @@ class TextChunker:
 
         return chunks
 
+
+    def _chunk_semantic(
+        self,
+        block: ParsedBlock,
+        document_id: str,
+        chunk_index: int,
+        outline_path: list[str],
+    ) -> list[VectorChunk] | None:
+        """语义分块：相邻句 embedding 余弦相似度低于阈值处断开，句子永不切断。
+
+        返回 None 表示回退固定窗口（embedding 调用失败 / 句子数 < 2）。
+        单句超过 chunk_size 时对该句硬切（极端长句兜底，同表格路径）。
+        """
+        content = block.content
+        sentences = [s for s in _SENTENCE_SPLIT_RE.split(content) if s.strip()]
+        if len(sentences) < 2:
+            return None
+
+        try:
+            # 延迟导入：embedding 依赖 provider 配置，且便于测试注入假实现
+            from app.core.embedding import get_embedding_service
+
+            vectors = get_embedding_service().get_embedding_batch(sentences)
+        except Exception:  # noqa: BLE001 — 实验特性静默降级，不阻断 ingestion
+            return None
+
+        if (
+            not vectors
+            or len(vectors) != len(sentences)
+            or any(not v for v in vectors)
+            or len({len(v) for v in vectors}) != 1
+        ):
+            return None
+
+        chunks: list[VectorChunk] = []
+        current_parts: list[str] = []
+        current_len = 0
+        current_start = 0
+        cursor = 0
+        current_index = chunk_index
+
+        def _flush() -> None:
+            nonlocal current_parts, current_len, current_start, current_index
+            if not current_parts:
+                return
+            joined = "".join(current_parts).strip()
+            if joined:
+                pieces = _hard_split(joined, self.chunk_size) if len(joined) > self.chunk_size else [joined]
+                for piece in pieces:
+                    chunks.append(VectorChunk(
+                        chunk_id=f"{document_id}_chunk_{current_index:04d}",
+                        index=current_index,
+                        content=piece,
+                        block_type=block.block_type.value,
+                        outline_path=outline_path,
+                        metadata={
+                            **block.metadata,
+                            "char_count": len(piece),
+                            "start_pos": current_start,
+                            "end_pos": current_start + len(joined),
+                            "semantic_boundary": True,
+                        },
+                    ))
+                    current_index += 1
+            current_parts = []
+            current_len = 0
+            current_start = cursor
+
+        for i, sentence in enumerate(sentences):
+            # 硬上限：加入该句会超出 chunk_size——先落当前块
+            if current_parts and current_len + len(sentence) > self.chunk_size:
+                _flush()
+
+            # 语义断点：相邻句相似度低于阈值且当前块已达最小长度
+            if (
+                current_parts
+                and current_len >= config.RAG_SEMANTIC_MIN_CHUNK
+                and i < len(sentences) - 1
+                and _cosine(vectors[i - 1], vectors[i]) < config.RAG_SEMANTIC_SIM_THRESHOLD
+            ):
+                _flush()
+
+            current_parts.append(sentence)
+            current_len += len(sentence)
+            cursor += len(sentence)
+
+        _flush()
+
+        if not chunks:
+            return None
+        return chunks
 
     def _chunk_table(
         self,
@@ -280,6 +386,15 @@ class TextChunker:
 
 def _hard_split(text: str, size: int) -> list[str]:
     return [text[start:start + size] for start in range(0, len(text), size)]
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    """余弦相似度；零向量按不相似（0.0）处理——零向量多来自 embedding 兜底降级。"""
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
+    norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
+    if norm == 0:
+        return 0.0
+    return dot / norm
 
 
 def chunk_blocks(blocks: list[ParsedBlock], document_id: str) -> list[VectorChunk]:

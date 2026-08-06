@@ -268,6 +268,58 @@ class ConversationStreamingPersistenceTest {
         assertEquals("hello world", user.getContent());
     }
 
+    /**
+     * content_reset 桥接回归（第二十五批）：Python groundedness 重试路径发出的
+     * {@code {"content_reset":true}} 无 event/content 键，Java 桥接层此前会
+     * 静默丢弃——持久化内容变成"初稿+重试"拼接，前端气泡也不清空。
+     * 修复后：重置持久化缓冲、转发清空事件，后续 content 分片替换重放。
+     */
+    @Test
+    void asyncContentResetClearsAccumulatedContentAndForwardsResetEvent() {
+        String requestId = "persist-reset-1";
+        String assistantRequestId = "persist-reset-1:assistant";
+
+        // 记录型 emitter：桥接层全部经 SseEventBuilder 发送，按次计数即可断言
+        // （content×2 + content_reset + [DONE] = 4 次）；配合持久化断言构成回归 bite
+        java.util.concurrent.atomic.AtomicInteger builderSends =
+                new java.util.concurrent.atomic.AtomicInteger();
+        SseEmitter recordingEmitter = new SseEmitter() {
+            @Override
+            public void send(SseEventBuilder builder) throws java.io.IOException {
+                builderSends.incrementAndGet();
+            }
+        };
+
+        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any()))
+                .thenReturn(Flux.just(
+                                "data: {\"content\":\"幻觉初稿\"}\n\n",
+                                "data: {\"content_reset\":true}\n\n",
+                                "data: {\"content\":\"重试后的可信回答\"}\n\n",
+                                "data: [DONE]\n\n")
+                        .subscribeOn(Schedulers.single()));
+        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any(), any()))
+                .thenReturn(Flux.just(
+                                "data: {\"content\":\"幻觉初稿\"}\n\n",
+                                "data: {\"content_reset\":true}\n\n",
+                                "data: {\"content\":\"重试后的可信回答\"}\n\n",
+                                "data: [DONE]\n\n")
+                        .subscribeOn(Schedulers.single()));
+
+        MessageSendDTO dto = new MessageSendDTO();
+        dto.setConversationId(conversationId);
+        dto.setContent("hello world");
+        dto.setRequestId(requestId);
+
+        conversationService.sendMessageStream(dto, recordingEmitter, 1L, new AtomicBoolean(false));
+
+        Message assistant = waitForAssistantMessage(assistantRequestId);
+        assertNotNull(assistant, "assistant message should be persisted after reset + retry");
+        // 核心回归断言：持久化内容只含重试后的文本（此前会拼接初稿）
+        assertEquals("重试后的可信回答", assistant.getContent());
+        // 前端桥接：content_reset 清空事件被转发（未修复时只有 3 次：content×2+[DONE]）
+        assertEquals(4, builderSends.get(), "content_reset should be forwarded: content×2 + reset + [DONE]");
+    }
+
     private Message waitForAssistantMessage(String assistantRequestId) {
         long deadline = System.currentTimeMillis() + 8000;
         Message assistant = null;

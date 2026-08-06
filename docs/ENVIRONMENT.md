@@ -130,6 +130,9 @@ Copy `python-ai/.env.example` to `python-ai/.env`:
 | `CHAT_MULTIMODAL_INPUT_ENABLED` | No | `false` | **对话图片输入**（实验档）：开启后聊天消息可携带图片（≤4 张、单张 ≤5MB），经 Ollama 视觉模型（`RAG_MULTIMODAL_VLM_MODEL`，默认 qwen2.5vl）转中文描述并入提问上下文；关闭时带图请求返回 400 |
 | `RAG_QA_GENERATION_ENABLED` | No | `false` | **知识库 QA 对生成**（实验档）：文档解析入库时用对话 LLM 从分块生成问答对（≤4 条/问答块，`RAG_QA_MAX_PER_DOC` 总量上限）并并入索引，提升"用户问法≠原文表述"场景的召回率；生成失败只跳过，不阻断索引 |
 | `RAG_QA_MAX_PER_DOC` | No | `20` | 单文档 QA 分块总量上限 |
+| `RAG_SEMANTIC_CHUNK_ENABLED` | No | `false` | **语义分块**（实验档）：入库时按相邻句 embedding 余弦相似度找语义断点（`RAG_SEMANTIC_SIM_THRESHOLD`），替代固定窗口切分；句子永不切断，单句超长硬切兜底；embedding 失败自动回退固定窗口，ingestion 不因实验特性失败。TABLE 块保持行对齐不受影响。需重传文档才生效（分块发生在入库时） |
+| `RAG_SEMANTIC_SIM_THRESHOLD` | No | `0.55` | 语义断点的相邻句余弦相似度阈值（低于即断开） |
+| `RAG_SEMANTIC_MIN_CHUNK` | No | `120` | 语义断点允许的最小块长度（字符），避免过碎 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | No | —（console） | OTLP HTTP 导出端点；留空退化为控制台输出。监控栈 Tempo 为 `http://tempo:4318/v1/traces` | 联网搜索后端：`duckduckgo`（免 Key）/ `tavily` / `serper` |
 | `WEB_SEARCH_API_KEY` | No | `` | Tavily / Serper 的 API Key |
 | `WEB_SEARCH_BASE_URL` | No | `` | 搜索 API 地址覆盖（可选） |

@@ -30,6 +30,7 @@ import {
   FlaskConical,
   Fingerprint,
   Home,
+  Languages,
   LogOut,
   Megaphone,
   ScrollText,
@@ -50,11 +51,15 @@ import {
   Wrench,
   X,
 } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
+import { useLocale } from '@/composables/useLocale'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 const { isDarkMode, initializeTheme, toggleTheme } = useTheme()
+const { t } = useI18n()
+const { locale, toggleLocale } = useLocale()
 const toast = useToast()
 
 const isSidebarOpen = ref(typeof window === 'undefined' ? true : window.innerWidth >= 1024)
@@ -117,11 +122,19 @@ const menuItems: Array<{
 
 // sidebar:false 的条目不进侧边栏(页面与路由保留,经工作台"更多功能"可达)
 const visibleMenuItems = computed(() => menuItems.filter(item => item.sidebar !== false && (!item.roles || userStore.hasAnyRole(item.roles))))
+// i18n 骨架：label/description 经语言包解析（键=路由路径），keywords 保持原文供搜索
+const translatedMenuItems = computed(() =>
+  visibleMenuItems.value.map(item => ({
+    ...item,
+    label: t(`nav.items.${item.path}.label`),
+    description: t(`nav.items.${item.path}.description`),
+  }))
+)
 const menuGroups = computed(() => [
-  { label: '使用', items: visibleMenuItems.value.filter(item => item.group === 'use') },
-  { label: '我的设置', items: visibleMenuItems.value.filter(item => item.group === 'personal') },
-  { label: '构建与评测', items: visibleMenuItems.value.filter(item => item.group === 'build') },
-  { label: '系统管理', items: visibleMenuItems.value.filter(item => item.group === 'admin') },
+  { label: t('nav.groups.use'), items: translatedMenuItems.value.filter(item => item.group === 'use') },
+  { label: t('nav.groups.personal'), items: translatedMenuItems.value.filter(item => item.group === 'personal') },
+  { label: t('nav.groups.build'), items: translatedMenuItems.value.filter(item => item.group === 'build') },
+  { label: t('nav.groups.admin'), items: translatedMenuItems.value.filter(item => item.group === 'admin') },
 ].filter(group => group.items.length > 0))
 
 const isActive = (path: string) => {
@@ -131,7 +144,10 @@ const isActive = (path: string) => {
   return route.path.startsWith(path)
 }
 
-const currentItem = computed(() => menuItems.find((item) => isActive(item.path)))
+const currentItem = computed(() => {
+  const raw = menuItems.find((item) => isActive(item.path))
+  return raw ? { ...raw, label: t(`nav.items.${raw.path}.label`) } : undefined
+})
 const userDisplayName = computed(() => userStore.nickname || userStore.username || 'HFusionHub 用户')
 const userInitial = computed(() => userDisplayName.value.trim().slice(0, 1).toUpperCase() || 'H')
 const userAvatarSrc = computed(() => userStore.userInfo?.avatar || '')
@@ -496,7 +512,16 @@ onBeforeUnmount(() => {
             variant="ghost"
             size="icon"
             class="h-9 w-9 rounded-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-            :title="isDarkMode ? '切换浅色主题' : '切换暗色主题'"
+            :title="locale === 'zh-CN' ? t('header.switchToEnglish') : t('header.switchToChinese')"
+            @click="toggleLocale"
+          >
+            <Languages class="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            class="h-9 w-9 rounded-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+            :title="isDarkMode ? t('header.themeLight') : t('header.themeDark')"
             @click="toggleTheme"
           >
             <Sun v-if="isDarkMode" class="h-4 w-4" />

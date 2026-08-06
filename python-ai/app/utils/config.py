@@ -202,6 +202,13 @@ class Config:
     # 检索命中子块后替换为父正文并按父去重——小块精准召回 + 大块完整上下文。
     RAG_PARENT_CHILD_ENABLED = os.getenv("RAG_PARENT_CHILD_ENABLED", "false").lower() in ("1", "true", "yes")
 
+    # 语义分块（实验档，默认关）：入库时按相邻句 embedding 余弦相似度找语义断点，
+    # 替代固定窗口切分——语义完整的分块比等长窗口召回更准。embedding 失败自动
+    # 回退固定窗口，ingestion 不因实验特性失败。
+    RAG_SEMANTIC_CHUNK_ENABLED = os.getenv("RAG_SEMANTIC_CHUNK_ENABLED", "false").lower() in ("1", "true", "yes")
+    RAG_SEMANTIC_SIM_THRESHOLD = float(os.getenv("RAG_SEMANTIC_SIM_THRESHOLD", "0.55"))
+    RAG_SEMANTIC_MIN_CHUNK = int(os.getenv("RAG_SEMANTIC_MIN_CHUNK", "120"))
+
     # P9 is an explicit rollout switch for the bounded single-agent runtime.
     # It wraps the existing read-only React agent; it does not add write tools.
     RAG_AGENT_WORKFLOW_ENABLED = os.getenv("RAG_AGENT_WORKFLOW_ENABLED", "false").lower() == "true"
