@@ -158,6 +158,8 @@ Alertmanager(`deploy/monitoring/alertmanager.yml`)。
 
 实测通过的环境口径:MySQL 8 默认 log_bin=ON/ROW;业务用户名 `hfusionhub`(非 hfusion);实时链路验证结果:MySQL `analytics_realtime_metrics` 12,879 个窗口行(30 天合成数据)。
 
+> 如实边界:上述验证基于**合成数据**的一次端到端跑通;增量 CDC 的 **checkpoint 断点续传与故障恢复路径未实测**,容量/延迟基线未压测。
+
 ### 5.3 演示数据(让"大数据"名副其实)
 
 ```bash
