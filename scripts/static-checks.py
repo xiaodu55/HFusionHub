@@ -247,7 +247,9 @@ def check_test_counts() -> None:
     e2e = count_frontend_e2e_tests()
     for source_file, pattern in ((README_FILE, "badge"), (AGENTS_FILE, "Tests line"), (CLAUDE_FILE, "test table")):
         if not source_file.exists():
-            problems.append(f"{source_file.name}: 文件不存在，无法校验测试计数")
+            # AGENTS.md / CLAUDE.md 已随"去 AI 协作痕迹"清理移除；README 为唯一计数权威
+            if source_file == README_FILE:
+                problems.append(f"{source_file.name}: 文件不存在，无法校验测试计数")
             continue
         claimed = extract_doc_counts(source_file.read_text(encoding="utf-8"), source_file.name)
         if claimed is None:

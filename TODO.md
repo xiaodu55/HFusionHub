@@ -40,7 +40,7 @@
 
 ### P2 — 生产准备
 
-7a. **分析扩展包剩余人工项**（可选，毕设演示用）— Superset 首启初始化管理员 + 搭建 5 张看板（bigdata/superset/README.md）；标准档加开 ClickHouse（--profile analytics-full）；Grafana 验证 analytics 告警组触发
+7a. **分析扩展包剩余人工项**（可选，演示用）— Superset 首启初始化管理员 + 搭建 5 张看板（bigdata/superset/README.md）；标准档加开 ClickHouse（--profile analytics-full）；Grafana 验证 analytics 告警组触发
 8. **逐项核对生产检查清单** — [docs/PRODUCTION_OPS.md](docs/PRODUCTION_OPS.md) 第 0 节（安全/持久化/性能/监控/合规）
 9. **启用监控告警** — `deploy/monitoring/`（Prometheus + Grafana + 告警规则）
 10. **配置 Plugin Runner TLS** — 按 [docs/PLUGIN_RUNNER_TLS.md](docs/PLUGIN_RUNNER_TLS.md) 生成证书并挂载（dev compose dind sidecar 下 healthy（引擎不可用时 503 属 fail-closed 设计））

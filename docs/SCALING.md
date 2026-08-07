@@ -239,7 +239,7 @@ curl http://localhost:8080/actuator/metrics/hikaricp.connections.usage
 
 #### 3. 虚拟线程池
 
-已默认启用（Spring Boot 3.2+），无需额外配置。监控：
+已默认启用，无需额外配置。监控：
 ```bash
 curl http://localhost:8080/actuator/metrics/executor.active
 ```

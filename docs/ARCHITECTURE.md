@@ -27,7 +27,7 @@ The result is a system where:
 └─────────────────────┬───────────────────────────────────┘
                       │ HTTP/SSE (Vite proxies /api → :8080)
 ┌─────────────────────▼───────────────────────────────────┐
-│              Java Backend (Spring Boot 3.2 :8080)       │
+│              Java Backend (Spring Boot 3.5.16 :8080)       │
 │          /api context-path, Sa-Token JWT auth           │
 ├─────────────────────────────────────────────────────────┤
 │  Write Path (ACID):                                     │

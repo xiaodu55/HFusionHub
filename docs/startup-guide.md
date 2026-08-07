@@ -14,7 +14,7 @@
 
 | 依赖 | 版本要求 | 说明 |
 | :--- | :--- | :--- |
-| Java | 17+ | Spring Boot 3.2 运行环境 |
+| Java | 17+ | Spring Boot 3.5.16 运行环境 |
 | Python | 3.11+ | AI 服务运行环境 |
 | Node.js | 20.19+ 或 22.12+ | Vite 8 前端开发服务器 |
 | Docker | Desktop / Engine | 运行 MySQL、Redis、MinIO、Milvus、Plugin Runner |
@@ -376,7 +376,7 @@ docker compose -f deploy/docker-compose.prod.yml pull
 docker compose -f deploy/docker-compose.prod.yml up -d
 ```
 
-Helm 模板已包含等价的 Java 环境覆盖项，可直接用于生产部署。详细运维见 `docs/PRODUCTION_OPS.md`。
+Helm 模板已包含等价的 Java 环境覆盖项，可作为生产部署配置起点（已通过本地 Docker Compose 全链路自测，未经生产环境流量验证）。详细运维见 `docs/PRODUCTION_OPS.md`。
 
 ---
 
@@ -437,7 +437,7 @@ Helm 模板已包含等价的 Java 环境覆盖项，可直接用于生产部署
 
 | Dependency | Version | Notes |
 | :--- | :--- | :--- |
-| Java | 17+ | Spring Boot 3.2 runtime |
+| Java | 17+ | Spring Boot 3.5.16 runtime |
 | Python | 3.11+ | AI service runtime |
 | Node.js | 20.19+ or 22.12+ | Vite 8 dev server |
 | Docker | Desktop / Engine | MySQL, Redis, MinIO, Milvus, Plugin Runner |
@@ -784,7 +784,7 @@ docker compose -f deploy/docker-compose.prod.yml pull
 docker compose -f deploy/docker-compose.prod.yml up -d
 ```
 
-The Helm template already includes equivalent Java environment overrides and is production-ready. See `docs/PRODUCTION_OPS.md` for operations.
+The Helm template already includes equivalent Java environment overrides and serves as a production deployment starting point (validated by local Docker Compose end-to-end self-tests only, not by production traffic). See `docs/PRODUCTION_OPS.md` for operations.
 
 ---
 

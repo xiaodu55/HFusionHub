@@ -1,6 +1,6 @@
 # Java 后端开发指南
 
-> Spring Boot 3.2.5 + MyBatis Plus + MySQL + Redis + Sa-Token
+> Spring Boot 3.5.16 + MyBatis Plus + MySQL + Redis + Sa-Token
 
 ## Architecture
 

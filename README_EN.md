@@ -1,6 +1,6 @@
 # HFusionHub
 
-> An enterprise-grade AI Agent platform with a hybrid Java + Python architecture.
+> A personal open-source project — a multi-tenant AI Agent platform with a hybrid Java + Python architecture.
 
 [简体中文](./README.md) | English
 
@@ -8,16 +8,19 @@
 ![Java](https://img.shields.io/badge/Java-17%2B-orange)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883)
+![Tests](https://img.shields.io/badge/Tests-Python%201451%20%7C%20Java%20702%20%7C%20Frontend%2057-success)
 
 ## Overview
 
 HFusionHub pairs the reliability of a Java backend (ACID writes, tenancy, billing) with the flexibility of the Python AI ecosystem (RAG, agents, streaming intelligence). It ships a complete RAG + Agent solution with a modern web console.
 
+**Quality & verification (honest scope)**: everything is validated by local Docker Compose end-to-end self-tests (smoke 48 PASS / 0 FAIL) plus the test suites below. It has **not** been validated by production traffic; the deployment configs under `deploy/` are a deployment starting point, not a production-validation claim.
+
 ## Architecture
 
 Three-tier hybrid:
 
-- **Java backend** (`java-backend/`) — owns all writes: Spring Boot 3.x, MyBatis Plus, MySQL, Redis, Flyway migrations, multi-tenancy, usage ledger and quota enforcement.
+- **Java backend** (`java-backend/`) — owns all writes: Spring Boot 3.5.16, MyBatis Plus, MySQL, Redis, Flyway migrations, multi-tenancy, usage ledger and quota enforcement.
 - **Python AI layer** (`python-ai/`) — owns reads and intelligence: FastAPI, Milvus (standalone via Docker), ReAct agent loop, retrieval pipelines, embedding and model gateways.
 - **Web console** (`hfusionhub-frontend/`) — Vue 3 + Vite + TypeScript + Tailwind CSS.
 

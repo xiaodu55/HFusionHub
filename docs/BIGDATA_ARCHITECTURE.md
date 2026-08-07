@@ -1,7 +1,7 @@
 # HFusionData Analytics — 运营数仓架构与部署手册
 
 > HFusionHub 的**分析扩展包**:以 Hadoop 生态为主线的运营数据仓库,兼具
-> **毕业设计**(经典大数据组件全覆盖)与**可上线产品**(部署开关/多租户隔离/
+> **个人项目**(经典大数据组件全覆盖)与**可上线产品**(部署开关/多租户隔离/
 > 数据质量门禁/告警闭环)两种交付形态。
 > 主产品不依赖本扩展包;未部署时一切照旧,`/analytics` 大屏显示空态。
 
@@ -43,7 +43,7 @@ HFusionHub 是多租户 AI 平台,持续产生四类运营事件流:LLM 调用(�
 
 | 决策 | 理由 |
 |---|---|
-| MinIO 不做湖存储,用 HDFS | 毕设要求 HDFS;MinIO 继续承担业务对象存储(插件 wheel),职责分离 |
+| MinIO 不做湖存储,用 HDFS | 项目要求 HDFS;MinIO 继续承担业务对象存储(插件 wheel),职责分离 |
 | **计算存储解耦**:Hive 全外部表,Spark 直读写 HDFS Parquet,不连 metastore | 规避 Spark 内置 Hive 2.3 客户端与 Hive 4 metastore 的版本耦合;HQL 与 Spark 共享同一份 Parquet。仍是"Hive 数仓"叙事(四层表全在 Hive),但计算引擎可替换 |
 | ADS 结果**同构回写 MySQL**(V82) | 业务侧(`/analytics` 接口)零 Hadoop 依赖、零新增驱动;离线聚合小表,整表刷新幂等 |
 | 埋点不动业务代码 | 增量采集走 binlog CDC;主产品零侵入 |
