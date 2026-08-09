@@ -38,6 +38,16 @@ def test_below_evidence_gate_treats_missing_score_as_zero():
     assert ReactAgent._below_evidence_gate(sources, threshold=0.7) is True
 
 
+def test_evidence_gate_threshold_defaults_off(monkeypatch):
+    """A4 实测校准：融合分阈值默认关闭（0=不拒答），待 runtime 校准后显式开启。"""
+    monkeypatch.delenv("RAG_EVIDENCE_GATE_THRESHOLD", raising=False)
+    assert ReactAgent._evidence_gate_threshold() == 0.0
+    monkeypatch.setenv("RAG_EVIDENCE_GATE_THRESHOLD", "0.7")
+    assert ReactAgent._evidence_gate_threshold() == 0.7
+    monkeypatch.setenv("RAG_EVIDENCE_GATE_THRESHOLD", "not-a-number")
+    assert ReactAgent._evidence_gate_threshold() == 0.0
+
+
 # ---------------------------------------------------------------------------
 # 词汇支持分（ReflectionConfig.confidence_threshold 的消费方判据）
 # ---------------------------------------------------------------------------

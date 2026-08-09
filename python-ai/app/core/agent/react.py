@@ -14,6 +14,7 @@ Agent V1 changes:
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from typing import Any, AsyncGenerator
@@ -699,6 +700,20 @@ class ReactAgent(Agent):
         )
 
     @staticmethod
+    def _evidence_gate_threshold() -> float:
+        """A4 证据门阈值，默认 0 = 关闭。
+
+        实测校准（2026-09-05 runtime）：融合分在单通道命中时上限约 0.5-0.7，
+        0.7 阈值会误杀合法查询（实测融合分 0.626 被拒）；而超纲查询的分数
+        与正常查询不可分（ADR-006 A1 节）。机制保留、默认关闭，待 runtime
+        校准后经 RAG_EVIDENCE_GATE_THRESHOLD 显式开启。
+        """
+        try:
+            return float(os.getenv("RAG_EVIDENCE_GATE_THRESHOLD", "0"))
+        except ValueError:
+            return 0.0
+
+    @staticmethod
     def _below_evidence_gate(sources: list[dict[str, Any]], threshold: float) -> bool:
         """A4 证据门判据：检索最高融合分是否低于路由置信阈值。
 
@@ -1221,7 +1236,7 @@ class ReactAgent(Agent):
         # 消费方，检索置信度从未参与"答不答"的决策。有非检索工具时与空
         # 上下文分支同样让位给 ReAct 循环。
         if has_selected_kb and rag_sources and not non_retrieval_tools:
-            evidence_gate_threshold = get_config().routing.confidence_threshold
+            evidence_gate_threshold = self._evidence_gate_threshold()
             best_evidence_score = max(
                 float(s.get("score") or 0.0) for s in rag_sources
             )
@@ -1667,7 +1682,7 @@ class ReactAgent(Agent):
 
             # ── A4 证据门（流式）：与 run() 同判据 ──
             if has_selected_kb and sources:
-                evidence_gate_threshold = get_config().routing.confidence_threshold
+                evidence_gate_threshold = self._evidence_gate_threshold()
                 if self._below_evidence_gate(sources, evidence_gate_threshold):
                     logger.warning(
                         f"[RAG:stream] Evidence gate triggered: best fused score "

@@ -332,12 +332,16 @@ class ModelGateway:
         cost_tracking_enabled: bool = True,
         failure_threshold: int = 3,
         cooldown_seconds: float = 30.0,
+        global_fallbacks: list[str] | None = None,
     ):
         self.enabled = enabled
         self._failover_enabled = failover_enabled
         self._cost_tracking_enabled = cost_tracking_enabled
         self._failure_threshold = max(1, failure_threshold)
         self._cooldown_seconds = max(0.0, cooldown_seconds)
+        # 全局降级链（A4/B1：如 "deepseek,ollama"——主渠道失败后按序尝试，
+        # 与 per-request fallbacks 合并去重；空表示不启用全局降级）
+        self._global_fallbacks = list(global_fallbacks or [])
 
         self._providers: dict[str, ProviderConfig] = {}
         self._circuits: dict[str, CircuitState] = {}
@@ -930,6 +934,14 @@ class ModelGateway:
                 except GatewayError:
                     continue
                 append(fb_provider, fb_model)
+        # 全局降级链：per-request fallbacks 之后追加（去重，主渠道已在链首）
+        if self._failover_enabled and self._global_fallbacks:
+            for fallback in self._global_fallbacks:
+                try:
+                    fb_provider, fb_model = self.resolve(fallback)
+                except GatewayError:
+                    continue
+                append(fb_provider, fb_model)
         return chain
 
     # -- usage & helpers ----------------------------------------------------
@@ -1161,12 +1173,22 @@ def _load_alias_overrides() -> dict[str, tuple[str, str | None]]:
 
 def _build_gateway_from_config() -> ModelGateway:
     """Assemble the default gateway from env/config (see module docstring)."""
+    # 全局降级链：如 MODEL_FAILOVER_CHAIN="deepseek,ollama"——任一请求的主
+    # 渠道（含熔断打开）失败后按序尝试后续渠道（B1 排障时 DeepSeek 欠费
+    # 402 暴露的缺口：此前 failover 只在 per-request fallbacks 存在时生效）。
+    global_fallbacks = [
+        item.strip()
+        for item in os.getenv("MODEL_FAILOVER_CHAIN", "").split(",")
+        if item.strip()
+    ]
+
     gateway = ModelGateway(
         enabled=_env_bool("MODEL_GATEWAY_ENABLED", default=True),
         failover_enabled=_env_bool("MODEL_FAILOVER_ENABLED", default=True),
         cost_tracking_enabled=_env_bool("MODEL_COST_TRACKING_ENABLED", default=True),
         failure_threshold=_env_int("MODEL_GATEWAY_FAILURE_THRESHOLD", 3),
         cooldown_seconds=_env_float("MODEL_GATEWAY_COOLDOWN_SECONDS", 30.0),
+        global_fallbacks=global_fallbacks,
     )
 
     default_rate = _env_int("MODEL_GATEWAY_RATE_LIMIT_PER_MIN", 60_000)

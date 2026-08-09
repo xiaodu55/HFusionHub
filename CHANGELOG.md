@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第三十一批（2026-09-05：B1 性能基线留档 + 全栈联调排障——模型降级链落地）
+
+#### Added
+- **全局模型降级链 `MODEL_FAILOVER_CHAIN`**：ModelGateway 支持配置化的全局
+  fallback 链（如 `deepseek,ollama`）——任一请求主渠道失败/熔断后按序尝试
+  后续渠道，与 per-request fallbacks 合并去重；此前 failover 只在调用方
+  显式传 fallbacks 时生效，主渠道挂掉即全军覆没（联调时 DeepSeek 欠费
+  402 暴露）。`docker/.env` 示例：`MODEL_FAILOVER_CHAIN=deepseek,ollama`
+- **runtime 评测环境播种脚本 `scripts/seed_eval_kb.py`**：把合成评测 KB
+  （10 篇，标题取自 kb_manifest）以 kb_id=101 上传/解析/索引到目标环境，
+  重复执行先清库（runtime 轨的 staging 前提，README 评测节早有约定）
+- **性能基线留档 `docs/baselines/baseline-v1-20260905.txt`**（单机全栈实测）：
+  Java API 五个读端点 P95 21~130ms；RAG 检索 P95 2261ms（瓶颈=本地 CPU
+  查询向量化，GPU/云端可显著下降）；文档处理端到端 P50 39.7s/篇
+
+#### Fixed
+- **eval_runtime 缺 X-Tenant-Id**：多租户 fail-closed 下批量请求被整体拒绝
+  （eval-nightly 定义了 EVAL_TENANT_ID 却从未被读取）；补 `--tenant-id`
+  参数与请求头；请求超时 60s→180s（RAG+LLM 全链路在 DeepSeek 高峰超 60s，
+  超时被记成 error 污染 error_rate 门禁）
+- **意图分类阈值接配置**：`HybridClassificationStrategy` 硬编码 0.7 改读
+  `RoutingConfig.confidence_threshold`（该配置字段的真实语义归属）
+- **证据门默认关闭（实测校准）**：runtime 实测合法查询融合分 0.626 被
+  0.7 阈值拒答（单通道命中时融合分上限≈0.5-0.7，而超纲查询分数与正常
+  不可分）——门机制保留，阈值改 `RAG_EVIDENCE_GATE_THRESHOLD` 默认 0
+  （关闭），待 runtime 校准后显式开启
+- **run-all-benchmarks.ps1 编码加固**：控制台固定 UTF-8（否则中文标题与
+  curl 响应体按 GBK 解码，ConvertFrom-Json 直接失败）
+- 测试 +5（降级链组装/去重/关闭语义），Python 全量 1529 过
+
 ### 第三十批（2026-09-05：A4 证据门 + groundedness 守卫修洞——A 线收官）
 
 #### Added

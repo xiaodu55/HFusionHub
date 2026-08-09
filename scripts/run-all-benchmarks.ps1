@@ -12,6 +12,11 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $RepoRoot 'docker\.env'
 
+# 控制台编码固定为 UTF-8：否则中文输出与 curl.exe 的 UTF-8 响应体
+# 会被按系统代码页（GBK）解码，ConvertFrom-Json 直接解析失败
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 Write-Host "==== HFusionHub 性能基线测试 ====" -ForegroundColor Cyan
 Write-Host "时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 Write-Host "Java: $BaseUrl"

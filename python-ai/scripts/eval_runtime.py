@@ -73,6 +73,8 @@ _REFUSAL_MARKERS = (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--token", required=True, help="X-Internal-Token for the Python AI service")
+    parser.add_argument("--tenant-id", type=int, default=1,
+                        help="X-Tenant-Id for multi-tenant fail-closed resolution (eval-nightly 的 EVAL_TENANT_ID)")
     parser.add_argument("--base-url", default="http://localhost:9000")
     parser.add_argument("--cases", type=Path, default=SUITE_DIR / "cases.jsonl")
     parser.add_argument("--suite-manifest", type=Path, default=SUITE_DIR / "suite_manifest.json")
@@ -297,12 +299,19 @@ async def run_case(client: httpx.AsyncClient, base_url: str, headers: dict, case
 async def run_all(args) -> list[CaseOutcome]:
     cases = load_cases(args.cases)
     known_titles, doc_text_by_title = load_kb_docs(args.kb_manifest)
-    headers = {"X-Internal-Token": args.token, "Content-Type": "application/json"}
+    headers = {
+        "X-Internal-Token": args.token,
+        # 多租户 fail-closed：缺租户头会被服务端整体拒绝（A4 排障发现）
+        "X-Tenant-Id": str(getattr(args, "tenant_id", 1) or 1),
+        "Content-Type": "application/json",
+    }
     semaphore = asyncio.Semaphore(max(1, args.concurrency))
 
     async def worker(case) -> CaseOutcome:
         async with semaphore:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            # 60s 对"RAG 检索 + LLM 生成"的全链路偏紧（DeepSeek 高峰 30-90s），
+            # 超时会被记成 error 污染 error_rate 门禁
+            async with httpx.AsyncClient(timeout=180.0) as client:
                 outcome = await run_case(
                     client, args.base_url, headers, case,
                     prompt_price_per_1m=args.prompt_price_per_1m,

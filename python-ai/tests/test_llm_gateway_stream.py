@@ -365,3 +365,37 @@ async def test_stream_provider_returns_async_generator_not_coroutine(monkeypatch
     assert not inspect.iscoroutine(gen)
     chunks = [chunk async for chunk in gen]
     assert chunks == ["chunk-1", "chunk-2"]
+
+
+# ---------------------------------------------------------------------------
+# 全局降级链（MODEL_FAILOVER_CHAIN）
+# ---------------------------------------------------------------------------
+
+def test_global_fallback_chain_appends_after_primary():
+    gw = ModelGateway(
+        providers=[_provider("deepseek", models=("d1",)), _provider("ollama", models=("o1",))],
+        global_fallbacks=["ollama"],
+        failover_enabled=True,
+    )
+    chain = gw._build_chain("deepseek", "d1", None)
+    assert chain == [("deepseek", "d1"), ("ollama", "o1")]
+
+
+def test_global_fallback_chain_dedupes_and_respects_primary():
+    gw = ModelGateway(
+        providers=[_provider("deepseek", models=("d1",)), _provider("ollama", models=("o1",))],
+        global_fallbacks=["deepseek", "ollama"],
+        failover_enabled=True,
+    )
+    # 主渠道已在链首：全局降级不重复、不改变顺序
+    chain = gw._build_chain("deepseek", "d1", None)
+    assert chain == [("deepseek", "d1"), ("ollama", "o1")]
+
+
+def test_global_fallback_chain_disabled_without_failover():
+    gw = ModelGateway(
+        providers=[_provider("deepseek", models=("d1",)), _provider("ollama", models=("o1",))],
+        global_fallbacks=["ollama"],
+        failover_enabled=False,
+    )
+    assert gw._build_chain("deepseek", "d1", None) == [("deepseek", "d1")]

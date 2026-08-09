@@ -238,6 +238,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 > 所有文档位于 [docs/](docs/) 目录，按用途分三类：**开发**、**运维**、**治理**。
 > 关键事实基线：Java 702 测试 / Python 1451 / 前端 57 单测 + 73 E2E / Flyway V84 / Spring Boot 3.5.16。
 > 离线评测基线（suite 1.1.0，2026-09-05 冻结，引用模拟含压缩感知）：Recall@5=0.932 / nDCG@10=0.903 / 引用准确率=0.942 / 引用忠实度 F1=0.741（精确率 0.703、召回率 0.894）。答案逐论断引用 `[n]` 标注经 `cited_chunk_ids` 透出，runtime 轨按答案实际标注的引用计分。
+> 性能基线（单机全栈实测，2026-09-05，[docs/baselines/baseline-v1-20260905.txt](docs/baselines/baseline-v1-20260905.txt)）：Java API 五个读端点 P95 21~130ms / RAG 检索 P95 2261ms（瓶颈为本地 CPU 查询向量化）/ 文档处理端到端 P50 39.7s。
 
 ### 开发类
 

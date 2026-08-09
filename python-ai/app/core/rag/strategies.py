@@ -391,7 +391,10 @@ class HybridClassificationStrategy(ClassificationStrategy):
         """
         self.rule_strategy = RuleClassificationStrategy()
         self.llm_strategy = LLMClassificationStrategy(llm)
-        self.confidence_threshold = 0.7
+        # A4：接入 RoutingConfig.confidence_threshold（此前硬编码 0.7，
+        # 配置字段全仓库无消费方）——规则分类置信不足时回退 LLM 分类
+        from .config import get_config
+        self.confidence_threshold = get_config().routing.confidence_threshold
 
     async def classify(
         self,
