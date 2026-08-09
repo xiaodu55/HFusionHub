@@ -103,3 +103,33 @@ chunk 不可引用（`eval_baseline.compression_surviving_chunks`，与生产共
 **当前合成套件上压缩不是忠实度瓶颈**——模板化文档事实密度均匀；修复价值
 在事实密度不均的真实 KB（机制由确定性翻转单测锁定）。忠实度的真实杠杆在
 生成侧引用约束（A3）。
+
+## 增补（A3 · 2026-09-05）：生成侧逐论断引用约束 + 答案标注引用接入度量
+
+**生产侧**：
+- `ExtractiveCompressionStrategy.compress_numbered_blocks`：**保溯源压缩**——
+  对 `[n]` 编号块上下文在合并文本上全局选句（与普通压缩同一评分与预算公式），
+  重建时按块归属拼回，只保留至少一句存活的块；编号 `n` 与 `sources[n-1]`
+  的对应关系因此贯穿压缩全程。
+- `_build_rag_prompt`：新增逐论断引用格式约束（每个论断末尾标注 `[n]`，
+  多资料 `[1][3]`，禁止标注不存在的编号）。
+- 答案解析：`_parse_cited_chunk_ids` 把答案中的 `[n]` 映射回来源 chunk_id
+  （越界/不可见块忽略），随 `AgentResponse.cited_chunk_ids` →
+  `ChatResponse.cited_chunk_ids` 透出；流式路径在 sources 事件携带同名字段；
+  groundedness 重试用未压缩全文时可见块恢复为全集。
+- 分解/非分解两条流式检索路径统一走 `_format_numbered_context` 编号格式。
+
+**评测侧**：`eval_runtime.parse_chat_response` 的 cited 集从"检索到的文档"
+改为"答案实际标注的引用"（响应 `cited_chunk_ids` → 文档名；未标注时回退
+检索集保持旧行为），key-facts 忠实度同步按标注引用评估——runtime 轨从此
+量到生成质量而非检索可见性。离线轨引用模拟改用与生产**同一份**
+`compress_numbered_blocks`（构造编号文本重放），彻底消除口径漂移；
+4 套基线随统一实现重冻结（主套件 F1 0.7404→0.7409，±0.0005 级）。
+
+**边界**：runtime 轨的前后对比数字（答案标注率、标注引用的忠实度）需真实
+服务实测，待 eval-nightly / 本地全栈运行采集；本增补的机制正确性由
+11 个新单测（编号格式化/标注解析/越界与不可见忽略/保溯源翻转/契约回退）锁定。
+
+**下一步**（A4）：证据门接上 `routing.confidence_threshold` 与
+`ReflectionConfig.confidence_threshold` 两个死配置；修 groundedness 守卫
+两个洞（`was_compressed=False` 不触发、判据为固定文案匹配而非分数）。

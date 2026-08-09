@@ -39,6 +39,8 @@ from .utils import (
 _MIN_COMPRESSION_TOKENS = 300
 # Characters below this threshold == skip compression entirely (rough CJK equivalent)
 _MIN_COMPRESSION_CHARS = 600
+# RAG 编号块标记（react._retrieve_context 产出的行首 [n] 行），保溯源压缩用
+_BLOCK_MARKER_RE = re.compile(r"(?m)^\[(\d{1,2})\][^\n]*\n")
 
 
 # ==================== 枚举定义 ====================
@@ -400,6 +402,83 @@ class ExtractiveCompressionStrategy(BaseCompressionStrategy):
     def _extract_key_phrases(self, text: str) -> list[str]:
         """提取关键短语"""
         return extract_key_phrases(text, MAX_KEY_PHRASES)
+
+    @staticmethod
+    def list_block_numbers(text: str) -> list[int]:
+        """列出文本中的编号块号（`[n]` 行首标记），保持出现顺序。"""
+        return [int(m.group(1)) for m in _BLOCK_MARKER_RE.finditer(text)]
+
+    async def compress_numbered_blocks(
+        self,
+        text: str,
+        config: CompressionConfig | None = None,
+        query: str | None = None,
+    ) -> tuple[str, list[int], bool]:
+        """对 ``[n]`` 编号块上下文做**保溯源**压缩（RAG 引用约束的基座）。
+
+        编号块格式（见 ``react._retrieve_context``）::
+
+            [1] (语义匹配, 相似度: 0.87)
+            第一句。第二句。
+
+        压缩在**合并文本**上全局打分选句（与 ``compress`` 同一评分实现与
+        预算公式），但重建时按块归属拼回，并只保留至少有一句存活的块——
+        编号 ``n`` 与外部 ``sources[n-1]`` 的对应关系因此贯穿压缩全程，
+        答案里的 ``[n]`` 标注才能映射回真实来源 chunk。
+
+        Returns:
+            ``(压缩后文本, 存活块号列表, 是否执行了压缩)``。文本低于短文本
+            守卫阈值时原样返回（全部块存活，未压缩）；文本不含编号块时
+            回退普通 ``compress``（块号列表为空——调用方此时无法引用溯源）。
+        """
+        if config is None:
+            config = CompressionConfig()
+
+        marker_matches = list(_BLOCK_MARKER_RE.finditer(text))
+        if not marker_matches:
+            result = await self.compress(text, config, query=query)
+            return result.compressed_text, [], result.compressed_text != text
+
+        original_tokens = self.estimate_tokens(text)
+        if (original_tokens < _MIN_COMPRESSION_TOKENS
+                or len(text) < _MIN_COMPRESSION_CHARS):
+            return text, self.list_block_numbers(text), False
+
+        # 按块切分：块内容 = 标记行之后到下一标记行之前
+        blocks: list[tuple[int, str, str]] = []  # (块号, 标记行, 内容)
+        for idx, match in enumerate(marker_matches):
+            start = match.end()
+            end = marker_matches[idx + 1].start() if idx + 1 < len(marker_matches) else len(text)
+            blocks.append((int(match.group(1)), match.group(0), text[start:end]))
+
+        sentences: list[str] = []
+        owners: list[int] = []
+        for number, _marker, content in blocks:
+            for sentence in split_sentences(content, min_length=2):
+                sentences.append(sentence)
+                owners.append(number)
+        if not sentences:
+            return text, self.list_block_numbers(text), False
+
+        scores = self._calculate_sentence_scores(sentences, text, query=query)
+        target_count = max(1, int(len(sentences) * config.target_ratio))
+        kept = sorted(range(len(sentences)), key=lambda i: -scores[i])[:target_count]
+        surviving_by_block: dict[int, list[int]] = {}
+        for i in kept:
+            surviving_by_block.setdefault(owners[i], []).append(i)
+
+        # 重建：块按原始顺序输出（保持 [n] 与 sources 的对应），块内句子按原顺序
+        parts: list[str] = []
+        kept_numbers: list[int] = []
+        for number, marker, content in blocks:
+            indices = surviving_by_block.get(number)
+            if not indices:
+                continue
+            kept_numbers.append(number)
+            body = "".join(sentences[i] for i in sorted(indices))
+            parts.append(f"{marker}{body}")
+        compressed = "\n\n".join(parts)
+        return compressed, kept_numbers, compressed != text
 
 
 # ==================== 生成式压缩策略 ====================

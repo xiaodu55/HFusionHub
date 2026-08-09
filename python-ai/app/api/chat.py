@@ -306,6 +306,7 @@ class ChatResponse(BaseModel):
     model: str = Field("", description="LLM model used")
     token_count: int = Field(0, description="Token count — Java tokenCount via @JsonProperty")
     sources: list[dict[str, Any]] = Field(default_factory=list, description="Source citations")
+    cited_chunk_ids: list[str] = Field(default_factory=list, description="Chunk IDs the answer actually cited via [n] markers (A3)")
     steps: list[dict[str, Any]] | None = Field(default_factory=list, description="Agent ReAct steps")
     auto_detected_kb_id: int | None = Field(None, description="Auto-detected knowledge base ID")
 
@@ -517,6 +518,7 @@ def _build_chat_response(response, style: str, extra_step_events: list[dict[str,
         model=response.model or "",
         token_count=response.token_count,
         sources=response.sources,
+        cited_chunk_ids=getattr(response, "cited_chunk_ids", None) or [],
         steps=[{
             "thought": s.thought,
             "action": s.action,

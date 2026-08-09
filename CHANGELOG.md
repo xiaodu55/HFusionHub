@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第二十九批（2026-09-05：A3 生成侧逐论断引用约束 + 答案标注引用接入度量）
+
+#### Added
+- **RAG 逐论断引用约束（[ADR-006](docs/adr/ADR-006-faithfulness-metric-recalibration.md) 增补）**：
+  - `_build_rag_prompt` 要求每个论断末尾标注依据资料编号 `[n]`（多资料 `[1][3]`）
+  - **保溯源压缩** `compress_numbered_blocks`：编号块上下文在合并文本上全局
+    选句、按块归属重建——`[n]` ↔ `sources[n-1]` 对应关系贯穿压缩全程
+    （编号是引用可溯源的基座；此前压缩会破坏编号）
+  - 答案解析 `_parse_cited_chunk_ids`：`[n]` → 来源 chunk_id（越界/不可见
+    忽略），`AgentResponse.cited_chunk_ids` → `ChatResponse.cited_chunk_ids`
+    透出，流式路径在 sources 事件携带；groundedness 重试用全文时可见块恢复全集
+- 分解/非分解流式检索路径统一 `_format_numbered_context` 编号格式
+
+#### Changed
+- **runtime 评测引用对齐**：`eval_runtime` 的 cited 集从"检索到的文档"改为
+  "答案实际标注的引用"（未标注回退检索集），key-facts 忠实度同步按标注引用
+  评估——runtime 轨从此量到生成质量；前后对比数字待真实服务实测采集
+- **离线引用模拟与生产共用同一份压缩实现**：`compression_surviving_chunks`
+  改为构造编号文本重放 `compress_numbered_blocks`（消除口径漂移），
+  4 套基线重冻结（主套件 F1 0.7409，±0.0005 级变化）
+- 测试 +11：编号格式化/标注解析/越界与不可见忽略/保溯源翻转/守卫旁路/
+  契约回退，Python 全量 1512 过
+
 ### 第二十八批（2026-09-05：A2 压缩阶段——query 信号 + 引用模拟压缩感知）
 
 #### Changed

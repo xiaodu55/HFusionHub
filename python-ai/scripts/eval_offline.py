@@ -145,7 +145,7 @@ async def evaluate_offline(router, cases, top_k: int, citation_top_k: int = 5,
         # ② 自适应窗口——答案只引用与首块相关性足够接近的可见块。
         get_content = getattr(router.index, "get_chunk_content", None)
         if compress_target_ratio < 1.0 and get_content is not None:
-            survivors = compression_surviving_chunks(
+            survivors = await compression_surviving_chunks(
                 ranked,
                 {cid: get_content(cid) for cid, _ in ranked},
                 case.query,

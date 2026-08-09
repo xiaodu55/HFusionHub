@@ -450,32 +450,35 @@ _COMPRESS_A = (
 _COMPRESS_B = "S1 音箱支持自定义唤醒词。唤醒词可以在设置中随时修改。"
 
 
-def test_compression_surviving_chunks_query_signal_flips_survival():
+@pytest.mark.asyncio
+async def test_compression_surviving_chunks_query_signal_flips_survival():
     """A2 核心机制：query 盲区会把相关低事实密度块整块压掉，query 信号救回。"""
     ranked = [("docA#s1", 10.0), ("docB#s1", 8.0)]
     contents = {"docA#s1": _COMPRESS_A, "docB#s1": _COMPRESS_B}
     query = "S1 音箱怎么修改自定义唤醒词"
 
     # query 盲区（修复前行为）：docB 的句子全部落入选保区之外，chunk 不可见
-    assert compression_surviving_chunks(ranked, contents, "", target_ratio=0.6) \
+    assert await compression_surviving_chunks(ranked, contents, "", target_ratio=0.6) \
         == [("docA#s1", 10.0)]
     # 带 query：docB 的句子被 query 重叠信号抬入选保区
-    assert compression_surviving_chunks(ranked, contents, query, target_ratio=0.6) \
+    assert await compression_surviving_chunks(ranked, contents, query, target_ratio=0.6) \
         == ranked
 
 
-def test_compression_surviving_chunks_short_context_bypasses_compression():
+@pytest.mark.asyncio
+async def test_compression_surviving_chunks_short_context_bypasses_compression():
     """合并文本低于生产短文本保护阈值时不压缩，全部 chunk 可见（与生产一致）。"""
     ranked = [("a#1", 5.0), ("b#1", 4.0)]
     contents = {"a#1": "这是很短的第一段。", "b#1": "这是很短的第二段。"}
-    assert compression_surviving_chunks(ranked, contents, "任意问题",
-                                        target_ratio=0.6) == ranked
+    assert await compression_surviving_chunks(ranked, contents, "任意问题",
+                                              target_ratio=0.6) == ranked
 
 
-def test_compression_surviving_chunks_ratio_one_disables_simulation():
+@pytest.mark.asyncio
+async def test_compression_surviving_chunks_ratio_one_disables_simulation():
     """target_ratio=1.0 保留全部句子，等价于关闭压缩模拟。"""
     ranked = [("docA#s1", 10.0), ("docB#s1", 8.0)]
     contents = {"docA#s1": _COMPRESS_A, "docB#s1": _COMPRESS_B}
-    assert compression_surviving_chunks(ranked, contents, "", target_ratio=1.0) \
+    assert await compression_surviving_chunks(ranked, contents, "", target_ratio=1.0) \
         == ranked
-    assert compression_surviving_chunks([], contents, "q") == []
+    assert await compression_surviving_chunks([], contents, "q") == []

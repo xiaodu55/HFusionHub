@@ -267,6 +267,67 @@ class TestExtractiveCompressionStrategy:
         assert result.status == CompressionStatus.COMPLETED
         assert relevant in result.compressed_text
 
+    # ── A3：保溯源压缩（compress_numbered_blocks）──
+
+    _NUM_A = (
+        "售后政策覆盖全国 128 个城市共 3500 个服务网点，网点数量逐年扩大并延伸到县域市场，具体覆盖范围以官方页面公示为准。"
+        "固件自 2024 年起累计更新 26 个版本，每个版本都经过完整的回归测试与灰度发布流程后才会逐步推送。"
+        "退换货政策自 2023 年 1 月起执行，签收后 30 天内可无理由退货退款，非质量问题往返运费由客户承担。"
+        "整机质保期为 2 年，电池等耗材部件质保 6 个月，人为损坏与进水不在免费保修范围之内。"
+        "延保服务可延长至 3 年，价格按整机售价的 8% 计算，购买后 7 天内可无条件全额退订。"
+        "以旧换新补贴最高 800 元，需提供旧机购买凭证，补贴以旧机型号与成色评估结果为准。"
+        "企业客户批量采购享受 95 折优惠，满 100 台额外赠送 2 年延保与专属客户成功经理服务。"
+        "发票自签收日起 15 个工作日内开具，支持增值税专用发票与普通电子发票两种类型。"
+        "上门服务覆盖时间为每日 9 点至 18 点，偏远地区上门响应时间可能延长至 5 个工作日。"
+        "配件与耗材可以通过官方商城购买，价格以商城实时标价为准，不接受线下渠道议价。"
+        "跨境购买与海外保修暂不支持，国行版本与海外版本的服务体系相互独立，请购买前确认清楚。"
+        "以上内容为售后条款总则，具体细则以官方公告与合同附件为准，条款如有冲突以最新版本为准。"
+        "本段介绍售后政策的适用范围与历史沿革背景说明，帮助用户快速了解服务承诺的整体框架与适用边界。"
+    )
+    _NUM_B = "S1 音箱支持自定义唤醒词。唤醒词可以在设置中随时修改。"
+    _NUM_TEXT = (
+        "[1] (语义匹配, 相似度: 0.90)\n" + _NUM_A
+        + "\n\n[2] (关键词匹配, 相似度: 0.80)\n" + _NUM_B
+    )
+
+    @pytest.mark.asyncio
+    async def test_compress_numbered_blocks_query_flips_block_survival(self):
+        """保溯源压缩：query 信号决定相关块存活，编号与来源对应不被破坏。"""
+        strategy = ExtractiveCompressionStrategy()
+        config = CompressionConfig(target_ratio=0.6)
+
+        compressed_blind, kept_blind, did = await strategy.compress_numbered_blocks(
+            self._NUM_TEXT, config, query="")
+        assert did is True
+        assert kept_blind == [1]  # query 盲区：相关块 [2] 整块被压
+
+        compressed_aware, kept_aware, _ = await strategy.compress_numbered_blocks(
+            self._NUM_TEXT, config, query="S1 音箱怎么修改自定义唤醒词")
+        assert kept_aware == [1, 2]  # query 信号救回 [2]
+        assert "[2] (关键词匹配, 相似度: 0.80)" in compressed_aware
+        assert "[1] (语义匹配, 相似度: 0.90)" in compressed_aware
+
+    @pytest.mark.asyncio
+    async def test_compress_numbered_blocks_short_text_bypasses(self):
+        """低于短文本守卫：原样返回，全部块存活，未压缩。"""
+        strategy = ExtractiveCompressionStrategy()
+        text = "[1] (语义匹配, 相似度: 0.90)\n短文本。\n\n[2] (关键词匹配, 相似度: 0.80)\n另一段。"
+        compressed, kept, did = await strategy.compress_numbered_blocks(
+            text, CompressionConfig(target_ratio=0.6), query="问题")
+        assert compressed == text
+        assert kept == [1, 2]
+        assert did is False
+
+    @pytest.mark.asyncio
+    async def test_compress_numbered_blocks_without_markers_falls_back(self):
+        """无编号块：回退普通 compress，块号列表为空。"""
+        strategy = ExtractiveCompressionStrategy()
+        text = "没有编号标记的普通长文本。" * 40
+        compressed, kept, did = await strategy.compress_numbered_blocks(
+            text, CompressionConfig(target_ratio=0.5), query=None)
+        assert kept == []
+        assert isinstance(did, bool)
+
 
 # ==================== 生成式压缩策略测试 ====================
 

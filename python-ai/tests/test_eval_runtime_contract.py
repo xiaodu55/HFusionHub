@@ -281,6 +281,58 @@ def test_runtime_citation_faithfulness_na_without_key_facts():
 
 
 # ---------------------------------------------------------------------------
+# A3: answer-annotated citations (cited_chunk_ids)
+# ---------------------------------------------------------------------------
+
+def _annotated_sources():
+    return [
+        {"chunk_id": "doc1#intro", "document_name": "云帆智能智能家居产品目录"},
+        {"chunk_id": "doc2#pricing", "document_name": "云帆智能订阅方案与价格"},
+    ]
+
+
+def test_cited_docs_mapped_from_answer_annotations():
+    """答案标注的 [n] → chunk_id → 文档名；忠实度按实际标注的引用评估。"""
+    case = _case(expected=("云帆智能订阅方案与价格",),
+                 facts=("基础版价格为每月 19 元。",))
+    data = {
+        "sources": _annotated_sources(),
+        "cited_chunk_ids": ["doc2#pricing"],
+        "answer": "基础版价格为每月 19 元 [2]。",
+    }
+    outcome = _parse(data, case)
+    assert outcome["cited_chunk_ids"] == ["云帆智能订阅方案与价格"]
+    assert outcome["citation_faithfulness"] == pytest.approx(1.0)
+
+
+def test_cited_docs_dedupes_and_ignores_unknown_chunk_ids():
+    data = {
+        "sources": _annotated_sources(),
+        "cited_chunk_ids": ["doc2#pricing", "doc2#pricing", "bogus#x"],
+        "answer": "回答 [2]。",
+    }
+    outcome = _parse(data)
+    assert outcome["cited_chunk_ids"] == ["云帆智能订阅方案与价格"]
+
+
+def test_cited_docs_fallback_to_retrieved_without_annotations():
+    """响应未携带 cited_chunk_ids（旧服务/未标注）→ 回退检索集（A3 前行为）。"""
+    data = {"sources": _annotated_sources(), "answer": "没有标注的回答。"}
+    outcome = _parse(data)
+    assert outcome["cited_chunk_ids"] == [
+        "云帆智能智能家居产品目录", "云帆智能订阅方案与价格",
+    ]
+
+
+def test_cited_empty_list_falls_back_to_retrieved():
+    data = {"sources": _annotated_sources(), "cited_chunk_ids": [], "answer": "回答。"}
+    outcome = _parse(data)
+    assert outcome["cited_chunk_ids"] == [
+        "云帆智能智能家居产品目录", "云帆智能订阅方案与价格",
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Gates and exit-code-driving failure list
 # ---------------------------------------------------------------------------
 

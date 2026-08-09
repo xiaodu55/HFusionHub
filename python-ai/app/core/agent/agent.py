@@ -31,6 +31,9 @@ class AgentResponse:
 
     # ── Sources ──
     sources: list[dict[str, Any]] = field(default_factory=list)
+    # 答案实际标注的引用（[n] → 来源 chunk_id，A3）；空表示答案未做标注。
+    # 与 sources 的区别：sources 是"检索到什么"，这里是"答案用了什么"。
+    cited_chunk_ids: list[str] = field(default_factory=list)
 
     # ── Execution metadata ──
     steps: list[AgentStep] = field(default_factory=list)

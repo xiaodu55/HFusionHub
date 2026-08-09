@@ -114,6 +114,28 @@ def _doc_name(source: dict) -> str:
     return str(source.get("document_name") or source.get("title") or "").strip()
 
 
+def cited_docs_from_response(data: dict, sources: list) -> list[str]:
+    """A3 引用对齐：答案实际标注的引用（cited_chunk_ids）→ 文档名列表。
+
+    响应的 ``cited_chunk_ids`` 是答案用 ``[n]`` 标注实际引用的 chunk 级 id
+    （由 react 管线解析答案文本得到），经响应 ``sources`` 列表映射回文档名。
+    响应未携带该字段（旧服务/未标注）时返回空列表，调用方回退检索集，
+    保持 A3 之前的行为。
+    """
+    chunk_to_name: dict[str, str] = {}
+    for source in sources:
+        chunk_id = str(source.get("chunk_id") or "")
+        name = _doc_name(source)
+        if chunk_id and name:
+            chunk_to_name.setdefault(chunk_id, name)
+    cited: list[str] = []
+    for cid in data.get("cited_chunk_ids") or []:
+        name = chunk_to_name.get(str(cid))
+        if name and name not in cited:
+            cited.append(name)
+    return cited
+
+
 def _detect_refusal(answer: str, status: str) -> bool:
     if status == "insufficient_evidence":
         return True
@@ -193,16 +215,19 @@ def parse_chat_response(
     failed_tool = data.get("failed_tool")
     tool_calls_count = int(data.get("tool_calls_count", 0) or 0)
 
+    # A3 引用对齐：优先用答案实际标注的引用；未标注（空）回退检索集
+    cited_docs = cited_docs_from_response(data, sources) or retrieved_docs
+
     return {
         "case_id": case.case_id,
         "category": case.category,
         "retrieved_chunk_ids": retrieved_docs,
-        "cited_chunk_ids": retrieved_docs,
+        "cited_chunk_ids": cited_docs,
         "expected_chunk_ids": tuple(expected_docs),
         "expected_document_names": tuple(expected_docs),
         "scope_violations": compute_scope_violations(sources, known_titles, case.kb_id),
         "citation_faithfulness": runtime_citation_faithfulness(
-            answer, retrieved_docs, case.key_facts, doc_text_by_title,
+            answer, cited_docs, case.key_facts, doc_text_by_title,
             support_threshold=support_threshold,
             answer_threshold=answer_threshold,
         ),
