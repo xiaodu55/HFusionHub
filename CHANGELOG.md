@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第三十批（2026-09-05：A4 证据门 + groundedness 守卫修洞——A 线收官）
+
+#### Added
+- **证据门（[ADR-006](docs/adr/ADR-006-faithfulness-metric-recalibration.md) 增补）**：
+  run()/run_stream() 在检索后、生成前判定——检索最高融合分（RRF 归一化
+  0-1）低于 `routing.confidence_threshold`（默认 0.7，`RAG_ROUTING_CONFIDENCE_
+  THRESHOLD` 可调）时走 `insufficient_evidence` 通道拒答；有非检索工具时
+  让位 ReAct 循环（与空上下文分支同策略）。`routing.confidence_threshold`
+  与 `ReflectionConfig.confidence_threshold` 两个死配置全部接入消费方
+- **groundedness 守卫分数判据**：`_answer_support_score` 计算答案实质句对
+  上下文的最大词元覆盖率（跳过 <10 字短句防误杀应答句），全部实质句低于
+  `ReflectionConfig.confidence_threshold`（默认 0.6，新增
+  `RAG_REFLECTION_CONFIDENCE_THRESHOLD` env）即判无依据——固定文案匹配之外
+  补上分数判据，抓住词元层面完全脱离资料的幻觉
+
+#### Fixed
+- **groundedness 守卫洞①**：`was_compressed=False` 时守卫从不触发——短
+  上下文路径的"无依据"答案直接以 completed 放行；现未压缩时走
+  insufficient_evidence（流式按 content_reset 替换协议改发拒答），
+  压缩过则保留原重试链路
+- 测试 +13（证据门判据/支持分/守卫组合），Python 全量 1525 过
+
 ### 第二十九批（2026-09-05：A3 生成侧逐论断引用约束 + 答案标注引用接入度量）
 
 #### Added

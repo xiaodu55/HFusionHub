@@ -19,7 +19,7 @@ HFusionHub 是一个可以私有部署的 AI Agent 平台：上传文档建知�
 - **双语言三层的职责切分**：Java（Spring Boot 3.5.16）独占全部 MySQL 写路径（ACID、多租户、计费账本），Python（FastAPI）独占检索与 Agent 智能；两端之间用内部令牌 + HMAC 签名回调约束契约，`scripts/static-checks.py` 在 CI 里静态校验契约锚点。
 - **工具审批的正确性设计**：审批决定的三表更新在同一事务内完成，签发**一次性执行令牌**（数据库守卫 UPDATE 保证 exactly-once），LLM/工具执行经 afterCommit 移出事务——行锁不会被 120 秒的工具调用占住。
 - **并发与竞态治理**：任务状态机全部走条件 UPDATE 守卫迁移（completeRunGuarded / failUnlessTerminal），用量账本"只有赢得终态迁移的一方结算"，配套竞态回归测试。
-- **RAG 管线纵深**：意图分类 → 查询分解 → 多路检索（向量+BM25+图谱+RRF）→ 上下文压缩 → Groundedness 守卫与重试 → 引用完整性校验；Parent-Child 父子分块与语义分块（实验档）提升长文档召回。
+- **RAG 管线纵深**：意图分类 → 查询分解 → 多路检索（向量+BM25+图谱+RRF）→ 上下文压缩 → 检索证据门（低置信拒答）→ Groundedness 守卫与重试 → 引用完整性校验；答案逐论断 `[n]` 引用溯源；Parent-Child 父子分块与语义分块（实验档）提升长文档召回。
 - **测试与防漂移门禁**：Java 702（H2 内存库 + Flyway 校验）/ Python 1451 / 前端 57 单测 + 73 E2E；schema-h2 与迁移链**漂移零容忍**（漏同步直接 CI 红）、文档测试计数与代码强同步、离线评测门禁（recall/nDCG/引用 P·R·F1 基线，引用窗口按相关性自适应，见 [ADR-006](docs/adr/ADR-006-faithfulness-metric-recalibration.md)）。
 - **数据规模**：84 个 Flyway 迁移、26 轮自审修复批次（全部记录在 CHANGELOG）、48 项冒烟自测全过。
 

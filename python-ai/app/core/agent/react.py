@@ -38,6 +38,9 @@ from ..rag import (
     get_retriever,
 )
 from ..tools import ToolExecutionPolicy, ToolRegistry, create_v1_registry, execute_tool
+from ..rag.config import get_config
+from ..rag.tokenization import tokenize
+from ..rag.utils import split_sentences
 from .agent import Agent, AgentResponse, AgentStep
 from .citation import normalize_source
 
@@ -696,10 +699,71 @@ class ReactAgent(Agent):
         )
 
     @staticmethod
-    def _is_groundless_answer(answer: str) -> bool:
-        """Return True when the answer text signals the model found no usable evidence."""
-        answer_lower = answer.lower()
-        return any(marker.lower() in answer_lower for marker in _GROUNDLESS_MARKERS)
+    def _below_evidence_gate(sources: list[dict[str, Any]], threshold: float) -> bool:
+        """A4 证据门判据：检索最高融合分是否低于路由置信阈值。
+
+        融合分（RRF 归一化到 0-1，顶块=跨通道一致性）构成"检索置信度"：
+        多通道一致命中同一顶块时≈1.0，通道分歧/弱相关显著走低。空检索
+        结果返回 False（由空上下文分支处理，不属于本门职责）。
+        """
+        if not sources:
+            return False
+        best = max(float(s.get("score") or 0.0) for s in sources)
+        return best < threshold
+
+    @staticmethod
+    def _answer_support_score(answer: str, context: str) -> tuple[float, bool]:
+        """答案对上下文的词汇支持度（0-1）与"是否存在实质句"。
+
+        按句计算（跳过 <10 字的短句——"是的。"这类应答不参与判据），
+        取全答案的**最大**句级词元覆盖率：忠实回答至少有一个实质句大量
+        复用上下文词元（数字/专名/术语），而完全脱离资料的回答各句支持度
+        都趋近 0。没有实质句时 ``has_substantial=False``，调用方不应据此
+        判定无依据（分数无意义）。
+        """
+        if not answer or not context:
+            return 0.0, False
+        context_terms = set(tokenize(context))
+        if not context_terms:
+            return 0.0, False
+        best = 0.0
+        has_substantial = False
+        for sentence in split_sentences(answer, min_length=1):
+            if len(sentence) < 10:
+                continue
+            terms = set(tokenize(sentence))
+            if not terms:
+                continue
+            has_substantial = True
+            best = max(best, len(terms & context_terms) / len(terms))
+        return best, has_substantial
+
+    @classmethod
+    def _is_groundless_answer(
+        cls,
+        answer: str,
+        context: str | None = None,
+        confidence_threshold: float | None = None,
+    ) -> bool:
+        """判定答案是否"无依据"（A4 修洞：文案匹配之外新增分数判据）。
+
+        两个判据任一命中即无依据：
+        1. **模式文案**——模型自己承认没有证据（"未检索到足够依据"等），
+           高精度信号，保留；
+        2. **词汇支持分**（``context`` 提供时）——所有实质句对上下文的
+           支持度都低于 ``confidence_threshold``（取自
+           ``ReflectionConfig.confidence_threshold``，默认 0.6），即答案
+           与资料在词元层面完全脱节，纯文案匹配抓不住这类幻觉。
+
+        ``context`` 缺省时仅做文案匹配（保持旧调用方行为）。
+        """
+        answer_lower = (answer or "").lower()
+        if any(marker.lower() in answer_lower for marker in _GROUNDLESS_MARKERS):
+            return True
+        if context is None or not confidence_threshold:
+            return False
+        support, has_substantial = cls._answer_support_score(answer, context)
+        return has_substantial and support < confidence_threshold
 
     @staticmethod
     def _build_rag_prompt(context: str, query: str, style: str = "detailed") -> str:
@@ -1119,15 +1183,19 @@ class ReactAgent(Agent):
         raw_context, rag_sources, auto_detected_kb_id, rag_context, was_compressed, visible_numbers = retrieved_full
         logger.info(f"[RAG] Retrieved context length: {len(raw_context)}, sources count: {len(rag_sources)}, auto_detected_kb_id: {auto_detected_kb_id}")
 
+        # Agent V1 Step 5: If non-retrieval tools (e.g. write_note) are
+        # available, the ReAct loop may still serve the user without KB
+        # context — both the empty-context branch and the evidence gate
+        # defer to it.
+        non_retrieval_tools = [
+            t for t in tools
+            if t.get("_spec") is not None
+            and getattr(t["_spec"], "risk_level", "read_only") != "read_only"
+        ]
         if has_selected_kb and not rag_context:
             # Agent V1 Step 5: If non-retrieval tools (e.g. write_note) are
             # available, enter the ReAct loop anyway — the LLM may still call
             # a tool that doesn't depend on KB context.
-            non_retrieval_tools = [
-                t for t in tools
-                if t.get("_spec") is not None
-                and getattr(t["_spec"], "risk_level", "read_only") != "read_only"
-            ]
             if not non_retrieval_tools:
                 reply = await self._empty_context_reply()
                 self._last_sources = []
@@ -1146,6 +1214,38 @@ class ReactAgent(Agent):
                     style_used=self.style,
                 )
             # Else: fall through to ReAct loop with empty context
+
+        # ── A4 证据门：检索最高融合分低于路由置信阈值 → 不进入生成 ──
+        # 融合分（RRF 归一化 0-1）衡量跨通道一致性：通道一致命中顶块≈1.0，
+        # 分歧/弱相关显著走低。此前 routing.confidence_threshold 全仓库无
+        # 消费方，检索置信度从未参与"答不答"的决策。有非检索工具时与空
+        # 上下文分支同样让位给 ReAct 循环。
+        if has_selected_kb and rag_sources and not non_retrieval_tools:
+            evidence_gate_threshold = get_config().routing.confidence_threshold
+            best_evidence_score = max(
+                float(s.get("score") or 0.0) for s in rag_sources
+            )
+            if self._below_evidence_gate(rag_sources, evidence_gate_threshold):
+                logger.warning(
+                    f"[RAG] Evidence gate triggered: best fused score "
+                    f"{best_evidence_score:.3f} < threshold "
+                    f"{evidence_gate_threshold:.2f}; refusing to answer."
+                )
+                self._last_sources = []
+                return AgentResponse(
+                    content=NO_SUFFICIENT_EVIDENCE_REPLY,
+                    answer=NO_SUFFICIENT_EVIDENCE_REPLY,
+                    steps=[],
+                    model=getattr(llm, "model", "unknown"),
+                    token_count=0,
+                    finish_reason="insufficient_evidence",
+                    status="insufficient_evidence",
+                    sources=[],
+                    intent=intent_result.to_dict() if intent_result else None,
+                    tool_calls_count=self._tool_calls_count,
+                    max_tool_steps=self.max_steps,
+                    style_used=self.style,
+                )
 
         if rag_context:
             enhanced_query = self._build_rag_prompt(rag_context, query, self.style)
@@ -1256,40 +1356,53 @@ class ReactAgent(Agent):
         deduped_sources = self._dedupe_sources(sources)
         self._last_sources = deduped_sources
 
-        # ── Groundedness check ──
+        # ── Groundedness check（A4 修洞：不再要求 was_compressed）──
+        # 此前守卫仅在压缩发生时触发——短上下文（未压缩）路径的"无依据"答案
+        # 直接以 completed 放行；且判据只有固定文案匹配。
+        # 现判据 = 模式文案匹配 OR 词汇支持分 < ReflectionConfig.confidence_threshold。
         groundedness_failed = False
+        reflection_confidence_threshold = get_config().reflection.confidence_threshold
         if (has_selected_kb and rag_sources
-                and self._is_groundless_answer(final_answer)
-                and was_compressed):
-            logger.warning(
-                "[RAG] Model returned groundless answer despite non-empty retrieval. "
-                "Retrying with uncompressed context."
-            )
-            try:
-                retry_prompt = self._build_rag_prompt(raw_context, query, self.style)
-                # 复用原 system 消息（含记忆注入），仅以未压缩上下文重建用户侧提示。
-                retry_messages = [messages[0]]
-                if history:
-                    for msg in history[-10:]:
-                        retry_messages.append(ChatMessage(role=msg["role"], content=msg["content"]))
-                retry_messages.append(ChatMessage(role="user", content=retry_prompt))
-                retry_response = await llm.chat(messages=retry_messages, temperature=0.7)
-                retry_text = retry_response.content
-                if not self._is_groundless_answer(retry_text):
-                    final_answer = retry_text
-                    # 重试用未压缩全文：全部编号块重新可见，[n] 引用按全集解析
-                    visible_numbers = list(range(1, len(rag_sources) + 1))
-                    logger.info("[RAG] Groundedness retry succeeded with uncompressed context.")
-                else:
+                and self._is_groundless_answer(final_answer, rag_context,
+                                               reflection_confidence_threshold)):
+            if was_compressed:
+                logger.warning(
+                    "[RAG] Model returned groundless answer despite non-empty retrieval. "
+                    "Retrying with uncompressed context."
+                )
+                try:
+                    retry_prompt = self._build_rag_prompt(raw_context, query, self.style)
+                    # 复用原 system 消息（含记忆注入），仅以未压缩上下文重建用户侧提示。
+                    retry_messages = [messages[0]]
+                    if history:
+                        for msg in history[-10:]:
+                            retry_messages.append(ChatMessage(role=msg["role"], content=msg["content"]))
+                    retry_messages.append(ChatMessage(role="user", content=retry_prompt))
+                    retry_response = await llm.chat(messages=retry_messages, temperature=0.7)
+                    retry_text = retry_response.content
+                    if not self._is_groundless_answer(retry_text, rag_context,
+                                                      reflection_confidence_threshold):
+                        final_answer = retry_text
+                        # 重试用未压缩全文：全部编号块重新可见，[n] 引用按全集解析
+                        visible_numbers = list(range(1, len(rag_sources) + 1))
+                        logger.info("[RAG] Groundedness retry succeeded with uncompressed context.")
+                    else:
+                        groundedness_failed = True
+                        logger.error(
+                            "[RAG] Groundedness retry also returned groundless answer. "
+                            f"Raw context length: {len(raw_context)}, "
+                            f"sources: {len(rag_sources)}"
+                        )
+                except Exception as retry_err:
                     groundedness_failed = True
-                    logger.error(
-                        "[RAG] Groundedness retry also returned groundless answer. "
-                        f"Raw context length: {len(raw_context)}, "
-                        f"sources: {len(rag_sources)}"
-                    )
-            except Exception as retry_err:
+                    logger.error(f"[RAG] Groundedness retry failed: {retry_err}")
+            else:
+                # 未压缩：不存在更强的上下文可重试，无依据答案直接走证据不足通道
                 groundedness_failed = True
-                logger.error(f"[RAG] Groundedness retry failed: {retry_err}")
+                logger.warning(
+                    "[RAG] Groundless answer with uncompressed context; "
+                    f"marking insufficient_evidence. sources: {len(rag_sources)}"
+                )
 
         # Self-reflection
         if final_answer and rag_context:
@@ -1552,6 +1665,18 @@ class ReactAgent(Agent):
                 yield await self._empty_context_reply()
                 return
 
+            # ── A4 证据门（流式）：与 run() 同判据 ──
+            if has_selected_kb and sources:
+                evidence_gate_threshold = get_config().routing.confidence_threshold
+                if self._below_evidence_gate(sources, evidence_gate_threshold):
+                    logger.warning(
+                        f"[RAG:stream] Evidence gate triggered: best fused score "
+                        f"{max(float(s.get('score') or 0.0) for s in sources):.3f} < threshold "
+                        f"{evidence_gate_threshold:.2f}; refusing to answer."
+                    )
+                    yield NO_SUFFICIENT_EVIDENCE_REPLY
+                    return
+
             prompt = self._build_rag_prompt(context, query, self.style) if context else query
 
             llm = self._get_llm()
@@ -1584,40 +1709,52 @@ class ReactAgent(Agent):
             }, ensure_ascii=False)
 
             # ── Groundedness check (streaming) ──
+            # ── Groundedness check (streaming)（A4 修洞：不再要求 was_compressed）──
+            reflection_confidence_threshold = get_config().reflection.confidence_threshold
             if (has_selected_kb and sources
-                    and self._is_groundless_answer(final_answer)
-                    and was_compressed
-                    and raw_context):
-                logger.warning(
-                    "[RAG:stream] Model returned groundless answer despite non-empty retrieval. "
-                    "Retrying with uncompressed context."
-                )
-                try:
-                    # 替换协议：通知前端清空已流出的无依据回答，重试内容整段替换
+                    and self._is_groundless_answer(final_answer, context,
+                                                   reflection_confidence_threshold)):
+                if was_compressed and raw_context:
+                    logger.warning(
+                        "[RAG:stream] Model returned groundless answer despite non-empty retrieval. "
+                        "Retrying with uncompressed context."
+                    )
+                    try:
+                        # 替换协议：通知前端清空已流出的无依据回答，重试内容整段替换
+                        yield json.dumps({"content_reset": True}, ensure_ascii=False)
+                        retry_prompt = self._build_rag_prompt(raw_context, query, self.style)
+                        retry_messages = [
+                            ChatMessage(role="system", content="你是一个智能助手，请回答用户的问题。"),
+                            ChatMessage(role="user", content=retry_prompt)
+                        ]
+                        retry_parts: list[str] = []
+                        async for chunk in llm.chat_stream(messages=retry_messages, temperature=0.7, max_tokens=2048):
+                            retry_parts.append(chunk)
+                            yield chunk
+                        retry_text = "".join(retry_parts)
+                        if not self._is_groundless_answer(retry_text, context,
+                                                          reflection_confidence_threshold):
+                            final_answer = retry_text
+                            # 重试用未压缩全文：全部编号块重新可见
+                            visible_numbers = list(range(1, len(sources) + 1))
+                            logger.info("[RAG:stream] Groundedness retry succeeded.")
+                        else:
+                            logger.error(
+                                "[RAG:stream] Groundedness retry also returned groundless answer. "
+                                f"Raw context length: {len(raw_context)}, "
+                                f"sources: {len(sources)}"
+                            )
+                    except Exception as retry_err:
+                        logger.error(f"[RAG:stream] Groundedness retry failed: {retry_err}")
+                else:
+                    # 未压缩：无更强上下文可重试——按替换协议改发证据不足答复
+                    logger.warning(
+                        "[RAG:stream] Groundless answer with uncompressed context; "
+                        "replacing with insufficient-evidence reply."
+                    )
                     yield json.dumps({"content_reset": True}, ensure_ascii=False)
-                    retry_prompt = self._build_rag_prompt(raw_context, query, self.style)
-                    retry_messages = [
-                        ChatMessage(role="system", content="你是一个智能助手，请回答用户的问题。"),
-                        ChatMessage(role="user", content=retry_prompt)
-                    ]
-                    retry_parts: list[str] = []
-                    async for chunk in llm.chat_stream(messages=retry_messages, temperature=0.7, max_tokens=2048):
-                        retry_parts.append(chunk)
-                        yield chunk
-                    retry_text = "".join(retry_parts)
-                    if not self._is_groundless_answer(retry_text):
-                        final_answer = retry_text
-                        # 重试用未压缩全文：全部编号块重新可见
-                        visible_numbers = list(range(1, len(sources) + 1))
-                        logger.info("[RAG:stream] Groundedness retry succeeded.")
-                    else:
-                        logger.error(
-                            "[RAG:stream] Groundedness retry also returned groundless answer. "
-                            f"Raw context length: {len(raw_context)}, "
-                            f"sources: {len(sources)}"
-                        )
-                except Exception as retry_err:
-                    logger.error(f"[RAG:stream] Groundedness retry failed: {retry_err}")
+                    final_answer = NO_SUFFICIENT_EVIDENCE_REPLY
+                    yield NO_SUFFICIENT_EVIDENCE_REPLY
 
             # Yield sources as a JSON event (Agent V1 canonical format).
             # Sources are already normalised by normalize_source() above —

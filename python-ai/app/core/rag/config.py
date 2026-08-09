@@ -408,6 +408,9 @@ class RAGConfig:
         # 反思配置
         if os.getenv("RAG_REFLECTION_QUALITY_THRESHOLD"):
             config.reflection.quality_threshold = float(os.getenv("RAG_REFLECTION_QUALITY_THRESHOLD"))
+        if os.getenv("RAG_REFLECTION_CONFIDENCE_THRESHOLD"):
+            # A4：groundedness 守卫的词汇支持分阈值（此前全仓库无消费方）
+            config.reflection.confidence_threshold = float(os.getenv("RAG_REFLECTION_CONFIDENCE_THRESHOLD"))
         if os.getenv("RAG_REFLECTION_MAX_RETRIES"):
             config.reflection.max_retries = int(os.getenv("RAG_REFLECTION_MAX_RETRIES"))
 

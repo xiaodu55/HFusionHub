@@ -133,3 +133,32 @@ chunk 不可引用（`eval_baseline.compression_surviving_chunks`，与生产共
 **下一步**（A4）：证据门接上 `routing.confidence_threshold` 与
 `ReflectionConfig.confidence_threshold` 两个死配置；修 groundedness 守卫
 两个洞（`was_compressed=False` 不触发、判据为固定文案匹配而非分数）。
+
+## 增补（A4 · 2026-09-05）：证据门 + groundedness 守卫修洞——A 线收官
+
+**证据门（`routing.confidence_threshold` 首个真实消费方）**：run() 与
+run_stream() 在检索之后、生成之前增加判定——检索最高融合分（RRF 归一化
+0-1，顶块=跨通道一致性）低于阈值（默认 0.7，`RAG_ROUTING_CONFIDENCE_
+THRESHOLD` 可调）时走现成 `insufficient_evidence` 通道拒答，不再让模型
+对着弱证据硬编。有非检索工具可用时让位给 ReAct 循环（与空上下文分支
+同一策略）。
+
+**groundedness 守卫修两洞**：
+1. **`was_compressed=False` 不触发**——短上下文（未压缩）路径的"无依据"
+   答案此前直接以 completed 放行。现：未压缩时无更强上下文可重试，
+   直接走 insufficient_evidence（流式按 content_reset 替换协议改发拒答）；
+   压缩过则保留原重试链路。
+2. **判据从固定文案改为"文案 OR 分数"**——`_answer_support_score` 计算
+   答案实质句对上下文的最大词元覆盖率（跳过 <10 字短句，防误杀"是的。"
+   类应答），全部实质句支持度低于 `ReflectionConfig.confidence_threshold`
+   （默认 0.6，新增 `RAG_REFLECTION_CONFIDENCE_THRESHOLD` env）即判无依据，
+   抓住纯文案匹配抓不住的幻觉。两个"死配置"至此全部接入消费方。
+
+**校准边界（红线）**：门阈值 0.7 / 支持分阈值 0.6 的"误杀率/漏答率"需要
+runtime 轨真实流量校准（refusal_correctness 与 recall 双达标验收依赖
+eval-nightly 实测）；本批交付的是机制与单测（+13 个），数字回填待
+eval-nightly 恢复（TODO P1）。
+
+**A 线总账**：忠实度度量从"结构性缺陷指标"（0.355，天花板 0.39）重建为
+P/R/F1 双报 + 压缩感知 + 答案标注引用（F1=0.741，suite 1.1.0）；生成侧
+新增逐论断引用约束与证据门，"答不答"与"答了有没有据"首次进入确定性门禁。
