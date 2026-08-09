@@ -179,7 +179,7 @@ curl -X POST http://localhost:8080/api/internal/analytics/batch/run \
 | 数据回补 | 内部端点 `POST /internal/analytics/batch/run {"date":"YYYY-MM-DD"}`(dt 分区覆盖写,幂等);或等次日 04:00 |
 | 门禁失败排查 | `bigdata_batch_run_log.status/log_excerpt`;Hive quality_report 看具体规则 |
 | 失败告警 | 日结失败/质量不达标 → RealtimeThresholdScheduler gauges + `hfusionhub_slo_analytics` 告警组(接既有 Alertmanager) |
-| Flink 断点续传 | checkpoint 在 flink-checkpoints 卷;作业恢复后从位点续读,不重不漏 |
+| Flink 断点续传 | checkpoint 在 flink-checkpoints 卷;作业恢复后从位点续读,不重不漏(按 checkpoint 语义设计,**未实测**) |
 | 数据保留 | ODS 保留 180 天:`hdfs dfs -rm -r /warehouse/hfusionhub/ods/<table>/dt=<过期日>`;替代主产品手工 DELETE 清理 |
 | 主产品回归 | 扩展包默认关闭(BIGDATA_BATCH_ENABLED=false 时调度零行为),现有 48 项冒烟不受影响 |
 

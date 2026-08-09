@@ -207,7 +207,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### 大数据扩展包批（2026-08-31 第十八批：HFusionData Analytics）
 
-#### Added（毕设 + 可上线产品双形态的分析扩展包）
+#### Added（个人项目 + 可上线产品双形态的分析扩展包）
 - **总体**：以 Hadoop 生态为主线的运营数仓扩展包（HDFS/YARN/Hive/Spark/
   MapReduce/Sqoop-等价/Flink CDC/ClickHouse/Superset），独立 compose profile
   （`docker/docker-compose.analytics.yml`），主产品零依赖、默认关闭。
