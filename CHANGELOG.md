@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第二十七批（2026-09-05：A1 评测度量口径修正——忠实度 0.355 正名）
+
+#### Changed
+- **离线引用指标口径重构（[ADR-006](docs/adr/ADR-006-faithfulness-metric-recalibration.md)）**：
+  - 数据侦查推翻原假设：套件期望证据最多 2 块（{0:31, 1:158, 2:31}），固定 top-3
+    引用窗口结构性偏大，精确率口径天花板 ≈0.388（实测 0.355 已贴近上限）；
+    直觉方案"窗口 3→5"实测反而恶化（F1 0.50→0.35），否决
+  - 引用窗口改为**相关性自适应**（`select_cited_chunks`：score ≥ 0.5×首块分数才算
+    被引用，`--citation-top-k` 降级为硬上限默认 5）；新增 `citation_recall` /
+    `citation_f1` 双报指标（离线/runtime/仿真三轨与基线 diff 全贯通）
+  - 数字：精确率 0.3545→**0.7015**、召回率 **0.894**（新增）、F1 **0.739**（新增）；
+    Recall@5 / nDCG 不变。**检索与生成未动，数字变化全部来自度量修正，
+    不作为系统改进宣称**（对照留档 `python-ai/evaluation/reports/
+    offline_metric_recalibration_20260905.md`，含窗口策略敏感度表）
+- **门禁收紧**：CI 主套件显式加 `--minimum-citation-recall 0.85 --minimum-citation-f1 0.70`；
+  4 套基线（offline / bid / bid_construction / bid_it）随口径重冻结（suite 1.0.0→1.1.0）
+
+#### Fixed
+- **套件类别契约**：25 条 category=refusal 超纲用例 `refusal` 字段漏标 none→required
+  （runtime 轨拒答计分覆盖 55→80 条），`build_suite.py` 增加校验规则防回归
+- **eval_offline `--min-score` 接线断裂**：参数此前传给 `SyntheticRouter` 而打分过滤
+  实际发生在 `SyntheticIndex`——从未生效；接线修正，默认 1.0→0.0（BM25 原始分
+  未归一化，1.0 底线会误杀 5 条用例的期望块）
+- **CI 4 处坏导入**：套件完整性校验步骤 `from app.core.rag.eval_baseline import ...`
+  指向不存在的模块，修正为 `scripts/eval_baseline.py`（CI 恢复时不再必红）
+- **PYTHONSAFEPATH 兼容**：eval_offline / eval_local_sim / eval_runtime / eval_reranker
+  显式插入脚本目录到 sys.path（`python -P` 环境下兄弟模块导入不再失败）
+- eval 单测 +5（自适应窗口 / 引用召回 / F1 / 双报聚合 / 套件契约），Python 全量绿
+
 ### 第二十六批（2026-09-04：P1 收官——语义分块 + content_reset 桥接 + i18n 骨架 + 语音贯通）
 
 #### Added

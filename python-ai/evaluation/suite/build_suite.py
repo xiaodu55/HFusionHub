@@ -24,7 +24,7 @@ MANIFEST_PATH = KB_ROOT / "kb_manifest.json"
 CASES_PATH = SUITE_DIR / "cases.jsonl"
 SUITE_MANIFEST_PATH = SUITE_DIR / "suite_manifest.json"
 
-SUITE_VERSION = "1.0.0"
+SUITE_VERSION = "1.1.0"
 CATEGORIES = {
     "normal": "普通问答",
     "cross_document": "跨文档问答",
@@ -79,6 +79,12 @@ def validate(definitions, manifest: dict) -> list[dict]:
             errors.append(f"{case_id}: kb_id mismatch (expected {kb_id})")
         if case["refusal"] not in ("none", "required"):
             errors.append(f"{case_id}: invalid refusal value {case['refusal']!r}")
+        if case["category"] == "refusal" and case["refusal"] != "required":
+            # 类别契约：refusal 类用例（知识库中无答案）必须要求拒答，
+            # 否则 runtime 轨的 refusal_correctness 永远统计不到它们。
+            errors.append(
+                f"{case_id}: category 'refusal' requires refusal=required"
+            )
         for risk in case["risk_labels"]:
             if risk not in VALID_RISKS:
                 errors.append(f"{case_id}: invalid risk label {risk!r}")

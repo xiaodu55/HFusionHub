@@ -21,8 +21,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+SCRIPTS_DIR = Path(__file__).resolve().parent
+# 显式插入脚本目录：PYTHONSAFEPATH=1（python -P）会取消脚本目录自动入表
+for _path in (str(SCRIPTS_DIR), str(PROJECT_ROOT)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 from eval_baseline import (  # noqa: E402
     EvaluationReport,
@@ -33,6 +36,7 @@ from eval_baseline import (  # noqa: E402
     load_cases,
     render_markdown,
     save_baseline,
+    select_cited_chunks,
     verify_suite_integrity,
 )
 
@@ -51,10 +55,21 @@ def parse_args() -> argparse.Namespace:
                         help="synthetic KB manifest path (default evaluation/kb/kb_manifest.json; "
                              "bid suite uses evaluation/kb_bid/kb_manifest.json)")
     parser.add_argument("--top-k", type=int, default=10)
-    parser.add_argument("--citation-top-k", type=int, default=3,
-                        help="how many retrieved chunks the extractive answer model cites")
-    parser.add_argument("--min-score", type=float, default=1.0,
-                        help="relevance threshold for the synthetic index")
+    parser.add_argument("--citation-top-k", type=int, default=5,
+                        help="hard cap on how many chunks the simulated extractive "
+                             "answer may cite (the adaptive score window decides "
+                             "the actual size, capped here)")
+    parser.add_argument("--citation-score-ratio", type=float, default=0.5,
+                        help="a retrieved chunk counts as cited when its score is "
+                             "at least this fraction of the top-1 score; a fixed "
+                             "top-k window without this gives faithfulness a "
+                             "structural ceiling well below 1.0")
+    parser.add_argument("--min-score", type=float, default=0.0,
+                        help="retrieval score floor; chunks scoring below are dropped "
+                             "from the results entirely (BM25 raw scores are not "
+                             "normalized, so keep 0.0 to disable the floor)")
+    parser.add_argument("--minimum-citation-recall", type=float, default=0.0)
+    parser.add_argument("--minimum-citation-f1", type=float, default=0.0)
     parser.add_argument("--report", type=Path, default=None,
                         help="output JSON report path (default evaluation/reports/offline_<date>.json)")
     parser.add_argument("--markdown", type=Path, default=None,
@@ -100,11 +115,13 @@ def _compute_bid_metrics(case, retrieved_chunk_ids: list[str], router) -> dict[s
     return bid or None
 
 
-async def evaluate_offline(router, cases, top_k: int, citation_top_k: int = 3) -> list:
+async def evaluate_offline(router, cases, top_k: int, citation_top_k: int = 5,
+                           citation_score_ratio: float = 0.5) -> list:
     outcomes = []
     for case in cases:
         merged = await router.search(case.query, case.kb_id, top_k)
         seen: list[str] = []
+        ranked: list[tuple[str, float]] = []
         scope_violations = 0
         for result in merged.results:
             metadata = result.metadata or {}
@@ -113,7 +130,8 @@ async def evaluate_offline(router, cases, top_k: int, citation_top_k: int = 3) -
             chunk_id = metadata.get("chunk_id")
             if chunk_id is not None and str(chunk_id) not in seen:
                 seen.append(str(chunk_id))
-        cited = seen[:citation_top_k]
+                ranked.append((str(chunk_id), float(result.score)))
+        cited = select_cited_chunks(ranked, citation_top_k, citation_score_ratio)
         outcomes.append(
             {
                 "case_id": case.case_id,
@@ -126,6 +144,9 @@ async def evaluate_offline(router, cases, top_k: int, citation_top_k: int = 3) -
                     cited, case.expected_chunk_ids
                 ),
                 "refusal_expected": case.refusal == "required",
+                # 拒答是生成层行为，密闭轨没有模型无法确定性评分（检索分数
+                # 与超纲性不可分，实测见 ADR-006）；refusal 用例统一由
+                # runtime 轨的 _detect_refusal 评分。
                 "refusal_correct": None,
                 "tool": case.tool,
                 "cited_chunk_ids": cited,
@@ -147,10 +168,14 @@ def main() -> int:
     # 支持领域套件（如 suite_bid）指向独立合成 KB 清单
     from app.core.rag.synthetic_index import SyntheticIndex
     kb_manifest = args.kb_manifest or (PROJECT_ROOT / "evaluation" / "kb" / "kb_manifest.json")
-    router = SyntheticRouter(index=SyntheticIndex(manifest_path=kb_manifest),
-                             min_score=args.min_score)
+    # min_score 由 SyntheticIndex 消费（Router 传入 index 时其自身的
+    # min_score 参数不参与打分过滤，见 synthetic_index.search_ranked）。
+    router = SyntheticRouter(
+        index=SyntheticIndex(manifest_path=kb_manifest, min_score=args.min_score),
+    )
     raw_outcomes = asyncio.run(
-        evaluate_offline(router, cases, args.top_k, args.citation_top_k)
+        evaluate_offline(router, cases, args.top_k, args.citation_top_k,
+                         args.citation_score_ratio)
     )
 
     from eval_baseline import CaseOutcome, aggregate_metrics
@@ -163,6 +188,8 @@ def main() -> int:
         "ndcg_at_10": args.minimum_ndcg,
         "citation_accuracy": args.minimum_citation_accuracy,
         "citation_faithfulness": args.minimum_citation_faithfulness,
+        "citation_recall": args.minimum_citation_recall,
+        "citation_f1": args.minimum_citation_f1,
         "scope_violations": args.maximum_scope_violations,
         "qualification_recall": args.minimum_qualification_recall,
         "disqualification_clause_recall": args.minimum_disqualification_clause_recall,

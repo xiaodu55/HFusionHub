@@ -31,6 +31,8 @@ METRIC_LABELS: dict[str, str] = {
     "ndcg_at_10": "nDCG@10",
     "citation_accuracy": "引用准确率 (citation accuracy)",
     "citation_faithfulness": "引用忠实度 (citation faithfulness)",
+    "citation_recall": "引用召回率 (citation recall)",
+    "citation_f1": "引用 F1 (citation F1)",
     "refusal_correctness": "拒答正确率 (refusal correctness)",
     "tool_success_rate": "工具成功率 (tool success rate)",
     "p95_latency_ms": "P95 延迟 (ms)",
@@ -172,6 +174,8 @@ class Metrics:
     ndcg_at_10: float | None = None
     citation_accuracy: float | None = None
     citation_faithfulness: float | None = None
+    citation_recall: float | None = None
+    citation_f1: float | None = None
     refusal_correctness: float | None = None
     tool_success_rate: float | None = None
     p95_latency_ms: float | None = None
@@ -206,6 +210,13 @@ def aggregate_metrics(outcomes: Sequence[CaseOutcome], top_k: int = 10,
     from citation aggregates.  The runtime track enables it because a correctly
     refused answer carries no citations by design; the offline track keeps them
     to also measure retrieval of sensitive content.
+
+    引用指标为精确率/召回率双报：``citation_faithfulness`` 是精确率口径
+    （逐 case 的 |E∩C|/|C|，由调用方按各轨语义给出——离线轨为引用窗口
+    精确率，runtime 轨为 key-facts 语义级支持度），``citation_recall``
+    在本函数中从 cited/expected 直接计算（文档/chunk 级覆盖）。
+    ``citation_f1`` 调和两者；runtime 轨的 F1 混合了语义级 P 与文档级 R，
+    仅作跨轨参考，跨套件对比以离线轨为准。
     """
     if not outcomes:
         raise ValueError("at least one outcome is required")
@@ -234,6 +245,8 @@ def aggregate_metrics(outcomes: Sequence[CaseOutcome], top_k: int = 10,
     ]
     citation_accuracy = None
     citation_faithfulness = None
+    citation_recall = None
+    citation_f1 = None
     if citation_outcomes:
         accurate = sum(
             1 for o in citation_outcomes
@@ -244,6 +257,24 @@ def aggregate_metrics(outcomes: Sequence[CaseOutcome], top_k: int = 10,
                                if o.citation_faithfulness is not None]
         if faithfulness_values:
             citation_faithfulness = sum(faithfulness_values) / len(faithfulness_values)
+        # 引用召回率/F1：与精确率（忠实度）互补的双报口径。忠实度只惩罚
+        # 引用集里的无关块，对"漏引期望证据"不敏感；recall = |E∩C|/|E|
+        # 补上这个盲区，F1 两者兼顾作为跨套件可比的主指标。
+        recall_values: list[float] = []
+        f1_values: list[float] = []
+        for o in citation_outcomes:
+            cited = o.cited_chunk_ids or o.retrieved_chunk_ids
+            recall = compute_citation_recall(cited, o.expected_chunk_ids)
+            if recall is None:
+                continue
+            recall_values.append(recall)
+            f1 = compute_citation_f1(o.citation_faithfulness, recall)
+            if f1 is not None:
+                f1_values.append(f1)
+        if recall_values:
+            citation_recall = sum(recall_values) / len(recall_values)
+        if f1_values:
+            citation_f1 = sum(f1_values) / len(f1_values)
 
     # refusal correctness is an answer-layer property; computed only when the
     # caller (runtime track) supplies per-case signals.
@@ -274,6 +305,8 @@ def aggregate_metrics(outcomes: Sequence[CaseOutcome], top_k: int = 10,
         ndcg_at_10=(sum(ndcg_values) / len(ndcg_values)) if ndcg_values else None,
         citation_accuracy=citation_accuracy,
         citation_faithfulness=citation_faithfulness,
+        citation_recall=citation_recall,
+        citation_f1=citation_f1,
         refusal_correctness=refusal_correctness,
         tool_success_rate=tool_success_rate,
         p95_latency_ms=_percentile(latencies, 0.95) if latencies else None,
@@ -315,6 +348,59 @@ def compute_citation_faithfulness(
     if not expected:
         return None
     return len(expected & set(cited)) / len(cited)
+
+
+def compute_citation_recall(
+    cited_chunk_ids: Sequence[str], expected_chunk_ids: Sequence[str]
+) -> float | None:
+    """引用召回率 |E∩C|/|E|：期望证据块被引用集覆盖的比例。
+
+    与忠实度（精确率口径）互补：忠实度对"引用集混入无关块"敏感，
+    对"漏引期望证据"完全不敏感（|E|=1、|C|=3 时即使漏掉唯一证据块，
+    只要剩余两个块也算引用，分数仍不为零的盲区由 recall 补上）。
+    """
+    expected = set(expected_chunk_ids)
+    if not expected:
+        return None
+    cited = list(cited_chunk_ids)
+    if not cited:
+        return 0.0
+    return len(expected & set(cited)) / len(expected)
+
+
+def compute_citation_f1(
+    precision: float | None, recall: float | None
+) -> float | None:
+    """引用 F1：精确率与召回率的调和平均，作为跨套件可比的主指标。"""
+    if precision is None or recall is None:
+        return None
+    if precision + recall <= 0:
+        return 0.0
+    return 2 * precision * recall / (precision + recall)
+
+
+def select_cited_chunks(
+    ranked: Sequence[tuple[str, float]], top_k: int, score_ratio: float
+) -> list[str]:
+    """模拟抽取式答案的引用行为：引用与最相关块"相关性足够接近"的块。
+
+    固定 top-k 引用窗口与期望证据集规模脱钩（本套件期望块最多 2 块，
+    而窗口固定 3 块），无关的高排名块必然进入引用集，使忠实度存在
+    结构性上限（完美检索也只有 ~0.39）。自适应窗口以
+    ``score >= score_ratio * 首块分数`` 划界：检索歧义小（首块显著占优）
+    时窗口收缩到 1~2 块，分数扁平（无法区分相关块）时窗口扩张到
+    ``top_k`` 封顶——窗口大小本身成为检索质量的信号。
+
+    ``ranked`` 为按相关性降序的 ``(chunk_id, score)`` 序列；首块分数
+    非>0（检索完全无命中）时引用空集，对应"无证据可引"。
+    """
+    if not ranked:
+        return []
+    top_score = ranked[0][1]
+    if top_score <= 0:
+        return []
+    threshold = top_score * score_ratio
+    return [chunk_id for chunk_id, score in ranked if score >= threshold][:top_k]
 
 
 def runtime_citation_faithfulness(
@@ -415,6 +501,8 @@ GATE_ORDER = [
     "ndcg_at_10",
     "citation_accuracy",
     "citation_faithfulness",
+    "citation_recall",
+    "citation_f1",
     "refusal_correctness",
     "tool_success_rate",
     "qualification_recall",
@@ -593,6 +681,7 @@ def render_markdown(report: EvaluationReport) -> str:
     ]
     metric_keys = [
         "recall_at_5", "ndcg_at_10", "citation_accuracy", "citation_faithfulness",
+        "citation_recall", "citation_f1",
         "refusal_correctness", "tool_success_rate", "p95_latency_ms",
         "tokens_per_task", "cost_usd_per_task", "error_rate", "scope_violations",
     ]

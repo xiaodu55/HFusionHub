@@ -27,8 +27,11 @@ import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+SCRIPTS_DIR = Path(__file__).resolve().parent
+# 显式插入脚本目录：PYTHONSAFEPATH=1（python -P）会取消脚本目录自动入表
+for _path in (str(SCRIPTS_DIR), str(PROJECT_ROOT)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 from eval_baseline import load_cases  # noqa: E402
 

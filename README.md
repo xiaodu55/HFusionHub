@@ -20,7 +20,7 @@ HFusionHub 是一个可以私有部署的 AI Agent 平台：上传文档建知�
 - **工具审批的正确性设计**：审批决定的三表更新在同一事务内完成，签发**一次性执行令牌**（数据库守卫 UPDATE 保证 exactly-once），LLM/工具执行经 afterCommit 移出事务——行锁不会被 120 秒的工具调用占住。
 - **并发与竞态治理**：任务状态机全部走条件 UPDATE 守卫迁移（completeRunGuarded / failUnlessTerminal），用量账本"只有赢得终态迁移的一方结算"，配套竞态回归测试。
 - **RAG 管线纵深**：意图分类 → 查询分解 → 多路检索（向量+BM25+图谱+RRF）→ 上下文压缩 → Groundedness 守卫与重试 → 引用完整性校验；Parent-Child 父子分块与语义分块（实验档）提升长文档召回。
-- **测试与防漂移门禁**：Java 702（H2 内存库 + Flyway 校验）/ Python 1451 / 前端 57 单测 + 73 E2E；schema-h2 与迁移链**漂移零容忍**（漏同步直接 CI 红）、文档测试计数与代码强同步、离线评测门禁（recall/nDCG 基线）。
+- **测试与防漂移门禁**：Java 702（H2 内存库 + Flyway 校验）/ Python 1451 / 前端 57 单测 + 73 E2E；schema-h2 与迁移链**漂移零容忍**（漏同步直接 CI 红）、文档测试计数与代码强同步、离线评测门禁（recall/nDCG/引用 P·R·F1 基线，引用窗口按相关性自适应，见 [ADR-006](docs/adr/ADR-006-faithfulness-metric-recalibration.md)）。
 - **数据规模**：84 个 Flyway 迁移、26 轮自审修复批次（全部记录在 CHANGELOG）、48 项冒烟自测全过。
 
 ## 质量与验证口径（如实）
@@ -237,6 +237,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 
 > 所有文档位于 [docs/](docs/) 目录，按用途分三类：**开发**、**运维**、**治理**。
 > 关键事实基线：Java 702 测试 / Python 1451 / 前端 57 单测 + 73 E2E / Flyway V84 / Spring Boot 3.5.16。
+> 离线评测基线（suite 1.1.0，2026-09-05 冻结）：Recall@5=0.932 / nDCG@10=0.903 / 引用准确率=0.942 / 引用忠实度 F1=0.739（精确率 0.701、召回率 0.894）。
 
 ### 开发类
 

@@ -1,14 +1,16 @@
 {
   "track": "offline",
-  "suite_version": "1.0.0",
+  "suite_version": "1.1.0",
   "kb_version": "1.0.0",
-  "suite_sha256": "a5617dd96a728aac4ff5d0882fccaffc7ad90abacc3010f5b8d1a7661ed5ff72",
-  "generated_at": "2026-08-03T02:17:25Z",
+  "suite_sha256": "b02b9dd329d4a38bae2336adec854b226b361418ef94747e75f37c4e95d72c4a",
+  "generated_at": "2026-09-05T02:04:01Z",
   "metrics": {
     "recall_at_5": 0.9318181818181818,
     "ndcg_at_10": 0.9029163197895282,
-    "citation_accuracy": 0.9470899470899471,
-    "citation_faithfulness": 0.35537918871252266,
+    "citation_accuracy": 0.9417989417989417,
+    "citation_faithfulness": 0.7014991181657846,
+    "citation_recall": 0.8941798941798942,
+    "citation_f1": 0.738977072310406,
     "refusal_correctness": null,
     "tool_success_rate": null,
     "p95_latency_ms": null,
@@ -17,6 +19,10 @@
     "tokens_per_task": null,
     "cost_usd_per_task": null,
     "error_rate": 0.0,
-    "scope_violations": 0
+    "scope_violations": 0,
+    "qualification_recall": null,
+    "disqualification_clause_recall": null,
+    "scoring_point_accuracy": null,
+    "bid_terminology_accuracy": null
   }
 }

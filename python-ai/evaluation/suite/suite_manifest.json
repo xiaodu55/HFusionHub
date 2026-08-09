@@ -1,5 +1,5 @@
 {
-  "suite_version": "1.0.0",
+  "suite_version": "1.1.0",
   "kb_id": 101,
   "kb_version": "1.0.0",
   "kb_name": "synthetic-business-kb",
@@ -13,5 +13,5 @@
     "tool": 20,
     "long_document": 20
   },
-  "cases_sha256": "a5617dd96a728aac4ff5d0882fccaffc7ad90abacc3010f5b8d1a7661ed5ff72"
+  "cases_sha256": "b02b9dd329d4a38bae2336adec854b226b361418ef94747e75f37c4e95d72c4a"
 }

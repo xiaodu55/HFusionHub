@@ -212,12 +212,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: Verify frozen suite integrity (SHA-256)
-        run: python -c "from app.core.rag.eval_baseline import verify_suite_integrity; verify_suite_integrity('evaluation/suite/cases.jsonl','evaluation/suite/suite_manifest.json'); print('frozen suite OK')"
+        run: python -c "import sys; sys.path.insert(0, 'scripts'); from eval_baseline import verify_suite_integrity; verify_suite_integrity('evaluation/suite/cases.jsonl','evaluation/suite/suite_manifest.json'); print('frozen suite OK')"
       - name: Run offline evaluation gate
-        run: python scripts/eval_offline.py --fail-on-regression
+        run: python scripts/eval_offline.py --fail-on-regression --minimum-citation-recall 0.85 --minimum-citation-f1 0.70
       # ─── 招投标领域评测门禁（B2 垂直化）───
       - name: Verify frozen bid suite integrity (SHA-256)
-        run: python -c "from app.core.rag.eval_baseline import verify_suite_integrity; verify_suite_integrity('evaluation/suite_bid/cases.jsonl','evaluation/suite_bid/suite_manifest.json'); print('frozen bid suite OK')"
+        run: python -c "import sys; sys.path.insert(0, 'scripts'); from eval_baseline import verify_suite_integrity; verify_suite_integrity('evaluation/suite_bid/cases.jsonl','evaluation/suite_bid/suite_manifest.json'); print('frozen bid suite OK')"
       - name: Run bid offline evaluation gate
         run: python scripts/eval_offline.py \
           --cases evaluation/suite_bid/cases.jsonl \
@@ -231,7 +231,7 @@ jobs:
           --fail-on-regression
       # ─── 行业方案包评测门禁（P2-4：工程施工 / IT 集成，售卖质量凭证）───
       - name: Verify frozen construction suite integrity (SHA-256)
-        run: python -c "from app.core.rag.eval_baseline import verify_suite_integrity; verify_suite_integrity('evaluation/suite_bid_construction/cases.jsonl','evaluation/suite_bid_construction/suite_manifest.json'); print('frozen construction suite OK')"
+        run: python -c "import sys; sys.path.insert(0, 'scripts'); from eval_baseline import verify_suite_integrity; verify_suite_integrity('evaluation/suite_bid_construction/cases.jsonl','evaluation/suite_bid_construction/suite_manifest.json'); print('frozen construction suite OK')"
       - name: Run construction offline evaluation gate
         run: python scripts/eval_offline.py \
           --cases evaluation/suite_bid_construction/cases.jsonl \
@@ -244,7 +244,7 @@ jobs:
           --minimum-bid-terminology-accuracy 0.9 \
           --fail-on-regression
       - name: Verify frozen IT suite integrity (SHA-256)
-        run: python -c "from app.core.rag.eval_baseline import verify_suite_integrity; verify_suite_integrity('evaluation/suite_bid_it/cases.jsonl','evaluation/suite_bid_it/suite_manifest.json'); print('frozen IT suite OK')"
+        run: python -c "import sys; sys.path.insert(0, 'scripts'); from eval_baseline import verify_suite_integrity; verify_suite_integrity('evaluation/suite_bid_it/cases.jsonl','evaluation/suite_bid_it/suite_manifest.json'); print('frozen IT suite OK')"
       - name: Run IT offline evaluation gate
         run: python scripts/eval_offline.py \
           --cases evaluation/suite_bid_it/cases.jsonl \

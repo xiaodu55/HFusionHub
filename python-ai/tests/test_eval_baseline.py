@@ -19,10 +19,13 @@ from eval_baseline import (
     aggregate_metrics,
     check_gates,
     compute_citation_faithfulness,
+    compute_citation_f1,
+    compute_citation_recall,
     diff_against_baseline,
     load_baseline,
     load_cases,
     save_baseline,
+    select_cited_chunks,
 )
 
 from app.core.rag.synthetic_index import (
@@ -95,6 +98,15 @@ def test_all_expected_chunks_exist_in_kb_manifest():
         for chunk in case.expected_chunk_ids:
             doc_id, _, section_id = chunk.partition("#")
             assert (doc_id, section_id) in sections, f"{case.case_id}: {chunk}"
+
+
+def test_refusal_category_cases_require_refusal_field():
+    """类别契约：refusal 类（知识库无答案）必须标 refusal=required，
+    否则 runtime 轨 refusal_correctness 永远统计不到它们（A1 修复项）。"""
+    cases = load_cases(SUITE_DIR / "cases.jsonl")
+    offenders = [c.case_id for c in cases
+                 if c.category == "refusal" and c.refusal != "required"]
+    assert offenders == []
 
 
 def test_load_cases_rejects_duplicates(tmp_path):
@@ -219,6 +231,28 @@ def test_aggregate_metrics_computes_fixed_format_fields():
     assert metrics.tokens_per_task == pytest.approx(500)
     assert metrics.cost_usd_per_task == pytest.approx((0.001 + 0.002 + 0.001) / 3)
     assert metrics.error_rate == 0.0
+
+
+def test_aggregate_metrics_reports_citation_recall_and_f1():
+    """双报口径：recall 惩罚漏引，F1 为精确率/召回率调和平均。"""
+    outcomes = [
+        # P=0.5, R=1.0 → F1=2/3
+        _outcome("a", retrieved=["x1", "x2"], expected=["x1"],
+                 cited=["x1", "x2"], faithfulness=0.5),
+        # P=0.5, R=0.5 → F1=0.5
+        _outcome("b", retrieved=["y1", "y3"], expected=["y1", "y2"],
+                 cited=["y1", "y3"], faithfulness=0.5),
+    ]
+    metrics = aggregate_metrics(outcomes, top_k=10)
+    assert metrics.citation_faithfulness == pytest.approx(0.5)
+    assert metrics.citation_recall == pytest.approx(0.75)
+    assert metrics.citation_f1 == pytest.approx((2 / 3 + 0.5) / 2)
+
+    # 新指标可设门禁（不低于阈值方向）
+    failures = check_gates(metrics, {"citation_recall": 0.9, "citation_f1": 0.9})
+    assert any("引用召回率" in f for f in failures)
+    assert any("引用 F1" in f for f in failures)
+    assert check_gates(metrics, {"citation_recall": 0.5, "citation_f1": 0.5}) == []
 
 
 def test_aggregate_metrics_bid_domain_fields():
@@ -362,3 +396,34 @@ def test_citation_faithfulness_edge_cases():
     assert compute_citation_faithfulness([], ["a#b"]) is None
     assert compute_citation_faithfulness(["a#b", "x#y"], []) is None
     assert compute_citation_faithfulness(["a#b", "x#y"], ["a#b", "c#d"]) == pytest.approx(0.5)
+
+
+def test_citation_recall_edge_cases():
+    # 无期望证据块时无定义；引用空集记 0（什么证据都没覆盖）
+    assert compute_citation_recall([], ["a#b"]) == pytest.approx(0.0)
+    assert compute_citation_recall(["a#b", "x#y"], []) is None
+    assert compute_citation_recall(["a#b", "x#y"], ["a#b", "c#d"]) == pytest.approx(0.5)
+    assert compute_citation_recall(["a#b", "c#d"], ["a#b", "c#d"]) == pytest.approx(1.0)
+
+
+def test_citation_f1_edge_cases():
+    assert compute_citation_f1(None, 0.5) is None
+    assert compute_citation_f1(0.5, None) is None
+    assert compute_citation_f1(0.0, 0.0) == pytest.approx(0.0)
+    assert compute_citation_f1(0.5, 1.0) == pytest.approx(2 / 3)
+
+
+def test_select_cited_chunks_adaptive_window():
+    # 检索无命中（首块分数 <= 0）→ 引用空集
+    assert select_cited_chunks([], top_k=5, score_ratio=0.5) == []
+    assert select_cited_chunks([("a", 0.0), ("b", 0.0)], top_k=5, score_ratio=0.5) == []
+    # 首块显著占优 → 窗口收缩到 1 块
+    assert select_cited_chunks(
+        [("a", 10.0), ("b", 3.0), ("c", 2.0)], top_k=5, score_ratio=0.5
+    ) == ["a"]
+    # 分数扁平（歧义大）→ 窗口扩张到 top_k 封顶
+    assert select_cited_chunks(
+        [("a", 10.0), ("b", 9.0), ("c", 8.0), ("d", 1.0)], top_k=3, score_ratio=0.5
+    ) == ["a", "b", "c"]
+    # 阈值边界：score >= ratio * top1 即引用
+    assert select_cited_chunks([("a", 10.0), ("b", 5.0)], top_k=5, score_ratio=0.5) == ["a", "b"]
