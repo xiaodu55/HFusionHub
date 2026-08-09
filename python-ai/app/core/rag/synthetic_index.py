@@ -22,23 +22,12 @@ from pathlib import Path
 from typing import Iterable
 
 from app.core.rag.query_router import ChannelType, MergedResult, SearchResult
+from app.core.rag.tokenization import tokenize  # noqa: F401  (re-export)
 
 logger = logging.getLogger(__name__)
 
 _KB_ROOT = Path(__file__).resolve().parents[3] / "evaluation" / "kb"
 _DEFAULT_MANIFEST = _KB_ROOT / "kb_manifest.json"
-
-_ASCII_TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:\.[0-9]+)?")
-_CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff]+")
-
-
-def tokenize(text: str) -> list[str]:
-    """Deterministic tokenization: ASCII words/numbers plus CJK bigrams."""
-    tokens: list[str] = []
-    tokens.extend(m.group(0).lower() for m in _ASCII_TOKEN_RE.finditer(text))
-    for run in _CJK_RUN_RE.findall(text):
-        tokens.extend(run[i : i + 2] for i in range(len(run) - 1))
-    return tokens
 
 
 def _extract_sections(md_text: str) -> list[tuple[str, str]]:

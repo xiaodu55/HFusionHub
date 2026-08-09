@@ -209,6 +209,64 @@ class TestExtractiveCompressionStrategy:
         assert sentences[1] == "第二句。"  # 分句后统一添加句号
         assert sentences[2] == "第三句。"
 
+    def test_query_signal_raises_relevant_sentence_score(self):
+        """A2：query 重叠信号提升与问题相关的低事实密度句子得分。
+
+        纯事实密度评分对"与问题直接相关但不含数字/日期"的句子是盲的，
+        压缩预算紧张时它们会被无差别丢掉。
+        """
+        strategy = ExtractiveCompressionStrategy()
+        sentences = [
+            "本段介绍售后政策的适用范围与历史沿革背景说明。",   # 与问题无关
+            "售后政策覆盖全国 128 个城市共 3500 个网点。",      # 事实密集
+            "音箱 S1 支持自定义唤醒词与唤醒灵敏度调节。",        # 相关但零事实标记
+            "固件自 2024 年起累计更新 26 个版本。",             # 事实密集
+        ]
+        text = "".join(sentences)
+        query = "音箱 S1 怎么设置自定义唤醒词"
+
+        scores_no_query = strategy.rank_sentences(sentences, text)
+        scores_with_query = strategy.rank_sentences(sentences, text, query=query)
+
+        relevant = 2
+        assert scores_with_query[relevant] > scores_no_query[relevant]
+        # 机制有界：query 命中满分的句子不应超过其权重上限（0.30 + 其余项）
+        assert max(scores_with_query) <= 1.0 + 1e-9
+
+    def test_no_query_keeps_legacy_weights(self):
+        """query 缺省/为空时退回历史权重分布，行为向后兼容。"""
+        strategy = ExtractiveCompressionStrategy()
+        sentences = ["第一句包含 2024 年的数据。", "第二句是普通描述性内容。"]
+        text = "".join(sentences)
+        assert (strategy.rank_sentences(sentences, text)
+                == strategy.rank_sentences(sentences, text, query=None)
+                == strategy.rank_sentences(sentences, text, query=""))
+
+    @pytest.mark.asyncio
+    async def test_compress_passes_query_to_scorer(self):
+        """compress(query=...) 端到端：query 参与句子选择（文本需超过短文本
+        守卫阈值，否则 compress 直接原样返回）。"""
+        strategy = ExtractiveCompressionStrategy()
+        config = CompressionConfig(target_ratio=0.25)
+        relevant = "音箱 S1 支持自定义唤醒词与唤醒灵敏度调节。"
+        # 长填充句：与问题无关、零事实标记，把合并文本推过守卫阈值
+        fillers = [
+            f"本段第{i}节介绍售后政策的适用范围与历史沿革背景说明，以及服务承诺的整体框架与边界。"
+            for i in range(1, 17)
+        ]
+        text = (
+            fillers[0] + fillers[1]
+            + "售后政策覆盖全国 128 个城市共 3500 个网点。"
+            + relevant
+            + "固件自 2024 年起累计更新 26 个版本。"
+            + "".join(fillers[2:])
+        )
+        assert len(text) > 600  # 确认越过短文本守卫
+
+        result = await strategy.compress(text, config, query="音箱 S1 唤醒词")
+        assert result.status == CompressionStatus.COMPLETED
+        assert relevant in result.compressed_text
+
 
 # ==================== 生成式压缩策略测试 ====================
 

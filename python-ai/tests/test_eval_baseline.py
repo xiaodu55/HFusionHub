@@ -18,6 +18,7 @@ from eval_baseline import (
     Metrics,
     aggregate_metrics,
     check_gates,
+    compression_surviving_chunks,
     compute_citation_faithfulness,
     compute_citation_f1,
     compute_citation_recall,
@@ -427,3 +428,54 @@ def test_select_cited_chunks_adaptive_window():
     ) == ["a", "b", "c"]
     # 阈值边界：score >= ratio * top1 即引用
     assert select_cited_chunks([("a", 10.0), ("b", 5.0)], top_k=5, score_ratio=0.5) == ["a", "b"]
+
+
+# 合并后长度超过生产压缩守卫阈值（600 字符）的确定性夹具：
+# docA 为数字密集+填充的长段落，docB 与 query 相关但零事实标记、句子短
+_COMPRESS_A = (
+    "售后政策覆盖全国 128 个城市共 3500 个服务网点，网点数量逐年扩大并延伸到县域市场，具体覆盖范围以官方页面公示为准。"
+    "固件自 2024 年起累计更新 26 个版本，每个版本都经过完整的回归测试与灰度发布流程后才会逐步推送。"
+    "退换货政策自 2023 年 1 月起执行，签收后 30 天内可无理由退货退款，非质量问题往返运费由客户承担。"
+    "整机质保期为 2 年，电池等耗材部件质保 6 个月，人为损坏与进水不在免费保修范围之内。"
+    "延保服务可延长至 3 年，价格按整机售价的 8% 计算，购买后 7 天内可无条件全额退订。"
+    "以旧换新补贴最高 800 元，需提供旧机购买凭证，补贴以旧机型号与成色评估结果为准。"
+    "企业客户批量采购享受 95 折优惠，满 100 台额外赠送 2 年延保与专属客户成功经理服务。"
+    "发票自签收日起 15 个工作日内开具，支持增值税专用发票与普通电子发票两种类型。"
+    "上门服务覆盖时间为每日 9 点至 18 点，偏远地区上门响应时间可能延长至 5 个工作日。"
+    "配件与耗材可以通过官方商城购买，价格以商城实时标价为准，不接受线下渠道议价。"
+    "跨境购买与海外保修暂不支持，国行版本与海外版本的服务体系相互独立，请购买前确认清楚。"
+    "以上内容为售后条款总则，具体细则以官方公告与合同附件为准，条款如有冲突以最新版本为准。"
+    "本段介绍售后政策的适用范围与历史沿革背景说明，帮助用户快速了解服务承诺的整体框架与适用边界。"
+)
+_COMPRESS_B = "S1 音箱支持自定义唤醒词。唤醒词可以在设置中随时修改。"
+
+
+def test_compression_surviving_chunks_query_signal_flips_survival():
+    """A2 核心机制：query 盲区会把相关低事实密度块整块压掉，query 信号救回。"""
+    ranked = [("docA#s1", 10.0), ("docB#s1", 8.0)]
+    contents = {"docA#s1": _COMPRESS_A, "docB#s1": _COMPRESS_B}
+    query = "S1 音箱怎么修改自定义唤醒词"
+
+    # query 盲区（修复前行为）：docB 的句子全部落入选保区之外，chunk 不可见
+    assert compression_surviving_chunks(ranked, contents, "", target_ratio=0.6) \
+        == [("docA#s1", 10.0)]
+    # 带 query：docB 的句子被 query 重叠信号抬入选保区
+    assert compression_surviving_chunks(ranked, contents, query, target_ratio=0.6) \
+        == ranked
+
+
+def test_compression_surviving_chunks_short_context_bypasses_compression():
+    """合并文本低于生产短文本保护阈值时不压缩，全部 chunk 可见（与生产一致）。"""
+    ranked = [("a#1", 5.0), ("b#1", 4.0)]
+    contents = {"a#1": "这是很短的第一段。", "b#1": "这是很短的第二段。"}
+    assert compression_surviving_chunks(ranked, contents, "任意问题",
+                                        target_ratio=0.6) == ranked
+
+
+def test_compression_surviving_chunks_ratio_one_disables_simulation():
+    """target_ratio=1.0 保留全部句子，等价于关闭压缩模拟。"""
+    ranked = [("docA#s1", 10.0), ("docB#s1", 8.0)]
+    contents = {"docA#s1": _COMPRESS_A, "docB#s1": _COMPRESS_B}
+    assert compression_surviving_chunks(ranked, contents, "", target_ratio=1.0) \
+        == ranked
+    assert compression_surviving_chunks([], contents, "q") == []

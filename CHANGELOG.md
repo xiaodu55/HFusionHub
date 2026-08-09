@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第二十八批（2026-09-05：A2 压缩阶段——query 信号 + 引用模拟压缩感知）
+
+#### Changed
+- **抽取式压缩评分加入 query 重叠信号（A2）**：原四项权重（事实密度
+  0.50/长度/位置/关键词）全部与问题无关，会把与问题直接相关但不含数字/
+  日期的句子无差别压掉；新增 query 重叠项（0.40 事实密度 / 0.30 query
+  重叠 / 其余 0.10×3；无 query 回退旧行为）。`react._safe_compress` 及
+  全部 4 处调用点透传 query
+- **离线引用模拟升级为压缩感知（ADR-006 增补）**：合并上下文按生产
+  target_ratio=0.6 重放压缩，句子全被压掉的 chunk 不可引用
+  （`compression_surviving_chunks` 与生产共用 `rank_sentences`，口径不漂移）；
+  4 套基线重冻结：主套件 F1 0.7404 / P 0.7028 / R 0.8942，recall@5 不变
+- **实测结论**：当前合成套件上压缩不是忠实度瓶颈（期望证据块存活率
+  99.51%→100%，仅 1 条边缘 case），修复价值在事实密度不均的真实 KB，
+  机制由确定性翻转单测锁定；忠实度真实杠杆在生成侧（A3）
+- 分词器抽至 `app/core/rag/tokenization.py`（压缩器/评测共用，
+  synthetic_index 保留 re-export）
+
+#### Fixed
+- **压缩缓存键缺 query**：`ContextCompressor._get_cache_key` 未含 query，
+  不同问题对同一文本会互串压缩缓存；纳入后缓存键与压缩结果决定因素一致
+- 测试 +6：query 信号机制（得分提升/权重回退/端到端存活）、
+  `compression_surviving_chunks`（翻转夹具/守卫旁路/ratio=1.0），
+  Python 全量 1501 过
+
 ### 第二十七批（2026-09-05：A1 评测度量口径修正——忠实度 0.355 正名）
 
 #### Changed

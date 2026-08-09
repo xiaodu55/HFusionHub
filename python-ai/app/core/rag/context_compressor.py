@@ -26,6 +26,7 @@ from typing import Any
 
 from .base import BaseCompressionStrategy
 from .cache import CacheManager
+from .tokenization import tokenize
 from .utils import (
     MAX_KEY_PHRASES,
     estimate_tokens,
@@ -187,6 +188,9 @@ class ExtractiveCompressionStrategy(BaseCompressionStrategy):
         """
         if config is None:
             config = CompressionConfig()
+        # query 经 kwargs 透传：提供时句子评分加入与问题的词元重叠信号，
+        # 避免丢掉与问题相关但事实密度低的句子；缺省行为与历史版本一致
+        query = kwargs.get("query")
 
         # 估算 token 数
         original_tokens = self.estimate_tokens(text)
@@ -219,7 +223,7 @@ class ExtractiveCompressionStrategy(BaseCompressionStrategy):
             )
 
         # 计算每个句子的重要性得分
-        sentence_scores = self._calculate_sentence_scores(sentences, text)
+        sentence_scores = self._calculate_sentence_scores(sentences, text, query=query)
 
         # 确定要保留的句子数量
         target_count = max(1, int(len(sentences) * config.target_ratio))
@@ -308,29 +312,54 @@ class ExtractiveCompressionStrategy(BaseCompressionStrategy):
     def _calculate_sentence_scores(
         self,
         sentences: list[str],
-        full_text: str
+        full_text: str,
+        query: str | None = None,
     ) -> list[float]:
         """
         计算句子重要性得分。
 
-        Weight breakdown (evidence-first):
-        - factual density  — 0.50  (numbers, dates, code, proper nouns, evidence markers)
-        - length            — 0.20  (longer sentences typically carry more info)
-        - position          — 0.15  (opening / closing sentences set context)
-        - keyword overlap   — 0.15  (overlap with key phrases in full text)
+        Weight breakdown (evidence-first + query-aware):
+        - factual density  — 0.40  (numbers, dates, code, proper nouns, evidence markers)
+        - query overlap    — 0.30  (与问题的词元重叠；无 query 时权重回收到其余项)
+        - length            — 0.10  (longer sentences typically carry more info)
+        - position          — 0.10  (opening / closing sentences set context)
+        - keyword overlap   — 0.10  (overlap with key phrases in full text)
+
+        query 信号解决一个盲区：纯"事实密度"评分会把与问题直接相关但不含
+        数字/日期等事实标记的句子无差别丢掉——而这些句子往往正是回答所
+        需要的证据。query 缺省（None/空）时退回无 query 的旧行为。
         """
+        # 无 query 时按原有权重分布归一（事实密度主导），保持向后兼容
+        if query and tokenize(query):
+            weight_fact, weight_query, weight_len, weight_pos, weight_kw = (
+                0.40, 0.30, 0.10, 0.10, 0.10)
+            query_terms = set(tokenize(query))
+        else:
+            weight_fact, weight_query, weight_len, weight_pos, weight_kw = (
+                0.50, 0.00, 0.20, 0.15, 0.15)
+            query_terms = set()
+
         scores = []
         max_len = max((len(s) for s in sentences), default=1)
         key_phrases = self._extract_key_phrases(full_text)
 
         for i, sentence in enumerate(sentences):
-            # 1. Factual density (dominant weight — evidence must survive)
+            # 1. Factual density (evidence must survive)
             fact_score = self._factual_density_score(sentence)
 
-            # 2. Length score
+            # 2. Query overlap: 命中的不同 query 词元占比
+            query_score = 0.0
+            if query_terms:
+                sentence_terms = set(tokenize(sentence))
+                query_score = (
+                    len(query_terms & sentence_terms) / len(query_terms)
+                    if query_terms else 0.0
+                )
+
+            # 3. Length score
             length_score = len(sentence) / max_len
 
-            # 3. Position score
+            # 4. Position score
             if i == 0:
                 position_score = 1.0
             elif i == len(sentences) - 1:
@@ -338,21 +367,35 @@ class ExtractiveCompressionStrategy(BaseCompressionStrategy):
             else:
                 position_score = 0.5
 
-            # 4. Keyword overlap with the full text key phrases
+            # 5. Keyword overlap with the full text key phrases
             kw_overlap = 0.0
             if key_phrases:
                 hits = sum(1 for kw in key_phrases if kw in sentence)
                 kw_overlap = min(1.0, hits / max(len(key_phrases), 1))
 
             total_score = (
-                fact_score * 0.50 +
-                length_score * 0.20 +
-                position_score * 0.15 +
-                kw_overlap * 0.15
+                fact_score * weight_fact +
+                query_score * weight_query +
+                length_score * weight_len +
+                position_score * weight_pos +
+                kw_overlap * weight_kw
             )
             scores.append(total_score)
 
         return scores
+
+    def rank_sentences(
+        self,
+        sentences: list[str],
+        full_text: str,
+        query: str | None = None,
+    ) -> list[float]:
+        """公开的句子打分入口：压缩选择与离线评测共用同一打分实现。
+
+        离线评测轨用它做压缩感知的引用模拟（存活句归属 chunk），若各自
+        实现打分逻辑，生产与评测的口径会静默漂移。
+        """
+        return self._calculate_sentence_scores(sentences, full_text, query=query)
 
     def _extract_key_phrases(self, text: str) -> list[str]:
         """提取关键短语"""
@@ -837,6 +880,8 @@ class ContextCompressor:
         Args:
             text: 原始文本
             config: 压缩配置
+            query: 触发检索的用户问题（影响抽取式评分的 query 重叠信号，
+                已纳入缓存键——不同问题对同一文本的压缩结果不同）
 
         Returns:
             压缩结果
@@ -844,8 +889,8 @@ class ContextCompressor:
         if config is None:
             config = CompressionConfig()
 
-        # 1. 检查缓存
-        cache_key = self._get_cache_key(text, config)
+        # 1. 检查缓存（query 影响压缩结果，必须进缓存键）
+        cache_key = self._get_cache_key(text, config, query=kwargs.get("query"))
         cached_result = self._cache_manager.get(cache_key)
         if cached_result is not None:
             return cached_result
@@ -894,7 +939,8 @@ class ContextCompressor:
     def _get_cache_key(
         self,
         text: str,
-        config: CompressionConfig | None
+        config: CompressionConfig | None,
+        query: str | None = None,
     ) -> str:
         """生成缓存键（纳入影响压缩结果的全部配置，避免不同参数互串缓存）"""
         if config is not None:
@@ -905,6 +951,8 @@ class ContextCompressor:
             )
         else:
             content = f"{text}:default"
+        if query:
+            content = f"{content}:q={query}"
         return hashlib.md5(content.encode()).hexdigest()
 
     def _estimate_tokens(self, text: str) -> int:

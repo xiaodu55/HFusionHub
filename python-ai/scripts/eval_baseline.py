@@ -403,6 +403,70 @@ def select_cited_chunks(
     return [chunk_id for chunk_id, score in ranked if score >= threshold][:top_k]
 
 
+def compression_surviving_chunks(
+    ranked: Sequence[tuple[str, float]],
+    content_by_chunk: dict[str, str | None],
+    query: str,
+    target_ratio: float = 0.6,
+) -> list[tuple[str, float]]:
+    """压缩感知的引用模拟：返回合并上下文经抽取式压缩后仍"可见"的 chunk。
+
+    生产管线在生成前用 ``ExtractiveCompressionStrategy`` 压缩**合并后的**
+    检索上下文（``react._safe_compress``，默认 target_ratio=0.6）——被压掉
+    全部句子的 chunk 对生成器不可见，也就不可能被引用。本函数按与生产
+    相同的打分实现（``rank_sentences``，含 query 重叠信号）重放该过程：
+
+    1. 按检索排名合并各 chunk 内容，逐句标注来源 chunk（分句按 chunk
+       预切后再拼接，与对合并文本直接分句等价——句子不跨 ``\\n\\n`` 边界）；
+    2. 合并文本低于生产短文本保护阈值时不压缩、全部可见（与生产一致）；
+    3. query 感知打分 → 按预算保留 top 句（与 ``compress`` 同一公式）→
+       存活句的来源 chunk 集合，按检索排名去重输出。
+
+    ``target_ratio=1.0`` 时保留全部句子，等价于关闭压缩模拟。
+    """
+    from app.core.rag.context_compressor import (
+        ExtractiveCompressionStrategy,
+        _MIN_COMPRESSION_CHARS,
+        _MIN_COMPRESSION_TOKENS,
+    )
+    from app.core.rag.utils import estimate_tokens, split_sentences
+
+    if not ranked:
+        return []
+    contents = [(cid, score, content_by_chunk.get(cid) or "")
+                for cid, score in ranked]
+    merged = "\n\n".join(content for _, _, content in contents if content)
+    if not merged:
+        return []
+    # 生产短文本保护（react 对合并上下文调用 compress，阈值判断相同）
+    if (estimate_tokens(merged) < _MIN_COMPRESSION_TOKENS
+            or len(merged) < _MIN_COMPRESSION_CHARS):
+        return list(ranked)
+
+    strategy = ExtractiveCompressionStrategy()
+    sentences: list[str] = []
+    owners: list[str] = []
+    for cid, _score, content in contents:
+        for sentence in split_sentences(content, min_length=2):
+            sentences.append(sentence)
+            owners.append(cid)
+    if not sentences:
+        return list(ranked)
+
+    scores = strategy.rank_sentences(sentences, merged, query=query)
+    target_count = max(1, int(len(sentences) * target_ratio))
+    kept = sorted(range(len(sentences)), key=lambda i: -scores[i])[:target_count]
+    surviving = {owners[i] for i in kept}
+
+    survived: list[tuple[str, float]] = []
+    seen: set[str] = set()
+    for cid, score, _content in contents:
+        if cid in surviving and cid not in seen:
+            seen.add(cid)
+            survived.append((cid, score))
+    return survived
+
+
 def runtime_citation_faithfulness(
     answer: str,
     cited_docs: Sequence[str],

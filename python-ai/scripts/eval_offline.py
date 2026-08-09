@@ -30,6 +30,7 @@ for _path in (str(SCRIPTS_DIR), str(PROJECT_ROOT)):
 from eval_baseline import (  # noqa: E402
     EvaluationReport,
     check_gates,
+    compression_surviving_chunks,
     compute_citation_faithfulness,
     diff_against_baseline,
     load_baseline,
@@ -64,6 +65,12 @@ def parse_args() -> argparse.Namespace:
                              "at least this fraction of the top-1 score; a fixed "
                              "top-k window without this gives faithfulness a "
                              "structural ceiling well below 1.0")
+    parser.add_argument("--compress-target-ratio", type=float, default=0.6,
+                        help="simulate the production extractive compression "
+                             "(react._safe_compress, default 0.6) over the merged "
+                             "retrieved context before the citation window: chunks "
+                             "whose sentences are all compressed away are not "
+                             "citable; 1.0 disables the compression simulation")
     parser.add_argument("--min-score", type=float, default=0.0,
                         help="retrieval score floor; chunks scoring below are dropped "
                              "from the results entirely (BM25 raw scores are not "
@@ -116,7 +123,8 @@ def _compute_bid_metrics(case, retrieved_chunk_ids: list[str], router) -> dict[s
 
 
 async def evaluate_offline(router, cases, top_k: int, citation_top_k: int = 5,
-                           citation_score_ratio: float = 0.5) -> list:
+                           citation_score_ratio: float = 0.5,
+                           compress_target_ratio: float = 0.6) -> list:
     outcomes = []
     for case in cases:
         merged = await router.search(case.query, case.kb_id, top_k)
@@ -131,7 +139,21 @@ async def evaluate_offline(router, cases, top_k: int, citation_top_k: int = 5,
             if chunk_id is not None and str(chunk_id) not in seen:
                 seen.append(str(chunk_id))
                 ranked.append((str(chunk_id), float(result.score)))
-        cited = select_cited_chunks(ranked, citation_top_k, citation_score_ratio)
+        # 引用模拟两段式（与生产可见性一致）：
+        # ① 压缩感知——生成前合并上下文经抽取式压缩，句子全被压掉的
+        #    chunk 对生成器不可见（A2：压缩打分含 query 重叠信号）；
+        # ② 自适应窗口——答案只引用与首块相关性足够接近的可见块。
+        get_content = getattr(router.index, "get_chunk_content", None)
+        if compress_target_ratio < 1.0 and get_content is not None:
+            survivors = compression_surviving_chunks(
+                ranked,
+                {cid: get_content(cid) for cid, _ in ranked},
+                case.query,
+                target_ratio=compress_target_ratio,
+            )
+        else:
+            survivors = ranked
+        cited = select_cited_chunks(survivors, citation_top_k, citation_score_ratio)
         outcomes.append(
             {
                 "case_id": case.case_id,
@@ -175,7 +197,7 @@ def main() -> int:
     )
     raw_outcomes = asyncio.run(
         evaluate_offline(router, cases, args.top_k, args.citation_top_k,
-                         args.citation_score_ratio)
+                         args.citation_score_ratio, args.compress_target_ratio)
     )
 
     from eval_baseline import CaseOutcome, aggregate_metrics

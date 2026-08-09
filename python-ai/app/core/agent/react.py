@@ -566,8 +566,13 @@ class ReactAgent(Agent):
         self,
         rag_context: str,
         target_ratio: float = 0.6,
+        query: str | None = None,
     ) -> tuple[str, bool]:
-        """Compress retrieval context with evidence-integrity guard."""
+        """Compress retrieval context with evidence-integrity guard.
+
+        ``query`` 透传给压缩器：句子评分加入与问题的重叠信号，避免把与
+        问题直接相关但事实密度低的句子无差别丢掉。
+        """
         if not rag_context:
             return rag_context, False
 
@@ -575,6 +580,7 @@ class ReactAgent(Agent):
         result = await compressor.compress(
             rag_context,
             CompressionConfig(target_ratio=target_ratio),
+            query=query,
         )
 
         if result.compressed_text == rag_context:
@@ -644,7 +650,7 @@ class ReactAgent(Agent):
         if retrieved is None:
             return None
         raw_context, rag_sources, auto_detected_kb_id = retrieved
-        rag_context, was_compressed = await self._safe_compress(raw_context)
+        rag_context, was_compressed = await self._safe_compress(raw_context, query=query)
         return raw_context, rag_sources, auto_detected_kb_id, rag_context, was_compressed
 
     async def _empty_context_reply(self) -> str:
@@ -960,7 +966,8 @@ class ReactAgent(Agent):
                 rag_context, rag_sources, _ = retrieved
 
             if rag_context:
-                rag_context, _ = await self._safe_compress(rag_context)
+                rag_context, _ = await self._safe_compress(
+                    rag_context, query=sub_question.content)
 
             if rag_context:
                 prompt = f"""基于以下参考资料回答问题。
@@ -1436,7 +1443,8 @@ class ReactAgent(Agent):
                         raw_context = "\n\n".join([
                             (getattr(r, "content", "") or "") for r in unique_results
                         ])
-                        context, was_compressed = await self._safe_compress(raw_context)
+                        context, was_compressed = await self._safe_compress(
+                            raw_context, query=query)
                         sources = [normalize_source(r) for r in unique_results]
                     else:
                         # ── Non-decomposition path ──
@@ -1449,7 +1457,8 @@ class ReactAgent(Agent):
                             raw_context = "\n\n".join([
                                 (getattr(r, "content", "") or "") for r in result.results
                             ])
-                            context, was_compressed = await self._safe_compress(raw_context)
+                            context, was_compressed = await self._safe_compress(
+                            raw_context, query=query)
                             sources = [normalize_source(r) for r in result.results]
 
                     retrieval_duration_ms = (_time.monotonic() - retrieval_start) * 1000
