@@ -1,0 +1,28 @@
+{
+  "track": "runtime",
+  "suite_version": "1.1.0",
+  "kb_version": "1.0.0",
+  "suite_sha256": "b02b9dd329d4a38bae2336adec854b226b361418ef94747e75f37c4e95d72c4a",
+  "generated_at": "2026-09-05T08:20:47Z",
+  "metrics": {
+    "recall_at_5": 0.6534653465346535,
+    "ndcg_at_10": 0.6494082925528601,
+    "citation_accuracy": 0.7142857142857143,
+    "citation_faithfulness": 0.6857142857142857,
+    "citation_recall": 0.6964285714285714,
+    "citation_f1": 0.6761904761904761,
+    "refusal_correctness": 0.5875,
+    "tool_success_rate": 0.0,
+    "p95_latency_ms": 19313.504799996736,
+    "avg_latency_ms": 8093.578602727873,
+    "p50_latency_ms": 6139.729199989233,
+    "tokens_per_task": 1225.659090909091,
+    "cost_usd_per_task": 0.0,
+    "error_rate": 0.0,
+    "scope_violations": 0,
+    "qualification_recall": null,
+    "disqualification_clause_recall": null,
+    "scoring_point_accuracy": null,
+    "bid_terminology_accuracy": null
+  }
+}
