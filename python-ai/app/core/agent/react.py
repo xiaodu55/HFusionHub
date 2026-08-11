@@ -27,6 +27,7 @@ from ..rag import (
     EvaluationSample,
     EvaluationStrategyType,
     IntentResult,
+    IntentType,
     ReflectionConfig,
     ReflectionStrategyType,
     SubQuestion,
@@ -1264,6 +1265,14 @@ class ReactAgent(Agent):
 
         if rag_context:
             enhanced_query = self._build_rag_prompt(rag_context, query, self.style)
+            # 工具路由（runtime 实测工具成功率 0.05 的修复）：操作类请求
+            # （IntentType.OPERATION，如订阅/请假/查询物流）即使有检索资料，
+            # 也应优先调用工具执行动作，而不是仅基于资料文字作答。
+            if getattr(intent_result, "intent", None) == IntentType.OPERATION:
+                enhanced_query += (
+                    "\n\n补充要求：该请求属于操作类请求。若存在能完成它的工具，"
+                    "请优先调用该工具执行操作；仅在没有任何适用工具时才基于资料回答。"
+                )
         else:
             enhanced_query = query
 
@@ -1693,6 +1702,12 @@ class ReactAgent(Agent):
                     return
 
             prompt = self._build_rag_prompt(context, query, self.style) if context else query
+            # 工具路由（流式，与 run() 同判据）：操作类请求优先调工具
+            if prompt != query and getattr(intent_result, "intent", None) == IntentType.OPERATION:
+                prompt += (
+                    "\n\n补充要求：该请求属于操作类请求。若存在能完成它的工具，"
+                    "请优先调用该工具执行操作；仅在没有任何适用工具时才基于资料回答。"
+                )
 
             llm = self._get_llm()
             messages = [
