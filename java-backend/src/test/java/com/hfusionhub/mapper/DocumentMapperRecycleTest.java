@@ -11,6 +11,7 @@ import cn.dev33.satoken.context.model.SaResponse;
 import cn.dev33.satoken.context.model.SaStorage;
 import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
 import cn.dev33.satoken.stp.StpUtil;
+import com.hfusionhub.support.AbstractItMySQLTest;
 import com.hfusionhub.entity.Document;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.entity.User;
@@ -22,21 +23,17 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Verify DocumentMapper.selectExpiredRecycled against H2 —
  * only deleted + expired documents are returned.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-@ActiveProfiles("test")
 @Transactional
-class DocumentMapperRecycleTest {
+class DocumentMapperRecycleTest extends AbstractItMySQLTest {
 
     @MockBean
     private StringRedisTemplate stringRedisTemplate;
@@ -65,6 +62,7 @@ class DocumentMapperRecycleTest {
         user.setPassword("test");
         user.setNickname("DMR");
         user.setStatus(0);
+        user.setTenantId(1L); // sys_user 在租户拦截器忽略表中，需显式盖章
         userMapper.insert(user);
         StpUtil.login(user.getId());
 
@@ -91,7 +89,7 @@ class DocumentMapperRecycleTest {
         expired.setTitle("expired-doc");
         expired.setDeleted(1);
         expired.setRecycledAt(now.minusDays(8));
-        expired.setRecycleExpiresAt(now.minusHours(1));
+        expired.setRecycleExpiresAt(now.minusDays(1)); // 余量 > JVM 与 MySQL 容器的时区差
         expired.setStatus(0);
         documentMapper.insert(expired);
 

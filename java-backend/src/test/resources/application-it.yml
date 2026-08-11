@@ -1,0 +1,185 @@
+# =====================================================
+# HFusionHub Java Backend — 集成测试配置（it profile，C1）
+# 真实 MySQL（Testcontainers 或外部 HFH_IT_JDBC_URL）+ 完整 Flyway 迁移链。
+# 除 datasource/flyway/sql-init/tenant 四处外与 application-test.yml 镜像，
+# 两文件的非数据源配置需同步维护。
+# =====================================================
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      # MySQL 容器是 UTC、JVM 是 +8：把会话时区对齐 JVM，
+      # 否则 NOW()/按天聚合与 Java 侧时间相差 8 小时
+      connection-init-sql: SET time_zone = '+08:00' 
+    # 实际坐标由 AbstractItMySQLTest 的 @DynamicPropertySource 注入
+    url: ${IT_JDBC_URL:jdbc:mysql://localhost:3306/hfusionhub_it?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
+    username: ${IT_JDBC_USER:itest}
+    password: ${IT_JDBC_PASS:itest}
+
+  # 真实 MySQL 上跑完整迁移链 V1..V84（it profile 的核心价值）
+  flyway:
+    enabled: true
+
+  # 迁移后的测试主体种子（MySQL 方言，ON DUPLICATE KEY 幂等）
+  sql:
+    init:
+      mode: always
+      data-locations: classpath:data-it.sql
+
+  # Disable Redis auto-configuration — tests use in-memory mock
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
+
+  main:
+    allow-bean-definition-overriding: true
+
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    serialization:
+      write-dates-as-timestamps: false
+
+# MyBatis Plus — same as production
+mybatis-plus:
+  mapper-locations: classpath:mapper/**/*.xml
+  type-aliases-package: com.hfusionhub.entity
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+
+# Sa-Token — test configuration (in-memory, no Redis)
+sa-token:
+  token-name: satoken
+  timeout: 86400
+  active-timeout: 1800
+  is-concurrent: true
+  token-style: uuid
+  is-log: false
+  # Use in-memory DAO instead of Redis
+  alone-redis: false
+
+# Disable knife4j in tests
+knife4j:
+  enable: false
+
+springdoc:
+  api-docs:
+    enabled: false
+
+# No actual external services in tests
+python-ai:
+  base-url: http://localhost:9001
+  timeout: 60000
+  engine:
+    url: http://localhost:9001
+  callback-base-url: http://localhost:8080/api
+  callback-secret: test-callback-secret
+  internal-token: test-internal-token
+
+ai-service:
+  base-url: http://localhost:9001
+  timeout: 120000
+
+minio:
+  endpoint: http://localhost:9000
+  access-key: test
+  secret-key: test
+  bucket-name: hfusionhub-test
+
+rag:
+  index:
+    stale-after-minutes: 5
+    max-attempts: 1
+    recovery-delay-ms: 60000
+
+# Admin init — empty by default in tests, set via test properties when needed
+app:
+  admin:
+    username: admin
+    password: ${ADMIN_PASSWORD:}
+
+# Agent scheduling (V13) — test defaults
+agent:
+  queue:
+    enabled: false
+  worker:
+    poll-delay-ms: 1000
+    batch-size: 5
+  run:
+    lease-seconds: 30
+    heartbeat-seconds: 5
+    timeout-seconds: 60
+  retry:
+    max-attempts: 3
+    base-delay-seconds: 1
+    backoff-multiplier: 2
+    max-delay-seconds: 10
+    retryable-error-codes: timeout,connection_error,tool_error,internal_error
+    on-approval-expiry: false
+    max-dispatch-count: 3
+  recovery:
+    sweep-delay-ms: 5000
+    startup-recovery: false
+  status-event:
+    sse-poll-delay-ms: 500
+    retention-days: 1
+  cancel-flag-ttl-seconds: 60
+  instance-id: test-worker
+
+# Prompt test set async run — queue disabled in tests (tests drive executeRun directly)
+prompt-test-set:
+  run:
+    queue-enabled: false
+    poll-delay-ms: 50
+    batch-size: 5
+    case-retry-max-attempts: 2
+    case-retry-delay-ms: 0
+    recovery-delay-ms: 5000
+    stale-running-minutes: 30
+    shutdown-timeout-ms: 5000
+
+# Tenant — non-strict mode for tests (defaults to tenant 1 when no context set).
+# Tenant-line SQL interceptor is DISABLED in tests because it interferes with
+# MyBatis-Plus lambda cache resolution for entities without a tenantId field.
+# Tenant isolation in tests is enforced at the service layer via userId filtering.
+hfusionhub:
+  tenant:
+    # it profile 保持生产语义：拦截器开启，tenant_id 由拦截器盖章
+    enabled: true
+    strict: false
+    default-tenant-id: 1
+  quota:
+    chat:
+      max-output-tokens: 512
+    defaults:
+      free:
+        chat-tokens: 1000
+        agent-tokens: 1000
+        index-chunks: 100
+        plugin-executions: 10
+      pro:
+        chat-tokens: 10000
+        agent-tokens: 10000
+        index-chunks: 1000
+        plugin-executions: 100
+      enterprise:
+        chat-tokens: 100000
+        agent-tokens: 100000
+        index-chunks: 10000
+        plugin-executions: 1000
+
+logging:
+  level:
+    root: WARN
+    com.hfusionhub: DEBUG
+    org.springframework.test: INFO
+    org.springframework.boot.test: INFO

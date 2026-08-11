@@ -11,6 +11,7 @@ import cn.dev33.satoken.context.model.SaResponse;
 import cn.dev33.satoken.context.model.SaStorage;
 import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
 import cn.dev33.satoken.stp.StpUtil;
+import com.hfusionhub.support.AbstractItMySQLTest;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.dto.PromptTemplateInfoDTO;
 import com.hfusionhub.dto.PromptTemplateSaveDTO;
@@ -24,11 +25,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -36,10 +35,8 @@ import org.springframework.transaction.annotation.Transactional;
  * publish → unpublish → rollback.  Uses a real MyBatis-Plus mapper
  * stack; mocks only Redis (not needed for prompt templates).
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-@ActiveProfiles("test")
 @Transactional
-class PromptTemplateVersionIntegrationTest {
+class PromptTemplateVersionIntegrationTest extends AbstractItMySQLTest {
 
     @MockBean
     private StringRedisTemplate stringRedisTemplate;
@@ -61,6 +58,7 @@ class PromptTemplateVersionIntegrationTest {
         SaManager.setSaTokenContext(new MockSaTokenContext());
 
         User user = new User();
+        user.setTenantId(1L); // sys_user 在租户拦截器忽略表中，需显式盖章
         user.setUsername("pt-int-" + System.nanoTime());
         user.setPassword("test");
         user.setNickname("PT");

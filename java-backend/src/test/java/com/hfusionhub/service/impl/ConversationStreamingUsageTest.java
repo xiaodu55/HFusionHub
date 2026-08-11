@@ -17,6 +17,7 @@ import cn.dev33.satoken.context.model.SaStorage;
 import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.hfusionhub.support.AbstractItMySQLTest;
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.dto.MessageSendDTO;
 import com.hfusionhub.entity.AgentRun;
@@ -40,11 +41,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
@@ -55,9 +54,7 @@ import reactor.core.scheduler.Schedulers;
  * <p>验证：流式响应的结算/退回发生在 Reactor 调度线程（无租户上下文），
  * 通过预捕获的 tenant ID + {@code TenantContext.runAs} 恢复后完成，预留不泄漏。</p>
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-@ActiveProfiles("test")
-class ConversationStreamingUsageTest {
+class ConversationStreamingUsageTest extends AbstractItMySQLTest {
 
     @MockBean
     private StringRedisTemplate stringRedisTemplate;

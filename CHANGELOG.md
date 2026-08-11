@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第三十三批（2026-09-05：C1 集成测试迁移真实 MySQL——H2 掩盖的 4 类问题现形）
+
+#### Added
+- **it profile + Testcontainers 集成基类**（[ADR-008](docs/adr/ADR-006-faithfulness-metric-recalibration.md#附adr-008-集成测试-h2--testcontainers-真实-mysql-演进c1--2026-09-05)）：
+  - `AbstractItMySQLTest`（PER_CLASS）：真实 MySQL + 完整 Flyway V1..V84，
+    数据源二选一（`HFH_IT_JDBC_URL` 外部库 / Testcontainers mysql:8.0），
+    无 Docker 时整类跳过；每类 @BeforeAll 全 schema 清空 + 重播核心种子
+  - 迁移 6/8 个 @SpringBootTest 到真库全绿（mvn test 702 全过）；
+    PromptTestSet（异步时序需 Awaitility 化）与 CostWebhookGate（需每类
+    独立库隔离）两例暂缓并文档化
+- **真 MySQL 揪出 H2 掩盖的 4 类问题**（迁移过程实录，全部修复/绕行）：
+  - sys_user 在租户拦截器忽略表，插入必须显式 tenant_id（H2 列默认值掩盖）
+  - DATETIME(0) 秒级取整：scheduled_at 存库后四舍五入到下一秒，立即查询差 1 秒
+  - MySQL 容器 UTC vs JVM +8：NOW()/按天聚合差 8 小时（connection-init-sql 对齐）
+  - agent_task↔agent_run FK 环 + 逻辑删除行：MP update/delete 命不中
+    逻辑删除行，清理需 JdbcTemplate 裸 SQL + FK 免检 + runAsSystem 重试
+- **runtime 基线重冻结**：工具路由（OPERATION 意图追加工具优先指令）后
+  工具成功率 0.05→0.10；引用忠实度 0.707 / F1 0.698 / 召回 0.658 / 越界 0
+
 ### 第三十二批（2026-09-05：runtime 轨首次实测——A 线机制的真实流量验证）
 
 #### Added

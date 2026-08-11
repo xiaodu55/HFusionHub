@@ -220,3 +220,45 @@ runtime 首测暴露三个缺口，逐项侦察结论与处置（红线：不假
 （17%）。而超纲拒答经 groundedness 路径已 25/25，门的边际收益
 （省一次生成调用）不抵误杀代价。**维持默认关闭**（0 = off），
 测量数据在此存档，开启需 `RAG_EVIDENCE_GATE_THRESHOLD` 显式配置。
+
+---
+
+# 附：ADR-008 集成测试 H2 → Testcontainers 真实 MySQL 演进（C1 · 2026-09-05）
+
+## 背景
+82 个测试文件中 61 个 Mockito 单测、8 个 @SpringBootTest 全跑 H2
+（schema-h2.sql 是迁移链的 H2 兼容翻译，漂移靠门禁压制）。租户拦截器、
+真实 MySQL 方言（DECIMAL/JSON/DATETIME 取整）、FK 约束在 H2 上从未被
+集成级验证。
+
+## 决策
+1. **it profile**（`application-it.yml`）：真实 MySQL + 完整 Flyway V1..V84
+   （核心价值：真链路承担 schema 正确性），Redis 仍 bean 级 mock
+   （现有测试的既有桩；真实 Redis 容器按需启用）。
+2. **基类 `AbstractItMySQLTest`**（PER_CLASS）：数据源二选一——
+   `HFH_IT_JDBC_URL` 外部 MySQL（Windows 本机路径）或 Testcontainers
+   mysql:8.0（CI Linux 路径）；两者皆无则整类跳过。
+3. **每类清空重置**：@BeforeAll 对全 schema 做 FK 免检 TRUNCATE + 重播
+   核心种子（tenant/sys_user），类间隔离、类内保序（有序有状态套件
+   依赖类内先后状态）。
+4. **迁移 6/8 类**：DocumentMapperRecycle、ConversationStreaming×2、
+   UsageLedgerServiceImpl、PromptTemplateVersion、（TenantInterceptor
+   Isolation 原有）。两例暂缓并文档化：
+   - PromptTestSet：10s 级异步 worker 轮询依赖 H2 时序特性，需 Awaitility 化改造；
+   - CostWebhookGate：租户维度聚合在跨类共上下文下行为不同，需每类独立库。
+
+## 真实 MySQL 揪出的 H2 掩盖问题（迁移过程实录）
+- `sys_user` 在租户拦截器忽略表中，插入必须显式带 tenant_id（H2 列默认值掩盖）；
+- DATETIME(0) 秒级取整：`scheduled_at = now()` 存库后四舍五入到下一秒，
+  立即查询差 1 秒不可见（测试余量需 > 时区差 + 取整）；
+- MySQL 容器 UTC vs JVM +8：NOW()/按天聚合差 8 小时（连接池
+  connection-init-sql 统一时区解决；生产部署同样需要）；
+- agent_task ↔ agent_run 互为 FK 环 + 逻辑删除行：MP 的 update/delete
+  永远命不中逻辑删除行，清理必须 JdbcTemplate 裸 SQL + FK 免检 + 重试；
+- 异步 Reactor 线程无租户上下文，写入盖哨兵 tenant_id=-1，清理必须
+  runAsSystem 跨租户。
+
+## 后果
+- CI 在真实 MySQL 上跑绿（mvn test 702 全过，含 6 类真库集成）；
+- schema-h2 漂移门禁继续保留（快跑档），但真链路不再被 H2 兼容层遮蔽；
+- 后续新集成测试继承基类即得真 MySQL 环境。

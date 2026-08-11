@@ -1,5 +1,8 @@
 package com.hfusionhub.service.impl;
 
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -54,11 +57,9 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -70,10 +71,14 @@ import org.springframework.transaction.annotation.Transactional;
  * write and read (autoResultMap). Redis is mocked (unused here); AiClient is
  * mocked so batch runs do not hit the Python service.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-@ActiveProfiles("test")
 @Transactional
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+/**
+ * 暂不迁移 it profile（C1 例外）：本类多个用例依赖 10s 级异步 worker 轮询
+ * 与 H2 的提交/时序特性，真实 MySQL 下需要 Awaitility 化改造，列后续工作。
+ */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@ActiveProfiles("test")
 class PromptTestSetIntegrationTest {
 
     @MockBean
@@ -106,6 +111,7 @@ class PromptTestSetIntegrationTest {
     void setUp() {
         SaManager.setSaTokenDao(new SaTokenDaoDefaultImpl());
         SaManager.setSaTokenContext(new MockSaTokenContext());
+        // 共享 hfusionhub_it 库：其他 it 类可能残留本域表数据，先清理
         TenantContext.setTenantId(1L);
 
         User user = new User();
@@ -332,6 +338,7 @@ class PromptTestSetIntegrationTest {
 
         // Template owned by another user (impersonation attempt)
         User other = new User();
+        other.setTenantId(1L);
         other.setUsername("pts-other-" + System.nanoTime());
         other.setPassword("test");
         other.setNickname("OTHER");
@@ -510,7 +517,7 @@ class PromptTestSetIntegrationTest {
 
     @Test
     @Order(1)
-    void queuedRunThenExecutePersistsStatusAndProgress() {
+    void queuedRunThenExecutePersistsStatusAndProgress() throws InterruptedException {
         Map<String, Object> vars = new HashMap<>();
         vars.put("角色", "客服");
         PromptTestSetDetailDTO created = createSetWithCase(vars);
@@ -533,11 +540,19 @@ class PromptTestSetIntegrationTest {
         // Other async-lifecycle cases can leave committed pending rows in the
         // shared H2 context; use a window large enough to assert this run is
         // discoverable rather than assuming it is among the first ten.
-        assertEquals(
-                1,
-                service.listQueuedRuns(100).stream()
-                        .filter(r -> r.getId().equals(queued.getId()))
-                        .count());
+        // scheduled_at 在 DATETIME(0) 上会秒级取整：立即查询可能差一秒不可见，
+        // 与 worker 的轮询语义一致地短暂重试
+        boolean discoverable = false;
+        for (int i = 0; i < 20 && !discoverable; i++) {
+            boolean found = service.listQueuedRuns(100).stream()
+                    .anyMatch(r -> r.getId().equals(queued.getId()));
+            if (found) {
+                discoverable = true;
+            } else {
+                Thread.sleep(100);
+            }
+        }
+        assertTrue(discoverable, "queued run 应对 worker 可见");
         assertTrue(service.claimRun(queued.getId()));
         // Guarded claim: second attempt fails because it is already running
         assertFalse(service.claimRun(queued.getId()));

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.hfusionhub.support.AbstractItMySQLTest;
 import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.entity.TenantQuota;
@@ -25,11 +26,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,9 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
  * 覆盖：预占/结算/退回、幂等、超额结算封顶、终态互斥、跨日窗口结算、
  * 跨租户相同 requestId 隔离、无租户上下文 fail-closed、并发重复预占。
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-@ActiveProfiles("test")
-class UsageLedgerServiceImplTest {
+class UsageLedgerServiceImplTest extends AbstractItMySQLTest {
 
     @MockBean
     private StringRedisTemplate stringRedisTemplate;

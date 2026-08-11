@@ -1,5 +1,6 @@
 package com.hfusionhub.client;
 
+import com.hfusionhub.support.AbstractItMySQLTest;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -10,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -19,7 +19,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.client.RestTemplate;
 
 /**
@@ -35,10 +34,8 @@ import org.springframework.web.client.RestTemplate;
  * 不依赖文件与 Milvus（Milvus 不可达时返回 0），又能验证 internal-token
  * + tenant + HTTP 传输全链路。</p>
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-@ActiveProfiles("test")
 @EnabledIfEnvironmentVariable(named = "CI_SMOKE_PYTHON_URL", matches = ".+")
-class PythonEngineSmokeTest {
+class PythonEngineSmokeTest extends AbstractItMySQLTest {
 
     @Autowired
     private RestTemplate restTemplate;

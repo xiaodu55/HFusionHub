@@ -1,5 +1,7 @@
 package com.hfusionhub.service.impl;
 
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -33,16 +35,19 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.test.context.ActiveProfiles;
 
 /**
  * 三个新能力模块（成本追踪 / Webhook / 评测回归门禁）集成冒烟测试（H2）。
  * 覆盖：成本落账与按日/汇总统计、Webhook 订阅 CRUD 与事件异步分发投递、
  * 评测门禁判定（准确率/延迟/成本基线）与历史持久化。
+ */
+/**
+ * 暂不迁移 it profile（C1 例外）：costTracking 的租户维度聚合断言在
+ * 真实 MySQL 与跨类共上下文下行为不同（隔离跑 4/4 绿，混跑 1 例失败），
+ * 需要数据源级隔离方案（每类独立库）后再迁移，列后续工作。
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @ActiveProfiles("test")
@@ -77,6 +82,7 @@ class CostWebhookGateIntegrationTest {
 
     @Autowired
     private WebhookDeliveryMapper webhookDeliveryMapper;
+
 
     @Autowired
     private AgentEvaluationDatasetMapper datasetMapper;
@@ -275,6 +281,7 @@ class CostWebhookGateIntegrationTest {
         dataset.setName(name);
         dataset.setUserId(userId);
         dataset.setCaseCount(0);
+        dataset.setDimensions(List.of("answer_correctness")); // 真实 MySQL 下 NOT NULL
         datasetMapper.insert(dataset);
         return dataset.getId();
     }

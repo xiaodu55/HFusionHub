@@ -18,7 +18,9 @@ import cn.dev33.satoken.context.model.SaResponse;
 import cn.dev33.satoken.context.model.SaStorage;
 import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
 import cn.dev33.satoken.stp.StpUtil;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.hfusionhub.support.AbstractItMySQLTest;
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.constant.AgentConstants;
 import com.hfusionhub.dto.MessageSendDTO;
@@ -47,12 +49,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
@@ -65,9 +66,7 @@ import reactor.core.scheduler.Schedulers;
  * 结构化 Agent 事件（step_completed / run_completed）与助手消息
  * 均成功落库，而非仅验证用量结算。</p>
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-@ActiveProfiles("test")
-class ConversationStreamingPersistenceTest {
+class ConversationStreamingPersistenceTest extends AbstractItMySQLTest {
 
     @MockBean
     private StringRedisTemplate stringRedisTemplate;
@@ -121,16 +120,31 @@ class ConversationStreamingPersistenceTest {
         SaManager.setSaTokenContext(new MockSaTokenContext());
         StpUtil.login(1L);
 
-        // 清理顺序遵循 FK：status_event → step → run → task → message → conversation
-        agentStatusEventMapper.delete(Wrappers.emptyWrapper());
-        agentStepMapper.delete(Wrappers.emptyWrapper());
-        agentRunMapper.delete(Wrappers.emptyWrapper());
-        agentTaskMapper.delete(Wrappers.emptyWrapper());
-        messageMapper.delete(Wrappers.emptyWrapper());
-        conversationMapper.delete(Wrappers.emptyWrapper());
-        usageEventMapper.delete(Wrappers.emptyWrapper());
-        usageReservationMapper.delete(Wrappers.emptyWrapper());
-        usageCounterMapper.delete(Wrappers.emptyWrapper());
+        // 异步 Reactor 线程无租户上下文，其写入盖 fail-closed 哨兵 tenant_id=-1；
+        // 且 task↔run 互为 FK 环 + 逻辑删除行不会被 MP update/delete 命中——
+        // 清理必须用 JdbcTemplate 裸 SQL（绕过逻辑删除条件），多轮重试
+        for (int round = 0; round < 6; round++) {
+            jdbcTemplate.update("UPDATE agent_task SET current_run_id = NULL WHERE current_run_id IS NOT NULL");
+            try {
+                jdbcTemplate.update("DELETE FROM agent_status_event");
+                jdbcTemplate.update("DELETE FROM agent_step");
+                jdbcTemplate.update("DELETE FROM agent_run");
+                jdbcTemplate.update("DELETE FROM agent_task");
+                jdbcTemplate.update("DELETE FROM message");
+                jdbcTemplate.update("DELETE FROM conversation");
+                jdbcTemplate.update("DELETE FROM usage_event");
+                jdbcTemplate.update("DELETE FROM usage_reservation");
+                jdbcTemplate.update("DELETE FROM usage_counter");
+                break; // 清理成功
+            } catch (DataIntegrityViolationException e) {
+                // 上一用例的异步写库仍在进行（FK 竞态）：等待后重试
+            }
+            try {
+                Thread.sleep(800);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
 
         TenantContext.setTenantId(1L);
         Conversation conversation = new Conversation();
