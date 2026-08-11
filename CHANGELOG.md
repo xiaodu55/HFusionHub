@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第三十四批（2026-09-05：B3 热点读缓存——知识库列表 + 版本化失效）
+
+#### Added
+- **HotReadCacheService**（[ADR-007](docs/adr/ADR-007-hot-read-cache.md)）：
+  统一防雪崩（TTL ±20% 抖动）/ 防穿透（空结果哨兵缓存）/ 主动失效
+  （版本号失联，免模式扫描竞态）三件套；**key 强制携带 tenant_id**
+  （多租户缓存隔离为第一约束）
+- 接入 `KnowledgeBaseServiceImpl.listByCurrentUser`（无名称过滤的前 10 页
+  常规分页，空页也缓存）；create/update/delete/restore 四个写路径 bumpVersion
+- 首查~1.9s 的检索链路缓存命中后 <10ms 量级（写路径代价：每次变更一次 INCR）
+- FeatureFlag 修正：此前已有进程内缓存（方案信息过时），维持不动
+- 测试：KnowledgeBaseServiceImplTest 补 HotReadCache mock，Java 全量 702 过
+
 ### 第三十三批（2026-09-05：C1 集成测试迁移真实 MySQL——H2 掩盖的 4 类问题现形）
 
 #### Added

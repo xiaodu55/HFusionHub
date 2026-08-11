@@ -45,6 +45,9 @@ class KnowledgeBaseServiceImplTest {
     @Mock
     private DeletionService deletionService;
 
+    @Mock
+    private com.hfusionhub.cache.HotReadCacheService hotReadCache;
+
     @InjectMocks
     private KnowledgeBaseServiceImpl knowledgeBaseService;
 
