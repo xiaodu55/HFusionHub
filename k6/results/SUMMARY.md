@@ -37,3 +37,30 @@ MSYS_NO_PATHCONV=1 docker run --rm --add-host=host.docker.internal:host-gateway 
 - MSYS_NO_PATHCONV=1 + `pwd -W`:Git Bash 会把 `/scripts/...` 改写为 Windows 安装路径,导致 k6 找不到脚本。
 - api-mix 的探活端点是 `/api/health`(公开);`/api/actuator/health` 已迁至 9092 管理端口且受认证,401 会被计为失败请求。
 - Grafana/k6 镜像的 entrypoint 即 k6,进入 shell 调试需 `--entrypoint sh`。
+
+---
+
+## B4 爬坡场景（2026-09-05，k6 v1.8.1 本机直连，混合读端点 4 个/迭代）
+
+| VU 档 | p50 | p90 | p95 | 失败率 | 结论 |
+|---|---|---|---|---|---|
+| 10 | 33ms | 113ms | **138ms** | 0% | 轻松 |
+| 50 | 312ms | 1312ms | **1423ms** | 0% | 延迟开始放大（×10） |
+| 100 | 605ms | 2902ms | **3018ms** | 0% | p95 首破 3s 门禁 |
+
+- **拐点 = 延迟而非错误**：100 VU（约 80 req/s）仍零失败，排队特征明显
+  （p90 远高于 p50），首要瓶颈嫌疑 = Hikari 池 40 连接 + 单实例 Tomcat；
+- 爬坡全程留档：`ramp-mixed_20260905-*.log/json`（带 VU 标签跑）+
+  `ramp_{10,50,100}vu_20260905.json`（恒定 VU 分档）；
+- 两次 ramp-mixed 全量跑 p95 2.6s→3.0s（阈值越线 exit 99），本机波动属正常。
+
+## B2 chat-stream 实测（2026-09-05，DeepSeek-v4-flash 全生成）
+
+| 场景 | 完整轮次（SSE 全流） | 备注 |
+|---|---|---|
+| 固定提示词（旧脚本） | med=41ms | **测量陷阱**：命中 LLM 响应缓存，数字无效 |
+| 变化提示词（已修脚本） | **1.0~1.6s/轮** | DeepSeek 全生成 + SSE 全链路 |
+
+- 历史 298ms（9/2）为缓存命中/旧脚本口径，不可直接对比；
+- 待办（B2 收尾）：OTel 未开（Tempo 查询为空）——开启后拉 trace 做分段
+  （首包 vs 生成 vs Java→Python 转发），或用 SSE 首包探测脚本定位。

@@ -44,7 +44,7 @@ export default function (token) {
   const started = Date.now()
   const stream = http.post(
     `${BASE}/conversation/message/stream`,
-    JSON.stringify({ conversationId: convId, content: '你好，请用一句话介绍你自己', requestId: tag }),
+    JSON.stringify({ conversationId: convId, content: `你好，请用一句话介绍你自己（问题编号 ${tag}，回答请不要重复问题编号）`, requestId: tag }),
     { headers, responseType: 'text' },
   )
   const turnMs = Date.now() - started
