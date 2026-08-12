@@ -64,3 +64,25 @@ MSYS_NO_PATHCONV=1 docker run --rm --add-host=host.docker.internal:host-gateway 
 - 历史 298ms（9/2）为缓存命中/旧脚本口径，不可直接对比；
 - 待办（B2 收尾）：OTel 未开（Tempo 查询为空）——开启后拉 trace 做分段
   （首包 vs 生成 vs Java→Python 转发），或用 SSE 首包探测脚本定位。
+
+## B2 分段定位（2026-09-05，SSE 探测脚本 probe_sse.py，n=4 成对）
+
+| 链路 | 首包 TTFB（中位） | 全流（中位） |
+|---|---|---|
+| Python 直连（/api/chat stream） | **2.5s** | 2.5s（=TTFB，真流式：检索事件 2.8s → token 流 3.9s 起） |
+| Java 转发（/conversation/message/stream） | **4.6s** | 4.9s |
+| **Java 桥额外开销** | **~2s** | —— |
+
+- Python 端真流式已验证（逐 token SSE 事件）；Java 桥代码（bodyToFlux +
+  逐元素 emitter.send）也无缓冲算子；
+- 但实测 Java 链路首包仍晚 ~2s（缓冲点在 WebClient 接收 → SseEmitter
+  发送链路的更深层，需 OTel trace 或 Reactor 调试继续定位）；
+- 另注：round 0 出现 13.7s 离群首包（熔断/冷启动嫌疑）。
+
+## 后续工作清单（按优先级）
+1. B2 收尾：开启 OTel（OTEL_ENABLED=true + OTEL_EXPORTER_OTLP_ENDPOINT）
+   拉 Tempo trace 定位 Java 桥内 2s 缓冲点，或 Reactor 调试逐算子计时；
+2. 主体级 ACL（权限类拒答 0/30 的机制解，设计见 ADR-006）；
+3. 业务工具集（8 个演示工具 + 沙箱端点）；
+4. PromptTestSet Awaitility 化 + Cost 每类独立库（C1 后续）；
+5. k6 正式加入 PATH（当前用 d:/college/development/k6-v1.8.1-windows-amd64/k6.exe）。
