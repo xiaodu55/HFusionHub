@@ -86,3 +86,9 @@ MSYS_NO_PATHCONV=1 docker run --rm --add-host=host.docker.internal:host-gateway 
 3. 业务工具集（8 个演示工具 + 沙箱端点）；
 4. PromptTestSet Awaitility 化 + Cost 每类独立库（C1 后续）；
 5. k6 正式加入 PATH（当前用 d:/college/development/k6-v1.8.1-windows-amd64/k6.exe）。
+
+## 工具路由状态（2026-09-05 深夜）
+- 20 个演示业务工具已实现并注册（read_only 沙箱语义，与套件 tool 用例一一对应）；
+- 双条件路由器（动作动词 + 领域词）已接入 run()/run_stream/_run_stream_react 三处；
+- 遗留：DeepSeek 在 ReAct 循环内仍不稳定发起 tool_calls（行为层）——
+  下一步用 tool_choice 强制调用或提示词迭代，属提示工程/参数工程工作。

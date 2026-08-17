@@ -1264,15 +1264,28 @@ class ReactAgent(Agent):
                 )
 
         if rag_context:
-            enhanced_query = self._build_rag_prompt(rag_context, query, self.style)
-            # 工具路由（runtime 实测工具成功率 0.05 的修复）：操作类请求
-            # （IntentType.OPERATION，如订阅/请假/查询物流）即使有检索资料，
-            # 也应优先调用工具执行动作，而不是仅基于资料文字作答。
-            if getattr(intent_result, "intent", None) == IntentType.OPERATION:
+            # 业务工具精准路由（双条件：动作动词 + 领域词）：命中时跳过 RAG
+            # 注入并指名调工具——RAG 上下文会让模型倾向文字作答而非调工具
+            # （runtime 实测工具成功率 0.05→0.10 的半边修复；本处补齐另一半）
+            matched_tool = match_demo_tool(query)
+            if matched_tool:
+                log.info(f"[Agent] 业务工具路由命中: {matched_tool}")
+                enhanced_query = (
+                    query
+                    + f"\n\n[系统指令] 该请求是业务操作。请调用工具 {matched_tool} 完成它；"
+                    "不要基于参考资料用文字回答。"
+                )
+            elif getattr(intent_result, "intent", None) == IntentType.OPERATION:
+                enhanced_query = self._build_rag_prompt(rag_context, query, self.style)
+                # 工具路由（runtime 实测工具成功率 0.05 的修复）：操作类请求
+                # （IntentType.OPERATION，如订阅/请假/查询物流）即使有检索资料，
+                # 也应优先调用工具执行动作，而不是仅基于资料文字作答。
                 enhanced_query += (
                     "\n\n补充要求：该请求属于操作类请求。若存在能完成它的工具，"
                     "请优先调用该工具执行操作；仅在没有任何适用工具时才基于资料回答。"
                 )
+            else:
+                enhanced_query = self._build_rag_prompt(rag_context, query, self.style)
         else:
             enhanced_query = query
 
@@ -1566,7 +1579,10 @@ class ReactAgent(Agent):
                     if t.get("_spec") is not None
                     and getattr(t["_spec"], "risk_level", "read_only") != "read_only"
                 ]
-                if non_retrieval_tools:
+                # 业务工具精准路由（B3 配套）：操作类查询命中演示业务工具时，
+                # 同样委派给 ReAct 流（工具调用需要工具循环，RAG 快路径没有）
+                demo_tool_matched = match_demo_tool(query) is not None
+                if non_retrieval_tools or demo_tool_matched:
                     logger.info(
                         "[Agent V1:stream] Non-retrieval tools detected (%s); "
                         "delegating to unified ReAct path",
@@ -1960,6 +1976,18 @@ class ReactAgent(Agent):
 
             if rag_context:
                 enhanced_query = self._build_rag_prompt(rag_context, query, self.style)
+                # 业务工具精准路由（与 run() 同判据）：命中演示业务工具时跳过
+                # RAG 注入并指名调工具——ReAct 循环里的工具调用才可达
+                matched_tool = match_demo_tool(query)
+                if matched_tool:
+                    enhanced_query = (
+                        query
+                        + "\n\n[系统指令] 该请求是业务操作。请调用工具 "
+                        + str(matched_tool)
+                        + " 完成它；"
+                        "不要基于参考资料用文字回答。"
+                    )
+                    log.info(f"[Agent V1:stream] 业务工具路由命中: {matched_tool}")
             else:
                 enhanced_query = query
             messages.append(ChatMessage(role="user", content=enhanced_query))

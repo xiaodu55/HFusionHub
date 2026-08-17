@@ -302,6 +302,11 @@ class ToolRegistry:
         self._register(V1_SPECS[READ_CHUNK_SPEC.name], ReadChunkTool(knowledge_base_id=kb))
         self._register(V1_SPECS[LIST_DOC_CHUNKS_SPEC.name], ListDocumentChunksTool(knowledge_base_id=kb))
 
+        # 演示业务工具集（B3 配套）：沙箱语义 read_only，覆盖评测 tool 用例
+        from .demo_business_tools import demo_business_tool_specs
+        for demo_spec, demo_tool in demo_business_tool_specs():
+            self._register(demo_spec, demo_tool)
+
         # Agent V1 Step 5: write_note (high-risk, requires approval)
         # Gated behind agent_version="1.1" — NOT visible to default V1 agents
         # (which only see "1.0" tools).  The decide/resume endpoint creates a
