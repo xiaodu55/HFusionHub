@@ -55,11 +55,18 @@ __all__ = [
 ]
 
 
-# Agent V1 whitelist
+# Agent V1 whitelist（B3 扩展：+20 沙箱业务工具，与评测 tool 用例一一对应）
 AGENT_V1_TOOL_NAMES: set[str] = {
     "search_knowledge_base",
     "read_chunk",
     "list_document_chunks",
+    # 演示业务工具（沙箱语义，read_only；生产可替换为真实业务系统调用）
+    "add_device", "apply_annual_leave", "apply_sick_leave", "cancel_auto_renew",
+    "create_incident", "export_finance_report", "get_cloud_footage",
+    "query_credits", "query_order_logistics", "redeem_gift_card",
+    "request_access", "run_database_backup", "schedule_service", "send_coupon",
+    "submit_expense", "submit_refund", "submit_warranty_claim", "subscribe_plan",
+    "switch_backup_link", "upgrade_firmware",
 }
 
 # legacy 入口的「每进程一次」告警标记：execute_tool 是 ReAct Agent 的活跃热路径，

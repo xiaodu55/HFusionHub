@@ -38,7 +38,7 @@ class DemoBusinessTool(BaseTool):
         return response
 
 
-def _ticket(prefix: str, kwargs: dict) -> dict:
+def _ticket(prefix: str, kwargs: dict = None) -> dict:
     return {"ticket_id": _demo_id(prefix)}
 
 

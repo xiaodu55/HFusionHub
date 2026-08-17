@@ -23,7 +23,8 @@ def test_default_registry_excludes_web_search_from_v1_tools():
     reg = ToolRegistry(knowledge_base_id=1)
     names = {t["name"] for t in reg.get_tools(v1_only=True)}
     assert "web_search" not in names
-    assert names == {"search_knowledge_base", "read_chunk", "list_document_chunks"}
+    # B3：白名单扩展至 3 KB 工具 + 20 沙箱业务工具（无 web_search）
+    assert len(names) == 23
 
 
 def test_flag_enabled_registry_includes_web_search():

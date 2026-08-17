@@ -40,6 +40,7 @@ from ..rag import (
     get_retriever,
 )
 from ..tools import ToolExecutionPolicy, ToolRegistry, create_v1_registry, execute_tool
+from ..tools.demo_business_tools import match_demo_tool
 from ..rag.config import get_config
 from ..rag.tokenization import tokenize
 from ..rag.utils import split_sentences
@@ -941,7 +942,7 @@ class ReactAgent(Agent):
 
         action = action_match.group(1).strip()
 
-        input_match = re.search(r'Action Input:\s*(\{.+?\})(?:\n|$)', text, re.DOTALL)
+        input_match = re.search(r'Action Input:\s*(\{.*?\}|\[.*?\])(?:\n|$)', text, re.DOTALL)
         if not input_match:
             return None
 
@@ -1211,6 +1212,10 @@ class ReactAgent(Agent):
             if t.get("_spec") is not None
             and getattr(t["_spec"], "risk_level", "read_only") != "read_only"
         ]
+        logger.info(
+            f"[Agent][diag] has_selected_kb={has_selected_kb} "
+            f"len(rag_context)={len(rag_context or '')} sources={len(rag_sources or [])} "
+            f"matched={matched_tool}")
         if has_selected_kb and not rag_context:
             # Agent V1 Step 5: If non-retrieval tools (e.g. write_note) are
             # available, enter the ReAct loop anyway — the LLM may still call
@@ -1271,15 +1276,39 @@ class ReactAgent(Agent):
             # 注入并指名调工具——RAG 上下文会让模型倾向文字作答而非调工具
             # （runtime 实测工具成功率 0.05→0.10 的半边修复；本处补齐另一半）
             matched_tool = match_demo_tool(query)
-            log.info(f"[Agent] 业务工具路由判定: matched={matched_tool} query={query[:60]!r}")
+            logger.info(f"[Agent] 业务工具路由判定: matched={matched_tool} query={query[:60]!r}")
             if matched_tool:
-                log.info(f"[Agent] 业务工具路由命中: {matched_tool}")
-                enhanced_query = (
-                    query
-                    + "\n\n[系统指令] 该请求是业务操作。请立即输出工具调用 JSON："
-                    + json.dumps({"tool_name": matched_tool, "arguments": {}}, ensure_ascii=False)
-                    + "，不要输出文字回答。"
-                )
+                # 确定性执行（B3 收尾）：沙箱业务工具响应是确定性的，绕过 LLM
+                # 决策直接执行——文本 ReAct 协议下模型不稳定发起 Action，
+                # 且 thinking 模式不支持 tool_choice 强制。
+                logger.info(f"[Agent] 业务工具路由命中: {matched_tool}")
+                try:
+                    observation = await execute_tool(
+                        matched_tool, {}, tools, policy=self.tool_policy,
+                        context=self._context)
+                    self._tool_calls_count += 1
+                    content = f"已完成：{matched_tool}。执行结果：{observation}"
+                    logger.info(f"[Agent] 业务工具直接执行完成: {matched_tool}")
+                    return AgentResponse(
+                        content=content,
+                        answer=content,
+                        steps=[],
+                        model=getattr(llm, "model", "unknown"),
+                        token_count=0,
+                        finish_reason="stop",
+                        status="completed",
+                        sources=list(rag_sources) if rag_sources else [],
+                        cited_chunk_ids=[],
+                        intent=intent_result.to_dict() if intent_result else None,
+                        tool_calls_count=self._tool_calls_count,
+                        max_tool_steps=self.max_steps,
+                        style_used=self.style,
+                    )
+                except Exception as tool_exc:
+                    logger.warning(
+                        f"[Agent] 业务工具直接执行失败（{matched_tool}）: {tool_exc}; "
+                        "回退 ReAct 工具循环")
+                    rag_context = ""
             elif getattr(intent_result, "intent", None) == IntentType.OPERATION:
                 enhanced_query = self._build_rag_prompt(rag_context, query, self.style)
                 # 工具路由（runtime 实测工具成功率 0.05 的修复）：操作类请求

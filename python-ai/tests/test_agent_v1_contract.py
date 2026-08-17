@@ -300,8 +300,9 @@ class TestAgentResponseV1:
 # ---------------------------------------------------------------------------
 
 def test_agent_v1_tool_names_is_exactly_three():
-    """The V1 whitelist contains exactly three tools."""
-    assert AGENT_V1_TOOL_NAMES == {"search_knowledge_base", "read_chunk", "list_document_chunks"}
+    """The V1 whitelist: 3 KB tools + 20 sandbox business tools (B3)."""
+    assert {"search_knowledge_base", "read_chunk", "list_document_chunks"} <= AGENT_V1_TOOL_NAMES
+    assert len(AGENT_V1_TOOL_NAMES) == 23
 
 
 # ---------------------------------------------------------------------------
@@ -538,7 +539,8 @@ class TestToolRegistry:
         reg = create_v1_registry(1)
         tools = reg.get_tools(v1_only=True)
         names = {t["name"] for t in tools}
-        assert names == {"search_knowledge_base", "read_chunk", "list_document_chunks"}
+        assert {"search_knowledge_base", "read_chunk", "list_document_chunks"} <= names
+        assert len(names) == 23
 
     @pytest.mark.asyncio
     async def test_non_v1_tool_is_rejected(self):
@@ -628,7 +630,8 @@ class TestAgentCannotBypassRegistry:
         tools = agent._get_tools()
 
         names = {t["name"] for t in tools}
-        assert names == {"search_knowledge_base", "read_chunk", "list_document_chunks"}
+        assert {"search_knowledge_base", "read_chunk", "list_document_chunks"} <= names
+        assert len(names) == 23
         # Each tool carries a _registry back-reference.
         for t in tools:
             assert "_registry" in t, f"{t['name']} missing _registry back-ref"
@@ -1030,7 +1033,8 @@ class TestWriteCapabilityGating:
         tools = reg.get_tools(v1_only=True)
         names = {t["name"] for t in tools}
         assert "write_note" not in names
-        assert names == {"search_knowledge_base", "read_chunk", "list_document_chunks"}
+        assert {"search_knowledge_base", "read_chunk", "list_document_chunks"} <= names
+        assert len(names) == 23
 
     def test_v1_1_registry_includes_write_note(self):
         """V1.1 registry → 3 V1.0 tools + write_note."""
@@ -1039,7 +1043,7 @@ class TestWriteCapabilityGating:
         tools = reg.get_tools(v1_only=True)
         names = {t["name"] for t in tools}
         assert "write_note" in names
-        assert len(names) == 4
+        assert len(names) == 24
 
     def test_read_write_context_gets_v1_1_registry(self):
         """get_agent() with read_write mode creates a V1.1 registry."""
