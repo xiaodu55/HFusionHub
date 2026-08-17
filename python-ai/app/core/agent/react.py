@@ -345,6 +345,7 @@ class ReactAgent(Agent):
         llm: BaseLLM,
         messages: list[ChatMessage],
         tools: list[dict[str, Any]],
+        tool_choice: Any = None,
     ) -> tuple[Any, tuple[str, dict[str, Any]] | None]:
         """ReAct 单步 LLM 调用：原生 tool-calls 优先，失败/不支持降级文本协议。
 
@@ -359,7 +360,8 @@ class ReactAgent(Agent):
             try:
                 response = await llm.chat(
                     messages=messages, temperature=0.7,
-                    tools=payload_tools, tool_choice="auto",
+                    tools=payload_tools,
+                    tool_choice=tool_choice or "auto",
                 )
             except Exception as exc:
                 logger.info(
@@ -1197,6 +1199,7 @@ class ReactAgent(Agent):
                 style_used=self.style,
             )
         raw_context, rag_sources, auto_detected_kb_id, rag_context, was_compressed, visible_numbers = retrieved_full
+        matched_tool: str | None = None  # 业务工具路由命中（B3）
         logger.info(f"[RAG] Retrieved context length: {len(raw_context)}, sources count: {len(rag_sources)}, auto_detected_kb_id: {auto_detected_kb_id}")
 
         # Agent V1 Step 5: If non-retrieval tools (e.g. write_note) are
@@ -1268,12 +1271,14 @@ class ReactAgent(Agent):
             # 注入并指名调工具——RAG 上下文会让模型倾向文字作答而非调工具
             # （runtime 实测工具成功率 0.05→0.10 的半边修复；本处补齐另一半）
             matched_tool = match_demo_tool(query)
+            log.info(f"[Agent] 业务工具路由判定: matched={matched_tool} query={query[:60]!r}")
             if matched_tool:
                 log.info(f"[Agent] 业务工具路由命中: {matched_tool}")
                 enhanced_query = (
                     query
-                    + f"\n\n[系统指令] 该请求是业务操作。请调用工具 {matched_tool} 完成它；"
-                    "不要基于参考资料用文字回答。"
+                    + "\n\n[系统指令] 该请求是业务操作。请立即输出工具调用 JSON："
+                    + json.dumps({"tool_name": matched_tool, "arguments": {}}, ensure_ascii=False)
+                    + "，不要输出文字回答。"
                 )
             elif getattr(intent_result, "intent", None) == IntentType.OPERATION:
                 enhanced_query = self._build_rag_prompt(rag_context, query, self.style)
@@ -1301,8 +1306,17 @@ class ReactAgent(Agent):
         assistant_text = None
         response = None
 
+        # 业务工具路由（B3）：首步强制调用匹配到的演示业务工具，
+        # 避免 LLM 无视指令直接文字作答；后续步恢复 auto
+        forced_tool_choice = (
+            {"type": "function", "function": {"name": matched_tool}}
+            if matched_tool else None
+        )
+
         for step_num in range(self.max_steps):
-            response, native_action = await self._chat_step(llm, messages, tools)
+            response, native_action = await self._chat_step(
+                llm, messages, tools, tool_choice=forced_tool_choice)
+            forced_tool_choice = None
             _last_response_token_count = response.token_count
             assistant_text = response.content
 
