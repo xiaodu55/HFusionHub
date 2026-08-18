@@ -109,3 +109,4 @@ MSYS_NO_PATHCONV=1 docker run --rm --add-host=host.docker.internal:host-gateway 
 - 优化方向（部署层）：embedding 模型 GPU 化/换 bge-small/缓存 query
   embedding；LLM 生成时长（DeepSeek ~2-4s）为外部依赖。
 - 工具路由已生效：确定性执行 subscribe_plan（tool_calls_count=1）。
+trace_tmp.json removed from repo
