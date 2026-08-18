@@ -92,3 +92,20 @@ MSYS_NO_PATHCONV=1 docker run --rm --add-host=host.docker.internal:host-gateway 
 - 双条件路由器（动作动词 + 领域词）已接入 run()/run_stream/_run_stream_react 三处；
 - 遗留：DeepSeek 在 ReAct 循环内仍不稳定发起 tool_calls（行为层）——
   下一步用 tool_choice 强制调用或提示词迭代，属提示工程/参数工程工作。
+
+## B2 分段定位·终版（2026-09-06，OTel + 直连探测双重验证）
+
+| 链路 | 全流耗时 | 说明 |
+|---|---|---|
+| Java 全链路（前端→Java→Python agent V1） | 7.9s | Tempo trace 根 span 7236ms |
+| Python agent-V1 直连（绕过 Java） | 7.2s | **Java 桥开销仅 ~0.7s** |
+| 普通 /api/chat（无记忆/会话链路） | ~1.9s | 同一问题 |
+
+**结论（推翻"Java 桥 2s 缓冲"假设）**：
+- Java SSE 桥是真流式转发（Flux 逐元素），开销 ~0.7s；
+- 差距大头在 **Python agent V1 路径 vs 普通 chat 路径的差**：记忆检索的
+  Ollama CPU embedding（bge-m3 单次 ~2.5s，每请求至少两次）+ 会话/历史
+  处理——**部署层瓶颈，非代码 bug**；
+- 优化方向（部署层）：embedding 模型 GPU 化/换 bge-small/缓存 query
+  embedding；LLM 生成时长（DeepSeek ~2-4s）为外部依赖。
+- 工具路由已生效：确定性执行 subscribe_plan（tool_calls_count=1）。
