@@ -6,6 +6,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第三十五批（2026-09-06：主体级 ACL——文档可见性 + 检索按主体 clearance 过滤）
+
+#### Added
+- **Flyway V85**：`document.visibility VARCHAR(20) NOT NULL DEFAULT 'general'`
+  （等级模型按敏感度升序：general < confidential，与 Python 侧共用同一张表）
+- **Java**：Document 实体增 `visibility`；upload API 增可选 `visibility` 参数
+  （白名单校验，非法值 fail-closed 拒绝）；向量化派发（`/api/parse` 请求体）
+  透传 visibility
+- **Python**：`app/core/security/clearance.py`（clearance contextvar + 等级
+  归一化 + ACL 过滤器构造）；`TenantMiddleware` 传播 `X-User-Clearance`
+  （缺省按最低权限 general，非法值与租户头同策略 400）；`/api/parse` →
+  inline/arq 派发 → 后台任务全链路透传，分块（含 QA 生成块）metadata 统一
+  打标 `visibility`；`_matches_metadata_filter` 扩展集合成员语义 + visibility
+  缺省 general（V85 前存量向量无需回填）；`MultiChannelRetriever` 与
+  `search_tool` 检索入口叠加 ACL 过滤（调用方无法经显式 filter 越权放宽）
+- **评测（runtime 轨道）**：`eval_runtime.subject_for_case` 双主体策略——
+  permission 类用例切低权限主体（`X-User-Clearance: general`），其余 admin；
+  同一 section 的"必答/必拒"矛盾由主体区分化解（cd-025 管理员答 ✓ /
+  pt-007 低权限拒 ✓），用例数据与 baseline SHA 保持冻结；`seed_eval_kb.py`
+  对受控文档（security-policy / employee-privacy-policy / permissions-matrix /
+  it-support-runbook）以 `confidential` 上传
+- 测试：`tests/test_subject_acl.py` 27 项（等级模型/谓词/中间件/主体策略）；
+  query_router、RAG access contract、eval runtime contract 等存量回归全绿
+
+#### Fixed
+- **seed_eval_kb.py purge 流量 bug（存量）**：直接对活文档调 purge 端点恒 400
+  （purge 只作用于回收站文档），导致 KB 101 跨次播种累积 3 批重复文档、
+  Milvus 实体数与 document_chunk 对账漂移（277 vs 870）——修复为
+  软删除进回收站 → purge 彻底删除（连带向量），状态轮询增加非 JSON 容错重试
+
+#### 验收（2026-09-06 · 单机全栈实测 · 权限类复测）
+- **permission 拒答正确率 0/30 → 30/30**（第三十二批记录的已知 ACL 缺口收口），
+  30 例全部 `insufficient_evidence`、sources 为空——受控文档在检索层被
+  ACL 过滤，不依赖模型自觉拒答；
+- 同一 section 双主体化解：cd-025（admin）13.7s 应答并引用 3 篇受控文档
+  （信息安全策略/员工隐私政策/IT 运维手册）；pt-007（general）0.2s 拒答、
+  sources 为空；
+- 过度屏蔽对照：nq-001 / nq-050（admin，general 文档）正常应答 ✓；
+  进程内直查验证：同 query 无过滤命中 confidential 分块、general 过滤后
+  仅剩 general 分块。
+
+#### Notes
+- 部署：arq payload 新增 `visibility` key，API 进程与 arq worker 需同批升级
+  （旧 worker 收新 payload 会因未知参数报错）；存量向量按 general 语义兼容
+- 后续：Java 会话 → Python chat 的 `X-User-Clearance` 注入（当前缺省 general，
+  fail-closed，admin 主体在真实聊天链路生效需接通）；chunk 级工具
+  （read_chunk/list_document_chunks）与直查端点 `/api/search` 的 ACL 接入
+
 ### 第三十四批（2026-09-05：B3 热点读缓存——知识库列表 + 版本化失效）
 
 #### Added
@@ -22,7 +70,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### 第三十三批（2026-09-05：C1 集成测试迁移真实 MySQL——H2 掩盖的 4 类问题现形）
 
 #### Added
-- **it profile + Testcontainers 集成基类**（[ADR-008](docs/adr/ADR-006-faithfulness-metric-recalibration.md#附adr-008-集成测试-h2--testcontainers-真实-mysql-演进c1--2026-09-05)）：
+- **it profile + Testcontainers 集成基类**（[ADR-008](docs/adr/ADR-008-it-mysql-testcontainers.md)）：
   - `AbstractItMySQLTest`（PER_CLASS）：真实 MySQL + 完整 Flyway V1..V84，
     数据源二选一（`HFH_IT_JDBC_URL` 外部库 / Testcontainers mysql:8.0），
     无 Docker 时整类跳过；每类 @BeforeAll 全 schema 清空 + 重播核心种子
