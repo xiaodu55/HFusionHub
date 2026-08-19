@@ -203,6 +203,14 @@ runtime 首测暴露三个缺口，逐项侦察结论与处置（红线：不假
 这需要文档级可见性 + 主体清购 + 检索过滤 + 评测框架按用例切换主体，
 是独立特性（已列后续工作），不在忠实度专项内假实现。
 
+> **✅ 收口（2026-09-06，CHANGELOG 第三十五批）**：主体级 ACL 已落地——
+> Flyway V85（`document.visibility`）+ Python `app/core/security/clearance.py`
+> （X-User-Clearance 中间件 + 检索 clearance 过滤）+ 评测双主体
+> （permission 用例切低权限主体，用例数据与 baseline SHA 冻结不变）。
+> 单机全栈复测：permission 拒答 0/30 → **30/30**（全部 sources 空，检索层
+> 拦截）；cd-025（admin）应答 ✓ / pt-007（低权限）拒答 ✓，同 section
+> 必答/必拒矛盾按本节预判的机制化解。
+
 ### 2. 工具成功率 0.05 → 双重根因，已修路由半边（本批）
 
 - **路由半边（已修）**：chat 快路径有检索结果即直答，操作类请求

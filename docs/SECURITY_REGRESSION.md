@@ -104,6 +104,29 @@ CI 已把 `java` / `python` / `python-container` / `eval-offline` / `helm` / `do
 
 ---
 
+## 6. 主体级文档可见性（ACL，V85）
+
+**目的**：受控文档（`visibility=confidential`）对低权限主体在**检索层**不可见
+（fail-closed），不依赖模型自觉拒答；clearance 由调用方（Java 后端）经
+`X-User-Clearance` 传播，Python 侧缺省按最低权限 general 处理，非法值拒绝。
+
+自动测试（`python-ai/tests/test_subject_acl.py`，27 项）：
+- 等级模型：`allowed_visibilities` / `build_acl_metadata_filter`（admin 全集 /
+  general 仅 general / 未知值归最低权限）
+- 存储层谓词：`_matches_metadata_filter` 集合成员语义 + visibility 缺失按
+  general（存量向量免回填）
+- 中间件：缺头 → general、非法头 → 400、admin 透传、请求间不泄漏
+- 评测契约：`subject_for_case` permission 用例切低权限主体
+
+人工检查：
+- [ ] 新增检索入口（绕过 `MultiChannelRetriever` / `search_tool` 的直查路径）
+      必须叠加 `build_acl_metadata_filter(get_clearance())`，或显式论证不需要
+- [ ] chunk 级读取工具（read_chunk 等）如开放给外部主体，需补 ACL 判断
+- [ ] Java 会话 → Python chat 的 clearance 注入接通前，admin 在聊天链路
+      亦为 general（fail-closed，不构成泄漏）
+
+---
+
 ## 汇总（发布清单）
 
 | # | 安全边界 | 关键自动测试 | CI job |
@@ -113,6 +136,7 @@ CI 已把 `java` / `python` / `python-container` / `eval-offline` / `helm` / `do
 | 3 | 插件沙箱 | `test_plugin_container.py` | `python-container` |
 | 4 | 账本幂等 | `AgentTaskQueueIntegrationTest`、`VectorizationServiceImplTest` | `java` |
 | 5 | Agent 拒绝 | `workerRejectsUnresolvableTenantBeforeCalling` | `java` |
+| 6 | 主体级文档可见性 | `test_subject_acl.py` | `python` |
 
 发布前请执行 `scripts/staging-rehearsal.sh` 验证全链路健康，并对照
 `docs/PRODUCTION_OPS.md` 第 6 节逐条打勾。

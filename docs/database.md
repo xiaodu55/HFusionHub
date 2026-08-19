@@ -4,7 +4,7 @@
 
 ## 概述
 
-数据库 `hfusionhub` 由 Flyway 管理，迁移脚本位于 `java-backend/src/main/resources/db/migration/`，当前已应用到 **V82**。
+数据库 `hfusionhub` 由 Flyway 管理，迁移脚本位于 `java-backend/src/main/resources/db/migration/`，当前已应用到 **V85**。
 
 ## 迁移历史（V1–V85）
 
@@ -64,6 +64,9 @@
 | V80 | `V80__long_term_memory_flag.sql` | 注册 `memory.long_term.enabled` 特性开关（默认 FALSE，长期记忆接线批） |
 | V81 | `V81__native_tool_calls_flag.sql` | 注册 `agent.native_tool_calls.enabled` 特性开关（默认 FALSE，原生 function calling 批） |
 | V82 | `V82__analytics_warehouse.sql` | HFusionData Analytics 运营数仓应用层：`analytics_realtime_metrics`（Flink 实时窗口）、5 张 `ads_*` ADS 镜像（Spark 回写）、`bigdata_batch_run_log`（批处理日志），全部含 tenant_id（大数据扩展包批） |
+| V83 | `V83__table_lineage.sql` | HFusionData Analytics 表级血缘元数据（轻量数据治理，`lineage.yaml` 经 load_lineage.py 注册，平台级 tenant_id=-1） |
+| V84 | `V84__message_images.sql` | 对话图片输入（实验特性，message.images 存相对 URL JSON 数组） |
+| V85 | `V85__document_visibility.sql` | 主体级 ACL：`document.visibility`（general/confidential，DEFAULT 'general'），随索引写入 Milvus chunk metadata，检索按主体 clearance 过滤（CHANGELOG 第三十五批） |
 
 ## 迁移规则
 

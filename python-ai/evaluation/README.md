@@ -53,7 +53,7 @@ P95/P50/平均延迟、单任务 Token、单任务成本、错误率、越界检
 
 ## 运行时契约测试
 
-`tests/test_eval_runtime_contract.py`（31 项）以 mock 覆盖运行时轨道全部关键契约：
+`tests/test_eval_runtime_contract.py`（35 项）以 mock 覆盖运行时轨道全部关键契约：
 SHA-256 冻结校验（匹配/篡改/缺失 pin）、跨 KB 越界来源检测（含同名跨 KB 泄露）、基线
 suite-SHA 绑定、请求异常处理、拒答检测（拒答文本 / `insufficient_evidence` / 泄露）、工具
 成功/失败/未调用、成本计算、由 key_facts 支撑且校验回答内容的引用忠实度，以及门禁失败

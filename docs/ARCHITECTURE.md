@@ -194,7 +194,7 @@ P6-P10 features are gated by environment variables, not code paths. This means:
 |---|---|---|---|---|
 | **Language** | Java + Python | Python + React | Java | Python |
 | **RAG** | Multi-channel + GraphRAG | Visual workflow | Enterprise pipelines | Modular chains |
-| **Auth** | JWT + per-KB ACL | Workspace-based | RBAC | DIY |
+| **Auth** | JWT + per-KB ACL + 文档级可见性 ACL | Workspace-based | RBAC | DIY |
 | **Deployment** | Docker / K8s | Docker / Cloud | Docker | Library |
 | **Evaluation** | Built-in + RAGAS | Annotation | ragenteval | LangSmith |
 | **MCP** | ✅ Native | Community | Built-in | Via adapter |

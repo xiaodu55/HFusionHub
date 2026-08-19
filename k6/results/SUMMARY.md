@@ -80,10 +80,12 @@ MSYS_NO_PATHCONV=1 docker run --rm --add-host=host.docker.internal:host-gateway 
 - 另注：round 0 出现 13.7s 离群首包（熔断/冷启动嫌疑）。
 
 ## 后续工作清单（按优先级）
-1. B2 收尾：开启 OTel（OTEL_ENABLED=true + OTEL_EXPORTER_OTLP_ENDPOINT）
-   拉 Tempo trace 定位 Java 桥内 2s 缓冲点，或 Reactor 调试逐算子计时；
-2. 主体级 ACL（权限类拒答 0/30 的机制解，设计见 ADR-006）；
-3. 业务工具集（8 个演示工具 + 沙箱端点）；
+1. ✅ B2 收尾（2026-09-05，commit 45550d0f）：OTel+直连探测双重验证——
+   Java 桥开销仅 ~0.7s，大头是本机 CPU embedding + LLM 生成（部署层归因留档）；
+2. ✅ 主体级 ACL（2026-09-06，commit 240d1a75，CHANGELOG 第三十五批）：
+   V85 + clearance 检索过滤 + 评测双主体，permission 复测 0/30 → 30/30；
+3. ✅ 业务工具集（2026-09-05，commit cbfaee3a）：20 个演示业务工具 +
+   双条件路由器，tool_success 0.10 → 0.80；
 4. PromptTestSet Awaitility 化 + Cost 每类独立库（C1 后续）；
 5. k6 正式加入 PATH（当前用 d:/college/development/k6-v1.8.1-windows-amd64/k6.exe）。
 
