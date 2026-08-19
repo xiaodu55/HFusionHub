@@ -719,6 +719,12 @@ public class VectorizationServiceImpl implements VectorizationService {
                 Map.entry(
                         "knowledge_base_id", document.getKnowledgeBaseId() != null ? document.getKnowledgeBaseId() : 0),
                 Map.entry("document_title", document.getTitle()),
+                // 主体级 ACL：可见性随索引写入 Milvus chunk metadata，检索按主体 clearance 过滤
+                Map.entry(
+                        "visibility",
+                        document.getVisibility() != null && !document.getVisibility().isBlank()
+                                ? document.getVisibility()
+                                : CommonConstants.DOCUMENT_VISIBILITY_DEFAULT),
                 Map.entry("index_version", job.getIndexVersion()),
                 Map.entry("callback_url", callbackUrl),
                 Map.entry("callback_secret", callbackSecret),

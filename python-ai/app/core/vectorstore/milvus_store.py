@@ -14,6 +14,7 @@ from collections import OrderedDict
 from typing import Any
 
 from app.core.chunker.text_chunker import VectorChunk
+from app.core.security.clearance import DEFAULT_VISIBILITY
 from app.core.vectorstore.milvus_lite import CHUNKS_STORE_PATH as _CO_STORE_DEFAULT
 from app.core.vectorstore.milvus_lite import MILVUS_LITE_PATH as _LITE_PATH_DEFAULT
 from app.core.vectorstore.milvus_lite import _migrate_co_store_layout
@@ -111,6 +112,11 @@ def _matches_metadata_filter(metadata: Any, metadata_filter: Any) -> bool:
 
     - metadata/filter 均容忍 JSON 字符串形态（Milvus 返回的 metadata 已反序列化，
       但扩展字段可能是 str 值），比较前做 str 归一化。
+    - expected 为 list/tuple/set 时按集合成员匹配（主体级 ACL 的
+      ``{"visibility": ["general", ...]}`` 过滤依赖此语义）。
+    - ``visibility`` 键缺失按缺省等级 general 处理：V85 之前索引的存量分块
+      metadata 无该字段，其语义等价于 DB 的 DEFAULT 'general'，不能因字段
+      缺失而对低权限主体整体消失。
     - filter 为空/None 恒真。"""
     if not metadata_filter:
         return True
@@ -118,9 +124,14 @@ def _matches_metadata_filter(metadata: Any, metadata_filter: Any) -> bool:
         return False
     for key, expected in metadata_filter.items():
         actual = metadata.get(key)
+        if actual is None and key == "visibility":
+            actual = DEFAULT_VISIBILITY
         if actual is None:
             return False
-        if isinstance(expected, (int, float)) and isinstance(actual, (int, float)):
+        if isinstance(expected, (list, tuple, set, frozenset)):
+            if str(actual) not in {str(item) for item in expected}:
+                return False
+        elif isinstance(expected, (int, float)) and isinstance(actual, (int, float)):
             if actual != expected:
                 return False
         elif str(actual) != str(expected):

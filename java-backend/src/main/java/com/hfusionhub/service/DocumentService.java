@@ -17,12 +17,13 @@ public interface DocumentService {
     /**
      * 上传文档
      *
-     * @param file   文件
-     * @param title  文档标题
-     * @param kbId   知识库ID
+     * @param file       文件
+     * @param title      文档标题
+     * @param kbId       知识库ID
+     * @param visibility 可见性等级（general/confidential，空则 general）
      * @return 文档信息
      */
-    DocumentInfoDTO upload(MultipartFile file, String title, Long kbId);
+    DocumentInfoDTO upload(MultipartFile file, String title, Long kbId, String visibility);
 
     /**
      * 从公开网页 URL 创建文档（由 Python AI 抓取并暂存为 markdown）。

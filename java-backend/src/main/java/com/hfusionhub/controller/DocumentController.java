@@ -33,8 +33,10 @@ public class DocumentController {
     public R<DocumentInfoDTO> upload(
             @Parameter(description = "文件") @RequestParam("file") MultipartFile file,
             @Parameter(description = "文档标题") @RequestParam("title") String title,
-            @Parameter(description = "知识库ID") @RequestParam("knowledgeBaseId") Long knowledgeBaseId) {
-        DocumentInfoDTO info = documentService.upload(file, title, knowledgeBaseId);
+            @Parameter(description = "知识库ID") @RequestParam("knowledgeBaseId") Long knowledgeBaseId,
+            @Parameter(description = "可见性等级：general/confidential，缺省 general")
+            @RequestParam(value = "visibility", required = false) String visibility) {
+        DocumentInfoDTO info = documentService.upload(file, title, knowledgeBaseId, visibility);
         return R.ok("上传成功", info);
     }
 

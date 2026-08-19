@@ -88,6 +88,15 @@ python scripts/eval_offline.py --minimum-recall 0.90      # 自定义阈值
 ## 运行时评测（Nightly/Staging）
 
 要求合成 KB 已以 kb_id=101 索引到目标环境，且文档标题与 `evaluation/kb` 一致。
+KB 播种使用 `scripts/seed_eval_kb.py`：受控文档（`security-policy` /
+`employee-privacy-policy` / `permissions-matrix` / `it-support-runbook`）以
+`visibility=confidential` 上传（主体级 ACL，V85），其余为 `general`。
+
+**双主体执行**：`permission` 类用例以最低权限主体（`X-User-Clearance: general`）
+执行，其余用例以 admin（全 clearance）执行——同一 section 的"必答/必拒"矛盾由
+主体区分化解（如 cd-025 管理员可引用安全文档应答，pt-007 低权限主体因受控文档
+被 ACL 检索过滤而正确拒答）。用例数据保持冻结（cases.jsonl / baseline SHA 不变），
+主体策略由 `eval_runtime.subject_for_case` 在运行时轨道落地。
 
 ```bash
 python scripts/eval_runtime.py --token <internal-token> \

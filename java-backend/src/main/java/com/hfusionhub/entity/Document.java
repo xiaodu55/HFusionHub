@@ -69,6 +69,13 @@ public class Document extends BaseEntity {
     private Integer chunkCount;
 
     /**
+     * 可见性等级：general-一般，confidential-受控（仅 admin 主体检索可见）。
+     * 随索引写入 Milvus chunk metadata，检索按主体 clearance 过滤。
+     */
+    @Schema(description = "可见性等级：general/confidential")
+    private String visibility;
+
+    /**
      * 状态：0-待解析，1-解析中，2-已完成，3-失败
      */
     @Schema(description = "状态：0-待解析，1-解析中，2-已完成，3-失败")

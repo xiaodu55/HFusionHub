@@ -42,14 +42,22 @@ class SearchTool(BaseTool):
 
         try:
             # Import here to avoid circular imports
+            from ..security.clearance import build_acl_metadata_filter, get_clearance
             from ..vectorstore.milvus_store import search_similar
+
+            # 主体级 ACL：工具与主检索链路同规则——按请求主体 clearance 过滤
+            # 可见性，叠加在调用方显式 filter 之上（visibility 键以 ACL 为准）。
+            acl_filter = build_acl_metadata_filter(get_clearance())
+            effective_filter = None
+            if metadata_filter or acl_filter:
+                effective_filter = {**(metadata_filter or {}), **(acl_filter or {})}
 
             # Search similar chunks
             results = search_similar(
                 query_text=query,
                 top_k=top_k,
                 knowledge_base_id=kb_id,
-                metadata_filter=metadata_filter,
+                metadata_filter=effective_filter,
             )
 
             # Format results with source information

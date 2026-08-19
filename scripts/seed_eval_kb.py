@@ -23,6 +23,16 @@ KB_DIR = ROOT / "python-ai" / "evaluation" / "kb"
 DOCS = KB_DIR / "docs"
 KB_ID = 101
 
+# 主体级 ACL：受控文档标记 confidential（安全/隐私/权限矩阵/IT 运维手册，
+# 与 permission 类用例引用面一致），仅 admin 主体检索可见；其余缺省 general。
+# runtime 评测据此实现双主体：permission 用例切低权限主体 → ACL 拒答。
+RESTRICTED_DOC_IDS = {
+    "security-policy",
+    "employee-privacy-policy",
+    "permissions-matrix",
+    "it-support-runbook",
+}
+
 
 def env_val(key: str) -> str:
     for line in (ROOT / "docker" / ".env").read_text(encoding="utf-8").splitlines():
@@ -41,7 +51,7 @@ def main() -> int:
     headers = {"satoken": login.json()["data"]}
     print("login ok")
 
-    # ── 清理 KB 101 既有文档（purge 连带清理向量）──
+    # ── 清理 KB 101 既有文档（软删除进回收站 → purge 彻底删除并连带清理向量）──
     listing = httpx.get(f"{java}/api/document/list/{KB_ID}",
                         params={"page": 1, "pageSize": 100},
                         headers=headers, timeout=30)
@@ -51,8 +61,14 @@ def main() -> int:
         rows = data.get("records") or data.get("list") or data.get("items") or []
     for row in rows:
         doc_id = row.get("id")
+        # purge 只作用于回收站文档：先软删除，再彻底删除（连带 Milvus 向量）
+        soft = httpx.delete(f"{java}/api/document/{doc_id}", headers=headers, timeout=60)
         purge = httpx.delete(f"{java}/api/document/{doc_id}/purge", headers=headers, timeout=60)
-        print(f"purged old doc {doc_id} ({row.get('title')}) -> {purge.status_code}")
+        if soft.status_code != 200 or purge.status_code != 200:
+            print(f"[WARN] remove doc {doc_id} ({row.get('title')}): "
+                  f"soft={soft.status_code} purge={purge.status_code} {purge.text[:120]}")
+        else:
+            print(f"removed old doc {doc_id} ({row.get('title')})")
     if rows:
         time.sleep(3)  # 等向量清理落定
 
@@ -63,9 +79,10 @@ def main() -> int:
 
     for md in sorted(DOCS.glob("*.md")):
         title = title_by_file.get(md.name, md.stem)
+        visibility = "confidential" if md.stem in RESTRICTED_DOC_IDS else "general"
         up = httpx.post(
             f"{java}/api/document/upload",
-            data={"title": title, "knowledgeBaseId": str(KB_ID)},
+            data={"title": title, "knowledgeBaseId": str(KB_ID), "visibility": visibility},
             files={"file": (md.name, md.read_bytes(), "text/markdown")},
             headers=headers, timeout=120,
         )
@@ -75,7 +92,7 @@ def main() -> int:
         except Exception as exc:
             print(f"[FAIL] upload {title}: {exc} {up.text[:200]}")
             return 1
-        print(f"uploaded {title} -> doc {doc_id}")
+        print(f"uploaded {title} -> doc {doc_id} (visibility={visibility})")
 
         parse = httpx.post(f"{java}/api/document/{doc_id}/parse", headers=headers, timeout=30)
         if parse.status_code != 200:
@@ -85,8 +102,14 @@ def main() -> int:
         deadline = time.time() + 180
         while time.time() < deadline:
             time.sleep(3)
-            doc = httpx.get(f"{java}/api/document/{doc_id}", headers=headers, timeout=30).json()
-            status = doc.get("data", {}).get("status")
+            # 状态轮询容错：瞬时非 JSON 响应（网关抖动/重启窗口）重试而非崩溃
+            try:
+                doc = httpx.get(f"{java}/api/document/{doc_id}",
+                                headers=headers, timeout=30).json()
+                status = doc.get("data", {}).get("status")
+            except Exception as exc:
+                print(f"  [retry] status poll: {type(exc).__name__}: {str(exc)[:80]}")
+                continue
             if status == 2:
                 print("  indexed ok")
                 break

@@ -1,5 +1,7 @@
 package com.hfusionhub.common.constant;
 
+import java.util.List;
+
 /**
  * 通用常量
  *
@@ -109,4 +111,14 @@ public interface CommonConstants {
      * Redis Key 前缀：接口限流
      */
     String REDIS_LIMIT_PREFIX = "hf:limit:";
+
+    /**
+     * 文档可见性缺省等级（与 V85 迁移 DEFAULT 'general' 一致）
+     */
+    String DOCUMENT_VISIBILITY_DEFAULT = "general";
+
+    /**
+     * 文档可见性合法等级（与 Python 侧 clearance 模型一致，按敏感度升序）
+     */
+    List<String> DOCUMENT_VISIBILITY_LEVELS = List.of("general", "confidential");
 }

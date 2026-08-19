@@ -27,6 +27,11 @@ class ParseRequest(BaseModel):
     callback_secret: str | None = Field(None, description="Secret for callback authentication")
     knowledge_base_id: int | None = Field(None, description="Knowledge base ID")
     document_title: str | None = Field(None, description="Document title for citations")
+    visibility: str | None = Field(
+        None,
+        description="Document visibility level (general/confidential); "
+                    "stamped into chunk metadata and enforced at retrieval by subject clearance",
+    )
     index_version: str = Field(..., description="Java-issued index version used to reject stale callbacks")
     embedding_model: str | None = Field(None, description="Embedding model to use: ollama or random")
     embedding_dimension: int | None = Field(None, description="Embedding vector dimension")

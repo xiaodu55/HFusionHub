@@ -85,7 +85,7 @@ public class DocumentServiceImpl implements DocumentService {
 
     @Override
     @Transactional
-    public DocumentInfoDTO upload(MultipartFile file, String title, Long kbId) {
+    public DocumentInfoDTO upload(MultipartFile file, String title, Long kbId, String visibility) {
         // 1. 验证知识库存在且属于当前用户
         Long currentUserId = JwtUtils.getCurrentUserId();
         KnowledgeBase kb = knowledgeBaseMapper.selectById(kbId);
@@ -145,6 +145,7 @@ public class DocumentServiceImpl implements DocumentService {
         Document document = new Document();
         document.setKnowledgeBaseId(kbId);
         document.setTitle(title);
+        document.setVisibility(normalizeVisibility(visibility));
         // 转换为正式路径存入数据库
         String finalPath = tempToFinalPath(tempPath);
         document.setFilePath(finalPath);
@@ -616,6 +617,20 @@ public class DocumentServiceImpl implements DocumentService {
             return filename.substring(filename.lastIndexOf("."));
         }
         return "";
+    }
+
+    /**
+     * 归一化可见性等级：空白取缺省 general，非法值直接拒绝（fail-closed）
+     */
+    private String normalizeVisibility(String visibility) {
+        if (visibility == null || visibility.isBlank()) {
+            return CommonConstants.DOCUMENT_VISIBILITY_DEFAULT;
+        }
+        String normalized = visibility.trim().toLowerCase();
+        if (!CommonConstants.DOCUMENT_VISIBILITY_LEVELS.contains(normalized)) {
+            throw new BusinessException("不支持的可见性等级: " + visibility);
+        }
+        return normalized;
     }
 
     /**

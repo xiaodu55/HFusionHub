@@ -20,6 +20,7 @@ from app.core.embedding import get_embedding_service
 from app.core.exceptions import EmbeddingException, MilvusException, ParsingException, VectorizationException
 from app.core.parser.base import BaseParser
 from app.core.parser.multimodal_evidence import MultimodalEvidenceExtractor
+from app.core.security.clearance import VISIBILITY_LEVELS, normalize_visibility
 from app.core.tenant.context import clear_tenant_id, require_tenant_id, set_tenant_id
 from app.core.vectorstore.milvus_store import (
     create_collection,
@@ -194,6 +195,10 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
         file_type=request.file_type,
         check_size=True
     )
+    # 主体级 ACL：非法可见性等级直接拒绝（fail-closed，与 Java 白名单一致）
+    if request.visibility and normalize_visibility(request.visibility) not in VISIBILITY_LEVELS:
+        from app.core.exceptions import ValidationException
+        raise ValidationException(f"不支持的可见性等级: {request.visibility}")
     logger.info(f"[Vectorization] Validation passed, resolved path: {resolved_path}, file_type: {file_type}")
 
     estimated_seconds = _estimate_processing_seconds(resolved_path, file_type)
@@ -228,6 +233,7 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
         knowledge_base_id=request.knowledge_base_id,
         tenant_id=tenant_id,
         document_title=request.document_title,
+        visibility=request.visibility,
         index_version=request.index_version,
         callback_url=request.callback_url,
         callback_secret=request.callback_secret,
@@ -276,6 +282,7 @@ async def _process_document_background(
     knowledge_base_id: int,
     tenant_id: int,
     document_title: str | None = None,
+    visibility: str | None = None,
     index_version: str = "",
     callback_url: str = None,
     callback_secret: str = None,
@@ -392,6 +399,11 @@ async def _process_document_background(
                 logger.warning(f"[Vectorization] QA 对生成失败（不影响索引）: {exc}")
 
         quality_suffix = f"；质量告警：{', '.join(quality['warnings'])}" if quality["warnings"] else ""
+        # 主体级 ACL：全部分块（含 QA 生成块，其 metadata 为自建字典）统一打标
+        # visibility；检索时按请求主体 clearance 过滤（milvus_store 后过滤）。
+        chunk_visibility = normalize_visibility(visibility)
+        for chunk in chunks:
+            chunk.metadata["visibility"] = chunk_visibility
         _update_status(
             "PROCESSING",
             f"Created {len(chunks)} chunks, generating embeddings...{quality_suffix}",

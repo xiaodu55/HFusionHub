@@ -144,6 +144,18 @@ def _detect_refusal(answer: str, status: str) -> bool:
     return any(marker in answer for marker in _REFUSAL_MARKERS)
 
 
+def subject_for_case(case) -> str:
+    """Subject-level ACL: permission cases run as the least-privileged subject;
+    everything else runs as admin (full clearance).
+
+    主体区分化解了同一 section 的"必答/必拒"矛盾：cd-025（admin）可引用
+    受控的安全文档应答，pt-007（低权限）因受控文档被 ACL 过滤而拒答。
+    用例数据保持冻结（无需改 cases.jsonl / baseline SHA），主体策略在
+    运行时轨道落地。
+    """
+    return "general" if case.category == "permission" else "admin"
+
+
 def load_kb_docs(kb_manifest_path: Any) -> tuple[set[str], dict[str, str]]:
     """Return ``(known_document_titles, doc_text_by_title)`` for the synthetic KB."""
     manifest = json.loads(Path(kb_manifest_path).read_text(encoding="utf-8"))
@@ -264,7 +276,7 @@ async def run_case(client: httpx.AsyncClient, base_url: str, headers: dict, case
         resp = await client.post(
             f"{base_url}/api/chat",
             json={"message": case.query, "knowledge_base_id": case.kb_id, "stream": False},
-            headers=headers,
+            headers={**headers, "X-User-Clearance": subject_for_case(case)},
         )
         resp.raise_for_status()
         data = resp.json()

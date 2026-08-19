@@ -12,6 +12,8 @@ from typing import Any
 
 from app.utils.config import config
 
+from app.core.security.clearance import build_acl_metadata_filter, get_clearance
+
 from .observability import RetrievalTrace, get_trace_store
 from .postprocessor import Postprocessor, ProcessedResult, get_postprocessor
 from .query_rewriter import QueryRewriter, RewriteResult, get_query_rewriter
@@ -75,6 +77,13 @@ class MultiChannelRetriever:
             RetrievalResult 检索结果
         """
         started_at = time.perf_counter()
+        # 主体级 ACL：按请求主体 clearance 过滤文档可见性。ACL 过滤器叠加在
+        # 调用方显式 filter 之上（visibility 键以 ACL 为准，调用方无法放宽）；
+        # 未设置 clearance 时按最低权限 general 处理（fail-closed）。
+        acl_filter = build_acl_metadata_filter(get_clearance())
+        effective_filter: dict[str, Any] | None = None
+        if metadata_filter or acl_filter:
+            effective_filter = {**(metadata_filter or {}), **(acl_filter or {})}
         rewrite_result = None
         routes: list[dict[str, Any]] = []
         processed: list[ProcessedResult] = []
@@ -106,7 +115,7 @@ class MultiChannelRetriever:
                     query=rewritten_query,
                     knowledge_base_id=knowledge_base_id,
                     top_k=candidate_top_k,
-                    metadata_filter=metadata_filter,
+                    metadata_filter=effective_filter,
                 )
                 route = merged.metadata.get("route_result", {})
                 routes.append({
