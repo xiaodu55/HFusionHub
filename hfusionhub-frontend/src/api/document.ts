@@ -2,7 +2,12 @@ import { get, post, put, del } from './request'
 import type { ApiResponse, PageResult, Document } from './types'
 
 // 上传文档（后端返回 R<DocumentInfoDTO>）
-export const uploadDocument = (file: File, kbId: number, title?: string): Promise<ApiResponse<Document>> => {
+export const uploadDocument = (
+  file: File,
+  kbId: number,
+  title?: string,
+  visibility?: string,
+): Promise<ApiResponse<Document>> => {
   const formData = new FormData()
   formData.append('file', file)
   formData.append('knowledgeBaseId', kbId.toString())
@@ -10,6 +15,9 @@ export const uploadDocument = (file: File, kbId: number, title?: string): Promis
     formData.append('title', title)
   } else {
     formData.append('title', file.name)
+  }
+  if (visibility) {
+    formData.append('visibility', visibility)
   }
   return post('/document/upload', formData, {
     headers: {
@@ -23,12 +31,16 @@ export const createDocumentFromUrl = (
   url: string,
   kbId: number,
   title?: string,
+  visibility?: string,
 ): Promise<ApiResponse<Document>> => {
-  return post(`/document/from-url?knowledgeBaseId=${kbId}`, { url, title })
+  return post(`/document/from-url?knowledgeBaseId=${kbId}`, { url, title, visibility })
 }
 
 // 更新文档
-export const updateDocument = (id: number, data: { title?: string; content?: string }): Promise<ApiResponse<void>> => {
+export const updateDocument = (
+  id: number,
+  data: { title?: string; content?: string; visibility?: string },
+): Promise<ApiResponse<void>> => {
   return put(`/document/${id}`, data)
 }
 

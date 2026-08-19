@@ -154,7 +154,11 @@ public class OpenApiServiceImpl implements OpenApiService {
                             requestId,
                             app.getUserId(),
                             null,
-                            null)
+                            null,
+                            null,
+                            // OpenApi 以应用所有者身份调用；与同步链路一致取
+                            // fail-closed 的 user clearance（admin 走会话聊天）
+                            "user")
                     .doOnNext(chunk -> {
                         try {
                             emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter

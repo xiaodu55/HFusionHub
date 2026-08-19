@@ -30,6 +30,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 /**
@@ -60,6 +62,23 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     private String versionKey(Long userId) {
         return hotReadCache.versionKey(KB_LIST_NS, TenantContext.getTenantId(), "user:" + userId);
     }
+
+    /**
+     * 缓存版本 bump 推迟到事务提交后执行：提交前的并发读会把旧数据回填进
+     * 新版本键，造成 TTL 内的脏读窗口；无事务上下文时立即 bump。
+     */
+    private void bumpVersionAfterCommit(String key) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    hotReadCache.bumpVersion(key);
+                }
+            });
+        } else {
+            hotReadCache.bumpVersion(key);
+        }
+    }
     private final DeletionService deletionService;
 
     /**
@@ -89,7 +108,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
         knowledgeBaseMapper.insert(knowledgeBase);
 
-        hotReadCache.bumpVersion(versionKey(userId));
+        bumpVersionAfterCommit(versionKey(userId));
         log.info("知识库创建成功，id: {}, name: {}", knowledgeBase.getId(), knowledgeBase.getName());
         return convertToInfoDTO(knowledgeBase);
     }
@@ -156,7 +175,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         }
 
         log.info("知识库更新成功，id: {}", id);
-        hotReadCache.bumpVersion(versionKey(currentUserId));
+        bumpVersionAfterCommit(versionKey(currentUserId));
         return convertToInfoDTO(knowledgeBase);
     }
 
@@ -202,7 +221,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     }
 
         log.info("知识库已移入回收站，id: {}", id);
-        hotReadCache.bumpVersion(versionKey(knowledgeBase.getUserId()));
+        bumpVersionAfterCommit(versionKey(knowledgeBase.getUserId()));
     }
 
     @Override
@@ -246,7 +265,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         if (knowledgeBaseMapper.restoreFromRecycle(id, restoreStatus) != 1) {
             throw new BusinessException("恢复知识库失败");
     }
-        hotReadCache.bumpVersion(versionKey(knowledgeBase.getUserId()));
+        bumpVersionAfterCommit(versionKey(knowledgeBase.getUserId()));
     }
 
     @Override

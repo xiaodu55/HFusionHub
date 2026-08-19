@@ -17,7 +17,7 @@ spring:
     username: ${IT_JDBC_USER:itest}
     password: ${IT_JDBC_PASS:itest}
 
-  # 真实 MySQL 上跑完整迁移链 V1..V84（it profile 的核心价值）
+  # 真实 MySQL 上跑完整迁移链 V1..V85（it profile 的核心价值）
   flyway:
     enabled: true
 

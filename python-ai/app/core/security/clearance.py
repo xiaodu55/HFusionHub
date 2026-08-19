@@ -84,3 +84,26 @@ def build_acl_metadata_filter(clearance: str | None = None) -> dict[str, Any] | 
     if clearance == CLEARANCE_LEVELS[-1]:
         return None
     return {"visibility": sorted(allowed_visibilities(clearance))}
+
+
+def subject_can_see_metadata(metadata: Any) -> bool:
+    """判断单条分块的 metadata 对当前主体是否可见（直读路径的 ACL 闸门）。
+
+    与检索后过滤同一语义：``rank(visibility) <= rank(clearance)``，
+    metadata 缺失 visibility 按 DB 缺省 ``general`` 处理；JSON 字符串形态
+    （co-store 落盘格式）自行解析；未知 visibility 值 fail-closed 按最敏感
+    等级处理（仅 admin 可见）。分块直读工具/端点必须先过此闸门再返回内容，
+    否则确定性 chunk_id 可被枚举绕过检索层过滤。
+    """
+    if isinstance(metadata, str):
+        import json
+        try:
+            metadata = json.loads(metadata)
+        except (TypeError, ValueError):
+            metadata = {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    visibility = normalize_visibility(metadata.get("visibility"))
+    if visibility not in VISIBILITY_LEVELS:
+        visibility = VISIBILITY_LEVELS[-1]
+    return visibility in allowed_visibilities(get_clearance())

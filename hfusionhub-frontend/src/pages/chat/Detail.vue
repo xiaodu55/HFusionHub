@@ -595,7 +595,9 @@ const handleStopGeneration = async () => {
 // 重试消息（先在服务端删除失败轮次，避免重复）
 const handleRetryMessage = async (message: Message) => {
   if (sending.value) return
-  sending.value = true // 双击竞态防护：删除请求在途期间禁止二次进入（handleSend 会重置）
+  // 双击竞态防护：删除请求在途期间禁止二次进入。
+  // 注意 handleSend 的守卫会在 sending===true 时直接 return，故发送前必须复位。
+  sending.value = true
 
   // 找到这条消息的前一条用户消息
   const messageIndex = messages.value.findIndex(m => m.id === message.id)
@@ -632,8 +634,8 @@ const handleRetryMessage = async (message: Message) => {
   inputMessage.value = userMessage.content
   // 移除用户消息（因为 handleSend 会重新添加）
   messages.value.splice(messageIndex - 1, 1)
+  sending.value = false // handleSend 守卫拦截 sending===true，先复位再发送（handleSend 内部自会重置）
   await handleSend()
-  sending.value = false
 }
 
 // 重新生成：服务端删除旧问答对后重新发送提问（不产生重复轮次）
@@ -669,8 +671,8 @@ const regenerateMessage = async (message: Message) => {
   messages.value.splice(messageIndex, 1)
   messages.value.splice(messageIndex - 1, 1)
   inputMessage.value = userMessage.content
+  sending.value = false // handleSend 守卫拦截 sending===true，先复位再发送（handleSend 内部自会重置）
   await handleSend()
-  sending.value = false
 }
 
 // 复制消息内容（优先 Clipboard API，失败时降级到 execCommand）

@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS document (
     chunk_count INT DEFAULT 0,
     status SMALLINT NOT NULL DEFAULT 0,
     error_message VARCHAR(500) DEFAULT NULL,
+    visibility VARCHAR(20) NOT NULL DEFAULT 'general',
     processed_at DATETIME DEFAULT NULL,
     recycled_at DATETIME DEFAULT NULL,
     recycle_expires_at DATETIME DEFAULT NULL,

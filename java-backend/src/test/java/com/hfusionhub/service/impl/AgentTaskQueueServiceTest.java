@@ -43,6 +43,7 @@ class AgentTaskQueueServiceTest {
     private AgentRunLifecycleService agentRunLifecycle;
     private ChatImageStorage chatImageStorage = new ChatImageStorage(java.nio.file.Path.of("target", "test-chat-images").toString());
     private TaskEventSseManager sseManager;
+    private com.hfusionhub.mapper.UserMapper userMapper;
 
     @BeforeEach
     void setUp() {
@@ -69,6 +70,7 @@ class AgentTaskQueueServiceTest {
         } catch (Exception ignored) {
         }
         sseManager = mock(TaskEventSseManager.class);
+        userMapper = mock(com.hfusionhub.mapper.UserMapper.class);
         workerExecutor = new ThreadPoolTaskExecutor();
         workerExecutor.setCorePoolSize(1);
         workerExecutor.setMaxPoolSize(1);
@@ -90,6 +92,7 @@ class AgentTaskQueueServiceTest {
                 chatImageStorage,
                 agentRunLifecycle,
                 sseManager,
+                userMapper,
                 workerExecutor);
         ReflectionTestUtils.setField(queueService, "leaseSeconds", 120);
         ReflectionTestUtils.setField(queueService, "timeoutSeconds", 180);

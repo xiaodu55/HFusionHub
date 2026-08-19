@@ -78,12 +78,15 @@ class OllamaEmbedding:
             "dimensions": self.dimension,
         }
 
-        max_retries = int(os.getenv("EMBEDDING_MAX_RETRIES", "3"))
+        # 至少尝试一次：max_retries<=0 时旧循环体会被整体跳过并隐式返回 None，
+        # 调用方在 embeddings[0] 处炸出难以定位的 TypeError。
+        max_retries = max(1, int(os.getenv("EMBEDDING_MAX_RETRIES", "3")))
         retry_delay = float(os.getenv("EMBEDDING_RETRY_DELAY", "1.0"))
 
-        for attempt in range(max_retries):
-            try:
-                async with httpx.AsyncClient() as client:
+        # 复用单个连接池完成全部重试（此前每次尝试都新建 client，热索引路径开销大）
+        async with httpx.AsyncClient() as client:
+            for attempt in range(max_retries):
+                try:
                     response = await client.post(url, json=payload, timeout=60.0)
                     response.raise_for_status()
                     result = response.json()
@@ -118,18 +121,18 @@ class OllamaEmbedding:
                         )
 
                     return embeddings
-            except httpx.TimeoutException:
-                if attempt < max_retries - 1:
-                    logger.warning(f"Ollama timeout (attempt {attempt + 1}/{max_retries}), retrying...")
-                    await asyncio.sleep(retry_delay)
-                    continue
-                raise
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    logger.warning(f"Ollama error (attempt {attempt + 1}/{max_retries}): {e}, retrying...")
-                    await asyncio.sleep(retry_delay)
-                    continue
-                raise
+                except httpx.TimeoutException:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Ollama timeout (attempt {attempt + 1}/{max_retries}), retrying...")
+                        await asyncio.sleep(retry_delay)
+                        continue
+                    raise
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Ollama error (attempt {attempt + 1}/{max_retries}): {e}, retrying...")
+                        await asyncio.sleep(retry_delay)
+                        continue
+                    raise
 
     @property
     def is_available(self) -> bool:

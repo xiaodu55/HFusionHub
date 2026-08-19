@@ -565,15 +565,22 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     public List<Map<String, String>> getChatHistory(Long conversationId) {
         LambdaQueryWrapper<Message> wrapper = new LambdaQueryWrapper<>();
+        // createdAt 为秒级 DATETIME：同秒消息需 id 作稳定 tiebreaker，否则用户
+        // 提问与上一条回答同秒落库时顺序不稳定（历史可能乱序喂给模型）。
+        // 先取 3 倍量、过滤后取尾部 20 条：被过滤的消息不占用历史槽位。
         wrapper.eq(Message::getConversationId, conversationId)
                 .orderByDesc(Message::getCreatedAt)
-                .last("LIMIT 20");
+                .orderByDesc(Message::getId)
+                .last("LIMIT 60");
 
         List<Message> messages = messageMapper.selectList(wrapper);
         java.util.Collections.reverse(messages); // return in chronological order
 
-        return messages.stream()
+        java.util.List<Message> usable = messages.stream()
                 .filter(ConversationServiceImpl::shouldIncludeInChatHistory)
+                .collect(java.util.stream.Collectors.toList());
+        int from = Math.max(0, usable.size() - 20);
+        return usable.subList(from, usable.size()).stream()
                 .map(m -> {
                     Map<String, String> map = new HashMap<>();
                     map.put("role", m.getRole());
@@ -906,7 +913,9 @@ public class ConversationServiceImpl implements ConversationService {
                     currentUserId,
                     streamingCapability,
                     intentContext,
-                    imagePayloads);
+                    imagePayloads,
+                    // 主体级 ACL：与同步链路同规则，认证角色映射 clearance 透传 Python
+                    JwtUtils.hasRole(CommonConstants.ROLE_ADMIN) ? "admin" : "user");
         } else {
             sseFlux = aiClient.streamChat(
                     dto.getContent(),

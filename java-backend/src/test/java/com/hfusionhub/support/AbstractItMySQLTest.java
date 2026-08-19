@@ -16,7 +16,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.containers.ContainerLaunchException;
 
 /**
- * 集成测试基类（C1）：真实 MySQL + 完整 Flyway 迁移链（V1..V84）。
+ * 集成测试基类（C1）：真实 MySQL + 完整 Flyway 迁移链（V1..V85）。
  *
  * <p>携带 {@code @SpringBootTest(NONE)} 与 {@code @ActiveProfiles("it")}，
  * 子类只写业务断言。数据源二选一：</p>

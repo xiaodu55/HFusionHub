@@ -45,6 +45,9 @@ public class DocumentInfoDTO {
     @Schema(description = "错误信息")
     private String errorMessage;
 
+    @Schema(description = "可见性等级：general/confidential（V85）")
+    private String visibility;
+
     @Schema(description = "上传者用户名")
     private String username;
 

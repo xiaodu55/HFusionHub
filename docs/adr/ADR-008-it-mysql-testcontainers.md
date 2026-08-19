@@ -8,7 +8,7 @@
 单元/切片层此前大量使用 H2 兼容模式，H2 与真实 MySQL 的行为差异会系统性
 掩盖问题：列默认值、时间精度/时区、方言细节、外键与逻辑删除的交互都在
 "测试全绿、线上现形"的风险敞口里。同时项目已有完整的 Flyway 迁移链
-（V1..V84+），没有任何理由让集成测试跑在另一套 schema 方言上。
+（V1..V85+），没有任何理由让集成测试跑在另一套 schema 方言上。
 
 ## 决策
 引入 **it profile + Testcontainers 集成基类**，替代 H2 承担集成测试：
@@ -16,11 +16,12 @@
 1. **`AbstractItMySQLTest`**（`@SpringBootTest(NONE)` + `@ActiveProfiles("it")`，
    `PER_CLASS` 生命周期）：
    - 数据源二选一：外部真实库（`HFH_IT_JDBC_URL` + 可选
-     `HFH_IT_JDBC_USER`/`HFH_IT_JDBC_PASSWORD`，默认容器里的
+     `HFH_IT_JDBC_USER`/`HFH_IT_JDBC_PASS`（注意变量名是 PASS 而非
+     PASSWORD，与 `AbstractItMySQLTest` 的读取一致），默认容器里的
      `hfusionhub_it`）或 **Testcontainers `mysql:8.0`**；
    - Windows 上 Testcontainers 与 Docker Desktop 的兼容性不稳——环境探测
      失败时**整类跳过**（`Assumptions`），CI 无 Docker 不红；
-   - 完整 Flyway V1..V84+ 迁移链在真库上重放，与生产 schema 同源；
+   - 完整 Flyway V1..V85+ 迁移链在真库上重放，与生产 schema 同源；
    - 每类 `@BeforeAll` 全 schema 清空 + 重播核心种子，类间零状态泄漏；
    - Redis 与 test profile 一致保持 bean 级 mock（本 ADR 只收口数据库层）。
 2. **存量 @SpringBootTest 逐个迁移**：6/8 个迁到真库全绿

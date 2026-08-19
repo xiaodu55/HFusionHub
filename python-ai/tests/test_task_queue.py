@@ -53,8 +53,8 @@ class TestInlineMode:
         assert passed_payload["document_id"] == "doc-1"
         expected_fields = {
             "document_id", "file_path", "file_type", "knowledge_base_id",
-            "tenant_id", "document_title", "index_version", "callback_url",
-            "callback_secret", "embedding_model",
+            "tenant_id", "document_title", "visibility", "index_version",
+            "callback_url", "callback_secret", "embedding_model",
         }
         assert set(passed_payload) == expected_fields
         # 执行体是 async 函数（Starlette 会 await）

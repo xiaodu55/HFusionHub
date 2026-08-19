@@ -22,4 +22,7 @@ public class DocumentFromUrlDTO {
     @Size(max = 200, message = "文档标题长度必须在200以内")
     @Schema(description = "可选标题（留空则取自网页 title）", example = "产品文档")
     private String title;
+
+    @Schema(description = "可见性等级：general/confidential，缺省 general", example = "general")
+    private String visibility;
 }

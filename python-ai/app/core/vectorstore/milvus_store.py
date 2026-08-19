@@ -120,6 +120,15 @@ def _matches_metadata_filter(metadata: Any, metadata_filter: Any) -> bool:
     - filter 为空/None 恒真。"""
     if not metadata_filter:
         return True
+    if isinstance(metadata, str):
+        # co-store 里的 metadata 落盘为 JSON 字符串（milvus_lite.insert_chunks
+        # 的 json.dumps），谓词必须自行解析，否则对非 dict 恒 False 会把
+        # ACL/block_type 过滤下的全部候选清空。
+        import json as _json
+        try:
+            metadata = _json.loads(metadata)
+        except (TypeError, ValueError):
+            metadata = None
     if not isinstance(metadata, dict) or not isinstance(metadata_filter, dict):
         return False
     for key, expected in metadata_filter.items():

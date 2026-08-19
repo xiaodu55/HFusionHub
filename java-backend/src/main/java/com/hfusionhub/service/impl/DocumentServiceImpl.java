@@ -13,6 +13,7 @@ import com.hfusionhub.dto.DocumentInfoDTO;
 import com.hfusionhub.dto.DocumentNameDTO;
 import com.hfusionhub.dto.DocumentQueryDTO;
 import com.hfusionhub.dto.DocumentUpdateDTO;
+import com.hfusionhub.dto.KbShareInfoDTO;
 import com.hfusionhub.entity.Document;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.entity.User;
@@ -67,7 +68,9 @@ public class DocumentServiceImpl implements DocumentService {
             ".pdf", ".docx", ".txt", ".md", ".csv", ".xlsx",
             // Batch 4 解析扩展：PPTX / HTML / 图片 OCR
             ".pptx", ".html", ".htm", ".png", ".jpg", ".jpeg");
-    // 允许的MIME类型（作为辅助验证）
+    // 允许的MIME类型（作为辅助验证）。不含 application/octet-stream：
+    // 它只在扩展名校验失败后的 MIME 兜底里生效，保留它等于允许任意扩展名
+    // 声明 octet-stream 绕过白名单（合法文件本就由扩展名检查通过）。
     private static final List<String> ALLOWED_TYPES = List.of(
             "application/pdf",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -79,8 +82,7 @@ public class DocumentServiceImpl implements DocumentService {
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             "text/html",
             "image/png",
-            "image/jpeg",
-            "application/octet-stream" // 允许通用二进制流（由扩展名验证）
+            "image/jpeg"
             );
 
     @Override
@@ -164,16 +166,14 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     // 无 @Transactional：方法内同步调用 Python 抓取网页（读超时 120s），
     // 长事务会占死连接；唯一的写操作是末尾单条 document insert（自动提交即可）
-    public DocumentInfoDTO createFromUrl(String url, String title, Long kbId) {
-        // 1. 验证知识库存在且属于当前用户
+    public DocumentInfoDTO createFromUrl(String url, String title, Long kbId, String visibility) {
+        // 1. 验证知识库存在且当前用户可管理（B3：owner 或 read_write 共享）
         Long currentUserId = JwtUtils.getCurrentUserId();
         KnowledgeBase kb = knowledgeBaseMapper.selectById(kbId);
         if (kb == null) {
             throw new BusinessException("知识库不存在");
         }
-        if (!kb.getUserId().equals(currentUserId)) {
-            throw new BusinessException("无权访问该知识库");
-        }
+        assertWritableKnowledgeBase(kb);
         if (kb.getStatus() == null || kb.getStatus() != CommonConstants.KB_STATUS_NORMAL) {
             throw new BusinessException("知识库已禁用，无法添加网页文档");
         }
@@ -203,6 +203,7 @@ public class DocumentServiceImpl implements DocumentService {
         document.setTitle(effectiveTitle);
         document.setFilePath(filePath);
         document.setFileType("md");
+        document.setVisibility(normalizeVisibility(visibility));
         Object contentLength = ingest.get("content_length");
         document.setFileSize(contentLength instanceof Number ? ((Number) contentLength).longValue() : 0L);
         document.setStatus(DocumentStatus.PENDING.getCode());
@@ -221,29 +222,40 @@ public class DocumentServiceImpl implements DocumentService {
             throw new BusinessException("文档不存在");
         }
 
-        // 2. 验证权限
-        Long currentUserId = JwtUtils.getCurrentUserId();
+        // 2. 验证权限（B3：owner 或 read_write 共享可编辑共享 KB 下的文档）
         KnowledgeBase kb = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
-        if (kb == null || !kb.getUserId().equals(currentUserId)) {
-            throw new BusinessException("无权修改该文档");
-        }
+        assertWritableKnowledgeBase(kb);
 
         // 3. 更新文档
-        boolean contentChanged = false;
+        boolean reindexNeeded = false;
         if (StringUtils.hasText(dto.getTitle())) {
             document.setTitle(dto.getTitle());
         }
         if (dto.getContent() != null) {
+            // A5：编辑内容必须与索引同源——文本类文档先把新内容回写源文件再触发
+            // 重索引（否则重析仍读旧文件，DB 是新文本、索引永远是旧内容的静默
+            // 分叉）；二进制文档无法由编辑文本还原原格式，拒绝在线编辑。
+            ensureTextLikeDocument(document);
+            writeContentBackToFile(document, dto.getContent());
             document.setContent(dto.getContent());
-            contentChanged = true;
+            reindexNeeded = true;
+        }
+        if (StringUtils.hasText(dto.getVisibility())) {
+            // B4：可见性等级可修正（此前只写一次，误标无修复路径）。
+            // 等级变化必须重索引——Milvus chunk metadata 的 visibility 随索引盖戳。
+            String newVisibility = normalizeVisibility(dto.getVisibility());
+            if (!newVisibility.equals(document.getVisibility())) {
+                document.setVisibility(newVisibility);
+                reindexNeeded = true;
+            }
         }
         documentMapper.updateById(document);
 
-        // 4. 内容变更时标记为 PENDING，触发重新向量化
-        if (contentChanged) {
+        // 4. 内容/可见性变更时标记为 PENDING，触发重新向量化
+        if (reindexNeeded) {
             document.setStatus(DocumentStatus.PENDING.getCode());
             documentMapper.updateById(document);
-            log.info("Document {} content updated, marked PENDING for re-index", document.getId());
+            log.info("Document {} content/visibility updated, marked PENDING for re-index", document.getId());
         }
 
         // 5. 转换为 DTO
@@ -259,12 +271,9 @@ public class DocumentServiceImpl implements DocumentService {
             throw new BusinessException("文档不存在");
         }
 
-        // 2. 验证权限
-        Long currentUserId = JwtUtils.getCurrentUserId();
+        // 2. 验证权限（B3：owner 或 read_write 共享可删除共享 KB 下的文档）
         KnowledgeBase kb = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
-        if (kb == null || !kb.getUserId().equals(currentUserId)) {
-            throw new BusinessException("无权删除该文档");
-        }
+        assertWritableKnowledgeBase(kb);
 
         if (DocumentStatus.DELETING.getCode().equals(document.getStatus())) {
             return;
@@ -290,10 +299,26 @@ public class DocumentServiceImpl implements DocumentService {
 
         List<Document> records = documentMapper.selectRecyclePage(
                 currentUserId, title, (queryDTO.getPage() - 1) * queryDTO.getPageSize(), queryDTO.getPageSize());
+
+        // 批量预加载 KB 与拥有者用户名（消除此前每行 3 次查询的 N+1）
+        List<Long> recycleKbIds = records.stream()
+                .map(Document::getKnowledgeBaseId).distinct().collect(Collectors.toList());
+        Map<Long, KnowledgeBase> kbMap = recycleKbIds.isEmpty()
+                ? Map.of()
+                : knowledgeBaseMapper.selectBatchIds(recycleKbIds).stream()
+                        .collect(Collectors.toMap(KnowledgeBase::getId, kb -> kb));
+        Map<Long, String> usernameMap = new java.util.HashMap<>();
+        kbMap.values().forEach(kbItem -> {
+            if (!usernameMap.containsKey(kbItem.getUserId())) {
+                User owner = userMapper.selectById(kbItem.getUserId());
+                usernameMap.put(kbItem.getUserId(), owner != null ? owner.getUsername() : "unknown");
+            }
+        });
+
         List<DocumentInfoDTO> result = records.stream()
                 .map(document -> {
-                    KnowledgeBase kb = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
-                    return convertToInfoDTO(document, kb == null ? "已删除知识库" : kb.getName());
+                    KnowledgeBase kb = kbMap.get(document.getKnowledgeBaseId());
+                    return convertToInfoDTO(document, kb == null ? "已删除知识库" : kb.getName(), kb, usernameMap);
                 })
                 .collect(Collectors.toList());
         return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), total, result);
@@ -340,7 +365,7 @@ public class DocumentServiceImpl implements DocumentService {
 
         // 2. 验证文档所属知识库属于当前用户
         KnowledgeBase kb = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
-        assertOwnedKnowledgeBase(kb);
+        assertAccessibleKnowledgeBase(kb);
         String kbName = kb.getName();
 
         // 3. 转换为 DTO
@@ -353,7 +378,7 @@ public class DocumentServiceImpl implements DocumentService {
         if (document == null) {
             throw new BusinessException("文档不存在");
         }
-        assertOwnedKnowledgeBase(knowledgeBaseMapper.selectById(document.getKnowledgeBaseId()));
+        assertAccessibleKnowledgeBase(knowledgeBaseMapper.selectById(document.getKnowledgeBaseId()));
         return document.getContent();
     }
 
@@ -370,7 +395,7 @@ public class DocumentServiceImpl implements DocumentService {
         if (kb == null) {
             throw new BusinessException("知识库不存在");
         }
-        assertOwnedKnowledgeBase(kb);
+        assertAccessibleKnowledgeBase(kb);
 
         // 2. 构建查询条件
         LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<>();
@@ -408,17 +433,32 @@ public class DocumentServiceImpl implements DocumentService {
 
         // 如果 knowledgeBaseId 为 0 或 null，返回当前用户所有知识库的文档
         if (knowledgeBaseId == null || knowledgeBaseId == 0) {
-            // 查询当前用户的所有知识库
+            // 查询当前用户的所有知识库（B3：同时并入共享给当前用户的 KB，
+            // read/read_write 被授予者的文档列表不再缺一半）
             QueryWrapper<KnowledgeBase> kbQuery = new QueryWrapper<>();
             kbQuery.eq("user_id", currentUserId);
             List<KnowledgeBase> userKbs = knowledgeBaseMapper.selectList(kbQuery);
 
-            if (userKbs.isEmpty()) {
+            Map<Long, String> kbNameMap = userKbs.stream()
+                    .collect(Collectors.toMap(KnowledgeBase::getId, KnowledgeBase::getName, (a, b) -> a));
+            List<Long> kbIds = new java.util.ArrayList<>(userKbs.stream()
+                    .map(KnowledgeBase::getId).collect(Collectors.toList()));
+            for (KbShareInfoDTO shared : kbShareService.listSharedToMe()) {
+                Long sharedKbId = shared.getKnowledgeBaseId();
+                if (sharedKbId != null && !kbIds.contains(sharedKbId)) {
+                    KnowledgeBase sharedKb = knowledgeBaseMapper.selectById(sharedKbId);
+                    if (sharedKb != null) {
+                        kbIds.add(sharedKbId);
+                        kbNameMap.put(sharedKbId, sharedKb.getName());
+                    }
+                }
+            }
+
+            if (kbIds.isEmpty()) {
                 return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), 0, List.of());
             }
 
             // 查询这些知识库下的所有文档
-            List<Long> kbIds = userKbs.stream().map(KnowledgeBase::getId).collect(Collectors.toList());
             QueryWrapper<Document> docQuery = new QueryWrapper<>();
             docQuery.in("knowledge_base_id", kbIds);
             if (queryDTO.getTitle() != null && !queryDTO.getTitle().isBlank()) {
@@ -433,10 +473,6 @@ public class DocumentServiceImpl implements DocumentService {
             IPage<Document> page =
                     documentMapper.selectPage(new Page<>(queryDTO.getPage(), queryDTO.getPageSize()), docQuery);
 
-            // 构建知识库名称映射
-            Map<Long, String> kbNameMap =
-                    userKbs.stream().collect(Collectors.toMap(KnowledgeBase::getId, KnowledgeBase::getName));
-
             List<DocumentInfoDTO> records = page.getRecords().stream()
                     .map(doc -> convertToInfoDTO(doc, kbNameMap.get(doc.getKnowledgeBaseId())))
                     .collect(Collectors.toList());
@@ -444,14 +480,12 @@ public class DocumentServiceImpl implements DocumentService {
             return PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), total, records);
         }
 
-        // 指定了具体知识库ID
+        // 指定了具体知识库ID（B3：共享 KB 的被授予者同样可以列出其文档）
         KnowledgeBase kb = knowledgeBaseMapper.selectById(knowledgeBaseId);
         if (kb == null) {
             throw new BusinessException("知识库不存在");
         }
-        if (!kb.getUserId().equals(currentUserId)) {
-            throw new BusinessException("无权访问该知识库");
-        }
+        assertAccessibleKnowledgeBase(kb);
 
         return listByKnowledgeBase(knowledgeBaseId, queryDTO);
     }
@@ -462,7 +496,7 @@ public class DocumentServiceImpl implements DocumentService {
         if (document == null) {
             throw new BusinessException("文档不存在");
         }
-        assertOwnedKnowledgeBase(knowledgeBaseMapper.selectById(document.getKnowledgeBaseId()));
+        assertAccessibleKnowledgeBase(knowledgeBaseMapper.selectById(document.getKnowledgeBaseId()));
         return DocumentNameDTO.builder()
                 .id(document.getId())
                 .name(document.getTitle())
@@ -477,12 +511,9 @@ public class DocumentServiceImpl implements DocumentService {
             throw new BusinessException("文档不存在");
         }
 
-        // 2. 验证权限
-        Long currentUserId = JwtUtils.getCurrentUserId();
+        // 2. 验证权限（B3：owner 或 read_write 共享可解析共享 KB 下的文档）
         KnowledgeBase kb = knowledgeBaseMapper.selectById(document.getKnowledgeBaseId());
-        if (kb == null || !kb.getUserId().equals(currentUserId)) {
-            throw new BusinessException("无权操作该文档");
-        }
+        assertWritableKnowledgeBase(kb);
 
         // 3. 调用向量化服务
         vectorizationService.startVectorization(id, model);
@@ -633,6 +664,71 @@ public class DocumentServiceImpl implements DocumentService {
         return normalized;
     }
 
+    /** 在线内容编辑仅对文本类文档开放（file_type 为带点/不带点的扩展名）。 */
+    private static final List<String> TEXT_LIKE_FILE_TYPES = List.of("md", "txt", "csv", "html", "htm");
+
+    private void ensureTextLikeDocument(Document document) {
+        String fileType = document.getFileType();
+        String normalized = fileType == null ? "" : fileType.toLowerCase().replaceFirst("^\\.", "");
+        if (!TEXT_LIKE_FILE_TYPES.contains(normalized)) {
+            throw new BusinessException("该文档为二进制格式，不支持在线编辑内容，请上传替换后的文件");
+        }
+    }
+
+    /** 把编辑后的文本回写源文件：重索引与 DB 内容保持同一真相（A5）。 */
+    private void writeContentBackToFile(Document document, String content) {
+        String filePath = document.getFilePath();
+        if (filePath == null || filePath.isBlank()) {
+            throw new BusinessException("文档缺少源文件路径，无法保存内容编辑");
+        }
+        try {
+            Path path = Path.of(filePath);
+            if (!Files.exists(path)) {
+                throw new BusinessException("文档源文件已不存在，无法保存内容编辑");
+            }
+            Files.writeString(path, content == null ? "" : content, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("回写文档内容失败: documentId={}, path={}", document.getId(), filePath, e);
+            throw new BusinessException("保存内容编辑失败，请稍后重试");
+        }
+    }
+
+    /**
+     * 授权矩阵（读取面，Batch 10/B3 修正）：owner 或任意共享权限（read/read_write）。
+     * 修复点：read/read_write 被授予者此前无法读取共享 KB 的任何文档。
+     */
+    private void assertAccessibleKnowledgeBase(KnowledgeBase kb) {
+        Long currentUserId = JwtUtils.getCurrentUserId();
+        if (kb == null) {
+            throw new BusinessException("知识库不存在");
+        }
+        if (kb.getUserId().equals(currentUserId)) {
+            return;
+        }
+        if (kbShareService.getEffectivePermission(currentUserId, kb.getId()) == null) {
+            throw new BusinessException("无权访问该知识库");
+        }
+    }
+
+    /**
+     * 授权矩阵（管理面）：owner 或 read_write 共享（与 upload 的判定一致）。
+     */
+    private void assertWritableKnowledgeBase(KnowledgeBase kb) {
+        Long currentUserId = JwtUtils.getCurrentUserId();
+        if (kb == null) {
+            throw new BusinessException("知识库不存在");
+        }
+        if (kb.getUserId().equals(currentUserId)) {
+            return;
+        }
+        String permission = kbShareService.getEffectivePermission(currentUserId, kb.getId());
+        if (!"read_write".equals(permission)) {
+            throw new BusinessException("无权操作该知识库下的文档");
+        }
+    }
+
     /**
      * Document 转换为 DocumentInfoDTO（使用预查询数据，避免 N+1）
      */
@@ -654,6 +750,7 @@ public class DocumentServiceImpl implements DocumentService {
                 .status(document.getStatus())
                 .statusDesc(getStatusDesc(document.getStatus()))
                 .errorMessage(document.getErrorMessage())
+                .visibility(document.getVisibility())
                 .username(username)
                 .createdAt(document.getCreatedAt())
                 .updatedAt(document.getUpdatedAt())

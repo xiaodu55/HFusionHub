@@ -19,4 +19,7 @@ public class DocumentUpdateDTO {
 
     @Schema(description = "文档内容", example = "更新后的文档内容")
     private String content;
+
+    @Schema(description = "可见性等级：general/confidential（缺省不修改）", example = "general")
+    private String visibility;
 }

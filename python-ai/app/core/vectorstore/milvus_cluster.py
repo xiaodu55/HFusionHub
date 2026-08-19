@@ -286,8 +286,10 @@ class MilvusClusterStore(VectorStoreProtocol):
                     "embedding": embedding,
                 })
 
-            client.insert(collection_name=self._collection_name, data=data)
-            logger.info("Inserted %d chunks into Milvus cluster (tenant %d)", len(data), tenant_id)
+            # chunk_id 为确定性主键：重索引时新旧 ID 相同，insert 不去重会双份
+            # 存储且旧文本继续可被检索——必须 upsert 按主键替换。
+            client.upsert(collection_name=self._collection_name, data=data)
+            logger.info("Upserted %d chunks into Milvus cluster (tenant %d)", len(data), tenant_id)
             return True
         except Exception:
             logger.exception("Failed to insert chunks into Milvus cluster")
@@ -423,11 +425,14 @@ class MilvusClusterStore(VectorStoreProtocol):
             if not client.has_collection(self._collection_name):
                 return {"code": 200, "data": {"records": [], "total": 0, "page": page, "size": size}}
 
-            filters = [f'document_id == "{document_id}"']
+            # block_type 拼进过滤表达式前必须转义（与 chunk_id 同策略），
+            # 防止值中引号破坏表达式语义。
+            tenant_expr = self._tenant_filter(document_id=document_id)
             if block_type:
-                filters.append(f'block_type == "{block_type}"')
-            filter_expr = self._tenant_filter(document_id=document_id) if block_type is None \
-                else " and ".join([self._tenant_filter(document_id=document_id), f'block_type == "{block_type}"'])
+                escaped_block = str(block_type).replace('"', '\\"')
+                filter_expr = f'{tenant_expr} and block_type == "{escaped_block}"'
+            else:
+                filter_expr = tenant_expr
 
             # Milvus doesn't natively paginate; query all then slice.
             results = client.query(
@@ -546,6 +551,28 @@ class MilvusClusterStore(VectorStoreProtocol):
             output = ["chunk_id", "document_id", "knowledge_base_id", "tenant_id", "content",
                       "block_type", "outline_path", "metadata"]
             grouped: dict[str, list[dict[str, Any]]] = {}
+            # 单次 query 硬上限 16384（offset+limit 窗口）——大库会在 except 分支
+            # 整体吞成空语料（BM25/评测静默退化）。优先 query_iterator（游标无
+            # 窗口限制），不可用时回退单次 query。
+            try:
+                iterator = client.query_iterator(
+                    collection_name=self._collection_name,
+                    filter=filter_expr,
+                    output_fields=output,
+                    batch_size=1000,
+                )
+                while True:
+                    batch = iterator.next()
+                    if not batch:
+                        break
+                    self._group_all_chunk_rows(batch, grouped)
+                iterator.close()
+                return grouped
+            except (AttributeError, TypeError) as exc:
+                logger.warning(
+                    "query_iterator unavailable (%s); falling back to offset pagination (16384 cap)", exc
+                )
+
             offset = 0
             page_size = 1000
             while True:
@@ -558,29 +585,7 @@ class MilvusClusterStore(VectorStoreProtocol):
                 )
                 if not results:
                     break
-                for r in results:
-                    outline = r.get("outline_path", "[]")
-                    if isinstance(outline, str):
-                        try:
-                            outline = json.loads(outline)
-                        except Exception:
-                            outline = []
-                    metadata = r.get("metadata", "{}")
-                    if isinstance(metadata, str):
-                        try:
-                            metadata = json.loads(metadata)
-                        except Exception:
-                            metadata = {}
-                    doc_key = str(r.get("document_id", ""))
-                    grouped.setdefault(doc_key, []).append({
-                        "chunk_id": r.get("chunk_id"),
-                        "document_id": r.get("document_id"),
-                        "knowledge_base_id": r.get("knowledge_base_id"),
-                        "content": r.get("content", ""),
-                        "block_type": r.get("block_type"),
-                        "outline_path": outline,
-                        "metadata": metadata,
-                    })
+                self._group_all_chunk_rows(results, grouped)
                 if len(results) < page_size:
                     break
                 offset += page_size
@@ -588,3 +593,29 @@ class MilvusClusterStore(VectorStoreProtocol):
         except Exception as exc:
             logger.error("Failed to load all chunks from cluster: %s", exc)
             return {}
+
+    @staticmethod
+    def _group_all_chunk_rows(rows: list[dict[str, Any]], grouped: dict[str, list[dict[str, Any]]]) -> None:
+        for r in rows:
+            outline = r.get("outline_path", "[]")
+            if isinstance(outline, str):
+                try:
+                    outline = json.loads(outline)
+                except Exception:
+                    outline = []
+            metadata = r.get("metadata", "{}")
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except Exception:
+                    metadata = {}
+            doc_key = str(r.get("document_id", ""))
+            grouped.setdefault(doc_key, []).append({
+                "chunk_id": r.get("chunk_id"),
+                "document_id": r.get("document_id"),
+                "knowledge_base_id": r.get("knowledge_base_id"),
+                "content": r.get("content", ""),
+                "block_type": r.get("block_type"),
+                "outline_path": outline,
+                "metadata": metadata,
+            })

@@ -68,4 +68,24 @@ public class ThreadPoolConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * 后台杂务线程池 — fire-and-forget 异步任务（如会话删除后的记忆固化）。
+     * 自定义 Executor Bean 存在时 Boot 的 applicationTaskExecutor 会退避，
+     * 无限定符的 @Async 会落到每任务新建线程的 SimpleAsyncTaskExecutor（无上界）；
+     * 这里有界池 + CallerRunsPolicy 兜住这类调用。
+     */
+    @Bean("housekeepingExecutor")
+    public Executor housekeepingExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("housekeeping-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+        return executor;
+    }
 }

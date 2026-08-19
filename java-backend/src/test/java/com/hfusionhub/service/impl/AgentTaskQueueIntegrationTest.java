@@ -116,6 +116,7 @@ class AgentTaskQueueIntegrationTest {
                 chatImageStorage,
                 agentRunLifecycle,
                 sseManager,
+                mock(com.hfusionhub.mapper.UserMapper.class),
                 syncExecutor);
         ReflectionTestUtils.setField(queueService, "leaseSeconds", 120);
         ReflectionTestUtils.setField(queueService, "timeoutSeconds", 180);
@@ -474,7 +475,8 @@ class AgentTaskQueueIntegrationTest {
         reactor.core.publisher.Flux<String> v1Flux = reactor.core.publisher.Flux.just(
                 "data: {\"event\":\"step_completed\",\"data\":{}}", "data: {\"event\":\"run_completed\",\"data\":{}}");
         when(aiClient.agentV1ChatStream(
-                        eq("kb query"), eq(52L), eq(5L), anyList(), eq(pendingRun.getRunUuid()), eq(1L), isNull(), any(), any()))
+                        eq("kb query"), eq(52L), eq(5L), anyList(), eq(pendingRun.getRunUuid()), eq(1L),
+                        isNull(), any(), any(), any()))
                 .thenReturn(v1Flux);
 
         queueService.pollAndDispatch();

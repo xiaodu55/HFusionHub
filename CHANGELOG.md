@@ -6,6 +6,88 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第三十六批（2026-09-07：全仓 bug 审查修复——ACL 收口 + 数据一致性 + 门禁恢复绿）
+
+#### Fixed
+- **前端重试/重新生成数据丢失（高危）**：`Detail.vue` 的 `handleRetryMessage`
+  / `regenerateMessage` 先置 `sending=true`（误信"handleSend 会重置"），删除旧
+  轮次后调用的 `handleSend` 被自家守卫（`sending===true` 直接 return）拦下——
+  旧问答对已被服务端删除而新请求从不发出。修复为发送前复位 `sending`
+  （删除请求在途期间仍保持 true 防双击）
+- **BM25/关键词通道被 ACL 过滤清空（高危）**：lite 模式 co-store 的
+  metadata 以 JSON 字符串落盘，`KeywordChannel` 未解析即传给
+  `_matches_metadata_filter`（对非 dict 恒 False），自第三十五批起所有
+  clearance<admin 请求的关键词通道命中为 0（混合检索静默退化为纯向量），
+  Batch 5 的 block_type 过滤同样受累。修复：谓词内部容错解析 JSON 字符串
+  （兑现 docstring 承诺）+ 通道侧显式解析；`_expand_heading_context`
+  邻块扩展同样过过滤（防未来按块过滤时借标题扩展泄漏）
+- **Java→Python `X-User-Clearance` 透传缺失（高危）**：第三十五批遗留项收口。
+  `AiClient.doChat`/`agentV1ChatStream`（新增 `userRole` 参数）、
+  `RagObservabilityController`、`VectorizationServiceImpl` legacy 分块兜底
+  均传播 clearance（admin→admin，其余→general fail-closed）；后台队列
+  （`AgentTaskQueueServiceImpl`）无 JWT，从库内用户角色解析；OpenApi 链路
+  与同步路径一致取 `user`（保守）
+- **Agent 分块工具绕过 ACL（高危）**：`read_chunk_tool` /
+  `list_document_chunks_tool` 只校验 KB 归属，确定性 chunk_id
+  （`{doc}_chunk_{n}`）可被枚举越权读取任意可见性分块全文。修复：
+  `clearance.subject_can_see_metadata` 闸门（未知 visibility fail-closed 按
+  最敏感处理）；直读端点 `/api/search`、`/api/chunks/{id}`、
+  `/api/chunks/detail/{id}` 同规则（不可见按不存在处理，不泄漏存在性）
+- **文档编辑内容永不入索引（高危）**：`update` 置 PENDING 后重索引只发
+  `file_path`，DB 新文本与索引旧内容永久分叉。修复：文本类文档
+  （md/txt/csv/html/htm）编辑时回写源文件再触发重索引；二进制文档拒绝
+  在线内容编辑（明确报错），杜绝静默错位
+- **重索引 Milvus 重复插入（高危）**：chunk_id 确定性 + `client.insert`
+  不去重 + `stale_ids = old - new` 恒空 → 重析后全部分块双份存储、旧文本
+  继续可被检索。修复：`milvus_lite`/`milvus_cluster` 的 `insert_chunks`
+  改 `client.upsert`（按主键替换）
+- **上传白名单 MIME 兜底旁路**：`application/octet-stream` 在白名单内，
+  任意非法扩展名声明该 MIME 即绕过校验进入解析管线——移除该 MIME
+  （合法文件本就由扩展名检查通过）
+- **KB 共享权限只作用于 upload**：read/read_write 被授予者此前无法读取共享
+  KB 的任何文档（read 名不副实）、read_write 上传的文档永远 PENDING（无法
+  触发解析/编辑/删除）。修复：读取面（getById/getContent/getDocumentName/
+  listByKnowledgeBase/listByCurrentUser 含"全部"分支并入共享 KB）按有效权限
+  放行；管理面（update/delete/parseDocument/createFromUrl）对 read_write 放开
+- **聊天历史同秒乱序 + 过滤占槽**：仅按秒级 `created_at` 排序无 tiebreaker，
+  同秒消息可能倒序喂给模型；先 LIMIT 20 后过滤导致被过滤消息占槽。修复：
+  `orderByDesc(createdAt, id)` 双键 + 取 3 倍量过滤后截尾部 20 条
+- **删除 vs stale 恢复竞态孤儿向量**：`recoverStaleIndexJobs` 重派时不检查
+  DELETING，删除步骤 0 清完向量后可能被重新插入。修复：DELETING 文档的
+  stale 任务直接置 FAILED，不重派
+- **schema-h2 漂移（CI 红）**：document 表缺 V85 `visibility` 列——补列对齐
+- **文档/脚本漂移（CI 红）**：`docs/database.md` 新迁移窗口 V85+→V86+；
+  README 徽章 Python 测试计数与 H2 口径（单测 H2 + 集成 Testcontainers，
+  见 ADR-008）、迁移链描述（V1–V85）按实际回填；ADR-008 环境变量名
+  `HFH_IT_JDBC_PASSWORD`→`HFH_IT_JDBC_PASS`（与代码读取一致）；
+  `AbstractItMySQLTest`/`application-it.yml` 的 V1..V84→V1..V85；
+  前端 `handleReparsen`→`handleReparse`；k6 `chat-stream.js` 增
+  `[DONE]` checks 阈值绑定（流截断不再静默通过）；
+  `tests/test_task_queue.py` 断言同步 dispatch payload 的 `visibility`
+  字段（第三十五批透传时遗漏）
+- **visibility 修正闭环（B4）**：`DocumentUpdateDTO`/`DocumentInfoDTO`/
+  `DocumentFromUrlDTO` 增 `visibility`，URL 创建可指定、创建后可修改
+  （等级变化触发重索引重盖 Milvus metadata）；前端上传/网页抓取对话框
+  增可见性选择、列表增机密徽章
+- **低危清理**：缓存版本 bump 推迟到事务提交后（`KnowledgeBaseServiceImpl`
+  4 处，消除提交前并发读回填脏数据）；`SchedulerLock` javadoc 与实现对齐
+  （默认 fail-closed + 明示无续期约束）；Ollama embedding 客户端
+  `EMBEDDING_MAX_RETRIES<=0` 时至少尝试一次（不再隐式返回 None 炸
+  TypeError）+ 重试间复用 httpx 连接池；`@Async` 限定 `housekeepingExecutor`
+  （多执行器下避免回退无上界的 SimpleAsyncTaskExecutor）；`listRecycleBin`
+  批量预载 KB/用户名消除 N+1；离线 `RetrievalEvaluator` 增可选
+  `metadata_filter`（默认 None，不改离线基线）；`milvus_cluster` 分块读取
+  死代码清理；SSO 回调令牌改 URL fragment（`#token=`，不进历史/代理日志/
+  Referer，前端 SsoCallback 解析并即读即清，query 形态灰度兼容）
+
+#### Notes
+- 重索引从 insert 改 upsert：依赖 chunk_id 主键语义，存量重复数据需一次
+  重建索引（或等自然重析收敛）才能清零
+- 二进制文档（pdf/docx 等）在线内容编辑现为显式拒绝（此前为静默分叉），
+  属行为变更
+- OpenApi 流式链路显式 `user` clearance：管理员经 OpenApi 应用调用不继承
+  其管理员 clearance（与同步路径一致，fail-closed）
+
 ### 第三十五批（2026-09-06：主体级 ACL——文档可见性 + 检索按主体 clearance 过滤）
 
 #### Added

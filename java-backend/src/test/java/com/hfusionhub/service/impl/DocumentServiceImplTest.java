@@ -48,6 +48,9 @@ class DocumentServiceImplTest {
     @Mock
     private DeletionService deletionService;
 
+    @Mock
+    private com.hfusionhub.service.KbShareService kbShareService;
+
     @InjectMocks
     private DocumentServiceImpl documentService;
 
@@ -98,8 +101,14 @@ class DocumentServiceImplTest {
     }
 
     @Test
-    void contentUpdateMarksDocumentPendingForReindex() {
+    void contentUpdateMarksDocumentPendingForReindex() throws Exception {
         Document document = document(10L, 20L, DocumentStatus.COMPLETED);
+        // A5：编辑内容回写源文件——文本类文档 + 真实临时文件验证同源语义
+        document.setFileType("md");
+        java.nio.file.Path sourceFile =
+                java.nio.file.Files.createTempFile("doc-update-test", ".md");
+        java.nio.file.Files.writeString(sourceFile, "original content");
+        document.setFilePath(sourceFile.toString());
         DocumentUpdateDTO update = new DocumentUpdateDTO();
         update.setContent("Updated content");
         when(documentMapper.selectById(10L)).thenReturn(document);
@@ -108,8 +117,25 @@ class DocumentServiceImplTest {
         documentService.update(10L, update);
 
         assertEquals("Updated content", document.getContent());
+        assertEquals("Updated content",
+                java.nio.file.Files.readString(sourceFile));
         assertEquals(DocumentStatus.PENDING.getCode(), document.getStatus());
         verify(documentMapper, times(2)).updateById(document);
+        java.nio.file.Files.deleteIfExists(sourceFile);
+    }
+
+    @Test
+    void contentUpdateRejectsBinaryFileType() {
+        Document document = document(10L, 20L, DocumentStatus.COMPLETED);
+        document.setFileType("pdf");
+        DocumentUpdateDTO update = new DocumentUpdateDTO();
+        update.setContent("Updated content");
+        when(documentMapper.selectById(10L)).thenReturn(document);
+        when(knowledgeBaseMapper.selectById(20L)).thenReturn(knowledgeBase(20L, 1L));
+
+        // A5：二进制文档拒绝在线内容编辑（无法回写源文件，防索引与 DB 静默分叉）
+        assertThrows(BusinessException.class, () -> documentService.update(10L, update));
+        verify(documentMapper, never()).updateById(document);
     }
 
     @Test

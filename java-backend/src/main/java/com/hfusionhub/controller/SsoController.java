@@ -84,7 +84,8 @@ public class SsoController {
             response.getWriter().write(objectMapper.writeValueAsString(R.ok("登录成功", token)));
             return;
         }
-        String separator = target.contains("?") ? "&" : "?";
-        response.sendRedirect(target + separator + "token=" + URLEncoder.encode(token, StandardCharsets.UTF_8));
+        // 会话令牌放 URL fragment（#token=...）而非 query：fragment 不会进入
+        // 浏览器历史、代理/访问日志与 Referer 头。前端 SsoCallback 页负责解析。
+        response.sendRedirect(target + "#token=" + URLEncoder.encode(token, StandardCharsets.UTF_8));
     }
 }

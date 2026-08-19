@@ -45,6 +45,7 @@ class ListDocumentChunksTool(BaseTool):
             return {"error": "document_id 参数无效。"}
 
         try:
+            from ..security.clearance import subject_can_see_metadata
             from ..vectorstore.milvus_store import get_document_chunks
 
             # The local store returns paginated results.  Fetch all pages up to
@@ -68,6 +69,10 @@ class ListDocumentChunksTool(BaseTool):
                     if r_kb is None:
                         return {"error": "chunk has no knowledge-base scope"}
                     if int(r_kb) != int(kb_id):
+                        continue
+                    # ACL enforcement: 与检索同规则——高可见性分块对当前主体
+                    # 不存在（摘要也属内容泄露面）。
+                    if not subject_can_see_metadata(r.get("metadata")):
                         continue
                     content = r.get("content", "")
                     all_chunks.append({

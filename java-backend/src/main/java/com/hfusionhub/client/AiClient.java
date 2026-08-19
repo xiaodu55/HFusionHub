@@ -435,6 +435,10 @@ public class AiClient {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             addInternalToken(headers);
+            // 主体级 ACL（V85）：clearance 与租户同边界传播。user_role 由调用方
+            // 从认证会话/DB 解析（后台队列无 JWT 时取库内角色）；admin → admin
+            // （全 clearance），其余 → general（fail-closed 最小权限）。
+            headers.set("X-User-Clearance", mapClearance(userRole));
 
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
 
@@ -620,10 +624,15 @@ public class AiClient {
             List<Map<String, Object>> intentContext) {
         return agentV1ChatStream(
                 message, conversationId, knowledgeBaseId, history, requestId, userId,
-                capabilityProfile, intentContext, null);
+                capabilityProfile, intentContext, null, null);
     }
 
-    /** 对话图片输入变体：images 为 base64 data URL 列表（可为空）。 */
+    /** 对话图片输入变体：images 为 base64 data URL 列表（可为空）。
+     *
+     * @param userRole 认证主体角色（admin|user）：映射 X-User-Clearance 传播
+     *                 主体 clearance（admin 全可见，user/general 仅一般文档）。
+     *                 后台队列等无 JWT 上下文的调用方须从库内角色解析。
+     */
     public reactor.core.publisher.Flux<String> agentV1ChatStream(
             String message,
             Long conversationId,
@@ -633,7 +642,8 @@ public class AiClient {
             Long userId,
             String capabilityProfile,
             List<Map<String, Object>> intentContext,
-            List<String> images) {
+            List<String> images,
+            String userRole) {
         if (knowledgeBaseId == null || knowledgeBaseId <= 0) {
             throw new BusinessException(
                     StatusCode.BAD_REQUEST, "Agent V1 streaming requires a non-null knowledge_base_id");
@@ -676,6 +686,8 @@ public class AiClient {
         // and may be null when the WebClient request executes on a Netty
         // event-loop thread during reactive subscription.
         final HttpHeaders capturedV1Headers = internalHeaders();
+        // 主体级 ACL（V85）：与 doChat 同规则，clearance 随流式请求传播
+        capturedV1Headers.set("X-User-Clearance", mapClearance(userRole));
 
         return webClient
                 .post()
@@ -1255,7 +1267,7 @@ public class AiClient {
      * {@code POST /api/internal/memory/entries} 回写 memory_entry 表。
      * 失败只记日志，不影响删除主流程。</p>
      */
-    @Async
+    @Async("housekeepingExecutor")
     public void consolidateMemoryOnConversationDeleted(
             Long conversationId, Long userId, Long knowledgeBaseId, Long tenantId,
             List<Map<String, String>> messages) {
@@ -1285,6 +1297,11 @@ public class AiClient {
         if (userId == null || userId <= 0) return;
         Map<String, Object> providerConfig = userModelConfigService.getRuntimeConfig(userId);
         if (!providerConfig.isEmpty()) request.put("provider_config", providerConfig);
+    }
+
+    /** user_role → clearance 映射（Python 侧等级模型：admin 全 clearance，其余 general）。 */
+    private String mapClearance(String userRole) {
+        return "admin".equalsIgnoreCase(userRole) ? "admin" : "general";
     }
 
     private void addInternalToken(HttpHeaders headers) {

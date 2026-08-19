@@ -69,12 +69,14 @@ const uploadForm = ref({
   kbId: 0,
   file: null as File | null,
   title: '',
+  visibility: 'general',
 })
 const uploadMode = ref<'file' | 'url'>('file')
 const urlForm = ref({
   kbId: 0,
   url: '',
   title: '',
+  visibility: 'general',
 })
 const uploading = ref(false)
 const urlAdding = ref(false)
@@ -177,9 +179,14 @@ const handleUpload = async () => {
 
   uploading.value = true
   try {
-    await documentApi.uploadDocument(uploadForm.value.file, uploadForm.value.kbId, uploadForm.value.title)
+    await documentApi.uploadDocument(
+      uploadForm.value.file,
+      uploadForm.value.kbId,
+      uploadForm.value.title,
+      uploadForm.value.visibility,
+    )
     isUploadDialogOpen.value = false
-    uploadForm.value = { kbId: 0, file: null, title: '' }
+    uploadForm.value = { kbId: 0, file: null, title: '', visibility: 'general' }
     toast.success('文档上传成功')
     await loadDocuments()
   } catch (error) {
@@ -204,9 +211,14 @@ const handleAddFromUrl = async () => {
 
   urlAdding.value = true
   try {
-    await documentApi.createDocumentFromUrl(urlForm.value.url.trim(), urlForm.value.kbId, urlForm.value.title.trim() || undefined)
+    await documentApi.createDocumentFromUrl(
+      urlForm.value.url.trim(),
+      urlForm.value.kbId,
+      urlForm.value.title.trim() || undefined,
+      urlForm.value.visibility,
+    )
     isUploadDialogOpen.value = false
-    urlForm.value = { kbId: 0, url: '', title: '' }
+    urlForm.value = { kbId: 0, url: '', title: '', visibility: 'general' }
     toast.success('网页已抓取，请在列表中点击解析')
     await loadDocuments()
   } catch (error) {
@@ -289,7 +301,7 @@ const handleViewChunks = (doc: Document) => {
   router.push(`/knowledge-base/${doc.knowledgeBaseId}/chunks/${doc.id}`)
 }
 
-const handleReparsen = async (doc: Document) => {
+const handleReparse = async (doc: Document) => {
   openModelDialog(doc)
 }
 
@@ -344,7 +356,7 @@ onMounted(() => {
 
     <Card class="overflow-hidden border-border bg-card/80">
       <CardHeader class="flex-row items-center justify-between border-b border-border/70 p-5"><div><CardTitle class="text-base">文档列表</CardTitle><CardDescription class="mt-1">选择文档开始解析，完成后即可在对话中被检索。</CardDescription></div><span class="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">{{ filteredDocuments.length }} 条</span></CardHeader><CardContent class="p-4 sm:p-5">
-        <LoadingSkeleton v-if="loading" type="card" :count="3" /><ErrorState v-else-if="loadError" message="加载文档失败，请检查网络连接后重试" @retry="loadDocuments" /><EmptyState v-else-if="filteredDocuments.length === 0" :icon="searchQuery ? FolderOpen : FileText" :title="searchQuery ? '没有找到匹配的文档' : '还没有文档'" :description="searchQuery ? '尝试更换搜索关键词' : '上传一份资料，AI 才能在对话中引用其中的信息。'" :steps="searchQuery || !hasEnabledKnowledgeBase ? undefined : [{ title: '上传文档', description: '支持 PDF、Word、Markdown，单次可多选' }, { title: '点击「开始解析」', description: '系统会分块并向量化，状态变为「已完成」即可被检索' }, { title: '到智能对话中提问', description: '回答会引用这份文档的原文片段' }]" :action="searchQuery ? undefined : '添加文档'" :show-action="!searchQuery && hasEnabledKnowledgeBase" @action="isUploadDialogOpen = true" /><div v-else class="space-y-3"><article v-for="doc in filteredDocuments" :key="doc.id" class="rounded-xl border border-border bg-muted/20 p-4 transition-colors hover:border-primary/25 hover:bg-muted/40"><div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between"><div class="flex min-w-0 gap-3.5"><div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><FileText class="h-5 w-5" /></div><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h3 class="truncate font-medium">{{ doc.title }}</h3><Badge :variant="getStatusBadge(doc.status).variant">{{ getStatusBadge(doc.status).text }}</Badge></div><p class="mt-1 text-sm text-muted-foreground">{{ doc.knowledgeBaseName || '未归属知识库' }} · {{ formatFileSize(doc.fileSize) }} · {{ formatDateTime(doc.createdAt) }}</p><p v-if="doc.username" class="mt-1 text-xs text-muted-foreground">上传者：{{ doc.username }}</p><p v-if="doc.status === 3 && doc.errorMessage" class="mt-2 max-w-xl text-xs leading-5 text-destructive">解析失败：{{ doc.errorMessage }}</p><div v-if="processingDocs.has(doc.id)" class="mt-3 max-w-xl space-y-1.5"><div class="h-1.5 overflow-hidden rounded-full bg-muted"><div class="h-full rounded-full bg-primary transition-all" :style="{ width: `${processingProgress(doc.id)}%` }" /></div><p class="text-xs text-muted-foreground">{{ getStageText(processingStatus[doc.id]?.stage) }} · {{ processingProgress(doc.id) }}% · 已用 {{ formatProcessingTime(processingStatus[doc.id]?.elapsedSeconds) }} · 预计剩余 {{ formatProcessingTime(processingStatus[doc.id]?.remainingSeconds) }}</p></div></div></div><div class="flex flex-wrap items-center gap-2 xl:justify-end"><Button v-if="doc.status === 0" variant="outline" size="sm" :disabled="!isKnowledgeBaseEnabled(doc) || processingDocs.has(doc.id)" @click="handleStartVectorization(doc)"><Play class="mr-1.5 h-3.5 w-3.5" />开始解析</Button><Button v-if="doc.status === 1 || doc.status === 3" variant="outline" size="sm" :disabled="!isKnowledgeBaseEnabled(doc)" @click="handleResetDocument(doc)"><RefreshCw class="mr-1.5 h-3.5 w-3.5" />重新解析</Button><Button v-if="doc.status === 2" variant="outline" size="sm" @click="handleViewChunks(doc)"><Eye class="mr-1.5 h-3.5 w-3.5" />查看分块</Button><Button v-if="doc.status === 2" variant="outline" size="sm" :disabled="!isKnowledgeBaseEnabled(doc) || processingDocs.has(doc.id)" @click="handleReparsen(doc)"><Loader2 v-if="processingDocs.has(doc.id)" class="mr-1.5 h-3.5 w-3.5 animate-spin" /><RefreshCw v-else class="mr-1.5 h-3.5 w-3.5" />重新解析</Button><Button variant="ghost" size="icon" :disabled="doc.status === 4" title="移入回收站" @click="handleDelete(doc)"><Loader2 v-if="doc.status === 4" class="h-4 w-4 animate-spin" /><Trash2 v-else class="h-4 w-4 text-destructive" /></Button></div></div></article></div>
+        <LoadingSkeleton v-if="loading" type="card" :count="3" /><ErrorState v-else-if="loadError" message="加载文档失败，请检查网络连接后重试" @retry="loadDocuments" /><EmptyState v-else-if="filteredDocuments.length === 0" :icon="searchQuery ? FolderOpen : FileText" :title="searchQuery ? '没有找到匹配的文档' : '还没有文档'" :description="searchQuery ? '尝试更换搜索关键词' : '上传一份资料，AI 才能在对话中引用其中的信息。'" :steps="searchQuery || !hasEnabledKnowledgeBase ? undefined : [{ title: '上传文档', description: '支持 PDF、Word、Markdown，单次可多选' }, { title: '点击「开始解析」', description: '系统会分块并向量化，状态变为「已完成」即可被检索' }, { title: '到智能对话中提问', description: '回答会引用这份文档的原文片段' }]" :action="searchQuery ? undefined : '添加文档'" :show-action="!searchQuery && hasEnabledKnowledgeBase" @action="isUploadDialogOpen = true" /><div v-else class="space-y-3"><article v-for="doc in filteredDocuments" :key="doc.id" class="rounded-xl border border-border bg-muted/20 p-4 transition-colors hover:border-primary/25 hover:bg-muted/40"><div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between"><div class="flex min-w-0 gap-3.5"><div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><FileText class="h-5 w-5" /></div><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><h3 class="truncate font-medium">{{ doc.title }}</h3><Badge :variant="getStatusBadge(doc.status).variant">{{ getStatusBadge(doc.status).text }}</Badge><Badge v-if="doc.visibility === 'confidential'" variant="outline" class="border-amber-500/50 text-amber-600">机密</Badge></div><p class="mt-1 text-sm text-muted-foreground">{{ doc.knowledgeBaseName || '未归属知识库' }} · {{ formatFileSize(doc.fileSize) }} · {{ formatDateTime(doc.createdAt) }}</p><p v-if="doc.username" class="mt-1 text-xs text-muted-foreground">上传者：{{ doc.username }}</p><p v-if="doc.status === 3 && doc.errorMessage" class="mt-2 max-w-xl text-xs leading-5 text-destructive">解析失败：{{ doc.errorMessage }}</p><div v-if="processingDocs.has(doc.id)" class="mt-3 max-w-xl space-y-1.5"><div class="h-1.5 overflow-hidden rounded-full bg-muted"><div class="h-full rounded-full bg-primary transition-all" :style="{ width: `${processingProgress(doc.id)}%` }" /></div><p class="text-xs text-muted-foreground">{{ getStageText(processingStatus[doc.id]?.stage) }} · {{ processingProgress(doc.id) }}% · 已用 {{ formatProcessingTime(processingStatus[doc.id]?.elapsedSeconds) }} · 预计剩余 {{ formatProcessingTime(processingStatus[doc.id]?.remainingSeconds) }}</p></div></div></div><div class="flex flex-wrap items-center gap-2 xl:justify-end"><Button v-if="doc.status === 0" variant="outline" size="sm" :disabled="!isKnowledgeBaseEnabled(doc) || processingDocs.has(doc.id)" @click="handleStartVectorization(doc)"><Play class="mr-1.5 h-3.5 w-3.5" />开始解析</Button><Button v-if="doc.status === 1 || doc.status === 3" variant="outline" size="sm" :disabled="!isKnowledgeBaseEnabled(doc)" @click="handleResetDocument(doc)"><RefreshCw class="mr-1.5 h-3.5 w-3.5" />重新解析</Button><Button v-if="doc.status === 2" variant="outline" size="sm" @click="handleViewChunks(doc)"><Eye class="mr-1.5 h-3.5 w-3.5" />查看分块</Button><Button v-if="doc.status === 2" variant="outline" size="sm" :disabled="!isKnowledgeBaseEnabled(doc) || processingDocs.has(doc.id)" @click="handleReparse(doc)"><Loader2 v-if="processingDocs.has(doc.id)" class="mr-1.5 h-3.5 w-3.5 animate-spin" /><RefreshCw v-else class="mr-1.5 h-3.5 w-3.5" />重新解析</Button><Button variant="ghost" size="icon" :disabled="doc.status === 4" title="移入回收站" @click="handleDelete(doc)"><Loader2 v-if="doc.status === 4" class="h-4 w-4 animate-spin" /><Trash2 v-else class="h-4 w-4 text-destructive" /></Button></div></div></article></div>
         <div v-if="totalPages > 1" class="mt-4 flex items-center justify-center gap-3 border-t border-border/70 pt-4">
           <Button variant="outline" size="sm" :disabled="loading || currentPage === 1" @click="handlePageChange(currentPage - 1)"><ChevronLeft class="mr-1 h-3.5 w-3.5" />上一页</Button>
           <span class="text-xs text-muted-foreground">第 {{ currentPage }} / {{ totalPages }} 页 · 共 {{ total }} 条</span>
@@ -397,6 +409,26 @@ onMounted(() => {
                 {{ kb.name }}{{ kb.status === 0 ? '' : '（已禁用）' }}
               </option>
             </select>
+          </div>
+
+          <div class="space-y-2">
+            <Label for="doc-visibility">可见性等级</Label>
+            <select
+              id="doc-visibility"
+              :value="uploadMode === 'file' ? uploadForm.visibility : urlForm.visibility"
+              class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              @change="(e) => {
+                const v = (e.target as HTMLSelectElement).value
+                if (uploadMode === 'file') uploadForm.visibility = v
+                else urlForm.visibility = v
+              }"
+            >
+              <option value="general">general（一般，全部主体可见）</option>
+              <option value="confidential">confidential（机密，仅 admin 可检索）</option>
+            </select>
+            <p class="text-sm text-muted-foreground">
+              机密文档仅在检索时对 admin 主体可见；上传后可在文档列表中修改。
+            </p>
           </div>
 
           <template v-if="uploadMode === 'file'">

@@ -419,8 +419,11 @@ class MilvusLiteStore(VectorStoreProtocol):
                     "embedding": embedding,
                 })
 
-            client.insert(collection_name=self._collection_name, data=data)
-            logger.info("Inserted %d chunks into Milvus Lite (tenant %d)", len(data), tenant_id)
+            # chunk_id 为确定性主键（{document_id}_chunk_{n}）：文档重析/embedding
+            # 变更重索引时新旧 ID 大量相同，insert 不去重会造成同主键双份存储、
+            # 旧文本继续可被检索——必须 upsert 按主键替换。
+            client.upsert(collection_name=self._collection_name, data=data)
+            logger.info("Upserted %d chunks into Milvus Lite (tenant %d)", len(data), tenant_id)
 
             # Mirror to JSON co-store
             store_records = []

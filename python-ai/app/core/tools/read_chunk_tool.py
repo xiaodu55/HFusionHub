@@ -43,6 +43,7 @@ class ReadChunkTool(BaseTool):
             return {"error": "chunk_id 参数无效。"}
 
         try:
+            from ..security.clearance import subject_can_see_metadata
             from ..vectorstore.milvus_store import get_chunk_detail
 
             detail = get_chunk_detail(chunk_id)
@@ -55,6 +56,11 @@ class ReadChunkTool(BaseTool):
                 return {"error": "chunk has no knowledge-base scope"}
             if int(chunk_kb_id) != int(kb_id):
                 return {"error": f"分块 {chunk_id} 不属于当前知识库。"}
+
+            # ACL enforcement: 直读路径与检索同规则——分块可见性不得高于
+            # 请求主体 clearance，否则确定性 chunk_id 可被枚举越权读取。
+            if not subject_can_see_metadata(detail.get("metadata")):
+                return {"error": f"分块 {chunk_id} 的可见性等级高于当前主体权限。"}
 
             metadata = detail.get("metadata")
             if isinstance(metadata, str):

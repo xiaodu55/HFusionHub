@@ -220,8 +220,16 @@ public class VectorizationServiceImpl implements VectorizationService {
         }
 
         try {
+            HttpHeaders headers = internalHeaders();
+            // 主体级 ACL：用户请求（已通过 owner 校验）透传 clearance，保持与
+            // MySQL 持久化路径同一可见语义；系统调用不带该头（Python 缺省 general）
+            if (JwtUtils.isLogin()) {
+                headers.set("X-User-Clearance",
+                        JwtUtils.hasRole(com.hfusionhub.common.constant.CommonConstants.ROLE_ADMIN)
+                                ? "admin" : "general");
+            }
             ResponseEntity<String> response =
-                    restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), String.class);
+                    restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
             @SuppressWarnings("unchecked")
             Map<String, Object> legacy = objectMapper.readValue(response.getBody(), Map.class);
             return legacyChunkPageFromPython(legacy, documentId);
@@ -296,6 +304,18 @@ public class VectorizationServiceImpl implements VectorizationService {
         int recovered = 0;
         for (DocumentIndexJob staleJob : staleJobs) {
             try {
+                // B7：删除流程已启动的文档不能重派索引——重析会在删除步骤 0
+                // 清完向量后重新插入，产生已删文档的可检索孤儿向量。任务直接
+                // 置 FAILED 收口；文档行本身归删除状态机管，这里不改动。
+                Document staleDocument = documentMapper.selectById(staleJob.getDocumentId());
+                if (staleDocument == null
+                        || DocumentStatus.DELETING.getCode().equals(staleDocument.getStatus())) {
+                    staleJob.setStatus("FAILED");
+                    staleJob.setErrorMessage("文档已删除/删除中，取消重派");
+                    staleJob.setCompletedAt(LocalDateTime.now());
+                    documentIndexJobMapper.updateById(staleJob);
+                    continue;
+                }
                 log.warn(
                         "恢复超时索引任务: documentId={}, version={}, attempt={}",
                         staleJob.getDocumentId(),

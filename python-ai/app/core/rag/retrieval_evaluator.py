@@ -91,11 +91,14 @@ def load_cases(path: Path) -> list[RetrievalCase]:
 class RetrievalEvaluator:
     """Calculate ranking quality and detect knowledge-base scope regressions."""
 
-    def __init__(self, router: Router, top_k: int = 5):
+    def __init__(self, router: Router, top_k: int = 5, metadata_filter: dict | None = None):
         if top_k < 1:
             raise ValueError("top_k must be positive")
         self.router = router
         self.top_k = top_k
+        # 可选元数据过滤（如主体级 ACL 的 {"visibility": [...]}）：离线评测默认
+        # 不过滤以保持既有基线可比；需要按主体视角评测时由调用方显式传入。
+        self.metadata_filter = metadata_filter
 
     async def evaluate(self, cases: Sequence[RetrievalCase]) -> RetrievalReport:
         if not cases:
@@ -121,11 +124,16 @@ class RetrievalEvaluator:
         )
 
     async def _evaluate_case(self, case: RetrievalCase) -> CaseEvaluation:
-        merged = await self.router.search(
-            query=case.query,
-            knowledge_base_id=case.knowledge_base_id,
-            top_k=self.top_k,
-        )
+        # 仅在显式配置过滤时下发 metadata_filter，保持与既有 Router/评测
+        # 契约的兼容（无过滤时调用面与历史完全一致）。
+        search_kwargs: dict = {
+            "query": case.query,
+            "knowledge_base_id": case.knowledge_base_id,
+            "top_k": self.top_k,
+        }
+        if self.metadata_filter is not None:
+            search_kwargs["metadata_filter"] = self.metadata_filter
+        merged = await self.router.search(**search_kwargs)
         retrieved_chunk_ids: list[str] = []
         scope_violations = 0
         seen_chunk_ids: set[str] = set()

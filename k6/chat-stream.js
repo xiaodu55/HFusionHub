@@ -18,6 +18,8 @@ export const options = {
   },
   thresholds: {
     http_req_failed: ['rate<0.1'],
+    // [DONE] 缺失（流被截断/桥接缓冲故障）必须让压测失败，而不是只掉 check 计数
+    'checks{check:stream [DONE] received}': ['rate>0.99'],
   },
 }
 

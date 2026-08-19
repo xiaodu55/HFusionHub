@@ -291,9 +291,11 @@ class KeywordChannel(BaseChannel):
             average_length = corpus.average_length
             scored: list[tuple[float, str, dict]] = []
             for document_id, chunk, tokens in documents:
-                # 元数据过滤（Batch 5）：与向量通道同一谓词语义
+                # 元数据过滤（Batch 5）：与向量通道同一谓词语义。
+                # co-store 落盘的 metadata 是 JSON 字符串，先解析为 dict
+                # 再进谓词（谓词内部也做了同样的容错）。
                 if metadata_filter and not _matches_metadata_filter(
-                        chunk.get("metadata"), metadata_filter):
+                        self._metadata(chunk.get("metadata")), metadata_filter):
                     continue
                 raw_score = self._bm25_score(
                     terms=terms,
@@ -316,6 +318,7 @@ class KeywordChannel(BaseChannel):
                     chunk,
                     chunks_by_document.get(str(document_id), []),
                     knowledge_base_id,
+                    metadata_filter=metadata_filter,
                 )
                 content_tokens = self._tokenize(content)
                 matched_terms = [term for term in terms if term in content_tokens]
@@ -420,6 +423,7 @@ class KeywordChannel(BaseChannel):
         heading: dict[str, Any],
         document_chunks: list[dict[str, Any]],
         knowledge_base_id: int | None,
+        metadata_filter: dict[str, Any] | None = None,
         max_neighbors: int = 2,
         max_chars: int = 1200,
     ) -> tuple[str, list[str]]:
@@ -450,6 +454,11 @@ class KeywordChannel(BaseChannel):
                 continue
             if str(neighbor.get("block_type", "")).upper() == "HEADING":
                 break
+            # 邻块与标题块适用同一元数据过滤（ACL 等）：标题可见而邻块
+            # 不可见时不能借标题扩展把邻块内容带出去。
+            if metadata_filter and not _matches_metadata_filter(
+                    cls._metadata(neighbor.get("metadata")), metadata_filter):
+                continue
 
             neighbor_content = (neighbor.get("content", "") or "").strip()
             if not neighbor_content:

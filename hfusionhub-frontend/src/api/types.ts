@@ -140,6 +140,8 @@ export interface Document {
   status: number
   statusDesc: string
   errorMessage: string | null
+  /** 可见性等级（V85 ACL）：general/confidential */
+  visibility?: 'general' | 'confidential' | string
   username?: string
   createdAt: string
   updatedAt: string

@@ -591,7 +591,12 @@ async def get_chunks(document_id: str, page: int = 1, size: int = 20, block_type
         chunks = []
         # index = 文档内全局顺序：分页 offset + 页内序号（此前硬编码 0，分页语义丢失）
         base_index = (max(page, 1) - 1) * size
+        # ACL：直读路径与检索同规则——高于请求主体 clearance 的分块不返回
+        from app.core.security.clearance import subject_can_see_metadata
+        visible_offset = 0
         for offset, record in enumerate(records):
+            if not subject_can_see_metadata(record.get("metadata")):
+                continue
             # Parse outline_path from JSON string to list
             outline_path = record.get("outline_path", "[]")
             if isinstance(outline_path, str):
@@ -603,12 +608,13 @@ async def get_chunks(document_id: str, page: int = 1, size: int = 20, block_type
 
             chunks.append(VectorChunk(
                 chunk_id=record.get("chunk_id", ""),
-                index=base_index + offset,
+                index=base_index + visible_offset,
                 content=record.get("content", ""),
                 block_type=record.get("block_type", "PARAGRAPH"),
                 outline_path=outline_path,
                 metadata={}
             ))
+            visible_offset += 1
 
         return ChunkResponse(
             success=True,
@@ -630,8 +636,12 @@ async def get_chunk_detail(chunk_id: str, document_id: str):
         result = await asyncio.to_thread(get_document_chunks, document_id)
         records = result.get("data", {}).get("records", []) if isinstance(result, dict) else []
 
+        # ACL：直读路径与检索同规则；不可见分块按不存在处理（不泄漏存在性）
+        from app.core.security.clearance import subject_can_see_metadata
         for chunk in records:
             if chunk.get('chunk_id') == chunk_id:
+                if not subject_can_see_metadata(chunk.get("metadata")):
+                    break
                 return VectorChunkResponse(**chunk)
 
         from app.core.exceptions import ValidationException
@@ -647,6 +657,9 @@ async def get_chunk_detail(chunk_id: str, document_id: str):
 async def search_chunks(request: SearchRequest):
     """Search for similar chunks"""
     try:
+        # ACL：直读端点与检索链路同规则——按请求主体 clearance 过滤可见性
+        #（中间件缺省 general，fail-closed）
+        from app.core.security.clearance import build_acl_metadata_filter, get_clearance
         # Search in Milvus（pymilvus 为同步客户端，放入线程池避免阻塞事件循环）
         try:
             results = await asyncio.to_thread(
@@ -654,6 +667,7 @@ async def search_chunks(request: SearchRequest):
                 query_text=request.query,
                 top_k=request.top_k,
                 knowledge_base_id=request.knowledge_base_id,
+                metadata_filter=build_acl_metadata_filter(get_clearance()),
             )
         except Exception as e:
             raise MilvusException(f"搜索失败: {e}")

@@ -7,11 +7,13 @@ import com.hfusionhub.entity.AgentRecoveryEvent;
 import com.hfusionhub.entity.AgentRun;
 import com.hfusionhub.entity.AgentTask;
 import com.hfusionhub.entity.Message;
+import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.AgentRecoveryEventMapper;
 import com.hfusionhub.mapper.AgentRunMapper;
 import com.hfusionhub.mapper.AgentStepMapper;
 import com.hfusionhub.mapper.AgentTaskMapper;
 import com.hfusionhub.mapper.MessageMapper;
+import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.AgentRetryPolicy;
 import com.hfusionhub.service.AgentStatusEventService;
 import com.hfusionhub.service.AgentStreamEventProcessor;
@@ -59,6 +61,7 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
     private final ChatImageStorage chatImageStorage;
     private final AgentRunLifecycleService agentRunLifecycle;
     private final TaskEventSseManager sseManager;
+    private final UserMapper userMapper;
 
     @Qualifier("agentWorkerExecutor")
     private final java.util.concurrent.Executor agentWorkerExecutor;
@@ -80,6 +83,7 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
             ChatImageStorage chatImageStorage,
             AgentRunLifecycleService agentRunLifecycle,
             @Lazy TaskEventSseManager sseManager,
+            UserMapper userMapper,
             @Qualifier("agentWorkerExecutor") java.util.concurrent.Executor agentWorkerExecutor) {
         this.taskMapper = taskMapper;
         this.runMapper = runMapper;
@@ -96,7 +100,20 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
         this.chatImageStorage = chatImageStorage;
         this.agentRunLifecycle = agentRunLifecycle;
         this.sseManager = sseManager;
+        this.userMapper = userMapper;
         this.agentWorkerExecutor = agentWorkerExecutor;
+    }
+
+    /**
+     * 后台队列无 JWT 会话，主体级 ACL 的 clearance 从库内用户角色解析
+     * （admin → admin 全 clearance，其余/查无此人 → user，fail-closed）。
+     */
+    private String resolveUserRole(Long userId) {
+        if (userId == null || userId <= 0) {
+            return "user";
+        }
+        User user = userMapper.selectById(userId);
+        return user != null && "admin".equals(user.getRole()) ? "admin" : "user";
     }
 
     @Value("${agent.run.lease-seconds:120}")
@@ -297,7 +314,8 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
                         task.getUserId(),
                         null, // capability profile — worker uses default read-only
                         null,
-                        imagePayloads);
+                        imagePayloads,
+                        resolveUserRole(task.getUserId()));
             } else {
                 // Non-KB chat: use standard /api/chat/stream
                 sseFlux = aiClient.streamChat(

@@ -45,7 +45,7 @@ public class DocumentController {
     public R<DocumentInfoDTO> createFromUrl(
             @Parameter(description = "知识库ID") @RequestParam("knowledgeBaseId") Long knowledgeBaseId,
             @Valid @RequestBody com.hfusionhub.dto.DocumentFromUrlDTO dto) {
-        DocumentInfoDTO info = documentService.createFromUrl(dto.getUrl(), dto.getTitle(), knowledgeBaseId);
+        DocumentInfoDTO info = documentService.createFromUrl(dto.getUrl(), dto.getTitle(), knowledgeBaseId, dto.getVisibility());
         return R.ok("网页已抓取，等待解析", info);
     }
 
