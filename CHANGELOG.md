@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第三十七批（2026-09-08：R16 优化方案落盘 + 批次 1 基线与一致性收口）
+
+#### Added
+- **R16 优化方案落盘**：`docs/OPTIMIZATION_PLAN.md` 追加第十六轮（R16-P0~P3 四批：基线收口 / 性能达标（仅应用层，不动 bge-m3 与部署）/ 质量加固 / 评测与工程卫生）；`docs/ROADMAP.md` 新增 Phase 7 与待排期对账
+- **ADR-001~005 补写**（ADR-006 头部遗留「待补写」清零）：双语言 CQRS 边界 / Milvus 选型 / HMAC 回调与幂等索引 / 租户行级隔离 / 插件沙箱纵深防御，格式对齐 ADR-006~008，ADR-006 交叉引用同步更新
+
+#### Changed
+- `docs/ROADMAP.md` 测试计数更新为 2026-09-08 口径（Python 1531 / Java 703 / 前端 57 单测 + 73 E2E）
+- `TODO.md` 状态对账：P0-0 CI 恢复（第三十六批已回绿）、P3-12 eval-nightly GitHub 配置就绪，均勾销
+
+#### Removed
+- 根目录 7 个本地调试 `.log`（`eval-permission-retest.log` 等；`.gitignore` 已覆盖属未跟踪杂物，permission 复测 30/30 数据已在第三十五批 CHANGELOG 留痕，无信息丢失）
+
 ### 第三十六批（2026-09-07：全仓 bug 审查修复——ACL 收口 + 数据一致性 + 门禁恢复绿）
 
 #### Fixed

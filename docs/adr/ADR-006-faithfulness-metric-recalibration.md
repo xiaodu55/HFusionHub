@@ -4,7 +4,12 @@
 - 关联：迭代优化方案 A 线 A1；`docs/CI_GATES.md` §评测门禁；
   留档 `python-ai/evaluation/reports/offline_metric_recalibration_20260905.md`
 - 前情：本 ADR 是 ADR 清局的第一篇（001–005 为双语言 CQRS 边界、Milvus 选型、
-  HMAC 回调、租户行级隔离、插件沙箱，待补写）
+  HMAC 回调、租户行级隔离、插件沙箱，✅ 2026-09-08 已补写：
+  [ADR-001](ADR-001-dual-language-cqrs-boundary.md) /
+  [ADR-002](ADR-002-milvus-vector-store-selection.md) /
+  [ADR-003](ADR-003-hmac-callback-idempotent-indexing.md) /
+  [ADR-004](ADR-004-tenant-row-level-isolation.md) /
+  [ADR-005](ADR-005-plugin-sandbox-defense-in-depth.md)）
 
 ## 背景
 

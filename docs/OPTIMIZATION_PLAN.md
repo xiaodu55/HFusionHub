@@ -315,3 +315,58 @@
 | R15-28 | P2-8 私有部署加固：✅ MinIO per-tenant bucket 隔离已落地（2026-08-30 第十七批：插件工件写 `hfusionhub-t<tenantId>` 租户桶，读取回退默认桶兼容旧对象）；敏感标书禁外部 LLM-as-judge 已由 judge_gate 覆盖 | `docs/BID_COMPLIANCE.md:31, 81` | 私有化部署模式开关 + 存储隔离 |
 | R15-29 | ✅ 前端 chat 断线重连已落地（`chat/Detail.vue`：尚未收到内容且网络类错误时以同一 requestId 自动重试一次，后端幂等不产生重复消息；`scrollToBottom` 已改 rAF；2026-09-03 复核确认） | 本文 §3 P2 遗留项 | F2 模式收尾 |
 | R15-30 | staging 真机验证缺口：隔离 Docker Engine / K8s runner 未在 staging 机器演练 | CHANGELOG 验收记录、`docs/PRODUCTION_OPS.md §9` | staging 机器跑 dind rehearsal + `plugin-e2e-acceptance.ps1` |
+
+---
+
+# 第十六轮优化方案（2026-09-08 全面复审：R15 闭环 + 主体级 ACL 落地后）
+
+> **复审方式**：架构与文档 / 代码质量与性能 / 已有规划与评测基线 三路并行深度探索。
+> **结论**：R15 全量闭环、主体级 ACL（V85）收口后，剩余优化空间集中在四条线：① 基线与文档一致性收口（快赢）；② 性能达标（RAG 检索 P95 与文档处理时长两大未达标项，根因已定位为 Ollama CPU embedding——本轮**仅做应用层优化**，不动模型与部署）；③ 测试与质量加固（覆盖率棘轮、IT 迁移收尾、前端组件单测、ACL 越权回归）；④ 评测/提示工程与工程卫生（ADR-006 开放点、结构化日志）。
+> **冻结项不动**：GraphRAG / 多模态 OCR / cross_encoder reranker（R15 冻结条件不变）；证据门维持默认关闭（ADR-006 实测结论）；embedding 模型（bge-m3）与部署方式本轮不改——换轻量模型 / GPU 化留待应用层优化穷尽后按测量数据另行决策（换模型需全量重嵌入 + 重冻结评测基线）。
+
+## R16-P0 基线与一致性收口（批次 1）
+
+| 编号 | 问题 | 证据 | 修法 | 验收 |
+|---|---|---|---|---|
+| R16-1 | **runtime 基线为 ACL 前口径**：`refusal_correctness=0.625`（50/80）冻结于 2026-09-06T04:21Z，早于 ACL 收口（第 35/36 批）；permission 复测已 30/30（原 0/30），基线未随之重冻结 | `evaluation/baseline/runtime_baseline.json`、CHANGELOG 第 35 批「permission 拒答正确率 0/30 → 30/30」 | 服务栈可用时重跑 `scripts/eval_runtime.py` 并重冻结基线，同步 `docs/CI_GATES.md` 口径注记；栈不可用则标「待真机执行」不阻塞 | baseline JSON 与文档口径一致，CHANGELOG 批次记录 |
+| R16-2 | **ADR-001~005 待补写**：ADR-006 头部明确列「待补写」，决策内容散落在 ARCHITECTURE/CHANGELOG | `docs/adr/` 仅 006~008 三篇 | 从 `docs/ARCHITECTURE.md` + CHANGELOG 提取落盘五篇：双语言 CQRS 边界 / Milvus 选型 / HMAC 回调 / 租户行级隔离 / 插件沙箱，格式对齐 ADR-006~008 | `docs/adr/` 八篇齐全，ADR-006 交叉引用更新 |
+| R16-3 | **根目录调试日志杂物**：7 个本地 `.log`（eval-runtime-live/eval-seed-live/it-debug/java-live/python-ai-live 等），`.gitignore` 已覆盖属未跟踪杂物，其中 permission 复测数据已在 CHANGELOG 留痕 | 仓库根 `*.log`（2026-09-05/06 产物） | 有价值数据核对 CHANGELOG 已留痕后删除本地文件 | 根目录无 .log 杂物 |
+| R16-4 | **TODO/ROADMAP 状态滞后**：TODO.md P0-0「恢复 CI」未勾（36 批已恢复绿）；P3-12 eval-nightly 配置项已就绪（ROADMAP 待排期已勾）；ROADMAP 测试计数停在 2026-08 口径 | `TODO.md:20`、`docs/ROADMAP.md:16,95` | 状态对账 + 计数更新（Python 1531 / Java 703 / 前端 57+73，2026-09-08 口径） | 文档互查一致 |
+
+## R16-P1 性能达标（批次 2，仅应用层）
+
+> 目标：RAG 检索 P95 2261ms → 向 500ms 线逼近、文档端到端 P50 39.7s → 向 12s 线逼近（`docs/baselines/baseline-v1-20260905.txt`）。k6 B2 已定位：Java 桥开销仅 ~0.7s，大头是 Ollama CPU embedding（bge-m3 单次 ~2.5s，每请求至少两次）。
+
+| 编号 | 问题 | 证据 | 修法 | 验收 |
+|---|---|---|---|---|
+| R16-5 | **同请求 embedding 重复计算（最大杠杆）**：每请求至少两次 query embedding，同文本重复嵌入 | `k6/results/SUMMARY.md` B2 结论、`python-ai/app/core/rag/retriever.py` | 定位 retriever/intent 链路重复嵌入点，单次生成后上下文传递复用 | 单请求 embedding 调用次数=1（日志计数），chat-stream P95 改善留档 |
+| R16-6 | **跨请求 query embedding 无缓存** | 同上 | LRU+TTL 缓存（key=model+归一化 query 哈希），对齐 P9 LLM 响应缓存模式；空结果短 TTL 防穿透 | 命中路径单测；k6 重放场景 P95 显著下降 |
+| R16-7 | **文档处理吞吐偏保守**：embedding batch_size=16 硬编码；解析→分块→嵌入整批串行 | `python-ai/app/api/vectorization.py:429` | batch_size 16→64 并配置化；流水线并行（解析/分块与嵌入重叠） | 文档端到端 P50 重测留档，全量测试回归 |
+| R16-8 | **SSE 线程池容量嫌疑**：sseTaskExecutor core5/max20/queue100 + CallerRunsPolicy，100 VU 爬坡 P95 3018ms 拐点 | `java-backend/.../config/ThreadPoolConfig.java`、`k6/results/SUMMARY.md` B4 | 先核实 TraceContext ThreadLocal 约束（注释称不能用虚拟线程），再压测驱动调参或 ThreadLocal 包装任务方案 | k6 ramp 复测留档 |
+| R16-9 | **N+1 残留**：listActiveBindings/resolveCurrentTier 循环内 `selectById` | `java-backend/.../service/impl/TenantPlanBindingServiceImpl.java:102-117` | 批量 `selectBatchIds` 预取（对齐 R15-17 模式） | 单测回归 |
+| R16-10 | **无界查询残留**：service impl 18 处 `selectList(null)/list()` | service impl 全量扫描 | 加 limit/分页（对齐 §1.8 的 `min(pageSize,100)` 模式），逐处核实调用语义 | 静态扫描清零 + 单测回归 |
+
+## R16-P2 质量加固（批次 3）
+
+| 编号 | 问题 | 证据 | 修法 | 验收 |
+|---|---|---|---|---|
+| R16-11 | **覆盖率下限偏低**：JaCoCo 仅 BUNDLE LINE ≥ 0.46 棘轮，无分支/包级约束；Python 覆盖率无门禁阈值 | `java-backend/pom.xml:245-285`、`ci.yml` python 测试步骤 | JaCoCo LINE 0.46→0.55 渐进 + 引入 BRANCH 约束；pytest-cov 加 fail-under（现值+2 起步） | CI 门禁生效且绿 |
+| R16-12 | **IT 迁移收尾**：PromptTestSet（Awaitility 化）/ CostWebhookGate（每类独立库隔离）2 类未迁 Testcontainers | `docs/adr/ADR-008` 明示暂缓 | 完成 ADR-008 遗留两类迁移 | ADR-008 达成 8/8，ADR 文档更新 |
+| R16-13 | **前端组件单测空白**：9 个 spec 仅覆盖 api/utils/composables，页面组件 0 单测（chat/Detail 状态机曾出 bug） | `hfusionhub-frontend/src/**/*.spec.ts` 对照 `src/pages/` | 先补 5 个高风险组件（chat/Detail 拆分子组件、knowledge/Detail、document/Index 等） | vitest 新增用例全绿 |
+| R16-14 | **ACL 越权回归缺永久套件**：V85 刚落地、第 36 批连环修洞，越权用例散落在临时复测中 | `eval-permission-retest.log`（已删，数据在 CHANGELOG 35 批） | 跨租户 × visibility × 通道（向量/BM25/图谱/chunk 工具）矩阵用例进 `evaluation/` 套件，作为永久回归 + CI 门禁输入 | 套件入库（suite 版本化 + SHA 冻结流程），CI 绿 |
+
+## R16-P3 评测/提示工程与工程卫生（批次 4）
+
+| 编号 | 问题 | 证据 | 修法 | 验收 |
+|---|---|---|---|---|
+| R16-15 | **答案标注率 ~50% 随问题类型波动**（ADR-006 留下的开放点，未定位） | `docs/adr/ADR-006` 缺口收敛节 | 定位压缩后块号可见性 vs 格式遵循，提示工程迭代；目标引用精确率 P 0.703→0.80 | 离线套件重测数字留档（走重冻结流程） |
+| R16-16 | **DeepSeek 在 ReAct 循环内不稳定发起 tool_calls** | `k6/results/SUMMARY.md` 后续工作清单 | tool_choice 参数工程 + 提示参数化 | 工具成功率 runtime 0.8→0.9+（nightly 验证） |
+| R16-17 | **日志非结构化**：pattern 格式，采集入 Loki/ES 需再加工；Python 端 trace 跨语言串联未全面验证 | `application.yml:249` | Java logstash-logback-encoder + Python loguru JSON sink，trace_id 字段对齐 | 双端 JSON 日志字段一致样例留档 |
+| R16-18 | **前端状态管理薄弱**：Pinia 仅 1 个 store，页面状态靠组件局部 state（chat/Detail 曾出 retry/regenerate 数据丢失 bug） | `hfusionhub-frontend/src/stores/` | chat store 收口会话状态机（随 R16-13 组件拆分同步做） | 组件单测覆盖状态迁移 |
+| R16-19 | **运维债（多为待真机执行）**：Plugin Runner TLS staging 演练（R15-30）、Superset 看板初始化、eval-nightly 固定域名 | `TODO.md` P2/P3 | 仅做文档/指引可落地部分，真机项保持「待执行」标注 | 文档指引复核一致 |
+
+## 实施约定（R16）
+
+- 每批完成：全量测试回归（Java H2 套件 / Python pytest / 前端 vitest）+ `scripts/static-checks.py` + CHANGELOG 批次记录，每批一个提交。
+- 评测数字任何变动走既有「重冻结基线 + CHANGELOG 批次」流程；suite SHA 是 CI 门禁输入，勿随意改语料。
+- 涉及运行时验证（eval_runtime、k6）依赖本机服务栈；栈不可用时如实标记「待真机执行」并继续后续项。
