@@ -425,28 +425,33 @@ async def _process_document_background(
         # 默认路径按批调用 EmbeddingService.generate_batch（一次网络往返生成
         # 多条向量，Ollama /api/embed 原生支持），吞吐远高于逐条串行；
         # 仅当调用方显式指定了单模型时回退逐条生成以保持行为兼容。
-        chunks_with_embeddings = []
-        batch_size = 16
+        # R16-7：批次大小/批间并发配置化（默认 32×2）——批间并发把 HTTP 往返
+        # 与重试延迟重叠进推理等待；顺序以批次序号保持，进度按完成分块数计。
+        batch_size = max(1, config.EMBEDDING_DOC_BATCH_SIZE)
+        batch_concurrency = max(1, config.EMBEDDING_DOC_BATCH_CONCURRENCY)
+        batches = [chunks[s:s + batch_size] for s in range(0, len(chunks), batch_size)]
+        embedded_by_index: list[tuple[list, list] | None] = [None] * len(batches)
+        done_counter = [0]
+        batch_semaphore = asyncio.Semaphore(batch_concurrency)
         service = await asyncio.to_thread(get_embedding_service)
-        for start in range(0, len(chunks), batch_size):
-            batch = chunks[start:start + batch_size]
-            if embedding_model:
-                embeddings = [
-                    await service.generate(c.content, model=embedding_model)
-                    for c in batch
-                ]
-            else:
-                embeddings = await service.generate_batch([c.content for c in batch])
+
+        async def _embed_batch(idx: int, batch: list) -> None:
+            async with batch_semaphore:
+                if embedding_model:
+                    embeddings = [
+                        await service.generate(c.content, model=embedding_model)
+                        for c in batch
+                    ]
+                else:
+                    embeddings = await service.generate_batch([c.content for c in batch])
             if len(embeddings) != len(batch):
                 raise MilvusException(
                     f"Embedding provider returned {len(embeddings)} vectors for "
                     f"{len(batch)} chunks"
                 )
-            for i, chunk in enumerate(batch):
-                chunk_dict = chunk.to_dict()
-                chunk_dict['embedding'] = embeddings[i]
-                chunks_with_embeddings.append(chunk_dict)
-            done = start + len(batch)
+            embedded_by_index[idx] = (batch, embeddings)
+            done_counter[0] += len(batch)
+            done = done_counter[0]
             if done % 5 == 0 or done == len(chunks):
                 logger.info(f"[Vectorization] Processed {done}/{len(chunks)} chunks")
                 embedding_progress = 40 + int((done / max(len(chunks), 1)) * 45)
@@ -458,6 +463,17 @@ async def _process_document_background(
                     processed_chunks=done,
                     total_chunks=len(chunks),
                 )
+
+        if batches:
+            await asyncio.gather(*(
+                _embed_batch(idx, batch) for idx, batch in enumerate(batches)
+            ))
+        chunks_with_embeddings = []
+        for batch, embeddings in embedded_by_index:
+            for i, chunk in enumerate(batch):
+                chunk_dict = chunk.to_dict()
+                chunk_dict['embedding'] = embeddings[i]
+                chunks_with_embeddings.append(chunk_dict)
 
         # Step 5: Insert into Milvus
         _update_status(

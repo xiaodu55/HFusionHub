@@ -146,6 +146,10 @@ Copy `python-ai/.env.example` to `python-ai/.env`:
 | `CHUNK_OVERLAP` | No | `50` | Chunk overlap |
 | `EMBEDDING_DIMENSION` | No | `1024` | Vector dimension |
 | `EMBEDDING_ALLOW_FALLBACK` | No | `false` | Enables random-vector fallback for development/testing only |
+| `EMBEDDING_QUERY_CACHE_TTL_SECONDS` | No | `600` | Query-embedding cache TTL; document chunks never enter the cache. `0` disables (R16-5) |
+| `EMBEDDING_QUERY_CACHE_MAX_ENTRIES` | No | `256` | Query-embedding cache LRU capacity |
+| `EMBEDDING_DOC_BATCH_SIZE` | No | `32` | Document-indexing embedding batch size (Ollama request timeout is 60s — raise cautiously on CPU) |
+| `EMBEDDING_DOC_BATCH_CONCURRENCY` | No | `2` | Concurrent embedding batches during document indexing |
 
 DeepSeek does not provide the embedding API used here. For document indexing outside tests, configure Ollama or another real embedding provider; keep `EMBEDDING_ALLOW_FALLBACK=false` in production.
 

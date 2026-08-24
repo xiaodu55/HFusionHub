@@ -339,12 +339,12 @@
 
 | 编号 | 问题 | 证据 | 修法 | 验收 |
 |---|---|---|---|---|
-| R16-5 | **同请求 embedding 重复计算（最大杠杆）**：每请求至少两次 query embedding，同文本重复嵌入 | `k6/results/SUMMARY.md` B2 结论、`python-ai/app/core/rag/retriever.py` | 定位 retriever/intent 链路重复嵌入点，单次生成后上下文传递复用 | 单请求 embedding 调用次数=1（日志计数），chat-stream P95 改善留档 |
-| R16-6 | **跨请求 query embedding 无缓存** | 同上 | LRU+TTL 缓存（key=model+归一化 query 哈希），对齐 P9 LLM 响应缓存模式；空结果短 TTL 防穿透 | 命中路径单测；k6 重放场景 P95 显著下降 |
-| R16-7 | **文档处理吞吐偏保守**：embedding batch_size=16 硬编码；解析→分块→嵌入整批串行 | `python-ai/app/api/vectorization.py:429` | batch_size 16→64 并配置化；流水线并行（解析/分块与嵌入重叠） | 文档端到端 P50 重测留档，全量测试回归 |
-| R16-8 | **SSE 线程池容量嫌疑**：sseTaskExecutor core5/max20/queue100 + CallerRunsPolicy，100 VU 爬坡 P95 3018ms 拐点 | `java-backend/.../config/ThreadPoolConfig.java`、`k6/results/SUMMARY.md` B4 | 先核实 TraceContext ThreadLocal 约束（注释称不能用虚拟线程），再压测驱动调参或 ThreadLocal 包装任务方案 | k6 ramp 复测留档 |
-| R16-9 | **N+1 残留**：listActiveBindings/resolveCurrentTier 循环内 `selectById` | `java-backend/.../service/impl/TenantPlanBindingServiceImpl.java:102-117` | 批量 `selectBatchIds` 预取（对齐 R15-17 模式） | 单测回归 |
-| R16-10 | **无界查询残留**：service impl 18 处 `selectList(null)/list()` | service impl 全量扫描 | 加 limit/分页（对齐 §1.8 的 `min(pageSize,100)` 模式），逐处核实调用语义 | 静态扫描清零 + 单测回归 |
+| R16-5 ✅ | **同请求 embedding 重复计算（最大杠杆）**：每请求至少两次 query embedding，同文本重复嵌入 | `k6/results/SUMMARY.md` B2 结论、`python-ai/app/core/rag/retriever.py` | 查询向量缓存统一收口（见 R16-6）：同请求内重复检索（Agent 预检索 + ReAct search_tool）与跨请求同问法直接命中缓存，省一次 CPU 推理 ~2.5s | 单测 8 例覆盖命中/隔离/TTL/淘汰；延迟收益待真机压测留档 |
+| R16-6 ✅ | **跨请求 query embedding 无缓存** | 同上 | `EmbeddingService.generate_query/get_query_embedding`（LRU+TTL，key=provider\|model\|sha256(空白折叠文本)），milvus lite/cluster 检索路径切换；文档分块路径不入缓存防挤占；`EMBEDDING_QUERY_CACHE_TTL_SECONDS=600`（0 禁用）/`EMBEDDING_QUERY_CACHE_MAX_ENTRIES=256`，`get_query_cache_stats()` 可观测 | pytest 专项 + 全量回归绿；命中收益待真机留档 |
+| R16-7 ✅ | **文档处理吞吐偏保守**：embedding batch_size=16 硬编码；批间串行 | `python-ai/app/api/vectorization.py:429` | batch_size 配置化 `EMBEDDING_DOC_BATCH_SIZE=32` + 批间并发 `EMBEDDING_DOC_BATCH_CONCURRENCY=2`（信号量限流、批次序号保序、进度按完成分块数计）；Ollama 请求 60s 超时约束下不过度放大单批 | 全量回归绿；文档端到端 P50 待真机留档 |
+| R16-8 ✅ | **SSE 线程池容量嫌疑**：sseTaskExecutor core5/max20/queue100 + CallerRunsPolicy，100 VU 爬坡 P95 3018ms 拐点 | `java-backend/.../config/ThreadPoolConfig.java`、`k6/results/SUMMARY.md` B4 | 根因是 JDK 线程池「先填满队列再扩容」——50+ 并发流时仅 core5 在跑；改 core32/max64/queue32（`app.sse.executor.*` 配置化）+ 空闲 120s 回收；核实 TenantContext 由任务内 runAs 显式传递（不依赖池线程继承），MDC（trace_id）经 TaskDecorator 传播 | 全量回归绿；k6 ramp 复测待真机留档 |
+| R16-9 ✅ | **N+1 残留**：listActiveBindings/resolveCurrentTier 循环内 `selectById`（复查发现 hasIndustry 为第三处） | `java-backend/.../service/impl/TenantPlanBindingServiceImpl.java` | 三处统一批量 `selectBatchIds` 预取（`subscriptionsByIds` 辅助方法，绑定顺序语义不变） | TenantPlanBindingServiceImplTest 9/9 绿（stub 同步 selectBatchIds） |
+| R16-10 ✅ | **无界查询残留**：探索报告估 18 处 `selectList(null)/list()` | service impl 实测 86 处 selectList | 逐类审计：列表/统计路径此前已收口（R15 §1.8/17 遗产），指标聚合 period 封顶 30 天、会话历史 LIMIT 60/100、记忆 LIMIT 200 均已有界；真实高危 3 处补防御性上限（listUnresolvedAlerts LIMIT 500、任务队列 RUNNING/RETRYABLE 调度扫描各 LIMIT 500，调度自愈余量下轮收敛） | 审计结论留档本表；Java 全量回归绿 |
 
 ## R16-P2 质量加固（批次 3）
 

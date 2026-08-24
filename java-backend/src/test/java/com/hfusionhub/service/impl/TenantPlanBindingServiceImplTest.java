@@ -175,7 +175,8 @@ class TenantPlanBindingServiceImplTest {
         tierBinding.setSubscriptionId(10L);
         tierBinding.setStatus(TenantPlanBinding.STATUS_ACTIVE);
         when(bindingMapper.selectList(any())).thenReturn(List.of(tierBinding));
-        when(subscriptionMapper.selectById(10L)).thenReturn(plan(10L, "enterprise", "tier", "{}"));
+        when(subscriptionMapper.selectBatchIds(List.of(10L)))
+                .thenReturn(List.of(plan(10L, "enterprise", "tier", "{}")));
 
         assertEquals("enterprise", service.resolveCurrentTier(7L));
     }
@@ -199,10 +200,9 @@ class TenantPlanBindingServiceImplTest {
         b.setSubscriptionId(20L);
         b.setStatus(TenantPlanBinding.STATUS_ACTIVE);
         when(bindingMapper.selectList(any())).thenReturn(List.of(a, b));
-        when(subscriptionMapper.selectById(10L)).thenReturn(plan(10L, "pro", "tier",
-                "{\"draft\":true,\"check\":true,\"openapi\":true}"));
-        when(subscriptionMapper.selectById(20L)).thenReturn(plan(20L, "industry_construction", "industry",
-                "{\"docx\":true}"));
+        when(subscriptionMapper.selectBatchIds(List.of(10L, 20L))).thenReturn(List.of(
+                plan(10L, "pro", "tier", "{\"draft\":true,\"check\":true,\"openapi\":true}"),
+                plan(20L, "industry_construction", "industry", "{\"docx\":true}")));
 
         Set<String> modules = service.grantedModules(7L);
 

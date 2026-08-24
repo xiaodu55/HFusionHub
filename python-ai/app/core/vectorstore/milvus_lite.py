@@ -501,7 +501,9 @@ class MilvusLiteStore(VectorStoreProtocol):
             if query_text and query_embedding is None:
                 from app.core.embedding import get_embedding_service
                 embedding_service = get_embedding_service()
-                query_embedding = embedding_service.get_embedding(query_text)
+                # R16-5：查询向量走缓存路径（同请求内重复检索/跨请求同问法
+                # 直接命中，省一次 CPU 推理 ~2.5s）。
+                query_embedding = embedding_service.get_query_embedding(query_text)
                 if query_embedding is None:
                     logger.warning("Failed to generate embedding for query: %s", query_text[:50])
                     return []

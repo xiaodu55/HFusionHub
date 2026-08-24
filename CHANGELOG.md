@@ -6,6 +6,51 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第三十八批（2026-09-08：R16 批次 2——性能应用层优化，不动模型与部署）
+
+#### Added
+- **查询向量缓存（R16-5/6）**：`EmbeddingService.generate_query/get_query_embedding`
+  （LRU+TTL，key=provider|model|sha256(空白折叠文本)）；milvus lite/cluster
+  检索路径切换至缓存版。同请求内重复嵌入（Agent 预检索与 ReAct 循环内
+  search_tool 命中同一文本）与跨请求同问法直接命中，省一次 CPU 推理
+  （bge-m3 实测 ~2.5s/次）。文档分块路径不入缓存防挤占热点；命中返回副本
+  防调用方污染；`EMBEDDING_QUERY_CACHE_TTL_SECONDS=600`（0 禁用）/
+  `EMBEDDING_QUERY_CACHE_MAX_ENTRIES=256`；`get_query_cache_stats()` 供压测
+  核对实际省掉的推理次数。+8 专项测试
+- **文档索引批量嵌入配置化（R16-7）**：`EMBEDDING_DOC_BATCH_SIZE=32`
+  （原硬编码 16）+ `EMBEDDING_DOC_BATCH_CONCURRENCY=2` 批间并发（信号量
+  限流、批次序号保序、进度按完成分块数计）——Ollama /api/embed 请求 60s
+  超时约束下以并发换吞吐而非无限放大单批
+- **SSE 线程池 MDC 传播**：`TaskDecorator` 把提交线程 MDC（trace_id）带进
+  池内线程并在结束后还原，异步流式日志不再断 trace 链；四个执行器统一应用
+
+#### Changed
+- **SSE 线程池容量模型（R16-8）**：core5/max20/queue100 → core32/max64/queue32
+  （`app.sse.executor.*` 配置化）+ 空闲线程 120s 回收。JDK 线程池「先填满
+  队列再扩容」语义下旧参数在 50+ 并发流时仅 5 个流真正推进——k6 爬坡
+  100 VU 拐点（P95 3018ms）主因；核实 TenantContext 由任务内 `runAs`
+  显式传递、不依赖线程继承，容量调整无上下文语义风险
+- **N+1 收口（R16-9）**：`TenantPlanBindingServiceImpl` 三处循环 selectById
+  （listActiveBindings / resolveCurrentTier / hasIndustry——探索期仅报两处，
+  hasIndustry 测试驱动复查补齐）→ `selectBatchIds` 批量预取
+- **无界查询审计收口（R16-10）**：service impl 实测 86 处 selectList 逐类
+  审计——列表/统计路径此前已收口（R15 §1.8/R15-17 遗产）：会话历史
+  LIMIT 60/100、记忆 LIMIT 200、指标聚合 period 封顶 30 天均已有界；
+  真实高危 3 处补防御性上限：`listUnresolvedAlerts` LIMIT 500、任务队列
+  RUNNING/RETRYABLE 恢复扫描各 LIMIT 500（调度自愈，余量下轮收敛）
+- `.env.example` / `docs/ENVIRONMENT.md` 同步 4 个新环境变量
+
+#### 验证（如实记录）
+- Java：`TenantPlanBindingServiceImplTest` 9/9 绿；全量套件见本批提交说明。
+  5 个 IT 类（Testcontainers）在本机报 context 加载 error——**HEAD 复现
+  确认为既有环境现象**（Docker Desktop 未运行），非本批引入；ADR-008 的
+  「无 Docker 整类跳过」在 context 加载阶段未生效，列入批次 3 改进
+- Python：1579 通过 / 8 跳过；`test_milvus_tenant_migration_real` 4 例失败
+  在 HEAD 同样失败（milvus-lite adapter CreateCollection "nullable"，环境
+  问题，非本批引入）
+- 性能复测（k6 chat-stream/ramp、文档端到端）待本机服务栈可用后按
+  `k6/results/SUMMARY.md` + `docs/baselines/` 流程留档
+
 ### 第三十七批（2026-09-08：R16 优化方案落盘 + 批次 1 基线与一致性收口）
 
 #### Added

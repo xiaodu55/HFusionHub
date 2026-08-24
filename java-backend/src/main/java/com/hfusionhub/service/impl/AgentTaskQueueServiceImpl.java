@@ -751,7 +751,9 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
         // 2. Task convergence: tasks with terminal runs still marked running
         List<AgentTask> stuckTasks =
                 taskMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentTask>()
-                        .eq(AgentTask::getStatus, AgentConstants.STATUS_RUNNING));
+                        .eq(AgentTask::getStatus, AgentConstants.STATUS_RUNNING)
+                        // 单轮扫描上限：堆积时由后续调度轮次继续收敛，避免一次性全量载入（R16-10）
+                        .last("LIMIT 500"));
         for (AgentTask task : stuckTasks) {
             try {
                 if (task.getCurrentRunId() != null) {
@@ -775,7 +777,8 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
         // 3. Dead-letter overdue: failed/timed_out tasks with attemptNumber >= maxAttempts
         List<AgentTask> overdueTasks =
                 taskMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentTask>()
-                        .in(AgentTask::getStatus, AgentConstants.RETRYABLE_STATUSES));
+                        .in(AgentTask::getStatus, AgentConstants.RETRYABLE_STATUSES)
+                        .last("LIMIT 500"));
         for (AgentTask task : overdueTasks) {
             try {
                 List<AgentRun> runs = runMapper.selectByTaskId(task.getId());

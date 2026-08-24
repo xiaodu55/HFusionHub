@@ -17,6 +17,7 @@ import com.hfusionhub.tenant.TenantContext;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -98,9 +99,10 @@ public class TenantPlanBindingServiceImpl implements TenantPlanBindingService {
     @Override
     public List<PlanBindingDTO> listActiveBindings(Long tenantId) {
         List<TenantPlanBinding> bindings = activeBindings(tenantId);
+        Map<Long, BidSubscription> subscriptions = subscriptionsByIds(bindings);
         List<PlanBindingDTO> result = new ArrayList<>();
         for (TenantPlanBinding binding : bindings) {
-            BidSubscription subscription = subscriptionMapper.selectById(binding.getSubscriptionId());
+            BidSubscription subscription = subscriptions.get(binding.getSubscriptionId());
             if (subscription != null) {
                 result.add(toDto(binding, subscription));
             }
@@ -110,14 +112,31 @@ public class TenantPlanBindingServiceImpl implements TenantPlanBindingService {
 
     @Override
     public String resolveCurrentTier(Long tenantId) {
-        for (TenantPlanBinding binding : activeBindings(tenantId)) {
-            BidSubscription subscription = subscriptionMapper.selectById(binding.getSubscriptionId());
+        List<TenantPlanBinding> bindings = activeBindings(tenantId);
+        Map<Long, BidSubscription> subscriptions = subscriptionsByIds(bindings);
+        for (TenantPlanBinding binding : bindings) {
+            BidSubscription subscription = subscriptions.get(binding.getSubscriptionId());
             if (subscription != null && BidSubscription.PLAN_TYPE_TIER.equals(subscription.getPlanType())) {
                 return subscription.getPlanCode();
             }
         }
         Tenant tenant = tenantMapper.selectById(tenantId);
         return tenant != null && tenant.getPlanTier() != null ? tenant.getPlanTier() : "free";
+    }
+
+    /** 按绑定列表批量取订阅（消除循环内 selectById 的 N+1），绑定顺序语义不变。 */
+    private Map<Long, BidSubscription> subscriptionsByIds(List<TenantPlanBinding> bindings) {
+        List<Long> ids = bindings.stream()
+                .map(TenantPlanBinding::getSubscriptionId)
+                .distinct()
+                .toList();
+        Map<Long, BidSubscription> byId = new LinkedHashMap<>();
+        if (!ids.isEmpty()) {
+            for (BidSubscription subscription : subscriptionMapper.selectBatchIds(ids)) {
+                byId.put(subscription.getId(), subscription);
+            }
+        }
+        return byId;
     }
 
     @Override
@@ -136,8 +155,10 @@ public class TenantPlanBindingServiceImpl implements TenantPlanBindingService {
 
     @Override
     public boolean hasIndustry(Long tenantId, String industryCode) {
-        for (TenantPlanBinding binding : activeBindings(tenantId)) {
-            BidSubscription subscription = subscriptionMapper.selectById(binding.getSubscriptionId());
+        List<TenantPlanBinding> bindings = activeBindings(tenantId);
+        Map<Long, BidSubscription> subscriptions = subscriptionsByIds(bindings);
+        for (TenantPlanBinding binding : bindings) {
+            BidSubscription subscription = subscriptions.get(binding.getSubscriptionId());
             if (subscription != null && industryCode.equals(subscription.getPlanCode())) {
                 return true;
             }

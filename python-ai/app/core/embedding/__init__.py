@@ -4,10 +4,13 @@ Embedding 模块 - 支持 Ollama Embedding 服务
 """
 import asyncio
 import concurrent.futures
+import hashlib
 import logging
 import os
 import random
+import threading
 import time
+from collections import OrderedDict
 
 from app.core.embedding.ollama import OllamaEmbedding
 from app.core.embedding.openai_compatible import OpenAICompatibleEmbedding
@@ -24,6 +27,29 @@ logger = logging.getLogger(__name__)
 _embedding_executor = concurrent.futures.ThreadPoolExecutor(
     max_workers=2, thread_name_prefix="embedding-sync"
 )
+
+# ── 查询向量缓存（R16-5）───────────────────────────────────────────────────
+# 检索侧同一 query 文本在一次请求内可能被多次嵌入（如 Agent 预检索与 ReAct
+# 循环内 search_tool 命中同一文本），跨请求也会重复（重放压测/高频问法）。
+# CPU 推理单次 ~2.5s（bge-m3 实测），缓存命中即省一次完整推理。
+# key = provider|model|sha256(空白折叠后的文本)；容量与 TTL 见
+# EMBEDDING_QUERY_CACHE_*（TTL=0 禁用）。锁只护字典操作，不跨网络等待——
+# 并发同 key 未命中时各算一次再写回，属可接受的 stampede 代价。
+_query_cache: "OrderedDict[str, tuple[float, list[float]]]" = OrderedDict()
+_query_cache_lock = threading.Lock()
+_query_cache_stats = {"hits": 0, "misses": 0}
+
+
+def _query_cache_key(text: str, provider: str, model: str) -> str:
+    normalized = " ".join(text.split())
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return f"{provider}|{model}|{digest}"
+
+
+def get_query_cache_stats() -> dict:
+    """查询缓存命中统计（可观测：压测/排障时核对实际省掉的推理次数）。"""
+    with _query_cache_lock:
+        return {"size": len(_query_cache), **_query_cache_stats}
 
 
 class EmbeddingService:
@@ -151,6 +177,62 @@ class EmbeddingService:
         except RuntimeError:
             return asyncio.run(self.generate_batch(texts))
 
+    # ── 检索侧缓存路径（R16-5）──────────────────────────────────────────
+
+    def _query_cache_key(self, text: str) -> str:
+        if self._use_openai_compatible():
+            provider, model = "openai_compatible", self._openai_compatible.model
+        else:
+            provider, model = "ollama", self._ollama.model
+        return _query_cache_key(text, provider, model)
+
+    async def generate_query(self, text: str, model: str = None) -> list[float]:
+        """
+        生成检索侧 query embedding（LRU+TTL 缓存）。
+
+        只用于检索路径的短文本 query（向量通道/搜索工具/图谱入口）；文档
+        分块向量请走 generate/generate_batch——分块文本唯一，入缓存只会
+        挤占查询热点条目。命中返回向量的副本，调用方改写不影响缓存。
+        """
+        ttl = config.EMBEDDING_QUERY_CACHE_TTL_SECONDS
+        if ttl <= 0:
+            return await self.generate(text, model)
+
+        key = self._query_cache_key(text)
+        now = time.monotonic()
+        with _query_cache_lock:
+            cached = _query_cache.get(key)
+            if cached is not None and now - cached[0] <= ttl:
+                _query_cache.move_to_end(key)
+                _query_cache_stats["hits"] += 1
+                return list(cached[1])
+
+        embedding = await self.generate(text, model)
+
+        with _query_cache_lock:
+            _query_cache_stats["misses"] += 1
+            _query_cache[key] = (time.monotonic(), embedding)
+            _query_cache.move_to_end(key)
+            max_entries = max(1, config.EMBEDDING_QUERY_CACHE_MAX_ENTRIES)
+            while len(_query_cache) > max_entries:
+                _query_cache.popitem(last=False)
+        return list(embedding)
+
+    def get_query_embedding(self, text: str) -> list[float]:
+        """
+        同步版本 - 获取带缓存的查询 Embedding（向量库检索路径专用）。
+
+        与 get_embedding 的差异仅在缓存语义；事件循环/线程池策略一致。
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                return _embedding_executor.submit(asyncio.run, self.generate_query(text)).result()
+            else:
+                return loop.run_until_complete(self.generate_query(text))
+        except RuntimeError:
+            return asyncio.run(self.generate_query(text))
+
     async def generate_batch(self, texts: list[str]) -> list[list[float]]:
         """
         批量生成 Embedding
@@ -260,4 +342,4 @@ def get_embedding_service() -> EmbeddingService:
     return _embedding_service
 
 
-__all__ = ["EmbeddingService", "get_embedding_service"]
+__all__ = ["EmbeddingService", "get_embedding_service", "get_query_cache_stats"]

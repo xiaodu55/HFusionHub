@@ -93,6 +93,16 @@ class Config:
     # Allow random-vector fallback ONLY in test environments.  Production must
     # fail-closed when every real embedding provider is unavailable.
     EMBEDDING_ALLOW_FALLBACK = os.getenv("EMBEDDING_ALLOW_FALLBACK", "false").lower() == "true"
+    # 查询向量缓存（R16-5）：LRU + TTL，只缓存检索侧 query embedding（文档
+    # 分块向量文本唯一、无复用价值，不入缓存防挤占查询热点）。TTL=0 禁用
+    # （对齐 LLM_RESPONSE_CACHE_TTL_SECONDS 约定）。
+    EMBEDDING_QUERY_CACHE_TTL_SECONDS = float(os.getenv("EMBEDDING_QUERY_CACHE_TTL_SECONDS", "600"))
+    EMBEDDING_QUERY_CACHE_MAX_ENTRIES = int(os.getenv("EMBEDDING_QUERY_CACHE_MAX_ENTRIES", "256"))
+    # 文档索引批量嵌入（R16-7）：单批大小与批间并发。Ollama /api/embed 请求
+    # 超时 60s——CPU 推理下过大批次会整批超时，默认 32×并发 2；GPU 部署可
+    # 调大批次。并发>1 在 OLLAMA_NUM_PARALLEL=1 时仅重叠 HTTP 开销，无害。
+    EMBEDDING_DOC_BATCH_SIZE = int(os.getenv("EMBEDDING_DOC_BATCH_SIZE", "32"))
+    EMBEDDING_DOC_BATCH_CONCURRENCY = int(os.getenv("EMBEDDING_DOC_BATCH_CONCURRENCY", "2"))
 
     # LLM HTTP client (P3): shared connection pool + bounded retry/backoff.
     # timeout = per-request upstream timeout; max_retries = additional attempts

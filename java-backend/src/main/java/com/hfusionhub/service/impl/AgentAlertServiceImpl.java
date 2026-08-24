@@ -128,6 +128,8 @@ public class AgentAlertServiceImpl implements AgentAlertService {
         query.eq(AgentAlertEvent::getResolved, false);
         if (userId != null) query.eq(AgentAlertEvent::getUserId, userId);
         query.orderByDesc(AgentAlertEvent::getCreatedAt);
+        // 防御性上限：未解决告警长期不处理时该列表会无界增长（R16-10）
+        query.last("LIMIT 500");
         return eventMapper.selectList(query);
     }
 
