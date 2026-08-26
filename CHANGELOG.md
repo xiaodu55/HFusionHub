@@ -6,6 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第三十九批（2026-09-08：R16 批次 3——质量加固 + ACL 矩阵抓出 3 个真实端点缺陷）
+
+#### Fixed（矩阵测试即时产出）
+- **chunk detail 端点 404 语义失效（R16-14 矩阵抓出）**：`/api/chunks/detail/{id}`
+  对不可见/缺失分块抛 `ValidationException(..., code=404)`——该签名不存在，
+  TypeError 被外层 `except Exception` 包成 MilvusException 返回 500。第 36 批
+  "按不存在处理（不泄漏存在性）"的语义在 HTTP 层从未真正生效。改抛
+  `HFusionHubException(code=404)` 并在 `except` 链中先于兜底重抛
+- **chunk detail / search 端点 outline_path 未解析（同族 2 处）**：co-store
+  落盘的 `outline_path` 为 JSON 字符串，`VectorChunkResponse`/`SearchResult`
+  响应模型要求 list——列表端点有解析而 detail/search 漏掉，携带该字段的
+  正常记录直接 pydantic 校验失败返回 500。新增 `_coerce_outline_path`
+  统一收口（容错解析、非 list 归空）
+
+#### Added
+- **ACL 越权回归矩阵（R16-14）**：`tests/test_acl_matrix.py` 13 例，补第 36 批
+  未覆盖的两条通道——① 向量通道「超额召回 → ACL 谓词后过滤 → 截断
+  top_k」端到端（含 JSON 字符串 metadata、legacy 无 visibility 分块、
+  admin 无过滤直取、超量截断保序）；② 直读端点按请求主体 clearance
+  强制（general 不可见、admin 全可见、未设主体 fail-closed 按 general）。
+  跨租户维度复用 per-tenant co-store 隔离测试不重复。53 个 ACL 测试全绿
+- **IT 无 Docker 干净跳过（R16-12a）**：`AbstractItMySQLTest` 新增
+  `RequireMySqlCondition`（JUnit `ExecutionCondition`）——旧实现依赖
+  @BeforeAll 的 assume，但 `@DynamicPropertySource` 在上下文加载期即解析
+  数据源属性，容器未就绪时 context 直接 error（跳过永不生效）。现于
+  实例创建之前裁决；本机 `mvn test` 701 过 0 挂、29 跳、BUILD SUCCESS
+
+#### Changed
+- **覆盖率棘轮（R16-11）**：实测（本机 IT 跳过口径）Java LINE 46.15% /
+  BRANCH 34.86%、Python TOTAL 75%。JaCoCo 新增 BUNDLE BRANCH ≥ 0.34
+  下限（LINE 维持 0.46——上调 0.55 需 CI 含 IT 实测数据，避免本机误红）；
+  CI pytest 加 `--cov-fail-under=74`（留 1pt 平台缓冲）
+
+#### 待办（如实记录）
+- R16-12b：PromptTestSet / CostWebhookGate 两类真库迁移需 Docker 验证
+- R16-13：前端组件单测（5 个高风险组件）转下批
+- R16-1 / 性能复测：runtime 基线重冻结与 k6 延迟留档待本机服务栈可用
+
 ### 第三十八批（2026-09-08：R16 批次 2——性能应用层优化，不动模型与部署）
 
 #### Added

@@ -17,7 +17,13 @@ from fastapi import APIRouter, BackgroundTasks
 from app.core.chunker.quality import assess_chunk_quality
 from app.core.chunker.text_chunker import chunk_blocks
 from app.core.embedding import get_embedding_service
-from app.core.exceptions import EmbeddingException, MilvusException, ParsingException, VectorizationException
+from app.core.exceptions import (
+    EmbeddingException,
+    HFusionHubException,
+    MilvusException,
+    ParsingException,
+    VectorizationException,
+)
 from app.core.parser.base import BaseParser
 from app.core.parser.multimodal_evidence import MultimodalEvidenceExtractor
 from app.core.security.clearance import VISIBILITY_LEVELS, normalize_visibility
@@ -589,6 +595,17 @@ async def _process_document_background(
         clear_tenant_id()
 
 
+def _coerce_outline_path(value: Any) -> list:
+    """co-store 落盘的 outline_path 是 JSON 字符串，响应模型要求 list。"""
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return value if isinstance(value, list) else []
+
+
 @router.get("/api/chunks/{document_id}", response_model=ChunkResponse)
 async def get_chunks(document_id: str, page: int = 1, size: int = 20, block_type: str = None):
     """Get all chunks for a document"""
@@ -658,12 +675,15 @@ async def get_chunk_detail(chunk_id: str, document_id: str):
             if chunk.get('chunk_id') == chunk_id:
                 if not subject_can_see_metadata(chunk.get("metadata")):
                     break
-                return VectorChunkResponse(**chunk)
+                return VectorChunkResponse(
+                    **{**chunk, "outline_path": _coerce_outline_path(chunk.get("outline_path"))}
+                )
 
-        from app.core.exceptions import ValidationException
-        raise ValidationException(f"分块不存在: {chunk_id}", code=404)
+        # 404 语义：不可见/缺失一律按不存在。此前误用 ValidationException 的
+        # 不存在的 code=404 签名 → TypeError → 500，反而暴露"处理出错"
+        raise HFusionHubException(f"分块不存在: {chunk_id}", code=404)
 
-    except ValidationException:
+    except HFusionHubException:
         raise
     except Exception as e:
         raise MilvusException(f"获取分块详情失败: {e}")
@@ -691,7 +711,12 @@ async def search_chunks(request: SearchRequest):
         return SearchResponse(
             success=True,
             query=request.query,
-            results=[SearchResult(**result) for result in results]
+            results=[
+                SearchResult(
+                    **{**result, "outline_path": _coerce_outline_path(result.get("outline_path"))}
+                )
+                for result in results
+            ]
         )
 
     except Exception as e:

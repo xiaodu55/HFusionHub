@@ -154,7 +154,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: Run tests
-        run: pytest -q tests --durations=20 --cov=app --cov-report=term-missing:skip-covered
+        # --cov-fail-under 覆盖率棘轮（R16-11）：2026-09-08 实测 TOTAL 75%，
+        # 下限设 74 留缓冲防平台差异；后续随补测逐步上调
+        run: pytest -q tests --durations=20 --cov=app --cov-report=term-missing:skip-covered --cov-fail-under=74
 
   # ─── Python AI 容器专项（阻断门禁）───
   # 数据面关键安全门禁：容器插件执行（digest 校验、固定入口、网络/资源限制）。

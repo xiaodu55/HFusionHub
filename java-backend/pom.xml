@@ -267,7 +267,10 @@
                         </goals>
                         <configuration>
                             <!-- 覆盖率棘轮：2026-08-30 补测后实测 47.4%，上调至 46% 防恶化；
-                                 后续随补测逐步上调，不追历史 -->
+                                 后续随补测逐步上调，不追历史。
+                                 2026-09-08（R16-11）实测 LINE 46.15% / BRANCH 34.86%
+                                 （本机口径：IT 类无 Docker 跳过；CI 含 IT 会更高），
+                                 新增 BRANCH 下限 0.34 防分支覆盖恶化，留缓冲防平台差异 -->
                             <rules>
                                 <rule>
                                     <element>BUNDLE</element>
@@ -276,6 +279,11 @@
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
                                             <minimum>0.46</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.34</minimum>
                                         </limit>
                                     </limits>
                                 </rule>

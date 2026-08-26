@@ -8,6 +8,10 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.extension.ConditionEvaluationResult;
+import org.junit.jupiter.api.extension.ExecutionCondition;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.ExtensionContext;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -34,6 +38,7 @@ import org.testcontainers.containers.ContainerLaunchException;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @ActiveProfiles("it")
+@ExtendWith(AbstractItMySQLTest.RequireMySqlCondition.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public abstract class AbstractItMySQLTest {
 
@@ -67,6 +72,28 @@ public abstract class AbstractItMySQLTest {
     static void assumeEnvironmentAvailable() {
         Assumptions.assumeTrue(USE_EXTERNAL_MYSQL || containerReady,
                 "真实 MySQL 不可用（未配置 HFH_IT_JDBC_URL 且 Docker/Testcontainers 不可用）");
+    }
+
+    /**
+     * 在 Spring 上下文加载之前裁决整类启用/禁用。旧实现只靠 @BeforeAll 的
+     * assume——但 @DynamicPropertySource 的属性 supplier 在上下文加载期
+     * 即被解析，容器未就绪时 context 直接失败（error 而非 skip），assume
+     * 永远没有执行机会。ExecutionCondition 在实例创建与上下文加载之前
+     * 运行，才能把「环境不可用」表达为 skip。
+     */
+    static final class RequireMySqlCondition implements ExecutionCondition {
+
+        @Override
+        public ConditionEvaluationResult evaluateExecutionCondition(ExtensionContext context) {
+            if (USE_EXTERNAL_MYSQL) {
+                return ConditionEvaluationResult.enabled("外部 MySQL（HFH_IT_JDBC_URL）已配置");
+            }
+            if (containerReady) {
+                return ConditionEvaluationResult.enabled("Testcontainers MySQL 已就绪");
+            }
+            return ConditionEvaluationResult.disabled(
+                    "真实 MySQL 不可用（未配置 HFH_IT_JDBC_URL 且 Docker/Testcontainers 不可用）");
+        }
     }
 
     @org.springframework.beans.factory.annotation.Autowired

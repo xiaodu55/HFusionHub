@@ -350,10 +350,10 @@
 
 | 编号 | 问题 | 证据 | 修法 | 验收 |
 |---|---|---|---|---|
-| R16-11 | **覆盖率下限偏低**：JaCoCo 仅 BUNDLE LINE ≥ 0.46 棘轮，无分支/包级约束；Python 覆盖率无门禁阈值 | `java-backend/pom.xml:245-285`、`ci.yml` python 测试步骤 | JaCoCo LINE 0.46→0.55 渐进 + 引入 BRANCH 约束；pytest-cov 加 fail-under（现值+2 起步） | CI 门禁生效且绿 |
-| R16-12 | **IT 迁移收尾**：PromptTestSet（Awaitility 化）/ CostWebhookGate（每类独立库隔离）2 类未迁 Testcontainers | `docs/adr/ADR-008` 明示暂缓 | 完成 ADR-008 遗留两类迁移 | ADR-008 达成 8/8，ADR 文档更新 |
-| R16-13 | **前端组件单测空白**：9 个 spec 仅覆盖 api/utils/composables，页面组件 0 单测（chat/Detail 状态机曾出 bug） | `hfusionhub-frontend/src/**/*.spec.ts` 对照 `src/pages/` | 先补 5 个高风险组件（chat/Detail 拆分子组件、knowledge/Detail、document/Index 等） | vitest 新增用例全绿 |
-| R16-14 | **ACL 越权回归缺永久套件**：V85 刚落地、第 36 批连环修洞，越权用例散落在临时复测中 | `eval-permission-retest.log`（已删，数据在 CHANGELOG 35 批） | 跨租户 × visibility × 通道（向量/BM25/图谱/chunk 工具）矩阵用例进 `evaluation/` 套件，作为永久回归 + CI 门禁输入 | 套件入库（suite 版本化 + SHA 冻结流程），CI 绿 |
+| R16-11 ✅ | **覆盖率下限偏低**：JaCoCo 仅 BUNDLE LINE ≥ 0.46 棘轮，无分支/包级约束；Python 覆盖率无门禁阈值 | `java-backend/pom.xml`、`ci.yml` | 实测（2026-09-08，本机 IT 跳过口径）：Java LINE 46.15% / BRANCH 34.86%；Python TOTAL 75%。Java 新增 BRANCH 下限 0.34（LINE 维持 0.46——0.55 需 CI 含 IT 的实测数据支撑，避免本机误红）；Python `--cov-fail-under=74` 留 1pt 平台缓冲 | 门禁落地且本地全绿；后续随补测逐步上调 |
+| R16-12 ◐ | **IT 迁移收尾**：PromptTestSet（Awaitility 化）/ CostWebhookGate（每类独立库隔离）2 类未迁 Testcontainers；且「无 Docker 整类跳过」机制失效——`@DynamicPropertySource` 在 context 加载期即解析数据源属性，容器未就绪时 context 直接 error（assume 永无执行机会） | `docs/adr/ADR-008`、本机 `mvn test` 实测（5 类 error） | 跳过机制修复：新增 `RequireMySqlCondition`（`ExecutionCondition`）在实例创建与上下文加载之前裁决 enable/disable ✅；两类的真库迁移需 Docker 验证，**待真机执行** | 本机 `mvn test` 701 过 0 挂、29 跳 BUILD SUCCESS；迁移 8/8 待真机 |
+| R16-13 | **前端组件单测空白**：9 个 spec 仅覆盖 api/utils/composables，页面组件 0 单测（chat/Detail 状态机曾出 bug） | `hfusionhub-frontend/src/**/*.spec.ts` 对照 `src/pages/` | 待下批执行：先补 5 个高风险组件（chat/Detail 拆分子组件、knowledge/Detail、document/Index 等） | vitest 新增用例全绿 |
+| R16-14 ✅ | **ACL 越权回归缺永久套件**：V85 刚落地、第 36 批连环修洞，越权用例散落在临时复测中 | permission 复测数据（CHANGELOG 35 批） | Python 测试层矩阵（不动冻结套件 SHA）：`tests/test_acl_matrix.py` 13 例——向量通道超额召回→ACL 后过滤→截断管线、直读端点（/api/search、/api/chunks、/api/chunks/detail）按主体强制、JSON 字符串 metadata、legacy 无 visibility 分块；跨租户维度由 per-tenant co-store 隔离测试覆盖（避免重复）。**矩阵立即抓出 3 个真实端点缺陷并修复**：① detail 端点 `ValidationException(code=404)` 签名不存在 → TypeError → 不可见分块 500 而非 404；② `/api/chunks/detail` 与 ③ `/api/search` 响应构造未解析 outline_path JSON 字符串 → 正常记录 500 | 53 个 ACL 测试全绿；Python 全量 1589 过（4 失败为既有 milvus-lite 环境项，HEAD 同现） |
 
 ## R16-P3 评测/提示工程与工程卫生（批次 4）
 
