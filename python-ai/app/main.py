@@ -10,25 +10,11 @@ from contextlib import asynccontextmanager
 # Add project root to Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Configure logging — include trace_id from contextvars via LoggerAdapter
-class SafeFormatter(logging.Formatter):
-    def format(self, record):
-        if not hasattr(record, 'trace_id'):
-            record.trace_id = '-'
-        return super().format(record)
+# Configure logging — JSON 行格式（LOG_FORMAT=json）或 text，trace_id 经
+# handler 级 TraceFilter 全局注入（见 app/utils/logging_config.py）
+from app.utils.logging_config import configure_logging
 
-_handler = logging.StreamHandler(sys.stdout)
-_handler.setFormatter(SafeFormatter("%(asctime)s [%(levelname)s] [%(trace_id)s] %(name)s: %(message)s"))
-logging.basicConfig(level=logging.INFO, handlers=[_handler], force=True)
-
-# Inject trace_id into every log record via a filter
-class TraceFilter(logging.Filter):
-    def filter(self, record):
-        from app.utils.trace import get_trace_id
-        record.trace_id = get_trace_id() or "-"
-        return True
-
-logging.getLogger().addFilter(TraceFilter())
+configure_logging()
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException

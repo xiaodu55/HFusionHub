@@ -81,6 +81,8 @@ Copy `deploy/.env.example` to `deploy/.env` for production Docker Compose:
 | `AGENT_STATUS_EVENT_SSE_POLL_THREADS` | No | `0`（自动） | 任务 SSE 轮询线程池大小；0 = max(4, CPU/2)。慢连接不再拖垮全局轮询（M8） |
 | `APP_AVATAR_DIR` | No | `uploads/avatars` |
 | `TRACING_ENABLED` | No | `false` | 分布式追踪总开关（默认关，零开销）。开启后 RestTemplate/WebClient 调 Python 自动携带 `traceparent`，span 经 OTLP 导出到 Tempo（监控栈）；实测见 CHANGELOG 第二十批 |
+| `SSE_EXECUTOR_CORE_POOL_SIZE` / `_MAX_POOL_SIZE` / `_QUEUE_CAPACITY` | No | `32` / `64` / `32` | SSE 流式转发线程池容量——每个流占一个线程直至流结束，核心数须对齐目标并发流数（R16-8，见 `ThreadPoolConfig`） |
+| `SPRING_PROFILES_ACTIVE=json-logs` | No | text | 激活 `json-logs` profile 后 console 日志走 LogstashEncoder JSON 行格式（MDC 的 trace_id 自动入字段，与 Python `LOG_FORMAT=json` 字段约定对齐，Loki/ES 采集就绪；R16-17，见 `logback-spring.xml`） |
 | `TRACING_SAMPLING` | No | `1.0` | 追踪采样率（0–1）；高流量生产可调 0.1 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4318/v1/traces` | OTLP HTTP 导出端点；监控栈 Tempo 为 `http://tempo:4318/v1/traces`（容器内）/ `127.0.0.1:4318`（宿主机直跑） | 用户头像落盘目录（相对应用工作目录；Docker 下在 uploads-data 卷内持久化）。上传接口校验 JPG/PNG/WEBP/GIF 魔数、≤2MB |
 
@@ -140,6 +142,7 @@ Copy `python-ai/.env.example` to `python-ai/.env`:
 | `LLM_ALLOW_MOCK` | No | `false` | Enables mock LLM for development/testing only |
 | `SERVER_HOST` | No | `0.0.0.0` | FastAPI bind address |
 | `SERVER_PORT` | No | `9000` | FastAPI port |
+| `LOG_FORMAT` | No | `text` | `json` 切换为每行一条 JSON 的结构化日志（trace_id 经 handler 级 filter 全局注入，字段与 Java json-logs 对齐；R16-17，见 `app/utils/logging_config.py`） |
 | `CORS_ORIGINS` | No | `http://localhost:5173,...` | Allowed CORS origins |
 | `JAVA_BACKEND_URL` | No | `http://localhost:8080` | Callback target |
 | `CHUNK_SIZE` | No | `500` | Text chunk size |

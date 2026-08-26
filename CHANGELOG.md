@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第四十批（2026-09-08：R16 批次 4——结构化 JSON 日志 + 前端组件单测首批）
+
+#### Added
+- **结构化 JSON 日志双端落地（R16-17）**：
+  - Java：`logback-spring.xml` 双 appender——默认保持 yml text pattern（经
+    `${CONSOLE_LOG_PATTERN}` 绑定，行为与旧配置一致）；激活 `json-logs`
+    profile（`SPRING_PROFILES_ACTIVE=json-logs`）后 console 走
+    LogstashEncoder，MDC 的 trace_id 自动进字段。新依赖
+    `logstash-logback-encoder:8.1`
+  - Python：`app/utils/logging_config.py`（自 main.py 收口）——
+    `LOG_FORMAT=json` 切换 JSON 行格式，字段
+    `@timestamp/level/logger_name/message/trace_id`（与 Java 对齐，
+    Loki/ES 按行采集就绪）；+7 专项测试
+- **前端共享组件单测首批（R16-13）**：MarkdownRenderer 7 例（**XSS 关键
+  面**：script 标签剥离、内联 onerror 事件剥离、代码块复制按钮、空内容、
+  列表/链接渲染）+ ConfirmDialog 7 例（confirm/update:open 事件、loading
+  态、destructive 变体）——前端 57→71 全量绿
+- **ENVIRONMENT.md 补录**：`LOG_FORMAT`（Python）、`json-logs` profile
+  （Java）、SSE 线程池三键（第三十八批遗漏补录）
+
+#### Fixed
+- **trace_id 恒为 "-"（R16-17 顺带修复）**：Python `TraceFilter` 原挂在根
+  logger 上——标准库语义下根 logger 的 filter 只对直接经根 logger 发出的
+  记录生效，app.* 子 logger 传播上来的记录不经过它；移到 handler 级后
+  全局注入生效
+
+#### 待办（如实记录）
+- R16-15 / R16-16：答案标注率定位、DeepSeek tool_calls 稳定性——需模型栈
+  配合，**待真机执行**
+- R16-13 余量 / R16-18：页面组件单测与 chat store 状态收口——下批联动
+  重构；R16-1 基线重冻结、R16-12b IT 迁移、R16-19 运维债——**待真机**
+
 ### 第三十九批（2026-09-08：R16 批次 3——质量加固 + ACL 矩阵抓出 3 个真实端点缺陷）
 
 #### Fixed（矩阵测试即时产出）

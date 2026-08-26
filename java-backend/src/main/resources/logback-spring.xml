@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  日志配置（R16-17 结构化 JSON 日志）。
+
+  默认：console 走 text pattern——${CONSOLE_LOG_PATTERN} 来自 Spring Boot 对
+  application.yml logging.pattern.console 的绑定，行为与旧纯 yml 配置一致。
+
+  启用 JSON：激活 json-logs profile（如 SPRING_PROFILES_ACTIVE=json-logs），
+  console 改走 LogstashEncoder——每行一条 JSON，MDC（trace_id）自动进字段，
+  与 Python 端 LOG_FORMAT=json 的字段约定对齐（message/level/logger_name/
+  trace_id），供 Loki/ES 按行采集。注意 json-logs 激活时 application.yml 的
+  logging.pattern.console 不生效（encoder 模式无 pattern）。
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            <charset>utf8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <timeZone>UTC</timeZone>
+            <fieldNames>
+                <version>[ignore]</version>
+            </fieldNames>
+        </encoder>
+    </appender>
+
+    <springProfile name="!json-logs">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="json-logs">
+        <root level="INFO">
+            <appender-ref ref="JSON_CONSOLE"/>
+        </root>
+    </springProfile>
+</configuration>

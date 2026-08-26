@@ -352,18 +352,18 @@
 |---|---|---|---|---|
 | R16-11 ✅ | **覆盖率下限偏低**：JaCoCo 仅 BUNDLE LINE ≥ 0.46 棘轮，无分支/包级约束；Python 覆盖率无门禁阈值 | `java-backend/pom.xml`、`ci.yml` | 实测（2026-09-08，本机 IT 跳过口径）：Java LINE 46.15% / BRANCH 34.86%；Python TOTAL 75%。Java 新增 BRANCH 下限 0.34（LINE 维持 0.46——0.55 需 CI 含 IT 的实测数据支撑，避免本机误红）；Python `--cov-fail-under=74` 留 1pt 平台缓冲 | 门禁落地且本地全绿；后续随补测逐步上调 |
 | R16-12 ◐ | **IT 迁移收尾**：PromptTestSet（Awaitility 化）/ CostWebhookGate（每类独立库隔离）2 类未迁 Testcontainers；且「无 Docker 整类跳过」机制失效——`@DynamicPropertySource` 在 context 加载期即解析数据源属性，容器未就绪时 context 直接 error（assume 永无执行机会） | `docs/adr/ADR-008`、本机 `mvn test` 实测（5 类 error） | 跳过机制修复：新增 `RequireMySqlCondition`（`ExecutionCondition`）在实例创建与上下文加载之前裁决 enable/disable ✅；两类的真库迁移需 Docker 验证，**待真机执行** | 本机 `mvn test` 701 过 0 挂、29 跳 BUILD SUCCESS；迁移 8/8 待真机 |
-| R16-13 | **前端组件单测空白**：9 个 spec 仅覆盖 api/utils/composables，页面组件 0 单测（chat/Detail 状态机曾出 bug） | `hfusionhub-frontend/src/**/*.spec.ts` 对照 `src/pages/` | 待下批执行：先补 5 个高风险组件（chat/Detail 拆分子组件、knowledge/Detail、document/Index 等） | vitest 新增用例全绿 |
+| R16-13 ◐ | **前端组件单测空白**：9 个 spec 仅覆盖 api/utils/composables，页面组件 0 单测（chat/Detail 状态机曾出 bug） | `hfusionhub-frontend/src/**/*.spec.ts` 对照 `src/pages/` | 首批 2 个共享组件落地（2026-09-08）：MarkdownRenderer 7 例（**XSS 关键面**：script 剥离、内联事件剥离、代码块复制按钮）+ ConfirmDialog 7 例（确认/取消事件、loading 态、destructive 变体），前端 57→71 全绿。页面组件（chat/Detail 拆分子组件等）待下批，与 R16-18 chat store 重构联动做 | vitest 全量绿；页面组件待下批 |
 | R16-14 ✅ | **ACL 越权回归缺永久套件**：V85 刚落地、第 36 批连环修洞，越权用例散落在临时复测中 | permission 复测数据（CHANGELOG 35 批） | Python 测试层矩阵（不动冻结套件 SHA）：`tests/test_acl_matrix.py` 13 例——向量通道超额召回→ACL 后过滤→截断管线、直读端点（/api/search、/api/chunks、/api/chunks/detail）按主体强制、JSON 字符串 metadata、legacy 无 visibility 分块；跨租户维度由 per-tenant co-store 隔离测试覆盖（避免重复）。**矩阵立即抓出 3 个真实端点缺陷并修复**：① detail 端点 `ValidationException(code=404)` 签名不存在 → TypeError → 不可见分块 500 而非 404；② `/api/chunks/detail` 与 ③ `/api/search` 响应构造未解析 outline_path JSON 字符串 → 正常记录 500 | 53 个 ACL 测试全绿；Python 全量 1589 过（4 失败为既有 milvus-lite 环境项，HEAD 同现） |
 
 ## R16-P3 评测/提示工程与工程卫生（批次 4）
 
 | 编号 | 问题 | 证据 | 修法 | 验收 |
 |---|---|---|---|---|
-| R16-15 | **答案标注率 ~50% 随问题类型波动**（ADR-006 留下的开放点，未定位） | `docs/adr/ADR-006` 缺口收敛节 | 定位压缩后块号可见性 vs 格式遵循，提示工程迭代；目标引用精确率 P 0.703→0.80 | 离线套件重测数字留档（走重冻结流程） |
-| R16-16 | **DeepSeek 在 ReAct 循环内不稳定发起 tool_calls** | `k6/results/SUMMARY.md` 后续工作清单 | tool_choice 参数工程 + 提示参数化 | 工具成功率 runtime 0.8→0.9+（nightly 验证） |
-| R16-17 | **日志非结构化**：pattern 格式，采集入 Loki/ES 需再加工；Python 端 trace 跨语言串联未全面验证 | `application.yml:249` | Java logstash-logback-encoder + Python loguru JSON sink，trace_id 字段对齐 | 双端 JSON 日志字段一致样例留档 |
-| R16-18 | **前端状态管理薄弱**：Pinia 仅 1 个 store，页面状态靠组件局部 state（chat/Detail 曾出 retry/regenerate 数据丢失 bug） | `hfusionhub-frontend/src/stores/` | chat store 收口会话状态机（随 R16-13 组件拆分同步做） | 组件单测覆盖状态迁移 |
-| R16-19 | **运维债（多为待真机执行）**：Plugin Runner TLS staging 演练（R15-30）、Superset 看板初始化、eval-nightly 固定域名 | `TODO.md` P2/P3 | 仅做文档/指引可落地部分，真机项保持「待执行」标注 | 文档指引复核一致 |
+| R16-15 | **答案标注率 ~50% 随问题类型波动**（ADR-006 留下的开放点，未定位） | `docs/adr/ADR-006` 缺口收敛节 | 需真机栈配合（DeepSeek 现场实验）：定位压缩后块号可见性 vs 格式遵循，提示工程迭代；目标引用精确率 P 0.703→0.80 | **待真机执行** |
+| R16-16 | **DeepSeek 在 ReAct 循环内不稳定发起 tool_calls** | `k6/results/SUMMARY.md` 后续工作清单 | 需真机栈配合（tool_choice 参数 + 提示参数化的 A/B 实验） | **待真机执行**；工具成功率目标 0.8→0.9+ |
+| R16-17 ✅ | **日志非结构化**：pattern 格式，采集入 Loki/ES 需再加工；Python 端 trace 跨语言串联未全面验证 | `application.yml:249`、`python-ai/app/main.py` | 双端 JSON 行格式落地：Java `logback-spring.xml`（`json-logs` profile 激活 LogstashEncoder，MDC trace_id 自动入字段，默认保持 text pattern）+ 新依赖 logstash-logback-encoder 8.1；Python `app/utils/logging_config.py`（`LOG_FORMAT=json`，字段 @timestamp/level/logger_name/message/trace_id 与 Java 对齐）。**顺带修复真实缺陷**：TraceFilter 原挂在根 logger——标准库语义下子 logger 传播的记录不经过它，trace_id 恒为 "-"；移到 handler 级全局生效 | Java `mvn test` 701 过 BUILD SUCCESS（logback 配置经 context 加载验证）；Python 7 个专项测试绿；ENVIRONMENT.md 补 `LOG_FORMAT` / `json-logs` / SSE 线程池三键 |
+| R16-18 | **前端状态管理薄弱**：Pinia 仅 1 个 store，页面状态靠组件局部 state（chat/Detail 曾出 retry/regenerate 数据丢失 bug） | `hfusionhub-frontend/src/stores/` | 待下批：chat store 收口会话状态机，随 R16-13 页面组件拆分同步做 | 组件单测覆盖状态迁移 |
+| R16-19 | **运维债（多为待真机执行）**：Plugin Runner TLS staging 演练（R15-30）、Superset 看板初始化、eval-nightly 固定域名 | `TODO.md` P2/P3 | 真机/部署侧操作，仓库内指引已齐备；待真机时按 TODO.md 逐项执行 | 保持「待执行」标注 |
 
 ## 实施约定（R16）
 

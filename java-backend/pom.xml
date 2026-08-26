@@ -58,6 +58,13 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
+        <!-- 结构化 JSON 日志（R16-17）：json-logs profile 下 console 走
+             LogstashEncoder（MDC 的 trace_id 自动入字段），默认保持 text pattern -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>8.1</version>
+        </dependency>
         <!-- 分布式追踪（默认关，TRACING_ENABLED=true 开启）：micrometer-tracing
              经 RestTemplate/WebClient 观测自动向 Python 传播 traceparent -->
         <dependency>
