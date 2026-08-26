@@ -8,7 +8,7 @@
 ![Java](https://img.shields.io/badge/Java-17%2B-orange)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883)
-![Tests](https://img.shields.io/badge/Tests-Python%201556%20%7C%20Java%20703%20%7C%20Frontend%2071-success)
+![Tests](https://img.shields.io/badge/Tests-Python%201556%20%7C%20Java%20703%20%7C%20Frontend%2077-success)
 
 ## 这个项目是什么（30 秒版）
 
@@ -20,7 +20,7 @@ HFusionHub 是一个可以私有部署的 AI Agent 平台：上传文档建知�
 - **工具审批的正确性设计**：审批决定的三表更新在同一事务内完成，签发**一次性执行令牌**（数据库守卫 UPDATE 保证 exactly-once），LLM/工具执行经 afterCommit 移出事务——行锁不会被 120 秒的工具调用占住。
 - **并发与竞态治理**：任务状态机全部走条件 UPDATE 守卫迁移（completeRunGuarded / failUnlessTerminal），用量账本"只有赢得终态迁移的一方结算"，配套竞态回归测试。
 - **RAG 管线纵深**：意图分类 → 查询分解 → 多路检索（向量+BM25+图谱+RRF）→ 上下文压缩 → 检索证据门（低置信拒答）→ Groundedness 守卫与重试 → 引用完整性校验；答案逐论断 `[n]` 引用溯源；Parent-Child 父子分块与语义分块（实验档）提升长文档召回。
-- **测试与防漂移门禁**：Java 703（单测跑 H2 内存库；C1 集成测试跑真实 MySQL——Testcontainers，见 [ADR-008](docs/adr/ADR-008-it-mysql-testcontainers.md)）/ Python 1556 / 前端 71 单测 + 73 E2E；schema-h2 与迁移链**漂移零容忍**（漏同步直接 CI 红）、文档测试计数与代码强同步、离线评测门禁（recall/nDCG/引用 P·R·F1 基线，引用窗口按相关性自适应，见 [ADR-006](docs/adr/ADR-006-faithfulness-metric-recalibration.md)）。
+- **测试与防漂移门禁**：Java 703（单测跑 H2 内存库；C1 集成测试跑真实 MySQL——Testcontainers，见 [ADR-008](docs/adr/ADR-008-it-mysql-testcontainers.md)）/ Python 1556 / 前端 77 单测 + 73 E2E；schema-h2 与迁移链**漂移零容忍**（漏同步直接 CI 红）、文档测试计数与代码强同步、离线评测门禁（recall/nDCG/引用 P·R·F1 基线，引用窗口按相关性自适应，见 [ADR-006](docs/adr/ADR-006-faithfulness-metric-recalibration.md)）。
 - **数据规模**：Flyway 迁移链 V1–V85、26 轮自审修复批次（全部记录在 CHANGELOG）、48 项冒烟自测全过。
 
 ## 质量与验证口径（如实）
@@ -236,7 +236,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 ## 📖 文档索引（Documentation Index）
 
 > 所有文档位于 [docs/](docs/) 目录，按用途分三类：**开发**、**运维**、**治理**。
-> 关键事实基线：Java 703 测试 / Python 1556 / 前端 71 单测 + 73 E2E / Flyway V85 / Spring Boot 3.5.16。
+> 关键事实基线：Java 703 测试 / Python 1556 / 前端 77 单测 + 73 E2E / Flyway V85 / Spring Boot 3.5.16。
 > 离线评测基线（suite 1.1.0，2026-09-05 冻结，引用模拟含压缩感知）：Recall@5=0.932 / nDCG@10=0.903 / 引用准确率=0.942 / 引用忠实度 F1=0.741（精确率 0.703、召回率 0.894）。答案逐论断引用 `[n]` 标注经 `cited_chunk_ids` 透出，runtime 轨按答案实际标注的引用计分。
 > runtime 评测基线（suite 1.1.0，2026-09-05 首次实测、工具路由修复后重冻结，DeepSeek-v4-flash 单机全栈）：越界检索 0 / 错误率 0 / 引用忠实度（按答案标注引用）0.75 / 工具成功率 0.80 / 拒答正确率 0.625（注入 25/25 + 超纲 25/25 通过；权限类当时 0/30 拖累该值，主体级 ACL 收口后 permission 复测 30/30，见 CHANGELOG 第三十二批/第三十五批）/ runtime 召回 0.8564（Recall@5 过门禁；与离线 0.932 的差距为生产检索栈 vs 合成轨差异）。
 > 性能基线（单机全栈实测，2026-09-05，[docs/baselines/baseline-v1-20260905.txt](docs/baselines/baseline-v1-20260905.txt)）：Java API 五个读端点 P95 21~130ms / RAG 检索 P95 2261ms（瓶颈为本地 CPU 查询向量化）/ 文档处理端到端 P50 39.7s。

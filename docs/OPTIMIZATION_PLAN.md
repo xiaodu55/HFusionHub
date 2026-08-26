@@ -362,7 +362,7 @@
 | R16-15 | **答案标注率 ~50% 随问题类型波动**（ADR-006 留下的开放点，未定位） | `docs/adr/ADR-006` 缺口收敛节 | 需真机栈配合（DeepSeek 现场实验）：定位压缩后块号可见性 vs 格式遵循，提示工程迭代；目标引用精确率 P 0.703→0.80 | **待真机执行** |
 | R16-16 | **DeepSeek 在 ReAct 循环内不稳定发起 tool_calls** | `k6/results/SUMMARY.md` 后续工作清单 | 需真机栈配合（tool_choice 参数 + 提示参数化的 A/B 实验） | **待真机执行**；工具成功率目标 0.8→0.9+ |
 | R16-17 ✅ | **日志非结构化**：pattern 格式，采集入 Loki/ES 需再加工；Python 端 trace 跨语言串联未全面验证 | `application.yml:249`、`python-ai/app/main.py` | 双端 JSON 行格式落地：Java `logback-spring.xml`（`json-logs` profile 激活 LogstashEncoder，MDC trace_id 自动入字段，默认保持 text pattern）+ 新依赖 logstash-logback-encoder 8.1；Python `app/utils/logging_config.py`（`LOG_FORMAT=json`，字段 @timestamp/level/logger_name/message/trace_id 与 Java 对齐）。**顺带修复真实缺陷**：TraceFilter 原挂在根 logger——标准库语义下子 logger 传播的记录不经过它，trace_id 恒为 "-"；移到 handler 级全局生效 | Java `mvn test` 701 过 BUILD SUCCESS（logback 配置经 context 加载验证）；Python 7 个专项测试绿；ENVIRONMENT.md 补 `LOG_FORMAT` / `json-logs` / SSE 线程池三键 |
-| R16-18 | **前端状态管理薄弱**：Pinia 仅 1 个 store，页面状态靠组件局部 state（chat/Detail 曾出 retry/regenerate 数据丢失 bug） | `hfusionhub-frontend/src/stores/` | 待下批：chat store 收口会话状态机，随 R16-13 页面组件拆分同步做 | 组件单测覆盖状态迁移 |
+| R16-18 ✅ | **前端状态管理薄弱**：Pinia 仅 1 个 store，页面状态靠组件局部 state（chat/Detail 曾出 retry/regenerate 数据丢失 bug） | `hfusionhub-frontend/src/stores/` | 发送单飞状态机收口：`useChatSending` composable——`runExclusive(task)` 单一入口（空闲执行/并发拒绝/异常自动复位），守卫持有权绑定调用（forceIdle 后新任务接管时旧任务收尾不误清）；chat/Detail.vue 接线后**手工置位/复位全部清零**，retry/regenerate 把"删除在途+重发"整体纳入同一守卫，"先复位再发送"时序约定消灭。+6 专项测试（并发拒绝/异常复位/强制释放/持有权隔离） | vitest 77 全绿 + vue-tsc 通过；消息列表等更大范围的 store 化随页面组件拆分后续推进 |
 | R16-19 | **运维债（多为待真机执行）**：Plugin Runner TLS staging 演练（R15-30）、Superset 看板初始化、eval-nightly 固定域名 | `TODO.md` P2/P3 | 真机/部署侧操作，仓库内指引已齐备；待真机时按 TODO.md 逐项执行 | 保持「待执行」标注 |
 
 ## 实施约定（R16）

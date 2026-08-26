@@ -13,7 +13,7 @@
 - **Notifications**: System notice table + read tracking (V9)
 - **Production**: Docker Compose prod (MySQL/Redis/MinIO/Milvus/etcd/Attu/Java/Python/Plugin Runner), Helm chart, GHCR 镜像发布流水线（`v*` tag 自动构建推送）
 - **Release**: 版本 1.0.0；`scripts/setup.ps1/.sh` 一键启动 + `init-env` 自动生成随机密钥；演示数据一键导入；Setup 引导清单
-- **Tests**: Python 1556 ✅ | Java 703 ✅（单测 H2 + 集成 Testcontainers，见 ADR-008） | Frontend 71 单测 + 73 E2E ✅（2026-09-08 口径）
+- **Tests**: Python 1556 ✅ | Java 703 ✅（单测 H2 + 集成 Testcontainers，见 ADR-008） | Frontend 77 单测 + 73 E2E ✅（2026-09-08 口径）
 - **Security**: SECURITY.md / CODE_OF_CONDUCT / NOTICE / dependabot / gitleaks / ruff+pip-audit CI 门禁
 - **Frontend**: P0-P4 completed — dashboard cleanup, RAG trend chart, notification stub, SetupChecklist, 能力开关设置页
 
@@ -105,7 +105,7 @@
 - [ ] **批次 1 基线与一致性收口（R16-P0）** — runtime 基线重冻结（ACL 后口径，⚠️ 待真机执行）、ADR-001~005 补写 ✅、仓库卫生（根目录调试日志清理）✅、TODO/ROADMAP 状态对账 ✅
 - [x] **批次 2 性能达标（R16-P1，仅应用层）** — query embedding 缓存（同请求复用 + 跨请求缓存）✅、文档嵌入批量 32×并发 2 配置化 ✅、SSE 线程池容量对齐并发流数 + MDC 传播 ✅、N+1 三处批量预取 ✅、无界查询审计收口 ✅（延迟复测待本机服务栈可用后留档）
 - [x] **批次 3 质量加固（R16-P2）** — 覆盖率棘轮（Java BRANCH 0.34 + Python fail-under 74）✅、IT 无 Docker 跳过机制修复（ExecutionCondition 前置裁决，本机 701 过 BUILD SUCCESS）✅、ACL 越权回归矩阵 13 例入测试库 ✅（并修复 3 个直读端点真实缺陷：404 语义 + 两处 outline_path 解析）；剩余：2 个 IT 类真库迁移（待 Docker）+ 前端组件单测（待下批）
-- [x] **批次 4 评测与工程卫生（R16-P3）** — 结构化 JSON 日志双端落地（Java json-logs profile + Python LOG_FORMAT=json，顺带修复 trace_id 恒为 "-" 的 filter 挂载缺陷）✅、前端共享组件单测首批（MarkdownRenderer XSS 面 + ConfirmDialog，57→71）✅、ENVIRONMENT.md 补 SSE 池/日志键 ✅；剩余待真机/下批：答案标注率定位与 tool_calls 稳定性（需模型栈）、页面组件单测与 chat store（联动重构）、运维债真机项
+- [x] **批次 4 评测与工程卫生（R16-P3）** — 结构化 JSON 日志双端落地（Java json-logs profile + Python LOG_FORMAT=json，顺带修复 trace_id 恒为 "-" 的 filter 挂载缺陷）✅、前端共享组件单测首批（MarkdownRenderer XSS 面 + ConfirmDialog）✅、ENVIRONMENT.md 补 SSE 池/日志键 ✅、chat 发送单飞状态机收口（useChatSending，手工置位清零 + retry/regenerate 守卫全程覆盖，前端 77 单测）✅；剩余待真机/下批：答案标注率定位与 tool_calls 稳定性（需模型栈）、消息列表 store 化与页面组件拆分、运维债真机项
 
 ---
 

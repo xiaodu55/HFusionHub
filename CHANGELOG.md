@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第四十一批（2026-09-08：R16-18 chat 发送单飞状态机收口）
+
+#### Added
+- **`useChatSending` composable（R16-18）**：发送单飞状态机——
+  `runExclusive(task)` 单一进入方式（空闲执行并自动复位、并发拒绝、
+  异常也复位），守卫持有权绑定到具体调用：forceIdle 后新任务接管
+  守卫位时，旧在途任务的收尾不会误清新任务的守卫（+6 专项测试，
+  含持有权隔离用例）
+- **chat/Detail.vue 接线**：`handleSend` 拆为守卫入口 + 无守卫主流程
+  `runSendFlow`（retry/regenerate 复用重发旧提问）；重试/重新生成把
+  "删除在途 + 重发"整体纳入同一守卫，删除请求在途期间双击防护不再
+  依赖手工时序——**组件内 `sending.value =` 手工置位/复位全部清零**
+  （第三十六批 retry/regenerate 数据丢失缺陷的模式根除）
+
+#### Changed
+- "停止生成"（handleStopGeneration）与卸载清理（cancelOngoingRequests）
+  改走 `forceIdle()` 强制释放，语义与旧实现一致
+
+#### 验证
+- vitest 77 全绿（+6）、`vue-tsc -b` 通过、README/ROADMAP 计数同步
+  （前端 77）
+
 ### 第四十批（2026-09-08：R16 批次 4——结构化 JSON 日志 + 前端组件单测首批）
 
 #### Added

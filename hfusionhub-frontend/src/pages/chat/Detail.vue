@@ -23,6 +23,7 @@ import {
 } from '@/constants/timing'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import { useChatSending } from '@/composables/useChatSending'
 
 const route = useRoute()
 const router = useRouter()
@@ -39,7 +40,9 @@ const feedbackReason = ref('')
 const expectedAnswer = ref('')
 const feedbackSaving = ref(false)
 const loading = ref(false)
-const sending = ref(false)
+// 发送单飞状态机（R16-18）：sending 置位/复位收口到 runExclusive/forceIdle，
+// 消灭"先复位再发送"手工时序（第三十六批 retry/regenerate 数据丢失的缺陷模式）
+const { sending, runExclusive, forceIdle } = useChatSending()
 const inputMessage = ref('')
 const isComposing = ref(false) // 中文输入法组合态：组合期间按 Enter 不发送
 
@@ -287,15 +290,15 @@ const loadMessages = async (silent = false) => {
   }
 }
 
-const handleSend = async () => {
-  if (isComposing.value) return
-  if ((!inputMessage.value.trim() && pendingImages.value.length === 0) || sending.value) return
+// 发送主流程（无守卫版）：输入来自输入框与待发图片队列。
+// retry/regenerate 复用本流程重发旧提问；单飞守卫统一由 runExclusive 承接。
+const runSendFlow = async () => {
+  if (!inputMessage.value.trim() && pendingImages.value.length === 0) return
 
   const content = inputMessage.value.trim()
   inputMessage.value = ''
   const imageUrls = pendingImages.value.map(p => p.url)
   const imagePreviews = pendingImages.value.map(p => p.preview)
-  sending.value = true
 
   // 创建新的 AbortController
   abortController = new AbortController()
@@ -534,7 +537,7 @@ const handleSend = async () => {
       }
     }
   } finally {
-    sending.value = false
+    // sending 复位由 runExclusive 的 finally 承接（R16-18）
     streamingMessageId.value = null
     abortController = null
     if (activeRequestId === requestId) {
@@ -543,6 +546,12 @@ const handleSend = async () => {
     // 工具调用可能已产生待审批（如 write_note），延迟检查并弹出确认卡片
     setTimeout(maybeCheckApproval, CHAT_APPROVAL_CHECK_INTERVAL_MS)
   }
+}
+
+const handleSend = async () => {
+  if (isComposing.value) return
+  // 空内容/组合态以外的守卫（双击、并发发送）统一走单飞状态机
+  await runExclusive(runSendFlow)
 }
 
 const scrollToBottom = async () => {
@@ -589,90 +598,87 @@ const handleStopGeneration = async () => {
   abortController = null
   // 保留已生成的内容，只停止流式输出
   streamingMessageId.value = null
-  sending.value = false
+  // 强制释放单飞守卫（在途发送的收尾不再维持占用，行为与旧实现一致）
+  forceIdle()
 }
 
 // 重试消息（先在服务端删除失败轮次，避免重复）
 const handleRetryMessage = async (message: Message) => {
-  if (sending.value) return
-  // 双击竞态防护：删除请求在途期间禁止二次进入。
-  // 注意 handleSend 的守卫会在 sending===true 时直接 return，故发送前必须复位。
-  sending.value = true
+  // 单飞守卫跨越"删除在途 + 重发"全程：双击/并发由 runExclusive 拒绝，
+  // 不再依赖手工置位/复位的时序约定（R16-18）
+  await runExclusive(async () => {
+    // 找到这条消息的前一条用户消息
+    const messageIndex = messages.value.findIndex(m => m.id === message.id)
+    if (messageIndex <= 0) return
 
-  // 找到这条消息的前一条用户消息
-  const messageIndex = messages.value.findIndex(m => m.id === message.id)
-  if (messageIndex <= 0) { sending.value = false; return }
+    const userMessage = messages.value[messageIndex - 1]
+    if (!userMessage || userMessage.role !== 'user') return
 
-  const userMessage = messages.value[messageIndex - 1]
-  if (!userMessage || userMessage.role !== 'user') { sending.value = false; return }
+    // 对话图片输入：把原消息图片恢复为待发送状态（blob/相对地址均可重上传）
+    try {
+      for (const u of userMessage.images || []) {
+        try {
+          const blob = await (await fetch(u)).blob()
+          const res = await conversationApi.uploadChatImage(
+            new File([blob], 'retry.png', { type: blob.type || 'image/png' }))
+          pendingImages.value.push({ url: res.data.url, preview: u })
+        } catch { /* 单图恢复失败忽略 */ }
+      }
+    } catch { /* 忽略恢复失败 */ }
 
-  // 对话图片输入：把原消息图片恢复为待发送状态（blob/相对地址均可重上传）
-  try {
-    for (const u of userMessage.images || []) {
-      try {
-        const blob = await (await fetch(u)).blob()
-        const res = await conversationApi.uploadChatImage(
-          new File([blob], 'retry.png', { type: blob.type || 'image/png' }))
-        pendingImages.value.push({ url: res.data.url, preview: u })
-      } catch { /* 单图恢复失败忽略 */ }
+    // 服务端删除旧轮次（失败回答 + 对应提问），防止重试后重复
+    const conversationId = Number(route.params.id)
+    if (message.id > 0) {
+      try { await conversationApi.deleteConversationMessage(conversationId, message.id) } catch { /* 忽略删除失败 */ }
     }
-  } catch { /* 忽略恢复失败 */ }
+    if (userMessage.id > 0) {
+      try { await conversationApi.deleteConversationMessage(conversationId, userMessage.id) } catch { /* 忽略删除失败 */ }
+    }
 
-  // 服务端删除旧轮次（失败回答 + 对应提问），防止重试后重复
-  const conversationId = Number(route.params.id)
-  if (message.id > 0) {
-    try { await conversationApi.deleteConversationMessage(conversationId, message.id) } catch { /* 忽略删除失败 */ }
-  }
-  if (userMessage.id > 0) {
-    try { await conversationApi.deleteConversationMessage(conversationId, userMessage.id) } catch { /* 忽略删除失败 */ }
-  }
+    // 移除这条失败的消息
+    messages.value.splice(messageIndex, 1)
 
-  // 移除这条失败的消息
-  messages.value.splice(messageIndex, 1)
-
-  // 重新发送用户消息
-  inputMessage.value = userMessage.content
-  // 移除用户消息（因为 handleSend 会重新添加）
-  messages.value.splice(messageIndex - 1, 1)
-  sending.value = false // handleSend 守卫拦截 sending===true，先复位再发送（handleSend 内部自会重置）
-  await handleSend()
+    // 重新发送用户消息
+    inputMessage.value = userMessage.content
+    // 移除用户消息（因为发送流程会重新添加）
+    messages.value.splice(messageIndex - 1, 1)
+    await runSendFlow()
+  })
 }
 
 // 重新生成：服务端删除旧问答对后重新发送提问（不产生重复轮次）
 const regenerateMessage = async (message: Message) => {
-  if (sending.value) return
-  sending.value = true
+  await runExclusive(async () => {
+    const messageIndex = messages.value.findIndex(m => m.id === message.id)
+    if (messageIndex <= 0) return
 
-  const messageIndex = messages.value.findIndex(m => m.id === message.id)
-  if (messageIndex <= 0) { sending.value = false; return }
+    const userMessage = messages.value[messageIndex - 1]
+    if (!userMessage || userMessage.role !== 'user') return
 
-  const userMessage = messages.value[messageIndex - 1]
-  if (!userMessage || userMessage.role !== 'user') { sending.value = false; return }
+    try {
+      for (const u of userMessage.images || []) {
+        try {
+          const blob = await (await fetch(u)).blob()
+          const res = await conversationApi.uploadChatImage(
+            new File([blob], 'retry.png', { type: blob.type || 'image/png' }))
+          pendingImages.value.push({ url: res.data.url, preview: u })
+        } catch { /* 单图恢复失败忽略 */ }
+      }
+    } catch { /* 忽略恢复失败 */ }
 
-  try {
-    for (const u of userMessage.images || []) {
-      try {
-        const blob = await (await fetch(u)).blob()
-        const res = await conversationApi.uploadChatImage(
-          new File([blob], 'retry.png', { type: blob.type || 'image/png' }))
-        pendingImages.value.push({ url: res.data.url, preview: u })
-      } catch { /* 单图恢复失败忽略 */ }
+    const conversationId = Number(route.params.id)
+    if (message.id > 0) {
+      try { await conversationApi.deleteConversationMessage(conversationId, message.id) } catch { /* 忽略删除失败 */ }
     }
-  } catch { /* 忽略恢复失败 */ }
+    if (userMessage.id > 0) {
+      try { await conversationApi.deleteConversationMessage(conversationId, userMessage.id) } catch { /* 忽略删除失败 */ }
+    }
 
-  const conversationId = Number(route.params.id)
-  if (message.id > 0) {
-    try { await conversationApi.deleteConversationMessage(conversationId, message.id) } catch { /* 忽略删除失败 */ }
-  }
-  if (userMessage.id > 0) {
-    try { await conversationApi.deleteConversationMessage(conversationId, userMessage.id) } catch { /* 忽略删除失败 */ }
-  }
-
-  messages.value.splice(messageIndex, 1)
-  messages.value.splice(messageIndex - 1, 1)
-  inputMessage.value = userMessage.content
-  sending.value = false // handleSend 守卫拦截 sending===true，先复位再发送（handleSend 内部自会重置）
-  await handleSend()
+    messages.value.splice(messageIndex, 1)
+    messages.value.splice(messageIndex - 1, 1)
+    inputMessage.value = userMessage.content
+    await runSendFlow()
+  })
 }
 
 // 复制消息内容（优先 Clipboard API，失败时降级到 execCommand）
@@ -858,7 +864,7 @@ const cancelOngoingRequests = async () => {
   controller?.abort()
   abortController = null
   streamingMessageId.value = null
-  sending.value = false
+  forceIdle()
 }
 
 // 组件卸载时取消请求
