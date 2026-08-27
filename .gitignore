@@ -138,3 +138,6 @@ bigdata/dolphinscheduler/docker
 
 # --- 本地 compose override(见文件头注释,网络恢复后删除) ---
 docker/docker-compose.override.yml
+
+# --- MCP 运行时用户配置（管理页持久化，各环境自行生成）---
+python-ai/mcp_servers.json

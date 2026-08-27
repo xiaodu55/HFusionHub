@@ -51,6 +51,12 @@
 - 集成测试依赖 Docker 或外部库：两者都不可用时静默跳过（可见性靠
   `[IT] Testcontainers unavailable` stderr 提示），**跳过不等于通过**——
   CI 报告需关注 IT 类的实际执行数；
+  - 2026-09-08（R16-12a）补记：初版跳过机制依赖 `@BeforeAll` 的
+    `Assumptions`，但 `@DynamicPropertySource` 的属性 supplier 在 Spring
+    上下文加载期即被解析，容器未就绪时 context 直接 error——assume
+    永无执行机会，Windows 无 Docker 的本机表现为 5 个 IT 类报错而非
+    跳过。现改为 `RequireMySqlCondition`（JUnit `ExecutionCondition`）
+    在实例创建与上下文加载之前裁决 enable/disable，跳过语义才真正成立；
 - 新增 @SpringBootTest 默认应继承 `AbstractItMySQLTest` 走真库，
   H2 仅保留给纯 SQL 方言无关的mapper单元层；
 - 暂缓的两类（PromptTestSet/CostWebhookGate）转 Awaitility 化与

@@ -172,7 +172,8 @@ class VectorChannel(BaseChannel):
 
             return [
                 SearchResult(
-                    content=r.get("content", ""),
+                    # 陈旧索引实体可能缺 content 字段（None）：归空防下游切片崩溃
+                    content=r.get("content") or "",
                     score=r.get("score", 0.0),
                     source=ChannelType.VECTOR,
                     document_id=r.get("document_id"),
@@ -846,7 +847,11 @@ class QueryRouter:
                     "document_id": result.document_id,
                     "knowledge_base_id": result.metadata.get("knowledge_base_id"),
                     "score": round(result.score, 6),
-                    "content_preview": result.content[:500],
+                    # content 可能为 None（陈旧索引实体字段缺失）：调试快照
+                    # 属观测面，绝不能因它把本已成功的检索拖成失败
+                    # （真机冒烟实录：'NoneType' object is not subscriptable
+                    #   → M10 retrieval_error，R16-1 环境核对时发现）
+                    "content_preview": (result.content or "")[:500],
                     "multimodal": result.metadata.get("multimodal"),
                 }
                 for rank, result in enumerate(results, start=1)

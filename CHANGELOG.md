@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第四十二批（2026-09-09：R16-1 runtime 基线重冻结——真机跑批 + 2 项环境级缺陷修复）
+
+#### Fixed
+- **检索成功被调试快照拖垮（R16-20）**：`QueryRouter._debug_candidates`
+  对 `content=None` 的检索结果切片崩溃（真机冒烟实录：检索已命中、
+  sources 正常，却在 debug 快照 `'NoneType' object is not subscriptable`
+  处整次请求以 retrieval_error 失败——"知识库检索服务暂时不可用"）。
+  调试快照空内容容错；同族加固 VectorChannel 构造 SearchResult 时
+  `content=None → ""`
+- **本机 pymilvus 版本漂移（R16-21）**：已装 2.4.15 vs 锁定 3.0.0
+  （milvus-lite 3.1.0 需 3.x 配对）——写读回环直测证实 content 恒为
+  null（读路径转换 bug，连既有数据也读不出），且是 4 个既有
+  `test_milvus_tenant_migration_real` "nullable" 失败的根因。
+  `pip install pymilvus==3.0.0` 按锁恢复：4 测试全绿、回环正常
+
+#### Changed
+- **runtime 基线重冻结（R16-1）**：真机栈（Docker/Ollama/Java/Python +
+  kb 101 重播种）后全量 220 用例跑批，`runtime_baseline.json` 重冻结于
+  2026-09-09T03:06Z——**拒答正确率 0.625 → 0.9625**（旧值为 ACL 前
+  口径：permission 0/30 被答出；现 30/30 拒答）✅、P95 21.7s→16.4s、
+  token/任务 1582→774、错误率 0、越界 0
+- 检索/引用指标 0.85→0.55 下移的归因（如实记录）：permission 30 例按
+  ACL 语义拒答后不贡献召回（口径变化，非回归）；残余差异疑模型侧行为
+  漂移（token 减半、答案变短）——reranker lexical/disabled 对照实验无
+  差异、本轮检索路径改动仅 embedding 缓存与空内容加固。runtime 轨为
+  非阻断监测轨，残余归因挂 eval-nightly 持续监测（`docs/CI_GATES.md`
+  口径注记）
+- ADR-008 补记 `RequireMySqlCondition`（ExecutionCondition）跳过机制
+  修复背景
+
 ### 第四十一批（2026-09-08：R16-18 chat 发送单飞状态机收口）
 
 #### Added

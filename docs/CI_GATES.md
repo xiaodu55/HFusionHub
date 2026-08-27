@@ -44,6 +44,19 @@
 
 ### 基线持久化
 
+> **口径注记（2026-09-09，R16-1 重冻结）**：runtime 基线以
+> `2026-09-09T03:06:39Z` 全量跑批重冻结（220 用例，真机栈）。与
+> 2026-09-06 旧冻结相比：拒答正确率 0.625→0.9625（旧值为 ACL 落地前
+> 口径，permission 类 0/30 被答出；现 30/30 拒答 + injection/refusal
+> 基本满分）；Recall/nDCG/引用指标 0.85→0.55 量级下移——其中
+> permission 类 30 例按 ACL 语义拒答后不再贡献检索召回（口径变化），
+> 残余差异伴随单任务 token 1582→774（答案变短），疑为模型侧行为漂移，
+> 与本轮代码改动无关（检索路径仅 embedding 缓存与空内容加固；reranker
+> lexical/disabled 对照实验无差异）。runtime 轨为非阻断监测轨，残余
+> 差异归因挂 eval-nightly 持续监测（对齐 ADR-006 门阈值校准红线）。
+> 另：本机 pymilvus 曾漂移至 2.4.15（锁定 3.0.0），导致 milvus-lite
+> 写读 content 为 null——已按锁恢复，4 个既有失败测试转绿。
+
 运行时基线无法入库（依赖具体环境的真实指标），用**可版本化的 cache 键**在 Nightly 之间持久化，避免固定键命中后不可覆盖的问题：
 
 - **restore**：`actions/cache/restore`，主键 `runtime-baseline-<cases 哈希>-<run_id>`（每次运行唯一），`restore-keys` 用前缀 `runtime-baseline-<cases 哈希>-` 恢复**最近一次**成功保存的版本。
