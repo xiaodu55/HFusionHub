@@ -1,11 +1,11 @@
 package com.hfusionhub.service.impl;
 
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.hfusionhub.support.AbstractItMySQLTest;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
@@ -40,18 +40,16 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 /**
- * 三个新能力模块（成本追踪 / Webhook / 评测回归门禁）集成冒烟测试（H2）。
+ * 三个新能力模块（成本追踪 / Webhook / 评测回归门禁）集成冒烟测试。
  * 覆盖：成本落账与按日/汇总统计、Webhook 订阅 CRUD 与事件异步分发投递、
  * 评测门禁判定（准确率/延迟/成本基线）与历史持久化。
+ *
+ * <p>2026-09-09 迁移 it profile（ADR-008 8/8 收口，R16-12b）：原 C1 例外的
+ * 「混跑 1 例失败」源于 H2 时代跨类共上下文的数据串扰——AbstractItMySQLTest
+ * 的每类全表 TRUNCATE + 真实 MySQL 已消除该干扰面；本类 @BeforeEach 的
+ * 域内清理保留为防御。Webhook 异步投递等待沿用用例内有界 waitFor。</p>
  */
-/**
- * 暂不迁移 it profile（C1 例外）：costTracking 的租户维度聚合断言在
- * 真实 MySQL 与跨类共上下文下行为不同（隔离跑 4/4 绿，混跑 1 例失败），
- * 需要数据源级隔离方案（每类独立库）后再迁移，列后续工作。
- */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-@ActiveProfiles("test")
-class CostWebhookGateIntegrationTest {
+class CostWebhookGateIntegrationTest extends AbstractItMySQLTest {
 
     /** 投递到不可达地址，投递必然失败但流程完整走通 */
     private static final String UNREACHABLE_URL = "http://127.0.0.1:1/unreachable-webhook";
@@ -117,6 +115,14 @@ class CostWebhookGateIntegrationTest {
     void costTracking_recordAndSummaries() {
         recordUsage(1L, "gpt-4o", 100, 50, 1.234567, 800, "chat");
         recordUsage(1L, "gpt-4o", 200, 80, 2.000000, 1200, "agent");
+        // DATETIME(0) 秒级取整会把秒末插入的 created_at 舍入到下一秒，
+        // 越过 getCostSummary 的 created_at <= endDate 上界（间歇 0 行，
+        // 即 ADR-008 第 2 类问题的变体）；跨过秒界后再查询
+        try {
+            Thread.sleep(1100);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
 
         var daily = costTrackingService.getUserDailyCost(1L, 30);
         assertFalse(daily.isEmpty(), "应有每日成本记录");
@@ -125,7 +131,8 @@ class CostWebhookGateIntegrationTest {
 
         var summary = costTrackingService.getCostSummary(1L);
         assertEquals(1L, summary.getUserId());
-        assertTrue(summary.getTotalRequests() >= 2);
+        assertTrue(summary.getTotalRequests() >= 2,
+                "totalRequests=" + summary.getTotalRequests() + " totalCost=" + summary.getTotalCost());
         assertTrue(summary.getTotalCost().compareTo(BigDecimal.valueOf(3.23)) >= 0);
         assertNotNull(summary.getEstimatedMonthCost(), "应有本月预估成本");
         assertFalse(summary.getModelBreakdown().isEmpty(), "应有按模型分组明细");

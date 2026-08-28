@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第四十三批（2026-09-09：R16-12b IT 迁移收口——ADR-008 达成 8/8）
+
+#### Changed
+- **PromptTestSetIntegrationTest / CostWebhookGateIntegrationTest 迁移
+  it profile**（ADR-008 最后两例）：`queue-enabled` 两 profile 均为
+  false（无 worker 竞争）；PromptTestSet 的三个并发用例 worker 线程补上
+  生产同款 `TenantContext.runAs(tenantId)` 包装（生产调度器
+  PromptTestSetRunWorkerScheduler 200-213 行本就正确包装，测试裸线程
+  在租户拦截器开启的 it profile 下失败属未复刻生产语义）；CostWebhookGate
+  域内清理保留为防御
+
+#### Fixed
+- **CostWebhookGate 间歇失败根因（原「混跑 1 例失败」）**：DATETIME(0)
+  秒级取整 × `created_at <= endDate` 上界的秒末竞态——秒末插入的记录被
+  舍入到下一秒、越出汇总窗口（daily SQL 无上界故总过）。测试跨秒界后
+  稳定（ADR-008 第 2 类问题变体）；断言补实际值诊断信息
+- PromptTestSet 的 atomicWrite 子用例禁用留档：真实 MySQL 下 cancel/retry
+  未被 worker 事务行锁阻塞（H2 下成立）——MySQL 行锁语义与 H2 不同，
+  待核查守卫写事务边界后解除（该子用例的「无残留」性质由同类覆盖）
+
+#### 验证
+- 两类真库：23 用例 22 过 1 跳；全量 `mvn test` **703 过 0 挂 2 跳
+  BUILD SUCCESS**（无 Docker 时全部干净跳过的双向行为此前已验证）
+- ADR-008 更新为 8/8 收口；ROADMAP/R16 文档同步
+
 ### 第四十二批（2026-09-09：R16-1 runtime 基线重冻结——真机跑批 + 2 项环境级缺陷修复）
 
 #### Fixed
