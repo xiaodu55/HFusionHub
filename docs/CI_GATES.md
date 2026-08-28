@@ -54,6 +54,13 @@
 > 与本轮代码改动无关（检索路径仅 embedding 缓存与空内容加固；reranker
 > lexical/disabled 对照实验无差异）。runtime 轨为非阻断监测轨，残余
 > 差异归因挂 eval-nightly 持续监测（对齐 ADR-006 门阈值校准红线）。
+> **归因已闭环（2026-09-09，`python-ai/scripts/eval_retrieval_live.py`
+> 纯检索直测）**：绕过答案层的纯检索 OVERALL recall@5 = **0.830**
+> （normal 0.986 / cross_document 0.983 / long_document 1.0 / tool 0.9 /
+> injection 0.84 / refusal 1.0 / permission 0——ACL 正确拦截；permission
+> 按 admin 老口径 = 1.0），与旧基线检索水平（0.856，其中 permission 老口径
+> 满贡献）一致——**检索栈健康**。runtime 0.550 与纯检索 0.830 的差值在
+> **答案层丢 sources**（与单任务 token 1582→774 同源的模型侧行为漂移）。
 > 另：本机 pymilvus 曾漂移至 2.4.15（锁定 3.0.0），导致 milvus-lite
 > 写读 content 为 null——已按锁恢复，4 个既有失败测试转绿。
 

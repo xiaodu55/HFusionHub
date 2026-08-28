@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第四十四批（2026-09-09：runtime 检索指标残余差异归因闭环）
+
+#### Added
+- **纯检索归因探针 `scripts/eval_retrieval_live.py`**：绕过 LLM 答案层，
+  对冻结套件逐用例直接检索并按 expected_document_names 计算 doc 级
+  recall@5（permission 按主体语义走 general + 附 admin 老口径对照），
+  用于把 runtime 轨检索指标变化拆分为「检索栈 vs 答案层」
+
+#### Changed
+- **归因闭环（真机实测）**：纯检索 OVERALL recall@5 = **0.830**
+  （normal 0.986 / cross_document 0.983 / long_document 1.0 / tool 0.9 /
+  injection 0.84 / refusal 1.0 / permission 0——ACL 正确拦截；permission
+  按 admin 老口径 = 1.0），与 2026-09-06 旧基线检索水平（0.856，其中
+  permission 老口径满贡献）一致——**检索栈健康，与 R16 代码改动无关**；
+  runtime 0.550 与纯检索 0.830 的差值在答案层丢 sources（与单任务
+  token 1582→774 同源的模型侧行为漂移）。`docs/CI_GATES.md` 口径注记
+  与 R16-1 行同步更新
+
 ### 第四十三批（2026-09-09：R16-12b IT 迁移收口——ADR-008 达成 8/8）
 
 #### Changed
