@@ -22,12 +22,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   秒级取整 × `created_at <= endDate` 上界的秒末竞态——秒末插入的记录被
   舍入到下一秒、越出汇总窗口（daily SQL 无上界故总过）。测试跨秒界后
   稳定（ADR-008 第 2 类问题变体）；断言补实际值诊断信息
-- PromptTestSet 的 atomicWrite 子用例禁用留档：真实 MySQL 下 cancel/retry
-  未被 worker 事务行锁阻塞（H2 下成立）——MySQL 行锁语义与 H2 不同，
-  待核查守卫写事务边界后解除（该子用例的「无残留」性质由同类覆盖）
+- atomicWrite 子用例复跑全绿——「MySQL 行锁语义与 H2 不同」的初步怀疑
+  不成立：真实根因是窗口用例的 cancel 线程缺租户上下文（worker 线程
+  已补而 cancel 线程漏补），`requireOwnedRun` 直接「运行记录不存在」
+  瞬间完成、根本未到锁争用；补上生产同款 `runAs` 包装后行锁阻塞语义
+  在真实 MySQL 下验证成立。断言保留 cancelError 诊断输出
 
 #### 验证
-- 两类真库：23 用例 22 过 1 跳；全量 `mvn test` **703 过 0 挂 2 跳
+- 两类真库：23/23 全绿；全量 `mvn test` **703 过 0 挂 1 跳
   BUILD SUCCESS**（无 Docker 时全部干净跳过的双向行为此前已验证）
 - ADR-008 更新为 8/8 收口；ROADMAP/R16 文档同步
 

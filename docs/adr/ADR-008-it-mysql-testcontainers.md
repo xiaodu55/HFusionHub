@@ -30,15 +30,14 @@
    PromptTemplateVersionIntegration / UsageLedgerService）；
    **PromptTestSet**（异步时序需 Awaitility 化）与 **CostWebhookGate**
    （需每类独立库隔离）两例暂缓并文档化，不阻塞本决策。
-   - 2026-09-09（R16-12b）后记：两例已完成迁移，**8/8 收口**。
-     PromptTestSet 的 worker 线程须复刻生产调度器的
-     `TenantContext.runAs(run.tenantId)` 包装（租户拦截器在 it 下开启，
-     裸线程会失败——生产调度器本就正确包装，测试补齐即可）；
-     `atomicWriteSerializesAgainstRetry` 一个子用例暂时禁用：真实 MySQL
-     下 cancel/retry 未被 worker 事务行锁阻塞（H2 下阻塞成立），锁语义
-     待核查（见用例禁用注记）；CostWebhookGate 的「混跑失败」实为
-     DATETIME(0) 秒级取整变体——`created_at <= endDate` 上界在秒末插入
-     时被舍入越过（测试跨秒界后稳定）。
+   - 2026-09-09（R16-12b）后记：两例已完成迁移，**8/8 收口、23/23 全绿**。
+     两处根因都是测试线程未复刻生产语义，而非 MySQL 缺陷：
+     ① PromptTestSet 的 worker/cancel 线程须持有租户上下文（生产调度器
+     `TenantContext.runAs(run.tenantId)` 包装、生产 HTTP 请求由拦截器
+     注入；it 下拦截器开启，裸线程的 requireOwnedRun 直接「运行记录
+     不存在」）；② CostWebhookGate 的「混跑失败」实为 DATETIME(0) 秒级
+     取整变体——`created_at <= endDate` 上界在秒末插入时被舍入越过
+     （测试跨秒界后稳定）。
 
 ## H2 掩盖的 4 类问题（迁移过程实录，全部修复/绕行）
 1. **逻辑删除 + 租户拦截器**：`sys_user` 在租户拦截器忽略表清单里，插入

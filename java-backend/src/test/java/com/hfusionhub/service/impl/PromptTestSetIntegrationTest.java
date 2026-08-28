@@ -841,15 +841,7 @@ class PromptTestSetIntegrationTest extends AbstractItMySQLTest {
      * <p>该窗口在未原子化实现下会让旧 Worker 无条件插入旧 token 的结果行（DB 残留脏数据）；
      * 原子化后由「单事务 + 行锁互斥」彻底消除。
      */
-    /**
-     * it 迁移遗留（2026-09-09，R16-12b）：真实 MySQL 下 cancel/retry 未被
-     * worker 事务的行锁阻塞（H2 下阻塞成立）。差异指向 guard 写事务的
-     * 锁持有/隔离语义（REPEATABLE READ + 行锁 vs H2 默认），需核查
-     * PromptTestSetServiceImpl 的守卫写与 cancelRun 的事务边界后解除禁用。
-     * 该子用例校验的「无残留脏数据」性质由同类其余用例覆盖。
-     */
     @Test
-    @org.junit.jupiter.api.Disabled("it 迁移遗留：MySQL 行锁语义与 H2 不同，待核查守卫写事务边界（R16-12b 留档）")
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void atomicWriteSerializesAgainstRetry_noDirtyResultsInProgressWrittenWindow() throws Exception {
         PromptTestSetDetailDTO created = createSetWithCases(1);
@@ -899,10 +891,16 @@ class PromptTestSetIntegrationTest extends AbstractItMySQLTest {
             Thread cancelThread = new Thread(
                     () -> {
                         try {
-                            service.cancelRun(runId);
-                            service.retryRun(runId);
-                        } catch (Throwable t) {
-                            cancelError.set(t);
+                            // 与 worker 线程同理：租户拦截器在 it 下开启，取消线程
+                            // 也须持有租户上下文（生产 HTTP 请求由拦截器注入）
+                            TenantContext.runAs(1L, () -> {
+                                try {
+                                    service.cancelRun(runId);
+                                    service.retryRun(runId);
+                                } catch (Throwable t) {
+                                    cancelError.set(t);
+                                }
+                            });
                         } finally {
                             cancelDone.countDown();
                         }
@@ -914,7 +912,8 @@ class PromptTestSetIntegrationTest extends AbstractItMySQLTest {
             Thread.sleep(300);
             assertFalse(
                     cancelDone.await(50, TimeUnit.MILLISECONDS),
-                    "cancel/retry must block on the worker's active transaction");
+                    "cancel/retry must block on the worker's active transaction; cancelError="
+                            + cancelError.get());
 
             // 释放 worker → 结果插入并提交事务 → 重试随后执行并清除其结果。
             releaseWorker.countDown();
