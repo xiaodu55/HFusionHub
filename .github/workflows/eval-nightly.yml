@@ -181,11 +181,26 @@ jobs:
             runtime-baseline-${{ hashFiles('python-ai/evaluation/suite/cases.jsonl') }}-
       - name: Run runtime evaluation gate
         run: |
-          args=(--base-url "${EVAL_BASE_URL}" --token "${EVAL_INTERNAL_TOKEN}" --fail-on-regression)
+          args=(--base-url "${EVAL_BASE_URL}" --token "${EVAL_INTERNAL_TOKEN}" --fail-on-regression --maximum-tokens-per-task 2000)
           if [ "${UPDATE_BASELINE}" = "true" ]; then args+=(--update-baseline); fi
           python scripts/eval_runtime.py "${args[@]}"
         env:
           UPDATE_BASELINE: ${{ github.event.inputs.update_baseline == 'true' }}
+      # 纯检索轨道（R17-1）：与 runtime 答案层口径解耦的稳定检索质量口径。
+      # 走目标栈的 /api/rag/eval（生产 router/retriever 链路、无答案生成），
+      # ACL 经 X-User-Clearance 头生效；文档名取自 chunk metadata 的
+      # document_title（检索基线 retrieval_baseline.json 已入库并钉扎套件 SHA）。
+      # 阈值：绝对下限 0.75 + 相对基线回退容差 0.03（2026-09-09 真机实测
+      # 生产链 recall=0.793，见 retrieval_baseline.json）。
+      - name: Run pure-retrieval evaluation track
+        run: |
+          python scripts/eval_retrieval_live.py \
+            --cases evaluation/suite/cases.jsonl \
+            --base-url "${EVAL_BASE_URL}" --token "${EVAL_INTERNAL_TOKEN}" \
+            --minimum-recall 0.75 --regression-tolerance 0.03 \
+            --fail \
+            --report evaluation/reports/retrieval_report.json \
+            --markdown evaluation/reports/retrieval_report.md
       - name: Persist re-frozen runtime baseline
         if: ${{ success() && github.event.inputs.update_baseline == 'true' }}
         uses: actions/cache/save@v4

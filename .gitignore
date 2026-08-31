@@ -141,3 +141,6 @@ docker/docker-compose.override.yml
 
 # --- MCP 运行时用户配置（管理页持久化，各环境自行生成）---
 python-ai/mcp_servers.json
+
+# --- 纯检索探针的 doc id→标题映射（环境相关运行时产物，各栈自行生成）---
+python-ai/evaluation/docmap_*.json

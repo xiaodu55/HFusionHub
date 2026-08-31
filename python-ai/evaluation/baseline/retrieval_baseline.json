@@ -1,0 +1,18 @@
+{
+  "track": "retrieval",
+  "suite_version": "1.1.0",
+  "suite_sha256": "b02b9dd329d4a38bae2336adec854b226b361418ef94747e75f37c4e95d72c4a",
+  "generated_at": "2026-09-09T06:40:31.720062+00:00",
+  "metrics": {
+    "recall_at_5": 0.7932,
+    "per_category": {
+      "cross_document": 0.8833,
+      "injection": 0.72,
+      "long_document": 1.0,
+      "normal": 0.9857,
+      "permission": 0.0,
+      "refusal": 1.0,
+      "tool": 0.8
+    }
+  }
+}

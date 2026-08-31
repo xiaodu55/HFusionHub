@@ -183,6 +183,8 @@ async def evaluate_production_path(request: ProductionEvaluationRequest):
             "results": [
                 {
                     "document_id": item.document_id,
+                    # 纯检索评测轨（R17-1）：暴露文档名，使评测侧无需 docmap
+                    "document_name": (item.metadata or {}).get("document_title"),
                     "content": item.content,
                     "score": item.score,
                     "source": item.source,

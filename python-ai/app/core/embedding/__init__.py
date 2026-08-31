@@ -105,11 +105,13 @@ class EmbeddingService:
         Raises:
             EmbeddingException: 嵌入服务不可用
         """
+        started_at = time.monotonic()
         # 优先：OpenAI 兼容通道（EMBEDDING_PROVIDER=openai_compatible）
         if self._use_openai_compatible():
             try:
                 embedding = await self._openai_compatible.generate(text)
                 logger.info("OpenAI-compatible embedding successful")
+                self._record_request(started_at)
                 return embedding
             except Exception as e:
                 logger.warning(f"OpenAI-compatible embedding failed: {e}")
@@ -120,6 +122,7 @@ class EmbeddingService:
                 logger.info("Trying Ollama embedding...")
                 embedding = await self._ollama.generate(text)
                 logger.info("Ollama embedding successful")
+                self._record_request(started_at)
                 return embedding
             except Exception as e:
                 logger.warning(f"Ollama failed: {e}")
@@ -133,6 +136,15 @@ class EmbeddingService:
 
         logger.error("Ollama embedding failed, no fallback available")
         raise EmbeddingException("无法生成向量嵌入：Ollama 服务不可用")
+
+    def _record_request(self, started_at: float) -> None:
+        """R17-4：真实嵌入请求延迟观测（缓存命中不经过此路径）。"""
+        try:
+            from app.api.metrics import record_embedding_request
+
+            record_embedding_request(time.monotonic() - started_at)
+        except Exception:
+            pass
 
     def get_embedding(self, text: str) -> list[float]:
         """
@@ -205,12 +217,25 @@ class EmbeddingService:
             if cached is not None and now - cached[0] <= ttl:
                 _query_cache.move_to_end(key)
                 _query_cache_stats["hits"] += 1
+                try:
+                    # R17-3：延迟导入防循环依赖（core → api 沿 chat.py 惯例）
+                    from app.api.metrics import record_embedding_cache
+
+                    record_embedding_cache(hit=True)
+                except Exception:
+                    pass
                 return list(cached[1])
 
         embedding = await self.generate(text, model)
 
         with _query_cache_lock:
             _query_cache_stats["misses"] += 1
+            try:
+                from app.api.metrics import record_embedding_cache
+
+                record_embedding_cache(hit=False)
+            except Exception:
+                pass
             _query_cache[key] = (time.monotonic(), embedding)
             _query_cache.move_to_end(key)
             max_entries = max(1, config.EMBEDDING_QUERY_CACHE_MAX_ENTRIES)

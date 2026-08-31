@@ -10,9 +10,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.utils.config import config
-
 from app.core.security.clearance import build_acl_metadata_filter, get_clearance
+from app.utils.config import config
 
 from .observability import RetrievalTrace, get_trace_store
 from .postprocessor import Postprocessor, ProcessedResult, get_postprocessor
@@ -190,6 +189,14 @@ class MultiChannelRetriever:
             error = f"{type(exc).__name__}: {exc}"
             raise
         finally:
+            try:
+                # R17-4：检索延迟分解观测（含 embedding 与全管线墙钟；
+                # embedding 单独延迟见 embedding_latency 指标）
+                from app.api.metrics import record_rag_retrieval
+
+                record_rag_retrieval(time.perf_counter() - started_at, len(processed))
+            except Exception:
+                pass
             trace_results = [
                 {
                     "document_id": result.document_id,

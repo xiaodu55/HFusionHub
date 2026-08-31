@@ -97,12 +97,32 @@ Invoke-RestMethod -Uri "$BaseUrl/api/knowledge-base/$kbId" -Method Delete -Heade
 
 ### 2. RAG 检索性能基线目标
 
-- **运行方式**：`POST $PythonUrl/api/rag/debug/search`（X-Internal-Token + X-Tenant-Id 头），100 次迭代，查询池 4 条，`top_k=5`。
+- **运行方式**：`POST $PythonUrl/api/rag/debug/search`（X-Internal-Token + X-Tenant-Id 头），50 次迭代，查询池 4 条，`top_k=5`。
 - **前置**：KB 52 存在且有文档。
 - **基线目标**（KB 内含 50 文档，~1000 chunks）：
   - 平均延迟：< 300ms
   - P95 延迟：< 500ms
   - P99 延迟：< 800ms
+
+#### 2.1 检索延迟分解口径（R17-5）
+
+上述 P95 计的是**完整 HTTP 墙钟，含 query embedding 生成**——本机 CPU 推理
+bge-m3 单次 ~2.5s，是检索延迟的主导项（k6 B2 定位），属推理算力成本而非
+工程缺陷。评价检索工程质量请用以下分解口径：
+
+| 口径 | 指标（Prometheus） | 含义 |
+|---|---|---|
+| 全管线墙钟 | `hfusionhub_rag_retrieval_latency_seconds` | debug/search 全链路（含 embedding/改写/ACL），即上表口径 |
+| 纯检索质量 | `scripts/eval_retrieval_live.py`（nightly 纯检索轨） | recall@5，与延迟无关 |
+| embedding 请求延迟 | `hfusionhub_embedding_latency_seconds` | 单次真实嵌入（不含缓存命中） |
+| query 缓存命中率 | `hfusionhub_embedding_query_cache_hits_total` / `_misses_total` | 命中率 = hits / (hits+misses)；同请求重复嵌入与跨请求同问法命中即省一次 CPU 推理 |
+
+- **GPU 化预估收益**：embedding 迁 GPU（或换轻量模型 bge-small-zh，需全量
+  重嵌入 + 重冻结评测基线）后，单次 ~2.5s 可降至 <100ms 量级，届时全管线
+  P95 < 500ms 目标即有意义；CPU 部署下请按分解口径评价。
+- **注意事项**：`/api/rag/debug/search` 走生产 router/retriever 链路；检索
+  质量口径（recall）由 nightly 纯检索轨（`eval_retrieval_live.py`，见
+  `docs/CI_GATES.md`）独立度量，与延迟指标解耦。
 
 ### 3. Java 后端 API 响应基线目标
 

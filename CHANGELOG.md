@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第四十五批（2026-09-09：R17 批次 1——评测双口径升级）
+
+#### Added
+- **纯检索轨道进 nightly（R17-1）**：`eval_retrieval_live.py` 升级双模式
+  （进程内本地归因 / HTTP 走目标栈 `/api/rag/eval` 生产检索链），文档名
+  优先读 chunk metadata 的 `document_title`（HTTP 由端点响应
+  `document_name` 暴露，`/api/rag/eval` 相应增强），`--docmap` 降级为旧
+  语料可选回退；新增 `--report/--markdown` 落盘、`--fail` 门禁退出码、
+  `evaluation/baseline/retrieval_baseline.json`（suite_sha256 钉扎，
+  HTTP 模式冻结：recall@5=0.793，绝对下限 0.75 + 回退容差 0.03）；
+  `eval-nightly.yml` 新增纯检索 step（与答案层口径解耦的稳定检索质量
+  监测）
+- **token 漂移门禁显式化（R17-2）**：`eval_baseline.py` GATE_ORDER 增
+  `tokens_per_task`（lower-is-better），`eval_runtime.py` 新增
+  `--maximum-tokens-per-task`（默认 2000，nightly 显式传参）——token
+  1582→774 式模型漂移自动告警；`check_gates` 语义经单测验证
+- **检索延迟分解埋点（R17-3/4）**：`record_rag_retrieval`（retriever
+  finally 处）/`record_embedding_request`（generate 成功路径）/
+  `record_embedding_cache(hit)`（查询缓存命中/未命中）接入生产路径，
+  `/metrics` 暴露 `hfusionhub_rag_retrieval_latency_seconds`、
+  `hfusionhub_embedding_latency_seconds`、
+  `hfusionhub_embedding_query_cache_{hits,misses}_total`（真机验证：
+  2 次检索即见 miss/hit 与延迟分布）
+
+#### Changed
+- **SCALING.md 分解口径（R17-5）**：RAG 检索基线小节明确"现行 P95 含
+  embedding（推理成本非工程缺陷）"，新增 2.1 分解口径表（全管线墙钟 /
+  纯检索质量 / embedding 延迟 / 缓存命中率四指标）与 GPU 化预估收益；
+  修正迭代数文档-脚本不一致（100→50）
+- `/api/rag/eval` 响应 results 增 `document_name` 字段
+
+#### 验证
+- Python 全量 **1600 过 0 挂 8 跳**；ruff 全绿；探针双模式真机验证
+  （进程内 0.8295 / HTTP 0.7932，基线钉扎与回退判定经单测）
+
 ### 第四十四批（2026-09-09：runtime 检索指标残余差异归因闭环）
 
 #### Added

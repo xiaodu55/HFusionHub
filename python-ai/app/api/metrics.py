@@ -135,6 +135,14 @@ def record_embedding_request(latency_seconds: float, is_error: bool = False):
         _metrics.inc("embedding_errors_total")
 
 
+def record_embedding_cache(hit: bool):
+    """Record a query-embedding cache lookup (R17-3：命中率 = hits / (hits+misses)）。"""
+    if hit:
+        _metrics.inc("embedding_query_cache_hits")
+    else:
+        _metrics.inc("embedding_query_cache_misses")
+
+
 def record_eval_gate_failure():
     """Record an eval gate failure (called when runtime eval fails a gate)."""
     _metrics.inc("eval_gate_failures")

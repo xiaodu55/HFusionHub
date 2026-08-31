@@ -555,6 +555,7 @@ GATE_ORDER = [
     "scoring_point_accuracy",
     "bid_terminology_accuracy",
     "p95_latency_ms",
+    "tokens_per_task",
     "error_rate",
     "scope_violations",
 ]
@@ -567,8 +568,10 @@ def check_gates(
     """Return human-readable failures for quality gates.
 
     ``thresholds`` maps a metric key to a minimum (for higher-is-better metrics)
-    or a maximum (for ``p95_latency_ms``, ``error_rate`` and
-    ``scope_violations``, which are lower-is-better).
+    or a maximum (for ``p95_latency_ms``, ``error_rate``,
+    ``scope_violations`` and ``tokens_per_task``, which are lower-is-better;
+    token 上限用于模型侧行为漂移告警——R17-2，token 1582→774 式漂移本可
+    自动发现而非人工对比基线).
     """
     failures: list[str] = []
     for key in GATE_ORDER:
@@ -580,7 +583,7 @@ def check_gates(
             # A gate for a metric this track cannot produce is skipped, not failed.
             continue
         label = METRIC_LABELS.get(key, key)
-        if key in ("p95_latency_ms", "error_rate", "scope_violations"):
+        if key in ("p95_latency_ms", "error_rate", "scope_violations", "tokens_per_task"):
             if value > threshold:
                 failures.append(f"{label}={value:.3f} exceeds maximum {threshold:.3f}")
         elif value < threshold:
