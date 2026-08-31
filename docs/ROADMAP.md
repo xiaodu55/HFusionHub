@@ -105,7 +105,16 @@
 - [x] **批次 1 基线与一致性收口（R16-P0）** — runtime 基线重冻结 ✅（2026-09-09 真机跑批：拒答 0.625→0.9625，检索指标口径变化归因见 CI_GATES 注记）、ADR-001~005 补写 ✅、仓库卫生 ✅、状态对账 ✅；附带修复 pymilvus 版本漂移（4 测试转绿）与检索调试快照空内容崩溃
 - [x] **批次 2 性能达标（R16-P1，仅应用层）** — query embedding 缓存（同请求复用 + 跨请求缓存）✅、文档嵌入批量 32×并发 2 配置化 ✅、SSE 线程池容量对齐并发流数 + MDC 传播 ✅、N+1 三处批量预取 ✅、无界查询审计收口 ✅（延迟复测待本机服务栈可用后留档）
 - [x] **批次 3 质量加固（R16-P2）** — 覆盖率棘轮（Java BRANCH 0.34 + Python fail-under 74）✅、IT 无 Docker 跳过机制修复（ExecutionCondition 前置裁决，本机 701 过 BUILD SUCCESS）✅、ACL 越权回归矩阵 13 例入测试库 ✅（并修复 3 个直读端点真实缺陷：404 语义 + 两处 outline_path 解析）；8/8 迁移收口、23/23 全绿（703 过 0 挂 BUILD SUCCESS）
-- [x] **批次 4 评测与工程卫生（R16-P3）** — 结构化 JSON 日志双端落地（Java json-logs profile + Python LOG_FORMAT=json，顺带修复 trace_id 恒为 "-" 的 filter 挂载缺陷）✅、前端共享组件单测首批（MarkdownRenderer XSS 面 + ConfirmDialog）✅、ENVIRONMENT.md 补 SSE 池/日志键 ✅、chat 发送单飞状态机收口（useChatSending，手工置位清零 + retry/regenerate 守卫全程覆盖，前端 77 单测）✅；剩余待真机/下批：答案标注率定位与 tool_calls 稳定性（需模型栈）、消息列表 store 化与页面组件拆分、运维债真机项
+- [x] **批次 4 评测与工程卫生（R16-P3）** — 结构化 JSON 日志双端落地（Java json-logs profile + Python LOG_FORMAT=json，顺带修复 trace_id 恒为 "-" 的 filter 挂载缺陷）✅、前端共享组件单测首批（MarkdownRenderer XSS 面 + ConfirmDialog）✅、ENVIRONMENT.md 补 SSE 池/日志键 ✅、chat 发送单飞状态机收口（useChatSending，手工置位清零 + retry/regenerate 守卫全程覆盖，前端 77 单测）✅；答案标注率与 tool_calls 稳定性转 R17 后续观测
+
+## Phase 8 — R17 优化（2026-09，进行中）
+
+> 方案全文见 [docs/OPTIMIZATION_PLAN.md](OPTIMIZATION_PLAN.md) 第十七轮（R17，2026-09-09 规划）。四条线：
+
+- [ ] **批次 1 评测双口径升级（R17-A）** — 纯检索轨道进 nightly（HTTP 模式 + retrieval_baseline）、token 漂移门禁显式化、embedding 缓存命中率/检索延迟分解埋点、SCALING.md 分解口径
+- [ ] **批次 2 技术债清零（R17-B）** — legacy 死代码清除（degraded 字段/agent-runs 路由/JwtUtils 死方法）、tools legacy 入口迁移 Registry、Java 流式接口收敛（非 KB 分支迁 V1）、双鉴权分工文档化、AgentQueueGauge 租户包装修复
+- [ ] **批次 3 前端第二轮（R17-C）** — chat store、Detail.vue 拆分（MessageItem/MessageList/ApprovalCard/KnowledgeSources）、页面组件单测 77→100+
+- [ ] **批次 4 发布与叙事（R17-D）** — CHANGELOG 修缮 + v1.1.0 tag + release notes 注入、README 归因叙事与验证口径清单、R15-27 指引复核
 
 ---
 

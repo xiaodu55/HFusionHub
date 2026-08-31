@@ -372,3 +372,54 @@
 - 每批完成：全量测试回归（Java H2 套件 / Python pytest / 前端 vitest）+ `scripts/static-checks.py` + CHANGELOG 批次记录，每批一个提交。
 - 评测数字任何变动走既有「重冻结基线 + CHANGELOG 批次」流程；suite SHA 是 CI 门禁输入，勿随意改语料。
 - 涉及运行时验证（eval_runtime、k6）依赖本机服务栈；栈不可用时如实标记「待真机执行」并继续后续项。
+
+---
+
+# 第十七轮优化方案（2026-09-09 规划：R16 收官后——评测双口径 + 技术债清零 + 前端第二轮 + v1.1.0 发布）
+
+> **规划方式**：三路并行探索（评测基建 / 技术债精确盘点 / 前端结构与发布基建），事实修正：门禁模块在 `scripts/eval_baseline.py`（非 app/core/rag）；`model_gateway` legacy 主体已退役仅剩死注释；`JwtUtils` 实为 Sa-Token 的 StpInterface + 静态薄包装（无独立 JWT）；nightly 纯检索轨道走服务端 `/api/rag/eval` 端点（不暴露 Milvus 端口）。
+> **四条线**：A 评测双口径升级（检索质量与模型行为解耦）；B 技术债清零（legacy 退役 + 双鉴权文档化 + 后台线程租户收尾）；C 前端第二轮（chat store + Detail.vue 拆分 + 组件单测）；D 发布与叙事（v1.1.0 + README 升级）。
+
+## R17-A 评测体系双口径升级（批次 1）
+
+| 编号 | 问题 | 证据 | 修法 | 验收 |
+|---|---|---|---|---|
+| R17-1 | **runtime 检索指标被模型行为污染**：sources 从 /api/chat 响应提取，模型漂移（token 1582→774）直接压低 recall，无法分辨系统退化与模型漂移 | R16-1 归因（纯检索 0.830 vs 答案层 0.550） | `eval_retrieval_live.py` 增 HTTP 模式（`--base-url/--token` 逐用例调 `/api/rag/eval`，确认响应含文档标识、缺则端点补 document_name）+ `--report/--markdown` 落盘 + `--fail` 退出码 + `evaluation/baseline/retrieval_baseline.json`（suite_sha256 钉扎，复用 eval_baseline load/save 模式）；`eval-nightly.yml` eval-runtime job 门禁步骤后新增纯检索 step | nightly 双口径报告 + artifact |
+| R17-2 | **模型漂移无自动告警**：token/任务 1582→774 靠人工对比基线才发现 | `scripts/eval_baseline.py` Metrics 已含 tokens_per_task、diff 容差 15% 已工作 | `METRIC_LABELS`/`GATE_ORDER`/`render_markdown` metric_keys 增 `tokens_per_task` 上限阈值；nightly CLI 加 `--maximum-tokens-per-task` | nightly 漂移自动标红 |
+| R17-3 | **embedding 缓存命中率不可观测**：`get_query_cache_stats()` 仅日志探针；`record_embedding_request` 等埋点函数零生产调用 | `app/api/metrics.py` L124/L130、`app/core/embedding/__init__.py` L207/L213 | metrics.py 注册 hit/miss counter，embedding 命中/未命中处接入；Grafana 面板/告警补 `embedding_cache_hit_ratio` | /metrics 暴露指标 + 面板 |
+| R17-4 | **"检索 P95（不含 embedding）"不可观测**：`record_rag_retrieval` 零生产调用；现有基准计完整 HTTP 墙钟 | `run-all-benchmarks.ps1` L100-104 语义 | `record_rag_retrieval`/`record_embedding_request` 接入 retriever 与 embedding 真实路径 | 分解指标可查询 |
+| R17-5 | **性能目标口径含混**：SCALING.md 的 P95<500ms 含 embedding（推理成本非工程缺陷）；脚本 50 次迭代 vs 文档"100 次"不一致 | `docs/SCALING.md` L98-105、脚本 L95 | SCALING.md 增分解口径小节（现行语义/纯检索口径/命中率/GPU 化预估收益表）；修正迭代数表述 | 文档-脚本一致 |
+
+## R17-B 技术债清零（批次 2）
+
+| 编号 | 问题 | 证据 | 修法 | 验收 |
+|---|---|---|---|---|
+| R17-6 | **legacy 死代码残留**：`GatewayResult.degraded` 死字段 + 失实 docstring（声称走 legacy 路径）；`/api/chat/agent-runs` 零调用方；`JwtUtils` 三个死方法 | model_gateway.py L11-14/L152-154、gateway_llm.py L9-11、chat.py L1306-1329、JwtUtils | 三处清除（degraded 字段、agent-runs 路由+warn、logout/getCurrentUserIdStr/hasPermission） | 引用清零 + 测试绿 |
+| R17-7 | **tools legacy 入口仍为 ReAct 热路径符号**：module 级 `execute_tool` 被 react.py 4 处调用（实际走 Registry 但入口是 deprecated 符号）；mcp_server 3 处 | react.py L489/1286/1358/2050、mcp_server.py L46/167/170 | react/mcp_server 改 Registry 直调，同步 2 个测试文件，删除 module 级 `get_tools/execute_tool` 与告警机制 | 旧入口删除、全量 pytest 绿 |
+| R17-8 | **Java 流式接口双轨**：`streamChat` 5 参重载零生产调用；非 KB 分支仍走旧 `/api/chat/stream`（2 处） | AiClient.java L484-568、ConversationServiceImpl L920、AgentTaskQueueServiceImpl L321 | 5 参重载删除（改 3 测试引用）；2 处非 KB 分支迁 `agentV1ChatStream`；退役 `/api/chat/stream` 旧端点（V1 保留） | 旧端点退役、E2E chat-sse 绿 |
+| R17-9 | **双鉴权分工无文档**：`JwtUtils` 名不副实（实为 StpInterface + 当前用户读取器），职责边界仅存于口口相传 | JwtUtils.java L21、~158 处 getCurrentUserId 调用 | 不合并；`docs/java-backend.md` 明确职责边界（Sa-Token 拦截器+注解=认证授权主体；JwtUtils=用户读取器+权限源）与使用规则 | 文档落盘 |
+| R17-10 | **后台线程租户包装收尾**：`AgentQueueGauge` 无 runAs → fail-closed 只读 -1 行，队列深度恒 0、`AgentQueueBacklogHigh` 告警失效（功能性缺陷）；两个调度器依赖"歪打正着"的 -1 平台口径 | AgentQueueGauge.java L33-45、RealtimeThresholdScheduler L54-82、BigDataBatchScheduler L34-45 | Gauge 包 runAsSystem（修复告警）；两调度器显式 runAsSystem 固化平台口径 | 告警恢复有效；审计留档（13/16 已正确包装、@Async 2 处安全、python 侧显式参数式无风险） |
+
+## R17-C 前端第二轮（批次 3）
+
+| 编号 | 问题 | 证据 | 修法 | 验收 |
+|---|---|---|---|---|
+| R17-11 | **chat 状态散落组件局部**：messages/feedbackByMessage/streamingMessageId/conversation 均为 Detail.vue 局部 ref | Detail.vue L34-42 | Pinia setup store `useChatStore`（对齐 user.ts 风格）；`useChatSending` 守卫职责不变（store 管数据、composable 管单飞） | store 单测 |
+| R17-12 | **Detail.vue 1368 行巨型 SFC** | Detail.vue 全文 | 拆分：`MessageItem`（v-for 块 L1008-1206）、`MessageList`（滚动容器+三次贴底校正+空/加载态）、`ApprovalCard`（L981-1007）、`KnowledgeSources`（L1152-1203，合并两个重复分支） | 主文件降至约 400 行 |
+| R17-13 | **页面组件单测空白**（R16-13 首批仅共享组件） | 同上 | 新组件单测（stub MarkdownRenderer/Teleport，沿用 mount 约定），目标 77→100+ | vitest 全绿 |
+| R17-14 | **拆分回归风险**：loadMessages 三次贴底校正与 messagesContainer ref 耦合、streamingMessageId 下传 | Detail.vue L247-291、L1042 | E2E（chat-sse 等）+ vue-tsc 全量回归 | 行为不变 |
+
+## R17-D 发布与叙事（批次 4）
+
+| 编号 | 问题 | 证据 | 修法 | 验收 |
+|---|---|---|---|---|
+| R17-15 | **CHANGELOG 结构缺陷**：L685/687 "第二十一批"标题重复；1.0.0 前旧轮次区段冗长 | CHANGELOG.md 1681 行 | 修复重复标题；旧轮次区段压缩为摘要行 | 结构清晰 |
+| R17-16 | **release notes 未接 CHANGELOG**：release.yml 仅 generate_release_notes | release.yml L88-92 | gh-release 步骤注入 CHANGELOG 摘要；摘取批次要点作 v1.1.0 正文；创建 `v1.1.0` tag | GitHub Release 发布 |
+| R17-17 | **README 叙事滞后**：核心工程点缺 R16 的归因方法故事；"未经生产流量验证"表述含混；README_EN 徽章漂移（1532/702/57） | README.md L17-29、README_EN.md L11 | 核心工程点增"指标归因方法"；验证口径改为清单式；EN 徽章同步 | 双语一致 |
+| R17-18 | **R15-27 cpolar 固定域名**长期挂起 | TODO.md/ROADMAP | Windows 服务注册指引落地性复核（真机操作项标注状态） | 指引状态明确 |
+
+## 实施约定（R17）
+
+- 每批：实现 → 全量回归（mvn/pytest/vitest/静态检查）→ CHANGELOG 批次记录 → 独立提交。
+- 风险点：R17-8 非 KB 分支流式切换（V1 已是主流路径，E2E 兜底）；R17-12 贴底校正与 streamingMessageId 下传语义保持；R17-1 nightly 依赖 staging 在线（本地先以进程内模式验证探针改造）。
+- 收尾：OPTIMIZATION_PLAN/ROADMAP/CHANGELOG 三处同步，静态检查全绿后打 `v1.1.0` tag。
