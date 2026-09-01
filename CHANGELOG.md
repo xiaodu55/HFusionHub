@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第四十六批（2026-09-09：R17 批次 2——技术债清零）
+
+#### Removed
+- **legacy 死代码清除（R17-6/7）**：`GatewayResult.degraded` 死字段 +
+  model_gateway/gateway_llm 失实 docstring（legacy 降级链已于 2026-08-29
+  退役，注释仍声称委托旧链）；`/api/chat/agent-runs` 两条零调用路由 +
+  退役告警函数；`JwtUtils.logout/getCurrentUserIdStr`（hasPermission 经
+  编译验证为 UserServiceImpl 在用，保留）
+- **ReAct 热路径脱离 legacy 入口（R17-7）**：react.py 4 处
+  `execute_tool(...)` 改为新私有 helper `_execute_tool_observation`
+  （Registry 直调 + JSON 序列化，语义与原 registry 分支一致）；
+  tools/__init__.py 的 `get_tools/execute_tool` 重新定位为 **MCP 支持路径**
+  （非 deprecated），移除每进程一次的退役告警
+
+#### Changed
+- **Java 流式接口收敛（R17-8，安全子集）**：`streamChat` 5 参零调用重载
+  删除（3 处测试引用补齐 userId/intentContext）；非 KB 分支迁 V1 涉及
+  产品级行为变更（普通对话→Agent 管线）且 E2E 未覆盖，**挂起待
+  非 KB V1 行为验证后执行**，`/api/chat/stream` 旧端点暂保留
+- **双鉴权分工文档化（R17-9）**：`docs/java-backend.md` 新增鉴权体系
+  分工表（Sa-Token 拦截器+注解=认证授权主体；JwtUtils=当前用户读取器 +
+  StpInterface 权限源；新代码禁新增 StpUtil 直接调用）
+- **后台线程租户包装收尾（R17-10）**：`AgentQueueGauge` 包 runAsSystem
+  （修复队列深度恒 0 → `AgentQueueBacklogHigh` 告警失效的功能缺陷）；
+  `RealtimeThresholdScheduler`/`BigDataBatchScheduler` 显式 runAsSystem
+  固化平台级 -1 口径；审计结论：16 个调度组件 13 个已正确包装、
+  @Async 2 处安全、python 侧显式参数式无风险
+
+#### 验证
+- Java **703 过 0 挂 1 跳 BUILD SUCCESS**（`JwtUtils.hasPermission` 经
+  编译验证为 UserServiceImpl 在用——探索期误判零调用，已恢复）；
+  Python **1600 过 0 挂 8 跳**（含 agent_v1_contract/mcp_server 全绿）
+
 ### 第四十五批（2026-09-09：R17 批次 1——评测双口径升级）
 
 #### Added

@@ -31,7 +31,10 @@ public class AgentQueueGauge {
 
     private double safeCount() {
         try {
-            return queueService.countQueuedRuns();
+            // R17-10：gauge 采样线程无租户上下文，租户拦截器 fail-closed 只读
+            // -1 行导致队列深度恒 0（AgentQueueBacklogHigh 告警失效）——
+            // 队列深度是平台级口径，显式 runAsSystem。
+            return com.hfusionhub.tenant.TenantContext.runAsSystem(() -> queueService.countQueuedRuns());
         } catch (Exception e) {
             // Scrape must never fail the whole /actuator/prometheus endpoint; a
             // DB blip reports 0 and logs instead of dropping every metric.

@@ -83,7 +83,7 @@ class AiClientTest {
                         Flux.just("data: {\"content\":\"Hello\"}", "data: {\"content\":\" World\"}", "data: [DONE]"));
 
         // When
-        Flux<String> result = aiClient.streamChat("test message", 1L, null, List.of(), "req-001");
+        Flux<String> result = aiClient.streamChat("test message", 1L, null, List.of(), "req-001", null, null);
 
         // Then
         StepVerifier.create(result)
@@ -107,7 +107,7 @@ class AiClientTest {
         when(responseSpec.bodyToFlux(String.class)).thenReturn(Flux.just("data: [DONE]"));
 
         // When: streamChat is called (verifies stream=true is in the request body)
-        Flux<String> result = aiClient.streamChat("query", 2L, 10L, List.of(), "req-002");
+        Flux<String> result = aiClient.streamChat("query", 2L, 10L, List.of(), "req-002", null, null);
 
         // Then
         StepVerifier.create(result).expectNextCount(1).verifyComplete();
@@ -125,7 +125,7 @@ class AiClientTest {
         when(responseSpec.onStatus(any(), any())).thenReturn(responseSpec);
         when(responseSpec.bodyToFlux(String.class)).thenReturn(Flux.just("data: [DONE]"));
 
-        Flux<String> result = aiClient.streamChat("test", 1L, null, null, "req-003");
+        Flux<String> result = aiClient.streamChat("test", 1L, null, null, "req-003", null, null);
 
         assertNotNull(result);
         StepVerifier.create(result).expectNextCount(1).verifyComplete();

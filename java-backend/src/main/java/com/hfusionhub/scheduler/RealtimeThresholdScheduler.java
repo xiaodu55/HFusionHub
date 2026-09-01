@@ -54,6 +54,12 @@ public class RealtimeThresholdScheduler {
     @Scheduled(fixedDelay = 60_000)
     @SchedulerLock("analytics-threshold")
     public void sample() {
+        // R17-10：采样线程无租户上下文；analytics_realtime_metrics 的 -1 行
+        // 即平台全局口径（V82），显式 runAsSystem 固化该语义
+        com.hfusionhub.tenant.TenantContext.runAsSystem(this::sampleInternal);
+    }
+
+    private void sampleInternal() {
         LocalDateTime since = LocalDateTime.now().minusMinutes(WINDOW_MINUTES);
         List<AnalyticsRealtimeMetric> rows = realtimeMapper.selectList(
                 new LambdaQueryWrapper<AnalyticsRealtimeMetric>()

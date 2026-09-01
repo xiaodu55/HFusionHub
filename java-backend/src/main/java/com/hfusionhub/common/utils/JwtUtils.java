@@ -108,9 +108,9 @@ public class JwtUtils implements StpInterface {
     }
 
     /**
-     * 登出
+     * 登出（UserServiceImpl 账户注销路径在用）
      */
-    public static void logout() {
+    public void logout() {
         StpUtil.logout();
         log.info("用户登出成功");
     }
@@ -122,15 +122,6 @@ public class JwtUtils implements StpInterface {
      */
     public static Long getCurrentUserId() {
         return StpUtil.getLoginIdAsLong();
-    }
-
-    /**
-     * 获取当前登录用户ID（字符串）
-     *
-     * @return 用户ID
-     */
-    public static String getCurrentUserIdStr() {
-        return StpUtil.getLoginIdAsString();
     }
 
     /**

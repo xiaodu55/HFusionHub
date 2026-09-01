@@ -29,6 +29,24 @@ java-backend/src/main/java/com/hfusionhub/
 └── service/         # Service interfaces + implementations
 ```
 
+## 鉴权体系分工（R17-9）
+
+认证与授权**只有一套**：Sa-Token。`common/utils/JwtUtils.java` 名字带
+Jwt 是历史遗留——它**不含任何 JWT 解析**，实为 Sa-Token 的静态薄包装 +
+`StpInterface` 权限数据源。职责边界：
+
+| 关注点 | 归属 | 说明 |
+|---|---|---|
+| 登录态认证 | `SaTokenConfig` 拦截器 | checkLogin + 未分配角色审批门 |
+| 粗粒度角色门 | 拦截器 | 未分配角色只读 |
+| 细粒度授权 | `@SaCheckPermission/@SaCheckRole` 注解（约 14 个 controller） | 权限数据源 = JwtUtils（StpInterface 回调） |
+| 读当前用户 ID | `JwtUtils.getCurrentUserId()`（~158 处） | 事实上的标准读法，勿直接用 StpUtil |
+| 服务层角色判断 | `JwtUtils.hasRole()` | 少量 service 场景 |
+
+新代码规则：**认证/授权一律走 Sa-Token 注解与拦截器；读用户 ID 一律
+`JwtUtils.getCurrentUserId()`；不要再新增 StpUtil 直接调用**（现存仅
+SaTokenConfig/JwtUtils/OidcService/FeatureFlagServiceImpl 四处）。
+
 ## Key Design Patterns
 
 | Pattern | Where | Purpose |

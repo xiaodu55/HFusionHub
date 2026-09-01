@@ -6,9 +6,9 @@ routing through the gateway, so streaming and non-streaming agent calls get
 rate limiting, circuit breaking, cost tracking and the exact-match response
 cache — the governance the legacy ``get_llm()`` chain lacks.
 
-When the gateway cannot route (disabled, no provider, unresolvable model) the
-gateway itself degrades to the legacy ``get_llm()`` chain, so the facade never
-turns a healthy request into an outage.
+When the gateway cannot route (disabled, no provider, unresolvable model) it
+raises ``GatewayError`` — the facade surfaces the outage instead of silently
+degrading (legacy chain retired 2026-08-29).
 """
 
 from __future__ import annotations

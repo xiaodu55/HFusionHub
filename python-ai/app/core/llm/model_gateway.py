@@ -8,11 +8,6 @@ each chat request through a configurable fallback chain, and records token
 usage/cost into a thread-safe accumulator that can be flushed to the Java
 backend.
 
-Graceful degradation: when ``MODEL_GATEWAY_ENABLED=false``, no provider is
-usable, or a model cannot be resolved, ``ModelGateway.chat`` / ``chat_stream``
-delegate to the legacy ``get_llm()`` path so existing callers keep working
-unchanged.
-
 Streaming (``chat_stream``) applies the same rate limiting, circuit breaking,
 cost tracking and exact-match response cache as the non-streaming path, so the
 agent/chat streaming paths are no longer outside the governance layer.
@@ -149,9 +144,6 @@ class GatewayResult:
     fallback_used: bool = False
     # 原生 function calling：provider 返回的 tool_calls（OpenAI 形态），无则为 None
     tool_calls: list[dict[str, Any]] | None = None
-    # True when the request was served by the legacy ``get_llm()`` path
-    # (gateway disabled, nothing to route with, or model unresolved).
-    degraded: bool = False
 
 
 def calculate_cost(

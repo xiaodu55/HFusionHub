@@ -486,15 +486,6 @@ public class AiClient {
             Long conversationId,
             Long knowledgeBaseId,
             List<Map<String, String>> history,
-            String requestId) {
-        return streamChat(message, conversationId, knowledgeBaseId, history, requestId, null, null);
-    }
-
-    public reactor.core.publisher.Flux<String> streamChat(
-            String message,
-            Long conversationId,
-            Long knowledgeBaseId,
-            List<Map<String, String>> history,
             String requestId,
             Long userId,
             List<Map<String, Object>> intentContext) {

@@ -39,8 +39,12 @@ public class BigDataBatchScheduler {
             return;
         }
         LocalDate batchDate = LocalDate.now().minusDays(Math.max(1, offsetDays));
-        log.info("[analytics-batch] 日结开始 dt={}", batchDate);
-        batchRunner.runPipeline(batchDate, null);
-        log.info("[analytics-batch] 日结结束 dt={}", batchDate);
+        // R17-10：批处理为平台级 -1 口径（batch 日志实体显式 setTenantId(null)），
+        // 显式 runAsSystem 固化语义
+        com.hfusionhub.tenant.TenantContext.runAsSystem(() -> {
+            log.info("[analytics-batch] 日结开始 dt={}", batchDate);
+            batchRunner.runPipeline(batchDate, null);
+            log.info("[analytics-batch] 日结结束 dt={}", batchDate);
+        });
     }
 }

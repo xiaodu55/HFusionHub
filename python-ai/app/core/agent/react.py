@@ -39,7 +39,7 @@ from ..rag import (
     get_reflector,
     get_retriever,
 )
-from ..tools import ToolExecutionPolicy, ToolRegistry, create_v1_registry, execute_tool
+from ..tools import ToolExecutionPolicy, ToolRegistry, create_v1_registry
 from ..tools.demo_business_tools import match_demo_tool
 from ..rag.config import get_config
 from ..rag.tokenization import tokenize
@@ -486,7 +486,7 @@ class ReactAgent(Agent):
 
             if action_result:
                 action, action_input = action_result
-                observation = await execute_tool(action, action_input, tools, policy=self.tool_policy, context=self._context)
+                observation = await self._execute_tool_observation(action, action_input, tools)
                 self._tool_calls_count += 1
 
                 thought_match = re.search(r'Thought:\s*(.+?)(?:\n|$)', assistant_text)
@@ -924,6 +924,23 @@ class ReactAgent(Agent):
                 return action
         return None
 
+    async def _execute_tool_observation(
+        self, tool_name: str, tool_input: dict[str, Any], tools: list[dict[str, Any]]
+    ) -> str:
+        """Registry 直调并序列化为 ReAct 文本观测。
+
+        取代 module 级 legacy ``execute_tool``（R17-7）：工具规格由
+        ``_get_tools`` 附带 ``_registry`` 回引用，此处直调 Registry——
+        模式门/权限/KB 隔离/审批流语义与原 registry 分支完全一致。
+        """
+        registry = next(
+            (t.get("_registry") for t in tools if t.get("_registry")), None
+        )
+        if registry is None:
+            raise RuntimeError("no tool registry attached to ReAct tool specs")
+        result = await registry.execute(tool_name, tool_input, context=self._context)
+        return json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
+
     def _parse_action(self, text: str) -> tuple | None:
         """Parse a structured tool call first, then the legacy ReAct format."""
         # Some smaller models emit a complete ReAct transcript in one turn,
@@ -1283,9 +1300,8 @@ class ReactAgent(Agent):
                 # 且 thinking 模式不支持 tool_choice 强制。
                 logger.info(f"[Agent] 业务工具路由命中: {matched_tool}")
                 try:
-                    observation = await execute_tool(
-                        matched_tool, {}, tools, policy=self.tool_policy,
-                        context=self._context)
+                    observation = await self._execute_tool_observation(
+                        matched_tool, {}, tools)
                     self._tool_calls_count += 1
                     content = f"已完成：{matched_tool}。执行结果：{observation}"
                     logger.info(f"[Agent] 业务工具直接执行完成: {matched_tool}")
@@ -1355,7 +1371,7 @@ class ReactAgent(Agent):
                 action, action_input = action_result
                 self._tool_calls_count += 1
 
-                observation = await execute_tool(action, action_input, tools, policy=self.tool_policy, context=self._context)
+                observation = await self._execute_tool_observation(action, action_input, tools)
 
                 # Agent V1 Step 5: detect approval_required from high-risk tools
                 try:
@@ -2047,9 +2063,8 @@ class ReactAgent(Agent):
                     action, action_input = action_result
                     self._tool_calls_count += 1
 
-                    observation = await execute_tool(
+                    observation = await self._execute_tool_observation(
                         action, action_input, tools,
-                        policy=self.tool_policy, context=self._context,
                     )
 
                     # ── Agent V1 Step 5: detect approval_required ──────

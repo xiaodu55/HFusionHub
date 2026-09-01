@@ -71,18 +71,6 @@ AGENT_V1_TOOL_NAMES: set[str] = {
 
 # legacy 入口的「每进程一次」告警标记：execute_tool 是 ReAct Agent 的活跃热路径，
 # 逐次告警会淹没日志，仅在首次调用时记录用于退役流量评估
-_LEGACY_WARNED: set[str] = set()
-
-
-def _warn_legacy_once(entry: str) -> None:
-    if entry not in _LEGACY_WARNED:
-        _LEGACY_WARNED.add(entry)
-        logger.warning(
-            "Legacy tools entry point %s() used — prefer ToolRegistry (deprecation candidate, "
-            "see OPTIMIZATION_PLAN R15; logged once per process)",
-            entry,
-        )
-
 
 class ToolPolicyError(ValueError):
     """A tool call did not satisfy the safety policy."""
@@ -163,7 +151,7 @@ class ToolExecutionPolicy:
         return normalized
 
 
-# ── Legacy compat — delegates to Registry internally ──────────────────
+# ── MCP 执行路径（ReAct 热路径已于 R17-7 迁移 Registry 直调）──────────
 
 def get_tools(
     knowledge_base_id: int = None,
@@ -176,8 +164,6 @@ def get_tools(
     back-reference so ``execute_tool`` routes through the Registry.
     For backward compat, also attaches the ``instance`` key used by MCP.
     """
-    _warn_legacy_once("get_tools")
-
     if v1_only and knowledge_base_id:
         registry = create_v1_registry(knowledge_base_id)
     else:
@@ -212,8 +198,6 @@ async def execute_tool(
     When *context* is provided, the Registry enforces mode gates,
     permission checks, and KB-scope isolation before execution.
     """
-    _warn_legacy_once("execute_tool")
-
     # Registry-attached 形式（审批流等场景在 tool dict 携带 _registry）走
     # Registry 执行（模式门/权限/KB 隔离生效）；否则回退 policy-based 执行。
     registry: ToolRegistry | None = None
