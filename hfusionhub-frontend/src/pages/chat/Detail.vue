@@ -9,7 +9,7 @@ import { useUserStore } from '@/stores/user'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import * as voiceApi from '@/api/voice'
-import { ArrowLeft, BookOpen, Check, Copy, Download, Eraser, Image as ImageIcon, Mic, Pencil, Send, User, Bot, Loader2, Square, RefreshCw, ThumbsUp, ThumbsDown, Volume2, X } from 'lucide-vue-next'
+import { ArrowLeft, BookOpen, Download, Eraser, Image as ImageIcon, Mic, Pencil, Send, Bot, Loader2 } from 'lucide-vue-next'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useToast } from '@/composables/useToast'
 import { useI18n } from 'vue-i18n'
@@ -21,7 +21,8 @@ import {
   CHAT_RELOAD_DELAY_MS,
   CHAT_RETRY_DELAY_MS,
 } from '@/constants/timing'
-import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
+import MessageItem from './components/MessageItem.vue'
+import ChatApprovalCard from './components/ChatApprovalCard.vue'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import { useChatSending } from '@/composables/useChatSending'
 
@@ -803,9 +804,6 @@ const exportConversation = () => {
   toast.success('对话已导出为 Markdown 文件')
 }
 
-// 引用分数展示（缺 score 时显示空，避免 NaN%）
-const formatScore = (score?: number) => (score == null ? '' : `${Math.round(score * 100)}%`)
-
 const submitPositiveFeedback = async (message: Message) => {
   try {
     await saveAnswerFeedback({ messageId: message.id, rating: 'UP' })
@@ -841,12 +839,6 @@ const submitNegativeFeedback = async () => {
   } finally {
     feedbackSaving.value = false
   }
-}
-
-// 判断消息是否为错误消息
-const isErrorMessage = (message: Message) => {
-  return message.role === 'assistant' &&
-    (message.model === 'error' || message.content?.includes('抱歉，AI服务暂时不可用'))
 }
 
 // 监听消息变化，自动滚动到底部
@@ -979,231 +971,30 @@ onMounted(() => {
       </div>
       <template v-else>
         <!-- 工具调用审批确认卡片（write_note 等写工具） -->
-        <div
+        <ChatApprovalCard
           v-if="approvalPrompt"
-          class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4"
-        >
-          <div class="flex items-start gap-3">
-            <Pencil class="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-            <div class="min-w-0 flex-1">
-              <p class="text-sm font-medium text-amber-600">需要你的确认</p>
-              <p class="mt-1 text-sm text-foreground">
-                Agent 请求{{ approvalPrompt.toolName === 'write_note' ? '把内容整理成笔记保存到知识库' : `调用工具 ${approvalPrompt.toolName}` }}，是否允许执行？
-              </p>
-              <p v-if="approvalPrompt.argumentsSummary" class="mt-1 line-clamp-3 text-xs text-muted-foreground">
-                {{ approvalPrompt.argumentsSummary }}
-              </p>
-              <div class="mt-3 flex items-center gap-2">
-                <Button size="sm" variant="default" :disabled="approvalBusy" @click="handleApprovalDecision('approved')">
-                  <Check class="mr-1 h-4 w-4" /> 同意执行
-                </Button>
-                <Button size="sm" variant="outline" :disabled="approvalBusy" @click="handleApprovalDecision('denied')">
-                  <X class="mr-1 h-4 w-4" /> 拒绝
-                </Button>
-                <Loader2 v-if="approvalBusy" class="ml-1 h-4 w-4 animate-spin text-muted-foreground" />
-              </div>
-            </div>
-          </div>
-        </div>
-        <div
+          :prompt="approvalPrompt"
+          :busy="approvalBusy"
+          @decide="handleApprovalDecision"
+        />
+        <MessageItem
           v-for="message in messages"
           :key="message.id"
-          :class="[
-            'flex gap-3',
-            message.role === 'user' ? 'justify-end' : 'justify-start'
-          ]"
-        >
-          <div
-            :class="[
-              'flex items-start gap-2 max-w-[80%]',
-              message.role === 'user' ? 'flex-row-reverse' : 'flex-row'
-            ]"
-          >
-            <div
-              :class="[
-                'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
-                message.role === 'user'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-secondary text-secondary-foreground'
-              ]"
-            >
-              <User v-if="message.role === 'user'" class="h-4 w-4" />
-              <Bot v-else class="h-4 w-4" />
-            </div>
-            <div
-              :class="[
-                'rounded-lg px-4 py-2',
-                message.role === 'user'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-secondary text-secondary-foreground'
-              ]"
-            >
-              <!-- 流式输出中的消息 -->
-              <template v-if="streamingMessageId === message.id">
-                <template v-if="message.content">
-                  <MarkdownRenderer :content="message.content" class="text-sm" />
-                  <div class="flex items-center gap-2 mt-2">
-                    <Loader2 class="h-3 w-3 animate-spin" />
-                    <span class="text-xs text-muted-foreground">生成中...</span>
-                  </div>
-                </template>
-                <template v-else>
-                  <div class="flex items-center gap-2">
-                    <Loader2 class="h-4 w-4 animate-spin" />
-                    <span class="text-sm">思考中...</span>
-                  </div>
-                </template>
-              </template>
-              <!-- 普通消息 -->
-              <template v-else>
-                <template v-if="message.role === 'assistant'">
-                  <MarkdownRenderer :content="message.content" class="text-sm" />
-                </template>
-                <template v-else>
-                  <div v-if="message.images?.length" class="mb-1 flex flex-wrap gap-1.5">
-                    <img
-                      v-for="(src, i) in message.images"
-                      :key="i"
-                      :src="src"
-                      class="max-h-36 rounded border border-background/20"
-                      alt="用户上传的图片"
-                      @load="stickIfNearBottom"
-                    />
-                  </div>
-                  <p v-if="message.content" class="whitespace-pre-wrap text-sm">{{ message.content }}</p>
-                </template>
-                <div class="flex items-center justify-between gap-2 mt-1">
-                  <p class="text-xs opacity-70">
-                    {{ formatTime(message.createdAt) }}
-                    <span
-                      v-if="message.role === 'assistant' && message.model && message.model !== 'error' && message.model !== 'streaming'"
-                      class="ml-1.5 inline-block rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"
-                    >
-                      {{ message.model }}
-                    </span>
-                  </p>
-                  <div class="flex items-center gap-0.5">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      class="h-7 w-7 text-muted-foreground hover:text-foreground"
-                      title="复制内容"
-                      @click="copyMessage(message)"
-                    >
-                      <Copy class="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      v-if="voiceStatus.tts && message.id > 0 && message.content && !isErrorMessage(message)"
-                      variant="ghost"
-                      size="icon"
-                      class="h-7 w-7 text-muted-foreground hover:text-primary"
-                      :title="speakingMessageId === String(message.id) ? '停止播报' : '语音播报'"
-                      @click="speakMessage(String(message.id), message.content)"
-                    >
-                      <Volume2 v-if="speakingMessageId !== String(message.id)" class="h-3.5 w-3.5" />
-                      <Square v-else class="h-3.5 w-3.5" />
-                    </Button>
-                    <template v-if="message.role === 'assistant' && message.id > 0 && !isErrorMessage(message) && !streamingMessageId">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        class="h-7 w-7 text-muted-foreground hover:text-primary"
-                        title="重新生成回答"
-                        @click="regenerateMessage(message)"
-                      >
-                        <RefreshCw class="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        class="h-7 w-7"
-                        :class="feedbackByMessage[message.id] === 'UP' ? 'text-emerald-400' : 'text-muted-foreground'"
-                        title="回答有帮助"
-                        @click="submitPositiveFeedback(message)"
-                      >
-                        <ThumbsUp class="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        class="h-7 w-7"
-                        :class="feedbackByMessage[message.id] === 'DOWN' ? 'text-rose-400' : 'text-muted-foreground'"
-                        title="回答需要改进"
-                        @click="openNegativeFeedback(message)"
-                      >
-                        <ThumbsDown class="h-3.5 w-3.5" />
-                      </Button>
-                    </template>
-                    <!-- 重试按钮（仅在错误消息上显示） -->
-                    <Button
-                      v-if="isErrorMessage(message) && !streamingMessageId"
-                      variant="ghost"
-                      size="sm"
-                      class="h-6 px-2 text-xs"
-                      @click="handleRetryMessage(message)"
-                    >
-                      <RefreshCw class="h-3 w-3 mr-1" />
-                      重试
-                    </Button>
-                  </div>
-                </div>
-              </template>
-
-              <!-- 知识来源（流式输出期间与完成后都会显示） -->
-              <div v-if="message.role === 'assistant' && message.sources && message.sources.length > 0" class="mt-3 pt-3 border-t border-secondary-foreground/20">
-                <p class="text-xs font-medium mb-2 flex items-center gap-1">
-                  <span>📚</span>
-                  <span>知识来源</span>
-                  <span class="opacity-60">({{ message.sources.length }}条)</span>
-                </p>
-                <div class="space-y-1.5">
-                  <template v-for="(source, index) in message.sources" :key="index">
-                    <router-link
-                      v-if="conversation?.knowledgeBaseId && source.document_id"
-                      :to="`/knowledge-base/${conversation.knowledgeBaseId}/chunks/${source.document_id}`"
-                      class="block text-xs bg-secondary-foreground/5 rounded px-2 py-1.5 transition-colors hover:bg-primary/10"
-                      :title="'查看分块：' + (source.document_name || source.title || `文档 #${source.document_id ?? '未知'}`)"
-                    >
-                      <div class="flex items-center justify-between gap-2">
-                        <span class="font-medium truncate flex-1" :title="source.document_name || source.title">
-                          {{ source.document_name || source.title || `文档 #${source.document_id ?? '未知'}` }}
-                        </span>
-                        <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                          {{ formatScore(source.score) }}
-                        </span>
-                      </div>
-                      <p v-if="source.outline_path && source.outline_path.length" class="mt-1 text-[10px] opacity-60 truncate">
-                        {{ source.outline_path.join(' > ') }}
-                      </p>
-                      <p v-if="source.content" class="mt-1 text-[11px] opacity-60 line-clamp-2">
-                        {{ source.content }}
-                      </p>
-                    </router-link>
-                    <div
-                      v-else
-                      class="text-xs bg-secondary-foreground/5 rounded px-2 py-1.5"
-                    >
-                      <div class="flex items-center justify-between gap-2">
-                        <span class="font-medium truncate flex-1" :title="source.document_name || source.title">
-                          {{ source.document_name || source.title || `文档 #${source.document_id ?? '未知'}` }}
-                        </span>
-                        <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                          {{ formatScore(source.score) }}
-                        </span>
-                      </div>
-                      <p v-if="source.outline_path && source.outline_path.length" class="mt-1 text-[10px] opacity-60 truncate">
-                        {{ source.outline_path.join(' > ') }}
-                      </p>
-                      <p v-if="source.content" class="mt-1 text-[11px] opacity-60 line-clamp-2">
-                        {{ source.content }}
-                      </p>
-                    </div>
-                  </template>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+          :message="message"
+          :streaming="streamingMessageId === message.id"
+          :session-streaming="Boolean(streamingMessageId)"
+          :feedback="feedbackByMessage[message.id]"
+          :tts-enabled="voiceStatus.tts"
+          :speaking="speakingMessageId === String(message.id)"
+          :knowledge-base-id="conversation?.knowledgeBaseId"
+          @copy="copyMessage"
+          @speak="speakMessage"
+          @regenerate="regenerateMessage"
+          @retry="handleRetryMessage"
+          @feedback-up="submitPositiveFeedback"
+          @feedback-down-open="openNegativeFeedback"
+          @image-load="stickIfNearBottom"
+        />
       </template>
     </div>
 
