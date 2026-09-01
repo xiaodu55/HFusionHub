@@ -17,7 +17,7 @@
 
 ### P0 — 上线安全（生产环境必需）
 
-0. ~~**恢复 CI 运行**~~ — ✅ 2026-09-07 已恢复（第三十六批：CI 门禁恢复绿）；如再遇 GitHub 计费暂停，合并前用 `./scripts/run-all-tests.ps1` 本地全量兜底
+0. ~~**恢复 CI 运行**~~ — ✅ 2026-09-07 曾恢复（第三十六批）；**2026-09-09 观测复现**：全部 workflow（CI/E2E/Release/Plugin Security/nightly）秒级失败且无日志（gh run list 实录，最早自 9-07 起）——GitHub 账户级问题（计费/Spending limit 或 Actions 维护），与仓库配置无关，需到 Settings → Billing 检查 Actions 用量后对失败 run 执行 `gh run rerun`（v1.1.0 的 Release run 重跑即会创建 Release 与 4 镜像）；期间合并前用 `./scripts/run-all-tests.ps1` 本地全量兜底（R17 五批均已本地全绿后推送）
 1. **修改默认密码** — ✅ 2026-08-30 复查：本地 `docker/.env` 与 `deploy/.env` 的全部密码/令牌键已是强随机值（非占位符/弱默认），`scripts/rotate-secrets.sh --check` 可随时复核。✅ **2026-09-01 已完成跨环境分离轮换**：`ADMIN_PASSWORD` / `CALLBACK_SECRET` / `PYTHON_AI_INTERNAL_TOKEN` 此前 docker 与 deploy 两环境完全相同、`docker` 的 `MINIO_SECRET_KEY` 与 `MYSQL_PASSWORD` 复用，均已各自重新生成（`MINIO_SECRET_KEY` 改指 MinIO root 真实口令，修复了既有的凭据不匹配）。轮换在**下次栈重启后生效**（`docker compose down && docker compose up -d`），数据库密码属卷内状态未动、需按 PRODUCTION_OPS 手动 ALTER USER——✅ **2026-09-03 该步已脚本化**：`scripts/rotate-db-password.sh --apply --yes` 用容器内旧 root 密码登录、把 .env 新密码经 stdin ALTER 到 root@'%' / root@'localhost' / hfusionhub@'%'（不进 argv/日志），重启栈后 `--check` 复核（开发栈实测跳过/复核路径正常）。如需再次轮换用 `scripts/rotate-secrets.sh` 生成新值并同步两侧 .env
 2. **配置 HTTPS** — `deploy/nginx-https.conf.example` 已提供完整模板：替换域名与证书路径后部署 Nginx + Let's Encrypt（`certbot certonly --webroot`），强制 HTTP→HTTPS（模板含 301 跳转与 SSE `proxy_buffering off`）
 3. **收紧 CORS** — ✅ 仓库侧就绪（2026-08-30）：后端默认 fail-closed（未配置白名单时仅同源，`allow-any-origin` 默认 false），`deploy/.env.example` 已含 `CORS_ALLOWED_ORIGINS` 键与说明；生产 `deploy/.env` 填入真实域名白名单（逗号分隔）即生效，**不要用 `*`**（后端 allowCredentials=true 会拒绝通配且属安全隐患）
