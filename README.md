@@ -20,12 +20,24 @@ HFusionHub 是一个可以私有部署的 AI Agent 平台：上传文档建知�
 - **工具审批的正确性设计**：审批决定的三表更新在同一事务内完成，签发**一次性执行令牌**（数据库守卫 UPDATE 保证 exactly-once），LLM/工具执行经 afterCommit 移出事务——行锁不会被 120 秒的工具调用占住。
 - **并发与竞态治理**：任务状态机全部走条件 UPDATE 守卫迁移（completeRunGuarded / failUnlessTerminal），用量账本"只有赢得终态迁移的一方结算"，配套竞态回归测试。
 - **RAG 管线纵深**：意图分类 → 查询分解 → 多路检索（向量+BM25+图谱+RRF）→ 上下文压缩 → 检索证据门（低置信拒答）→ Groundedness 守卫与重试 → 引用完整性校验；答案逐论断 `[n]` 引用溯源；Parent-Child 父子分块与语义分块（实验档）提升长文档召回。
+- **指标归因方法（R16/R17）**：评测双轨把"检索质量"与"答案层模型行为"解耦——`eval_retrieval_live.py` 纯检索探针绕过 LLM 直测冻结套件（真机 0.830，与历史水平一致），从而把 runtime 指标波动定位到答案层模型漂移（token 1582→774）；配套 token 漂移门禁与命中/延迟分解指标（`/metrics`）。归因实录见 [CI_GATES](docs/CI_GATES.md) 口径注记。
 - **测试与防漂移门禁**：Java 703（单测跑 H2 内存库；C1 集成测试跑真实 MySQL——Testcontainers，见 [ADR-008](docs/adr/ADR-008-it-mysql-testcontainers.md)）/ Python 1556 / 前端 101 单测 + 73 E2E；schema-h2 与迁移链**漂移零容忍**（漏同步直接 CI 红）、文档测试计数与代码强同步、离线评测门禁（recall/nDCG/引用 P·R·F1 基线，引用窗口按相关性自适应，见 [ADR-006](docs/adr/ADR-006-faithfulness-metric-recalibration.md)）。
 - **数据规模**：Flyway 迁移链 V1–V85、26 轮自审修复批次（全部记录在 CHANGELOG）、48 项冒烟自测全过。
 
 ## 质量与验证口径（如实）
 
-- 全部功能经过**本地 Docker Compose 全链路自测**（冒烟 48 PASS / 0 FAIL），上述三端测试套件本地全绿。
+验证口径清单（每一项可复现）：
+
+| 维度 | 口径 |
+|---|---|
+| 功能冒烟 | `scripts/smoke-test.ps1` 48 项 PASS / 0 FAIL（本地 Compose 全链路） |
+| 单元/集成 | Java 703（单测 H2 + 集成 Testcontainers 真 MySQL，8/8 类）/ Python 1556 / 前端 101 单测 |
+| E2E | Playwright 73 用例（登录/知识库/对话/审批/插件等关键路径，CI e2e job） |
+| 检索质量 | 离线冻结套件 220 用例（CI push 阻断门禁）+ nightly 纯检索轨（[R17](docs/OPTIMIZATION_PLAN.md)） |
+| 答案层质量 | runtime nightly（延迟/拒答/引用/工具成功率，非阻断监测，标注模型版本） |
+| 性能 | k6 压测基线 + 分解口径（见 [SCALING.md](docs/SCALING.md) §2.1） |
+| 指标归因 | 纯检索探针解耦检索栈/答案层，模型漂移甄别方法（见核心工程点） |
+
 - **未经过生产环境流量验证**；`deploy/` 下的生产部署配置与 `docs/PRODUCTION_OPS.md` 运维手册是"可部署起点"，不是"生产验证结论"。
 
 ## 🏗️ 技术架构

@@ -85,8 +85,20 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # R17-16：从 CHANGELOG.md 摘取与 tag 版本匹配的小节作为 release 正文
+      #（GitHub 自动生成的 PR/commit notes 经 generate_release_notes 叠加）
+      - name: Extract release notes from CHANGELOG
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v sec="[$version]" '
+            $0 ~ "^## \[" ver "\]" {flag=1; next}
+            /^## \[/ && flag {exit}
+            flag {print}
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          wc -c RELEASE_NOTES.md
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: RELEASE_NOTES.md
           generate_release_notes: true
           name: HFusionHub ${{ steps.meta.outputs.version }}

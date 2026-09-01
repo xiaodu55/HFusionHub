@@ -47,7 +47,7 @@
 ### P3 — 持续优化
 
 11. **JVM 调优** — 参考 [docs/SCALING.md](docs/SCALING.md) 垂直扩容节（`-Xms4g -Xmx8g -XX:+UseG1GC`）
-12. ~~**eval-nightly 启用**~~ — ✅ GitHub `vars.EVAL_BASE_URL` + `secrets.EVAL_INTERNAL_TOKEN` 已配置（2026-09）；⚠️ cpolar 免费隧道随机子域名问题与固定化指引见 [docs/ROADMAP.md](docs/ROADMAP.md) 待排期节（R15-27）
+12. ~~**eval-nightly 启用**~~ — ✅ GitHub `vars.EVAL_BASE_URL` + `secrets.EVAL_INTERNAL_TOKEN` 已配置（2026-09）；⚠️ cpolar 免费隧道随机子域名问题与固定化指引见 [docs/ROADMAP.md](docs/ROADMAP.md) 待排期节（R15-27）——**指引复核完成（R17-18）：推荐路径为 `sc create cpolar binPath= "...cpolar.exe http 9000" start= auto` 注册 Windows 服务 + cpolar 面板升级保留固定子域名，属真机操作待执行**
 
 ---
 

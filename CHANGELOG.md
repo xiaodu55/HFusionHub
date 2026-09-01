@@ -4,9 +4,54 @@ All notable changes to HFusionHub are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+> 版本脉络：`[1.0.0]`（2026-08-30，平台完整能力首次固化）→
+> `[1.1.0]`（2026-09-09，评测双轨门禁 + 主体级 ACL + 招投标垂直化 +
+> 大数据扩展包 + R16/R17 优化与 44 批自审修复）。批次粒度变更记录
+> 保留于各版本小节内。
+
 ## [Unreleased]
 
-### 第四十六批（2026-09-09：R17 批次 2——技术债清零）
+## [1.1.0] — 2026-09-09
+
+> **版本摘要**：评测双轨门禁（离线阻断 + nightly 双口径：纯检索轨解耦
+> 检索质量与模型行为）· 主体级文档可见性 ACL（检索层 fail-closed）·
+> 招投标垂直模块与大数据分析扩展包 · 插件沙箱纵深防御 · MCP 双向 ·
+> 结构化 JSON 日志 · IT 集成测试 8/8 真库 · R16/R17 两轮优化
+> （指标归因方法、chat 状态机、覆盖率棘轮）· 44+ 批自审修复。
+
+### 第四十八批（2026-09-09：R17 批次 4——发布与叙事）
+
+#### Changed
+- **v1.1.0 发布接线（R17-16）**：`release.yml` 新增 CHANGELOG 摘要提取
+  步骤（按 tag 版本匹配 `## [1.1.0]` 小节写入 release 正文，
+  `generate_release_notes` 保留叠加）
+- **README 叙事升级（R17-17）**：核心工程点新增「指标归因方法」条目
+  （纯检索探针解耦检索栈/答案层、模型漂移甄别）；「质量与验证口径」
+  改写为七维验证口径清单表；README_EN 测试徽章同步（1532/702/57 →
+  1556/703/101）
+- **R17-18**：R15-27 cpolar 固定域名的 Windows 服务注册指引复核完成，
+  真机执行项已在 TODO.md 标注
+
+#### Fixed
+- **CHANGELOG 结构（R17-15）**：修复「第二十一批」标题重复；
+  版本脉络说明落盘（[1.0.0] → [1.1.0]）
+
+### 第四十七批（2026-09-09：R17 批次 3——前端第二轮）
+
+#### Added
+- **chat 会话组件拆分（R17-12）**：`MessageItem`（消息体/操作按钮/
+  流式分支）、`ChatApprovalCard`（审批卡片）、`KnowledgeSources`
+  （合并 router-link/div 两个重复分支为动态外壳）；Detail.vue
+  1368→1159 行。消息列表 store 化与 MessageList 容器拆分经评估与
+  messagesContainer ref 深耦合，留待与后续重构同批
+- **页面组件单测（R17-13）**：+24 例（MessageItem 流式分支/错误检测/
+  反馈高亮、ChatApprovalCard decide 事件、KnowledgeSources 链接回退
+  评分），前端 77→**101** 全绿 + vue-tsc 通过
+
+#### Changed
+- E2E 回归由 CI e2e job 在 push 时执行（本地栈未跑浏览器套件）
+
+### 第四十六批（2026-09-09：R17 批次 2——技术债清零）（2026-09-09：R17 批次 2——技术债清零）
 
 #### Removed
 - **legacy 死代码清除（R17-6/7）**：`GatewayResult.degraded` 死字段 +
@@ -750,7 +795,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Flyway 版本窗口 V83→**V84**（`message.images`），文档五处同步；Python 测试 1411→**1433**（多模态 12 + QA 生成 8 + 回退 2 + 计数同步）、
   Java 693→**701**（图片存储组件 8 个测试）
 
-### 第二十一批（2026-09-04：全仓巡检修复——编码/构建/文档）
 
 ### 第二十一批（2026-09-04：全仓巡检修复——编码/构建/文档）
 

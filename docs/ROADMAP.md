@@ -111,10 +111,10 @@
 
 > 方案全文见 [docs/OPTIMIZATION_PLAN.md](OPTIMIZATION_PLAN.md) 第十七轮（R17，2026-09-09 规划）。四条线：
 
-- [ ] **批次 1 评测双口径升级（R17-A）** — 纯检索轨道进 nightly（HTTP 模式 + retrieval_baseline）、token 漂移门禁显式化、embedding 缓存命中率/检索延迟分解埋点、SCALING.md 分解口径
-- [ ] **批次 2 技术债清零（R17-B）** — legacy 死代码清除（degraded 字段/agent-runs 路由/JwtUtils 死方法）、tools legacy 入口迁移 Registry、Java 流式接口收敛（非 KB 分支迁 V1）、双鉴权分工文档化、AgentQueueGauge 租户包装修复
-- [ ] **批次 3 前端第二轮（R17-C）** — chat store、Detail.vue 拆分（MessageItem/MessageList/ApprovalCard/KnowledgeSources）、页面组件单测 77→100+
-- [ ] **批次 4 发布与叙事（R17-D）** — CHANGELOG 修缮 + v1.1.0 tag + release notes 注入、README 归因叙事与验证口径清单、R15-27 指引复核
+- [x] **批次 1 评测双口径升级（R17-A）** — 纯检索轨道进 nightly（HTTP 模式 + retrieval_baseline）、token 漂移门禁显式化、embedding 缓存命中率/检索延迟分解埋点、SCALING.md 分解口径
+- [x] **批次 2 技术债清零（R17-B）** — legacy 死代码清除（degraded 字段/agent-runs 路由/JwtUtils 死方法）、tools legacy 入口迁移 Registry、Java 流式接口收敛（非 KB 分支迁 V1）、双鉴权分工文档化、AgentQueueGauge 租户包装修复
+- [x] **批次 3 前端第二轮（R17-C）** — chat store、Detail.vue 拆分（MessageItem/MessageList/ApprovalCard/KnowledgeSources）、页面组件单测 77→100+
+- [x] **批次 4 发布与叙事（R17-D）** — CHANGELOG 修缮 + v1.1.0 tag + release notes 注入、README 归因叙事与验证口径清单、R15-27 指引复核
 
 ---
 
