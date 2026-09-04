@@ -64,7 +64,7 @@ class CompressionConfig:
         min_sentence_length: 最小句子长度
     """
     strategy: str = "extractive"
-    target_ratio: float = 0.5
+    target_ratio: float = 0.8
     max_tokens: int | None = None
     preserve_keywords: list[str] | None = None
     language: str = "zh"

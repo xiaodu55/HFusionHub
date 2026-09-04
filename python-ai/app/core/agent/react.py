@@ -579,7 +579,7 @@ class ReactAgent(Agent):
     async def _safe_compress(
         self,
         rag_context: str,
-        target_ratio: float = 0.6,
+        target_ratio: float | None = None,
         query: str | None = None,
     ) -> tuple[str, bool, list[int]]:
         """Compress retrieval context with evidence-integrity guard.
@@ -599,7 +599,15 @@ class ReactAgent(Agent):
         compressed, visible_numbers, did_compress = (
             await compressor.strategy.compress_numbered_blocks(
                 rag_context,
-                CompressionConfig(target_ratio=target_ratio),
+                # R18：压缩率单一来源化——走 RAGConfig.compression.target_ratio
+                # （默认 0.8，RAG_COMPRESSION_TARGET_RATIO 可覆盖）。0.6 旧默认
+                # 的过激压缩会丢答案句触发 insufficient_evidence 误杀
+                # （ADR-006 后记：真机 20 例对照实验 3/5 可复现修复）。
+                CompressionConfig(
+                    target_ratio=target_ratio
+                    if target_ratio is not None
+                    else get_config().compression.target_ratio
+                ),
                 query=query,
             )
         )

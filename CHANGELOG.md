@@ -13,7 +13,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [1.1.0] — 2026-09-09
 
-### 第四十九批（2026-09-09：R16-15 开放点定位 + R17 真机基线复测）
+### 第五十批（2026-09-09：R18 压缩误杀修复——ADR-006 后记实施）
+
+#### Changed
+- **压缩率单一来源化 + 默认 0.8**：`react._safe_compress` 硬编码 0.6 改读
+  `RAGConfig.compression.target_ratio`（`RAG_COMPRESSION_TARGET_RATIO`
+  可覆盖），默认 0.5→**0.8**——ADR-006 后记的消融实验（0.8/1.0 各修复
+  3/5 insufficient_evidence 误杀）支撑；runtime 基线重冻结
+  （citation_acc 0.743→0.757、faithfulness 0.564→0.579、refusal 0.9625
+  持平、token 800 在 R17-2 门禁内）
+
+#### 验证
+- Python 全量 **1600 过 0 挂 8 跳**；方法论注记：单次 runtime 跑批的
+  LLM 方差显著（同配置两次 P95 16.4s vs 28.9s），答案层结论以 nightly
+  累积观测为准（双口径设计动机）
+
+### 第四十九批（2026-09-09：R16-15 开放点定位 + R17 真机基线复测）（2026-09-09：R16-15 开放点定位 + R17 真机基线复测）
 
 #### Added
 - **R16-15 开放点定位（真机对照实验）**：normal 20 例纯检索 recall
