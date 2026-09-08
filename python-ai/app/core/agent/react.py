@@ -774,22 +774,27 @@ class ReactAgent(Agent):
     ) -> bool:
         """判定答案是否"无依据"（A4 修洞：文案匹配之外新增分数判据）。
 
-        两个判据任一命中即无依据：
-        1. **模式文案**——模型自己承认没有证据（"未检索到足够依据"等），
-           高精度信号，保留；
-        2. **词汇支持分**（``context`` 提供时）——所有实质句对上下文的
-           支持度都低于 ``confidence_threshold``（取自
-           ``ReflectionConfig.confidence_threshold``，默认 0.6），即答案
-           与资料在词元层面完全脱节，纯文案匹配抓不住这类幻觉。
+        R18 改写容忍（统一判据，分数先行）：词汇支持分（``context`` 提供
+        时）——答案存在支持度达 ``confidence_threshold`` 的实质句（大量
+        复用上下文的数字/专名/术语）即**不判**无依据，即使模型同时输出了
+        自认无证据的犹豫文案（模型漂移下的过度自谦不应把有依据的回答
+        变成硬拒答，ADR-006 后记 nq-005/007 实录）；反之无论有无文案
+        标记，全部实质句支持度低于阈值即无依据——字面脱节的幻觉
+        纯文案匹配抓不住，分数判据兜住。
 
         ``context`` 缺省时仅做文案匹配（保持旧调用方行为）。
         """
         answer_lower = (answer or "").lower()
-        if any(marker.lower() in answer_lower for marker in _GROUNDLESS_MARKERS):
-            return True
+        marker_hit = any(
+            marker.lower() in answer_lower for marker in _GROUNDLESS_MARKERS
+        )
         if context is None or not confidence_threshold:
-            return False
+            return marker_hit
         support, has_substantial = cls._answer_support_score(answer, context)
+        if has_substantial and support >= confidence_threshold:
+            return False
+        if marker_hit:
+            return True
         return has_substantial and support < confidence_threshold
 
     @staticmethod
