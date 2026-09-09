@@ -44,7 +44,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `tests/test_react_evidence_gate.py` 14/14 全绿（含 marker+高支持新
   行为路径）；Python 全量 **1600 过 0 挂 8 跳**
 
-### 第四十九批（2026-09-09：R16-15 开放点定位 + R17 真机基线复测）（2026-09-09：R16-15 开放点定位 + R17 真机基线复测）
+### 第四十九批（2026-09-09：R16-15 开放点定位 + R17 真机基线复测）
 
 #### Added
 - **R16-15 开放点定位（真机对照实验）**：normal 20 例纯检索 recall
