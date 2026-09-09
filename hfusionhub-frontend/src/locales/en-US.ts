@@ -5,9 +5,11 @@ export const enUS = {
   },
   nav: {
     groups: {
-      use: 'Use',
-      personal: 'Personal',
+      use: 'Workspace',
+      apps: 'Business Apps',
       build: 'Build & Eval',
+      ops: 'Operations',
+      personal: 'Personal',
       admin: 'Admin',
     },
     items: {

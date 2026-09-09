@@ -5,9 +5,11 @@ export const zhCN = {
   },
   nav: {
     groups: {
-      use: '使用',
-      personal: '我的设置',
+      use: '使用与知识库',
+      apps: '业务应用',
       build: '构建与评测',
+      ops: '运营管理',
+      personal: '我的设置',
       admin: '系统管理',
     },
     items: {
