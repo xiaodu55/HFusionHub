@@ -118,6 +118,10 @@ HFusionHub 是一个可以私有部署的 AI Agent 平台：上传文档建知�
 - 成本仪表板、RAG 观测、通知告警
 - 运营数仓扩展包（Hadoop/Hive/Spark/Flink，见 docs/BIGDATA_ARCHITECTURE.md）
 
+### 8. 垂直应用：招投标标书助手（Java + 前端）
+- 招标文件解读 → 要求条目结构化 → 标书草稿编辑（DraftEditor）→ 合规自检（CheckReport），全流程基于知识库 RAG 与证据引用
+- 租户隔离与合规边界（机密性 / 准确性 / 审计追踪）见 [docs/BID_COMPLIANCE.md](docs/BID_COMPLIANCE.md)
+
 ## 🚀 快速开始
 
 ### 一键启动（推荐，Windows / Linux / macOS）
@@ -202,6 +206,10 @@ curl -X POST http://localhost:8080/api/demo/clear -H "satoken: <token>"   # 清�
 ```
 
 > 演示端点默认关闭，开发 compose 已开启（`DEMO_ENDPOINTS_ENABLED=true`）；生产 compose 默认不可用（`/demo/clear` 有数据破坏性）。
+
+### 30 秒体验路径（演示动线）
+
+登录并导入演示数据 → 打开知识库提问（RAG 引用溯源，答案带 `[n]` 标注）→ 到「构建中心」看提示词 / 测试集 / 评测台 → 到「招投标助手」从招标文件生成标书草稿并走审批。逐页图文说明见 [docs/PROJECT_TOUR.md](docs/PROJECT_TOUR.md)。
 
 ## 🚢 部署
 
