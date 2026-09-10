@@ -28,6 +28,7 @@ import {
   GitBranch,
   Megaphone,
   Package,
+  CreditCard,
 } from 'lucide-vue-next'
 import * as knowledgeBaseApi from '@/api/knowledgeBase'
 import * as documentApi from '@/api/document'
@@ -181,6 +182,7 @@ const moreLinks = [
   { label: '问题分流', path: '/admin/intent-tree', icon: GitBranch },
   { label: '公告管理', path: '/admin/notices', icon: Megaphone },
   { label: '套餐管理', path: '/admin/plans', icon: Package },
+  { label: '套餐中心', path: '/bid/billing', icon: CreditCard },
 ]
 
 // 六色柔和渐变循环:每个功能磁贴有专属色调,呼应统计卡的彩色圆点
