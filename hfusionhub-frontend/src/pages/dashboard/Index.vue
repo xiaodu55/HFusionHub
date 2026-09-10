@@ -169,32 +169,8 @@ const onboardingSteps = computed(() => [
 
 const nextStep = computed(() => onboardingSteps.value.find((step) => !step.done) || onboardingSteps.value[2])
 
-const moreLinks = [
-  { label: '我的模型', path: '/builder/models', icon: Cpu },
-  { label: 'AI 能力', path: '/builder/tools', icon: Wrench },
-  { label: 'MCP 服务', path: '/builder/mcp', icon: Cable },
-  { label: '应用发布', path: '/builder/apps', icon: Rocket },
-  { label: '运行记录', path: '/agent', icon: Sparkles },
-  { label: '待确认操作', path: '/approvals', icon: Fingerprint },
-  { label: '我的记忆', path: '/memory', icon: User },
-  { label: '我的笔记', path: '/notes', icon: StickyNote },
-  { label: '模型用量', path: '/cost', icon: DollarSign },
-  { label: '问题分流', path: '/admin/intent-tree', icon: GitBranch },
-  { label: '公告管理', path: '/admin/notices', icon: Megaphone },
-  { label: '套餐管理', path: '/admin/plans', icon: Package },
-  { label: '套餐中心', path: '/bid/billing', icon: CreditCard },
-]
 
 // 六色柔和渐变循环:每个功能磁贴有专属色调,呼应统计卡的彩色圆点
-const TILE_TINTS = [
-  "from-emerald-500/20 to-emerald-500/5 text-emerald-600 dark:text-emerald-300",
-  "from-sky-500/20 to-sky-500/5 text-sky-600 dark:text-sky-300",
-  "from-violet-500/20 to-violet-500/5 text-violet-600 dark:text-violet-300",
-  "from-amber-500/20 to-amber-500/5 text-amber-600 dark:text-amber-300",
-  "from-rose-500/20 to-rose-500/5 text-rose-600 dark:text-rose-300",
-  "from-cyan-500/20 to-cyan-500/5 text-cyan-600 dark:text-cyan-300",
-]
-const tileTint = (i: number) => TILE_TINTS[i % TILE_TINTS.length]
 
 const quickActions = [
   { label: '新建知识库', path: '/knowledge-base', icon: Plus },
@@ -260,36 +236,6 @@ onMounted(async () => {
           <component :is="action.icon" class="mr-2 h-4 w-4" />
           {{ action.label }}
         </Button>
-      </div>
-    </section>
-
-    <section class="glass-panel-soft rounded-2xl p-5">
-      <div class="mb-4 flex items-center justify-between">
-        <h3 class="flex items-center gap-2 text-sm font-medium text-foreground">
-          <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px] shadow-emerald-400/50" />
-          更多功能
-        </h3>
-        <span class="rounded-full bg-foreground/5 px-2.5 py-0.5 text-xs text-muted-foreground">
-          {{ moreLinks.length }} 项
-        </span>
-      </div>
-      <div class="grid grid-cols-3 gap-2.5 sm:grid-cols-4 lg:grid-cols-6">
-        <router-link
-          v-for="(link, i) in moreLinks"
-          :key="link.path"
-          :to="link.path"
-          class="group flex flex-col items-center gap-2.5 rounded-2xl border border-border/40 bg-card/50 px-2 py-4 text-muted-foreground shadow-sm backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-border hover:bg-card hover:text-foreground hover:shadow-lg hover:shadow-foreground/5"
-        >
-          <span
-            :class="[
-              'flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br shadow-sm transition-transform duration-300 group-hover:scale-110',
-              tileTint(i),
-            ]"
-          >
-            <component :is="link.icon" class="h-[18px] w-[18px]" />
-          </span>
-          <span class="text-center text-xs font-medium leading-none">{{ link.label }}</span>
-        </router-link>
       </div>
     </section>
 
