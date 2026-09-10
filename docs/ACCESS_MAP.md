@@ -147,3 +147,18 @@
 ---
 
 **最后更新**：2026-08-31（增补 HFusionData Analytics 运营分析模块：/analytics 6 端点 + 内部回补端点 + 前端大屏路由；Flyway V82）
+
+## 服务端口速查（开发模式）
+
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| 前端 (dev) | 3000 | Vite 开发服务器 |
+| 前端 (prod) | 80 | Nginx 静态服务 |
+| Java 后端 | 8080 | Spring Boot |
+| Python AI | 9000 | FastAPI |
+| MySQL | 3306 | Docker 容器 |
+| Redis | 6379 | Docker 容器 |
+| MinIO | 9001, 9002 | 对象存储（控制台, API） |
+| Plugin Runner | 9100 | 插件沙箱执行 |
+| Milvus | 19530, 9091 | 向量数据库（Standalone + etcd） |
+| Attu (Milvus 控制台) | 8000 | 浏览器查看向量数据 |

@@ -109,3 +109,29 @@ data: [DONE]
 ```
 
 Java backend reads this stream and forwards chunks to the frontend via `SseEmitter`.
+
+## RAG 引擎模块与测试分布
+
+| 模块 | 功能 | 测试数 |
+|------|------|--------|
+| IntentClassifier | 意图识别 | - |
+| QueryDecomposer | 查询分解 | 35 |
+| ContextCompressor | 上下文压缩 | 43 |
+| SelfReflector | 自我反思 | 36 |
+| QueryRouter | 智能检索路由 | 42 |
+| MultiTurnStrategy | 多轮检索策略 | 45 |
+| KnowledgeGraph | 知识图谱 | 59 |
+| Utils | 公共工具 | 36 |
+
+## 高级功能矩阵
+
+| 功能 | 状态 | 默认 | 依赖 |
+|------|------|------|------|
+| Hybrid Retrieval (Vector + BM25) | ✅ Stable | 开启 | 无额外依赖 |
+| GraphRAG (Scoped) | 🧪 Beta | 关闭 | `RAG_GRAPH_ENABLED=true` + 图谱索引 |
+| Reranker (第二-stage) | 🧪 Beta | 关闭 | `RAG_RERANKER_MODE=lexical/cross_encoder` |
+| Multimodal / OCR | 🔬 Experimental | 关闭 | Tesseract + `requirements-multimodal.txt` |
+| Single-Agent Workflow | 🧪 Beta | 关闭 | `RAG_AGENT_WORKFLOW_ENABLED=true` |
+| Multi-Agent Collaboration | 🔬 Experimental | 关闭 | 依赖 P9 + 明确选中的知识库 |
+
+> 详见 [python-ai/.env.example](.env.example) 和本文件 [Feature Flags](#feature-flags) 一节。

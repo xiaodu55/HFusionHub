@@ -4,6 +4,10 @@
 
 [English](./README_EN.md) | 简体中文
 
+| 工作台 | 知识库与 RAG | 回答效果观测 |
+|---|---|---|
+| ![工作台](docs/assets/dashboard.png) | ![知识库](docs/assets/knowledge.png) | ![RAG 观测](docs/assets/rag-observability.png) |
+
 ![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)
 ![Java](https://img.shields.io/badge/Java-17%2B-orange)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
@@ -14,7 +18,16 @@
 
 HFusionHub 是一个可以私有部署的 AI Agent 平台：上传文档建知识库（RAG 问答、带引用溯源）、ReAct Agent 执行多步任务（敏感工具需人工审批）、插件在沙箱里运行、全程有用量计费与审计。它有意采用 **Java 管写入、Python 管智能**的双语言分层架构——用两个生态各自最擅长的一面，同时逼自己解决跨语言一致性问题。
 
-## 核心工程点（面试官视角）
+## ✨ 核心特性
+
+- **多渠道统一接入**：飞书 / Telegram / 微信 / QQ / 钉钉 / Discord / WhatsApp 七种 IM 与 Web / Electron，新增渠道只补一个适配器
+- **RAG 全链路可评测**：意图分类 → 查询分解 → 多路召回（向量 + BM25 + 图谱 + RRF）→ 证据门控 → 引用溯源 `[n]`，220 用例冻结套件做 CI 门禁
+- **ReAct Agent 运行时**：多 Agent 协作、工具审批工作流（一次性执行令牌）、Checkpoint 暂停 / 恢复、SSE 流式输出
+- **执行边界不可绕过**：PreToolUse 三级权限门禁、Bash 子命令粒度校验、插件沙箱（独立 Runner + digest 校验）
+- **双语言分层架构**：Java 独占 MySQL 写路径 / Python 独占检索与智能，内部令牌 + HMAC 签名契约
+- **垂直场景落地**：招投标标书助手——招标解读 → 条目结构化 → 草稿 → 合规自检
+
+## 🌟 工程亮点
 
 - **双语言三层的职责切分**：Java（Spring Boot 3.5.16）独占全部 MySQL 写路径（ACID、多租户、计费账本），Python（FastAPI）独占检索与 Agent 智能；两端之间用内部令牌 + HMAC 签名回调约束契约，`scripts/static-checks.py` 在 CI 里静态校验契约锚点。
 - **工具审批的正确性设计**：审批决定的三表更新在同一事务内完成，签发**一次性执行令牌**（数据库守卫 UPDATE 保证 exactly-once），LLM/工具执行经 afterCommit 移出事务——行锁不会被 120 秒的工具调用占住。
@@ -171,20 +184,7 @@ python -m app.main
 cd hfusionhub-frontend && npm ci && npm run dev
 ```
 
-**服务端口**：
-
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| 前端 (dev) | 3000 | Vite开发服务器 |
-| 前端 (prod) | 80 | Nginx静态服务 |
-| Java 后端 | 8080 | Spring Boot |
-| Python AI | 9000 | FastAPI |
-| MySQL | 3306 | Docker容器 |
-| Redis | 6379 | Docker容器 |
-| MinIO | 9001, 9002 | 对象存储（控制台, API） |
-| Plugin Runner | 9100 | 插件沙箱执行 |
-| Milvus | 19530, 9091 | 向量数据库（Standalone + etcd） |
-| Attu (Milvus 控制台) | 8000 | 浏览器查看向量数据 |
+**服务端口**：全量端口与访问入口见 [docs/ACCESS_MAP.md](docs/ACCESS_MAP.md#服务端口速查开发模式)。
 
 **启动后访问**：
 - 前端：http://localhost:3000
@@ -227,31 +227,13 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 > 如实说明：该部署配置已通过**本地**容器化自测，未经过生产环境流量验证。
 > 运维手册见 [docs/PRODUCTION_OPS.md](docs/PRODUCTION_OPS.md)，监控（Prometheus/Grafana）见 `deploy/docker-compose.monitoring.yml`。
 
-## 🧠 RAG 引擎模块
+## 🧠 RAG 引擎
 
-| 模块 | 功能 | 测试数 |
-|------|------|--------|
-| IntentClassifier | 意图识别 | - |
-| QueryDecomposer | 查询分解 | 35 |
-| ContextCompressor | 上下文压缩 | 43 |
-| SelfReflector | 自我反思 | 36 |
-| QueryRouter | 智能检索路由 | 42 |
-| MultiTurnStrategy | 多轮检索策略 | 45 |
-| KnowledgeGraph | 知识图谱 | 59 |
-| Utils | 公共工具 | 36 |
+模块与测试分布（IntentClassifier / QueryDecomposer / ContextCompressor / SelfReflector / QueryRouter / MultiTurnStrategy / KnowledgeGraph 等）见 [docs/python-ai.md](docs/python-ai.md#rag-引擎模块与测试分布)。
 
-## 🧩 高级功能矩阵
+## 🧩 高级功能
 
-| 功能 | 状态 | 默认 | 依赖 |
-|------|------|------|------|
-| Hybrid Retrieval (Vector + BM25) | ✅ Stable | 开启 | 无额外依赖 |
-| GraphRAG (Scoped) | 🧪 Beta | 关闭 | `RAG_GRAPH_ENABLED=true` + 图谱索引 |
-| Reranker (第二-stage) | 🧪 Beta | 关闭 | `RAG_RERANKER_MODE=lexical/cross_encoder` |
-| Multimodal / OCR | 🔬 Experimental | 关闭 | Tesseract + `requirements-multimodal.txt` |
-| Single-Agent Workflow | 🧪 Beta | 关闭 | `RAG_AGENT_WORKFLOW_ENABLED=true` |
-| Multi-Agent Collaboration | 🔬 Experimental | 关闭 | 依赖 P9 + 明确选中的知识库 |
-
-> 详见 [python-ai/.env.example](python-ai/.env.example) 和 [docs/python-ai.md](docs/python-ai.md#feature-flags)
+功能矩阵与开关（Hybrid Retrieval / GraphRAG / Reranker / Multimodal / Agent Workflow 等）见 [docs/python-ai.md](docs/python-ai.md#rag-引擎模块与测试分布) 与 [python-ai/.env.example](python-ai/.env.example)。
 
 ## 📖 文档索引（Documentation Index）
 
