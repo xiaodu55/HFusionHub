@@ -13,6 +13,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [1.1.0] — 2026-09-09
 
+### 第五十二批（2026-09-19：经营决策场景落地——模拟数据源 + 工具契约 + 评测闭环 + 导航分组）
+
+#### Added
+- **模拟经营数据源**：确定性 fixture（商品 / 库存 / 销售 / 促销 / 广告，覆盖促销叠加、多规格拆分、组合装、赠品、延迟数据、口径变更六类失败模式），经 `createMcpTools` 注册为 `commerce_*` 查询工具——结果强制携带 sku_id / 时间窗 / 促销与库存状态 / retrieval_status 等十字段
+- **经营决策 SOP Skill 转正**：`assets/builtin-skills/commerce-decision-sop/` 六阶段（Monitor→Detect→Investigate→Decide→Act→Review）经安装链路物化并纳入目录指纹校验
+- **Case Memory 扩展（schema v70）**：第五类知识 `case`（异常模式 / 决策条件 / 处置动作 / 结果与回滚 / 结构化规则五段结构），FTS5 检索 + 既有 CAS / HMAC 语义
+- **四级审批边界**：AUTO / DRAFT / APPROVAL / BLOCKED（`src/commerce/action-policy.ts`），APPROVAL 复用 PreToolUse 人工审批路径，BLOCKED 直接阻断
+- **只读 Reviewer**：仅驳回 / 要求补查，无执行权（`container/agent-runner/src/commerce/reviewer.ts`）
+- **Benchmark harness**：`scripts/commerce-benchmark.mjs` 20 例回放（Gold 8 / Bad 6 / Ambiguous 6），报告见 `docs/commerce-benchmark-report.md`
+- **导航分组折叠**：侧栏四组（使用与知识库 / 业务应用 / 构建与评测 / 系统管理）可折叠、激活组自动展开，低频项降级至首页「更多功能」分组网格
+- **README 改版**：首屏三张界面截图、特性亮点拆分、RAG 模块表 / 高级功能矩阵下沉 `docs/python-ai.md`、端口表下沉 `docs/ACCESS_MAP.md`
+
+#### 验证
+- 20 例回放**全 PASS**：SKU Matching 100% / Evidence Coverage 100% / False Positive **0%**（Bad 全拒绝）/ Constraint Violation **0** / Action Safety **100%** / Ambiguous 冻结率 **100%**——两条安全底线（Bad 全拒、Ambiguous 全冻结）由 harness 硬性把关
+- commerce 六测试文件 + 双端 tsc --noEmit 通过；边界：剧本回放、模拟数据源，未接真实电商平台、无在线模型评测
+
 ### 第五十批（2026-09-09：R18 压缩误杀修复——ADR-006 后记实施）
 
 #### Changed
