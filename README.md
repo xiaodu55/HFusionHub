@@ -12,7 +12,7 @@
 ![Java](https://img.shields.io/badge/Java-17%2B-orange)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883)
-![Tests](https://img.shields.io/badge/Tests-Python%201556%20%7C%20Java%20703%20%7C%20Frontend%20101-success)
+![Tests](https://img.shields.io/badge/Tests-Python%201556%20%7C%20Java%20694%20%7C%20Frontend%20101-success)
 
 ## 这个项目是什么（30 秒版）
 
@@ -20,22 +20,22 @@ HFusionHub 是一个可以私有部署的 AI Agent 平台：上传文档建知�
 
 ## ✨ 核心特性
 
-- **多渠道统一接入**：飞书 / Telegram / 微信 / QQ / 钉钉 / Discord / WhatsApp 七种 IM 与 Web / Electron，新增渠道只补一个适配器
-- **RAG 全链路可评测**：意图分类 → 查询分解 → 多路召回（向量 + BM25 + 图谱 + RRF）→ 证据门控 → 引用溯源 `[n]`，220 用例冻结套件做 CI 门禁
+- **多渠道统一接入**：飞书 / 钉钉 / 企业微信三种 IM 机器人与 Web 端，新增渠道只补一个适配器（接入指引见 docs/PUBLISH_CHANNELS.md）
+- **RAG 全链路可评测**：意图分类 → 查询分解 → 多路召回（向量 + BM25 + RRF 融合）→ 证据门控 → 引用溯源 `[n]`，220 用例冻结套件做 CI 门禁
 - **ReAct Agent 运行时**：多 Agent 协作、工具审批工作流（一次性执行令牌）、Checkpoint 暂停 / 恢复、SSE 流式输出
-- **执行边界不可绕过**：PreToolUse 三级权限门禁、Bash 子命令粒度校验、插件沙箱（独立 Runner + digest 校验）
+- **执行边界不可绕过**：工具调用七段门禁（READ_ONLY/READ_WRITE/EXTERNAL 风险分级 + 一次性 scoped grant + 三态策略 + 防伪造参数注入 + guardrails 全调用覆盖）、插件沙箱（独立 Runner + digest 校验）
 - **双语言分层架构**：Java 独占 MySQL 写路径 / Python 独占检索与智能，内部令牌 + HMAC 签名契约
-- **垂直场景落地**：招投标标书助手——招标解读 → 条目结构化 → 草稿 → 合规自检
+- **示例应用**：招投标标书助手——招标解读 → 条目结构化 → 草稿 → 合规自检，展示平台承载垂直场景的能力
 
 ## 🌟 工程亮点
 
 - **双语言三层的职责切分**：Java（Spring Boot 3.5.16）独占全部 MySQL 写路径（ACID、多租户、计费账本），Python（FastAPI）独占检索与 Agent 智能；两端之间用内部令牌 + HMAC 签名回调约束契约，`scripts/static-checks.py` 在 CI 里静态校验契约锚点。
 - **工具审批的正确性设计**：审批决定的三表更新在同一事务内完成，签发**一次性执行令牌**（数据库守卫 UPDATE 保证 exactly-once），LLM/工具执行经 afterCommit 移出事务——行锁不会被 120 秒的工具调用占住。
 - **并发与竞态治理**：任务状态机全部走条件 UPDATE 守卫迁移（completeRunGuarded / failUnlessTerminal），用量账本"只有赢得终态迁移的一方结算"，配套竞态回归测试。
-- **RAG 管线纵深**：意图分类 → 查询分解 → 多路检索（向量+BM25+图谱+RRF）→ 上下文压缩 → 检索证据门（低置信拒答）→ Groundedness 守卫与重试 → 引用完整性校验；答案逐论断 `[n]` 引用溯源；Parent-Child 父子分块与语义分块（实验档）提升长文档召回。
+- **RAG 管线纵深**：意图分类 → 查询分解 → 多路检索（向量+BM25+RRF 融合）→ 上下文压缩 → 检索证据门（低置信拒答）→ Groundedness 守卫与重试 → 引用完整性校验；答案逐论断 `[n]` 引用溯源；Parent-Child 父子分块与语义分块（实验档）提升长文档召回。
 - **指标归因方法（R16/R17）**：评测双轨把"检索质量"与"答案层模型行为"解耦——`eval_retrieval_live.py` 纯检索探针绕过 LLM 直测冻结套件（真机 0.830，与历史水平一致），从而把 runtime 指标波动定位到答案层模型漂移（token 1582→774）；配套 token 漂移门禁与命中/延迟分解指标（`/metrics`）。归因实录见 [CI_GATES](docs/CI_GATES.md) 口径注记。
-- **测试与防漂移门禁**：Java 703（单测跑 H2 内存库；C1 集成测试跑真实 MySQL——Testcontainers，见 [ADR-008](docs/adr/ADR-008-it-mysql-testcontainers.md)）/ Python 1556 / 前端 101 单测 + 73 E2E；schema-h2 与迁移链**漂移零容忍**（漏同步直接 CI 红）、文档测试计数与代码强同步、离线评测门禁（recall/nDCG/引用 P·R·F1 基线，引用窗口按相关性自适应，见 [ADR-006](docs/adr/ADR-006-faithfulness-metric-recalibration.md)）。
-- **数据规模**：Flyway 迁移链 V1–V85、26 轮自审修复批次（全部记录在 CHANGELOG）、48 项冒烟自测全过。
+- **测试与防漂移门禁**：Java 694（单测跑 H2 内存库；C1 集成测试跑真实 MySQL——Testcontainers，见 [ADR-008](docs/adr/ADR-008-it-mysql-testcontainers.md)）/ Python 1556 / 前端 101 单测 + 73 E2E；schema-h2 与迁移链**漂移零容忍**（漏同步直接 CI 红）、文档测试计数与代码强同步、离线评测门禁（recall/nDCG/引用 P·R·F1 基线，引用窗口按相关性自适应，见 [ADR-006](docs/adr/ADR-006-faithfulness-metric-recalibration.md)）。
+- **数据规模**：Flyway 迁移链 V1–V86、26 轮自审修复批次（全部记录在 CHANGELOG）、48 项冒烟自测全过。
 
 ## 质量与验证口径（如实）
 
@@ -44,7 +44,7 @@ HFusionHub 是一个可以私有部署的 AI Agent 平台：上传文档建知�
 | 维度 | 口径 |
 |---|---|
 | 功能冒烟 | `scripts/smoke-test.ps1` 48 项 PASS / 0 FAIL（本地 Compose 全链路） |
-| 单元/集成 | Java 703（单测 H2 + 集成 Testcontainers 真 MySQL，8/8 类）/ Python 1556 / 前端 101 单测 |
+| 单元/集成 | Java 694（单测 H2 + 集成 Testcontainers 真 MySQL，8/8 类）/ Python 1556 / 前端 101 单测 |
 | E2E | Playwright 73 用例（登录/知识库/对话/审批/插件等关键路径，CI e2e job） |
 | 检索质量 | 离线冻结套件 220 用例（CI push 阻断门禁）+ nightly 纯检索轨（[R17](docs/OPTIMIZATION_PLAN.md)） |
 | 答案层质量 | runtime nightly（延迟/拒答/引用/工具成功率，非阻断监测，标注模型版本） |
@@ -108,7 +108,7 @@ HFusionHub 是一个可以私有部署的 AI Agent 平台：上传文档建知�
 
 ### 3. RAG 引擎（Python）
 - 意图分类 → 自适应检索规划 → 查询分解 → 并行子问题执行
-- 多路检索（向量 + BM25 + 图谱 + RRF 融合）
+- 多路检索（向量 + BM25 + RRF 融合）
 - 上下文压缩 + 证据完整性守卫 + Groundedness 回退重试
 - 自我反思 + 回答质量评测 + 引用溯源
 
@@ -129,9 +129,9 @@ HFusionHub 是一个可以私有部署的 AI Agent 平台：上传文档建知�
 ### 7. 对话与运营（Java + Python + 前端）
 - 多轮对话 + SSE 流式 + 会话/长期记忆
 - 成本仪表板、RAG 观测、通知告警
-- 运营数仓扩展包（Hadoop/Hive/Spark/Flink，见 docs/BIGDATA_ARCHITECTURE.md）
+- 运营数仓扩展包已拆分为独立仓库 [HFusionData](https://github.com/xiaodu55/HFusionData)（Hadoop/Hive/Spark/Flink，批处理调度与主平台解耦）
 
-### 8. 垂直应用：招投标标书助手（Java + 前端）
+### 8. 示例应用：招投标标书助手（Java + 前端）
 - 招标文件解读 → 要求条目结构化 → 标书草稿编辑（DraftEditor）→ 合规自检（CheckReport），全流程基于知识库 RAG 与证据引用
 - 租户隔离与合规边界（机密性 / 准确性 / 审计追踪）见 [docs/BID_COMPLIANCE.md](docs/BID_COMPLIANCE.md)
 
@@ -238,7 +238,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 ## 📖 文档索引（Documentation Index）
 
 > 所有文档位于 [docs/](docs/) 目录，按用途分三类：**开发**、**运维**、**治理**。
-> 关键事实基线：Java 703 测试 / Python 1556 / 前端 101 单测 + 73 E2E / Flyway V85 / Spring Boot 3.5.16。
+> 关键事实基线：Java 694 测试 / Python 1556 / 前端 101 单测 + 73 E2E / Flyway V86 / Spring Boot 3.5.16。
 > 离线评测基线（suite 1.1.0，2026-09-05 冻结，引用模拟含压缩感知）：Recall@5=0.932 / nDCG@10=0.903 / 引用准确率=0.942 / 引用忠实度 F1=0.741（精确率 0.703、召回率 0.894）。答案逐论断引用 `[n]` 标注经 `cited_chunk_ids` 透出，runtime 轨按答案实际标注的引用计分。
 > runtime 评测基线（suite 1.1.0，2026-09-05 首次实测、工具路由修复后重冻结，DeepSeek-v4-flash 单机全栈）：越界检索 0 / 错误率 0 / 引用忠实度（按答案标注引用）0.75 / 工具成功率 0.80 / 拒答正确率 0.625（注入 25/25 + 超纲 25/25 通过；权限类当时 0/30 拖累该值，主体级 ACL 收口后 permission 复测 30/30，见 CHANGELOG 第三十二批/第三十五批）/ runtime 召回 0.8564（Recall@5 过门禁；与离线 0.932 的差距为生产检索栈 vs 合成轨差异）。
 > 性能基线（单机全栈实测，2026-09-05，[docs/baselines/baseline-v1-20260905.txt](docs/baselines/baseline-v1-20260905.txt)）：Java API 五个读端点 P95 21~130ms / RAG 检索 P95 2261ms（瓶颈为本地 CPU 查询向量化）/ 文档处理端到端 P50 39.7s。
@@ -249,10 +249,9 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 |------|------|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **架构全景**。CQRS 三层架构图、数据流、关键设计决策、安全边界、设计模式、与 Dify/Ragent/LangChain 对比 |
 | [docs/PROJECT_TOUR.md](docs/PROJECT_TOUR.md) | **项目功能全览**（带截图）：每个页面的功能说明与使用方法，新用户与评估者首选入口 |
-| [docs/java-backend.md](docs/java-backend.md) | Java 后端开发指南：项目结构、设计模式、环境变量、Flyway 规则（V1–V85）、测试与构建 |
+| [docs/java-backend.md](docs/java-backend.md) | Java 后端开发指南：项目结构、设计模式、环境变量、Flyway 规则（V1–V86）、测试与构建 |
 | [docs/python-ai.md](docs/python-ai.md) | Python AI 开发指南：模块结构、RAG 管线、Feature Flags、SSE 输出格式、Provider 说明 |
-| [docs/BIGDATA_ARCHITECTURE.md](docs/BIGDATA_ARCHITECTURE.md) | **HFusionData Analytics**（分析扩展包）：Hadoop 运营数仓架构、数据字典、部署/运维手册、演示动线 |
-| [docs/database.md](docs/database.md) | 数据库设计：V1–V85 全部迁移历史、核心表、实体关系、迁移规则 |
+| [docs/database.md](docs/database.md) | 数据库设计：V1–V86 全部迁移历史、核心表、实体关系、迁移规则 |
 | [docs/api.md](docs/api.md) | API 接口参考：模块列表、公开端点、调用约定 |
 | [docs/agent-v1-scope.md](docs/agent-v1-scope.md) | Agent V1 软件契约：只读研究型 Agent 的能力边界、输入/输出 JSON 契约 |
 | [docs/SWAGGER_UI.md](docs/SWAGGER_UI.md) | Swagger UI 配置指南：访问地址、生产关闭/IP 白名单/Basic Auth 策略、注解规范、常见问题 |
@@ -282,6 +281,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 | [docs/CI_GATES.md](docs/CI_GATES.md) | CI 门禁：Compose 校验、Python/Java/前端测试、离线评测门禁（PR 阻塞） |
 | [docs/SECURITY_REGRESSION.md](docs/SECURITY_REGRESSION.md) | 安全回归清单：每日/每次发布必查的 5 条安全边界（租户隔离、HMAC 回调、插件沙箱、配额幂等、租户拒绝执行） |
 | [docs/BID_COMPLIANCE.md](docs/BID_COMPLIANCE.md) | **招投标合规与责任边界**：机密性（tenant_id 隔离/SSE 同租户/知识库边界）、准确性（逐节强制审批/critical 人工确认/引用追溯）、审计与私有部署 |
+| [HFusionData](https://github.com/xiaodu55/HFusionData) | **运营数仓扩展包**（独立仓库）：Hadoop/Hive/Spark/Flink 数据管线、DDL、架构与运维手册 |
 
 ## 🤝 贡献
 

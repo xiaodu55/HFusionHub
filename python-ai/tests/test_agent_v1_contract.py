@@ -2054,7 +2054,7 @@ class TestApprovalWriteToolVisibility:
         )
         # P5 起 write_note 通过 Java /api/internal/notes 持久化；测试环境无
         # Java 后端，mock 该 HTTP 调用后应成功落库（返回 note_id）。
-        from tests.conftest import mock_java_note_backend
+        from conftest import mock_java_note_backend
 
         with mock_java_note_backend():
             result = await reg.execute(

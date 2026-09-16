@@ -30,7 +30,6 @@ export const enUS = {
       '/builder/test-bench': { label: 'Profile testing', description: 'Verify a single answer' },
       '/builder/test-sets': { label: 'Regression sets', description: 'Compare answers in batch' },
       '/rag': { label: 'Answer quality', description: 'Analyze retrieval and citations' },
-      '/analytics': { label: 'Analytics', description: 'Usage, cost and quality dashboards' },
       '/builder/plugins': { label: 'Plugins', description: 'Install and run in isolation' },
       '/builder/apps': { label: 'Apps', description: 'Publish knowledge bases as APIs' },
       '/builder/mcp': { label: 'MCP servers', description: 'Connect external MCP servers' },

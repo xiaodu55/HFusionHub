@@ -22,10 +22,10 @@ describe('i18n skeleton', () => {
 
   it('resolves nav and chat keys in both locales', () => {
     i18n.global.locale.value = 'zh-CN'
-    expect(i18n.global.t('nav.groups.use')).toBe('使用')
+    expect(i18n.global.t('nav.groups.use')).toBe('使用与知识库')
     expect(i18n.global.t('nav.items./chat.label')).toBe('智能对话')
     i18n.global.locale.value = 'en-US'
-    expect(i18n.global.t('nav.groups.use')).toBe('Use')
+    expect(i18n.global.t('nav.groups.use')).toBe('Workspace')
     expect(i18n.global.t('nav.items./chat.label')).toBe('Chat')
     expect(i18n.global.t('chat.inputPlaceholder')).toContain('Enter to send')
   })

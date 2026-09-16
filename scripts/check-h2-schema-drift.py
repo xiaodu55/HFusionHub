@@ -4,7 +4,7 @@
 问题：`java-backend/src/test/resources/schema-h2.sql` 为手维护（停在 V70），
 真实 Flyway 迁移已到 V83——单测基座与真实 schema 之间存在静默漂移。
 
-本脚本静态解析 V1..V<latest> 迁移链（CREATE TABLE / ALTER TABLE ADD|DROP|
+本脚本静态解析 V1..V<latest> 迁移链（CREATE TABLE / DROP TABLE / ALTER TABLE ADD|DROP|
 RENAME COLUMN / RENAME TO）得到最终表-列集合，与 schema-h2.sql 对比：
 
 - 漂移全部命中基线（scripts/h2_schema_drift_baseline.json）→ 通过；
@@ -87,6 +87,11 @@ def parse_create_columns(body: str) -> set[str]:
 
 def apply_statement(schema: dict[str, set[str]], stmt: str) -> None:
     stmt = re.sub(r"\s+", " ", stmt.strip())
+
+    m = re.search(r"DROP TABLE (?:IF EXISTS )?[`]?(\w+)[`]?", stmt, re.I)
+    if m:
+        schema.pop(m.group(1).lower(), None)
+        return
 
     m = re.search(r"CREATE TABLE (?:IF NOT EXISTS )?[`]?(\w+)[`]?\s*\(", stmt, re.I)
     if m:

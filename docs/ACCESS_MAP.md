@@ -90,9 +90,8 @@
 | 模型配置/成本/系统 | UserModelConfigController + CostController + SystemController | 10 | `/model-config` `/cost/*` `/system/*` |
 | 管理/其他 | AuditController + VectorReconciliationController + EvaluationGateController + DemoController + HealthController | 12 | `/admin/*` `/evaluation/*` `/demo/*` `/health` |
 | 投标项目 | BidProjectController + BidWriteController + BidCheckController | 14 | `/bid/project/*` `/bid/write*` `/bid/check*` |
-| 运营分析（扩展包） | AnalyticsController | 6 | `/analytics/*`（概览/成本趋势/模型占比/步骤成功率/评测质量/实时指标） |
 
-- **内部接口**（Java→Java 或内网，不对浏览器开放）：`AgentApprovalInternalController`、`AgentTaskEventController`、`FeatureFlagInternalController`、`InternalNoteController`、`InternalPluginController`、`InternalPluginQuotaController`、`InternalAnalyticsController`（大数据批处理手工回补触发，X-Internal-Token 保护）。
+- **内部接口**（Java→Java 或内网，不对浏览器开放）：`AgentApprovalInternalController`、`AgentTaskEventController`、`FeatureFlagInternalController`、`InternalNoteController`、`InternalPluginController`、`InternalPluginQuotaController`、
 - 认证：登录 `POST /api/user/login` 拿 `data`（Sa-Token），后续请求带 header `satoken: <token>`。无 token 访问受保护接口返回 401。
 
 ## 5. Python AI 路由（74 个）
@@ -118,7 +117,6 @@
 | Agent | `/agent` `/approvals` |
 | 构建器 | `/builder/prompts` `/builder/prompts/recycle-bin` `/builder/models` `/builder/tools` `/builder/plugins` `/builder/test-bench` `/builder/test-sets` `/builder/apps` `/builder/mcp` |
 | 成本/记忆/笔记/RAG | `/cost` `/memory` `/notes` `/rag` |
-| 运营分析 | `/analytics`（大屏页：概览/成本趋势/模型占比/步骤成功率/评测质量/实时指标，分析扩展包） |
 | 投标项目 | `/bid/projects` `/bid/projects/:id/interpret` `/bid/projects/:id/requirements` `/bid/projects/:id/draft` |
 | 套餐中心 | `/bid/billing` |
 | 个人/设置 | `/profile` `/settings` |
@@ -146,7 +144,8 @@
 
 ---
 
-**最后更新**：2026-08-31（增补 HFusionData Analytics 运营分析模块：/analytics 6 端点 + 内部回补端点 + 前端大屏路由；Flyway V82）
+**最后更新**：2026-09-22（运营分析扩展包整体迁出至独立仓库 [HFusionData](https://github.com/xiaodu55/HFusionData)：/analytics 6 端点、内部回补端点、前端大屏路由随迁）
+**历史**：2026-08-31（增补 HFusionData Analytics 运营分析模块：/analytics 6 端点 + 内部回补端点 + 前端大屏路由；Flyway V82）
 
 ## 服务端口速查（开发模式）
 

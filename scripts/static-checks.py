@@ -308,6 +308,48 @@ def check_flyway_doc_sync() -> None:
         print(f"[ok] Flyway 版本窗口同步：最新迁移 V{latest}，新脚本窗口 V{latest + 1}+")
 
 
+# 当前态文档声称对账（2026-09-22 架构减法批次）：
+# 这些词描述的能力已被移除或从未实现，不允许再出现在"描述现状"的文档里。
+# 历史记录类文档（CHANGELOG / ROADMAP / TODO / OPTIMIZATION_PLAN /
+# CLEANUP_BACKLOG / GRAPHRAG_REVIEW / adr/）不参与扫描——它们记录过去。
+BANNED_CLAIMS = {
+    "PreToolUse": "工具门禁的实际实现是 ToolRegistry 七段门禁链，不存在 PreToolUse 钩子",
+    "Bash 子命令": "仓库无 Bash 工具，子命令粒度校验从未实现",
+    "Electron": "无 Electron 客户端代码",
+    "Telegram": "IM 渠道实际只有飞书/钉钉/企业微信",
+    "Discord": "IM 渠道实际只有飞书/钉钉/企业微信",
+    "WhatsApp": "IM 渠道实际只有飞书/钉钉/企业微信",
+    "七种 IM": "IM 渠道实际只有飞书/钉钉/企业微信三种",
+    "图谱": "图谱召回通道已按 GRAPHRAG_REVIEW 复评移除（向量+BM25+RRF）",
+}
+CLAIM_SCAN_FILES = [
+    "README.md",
+    "README_EN.md",
+    "docs/python-ai.md",
+    "docs/ARCHITECTURE.md",
+    "docs/PROJECT_TOUR.md",
+    "docs/ACCESS_MAP.md",
+]
+
+
+def check_readme_claims() -> None:
+    """当前态文档不得声称已移除/未实现的能力（声称-实现对账防复发）。"""
+    bad: list[str] = []
+    for name in CLAIM_SCAN_FILES:
+        f = REPO / name
+        if not f.exists():
+            continue
+        for lineno, line in enumerate(
+                f.read_text(encoding="utf-8").splitlines(), 1):
+            for word, reason in BANNED_CLAIMS.items():
+                if word in line:
+                    bad.append(f"{name}:{lineno} 出现「{word}」（{reason}）")
+    if bad:
+        problems.append("文档声称与实现不一致:\n    " + "\n    ".join(bad))
+    else:
+        print(f"[ok] 文档声称对账：{len(CLAIM_SCAN_FILES)} 个当前态文档无禁用声称")
+
+
 def check_h2_schema_drift() -> None:
     """H2 测试 schema 与 Flyway 迁移链的漂移防护（R15-22 收尾）。
 
@@ -335,12 +377,15 @@ def main() -> int:
     parser.add_argument("--test-counts", action="store_true")
     parser.add_argument("--flyway-doc-sync", action="store_true")
     parser.add_argument("--h2-schema-drift", action="store_true")
+    parser.add_argument("--readme-claims", action="store_true")
     args = parser.parse_args()
 
     if not (args.tenant_columns or args.internal_token_keys or args.test_counts
-            or args.flyway_doc_sync or args.h2_schema_drift):
+            or args.flyway_doc_sync or args.h2_schema_drift
+            or args.readme_claims):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
-            args.flyway_doc_sync = args.h2_schema_drift = True
+            args.flyway_doc_sync = args.h2_schema_drift = \
+            args.readme_claims = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -352,6 +397,8 @@ def main() -> int:
         check_flyway_doc_sync()
     if args.h2_schema_drift:
         check_h2_schema_drift()
+    if args.readme_claims:
+        check_readme_claims()
 
     if problems:
         print("\n发现问题:")

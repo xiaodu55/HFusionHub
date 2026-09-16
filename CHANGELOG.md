@@ -11,24 +11,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第五十三批（2026-09-22：架构减法——运营数仓扩展包拆分 + 文档声称对账）
+
+#### Removed
+- **HFusionData Analytics 运营数仓扩展包整体迁出**至独立仓库 [HFusionData](https://github.com/xiaodu55/HFusionData)：`bigdata/`（Spark/Flink/Hive/ClickHouse/DolphinScheduler/Superset/血缘/基准 60 文件）、`docs/BIGDATA_ARCHITECTURE.md`、`docker-compose.analytics.yml`、平台侧对接层 22 个 Java 文件（AnalyticsController/InternalAnalyticsController/AnalyticsService×2/Ads*×5 实体+Mapper/AnalyticsRealtimeMetric/BigDataBatchRunLog/双调度器）及对应测试、前端 `/analytics` 大屏页与 API 封装、`hfusionhub.analytics/batch` 配置段。主平台与数仓以批处理调度解耦，恢复联动只需将文件放回原路径
+- **V86 drop 迁移**：移除 V82/V83 建立的 8 张扩展包表（历史迁移保留，`check-h2-schema-drift.py` 新增 DROP TABLE 解析支持）
+- **README/文档过时声称清理**：图谱召回（已按 GRAPHRAG_REVIEW 复评移除）、"七种 IM"（实际飞书/钉钉/企业微信三种）、Electron 客户端、Bash 子命令校验、PreToolUse 术语——当前态文档全部对齐代码实际
+- **悬空导出**：`rag/__init__.py` 移除无实现的 `KnowledgeGraphManager`/`KnowledgeGraphFactory` 导出（GraphRAG 移除时残留）
+
+#### Changed
+- **招投标标书助手降级为示例应用**：保留全部代码与文档，不再作为核心特性叙事
+- **`static-checks.py` 新增文档声称对账检查**：6 个当前态文档禁用已移除能力的声称词，防复发
+- **修正第五十二批**：移除误粘贴的外部项目（craft-agents）commerce 条目，本批为纯导航与 README 改版
+
+#### 验证
+- `static-checks.py` 七项全绿（新增文档声称对账通过；Java 计数 703→694 与实测同步；Flyway 窗口 V1–V86 同步）
+- Java `mvn compile` 通过；离线评测门禁 `eval_offline.py` 零回归零门禁失败；Python 全量 pytest 通过；前端 vitest 101 全绿（含修复存量 `useLocale` 期望漂移）
+- Testcontainers 集成测试（真实 MySQL 全迁移链含 V86）通过
+
 ## [1.1.0] — 2026-09-09
 
-### 第五十二批（2026-09-19：经营决策场景落地——模拟数据源 + 工具契约 + 评测闭环 + 导航分组）
+### 第五十二批（2026-09-19：导航分组 + README 改版；2026-09-22 修订——移除误粘贴的外部项目条目）
 
 #### Added
-- **模拟经营数据源**：确定性 fixture（商品 / 库存 / 销售 / 促销 / 广告，覆盖促销叠加、多规格拆分、组合装、赠品、延迟数据、口径变更六类失败模式），经 `createMcpTools` 注册为 `commerce_*` 查询工具——结果强制携带 sku_id / 时间窗 / 促销与库存状态 / retrieval_status 等十字段
-- **经营决策 SOP Skill 转正**：`assets/builtin-skills/commerce-decision-sop/` 六阶段（Monitor→Detect→Investigate→Decide→Act→Review）经安装链路物化并纳入目录指纹校验
-- **Case Memory 扩展（schema v70）**：第五类知识 `case`（异常模式 / 决策条件 / 处置动作 / 结果与回滚 / 结构化规则五段结构），FTS5 检索 + 既有 CAS / HMAC 语义
-- **四级审批边界**：AUTO / DRAFT / APPROVAL / BLOCKED（`src/commerce/action-policy.ts`），APPROVAL 复用 PreToolUse 人工审批路径，BLOCKED 直接阻断
-- **只读 Reviewer**：仅驳回 / 要求补查，无执行权（`container/agent-runner/src/commerce/reviewer.ts`）
-- **Benchmark harness**：`scripts/commerce-benchmark.mjs` 20 例回放（Gold 8 / Bad 6 / Ambiguous 6），报告见 `docs/commerce-benchmark-report.md`
 - **导航分组折叠**：侧栏四组（使用与知识库 / 业务应用 / 构建与评测 / 系统管理）可折叠、激活组自动展开，低频项降级至首页「更多功能」分组网格
 - **README 改版**：首屏三张界面截图、特性亮点拆分、RAG 模块表 / 高级功能矩阵下沉 `docs/python-ai.md`、端口表下沉 `docs/ACCESS_MAP.md`
 
 #### 验证
-- 20 例回放**全 PASS**：SKU Matching 100% / Evidence Coverage 100% / False Positive **0%**（Bad 全拒绝）/ Constraint Violation **0** / Action Safety **100%** / Ambiguous 冻结率 **100%**——两条安全底线（Bad 全拒、Ambiguous 全冻结）由 harness 硬性把关
-- commerce 六测试文件 + 双端 tsc --noEmit 通过；边界：剧本回放、模拟数据源，未接真实电商平台、无在线模型评测
-
+- 导航分组与 README 改版改动经前端单测 + 构建验证
+- 修订说明：本批原稿误粘贴了另一项目（craft-agents）的 commerce 场景条目，涉及代码（`src/commerce/`、`container/agent-runner/`、FTS5/Case Memory schema v70 等）在本仓不存在，已整体移除
 ### 第五十批（2026-09-09：R18 压缩误杀修复——ADR-006 后记实施）
 
 #### Changed

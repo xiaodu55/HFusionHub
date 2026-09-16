@@ -30,7 +30,6 @@ export const zhCN = {
       '/builder/test-bench': { label: '方案测试', description: '验证单个回答效果' },
       '/builder/test-sets': { label: '回归用例', description: '批量比较回答结果' },
       '/rag': { label: '回答效果', description: '分析检索和引用质量' },
-      '/analytics': { label: '运营分析', description: '平台用量成本与质量大屏' },
       '/builder/plugins': { label: '插件管理', description: '安装和隔离运行插件' },
       '/builder/apps': { label: '应用发布', description: '打包知识库为对外 API' },
       '/builder/mcp': { label: 'MCP 服务', description: '接入外部 MCP 工具服务器' },

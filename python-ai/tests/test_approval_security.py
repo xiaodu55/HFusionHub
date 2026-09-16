@@ -235,7 +235,7 @@ class TestWriteNoteKBEnforcement(unittest.IsolatedAsyncioTestCase):
 
     async def test_valid_kb_id_succeeds(self):
         """write_note with valid KB ID + user_id → persists via Java backend."""
-        from tests.conftest import mock_java_note_backend
+        from conftest import mock_java_note_backend
 
         tool = WriteNoteTool()
         with mock_java_note_backend():
@@ -299,7 +299,7 @@ class TestRegistryKBInjection(unittest.IsolatedAsyncioTestCase):
 
         # P5 起持久化走 Java /api/internal/notes；mock 后 registry 注入的
         # knowledge_base_id/user_id 应随请求成功落库。
-        from tests.conftest import mock_java_note_backend
+        from conftest import mock_java_note_backend
 
         with mock_java_note_backend():
             result = await registry.execute(

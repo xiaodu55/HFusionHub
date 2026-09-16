@@ -4,9 +4,9 @@
 
 ## 概述
 
-数据库 `hfusionhub` 由 Flyway 管理，迁移脚本位于 `java-backend/src/main/resources/db/migration/`，当前已应用到 **V85**。
+数据库 `hfusionhub` 由 Flyway 管理，迁移脚本位于 `java-backend/src/main/resources/db/migration/`，当前已应用到 **V86**。
 
-## 迁移历史（V1–V85）
+## 迁移历史（V1–V86）
 
 | 版本 | 文件 | 说明 |
 |------|------|------|
@@ -63,15 +63,16 @@
 | V79 | `V79__eval_harness_runs.sql` | eval_harness_runs 运行记录表（评估中枢收尾批） |
 | V80 | `V80__long_term_memory_flag.sql` | 注册 `memory.long_term.enabled` 特性开关（默认 FALSE，长期记忆接线批） |
 | V81 | `V81__native_tool_calls_flag.sql` | 注册 `agent.native_tool_calls.enabled` 特性开关（默认 FALSE，原生 function calling 批） |
-| V82 | `V82__analytics_warehouse.sql` | HFusionData Analytics 运营数仓应用层：`analytics_realtime_metrics`（Flink 实时窗口）、5 张 `ads_*` ADS 镜像（Spark 回写）、`bigdata_batch_run_log`（批处理日志），全部含 tenant_id（大数据扩展包批） |
-| V83 | `V83__table_lineage.sql` | HFusionData Analytics 表级血缘元数据（轻量数据治理，`lineage.yaml` 经 load_lineage.py 注册，平台级 tenant_id=-1） |
+| V82 | `V82__analytics_warehouse.sql` | HFusionData Analytics 运营数仓应用层（历史）：7 张表。**2026-09-22 扩展包迁出至 [HFusionData](https://github.com/xiaodu55/HFusionData)，表已在 V86 移除** |
+| V83 | `V83__table_lineage.sql` | 表级血缘元数据（历史）。**2026-09-22 随扩展包迁出，表已在 V86 移除** |
 | V84 | `V84__message_images.sql` | 对话图片输入（实验特性，message.images 存相对 URL JSON 数组） |
 | V85 | `V85__document_visibility.sql` | 主体级 ACL：`document.visibility`（general/confidential，DEFAULT 'general'），随索引写入 Milvus chunk metadata，检索按主体 clearance 过滤（CHANGELOG 第三十五批） |
+| V86 | `V86__drop_analytics_warehouse.sql` | 移除 V82/V83 的 8 张扩展包表（代码随 HFusionData 迁出，主库无代码读写；DROP 前如需保留请自行归档） |
 
 ## 迁移规则
 
-1. **历史迁移（V1–V85）不可修改**——修改会导致 Flyway checksum mismatch。
-2. **所有新表结构变更必须使用 V86+ 脚本**（V85 已被主体级 ACL 占用）。
+1. **历史迁移（V1–V86）不可修改**——修改会导致 Flyway checksum mismatch。
+2. **所有新表结构变更必须使用 V87+ 脚本**（V85 已被主体级 ACL 占用，V86 已被扩展包表移除占用）。
 3. **新表必须包含 `tenant_id` 列**（除非加入 `MybatisPlusConfig.TENANT_IGNORE_TABLES`）——租户拦截器会对非忽略表自动注入 `WHERE tenant_id=?`，缺列会导致整表功能 500（V52/V53 曾因此出问题，`scripts/static-checks.py` 在 CI 中静态校验）。
 4. **生产环境**：禁止手动修改 `flyway_schema_history`。
 5. **本地重置**：`cd docker && docker compose down -v && docker compose up -d`。

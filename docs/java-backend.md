@@ -80,10 +80,10 @@ SaTokenConfig/JwtUtils/OidcService/FeatureFlagServiceImpl 四处）。
 
 ## Flyway Migrations
 
-Current migrations: **V1–V85**
+Current migrations: **V1–V86**
 
 Rules:
-- **Historical migrations (V1–V85) must NOT be modified** — any schema changes go into new `V86+` scripts.
+- **Historical migrations (V1–V86) must NOT be modified** — any schema changes go into new `V87+` scripts.
 - In production, **never** manually edit `flyway_schema_history`.
 - For local dev reset: `docker compose down -v && docker compose up -d` (see [startup-guide.md](startup-guide.md#4-本地重置数据库)).
 

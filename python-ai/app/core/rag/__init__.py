@@ -9,7 +9,6 @@ RAG Module - 检索增强生成模块
 - SelfReflector: 自我反思器
 - QueryRouter: 查询路由器
 - MultiTurnStrategy: 多轮检索策略
-- KnowledgeGraph: 知识图谱
 - QueryRewriter: 问题重写器
 - MultiChannelRetriever: 多通道检索器
 - Postprocessor: 后处理器
@@ -314,9 +313,7 @@ __all__ = [
     "GraphDatabase",
     "Neo4jDatabase",
     "InMemoryGraphDatabase",
-    "KnowledgeGraphManager",
     "GraphBuilder",
-    "KnowledgeGraphFactory",
     # 问题重写器
     "QueryRewriter",
     "get_query_rewriter",

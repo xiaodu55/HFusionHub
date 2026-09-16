@@ -120,7 +120,6 @@ Java backend reads this stream and forwards chunks to the frontend via `SseEmitt
 | SelfReflector | 自我反思 | 36 |
 | QueryRouter | 智能检索路由 | 42 |
 | MultiTurnStrategy | 多轮检索策略 | 45 |
-| KnowledgeGraph | 知识图谱 | 59 |
 | Utils | 公共工具 | 36 |
 
 ## 高级功能矩阵
@@ -128,7 +127,6 @@ Java backend reads this stream and forwards chunks to the frontend via `SseEmitt
 | 功能 | 状态 | 默认 | 依赖 |
 |------|------|------|------|
 | Hybrid Retrieval (Vector + BM25) | ✅ Stable | 开启 | 无额外依赖 |
-| GraphRAG (Scoped) | 🧪 Beta | 关闭 | `RAG_GRAPH_ENABLED=true` + 图谱索引 |
 | Reranker (第二-stage) | 🧪 Beta | 关闭 | `RAG_RERANKER_MODE=lexical/cross_encoder` |
 | Multimodal / OCR | 🔬 Experimental | 关闭 | Tesseract + `requirements-multimodal.txt` |
 | Single-Agent Workflow | 🧪 Beta | 关闭 | `RAG_AGENT_WORKFLOW_ENABLED=true` |
