@@ -11,6 +11,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第五十五批（2026-09-22：react.py 去重第一刀 + 三循环合一的可行性结论）
+
+#### Changed
+- **ReAct 循环真重复片段去重**：新增 `_approval_observation_data()`（审批载荷解析）与 `_collect_search_sources()`（search_knowledge_base sources 采集 + `_last_sources` 同步），非流式 `run()` 与流式 `_run_stream_react()` 各删除一份 try/except 拷贝——审批检测与 sources 采集从"两份手抄"收敛为单一实现，行数基本持平但漂移温床消除
+
+#### 明确记录：三循环完全合一暂缓（决策依据，非拖延）
+- 深读后发现 **`run_stream()` 不是 `run()` 的近似拷贝**，而是一条语义不同的 RAG 快路径：分解检索在流式路径"合并子问题上下文"、在非流式路径经 `_decompose_and_handle` "合并子答案"——M12 只对齐了触发条件，合并语义是两套设计。盲目统一必然改变其中一条的行为
+- 真正近似的只有两条 ReAct 工具循环（非流式 run() 内层 vs `_run_stream_react()`），本次已抽其共享片段；完全合一需要：① golden-master 双轨录像（SSE 事件序列 + AgentResponse 逐字段对比）先冻结现状；② 对分解语义做出产品决策。两项都不适合静默自动完成
+- 前批"2201→~1200 行"的估计基于"三份近似拷贝"的判断，深读后修正：安全可省的是重复片段而非整段循环
+
+#### 验证
+- agent 相关 208 测试全绿；Python 全量 1600 passed；离线评测门禁零回归；static-checks 七项全绿
+
 ### 第五十四批（2026-09-22：正确性堵缺——exactly-once 收口 + task 条件守卫 + 静默降级可观测 + 事件循环卫生）
 
 #### Changed

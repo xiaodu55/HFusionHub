@@ -1011,6 +1011,47 @@ class ReactAgent(Agent):
                 unique[source_key] = source
         return list(unique.values())
 
+    def _approval_observation_data(self, observation: Any) -> dict[str, Any] | None:
+        """解析工具输出中的 approval_required 载荷；非 JSON / 非审批时返回 None。
+
+        非流式 ``run()`` 与流式 ``_run_stream_react()`` 共用（第五十五批去重）：
+        此前两份 try/except 拷贝是漂移温床。
+        """
+        try:
+            obs_data = json.loads(observation) if isinstance(observation, str) else observation
+        except (json.JSONDecodeError, TypeError):
+            # 非 JSON 的工具输出不携带 approval 载荷，按设计跳过；
+            # debug 留痕便于排查"为何未触发审批暂停"（第五十四批）
+            logger.debug(
+                "Tool observation not JSON, skipping approval detection: obs=%.200s",
+                observation)
+            return None
+        if isinstance(obs_data, dict) and obs_data.get("error_code") == "approval_required":
+            return obs_data
+        return None
+
+    def _collect_search_sources(self, observation: Any, sources: list) -> list:
+        """收集 search_knowledge_base 输出的规范化 sources：追加进 ``sources``
+        并同步 ``_last_sources``，返回本次新增列表（流式版还需计入当步事件）。
+
+        纯文本输出没有结构化 sources，按设计返回 []（第五十四批留痕）。
+        """
+        newly: list = []
+        try:
+            obs_data = json.loads(observation) if isinstance(observation, str) else observation
+            if isinstance(obs_data, list):
+                for result in obs_data:
+                    if isinstance(result, dict) and "error" not in result:
+                        normed = normalize_source(result)
+                        sources.append(normed)
+                        newly.append(normed)
+                        self._last_sources = list(sources)
+        except (json.JSONDecodeError, TypeError):
+            logger.debug(
+                "search_knowledge_base observation not JSON, no sources collected: %.200s",
+                observation)
+        return newly
+
     def _public_answer_or_fallback(self, text: str | None) -> str:
         """Return user-facing answer text without exposing ReAct internals."""
         if not text or not text.strip():
@@ -1387,58 +1428,40 @@ class ReactAgent(Agent):
                 observation = await self._execute_tool_observation(action, action_input, tools)
 
                 # Agent V1 Step 5: detect approval_required from high-risk tools
-                try:
-                    obs_data = json.loads(observation) if isinstance(observation, str) else observation
-                    if isinstance(obs_data, dict) and obs_data.get("error_code") == "approval_required":
-                        logger.info("[Agent V1] Approval required for tool '%s'", action)
-                        # Record a pending step for audit trail
-                        pending_step = AgentStep(
-                            thought="检测到高风险工具调用，需要人工审批",
-                            action=action,
-                            action_input=action_input,
-                            observation="approval_required: " + obs_data.get("message", ""),
-                        )
-                        steps.append(pending_step)
-                        # Return immediately with waiting_approval status
-                        return AgentResponse(
-                            content="",
-                            answer="",
-                            status="waiting_approval",
-                            steps=steps,
-                            model=response.model or getattr(llm, "model", "unknown"),
-                            token_count=0,
-                            finish_reason="waiting_approval",
-                            sources=sources,
-                            intent=intent_result.to_dict() if intent_result else None,
-                            tool_calls_count=self._tool_calls_count,
-                            max_tool_steps=self.max_steps,
-                            style_used=self.style,
-                            failed_tool=action,
-                            error_detail=json.dumps(_approval_required_payload(
-                                action, action_input, tools, obs_data.get("message", "")),
-                                ensure_ascii=False),
-                        )
-                except (json.JSONDecodeError, TypeError):
-                    # 非 JSON 的工具输出不携带 approval 载荷，按设计跳过；
-                    # debug 留痕便于排查"为何未触发审批暂停"（第五十四批）
-                    logger.debug(
-                        "Tool observation not JSON, skipping approval detection: action=%s obs=%.200s",
-                        action, observation)
+                obs_data = self._approval_observation_data(observation)
+                if obs_data is not None:
+                    logger.info("[Agent V1] Approval required for tool '%s'", action)
+                    # Record a pending step for audit trail
+                    pending_step = AgentStep(
+                        thought="检测到高风险工具调用，需要人工审批",
+                        action=action,
+                        action_input=action_input,
+                        observation="approval_required: " + obs_data.get("message", ""),
+                    )
+                    steps.append(pending_step)
+                    # Return immediately with waiting_approval status
+                    return AgentResponse(
+                        content="",
+                        answer="",
+                        status="waiting_approval",
+                        steps=steps,
+                        model=response.model or getattr(llm, "model", "unknown"),
+                        token_count=0,
+                        finish_reason="waiting_approval",
+                        sources=sources,
+                        intent=intent_result.to_dict() if intent_result else None,
+                        tool_calls_count=self._tool_calls_count,
+                        max_tool_steps=self.max_steps,
+                        style_used=self.style,
+                        failed_tool=action,
+                        error_detail=json.dumps(_approval_required_payload(
+                            action, action_input, tools, obs_data.get("message", "")),
+                            ensure_ascii=False),
+                    )
 
                 # Collect sources from tool results (Agent V1 canonical format).
                 if action == "search_knowledge_base":
-                    try:
-                        obs_data = json.loads(observation) if isinstance(observation, str) else observation
-                        if isinstance(obs_data, list):
-                            for result in obs_data:
-                                if isinstance(result, dict) and "error" not in result:
-                                    sources.append(normalize_source(result))
-                                    self._last_sources = list(sources)
-                    except (json.JSONDecodeError, TypeError):
-                        # 纯文本输出没有结构化 sources，按设计跳过（第五十四批）
-                        logger.debug(
-                            "search_knowledge_base observation not JSON, no sources collected: %.200s",
-                            observation)
+                    self._collect_search_sources(observation, sources)
 
                 # Record step
                 thought_match = re.search(r'Thought:\s*(.+?)(?:\n|$)', assistant_text)
@@ -2088,55 +2111,36 @@ class ReactAgent(Agent):
                     )
 
                     # ── Agent V1 Step 5: detect approval_required ──────
-                    try:
-                        obs_data = _json.loads(observation) if isinstance(observation, str) else observation
-                        if isinstance(obs_data, dict) and obs_data.get("error_code") == "approval_required":
-                            logger.info(
-                                "[Agent V1:stream-react] Approval required for tool '%s' at step %d",
-                                action, step_num + 1,
-                            )
-                            # Emit step record for audit trail
-                            _step_seq += 1
-                            yield _json.dumps({
-                                "event": "step_completed",
-                                "sequence": _step_seq,
-                                "step_type": "tool_call",
-                                "action": action,
-                                "input_summary": _json.dumps(action_input, ensure_ascii=False)[:500],
-                                "output_summary": "approval_required: " + obs_data.get("message", ""),
-                                "sources": None,
-                                "duration_ms": 0,
-                                "error_code": "approval_required",
-                                "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
-                            }, ensure_ascii=False)
-                            # Emit the approval_required event for Java interception
-                            yield _json.dumps(_approval_required_payload(
-                                action, action_input, tools, obs_data.get("message", "")),
-                                ensure_ascii=False)
-                            return  # Stop streaming — wait for human decision
-                    except (_json.JSONDecodeError, TypeError):
-                        # 流式版同非流式：非 JSON 输出按设计跳过审批检测（第五十四批）
-                        logger.debug(
-                            "Tool observation not JSON, skipping approval detection: action=%s obs=%.200s",
-                            action, observation)
+                    obs_data = self._approval_observation_data(observation)
+                    if obs_data is not None:
+                        logger.info(
+                            "[Agent V1:stream-react] Approval required for tool '%s' at step %d",
+                            action, step_num + 1,
+                        )
+                        # Emit step record for audit trail
+                        _step_seq += 1
+                        yield _json.dumps({
+                            "event": "step_completed",
+                            "sequence": _step_seq,
+                            "step_type": "tool_call",
+                            "action": action,
+                            "input_summary": _json.dumps(action_input, ensure_ascii=False)[:500],
+                            "output_summary": "approval_required: " + obs_data.get("message", ""),
+                            "sources": None,
+                            "duration_ms": 0,
+                            "error_code": "approval_required",
+                            "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()),
+                        }, ensure_ascii=False)
+                        # Emit the approval_required event for Java interception
+                        yield _json.dumps(_approval_required_payload(
+                            action, action_input, tools, obs_data.get("message", "")),
+                            ensure_ascii=False)
+                        return  # Stop streaming — wait for human decision
 
                     # Collect sources from tool results
                     tool_sources: list = []
                     if action == "search_knowledge_base":
-                        try:
-                            obs_data2 = _json.loads(observation) if isinstance(observation, str) else observation
-                            if isinstance(obs_data2, list):
-                                for result in obs_data2:
-                                    if isinstance(result, dict) and "error" not in result:
-                                        normed = normalize_source(result)
-                                        sources.append(normed)
-                                        tool_sources.append(normed)
-                                        self._last_sources = list(sources)
-                        except (_json.JSONDecodeError, TypeError):
-                            # 流式版同非流式：纯文本输出没有结构化 sources（第五十四批）
-                            logger.debug(
-                                "search_knowledge_base observation not JSON, no sources collected: %.200s",
-                                observation)
+                        tool_sources = self._collect_search_sources(observation, sources)
 
                     # Emit step_completed for the tool call
                     _step_seq += 1
