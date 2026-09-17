@@ -30,8 +30,6 @@ from ..rag import (
     IntentType,
     ReflectionConfig,
     ReflectionStrategyType,
-    SubQuestion,
-    SubQuestionStatus,
     get_adaptive_retrieval_planner,
     get_compressor,
     get_evaluator,
@@ -687,6 +685,119 @@ class ReactAgent(Agent):
         return (raw_context, rag_sources, auto_detected_kb_id,
                 rag_context, was_compressed, visible_numbers)
 
+    async def _decompose_retrieve_merge_context(
+        self,
+        query: str,
+        history: list[dict[str, str]] | None,
+        intent_result: Any | None,
+    ) -> tuple[str, list[dict[str, Any]], str, bool, list[int], dict[str, Any]] | None:
+        """分解检索统一实现（第五十七批）：按依赖层并行检索子问题，
+        合并编号上下文后统一压缩。
+
+        run() 与 run_stream() 共用，终结两条语义分叉的旧实现：非流式
+        "逐子问题生成再模板拼接"（合并从未真正合成、token_count=0 绕过
+        计费、绕过证据门/忠实度守卫）与流式"顺序检索合并上下文"（无依赖
+        分层、无并行）。依赖分层的 execution_plan + can_execute 判据从旧
+        答案合并路径移植至此。答案由调用方的统一次生成产出——证据门、
+        Groundedness 重试与引用编号空间由此恢复一致。
+
+        Returns:
+            (raw_context, sources, rag_context, was_compressed,
+             visible_block_numbers, decomposition_dict)；
+            needs_decomposition=False 时返回 None（调用方回落单路检索）。
+
+        Raises:
+            RuntimeError: 全部子问题检索失败（调用方按检索服务故障口径处理，
+                与 M10"不伪装成无证据"一致）；单个子问题失败按空结果降级。
+        """
+        from ..rag import get_query_decomposer
+
+        decomposition_result = await get_query_decomposer().decompose(
+            query=query, intent_result=intent_result, history=history)
+        if not (
+            decomposition_result
+            and decomposition_result.needs_decomposition
+            and decomposition_result.sub_questions
+        ):
+            return None
+
+        retriever = get_retriever()
+        stats = {"attempted": 0, "failed": 0, "last_exc": None}
+
+        async def _sub_retrieve(sub_q: Any) -> list:
+            content = getattr(sub_q, "content", None) or str(sub_q)
+            stats["attempted"] += 1
+            try:
+                sub_plan = await get_adaptive_retrieval_planner().plan(
+                    query=content,
+                    history=history,
+                    intent_result=intent_result,
+                )
+                result = await retriever.retrieve(
+                    query=sub_plan.query,
+                    knowledge_base_id=self.knowledge_base_id,
+                    conversation_history=history,
+                    top_k=self.retrieval_top_k or sub_plan.top_k,
+                )
+                return list(result.results) if result and result.results else []
+            except Exception as exc:
+                # 单个子问题检索失败按空结果降级，不拖垮整批（M10 口径）；
+                # 全部失败在调用方聚合为 RuntimeError
+                stats["failed"] += 1
+                stats["last_exc"] = exc
+                logger.error("Sub-question %r retrieval failed: %s", content[:50], exc)
+                return []
+
+        all_results: list = []
+        completed_ids: set = set()
+        for level in decomposition_result.execution_plan or []:
+            batch = [q for q in level if q.can_execute(completed_ids)]
+            if not batch:
+                continue
+            results = await asyncio.gather(
+                *[_sub_retrieve(q) for q in batch], return_exceptions=True)
+            for q, sub_results in zip(batch, results):
+                if isinstance(sub_results, Exception):
+                    stats["failed"] += 1
+                    stats["last_exc"] = sub_results
+                    logger.error(
+                        "Sub-question %r retrieval failed: %s",
+                        getattr(q, "content", "?"), sub_results)
+                    sub_results = []
+                all_results.extend(sub_results)
+                completed_ids.add(q.id)
+
+        # 防御：execution_plan 未覆盖的子问题兜底检索，保持总量一致
+        planned_ids = {
+            q.id
+            for level in decomposition_result.execution_plan or []
+            for q in level
+        }
+        for q in decomposition_result.sub_questions:
+            if getattr(q, "id", None) not in planned_ids:
+                all_results.extend(await _sub_retrieve(q))
+
+        if stats["attempted"] and stats["failed"] == stats["attempted"]:
+            raise RuntimeError(
+                "all sub-question retrievals failed") from stats["last_exc"]
+
+        seen: set = set()
+        unique_results: list = []
+        for r in all_results:
+            content_val = getattr(r, "content", "") or ""
+            if content_val not in seen:
+                seen.add(content_val)
+                unique_results.append(r)
+
+        raw_context, sources = _format_numbered_context(unique_results)
+        rag_context, was_compressed, visible_numbers = await self._safe_compress(
+            raw_context, query=query)
+        logger.info(
+            "[RAG] Decomposed retrieval: %d sub-questions -> %d unique blocks (compressed=%s)",
+            len(decomposition_result.sub_questions), len(unique_results), was_compressed)
+        return (raw_context, sources, rag_context, was_compressed,
+                visible_numbers, decomposition_result.to_dict())
+
     async def _empty_context_reply(self) -> str:
         """Reply used when retrieval returned nothing for a selected KB.
 
@@ -1070,143 +1181,6 @@ class ReactAgent(Agent):
 
         return text.strip()
 
-    async def _decompose_and_handle(
-        self,
-        query: str,
-        history: list[dict[str, str]] | None,
-        intent_result: IntentResult,
-        llm: BaseLLM,
-        tools: list[dict[str, Any]]
-    ) -> AgentResponse | None:
-        """分解复杂问题并处理子问题"""
-        try:
-            decomposer = get_query_decomposer()
-
-            decomposition_result = await decomposer.decompose(
-                query=query,
-                intent_result=intent_result,
-                history=history,
-            )
-
-            logger.info(
-                f"Query decomposed: {len(decomposition_result.sub_questions)} sub-questions, "
-                f"strategy: {decomposition_result.strategy_used}, "
-                f"parallel groups: {decomposition_result.parallel_groups}"
-            )
-
-            if not decomposition_result.needs_decomposition:
-                return None
-
-            all_sub_answers = []
-            all_sources = []
-            completed_ids = set()
-
-            for level in decomposition_result.execution_plan:
-                batch = [q for q in level if q.can_execute(completed_ids)]
-
-                if not batch:
-                    continue
-
-                tasks = [
-                    self._handle_sub_question(q, history, llm, tools)
-                    for q in batch
-                ]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                for q, result in zip(batch, results):
-                    if isinstance(result, Exception):
-                        logger.error(f"Sub-question {q.id} failed: {result}")
-                        q.status = SubQuestionStatus.FAILED
-                        all_sub_answers.append(f"[{q.id}] 处理失败: {str(result)[:100]}")
-                    else:
-                        answer, sources = result
-                        q.status = SubQuestionStatus.COMPLETED
-                        q.answer = answer
-                        all_sub_answers.append(f"[{q.id}] {answer}")
-                        all_sources.extend(sources)
-
-                    completed_ids.add(q.id)
-
-            combined_answer = self._merge_sub_answers(query, all_sub_answers)
-
-            return AgentResponse(
-                content=combined_answer,
-                answer=combined_answer,
-                steps=[],
-                model=llm.model if hasattr(llm, 'model') else "unknown",
-                token_count=0,
-                finish_reason="stop",
-                status="completed",
-                sources=all_sources,
-                intent=intent_result.to_dict(),
-                decomposition=decomposition_result.to_dict(),
-                tool_calls_count=self._tool_calls_count,
-                max_tool_steps=self.max_steps,
-                style_used=self.style,
-            )
-
-        except Exception as e:
-            logger.error(f"Query decomposition failed: {e}")
-            return None
-
-    async def _handle_sub_question(
-        self,
-        sub_question: "SubQuestion",
-        history: list[dict[str, str]] | None,
-        llm: BaseLLM,
-        tools: list[dict[str, Any]]
-    ) -> tuple:
-        """处理单个子问题"""
-        sub_question.status = SubQuestionStatus.PROCESSING
-
-        try:
-            retrieved = await self._retrieve_context(sub_question.content, history)
-            if retrieved is None:
-                # M10: 子问题检索失败按空上下文降级，合并答案仍可产出
-                rag_context, rag_sources = "", []
-            else:
-                rag_context, rag_sources, _ = retrieved
-
-            if rag_context:
-                rag_context, _, _ = await self._safe_compress(
-                    rag_context, query=sub_question.content)
-
-            if rag_context:
-                prompt = f"""基于以下参考资料回答问题。
-
-参考资料：
-{rag_context}
-
-问题：{sub_question.content}
-
-请提供准确、简洁的回答。"""
-            else:
-                prompt = sub_question.content
-
-            messages = [ChatMessage(role="user", content=prompt)]
-            response = await llm.chat(messages=messages, temperature=0.7)
-
-            return response.content, rag_sources
-
-        except Exception:
-            raise
-
-    def _merge_sub_answers(self, original_query: str, sub_answers: list[str]) -> str:
-        """合并多个子问题的答案"""
-        if not sub_answers:
-            return "无法回答该问题"
-
-        if len(sub_answers) == 1:
-            return sub_answers[0]
-
-        answers_text = "\n\n".join(sub_answers)
-
-        return f"""根据对问题的分解分析，以下是各部分的回答：
-
-{answers_text}
-
-请综合以上信息回答原始问题：{original_query}"""
-
     async def run(
         self,
         query: str,
@@ -1227,6 +1201,7 @@ class ReactAgent(Agent):
 
         has_selected_kb = self._has_selected_knowledge_base()
         auto_detected_kb_id = None
+        decomposition_requested = False
         intent_result = await self._classify_intent_safely(query, history)
 
         if intent_result is not None:
@@ -1241,18 +1216,35 @@ class ReactAgent(Agent):
             if not has_selected_kb:
                 return await self._handle_chitchat(query, history, llm)
 
-            if intent_result.needs_retrieval() and intent_result.should_decompose():
-                decomposition_result = await self._decompose_and_handle(
-                    query, history, intent_result, llm, tools
-                )
-                if decomposition_result:
-                    return decomposition_result
+            # 第五十七批：分解语义统一为"上下文合并"——分解只在检索侧生效
+            #（依赖层并行检索子问题，合并编号上下文），答案由统一次生成产出，
+            # 证据门 / Groundedness 重试 / 引用编号空间全部恢复一致；
+            # 旧"逐子问题生成再模板拼接"提前返回路径移除（其合并从未真正
+            # 合成，且 token_count=0 绕过计费、绕过守卫）
+            decomposition_requested = (
+                intent_result.needs_retrieval() and intent_result.should_decompose()
+            )
 
         messages = await self._build_react_messages(query, history)
 
-        # RAG: 检索相关知识
+        # RAG: 检索相关知识（第五十七批：分解请求走统一的上下文合并检索，
+        # 失败/未触发回落单路检索；全部子问题失败按 M10 升格为检索故障）
         logger.info(f"[RAG] Starting retrieval for query: {query[:50]}..., knowledge_base_id: {self.knowledge_base_id}")
-        retrieved_full = await self._retrieve_and_compress(query, history, intent_result)
+        decomposed = None
+        if decomposition_requested and has_selected_kb:
+            try:
+                decomposed = await self._decompose_retrieve_merge_context(
+                    query, history, intent_result)
+            except Exception as exc:
+                logger.error(
+                    "Decomposed retrieval failed — falling back to single-path: %s", exc)
+                decomposed = None
+        if decomposed is not None:
+            raw_d, sources_d, rag_c_d, was_c_d, vis_d, _decomp_meta = decomposed
+            retrieved_full = (raw_d, sources_d, self.knowledge_base_id,
+                              rag_c_d, was_c_d, vis_d)
+        else:
+            retrieved_full = await self._retrieve_and_compress(query, history, intent_result)
         if retrieved_full is None:
             # M10: 检索服务故障以 retrieval_error 返回，不伪装成 insufficient_evidence
             logger.error("[RAG] Retrieval service unavailable — returning retrieval_error")
@@ -1631,8 +1623,6 @@ class ReactAgent(Agent):
         if "style" in kwargs:
             self.style = kwargs["style"] if kwargs["style"] in _STYLE_PROMPTS else self.style
 
-        from ..rag import get_query_decomposer
-
         # Track step sequence counter for structured events.
         _step_seq = 0
 
@@ -1711,51 +1701,21 @@ class ReactAgent(Agent):
             if has_selected_kb:
                 retrieval_start = _time.monotonic()
                 try:
-                    retrieval_plan = await get_adaptive_retrieval_planner().plan(
-                        query=query,
-                        history=history,
-                        intent_result=intent_result,
-                    )
-                    query_decomposer = get_query_decomposer()
-                    decomposition_result = await query_decomposer.decompose(query, intent_result, history)
-
-                    # M12: 与 run() 的 _decompose_and_handle 判据对齐 — 只有
-                    # needs_decomposition=True 才走分解检索，避免同一问题两路径行为分叉
-                    if (
-                        decomposition_result
-                        and decomposition_result.needs_decomposition
-                        and decomposition_result.sub_questions
-                    ):
-                        # ── Decomposition path ──
-                        all_results: list = []
-                        for sub_q in decomposition_result.sub_questions:
-                            sub_query = sub_q.content if hasattr(sub_q, 'content') else str(sub_q)
-                            sub_plan = await get_adaptive_retrieval_planner().plan(
-                                query=sub_query,
-                                history=history,
-                                intent_result=intent_result,
-                            )
-                            sub_result = await retriever.retrieve(
-                                query=sub_plan.query,
-                                knowledge_base_id=self.knowledge_base_id,
-                                top_k=sub_plan.top_k,
-                            )
-                            if sub_result and sub_result.results:
-                                all_results.extend(sub_result.results)
-
-                        seen_contents: set = set()
-                        unique_results: list = []
-                        for r in all_results:
-                            content_val = getattr(r, "content", "") or ""
-                            if content_val not in seen_contents:
-                                seen_contents.add(content_val)
-                                unique_results.append(r)
-
-                        raw_context, sources = _format_numbered_context(unique_results)
-                        context, was_compressed, visible_numbers = await self._safe_compress(
-                            raw_context, query=query)
+                    # ── 分解检索统一实现（第五十七批）：依赖层并行检索子问题并
+                    # 合并编号上下文，终结与非流式路径的语义分叉（M12 只对齐了
+                    # 触发条件）；needs_decomposition=False 回落单路检索，
+                    # 全部子问题失败升格 RuntimeError 走既有错误事件口径
+                    decomposed = await self._decompose_retrieve_merge_context(
+                        query, history, intent_result)
+                    if decomposed is not None:
+                        raw_c, sources, context, was_compressed, visible_numbers, _meta = decomposed
+                        raw_context = raw_c
                     else:
-                        # ── Non-decomposition path ──
+                        retrieval_plan = await get_adaptive_retrieval_planner().plan(
+                            query=query,
+                            history=history,
+                            intent_result=intent_result,
+                        )
                         result = await retriever.retrieve(
                             query=retrieval_plan.query,
                             knowledge_base_id=self.knowledge_base_id,
