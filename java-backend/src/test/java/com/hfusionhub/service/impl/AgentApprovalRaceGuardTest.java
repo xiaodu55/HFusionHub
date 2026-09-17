@@ -1,6 +1,7 @@
 package com.hfusionhub.service.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -12,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.constant.AgentConstants;
+import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.RedisUtils;
 import com.hfusionhub.config.QuotaProperties;
 import com.hfusionhub.entity.AgentApproval;
@@ -212,6 +214,68 @@ class AgentApprovalRaceGuardTest {
         decisionService.decideApproval("appr-1", "approved", DECIDER_ID, null);
 
         verify(runLifecycle, never()).finalizeAgentRunUsage(RUN_ID, AgentConstants.STATUS_FAILED, null);
+    }
+
+    @Test
+    void approveFailsClosedWhenTokenIssuanceReturnsZero() {
+        stubApprovalFlow("approved");
+        // 第五十四批：签发命中 0 行（审批不在可签发状态）必须整体失败——
+        // 事务回滚使 approval 回到 pending，绝不带着 null token 调 Python resume
+        when(approvalMapper.issueExecutionToken(eq(1L), anyString(), anyString(), anyString()))
+                .thenReturn(0);
+
+        assertThatThrownBy(() -> decisionService.decideApproval("appr-1", "approved", DECIDER_ID, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("执行令牌签发失败");
+
+        verify(aiClient, never())
+                .decideApproval(any(), any(), any(), any(), any(), any(),
+                        any(), any(), any(), any(), any(), any(),
+                        any(), any());
+        verify(runLifecycle, never()).resumeFromWaitingApproval(anyLong());
+    }
+
+    @Test
+    void approveFailsClosedWhenTokenIssuanceThrows() {
+        stubApprovalFlow("approved");
+        // 签发 SQL 异常同样 fail-closed：抛出 → 事务回滚，而不是吞掉后以
+        // null token 继续（旧版行为，第五十四批移除）
+        when(approvalMapper.issueExecutionToken(eq(1L), anyString(), anyString(), anyString()))
+                .thenThrow(new RuntimeException("db down"));
+
+        assertThatThrownBy(() -> decisionService.decideApproval("appr-1", "approved", DECIDER_ID, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("执行令牌签发失败");
+
+        verify(aiClient, never())
+                .decideApproval(any(), any(), any(), any(), any(), any(),
+                        any(), any(), any(), any(), any(), any(),
+                        any(), any());
+        verify(runLifecycle, never()).resumeFromWaitingApproval(anyLong());
+    }
+
+    @Test
+    void approveSkipsTaskOverwriteWhenGuardedTransitionLoses() {
+        stubApprovalFlow("approved");
+        when(approvalMapper.issueExecutionToken(eq(1L), anyString(), anyString(), anyString()))
+                .thenReturn(1);
+        when(runLifecycle.resumeFromWaitingApproval(RUN_ID)).thenReturn(true);
+        // task 条件迁移命中 0 行（并发已迁移/终态）→ 不再退回 updateById 覆盖
+        when(taskMapper.transitionTaskGuarded(eq(TASK_ID), anyString(), any()))
+                .thenReturn(0);
+        when(aiClient.decideApproval(
+                any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(),
+                any(), any())).thenThrow(new RuntimeException("python down"));
+        when(runMapper.selectById(RUN_ID)).thenReturn(waitingRun());
+        when(runLifecycle.failUnlessTerminal(eq(RUN_ID), eq("internal_error"), anyString()))
+                .thenReturn(true);
+
+        decisionService.decideApproval("appr-1", "approved", DECIDER_ID, null);
+
+        // 第五十四批：decideApproval 全链路的 task 写入只走条件守卫，
+        // 任何路径都不再出现无条件 updateById 覆盖
+        verify(taskMapper, never()).updateById(any(AgentTask.class));
     }
 
     @Test

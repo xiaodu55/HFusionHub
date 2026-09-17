@@ -75,8 +75,8 @@ def _apply_subprocess_limits(config: SubprocessConfig) -> None:
         import resource
         cpu_secs = int(config.cpu_seconds)
         resource.setrlimit(resource.RLIMIT_CPU, (cpu_secs, cpu_secs))
-    except (ValueError, OSError):
-        pass
+    except (ValueError, OSError) as exc:
+        logger.warning("CPU rlimit not enforced for plugin subprocess: %s", exc)
     except ImportError:
         logger.warning(
             "Subprocess resource limits unavailable (no `resource` module, e.g. Windows): "
@@ -88,15 +88,19 @@ def _apply_subprocess_limits(config: SubprocessConfig) -> None:
         import resource
         mem_bytes = config.memory_mb * 1024 * 1024
         resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
-    except (ImportError, ValueError, OSError):
-        pass
+    except ImportError:
+        pass  # no `resource` module (Windows) — already warned by the CPU block above
+    except (ValueError, OSError) as exc:
+        logger.warning("Memory rlimit not enforced for plugin subprocess: %s", exc)
 
     # Open files limit
     try:
         import resource
         resource.setrlimit(resource.RLIMIT_NOFILE, (config.max_open_files, config.max_open_files))
-    except (ImportError, ValueError, OSError):
-        pass
+    except ImportError:
+        pass  # no `resource` module (Windows) — already warned by the CPU block above
+    except (ValueError, OSError) as exc:
+        logger.warning("Open-files rlimit not enforced for plugin subprocess: %s", exc)
 
 
 def _make_domain_check(allowed: list[str], blocked: list[str]) -> Callable[[str], None]:
@@ -157,8 +161,10 @@ def _install_network_guard(config: SubprocessConfig) -> None:
             return _original_create_connection(address, *args, **kwargs)
 
         socket.create_connection = _sandboxed_create_connection  # type: ignore
-    except (ImportError, AttributeError):
-        pass
+    except ImportError:
+        pass  # socket module absent — nothing to guard
+    except AttributeError as exc:
+        logger.warning("Network guard NOT installed (socket API changed): %s", exc)
 
     # Patch httpx if available
     try:
@@ -170,8 +176,10 @@ def _install_network_guard(config: SubprocessConfig) -> None:
             return await _original_send(self, request, **kwargs)
 
         httpx.AsyncClient.send = _sandboxed_send  # type: ignore
-    except (ImportError, AttributeError):
-        pass
+    except ImportError:
+        pass  # httpx not installed inside the subprocess — no vector to guard
+    except AttributeError as exc:
+        logger.warning("Network guard NOT installed (httpx API changed): %s", exc)
 
     # Patch urllib
     try:
@@ -186,8 +194,10 @@ def _install_network_guard(config: SubprocessConfig) -> None:
             return _original_urlopen(url, *args, **kwargs)
 
         urllib.request.urlopen = _sandboxed_urlopen  # type: ignore
-    except (ImportError, AttributeError):
-        pass
+    except ImportError:
+        pass  # urllib absent — nothing to guard
+    except AttributeError as exc:
+        logger.warning("Network guard NOT installed (urllib API changed): %s", exc)
 
 
 def _install_filesystem_guard(config: SubprocessConfig, default_allowed: list[str] | None = None) -> None:
@@ -261,8 +271,8 @@ def _install_filesystem_guard(config: SubprocessConfig, default_allowed: list[st
                     return op(src, *args, **kwargs)
                 return guarded
             setattr(shutil, op_name, _make_shutil_guard(orig))
-    except ImportError:
-        pass
+    except ImportError as exc:
+        logger.warning("Filesystem guard NOT installed for shutil operations: %s", exc)
 
     # Block subprocess spawning from plugins
     try:
@@ -273,8 +283,11 @@ def _install_filesystem_guard(config: SubprocessConfig, default_allowed: list[st
             raise OSError("SANDBOX VIOLATION: subprocess spawning is not allowed")
 
         _subprocess.Popen.__init__ = _blocked_popen  # type: ignore
-    except (ImportError, AttributeError):
-        pass
+    except ImportError as exc:
+        logger.warning("Subprocess-spawn guard NOT installed (subprocess module missing): %s", exc)
+    except AttributeError as exc:
+        logger.warning(
+            "SANDBOX DEGRADED: subprocess-spawn guard NOT installed (Popen API changed): %s", exc)
 
     # Block fork/exec
     try:
@@ -283,8 +296,10 @@ def _install_filesystem_guard(config: SubprocessConfig, default_allowed: list[st
         def _blocked_fork():
             raise OSError("SANDBOX VIOLATION: fork is not allowed")
         _os_module.fork = _blocked_fork  # type: ignore
-    except (ImportError, AttributeError):
-        pass
+    except ImportError:
+        pass  # fork not available on this platform (e.g. Windows)
+    except AttributeError as exc:
+        logger.warning("SANDBOX DEGRADED: fork guard NOT installed (os API changed): %s", exc)
 
 
 def _subprocess_worker(

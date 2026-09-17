@@ -1419,7 +1419,11 @@ class ReactAgent(Agent):
                                 ensure_ascii=False),
                         )
                 except (json.JSONDecodeError, TypeError):
-                    pass
+                    # 非 JSON 的工具输出不携带 approval 载荷，按设计跳过；
+                    # debug 留痕便于排查"为何未触发审批暂停"（第五十四批）
+                    logger.debug(
+                        "Tool observation not JSON, skipping approval detection: action=%s obs=%.200s",
+                        action, observation)
 
                 # Collect sources from tool results (Agent V1 canonical format).
                 if action == "search_knowledge_base":
@@ -1431,7 +1435,10 @@ class ReactAgent(Agent):
                                     sources.append(normalize_source(result))
                                     self._last_sources = list(sources)
                     except (json.JSONDecodeError, TypeError):
-                        pass
+                        # 纯文本输出没有结构化 sources，按设计跳过（第五十四批）
+                        logger.debug(
+                            "search_knowledge_base observation not JSON, no sources collected: %.200s",
+                            observation)
 
                 # Record step
                 thought_match = re.search(r'Thought:\s*(.+?)(?:\n|$)', assistant_text)
@@ -2108,7 +2115,10 @@ class ReactAgent(Agent):
                                 ensure_ascii=False)
                             return  # Stop streaming — wait for human decision
                     except (_json.JSONDecodeError, TypeError):
-                        pass
+                        # 流式版同非流式：非 JSON 输出按设计跳过审批检测（第五十四批）
+                        logger.debug(
+                            "Tool observation not JSON, skipping approval detection: action=%s obs=%.200s",
+                            action, observation)
 
                     # Collect sources from tool results
                     tool_sources: list = []
@@ -2123,7 +2133,10 @@ class ReactAgent(Agent):
                                         tool_sources.append(normed)
                                         self._last_sources = list(sources)
                         except (_json.JSONDecodeError, TypeError):
-                            pass
+                            # 流式版同非流式：纯文本输出没有结构化 sources（第五十四批）
+                            logger.debug(
+                                "search_knowledge_base observation not JSON, no sources collected: %.200s",
+                                observation)
 
                     # Emit step_completed for the tool call
                     _step_seq += 1

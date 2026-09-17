@@ -45,4 +45,13 @@ public interface AgentTaskMapper extends BaseMapper<AgentTask> {
      * 更新任务状态和当前运行ID
      */
     int updateStatus(@Param("id") Long id, @Param("status") String status, @Param("currentRunId") Long currentRunId);
+
+    /**
+     * 条件状态迁移（第五十四批）：仅当当前状态属于 fromStatuses 时原子更新，
+     * 返回命中行数——并发下只有真正赢得迁移的一方生效，替代 check-then-act
+     */
+    int transitionTaskGuarded(
+            @Param("id") Long id,
+            @Param("target") String target,
+            @Param("fromStatuses") List<String> fromStatuses);
 }

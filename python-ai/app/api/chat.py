@@ -474,6 +474,10 @@ def _build_chat_response(response, style: str, extra_step_events: list[dict[str,
 
     When *extra_step_events* is provided (e.g. from the decide/resume flow),
     those events are used directly instead of deriving them from response.steps.
+
+    本函数是同步函数且内部含阻塞操作（guardrails 的外部审核 HTTP 调用与
+    正则/PII 全文扫描）——async 路由必须经 ``asyncio.to_thread`` 调用，
+    不得在事件循环上直跑（第五十四批）。
     """
     # ── Content guardrails: output check before returning the response ──
     # Blocks critical injection echoes / inappropriate content and masks PII
@@ -683,7 +687,7 @@ async def chat(request: ChatRequest):
             history=request.history,
             message=request.message,
         )
-        return _build_chat_response(response, style)
+        return await asyncio.to_thread(_build_chat_response, response, style)
 
     except Exception as e:
         _is_error = True
@@ -780,7 +784,7 @@ async def agent_v1_chat(request: AgentV1Request):
             history=request.history,
             message=request.message,
         )
-        return _build_chat_response(response, style)
+        return await asyncio.to_thread(_build_chat_response, response, style)
 
     except Exception as e:
         _is_error = True
@@ -1260,7 +1264,8 @@ async def agent_v1_decide(request: AgentResumeRequest):
             error_detail=None,
             failed_tool=None,
         )
-        return _build_chat_response(response, style, extra_step_events=[step_event])
+        return await asyncio.to_thread(
+            _build_chat_response, response, style, extra_step_events=[step_event])
     else:
         logger.error(
             "Approval tool returned FAILURE: approval=%s tool=%s error_code=%s message=%s",
@@ -1296,7 +1301,8 @@ async def agent_v1_decide(request: AgentResumeRequest):
             error_detail=result.message,
             failed_tool=request.tool_name,
         )
-        return _build_chat_response(response, style, extra_step_events=[step_event])
+        return await asyncio.to_thread(
+            _build_chat_response, response, style, extra_step_events=[step_event])
 
 
 @router.get("/api/chat/health")

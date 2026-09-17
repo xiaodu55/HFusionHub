@@ -81,7 +81,7 @@ public class AgentTaskDecisionService {
         if (!"pending".equals(approval.getStatus())) throw new BusinessException("审批状态不允许决定: " + approval.getStatus());
         if (approval.getExpiresAt().isBefore(java.time.LocalDateTime.now())) throw new BusinessException("审批已过期");
 
-        // ── Phase 1: MySQL updates (auto-committed per statement) ──
+        // ── Phase 1: MySQL updates（同一事务：approval/令牌/task/run，见类注解）──
         String newStatus = "approved".equals(decision) ? "approved" : "denied";
         int updated = approvalMapper.updateDecision(
                 approval.getId(),
@@ -93,13 +93,55 @@ public class AgentTaskDecisionService {
             throw new BusinessException("审批已被其他请求处理");
         }
 
+        // ── 执行令牌签发（durable one-time，M2 事务的一部分，第五十四批前移）──
+        // 签发必须在 task/run 迁移之前完成并视为 Phase 1 的一部分：签发失败
+        // （DB 异常或审批不在可签发状态）时整体抛出 → @Transactional 回滚本次
+        // 决定（approval 回到 pending），绝不带着 null token 调 Python resume。
+        // Python 侧消费本就是 fail-closed（空 token → 409 拒绝执行），Java 侧
+        // 旧版静默降级只会把 approved 的 run/task 误收敛成 failed。
+        // 只有首个 approve 能把令牌从 'none' → 'issued'（SQL 守卫防并发重复）；
+        // 令牌在工具执行前经 Java consume 端点 / Python decide 消费，重放的
+        // approve/resume 永远无法二次执行工具。
+        String executionToken = null;
+        if ("approved".equals(decision)) {
+            executionToken = java.util.UUID.randomUUID().toString();
+            int issued;
+            try {
+                issued = approvalMapper.issueExecutionToken(
+                        approval.getId(),
+                        executionToken,
+                        AgentConstants.EXECUTION_TOKEN_ISSUED,
+                        LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+            } catch (Exception e) {
+                log.error("Failed to issue execution token for approval {}: {}", approvalId, e.getMessage(), e);
+                throw new BusinessException("执行令牌签发失败，本次审批未生效（可重试）: " + approvalId);
+            }
+            if (issued != 1) {
+                log.warn(
+                        "Could not issue execution token for approval {} — approval not in issueable state",
+                        approvalId);
+                throw new BusinessException("执行令牌签发失败：审批状态异常，本次审批未生效: " + approvalId);
+            }
+        }
+
         AgentTask task = taskMapper.selectById(approval.getTaskId());
         AgentRun run = runMapper.selectById(approval.getRunId());
 
         if ("denied".equals(decision)) {
             if (task != null) {
-                task.setStatus(AgentConstants.STATUS_FAILED);
-                taskMapper.updateById(task);
+                // 第五十四批：task 状态迁移同样走条件 UPDATE 守卫，与 run 的
+                // failFromWaitingApproval 对齐，不再无条件覆盖
+                boolean taskTransitioned = taskMapper.transitionTaskGuarded(
+                                task.getId(),
+                                AgentConstants.STATUS_FAILED,
+                                List.of(AgentConstants.STATUS_WAITING_APPROVAL))
+                        == 1;
+                if (!taskTransitioned) {
+                    log.warn(
+                            "Task {} not transitioned to failed on deny (status={}) — skipping overwrite",
+                            task.getId(),
+                            task.getStatus());
+                }
             }
             if (run != null) {
                 // S3/M3 行锁升级：条件 UPDATE（WHERE status='waiting_approval'）原子完成
@@ -128,9 +170,21 @@ public class AgentTaskDecisionService {
                     approval.getToolName(),
                     reason);
         } else {
-            if (task != null && AgentConstants.canTransition(task.getStatus(), AgentConstants.STATUS_RUNNING)) {
-                task.setStatus(AgentConstants.STATUS_RUNNING);
-                taskMapper.updateById(task);
+            // 第五十四批：task 的 check-then-act（canTransition + updateById）升级为
+            // SQL 条件守卫——pending/waiting_approval → running 的合法迁移集合
+            // 与 AgentConstants.canTransition 语义一致，并发下只有赢得迁移的一方生效
+            if (task != null) {
+                boolean taskTransitioned = taskMapper.transitionTaskGuarded(
+                                task.getId(),
+                                AgentConstants.STATUS_RUNNING,
+                                List.of(AgentConstants.STATUS_PENDING, AgentConstants.STATUS_WAITING_APPROVAL))
+                        == 1;
+                if (!taskTransitioned) {
+                    log.warn(
+                            "Task {} not transitioned to running on approve (status={}) — skipping overwrite",
+                            task.getId(),
+                            task.getStatus());
+                }
             }
             if (run != null) {
                 // S3/M3 行锁升级：仅当仍处 waiting_approval 时原子迁移到 running，
@@ -157,32 +211,6 @@ public class AgentTaskDecisionService {
         approval.setStatus(newStatus);
         approval.setDecidedBy(decidedBy);
         approval.setReason(reason);
-
-        // ── Issue a durable one-time execution token (durable single-execution).
-        // Only the first approve can change the token from 'none' → 'issued'
-        // (guarded in SQL against concurrent duplicates).  It is consumed by the
-        // Java consume endpoint / Python decide before the tool runs, so a
-        // replayed approve/resume can never execute the tool twice.
-        String executionToken = null;
-        if ("approved".equals(decision)) {
-            executionToken = java.util.UUID.randomUUID().toString();
-            try {
-                int issued = approvalMapper.issueExecutionToken(
-                        approval.getId(),
-                        executionToken,
-                        AgentConstants.EXECUTION_TOKEN_ISSUED,
-                        LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-                if (issued != 1) {
-                    log.warn(
-                            "Could not issue execution token for approval {} — approval not in issueable state",
-                            approvalId);
-                    executionToken = null;
-                }
-            } catch (Exception e) {
-                log.error("Failed to issue execution token for approval {}: {}", approvalId, e.getMessage());
-                executionToken = null;
-            }
-        }
 
         // ── Phase 2: Call Python AFTER COMMIT ──
         // M2 的三表同事务保证只覆盖 Phase 1。LLM/工具执行（读超时 120s）绝不能
@@ -213,10 +241,17 @@ public class AgentTaskDecisionService {
                             if (transitioned) {
                                 runLifecycle.finalizeAgentRunUsage(checkRun.getId(), AgentConstants.STATUS_FAILED, null);
                                 AgentTask checkTask = taskMapper.selectById(checkRun.getTaskId());
-                                if (checkTask != null
-                                        && !AgentConstants.TERMINAL_STATUSES.contains(checkTask.getStatus())) {
-                                    checkTask.setStatus(AgentConstants.STATUS_FAILED);
-                                    taskMapper.updateById(checkTask);
+                                if (checkTask != null) {
+                                    // 第五十四批：task 收敛同样走条件守卫，非终态才置 failed
+                                    boolean taskSettled = taskMapper.transitionTaskGuarded(
+                                            checkTask.getId(),
+                                            AgentConstants.STATUS_FAILED,
+                                            AgentConstants.NON_TERMINAL_STATUSES) == 1;
+                                    if (!taskSettled) {
+                                        log.warn(
+                                                "Task {} already terminal — skipping failure convergence",
+                                                checkTask.getId());
+                                    }
                                 }
                             }
                         } else {
@@ -230,9 +265,12 @@ public class AgentTaskDecisionService {
                             if (transitioned) {
                                 runLifecycle.finalizeAgentRunUsage(fRun.getId(), AgentConstants.STATUS_FAILED, null);
                             }
-                            if (fTask != null && !AgentConstants.TERMINAL_STATUSES.contains(fTask.getStatus())) {
-                                fTask.setStatus(AgentConstants.STATUS_FAILED);
-                                taskMapper.updateById(fTask);
+                            if (fTask != null) {
+                                // 第五十四批：非终态才收敛，条件守卫防覆盖并发终态
+                                taskMapper.transitionTaskGuarded(
+                                        fTask.getId(),
+                                        AgentConstants.STATUS_FAILED,
+                                        AgentConstants.NON_TERMINAL_STATUSES);
                             }
                         }
                     } catch (Exception convergenceError) {
@@ -393,14 +431,19 @@ public class AgentTaskDecisionService {
                     freshRun.getId());
         }
 
+        // 第五十四批：task 终态回写同样走条件守卫（与 run 的 completeRunGuarded
+        // 对齐）——只在任务仍为非终态时生效，不再无条件覆盖并发取消/完成的终态；
+        // 重读失败时退回原引用的 id，守卫语义不变
         AgentTask freshTask = taskMapper.selectById(freshRun.getTaskId());
-        if (freshTask != null) {
-            freshTask.setStatus(mappedStatus);
-            taskMapper.updateById(freshTask);
-        } else {
-            // Fallback: update the original task reference
-            task.setStatus(mappedStatus);
-            taskMapper.updateById(task);
+        Long targetTaskId = freshTask != null ? freshTask.getId() : task.getId();
+        boolean taskSettled = taskMapper.transitionTaskGuarded(
+                        targetTaskId, mappedStatus, AgentConstants.NON_TERMINAL_STATUSES)
+                == 1;
+        if (!taskSettled) {
+            log.warn(
+                    "Task {} terminal state settled concurrently — skipping overwrite to {}",
+                    targetTaskId,
+                    mappedStatus);
         }
 
         String contentPreview = "";

@@ -11,6 +11,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第五十四批（2026-09-22：正确性堵缺——exactly-once 收口 + task 条件守卫 + 静默降级可观测 + 事件循环卫生）
+
+#### Changed
+- **执行令牌签发 fail-closed（第五十三批遗留缺口修复）**：`decideApproval` 的令牌签发前移至 task/run 迁移之前并纳入 M2 事务——签发异常或命中 0 行时整体抛出 `BusinessException` 回滚本次决定（approval 回到 pending，可重试），不再带着 null token 调 Python resume。Python 侧消费本就 fail-closed（空 token → 409），旧版静默降级的实际后果是 approved 的 run/task 被误收敛为 failed。顺带修正与 `@Transactional` 矛盾的过时注释
+- **task 表状态写入全面条件守卫**：新增 `AgentTaskMapper.transitionTaskGuarded`（`WHERE id=? AND status IN (...)`）与 `AgentConstants.NON_TERMINAL_STATUSES`，替换 decideApproval 全链 6 处 check-then-act / 无条件 `updateById`（approve → running、deny → failed、恢复失败收敛 ×2、恢复完成终态回写）——并发下只有真正赢得迁移的一方生效，与 run 侧 `completeRunGuarded` 约定对齐
+- **沙箱静默降级可观测**：`sandbox_runner.py` 9 处裸 `pass` 分类处理——rlimit 失败（CPU/内存/fd 未生效）warn、网络/Popen/fork 守卫补丁 API 变更（`AttributeError`）以 "SANDBOX DEGRADED" warn、平台不支持的 ImportError 保持静默；行为零变更，降级从不可见变为可告警
+- **ReAct 循环静默吞噬留痕**：`react.py` 非流式/流式共 4 处 `except (JSONDecodeError, TypeError): pass` 补 debug 日志（审批检测跳过 / sources 采集跳过），纯文本工具输出按设计跳过的行为不变
+- **事件循环卫生**：eval API 的 `_notify_java_record`（同步 httpx，最长阻塞 10s）与 chat 链 `_build_chat_response` 的 4 个 async 路由调用点统一下沉 `asyncio.to_thread`——后者内部含外部审核 HTTP 与全文正则扫描，配置审核引擎后此前会阻塞事件循环；`runner.py` 的同步 httpx 经确认整体运行于 `start_run` 的 to_thread 内，无需改动
+
+#### Added
+- **竞态回归测试 ×3**（`AgentApprovalRaceGuardTest`）：签发命中 0 行 / 签发抛异常 → 断言抛 BusinessException 且绝不调 Python resume、绝不迁移 run；task 守卫落选 → 断言全链路不再出现无条件 `updateById`
+
+#### 验证
+- `AgentApprovalRaceGuardTest` 9/9（含新增 3 例）+ `AgentTaskExecutionTokenTest` 全绿；`mvn compile` 通过
+- Python 1600 passed / 8 skipped；离线评测门禁零回归（recall@5=0.932、引用 F1 过阈值）；static-checks 七项全绿（Java 计数同步 697）
+
 ### 第五十三批（2026-09-22：架构减法——运营数仓扩展包拆分 + 文档声称对账）
 
 #### Removed

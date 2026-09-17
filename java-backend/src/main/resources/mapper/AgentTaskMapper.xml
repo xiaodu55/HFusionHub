@@ -54,4 +54,14 @@
         WHERE id = #{id}
     </update>
 
+    <!-- 第五十四批：条件状态迁移，仅当当前状态在 fromStatuses 内时生效 -->
+    <update id="transitionTaskGuarded">
+        UPDATE agent_task
+        SET status = #{target},
+            updated_at = NOW()
+        WHERE id = #{id}
+          AND status IN
+        <foreach collection="fromStatuses" item="s" open="(" separator="," close=")">#{s}</foreach>
+    </update>
+
 </mapper>

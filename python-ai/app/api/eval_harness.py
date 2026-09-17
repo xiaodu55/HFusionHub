@@ -154,7 +154,9 @@ async def start_run(request: _RunRequest) -> dict[str, Any]:
         retrieval_k=request.top_k,
     )
     report_mod.save_report(result, REPORTS_DIR, title=request.label)
-    _notify_java_record(run_file.name, request, result)
+    import asyncio
+    # 第五十四批：同步 httpx 回传最阻塞 10s，不得在事件循环上直接执行
+    await asyncio.to_thread(_notify_java_record, run_file.name, request, result)
     return {"run_file": run_file.name, "summary": result.overall, "meta": result.meta}
 
 
