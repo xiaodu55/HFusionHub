@@ -11,6 +11,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第五十六批（2026-09-22：生产纵深留缝——观测/检查点存储后端契约化）
+
+#### Added
+- **`AgentTraceBackend` / `CheckpointBackend` 协议**：把两个存储类 docstring 里"多副本部署可替换同类后端"的口头约定升级为正式 `Protocol` 契约（record/get/list/count/stats/stale_runs/clear；save/load/load_at_step/list_for_run/delete/prune/count）
+- **注册表工厂 + env 选择点**：`AGENT_TRACE_BACKEND` / `AGENT_CHECKPOINT_BACKEND`（默认 `sqlite`，未知值警告后回落）——未来 MySQL/Postgres/Redis/OTLP 后端实现协议并登记注册表即可接入，调用方与单例工厂零改动；本批不实现第二后端，只留缝
+- **ENVIRONMENT.md 补 4 行**：上述两个选择点 + 此前漏记的 `AGENT_TRACE_DB_PATH` / `CHECKPOINT_DB_PATH` 两个库文件路径（权威清单补全）
+
+#### 验证
+- 观测/检查点相关 58 测试全绿；Python 全量 1600 passed；离线评测门禁零回归；static-checks 七项全绿
+
 ### 第五十五批（2026-09-22：react.py 去重第一刀 + 三循环合一的可行性结论）
 
 #### Changed

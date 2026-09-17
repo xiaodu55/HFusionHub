@@ -114,6 +114,10 @@ Copy `python-ai/.env.example` to `python-ai/.env`:
 | `DEEPSEEK_MODEL` | No | `deepseek-v4-flash` | Model name (chat only, DeepSeek does not provide embedding API) |
 | `LLM_HTTP_TIMEOUT_SECONDS` | No | `120` | 共享 HTTP 客户端单请求上游超时（P3） |
 | `LLM_MAX_RETRIES` | No | `3` | 429/5xx/连接错误的额外重试次数（首次调用后的重试上限，P3） |
+| `AGENT_TRACE_BACKEND` | No | `sqlite` | Agent 运行元数据后端选择（第五十六批生产纵深留缝）：当前仅实现 `sqlite`，未知值警告后回落；新后端实现 `AgentTraceBackend` 协议并登记 `_BACKEND_REGISTRY` 即可接入，调用方零改动 |
+| `AGENT_TRACE_DB_PATH` | No | `<milvus 数据目录>/agent_traces.db` | `sqlite` 后端的运行元数据库文件路径 |
+| `AGENT_CHECKPOINT_BACKEND` | No | `sqlite` | Agent 检查点后端选择（第五十六批留缝）：当前仅实现 `sqlite`（WAL）；多副本部署实现 `CheckpointBackend` 协议（MySQL/Redis 共享存储）后经此切换 |
+| `CHECKPOINT_DB_PATH` | No | `data/checkpoints.db` | `sqlite` 后端的检查点库文件路径 |
 | `LLM_RETRY_BACKOFF_SECONDS` | No | `0.5` | 指数退避基础秒数（每次翻倍 + jitter，P3） |
 | `LLM_RESPONSE_CACHE_TTL_SECONDS` | No | `300` | LLM 响应缓存 TTL（P9）；设为 0 禁用缓存 |
 | `LLM_RESPONSE_CACHE_FUZZY_ENABLED` | No | `true` | LLM 响应缓存归一化模糊命中（精确 miss 后按空白折叠+casefold 二次查找）；设为 false 仅精确匹配 |

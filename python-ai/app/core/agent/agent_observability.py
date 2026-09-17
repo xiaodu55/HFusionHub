@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import builtins
 import json
+import logging
 import sqlite3
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Callable, Protocol
+
+logger = logging.getLogger(__name__)
 
 # ── Data models ────────────────────────────────────────────────────────
 
@@ -46,6 +49,53 @@ class AgentTrace:
 
 
 # ── Persistent store ───────────────────────────────────────────────────
+
+class AgentTraceBackend(Protocol):
+    """Agent 运行元数据后端契约（第五十六批，生产纵深留缝）。
+
+    ``AgentTraceStore``（SQLite）为默认实现；单机部署够用，多副本/共享
+    数据库部署按本协议实现第二个后端（MySQL / Postgres / OTLP 均可），
+    经 ``AGENT_TRACE_BACKEND`` 配置选择，调用方与单例工厂零改动。
+    """
+
+    def record(self, trace: AgentTrace) -> AgentTrace: ...
+
+    def get(self, run_uuid: str) -> dict[str, Any] | None: ...
+
+    def list(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        knowledge_base_id: int | None = None,
+        status: str | None = None,
+        error_only: bool = False,
+    ) -> builtins.list[dict[str, Any]]: ...
+
+    def count(
+        self,
+        *,
+        knowledge_base_id: int | None = None,
+        status: str | None = None,
+        error_only: bool = False,
+    ) -> int: ...
+
+    def stats(
+        self,
+        *,
+        window_days: int = 7,
+        knowledge_base_id: int | None = None,
+    ) -> dict[str, Any]: ...
+
+    def stale_runs(
+        self,
+        *,
+        max_running_seconds: float = 120.0,
+        knowledge_base_id: int | None = None,
+    ) -> builtins.list[dict[str, Any]]: ...
+
+    def clear(self) -> None: ...
+
 
 class AgentTraceStore:
     """SQLite-backed append-only journal of agent run metadata.
@@ -339,17 +389,33 @@ class AgentTraceStore:
 
 # ── Global singleton ───────────────────────────────────────────────────
 
-_trace_store: AgentTraceStore | None = None
+_trace_store: AgentTraceBackend | None = None
+
+# 后端注册表：新后端实现 AgentTraceBackend 协议后在此登记即可被选择
+_BACKEND_REGISTRY: dict[str, Callable[[str | None], AgentTraceBackend]] = {
+    "sqlite": lambda database_path: AgentTraceStore(database_path),
+}
 
 
-def get_agent_trace_store(database_path: str | None = None) -> AgentTraceStore:
+def _resolve_backend_name() -> str:
+    from app.utils.config import config
+    return str(getattr(config, "AGENT_TRACE_BACKEND", "sqlite") or "sqlite").strip().lower()
+
+
+def get_agent_trace_store(database_path: str | None = None) -> AgentTraceBackend:
     global _trace_store
     if _trace_store is None:
+        name = _resolve_backend_name()
+        factory = _BACKEND_REGISTRY.get(name)
+        if factory is None:
+            logger.warning(
+                "Unknown AGENT_TRACE_BACKEND=%r — falling back to sqlite", name)
+            factory = _BACKEND_REGISTRY["sqlite"]
         if database_path is None:
             from app.utils.config import config
             database_path = getattr(config, 'AGENT_TRACE_DB_PATH',
                                     str(Path(config.MILVUS_LITE_PATH).parent / "agent_traces.db"))
-        _trace_store = AgentTraceStore(database_path)
+        _trace_store = factory(database_path)
     return _trace_store
 
 

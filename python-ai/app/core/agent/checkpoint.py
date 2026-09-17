@@ -29,7 +29,7 @@ import threading
 from dataclasses import asdict, dataclass, field
 from datetime import UTC
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Protocol
 
 from app.utils.config import config
 
@@ -75,6 +75,29 @@ class Checkpoint:
 def _now_iso() -> str:
     from datetime import datetime
     return datetime.now(UTC).isoformat()
+
+
+class CheckpointBackend(Protocol):
+    """Agent 检查点后端契约（第五十六批，生产纵深留缝）。
+
+    ``CheckpointManager``（SQLite + WAL）为默认实现，单节点部署够用；
+    多副本部署按本协议实现共享存储后端（MySQL / Redis），经
+    ``AGENT_CHECKPOINT_BACKEND`` 配置选择，调用方与单例工厂零改动。
+    """
+
+    def save(self, checkpoint: Checkpoint) -> int: ...
+
+    def load(self, run_id: str) -> Checkpoint | None: ...
+
+    def load_at_step(self, run_id: str, step_index: int) -> Checkpoint | None: ...
+
+    def list_for_run(self, run_id: str) -> list[Checkpoint]: ...
+
+    def delete(self, run_id: str) -> int: ...
+
+    def prune(self, max_age_days: int = 7) -> int: ...
+
+    def count(self) -> int: ...
 
 
 class CheckpointManager:
@@ -242,18 +265,30 @@ def build_checkpoint_from_agent(
 
 # ── Singleton ──────────────────────────────────────────────────────────
 
-_checkpoint_manager: CheckpointManager | None = None
+_checkpoint_manager: CheckpointBackend | None = None
+
+# 后端注册表：新后端实现 CheckpointBackend 协议后在此登记即可被选择
+_CHECKPOINT_BACKEND_REGISTRY: dict[str, Callable[[], CheckpointBackend]] = {
+    "sqlite": lambda: CheckpointManager(),
+}
 
 
-def get_checkpoint_manager() -> CheckpointManager:
+def get_checkpoint_manager() -> CheckpointBackend:
     global _checkpoint_manager
     if _checkpoint_manager is None:
-        _checkpoint_manager = CheckpointManager()
+        name = str(getattr(config, "AGENT_CHECKPOINT_BACKEND", "sqlite") or "sqlite").strip().lower()
+        factory = _CHECKPOINT_BACKEND_REGISTRY.get(name)
+        if factory is None:
+            logger.warning(
+                "Unknown AGENT_CHECKPOINT_BACKEND=%r — falling back to sqlite", name)
+            factory = _CHECKPOINT_BACKEND_REGISTRY["sqlite"]
+        _checkpoint_manager = factory()
     return _checkpoint_manager
 
 
 __all__ = [
     "Checkpoint",
+    "CheckpointBackend",
     "CheckpointManager",
     "build_checkpoint_from_agent",
     "get_checkpoint_manager",
