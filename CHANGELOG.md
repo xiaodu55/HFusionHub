@@ -11,6 +11,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第五十八批（2026-09-22：sendMessageStream 阶段化拆分——397 行方法收敛为编排 + 会话类）
+
+#### Changed
+- **`sendMessageStream` 397 → 137 行**：主方法只保留编排（校验 → 幂等 → 持久化 → 任务创建 → 订阅接线）
+  - 前置守卫抽为 `validateStreamTarget()`（对话存在/归属/知识库可用可读，失败即 emitter 错误收尾）
+  - 用户消息幂等持久化抽为 `persistUserMessageIfAbsent()`（查重 → 插入 → DuplicateKey 回落查询）
+  - 三个 Reactor 终端回调（onNext 分发 ~125 行 / onError 收敛 ~47 行 / onComplete 兜底 ~55 行）收敛进内部类 `StreamSession`——共享状态（responseBuilder / accumulatedSources / usageFinalized / assistantSaved 等）从散落局部变量变为具名字段，DONE 哨兵、取消信号各自成方法
+- **行为零变更**：所有回调代码原样搬迁，仅 `assistantSaved[0]` 数组标记改为会话字段（Flux 信号串行保证安全）；`StreamSession` 为内部类，直接复用外部服务的 `saveStreamAssistantMessage` / `aiUnavailableMessage` / `chatUsageRecorder` / `agentTaskService`
+
+#### 决策记录：AiClient 拆分本批不实施（设计已定稿）
+- 深入检查后发现拆分触及面大于预期：`AiClientTest` 以反射直接注入 AiClient 的 `@Value` 私有字段（抽取共享管道后须重写为注入 Support 实例）；标书 4 方法有 8 个调用文件。设计已定稿并记录：`AiInternalHttpSupport`（包私有 @Component：baseUrl/internalApiToken/internalHeaders/addInternalToken/addUserProviderConfig/mapClearance）+ `AiBidClient`（标书域）+ AiClient 保留一行委托门面（调用方零改动）——留待独立批次执行
+- `AiClient` 的 77 方法中 12 个 chat 重载的宽签名是另一处债务，需与调用方签名收敛一起做
+
+#### 验证
+- `mvn compile` 通过；`ConversationServiceImplTest` 11/11 全绿（jacoco 覆盖率棘轮在单类运行下的告警与测试无关）；Python 全量 1600 passed；static-checks 七项全绿
+
 ### 第五十七批（2026-09-22：分解语义统一——上下文合并取代答案拼接，react.py 循环合一的前置解锁）
 
 #### Changed
