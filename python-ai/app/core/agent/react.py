@@ -2049,7 +2049,7 @@ class ReactAgent(Agent):
                         + " 完成它；"
                         "不要基于参考资料用文字回答。"
                     )
-                    log.info(f"[Agent V1:stream] 业务工具路由命中: {matched_tool}")
+                    logger.info(f"[Agent V1:stream] 业务工具路由命中: {matched_tool}")
             else:
                 enhanced_query = query
             messages.append(ChatMessage(role="user", content=enhanced_query))

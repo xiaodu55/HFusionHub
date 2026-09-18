@@ -11,6 +11,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第五十九批（2026-10-05：修复流式业务工具路由的 NameError——命中即整体失败）
+
+#### Fixed
+- **`react.py:2052` `log.info` → `logger.info`**：本文件只有模块级 `logger`，`log` 从未导入。触发条件为流式 ReAct 路径同时满足"检索上下文非空"与"命中演示业务工具"——而 `_run_stream_react` 的入口判据本身包含 `demo_tool_matched`（`run_stream` 内 1677 行），故该组合**必然**抛 `NameError`，被 2161 行的兜底 except 转成 `run_error` 事件；用户侧表现为：只要业务工具命中且知识库有召回，流式回答整体失败（非降级、非空答，而是终止）
+- 回归测试 `tests/test_react_stream_routing.py`（2 例）：一条断言不再发 `run_error` 且终答流出，一条以"stub LLM 收到的用户消息含 `query_order_logistics`、不含 `<reference_material>`"证明路由分支确实被执行——此前该分支无任何测试覆盖，故此类错误可长期存活
+
+#### Known debt（本批不处置，仅记录）
+- `ruff check .` 在本工作区有 12 项既存命中（`react.py` 的 I001/F401/F811 三连源于第五十七批把 `get_query_decomposer` 改为函数内导入后模块级导入未删；其余分布在 `demo_business_tools.py`、根目录 `probe_sse.py`、3 个测试文件）。CI 自 2026-09-09 账户级停摆期间未拦住这批 lint 债务，与 TODO.md P0-0 记录的窗口一致
+
 ### 第五十八批（2026-09-22：sendMessageStream 阶段化拆分——397 行方法收敛为编排 + 会话类）
 
 #### Changed
