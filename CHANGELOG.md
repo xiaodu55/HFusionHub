@@ -11,6 +11,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第六十二批（2026-10-05：lint 债务清零——`ruff check .` 首次全绿，关闭第五十九批 Known debt）
+
+#### Fixed
+- **CI `python-lint` 作业的 9 项既存命中全部清除**（工作目录 `python-ai`，与 `.github/workflows/ci.yml:135` 的 `ruff check .` 同口径）。这些债务是 CI 自 2026-09-09 账户级停摆期间无人拦截留下的，第五十九批曾逐项记录
+  - 5 项 `I001` + 1 项 `F401` 由 `ruff --fix` 安全修复：`demo_business_tools.py`（`RiskLevel, ToolSpec` 排序）、`test_acl_regression_36.py` / `test_subject_acl.py`（app.* 导入块排序）、`test_eval_baseline.py`（`compute_citation_*` 排序）、`probe_sse.py`（未使用的 `import json`）——**纯重排，无一条改变解析结果**
+  - 2 项 `E741`：`probe_sse.py:20,22` 读取 `.env` 的列表推导变量 `l` → `raw`（`l` 与 `1` 视觉歧义）
+  - 1 项 `F841`：`test_acl_matrix.py:106` 的 `store = _matrix_store(...)` 是**死设置**——该用例只断言 `build_acl_metadata_filter(None) == build_acl_metadata_filter("general")` 的 fail-closed 契约，桩 store 从未参与，删除该行并去掉随之无用的 `monkeypatch` 形参（本文件的 clearance 用例本就直接调用 `clear_clearance()`，不依赖 monkeypatch 还原）
+
+#### 验证
+- `ruff check .`（python-ai）**All checks passed**——本仓 Python 侧门禁首次回到绿色
+- 受影响 4 个测试文件 87/87 通过；Python 全量 **1621 passed / 8 skipped**，与第六十一批基线逐条一致（本批零行为变更的判据）；static-checks 七项全绿（计数仍 1577，本批不增测试）
+
 ### 第六十一批（2026-10-05：RetrievalPipeline 直接单测——检索编排首次获得独立可测面）
 
 #### Added

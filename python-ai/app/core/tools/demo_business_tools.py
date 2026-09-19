@@ -12,7 +12,7 @@ import time
 from typing import Any
 
 from .base import BaseTool
-from .spec import ToolSpec, RiskLevel
+from .spec import RiskLevel, ToolSpec
 
 
 def _demo_id(prefix: str) -> str:

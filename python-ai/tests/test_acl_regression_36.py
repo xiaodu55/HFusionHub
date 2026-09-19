@@ -16,9 +16,9 @@ from unittest.mock import patch
 
 import pytest
 
+from app.core.rag.query_router import ChannelConfig, ChannelType, KeywordChannel
 from app.core.security.clearance import clear_clearance, get_clearance, set_clearance
 from app.core.vectorstore.milvus_store import _matches_metadata_filter
-from app.core.rag.query_router import ChannelConfig, ChannelType, KeywordChannel
 
 # ---------------------------------------------------------------------------
 # 谓词：JSON 字符串形态 metadata 容错

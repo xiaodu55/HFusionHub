@@ -16,6 +16,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from app.api.tenant_middleware import TenantMiddleware
 from app.core.security.clearance import (
     DEFAULT_CLEARANCE,
     DEFAULT_VISIBILITY,
@@ -28,7 +29,6 @@ from app.core.security.clearance import (
     set_clearance,
 )
 from app.core.vectorstore.milvus_store import _matches_metadata_filter
-from app.api.tenant_middleware import TenantMiddleware
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
@@ -37,7 +37,6 @@ for _path in (str(SCRIPTS_DIR), str(PROJECT_ROOT)):
         sys.path.insert(0, str(_path))
 
 from eval_runtime import subject_for_case  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # clearance 上下文与等级模型

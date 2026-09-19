@@ -10,7 +10,6 @@
 """
 from __future__ import annotations
 
-import json
 import time
 
 import httpx
@@ -18,10 +17,10 @@ import httpx
 JAVA = "http://localhost:8080/api"
 PY = "http://localhost:9000/api"
 
-admin = [l.split("=", 1)[1].strip() for l in open("../docker/.env", encoding="utf-8")
-         if l.startswith("ADMIN_PASSWORD=")][0]
-py_token = [l.split("=", 1)[1].strip() for l in open(".env", encoding="utf-8")
-            if l.startswith("PYTHON_AI_INTERNAL_TOKEN=")][0]
+admin = [raw.split("=", 1)[1].strip() for raw in open("../docker/.env", encoding="utf-8")
+         if raw.startswith("ADMIN_PASSWORD=")][0]
+py_token = [raw.split("=", 1)[1].strip() for raw in open(".env", encoding="utf-8")
+            if raw.startswith("PYTHON_AI_INTERNAL_TOKEN=")][0]
 
 
 def probe_java(prompt: str, run: int) -> tuple[float, float]:

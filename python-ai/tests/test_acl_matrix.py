@@ -101,9 +101,8 @@ def test_over_recall_truncates_to_top_k_preserving_order(monkeypatch):
     assert [r["chunk_id"] for r in results] == ["c-general-1", "c-general-2"]
 
 
-def test_missing_clearance_is_least_privilege(monkeypatch):
+def test_missing_clearance_is_least_privilege():
     clear_clearance()
-    store = _matrix_store(monkeypatch, _CANDIDATES)
     # 未设置 clearance 时调用方必须按 general 兜底（fail-closed 契约）
     assert build_acl_metadata_filter(None) == build_acl_metadata_filter("general")
 
