@@ -11,6 +11,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第六十一批（2026-10-05：RetrievalPipeline 直接单测——检索编排首次获得独立可测面）
+
+#### Added
+- **`python-ai/tests/test_retrieval_pipeline.py`（19 例）**：第六十批抽出的编排此前只能经 `ReactAgent` 间接覆盖，现按模块直接测，**本批零生产代码改动**
+  - **两条入口的口径分叉逐项钉死**：`retrieve_context`（转发历史 / `retrieval_top_k` 覆盖规划值 / 异常降 `None`）与 `retrieve_context_for_stream`（不转发 / 不覆盖 / 异常升格）——把"有意保留的分叉"升级为有断言保护的既定契约，将来统一时测试会精确指出改的是哪一条
+  - **空召回 vs 服务故障**：`("", [], kb_id)` 与 `None` 的语义区分（M10 口径），以及流式入口故障必须抛出
+  - **`safe_compress` 四条路径**：空上下文短路（压缩器不得被创建）、策略拒压时回落原文、过激压缩守卫（压缩比 <25% 且原文 >500 token 时回退并取全块号）、正常压缩放行
+  - **`decompose_retrieve_merge_context`**：单子问题返回 `None` 交回单路检索；依赖层间串行、层内并行的实际检索次序；跨子问题内容去重；`execution_plan` 漏项的兜底检索；依赖未登记子问题整条路径跳过；全部子问题失败升格 `RuntimeError`（`__cause__` 保留末次异常）；部分失败按空结果降级不拖垮整批
+  - **`empty_context_reply`**：库空文案 / 证据不足文案 / store 不可达时的保守回落（不误报"库是空的"）
+- **测试计数 1558 → 1577**：README badge 与三处正文、`README_EN.md`、`docs/ROADMAP.md` 同步
+- 桩件选型：压缩器以 stub 注入且分解类用例让 `safe_compress` 直通，使编排断言不受压缩策略演进影响；`SubQuestion` / `DecompositionResult` 使用真实数据类而非 mock，以保住 `can_execute` 的依赖判定语义
+
+#### 验证
+- 新文件 19/19 通过；Python 全量 1621 passed / 8 skipped；`ruff check` 对新文件全绿（既存 9 项债务仍在本批未触碰文件）；static-checks 七项全绿
+
 ### 第六十批（2026-10-05：检索编排自 react.py 抽出——RetrievalPipeline，R15-20 前半程）
 
 #### Changed
