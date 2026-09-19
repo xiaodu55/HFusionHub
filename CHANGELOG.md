@@ -11,6 +11,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第六十三批（2026-10-05：运维面 API 契约测试——gateway/guardrails/memory/tools 脱离零测试）
+
+#### Added
+- **`tests/test_api_contract.py` +14 个用例（+25 收集）**，覆盖 R15-21 剩余路由中运维面四类。这批契约是"读代码推不出来、但错了就出事"的那类：
+  - **鉴权守卫挂载**（8 端点参数化）：缺 token 与伪造 token 都必须 401。守卫挂在 `app/main.py:173-185` 的注册处而非各端点，任何人把某个 router 改回无依赖注册，测试立刻红
+  - **gateway 不泄漏承诺首次可执行**：`app/api/gateway.py:11-12` 的 docstring 声明"绝不暴露 API key、provider URL 与提示词内容"，此前无任何保护。现以携带哨兵 key/URL 的真实 `ModelGateway` + `ProviderConfig` 走 `/status`、`/models`，断言响应体不含二值，且 provider 字段集合封闭在 11 个运维字段内（新增字段即失败，逼作者先想清楚是否敏感）
+  - **guardrails 是诊断端点不是拦截器**：命中 critical 注入必须返回 **200 + `allowed=False` + `blocked_reason`**，而不是 4xx——把拦截改成 HTTP 错误会让调用方无法区分"内容被判危险"与"服务故障"。另钉 kill-switch 关闭时完全不检查、check-input/check-output 共用校验模型、5 类畸形请求 422（空/超长/channel 枚举/ID 下界/必填缺失）、status 端点只给开关计数与审计元数据
+  - **memory consolidate 形状先行**：Java 侧消息快照的角色白名单、内容非空、ID 为正、100 条上限全部 422 拦截；未启用记忆时短路返回 `{"enabled": False, "saved": 0}` 且不得触达抽取
+  - **tools/registry 降级契约**：token 有效但缺租户上下文时 400（fail-closed，不默认租户）；registry 构造失败时返回 `{"tools": [], "total": 0, "error": …}` 而非 500
+- **测试计数 1577 → 1591**：README badge 与三处正文、`README_EN.md`、`docs/ROADMAP.md` 同步
+- `docs/OPTIMIZATION_PLAN.md` R15-21 更新为 🟡 部分完成，并列出剩余 26 个无 API 层测试的端点（`eval_harness` 7 / `plugin_admin` 8 / `agent_observability` 7 / `mcp_admin` 4 / `mcp` 3 / `ingest` 1）
+
+#### 验证
+- 本文件 34/34 通过；Python 全量 **1646 passed / 8 skipped**（新增 25 例收集，无既有用例受影响）；`ruff check .` 保持全绿；static-checks 七项全绿
+- 本批零生产代码改动——所有失败模式均由测试侧暴露
+
 ### 第六十二批（2026-10-05：lint 债务清零——`ruff check .` 首次全绿，关闭第五十九批 Known debt）
 
 #### Fixed
