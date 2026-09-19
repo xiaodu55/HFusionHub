@@ -155,6 +155,62 @@ class TestAuditFlush:
         assert count == 0
 
 
+# ── Backend sync token ───────────────────────────────────────────────
+
+class TestBackendSyncToken:
+    """出站同步只认服务权威 token（第六十四批修复）。
+
+    历史缺陷：两处出站读取从未部署过的 HFUSIONHUB_INTERNAL_TOKEN，导致插件
+    审计静默不同步；现在与入站守卫共用 config.INTERNAL_API_TOKEN。
+    """
+
+    @patch("httpx.post")
+    @patch("app.core.plugin.audit.config")
+    def test_batch_sync_uses_internal_api_token(self, mock_config, mock_post):
+        import os
+        from types import SimpleNamespace
+
+        from app.core.plugin.audit import _post_to_java_backend_batch
+
+        mock_config.INTERNAL_API_TOKEN = "shared-internal-token"
+        mock_post.return_value = SimpleNamespace(status_code=200, text="")
+        entry = record_audit(plugin_id="pid-1", plugin_name="p", action="install")
+
+        with patch.dict(os.environ, {"HFUSIONHUB_INTERNAL_TOKEN": "legacy-ignored"}):
+            assert _post_to_java_backend_batch([entry]) is True
+
+        url = mock_post.call_args.args[0]
+        assert url.endswith("/internal/plugin/audit-logs")
+        assert mock_post.call_args.kwargs["headers"] == {
+            "X-Internal-Token": "shared-internal-token"}
+        assert isinstance(mock_post.call_args.kwargs["json"], list)
+
+    @patch("httpx.post")
+    @patch("app.core.plugin.audit.config")
+    def test_single_sync_uses_internal_api_token(self, mock_config, mock_post):
+        from types import SimpleNamespace
+
+        from app.core.plugin.audit import _post_to_java_backend
+
+        mock_config.INTERNAL_API_TOKEN = "shared-internal-token"
+        mock_post.return_value = SimpleNamespace(status_code=200, text="")
+        entry = record_audit(plugin_id="pid-1", plugin_name="p", action="enable")
+
+        assert _post_to_java_backend(entry) is True
+        assert mock_post.call_args.kwargs["headers"] == {
+            "X-Internal-Token": "shared-internal-token"}
+
+    @patch("httpx.post")
+    @patch("app.core.plugin.audit.config")
+    def test_sync_skips_http_when_token_unconfigured(self, mock_config, mock_post):
+        from app.core.plugin.audit import _post_to_java_backend_batch
+
+        mock_config.INTERNAL_API_TOKEN = ""
+        entry = record_audit(plugin_id="pid-1", plugin_name="p", action="install")
+        assert _post_to_java_backend_batch([entry]) is False
+        mock_post.assert_not_called()
+
+
 # ── Valid actions ────────────────────────────────────────────────────
 
 class TestValidActions:

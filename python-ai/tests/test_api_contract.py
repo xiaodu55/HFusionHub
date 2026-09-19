@@ -1,12 +1,15 @@
 """API 层契约测试（第十五轮 R15-21，第六十三批续）。
 
-覆盖此前零测试的路由（bid / rag，以及本批新增的 gateway / guardrails /
-memory_internal / tools）。用 FastAPI TestClient 走真实请求-响应契约：
-鉴权守卫挂载、参数校验（422）、错误包装（status=error）、降级不 5xx、
-成功路径（monkeypatch 工作流），不依赖 LLM / Milvus。
+覆盖此前零测试的路由（bid / rag，第六十三批的 gateway / guardrails /
+memory_internal / tools，以及第六十四批的 plugin_admin）。用 FastAPI
+TestClient 走真实请求-响应契约：鉴权守卫挂载、参数校验（422）、错误包装
+（status=error）、降级不 5xx、成功路径（monkeypatch 工作流），不依赖 LLM /
+Milvus。
 """
 
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -411,4 +414,283 @@ def test_tool_registry_degrades_instead_of_500(client, monkeypatch):
     body = resp.json()
     assert body["tools"] == [] and body["total"] == 0
     assert "无法加载工具注册表" in body["error"]
+
+
+# ── plugin_admin API（第六十四批）─────────────────────────────────────
+
+PLUGIN_ADMIN_ROUTES = [
+    ("get", "/api/plugin/list"),
+    ("get", "/api/plugin/tool-specs"),
+    ("post", "/api/plugin/install"),
+    ("post", "/api/plugin/enable"),
+    ("post", "/api/plugin/disable"),
+    ("post", "/api/plugin/uninstall"),
+    ("post", "/api/plugin/verify"),
+    ("get", "/api/plugin/audit-logs"),
+]
+
+
+class _RegisteredPlugin:
+    """registry 中已注册插件的最小替身。"""
+
+    def __init__(self, plugin_id, *, enabled=True, tool_specs=(), manifest_hash="sha256:abc"):
+        self.plugin_id = plugin_id
+        self.name = f"{plugin_id}-name"
+        self.version = "1.0.0"
+        self.enabled = enabled
+        self.tool_specs = list(tool_specs)
+        self.manifest_hash = manifest_hash
+
+
+@pytest.fixture
+def plugin_api():
+    import app.api.plugin_admin as plugin_api
+    return plugin_api
+
+
+@pytest.fixture
+def plugin_api_calls(monkeypatch, plugin_api):
+    """把 plugin_admin 的写侧协作者换成有序记录器。"""
+    calls = []
+    for name in ("record_install", "record_enable", "record_disable", "record_uninstall",
+                 "enable_plugin", "disable_plugin", "unregister_plugin"):
+        monkeypatch.setattr(
+            plugin_api, name,
+            lambda *args, _name=name, **kwargs: calls.append((_name, args, kwargs)))
+    return calls
+
+
+@pytest.mark.parametrize("method,path", PLUGIN_ADMIN_ROUTES)
+def test_plugin_admin_routes_reject_missing_and_forged_internal_token(
+        bare_client, method, path):
+    """plugin_admin 全部端点由 router 级守卫先拦截：缺 token / 伪造 token 一律 401。"""
+    call = getattr(bare_client, method)
+    kwargs = {"json": {}} if method == "post" else {}
+    assert call(path, **kwargs).status_code == 401
+
+    forged = call(path, **kwargs, headers={"X-Internal-Token": "guess-me"})
+    assert forged.status_code == 401
+
+
+def test_plugin_admin_accepts_the_router_guard_token(client, monkeypatch, plugin_api):
+    """回归防护：token 有效 + 租户上下文齐备时必须放行（200），不得 403。
+
+    历史缺陷：端点内二次校验 HFUSIONHUB_INTERNAL_TOKEN（部署中从未配置），
+    使 plugin_admin 在通过 router 守卫后仍然恒定 403。
+    """
+    monkeypatch.setattr(plugin_api, "list_plugins", lambda enabled_only=False: [])
+    resp = client.get("/api/plugin/list")
+    assert resp.status_code == 200
+    assert resp.json() == {"plugins": [], "total": 0}
+
+
+def test_plugin_admin_requires_verifiable_tenant(plugin_api):
+    """token 有效但租户上下文缺失/非法时必须 fail-closed 到 400。"""
+    bare = TestClient(create_app())
+    valid = {"X-Internal-Token": "test-internal-token"}
+    assert bare.get("/api/plugin/list").status_code == 401
+    assert bare.get("/api/plugin/list", headers=valid).status_code == 400
+    assert bare.get(
+        "/api/plugin/list", headers={**valid, "X-Tenant-Id": "acme"}).status_code == 400
+
+
+def test_plugin_list_reports_per_plugin_tool_count(client, monkeypatch, plugin_api):
+    plugins = [
+        _RegisteredPlugin("p1", tool_specs=({"name": "ocr"}, {"name": "table"})),
+        _RegisteredPlugin("p2", enabled=False),
+    ]
+    seen = {}
+
+    def fake_list(enabled_only=False):
+        seen["enabled_only"] = enabled_only
+        return plugins
+
+    monkeypatch.setattr(plugin_api, "list_plugins", fake_list)
+    body = client.get("/api/plugin/list").json()
+    assert seen["enabled_only"] is False  # 管理视图必须含停用插件
+    assert body["total"] == 2
+    assert body["plugins"][0] == {
+        "plugin_id": "p1", "name": "p1-name", "version": "1.0.0",
+        "manifest_hash": "sha256:abc", "enabled": True, "tool_count": 2}
+    assert body["plugins"][1]["tool_count"] == 0
+
+
+def test_plugin_tool_specs_only_expose_enabled(client, monkeypatch, plugin_api):
+    seen = {}
+
+    def fake(enabled_only=True):
+        seen["enabled_only"] = enabled_only
+        return [{"name": "ocr"}]
+
+    monkeypatch.setattr(plugin_api, "list_all_tool_specs", fake)
+    body = client.get("/api/plugin/tool-specs").json()
+    assert seen["enabled_only"] is True
+    assert body == {"tool_specs": [{"name": "ocr"}], "total": 1}
+
+
+def test_install_requires_expected_hash(client):
+    """expected_hash 必填：未给出哈希的 wheel 不得进入安装流程。"""
+    resp = client.post("/api/plugin/install", json={"wheel_path": "/tmp/x.whl"})
+    assert resp.status_code == 422
+
+
+def test_install_maps_load_error_to_400_without_audit(client, monkeypatch,
+                                                      plugin_api, plugin_api_calls):
+    from app.core.plugin.loader import PluginLoadError
+
+    def boom(**kwargs):
+        raise PluginLoadError("p1", "manifest hash mismatch")
+
+    monkeypatch.setattr(plugin_api, "load_and_register_wheel", boom)
+    resp = client.post("/api/plugin/install", json={
+        "wheel_path": "/tmp/x.whl", "expected_hash": "sha256:abc"})
+    assert resp.status_code == 400
+    assert "hash mismatch" in resp.json()["message"]
+    assert plugin_api_calls == []
+
+
+def test_install_wraps_unexpected_error_as_500(client, monkeypatch, plugin_api):
+    def boom(**kwargs):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(plugin_api, "load_and_register_wheel", boom)
+    resp = client.post("/api/plugin/install", json={
+        "wheel_path": "/tmp/x.whl", "expected_hash": "sha256:abc"})
+    assert resp.status_code == 500
+    assert "插件安装失败" in resp.json()["message"]
+
+
+def test_install_records_audit_after_registration(client, monkeypatch, plugin_api):
+    registered = _RegisteredPlugin("p1", tool_specs=({"name": "ocr"},))
+    calls = []
+
+    def fake_load(**kwargs):
+        calls.append(("load", kwargs))
+        return registered
+
+    def fake_record(**kwargs):
+        calls.append(("record", kwargs))
+
+    monkeypatch.setattr(plugin_api, "load_and_register_wheel", fake_load)
+    monkeypatch.setattr(plugin_api, "record_install", fake_record)
+    resp = client.post("/api/plugin/install", json={
+        "wheel_path": "/tmp/p.whl", "plugin_id": "p1",
+        "expected_hash": "sha256:abc", "operator_id": 9})
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "status": "installed", "plugin_id": "p1", "name": "p1-name",
+        "version": "1.0.0", "tool_count": 1}
+    assert calls[0] == ("load", {
+        "wheel_path": "/tmp/p.whl", "plugin_id": "p1", "expected_hash": "sha256:abc"})
+    assert calls[1] == ("record", {
+        "plugin_id": "p1", "plugin_name": "p1-name",
+        "manifest_hash": "sha256:abc", "operator_id": 9})
+
+
+@pytest.mark.parametrize("path", [
+    "/api/plugin/enable", "/api/plugin/disable",
+    "/api/plugin/uninstall", "/api/plugin/verify"])
+def test_plugin_action_returns_404_for_unknown_plugin(client, monkeypatch,
+                                                     plugin_api, path):
+    monkeypatch.setattr(plugin_api, "get_plugin", lambda plugin_id: None)
+    resp = client.post(path, json={"plugin_id": "ghost"})
+    assert resp.status_code == 404
+    assert resp.json() == {"code": 404, "message": "插件不存在"}
+
+
+def test_enable_skips_state_change_and_audit_when_already_enabled(
+        client, monkeypatch, plugin_api, plugin_api_calls):
+    monkeypatch.setattr(
+        plugin_api, "get_plugin", lambda pid: _RegisteredPlugin("p1", enabled=True))
+    body = client.post("/api/plugin/enable", json={"plugin_id": "p1"}).json()
+    assert body == {"status": "already_enabled", "plugin_id": "p1"}
+    assert plugin_api_calls == []
+
+
+def test_disable_skips_state_change_and_audit_when_already_disabled(
+        client, monkeypatch, plugin_api, plugin_api_calls):
+    monkeypatch.setattr(
+        plugin_api, "get_plugin", lambda pid: _RegisteredPlugin("p1", enabled=False))
+    body = client.post("/api/plugin/disable", json={"plugin_id": "p1"}).json()
+    assert body == {"status": "already_disabled", "plugin_id": "p1"}
+    assert plugin_api_calls == []
+
+
+def test_enable_changes_state_before_recording_audit(client, monkeypatch,
+                                                     plugin_api, plugin_api_calls):
+    monkeypatch.setattr(
+        plugin_api, "get_plugin", lambda pid: _RegisteredPlugin("p1", enabled=False))
+    resp = client.post("/api/plugin/enable", json={"plugin_id": "p1", "operator_id": 3})
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "enabled", "plugin_id": "p1"}
+    assert [c[0] for c in plugin_api_calls] == ["enable_plugin", "record_enable"]
+    assert plugin_api_calls[1][2] == {
+        "plugin_id": "p1", "plugin_name": "p1-name", "operator_id": 3}
+
+
+def test_disable_changes_state_before_recording_audit(client, monkeypatch,
+                                                      plugin_api, plugin_api_calls):
+    monkeypatch.setattr(
+        plugin_api, "get_plugin", lambda pid: _RegisteredPlugin("p1", enabled=True))
+    body = client.post("/api/plugin/disable", json={
+        "plugin_id": "p1", "reason": "security concern", "operator_id": 4}).json()
+    assert body == {"status": "disabled", "plugin_id": "p1"}
+    assert [c[0] for c in plugin_api_calls] == ["disable_plugin", "record_disable"]
+    assert plugin_api_calls[1][2] == {
+        "plugin_id": "p1", "plugin_name": "p1-name",
+        "reason": "security concern", "operator_id": 4}
+
+
+def test_uninstall_records_audit_before_deregistering(client, monkeypatch,
+                                                      plugin_api, plugin_api_calls):
+    """审计先落盘：unregister 失败也必须留下卸载痕迹。"""
+    monkeypatch.setattr(
+        plugin_api, "get_plugin", lambda pid: _RegisteredPlugin("p1", enabled=False))
+    body = client.post("/api/plugin/uninstall", json={"plugin_id": "p1"}).json()
+    assert body == {"status": "uninstalled", "plugin_id": "p1"}
+    assert [c[0] for c in plugin_api_calls] == ["record_uninstall", "unregister_plugin"]
+
+
+def test_verify_reports_manifest_hash_drift(client, monkeypatch, plugin_api):
+    plugin = _RegisteredPlugin("p1", manifest_hash="sha256:abc")
+    plugin.descriptor = SimpleNamespace(manifest={"plugin_id": "p1"})
+    monkeypatch.setattr(plugin_api, "get_plugin", lambda pid: plugin)
+    import app.core.plugin.manifest as manifest_module
+    monkeypatch.setattr(
+        manifest_module, "compute_manifest_hash", lambda manifest: "sha256:tampered")
+    body = client.post("/api/plugin/verify", json={"plugin_id": "p1"}).json()
+    assert body == {
+        "plugin_id": "p1", "valid": False,
+        "current_hash": "sha256:tampered", "stored_hash": "sha256:abc"}
+
+
+def test_verify_confirms_intact_manifest(client, monkeypatch, plugin_api):
+    plugin = _RegisteredPlugin("p1", manifest_hash="sha256:abc")
+    plugin.descriptor = SimpleNamespace(manifest={"plugin_id": "p1"})
+    monkeypatch.setattr(plugin_api, "get_plugin", lambda pid: plugin)
+    import app.core.plugin.manifest as manifest_module
+    monkeypatch.setattr(
+        manifest_module, "compute_manifest_hash", lambda manifest: "sha256:abc")
+    assert client.post("/api/plugin/verify", json={"plugin_id": "p1"}).json()["valid"] is True
+
+
+def test_audit_logs_forward_filters_and_wrap_shape(client, monkeypatch, plugin_api):
+    class _Entry:
+        def to_dict(self):
+            return {"action": "install", "plugin_id": "p1"}
+
+    seen = []
+
+    def fake_get(plugin_id=None, limit=50):
+        seen.append((plugin_id, limit))
+        return [_Entry()]
+
+    monkeypatch.setattr(plugin_api, "get_audit_log", fake_get)
+    body = client.get("/api/plugin/audit-logs",
+                      params={"plugin_id": "p1", "limit": 7}).json()
+    assert seen[0] == ("p1", 7)
+    assert body == {"entries": [{"action": "install", "plugin_id": "p1"}], "total": 1}
+
+    client.get("/api/plugin/audit-logs")
+    assert seen[1] == (None, 50)
 

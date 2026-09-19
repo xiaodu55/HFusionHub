@@ -24,6 +24,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.utils.config import config
+
 logger = logging.getLogger(__name__)
 
 ACTION_INSTALL = "install"
@@ -337,10 +339,10 @@ def _post_to_java_backend_batch(entries: list) -> bool:
     try:
         import httpx
         java_url = os.environ.get("JAVA_BASE_URL", "http://localhost:8080")
-        internal_token = os.environ.get("HFUSIONHUB_INTERNAL_TOKEN", "")
+        internal_token = config.INTERNAL_API_TOKEN
 
         if not internal_token:
-            logger.warning("HFUSIONHUB_INTERNAL_TOKEN 未设置，跳过审计同步")
+            logger.warning("INTERNAL_API_TOKEN 未设置，跳过审计同步")
             return False
 
         resp = httpx.post(
@@ -368,10 +370,10 @@ def _post_to_java_backend(entry: AuditEntry) -> bool:
     try:
         import httpx
         java_url = os.environ.get("JAVA_BASE_URL", "http://localhost:8080")
-        internal_token = os.environ.get("HFUSIONHUB_INTERNAL_TOKEN", "")
+        internal_token = config.INTERNAL_API_TOKEN
 
         if not internal_token:
-            logger.warning("HFUSIONHUB_INTERNAL_TOKEN 未设置，跳过审计同步")
+            logger.warning("INTERNAL_API_TOKEN 未设置，跳过审计同步")
             return False
 
         wire_data = entry.to_wire()

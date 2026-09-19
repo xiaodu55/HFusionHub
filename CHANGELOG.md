@@ -11,6 +11,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第六十四批（2026-10-05：plugin_admin 恒 403 缺陷修复 + 8 端点契约测试——插件审计同步恢复）
+
+#### Fixed
+- **`app/api/plugin_admin.py`：删除端点内的第二套鉴权，`/api/plugin/*` 8 个端点恢复可用**。建测试时发现的既存生产缺陷（此前零测试所以从未暴露）：`_verify_internal_token` 校验的是 `HFUSIONHUB_INTERNAL_TOKEN`，而全仓部署只配置 `PYTHON_AI_INTERNAL_TOKEN`（`app/utils/config.py:74`、`docker/.env` / `deploy/.env` 变量名清单），该键在任何环境都为空 → `if not expected` 分支恒真 → **每个端点无论携带什么凭证都返回 403**。守卫实际挂在注册处（`app/main.py:176` 的 `tenant_dependencies`），端点内自校验既冗余又致命
+  - 移除 helper 及 8 处调用、各端点的 `x_internal_token` 形参与随之无用的 `Header` 导入（255→211 行）；权威守卫仍是 router 级"内部 token + 可验证租户上下文"，行为口径与本仓其余 data-touching 路由一致
+- **`app/core/plugin/audit.py:342,373`：插件审计出站同步改用服务权威 token**。两处 `_post_to_java_backend*` 同样读 `HFUSIONHUB_INTERNAL_TOKEN`，取空即 `logger.warning("…跳过审计同步")` 直接返回 False——**审计只落本地 SQLite，Java 侧 `plugin_audit_log` 静默收不到任何条目**（接收端 `InternalPluginController.java:99` 一直在等）。现统一为 `config.INTERNAL_API_TOKEN`，与入站守卫、Java `python-ai.internal-token` 共用同一密钥（单一共享密钥双向复用的既有设计）
+
+#### Added
+- **`tests/test_api_contract.py` +18 个用例（+28 收集）**：8 个 plugin_admin 端点脱离零测试
+  - **鉴权挂载与"不得二次校验"同时钉死**：8 端点参数化断言缺 token / 伪造 token 一律 401（守卫在注册处，业务逻辑触达之前）；再以"有效 token + 合法租户 → 200"这条正向断言锁死本次修复——回归成 403-by-construction 即红
+  - **租户 fail-closed**：token 有效但缺 `X-Tenant-Id` 或头非法（非正整数）时必须 400，不默认租户
+  - **写侧顺序契约**（用有序记录器替换全部写侧协作者）：`install` 成功后才 `record_install`；`enable`/`disable` 先改状态再记审计；**`uninstall` 先记审计再注销插件**（`unregister_plugin` 抛错也必须留下卸载痕迹）
+  - **幂等短路不产生审计**：`already_enabled` / `already_disabled` 既不调用 `enable_plugin`/`disable_plugin`，也不写审计条目——否则启停面板会被无变化操作刷满
+  - **错误映射**：`PluginLoadError`→400（业务拒绝，不是服务故障）、未预期异常→500、`expected_hash` 缺失→422（无哈希的 wheel 不得进入安装流程）、未知 plugin_id 在 enable/disable/uninstall/verify 四处均 404 且体为 `{"code": 404, "message": "插件不存在"}`（全局 handler 的响应形状，非 FastAPI 默认 `detail`）
+  - **读侧形状**：`/list` 管理视图必须含停用插件（`enabled_only=False`）并逐插件给出 `tool_count`；`/tool-specs` 只暴露启用插件（`enabled_only=True`）；`/verify` 报告哈希漂移（`valid=False` + 双侧哈希）；`/audit-logs` 透传 `plugin_id`/`limit`（默认 50）
+- **`tests/test_plugin_audit.py` +3 例**：批量与单条同步都必须以 `config.INTERNAL_API_TOKEN` 作为 `X-Internal-Token` 发出（并在环境里塞入 `HFUSIONHUB_INTERNAL_TOKEN` 哨兵，证明旧键不再被读取）；token 未配置时直接返回 False 且**不发任何 HTTP 请求**
+- **测试计数 1591 → 1612**：README badge 与三处正文、`README_EN.md`、`docs/ROADMAP.md` 同步
+- `docs/OPTIMIZATION_PLAN.md` R15-21 剩余无 API 层测试端点由 26 收窄到 22，并记录本批发现的鉴权缺陷
+
+#### 决策记录
+- **修复方向选 A（删冗余自校验）而非 B（补配置该键）**：两套 token 并存本身就是事故源——router 级守卫已经是权威，端点内再校验一个不同变量名没有任何安全增益，只增加"看起来有两道锁"的误导。B 会让同一服务同时接受两个不同密钥，且 `HFUSIONHUB_INTERNAL_TOKEN` 在部署侧仍需新配，收益为零
+- **未一并收紧 `install` 的 500 响应文案**（`plugin_admin.py:122` 把内部异常文本拼进 `message`）：与 `general_exception_handler` "不回传实现细节"的口径不一致，但这是内部管理员 API、由 Java 侧透给操作者看失败原因，属有意信息量，本批按现状钉死；是否统一为通用文案 + 日志留痕，留待确认
+- **`audit.py` 顶部新增 `from app.utils.config import config`**：`app/utils/config.py` 只依赖 stdlib 与 dotenv，无循环导入风险；改在调用点读取（而非导入期快照）保证 monkeypatch 生效
+
+#### 验证
+- `tests/test_api_contract.py` + `tests/test_plugin_audit.py` **85/85 通过**；Python 全量 **1677 passed / 8 skipped**（第六十三批基线 1646 + 31 收集，无既有用例受影响）
+- `ruff check .`（python-ai）保持全绿；static-checks 七项全绿，含"内部 token 键一致性"与测试计数同步
+- 本批生产改动仅限 `plugin_admin.py`（删鉴权helper 及其形参）与 `audit.py`（两处 token 取值来源），无检索/对话链路行为变化
+
 ### 第六十三批（2026-10-05：运维面 API 契约测试——gateway/guardrails/memory/tools 脱离零测试）
 
 #### Added
