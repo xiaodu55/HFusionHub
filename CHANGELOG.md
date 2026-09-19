@@ -11,6 +11,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第六十五批（2026-10-05：agent_observability 契约测试——观测面首次经过真实鉴权挂载）
+
+#### Added
+- **`tests/test_api_contract.py` +15 个用例（+30 收集）**，覆盖 `/api/agent/observability` 全部 7 端点。**本批零生产代码改动**
+  - **先补上"守卫从未被测过"这一层**：既有 `tests/test_agent_evaluation.py:24-26` 自建裸 `FastAPI()` 再 `include_router(obs_router)`，因此 `/evaluate/run` 的九条业务用例**从不经过内部 token 与租户守卫**——router 若被改回无依赖注册，那批用例一条都不会红。本批用真实 `create_app()` 参数化断言 7 端点缺 token / 伪造 token 一律 401，并断言 token 有效但缺 `X-Tenant-Id` 时 400（fail-closed，不默认租户）
+  - **分页 total 与当页过滤同源**：`/runs` 必须把 `knowledge_base_id/status/error_only` 三元组同时交给 `store.list` 与 `store.count`，只给一侧就会造成"总数与筛选条件互相矛盾"的静默错位；默认值逐项钉死（`limit=50, offset=0, error_only=False`），6 类越界查询参数 422（`limit` 0/201、`offset` -1/1001、`kb_id` 0、`status` 31 字符）
+  - **`POST /runs` 字段集封闭**：以 `AgentTrace.__dataclass_fields__` 反查，payload 必须覆盖除 `created_at` 外的全部 14 个字段并逐字段等值透传——将来给 `AgentTrace` 加字段而端点忘记透传，Java 侧推送的 trace 会静默丢列，这条断言会立刻指出
+  - **参数改名即失败**：`/stats` 的 `days` → `window_days`、`/stale-runs` 的 `max_running_seconds` 默认 120.0 且响应回显阈值、`count == len(stale_runs)`
+  - **写侧校验**：`run_uuid` 空/超 64、`status` 空、`token_usage` 值非 int、`duration_ms` 非数值全部 422，且校验失败时 `store.record` 一次都不调用（不产生半条 trace）
+  - **`/evaluate/run` 在真实挂载下的三条边界**：未知维度静默丢弃、`dimensions: []` 回落全量维度、**缺 `knowledge_base_id` 时绝不构造 Agent**（把 `get_agent` 换成抛断言的桩）——离线已答题原样送评、`ground_truth` 只参与打分不冒充答案、`agent_call.agent_status == "skipped"`；批形状校验 6 例（空 cases、缺 query、空 case_id、超时上下界、201 条上限）
+  - **`/evaluate/regression-check` 只回报阈值**：自定义阈值确实交给 `AgentRegressionGate`，空请求体可接受（该端点字段全可选，真正评测在 `/evaluate/run`）
+- **测试计数 1612 → 1627**：README badge 与三处正文、`README_EN.md`、`docs/ROADMAP.md` 同步
+- `docs/OPTIMIZATION_PLAN.md` R15-21 剩余无 API 层测试端点由 22 收窄到 15（`eval_harness` 7 / `mcp_admin` 4 / `mcp` 3 / `ingest` 1）
+
+#### 决策记录
+- **不重复覆盖 `/evaluate/run` 的评测语义**：`test_agent_evaluation.py` 已用真实评测器覆盖三条必测回归场景（引用一致性、无证据引用、越权抑制）与超时/异常降级，本批只测**挂载 + 请求契约 + 未覆盖的 skipped 分支**，两套测试按"语义 vs 契约"分工，不互相替代
+- **`_FakeEvalReport.to_dict()` 必须带 `cases`**：端点是先回填 `report.cases` 再 `{**report.to_dict()}`（`agent_observability_api.py:313,320`），替身若省略 `cases` 就会把"响应里没有逐用例结果"这种真实形状错误掩盖掉——首版即因此漏测，修正后断言才落在实际契约上
+- **裸 app 测试暂不迁移**：`test_agent_evaluation.py` 用裸 app 是有意绕开鉴权以聚焦评测语义，改动它会牵动 9 条既有用例的桩装配；本批用真实 app 补一层，两层并存，迁移留作后续（若要合并需先确认评测器桩在 `create_app()` 下的导入路径可用）
+
+#### 验证
+- `tests/test_api_contract.py` **92/92 通过**（本文件 62 → 92 收集）；Python 全量 **1707 passed / 8 skipped**（第六十四批基线 1677 + 30 收集，既有用例零受影响）
+- `ruff check .`（python-ai）保持全绿；static-checks 八项全绿（含内部 token 键一致性与测试计数同步）
+- 本批生产代码零改动，全部结论均由测试侧暴露
+
 ### 第六十四批（2026-10-05：plugin_admin 恒 403 缺陷修复 + 8 端点契约测试——插件审计同步恢复）
 
 #### Fixed

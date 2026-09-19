@@ -1,10 +1,10 @@
 """API 层契约测试（第十五轮 R15-21，第六十三批续）。
 
 覆盖此前零测试的路由（bid / rag，第六十三批的 gateway / guardrails /
-memory_internal / tools，以及第六十四批的 plugin_admin）。用 FastAPI
-TestClient 走真实请求-响应契约：鉴权守卫挂载、参数校验（422）、错误包装
-（status=error）、降级不 5xx、成功路径（monkeypatch 工作流），不依赖 LLM /
-Milvus。
+memory_internal / tools，第六十四批的 plugin_admin，第六十五批的
+agent_observability）。用 FastAPI TestClient 走真实请求-响应契约：鉴权守卫
+挂载、参数校验（422）、错误包装（status=error）、降级不 5xx、成功路径
+（monkeypatch 工作流），不依赖 LLM / Milvus。
 """
 
 from __future__ import annotations
@@ -693,4 +693,330 @@ def test_audit_logs_forward_filters_and_wrap_shape(client, monkeypatch, plugin_a
 
     client.get("/api/plugin/audit-logs")
     assert seen[1] == (None, 50)
+
+
+# ── agent_observability API（第六十五批）──────────────────────────────
+
+OBS_ROUTES = [
+    ("get", "/api/agent/observability/runs"),
+    ("post", "/api/agent/observability/runs"),
+    ("get", "/api/agent/observability/runs/run-1"),
+    ("get", "/api/agent/observability/stats"),
+    ("get", "/api/agent/observability/stale-runs"),
+    ("post", "/api/agent/observability/evaluate/run"),
+    ("post", "/api/agent/observability/evaluate/regression-check"),
+]
+
+AGENT_RUN_PAYLOAD = {
+    "run_uuid": "run-1",
+    "knowledge_base_id": 3,
+    "status": "tool_error",
+    "model": "test-model",
+    "duration_ms": 1234.5,
+    "token_usage": {"prompt_tokens": 60, "completion_tokens": 40, "total_tokens": 100},
+    "tool_calls_count": 2,
+    "sources_count": 5,
+    "step_count": 4,
+    "approval_count": 1,
+    "total_approval_duration_ms": 900.0,
+    "error_code": "TOOL_TIMEOUT",
+    "error_detail": "sandbox 超时",
+    "failed_tool": "pdf_ocr",
+}
+
+
+class _RecordingTraceStore:
+    """AgentTraceBackend 契约替身：记录每次调用的关键字参数。"""
+
+    def __init__(self):
+        self.calls = []
+        self.recorded = []
+        self._traces: list = []
+        self._count = 0
+        self._stats: dict = {"total_runs": 0}
+        self._stale: list = []
+        self._detail: dict | None = {"run_uuid": "r-1", "status": "completed"}
+
+    def list(self, **kwargs):
+        self.calls.append(("list", kwargs))
+        return self._traces
+
+    def count(self, **kwargs):
+        self.calls.append(("count", kwargs))
+        return self._count
+
+    def get(self, run_uuid):
+        self.calls.append(("get", run_uuid))
+        return None if run_uuid == "missing" else {"run_uuid": run_uuid, "status": "completed"}
+
+    def stats(self, **kwargs):
+        self.calls.append(("stats", kwargs))
+        return self._stats
+
+    def stale_runs(self, **kwargs):
+        self.calls.append(("stale_runs", kwargs))
+        return self._stale
+
+    def record(self, trace):
+        self.recorded.append(trace)
+        return trace
+
+
+@pytest.fixture
+def obs_api():
+    import app.api.agent_observability_api as obs_api
+    return obs_api
+
+
+@pytest.fixture
+def trace_store(monkeypatch, obs_api):
+    store = _RecordingTraceStore()
+    monkeypatch.setattr(obs_api, "get_agent_trace_store", lambda: store)
+    return store
+
+
+@pytest.mark.parametrize("method,path", OBS_ROUTES)
+def test_agent_observability_routes_reject_missing_and_forged_internal_token(
+        bare_client, method, path):
+    """7 个观测端点全部由 router 级守卫拦截（`app/main.py:173` 的 tenant_dependencies）。
+
+    既有 `test_agent_evaluation.py` 把 router 挂在自建裸 app 上，从不经过这道守卫。
+    """
+    call = getattr(bare_client, method)
+    kwargs = {"json": {}} if method == "post" else {}
+    assert call(path, **kwargs).status_code == 401
+
+    forged = call(path, **kwargs, headers={"X-Internal-Token": "guess-me"})
+    assert forged.status_code == 401
+
+
+def test_agent_observability_requires_verifiable_tenant():
+    bare = TestClient(create_app())
+    valid = {"X-Internal-Token": "test-internal-token"}
+    assert bare.get("/api/agent/observability/runs").status_code == 401
+    assert bare.get("/api/agent/observability/runs", headers=valid).status_code == 400
+
+
+def test_agent_runs_applies_the_same_filter_to_list_and_count(client, trace_store):
+    """分页 total 必须与当页过滤条件同源，否则页码与总数互相矛盾。"""
+    trace_store._traces = [{"run_uuid": "r1"}]
+    trace_store._count = 42
+    body = client.get("/api/agent/observability/runs", params={
+        "limit": 5, "offset": 10, "knowledge_base_id": 3,
+        "status": "tool_error", "error_only": "true"}).json()
+    assert body == {"traces": [{"run_uuid": "r1"}], "total": 42}
+
+    listing = trace_store.calls[0][1]
+    counting = trace_store.calls[1][1]
+    assert (listing["limit"], listing["offset"]) == (5, 10)
+    assert counting == {key: listing[key] for key in
+                        ("knowledge_base_id", "status", "error_only")}
+
+
+def test_agent_runs_defaults(client, trace_store):
+    client.get("/api/agent/observability/runs")
+    assert trace_store.calls[0][1] == {
+        "limit": 50, "offset": 0, "knowledge_base_id": None,
+        "status": None, "error_only": False}
+    assert trace_store.calls[1][1] == {
+        "knowledge_base_id": None, "status": None, "error_only": False}
+
+
+@pytest.mark.parametrize("params", [
+    {"limit": 0},
+    {"limit": 201},
+    {"offset": -1},
+    {"offset": 1001},
+    {"knowledge_base_id": 0},
+    {"status": "x" * 31},
+])
+def test_agent_run_query_bounds_rejected(client, trace_store, params):
+    assert client.get("/api/agent/observability/runs", params=params).status_code == 422
+
+
+def test_agent_run_detail_passthrough_and_404_envelope(client, trace_store):
+    assert client.get("/api/agent/observability/runs/r-9").json() == {
+        "run_uuid": "r-9", "status": "completed"}
+    resp = client.get("/api/agent/observability/runs/missing")
+    assert resp.status_code == 404
+    assert resp.json() == {"code": 404, "message": "Agent run trace not found"}
+
+
+def test_agent_stats_maps_days_to_window_days(client, trace_store):
+    trace_store._stats = {"total_runs": 3, "avg_duration_ms": 12.0}
+    body = client.get("/api/agent/observability/stats",
+                      params={"days": 30, "knowledge_base_id": 2}).json()
+    assert body == {"total_runs": 3, "avg_duration_ms": 12.0}
+    assert trace_store.calls[0] == ("stats", {"window_days": 30, "knowledge_base_id": 2})
+
+    assert client.get("/api/agent/observability/stats", params={"days": 0}).status_code == 422
+    assert client.get("/api/agent/observability/stats", params={"days": 31}).status_code == 422
+
+
+def test_agent_stale_runs_echoes_threshold_and_counts(client, trace_store):
+    trace_store._stale = [{"run_uuid": "r1"}, {"run_uuid": "r2"}]
+    body = client.get("/api/agent/observability/stale-runs",
+                      params={"max_running_seconds": 300}).json()
+    assert body["stale_runs"] == trace_store._stale
+    assert body["count"] == 2
+    assert body["max_running_seconds"] == 300.0
+    assert trace_store.calls[0][1] == {"max_running_seconds": 300.0, "knowledge_base_id": None}
+
+    client.get("/api/agent/observability/stale-runs")
+    assert trace_store.calls[1][1] == {"max_running_seconds": 120.0, "knowledge_base_id": None}
+    assert client.get("/api/agent/observability/stale-runs",
+                      params={"max_running_seconds": 5}).status_code == 422
+
+
+def test_record_agent_run_forwards_every_declared_field(client, trace_store):
+    """字段集封闭：AgentTrace 新增字段而端点未透传时，此断言立即失败。"""
+    from app.core.agent.agent_observability import AgentTrace
+
+    body = client.post("/api/agent/observability/runs", json=AGENT_RUN_PAYLOAD).json()
+    assert body == {"status": "recorded", "run_uuid": "run-1"}
+
+    trace = trace_store.recorded[0]
+    declared = {name for name in AgentTrace.__dataclass_fields__ if name != "created_at"}
+    assert declared == set(AGENT_RUN_PAYLOAD)  # 模型新增字段时同步补进 payload
+    for field_name in declared:
+        assert getattr(trace, field_name) == AGENT_RUN_PAYLOAD[field_name], field_name
+
+
+@pytest.mark.parametrize("patch", [
+    {"run_uuid": ""},
+    {"run_uuid": "x" * 65},
+    {"status": ""},
+    {"token_usage": {"prompt_tokens": "abc"}},
+    {"duration_ms": "slow"},
+])
+def test_record_agent_run_payload_validation(client, trace_store, patch):
+    payload = {**AGENT_RUN_PAYLOAD, **patch}
+    assert client.post("/api/agent/observability/runs", json=payload).status_code == 422
+    assert trace_store.recorded == []
+
+
+def test_record_agent_run_rejects_missing_required_fields(client, trace_store):
+    assert client.post("/api/agent/observability/runs", json={}).status_code == 422
+    assert client.post(
+        "/api/agent/observability/runs", json={"run_uuid": "run-1"}).status_code == 422
+    assert trace_store.recorded == []
+
+
+def test_regression_check_forwards_custom_thresholds(client, monkeypatch):
+    """regression-check 只回报门禁阈值，不做评测（评测在 /evaluate/run）。"""
+    import app.core.agent.agent_evaluation as eval_module
+
+    captured = {}
+
+    class _Gate:
+        def __init__(self, thresholds=None):
+            captured["thresholds"] = thresholds
+            self.thresholds = {"answer_correctness": 0.6}
+
+    monkeypatch.setattr(eval_module, "AgentRegressionGate", _Gate)
+    body = client.post("/api/agent/observability/evaluate/regression-check",
+                       json={"thresholds": {"citation_consistency": 0.9}}).json()
+    assert captured["thresholds"] == {"citation_consistency": 0.9}
+    assert body["default_thresholds"] == {"answer_correctness": 0.6}
+    assert body["status"] == "ok"
+
+    assert client.post(
+        "/api/agent/observability/evaluate/regression-check", json={}).json()["status"] == "ok"
+
+
+class _FakeEvalReport:
+    def __init__(self, cases):
+        self.cases = cases
+
+    def to_dict(self):
+        # 真实 report.to_dict() 会带 cases；端点在 spread 之前先回填 enrich 过的 cases
+        return {"dimension_scores": {"answer_correctness": 1.0}, "cases": self.cases}
+
+
+class _CapturingEvaluator:
+    last: dict = {}
+
+    def __init__(self, dimensions=None):
+        _CapturingEvaluator.last["dimensions"] = dimensions
+
+    async def evaluate_batch(self, samples, run_id=None):
+        _CapturingEvaluator.last["samples"] = list(samples)
+        return _FakeEvalReport([{"case_id": s.case_id} for s in samples])
+
+
+class _StubGate:
+    def __init__(self, thresholds=None):
+        self.thresholds = thresholds or {}
+
+    def check(self, report):
+        return SimpleNamespace(to_dict=lambda: {"passed": True, "violations": []})
+
+
+def _eval_stack(monkeypatch, evaluator_cls=_CapturingEvaluator):
+    import app.core.agent.agent_evaluation as eval_module
+
+    _CapturingEvaluator.last = {}
+    monkeypatch.setattr(eval_module, "AgentAnswerEvaluator", evaluator_cls)
+    monkeypatch.setattr(eval_module, "AgentRegressionGate", _StubGate)
+
+
+def test_evaluate_run_drops_unknown_dimensions_and_falls_back_to_all(client, monkeypatch):
+    from app.core.agent.agent_evaluation import AgentEvalDimension
+
+    _eval_stack(monkeypatch)
+    case = [{"case_id": "c1", "query": "营收多少？", "answer": "12.8 亿元"}]
+
+    client.post("/api/agent/observability/evaluate/run", json={
+        "cases": case, "dimensions": ["answer_correctness", "not_a_dimension"]})
+    assert [d.value for d in _CapturingEvaluator.last["dimensions"]] == ["answer_correctness"]
+
+    client.post("/api/agent/observability/evaluate/run", json={"cases": case, "dimensions": []})
+    assert {d.value for d in _CapturingEvaluator.last["dimensions"]} == {
+        d.value for d in AgentEvalDimension}
+
+
+def test_evaluate_run_without_kb_uses_payload_answer_and_skips_agent(client, monkeypatch):
+    """缺 knowledge_base_id 时不构造 Agent：离线已答题直接送评，并标记 skipped。"""
+    def no_agent(**kwargs):
+        raise AssertionError("无 knowledge_base_id 时不得构造 Agent")
+
+    _eval_stack(monkeypatch)
+    monkeypatch.setattr("app.core.agent.get_agent", no_agent)
+
+    resp = client.post("/api/agent/observability/evaluate/run", json={
+        "label": "offline",
+        "cases": [{
+            "case_id": "c1",
+            "query": "营收多少？",
+            "answer": "12.8 亿元",
+            "ground_truth": "参考答案：12.8 亿元（同比 +23%）",
+            "expected_document_ids": ["7"],
+        }],
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+
+    sample = _CapturingEvaluator.last["samples"][0]
+    assert sample.answer == "12.8 亿元"
+    assert sample.ground_truth == "参考答案：12.8 亿元（同比 +23%）"  # 只用于打分，不冒充答案
+    assert body["cases"][0]["agent_call"]["agent_status"] == "skipped"
+    assert body["cases"][0]["agent_call"]["real_answer"] == "12.8 亿元"
+    assert body["regression_gate"] == {"passed": True, "violations": []}
+    assert body["label"] == "offline" and body["knowledge_base_id"] is None
+
+
+def test_evaluate_run_validates_batch(client, monkeypatch):
+    _eval_stack(monkeypatch)
+    one_case = [{"case_id": "c1", "query": "x", "answer": "y"}]
+    bad_payloads = [
+        {"cases": []},                                   # min_length=1
+        {"cases": [{"case_id": "c1", "answer": "y"}]},   # query 必填
+        {"cases": [{"case_id": "", "query": "x"}]},      # case_id min_length=1
+        {"cases": one_case, "agent_timeout_seconds": 0.05},   # ge=0.1
+        {"cases": one_case, "agent_timeout_seconds": 200.0},  # le=120
+        {"cases": [{"case_id": f"c{i}", "query": "x"} for i in range(201)]},  # max_length=200
+    ]
+    for payload in bad_payloads:
+        resp = client.post("/api/agent/observability/evaluate/run", json=payload)
+        assert resp.status_code == 422, payload
 
