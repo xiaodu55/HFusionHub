@@ -39,7 +39,7 @@ from .utils import (
 _MIN_COMPRESSION_TOKENS = 300
 # Characters below this threshold == skip compression entirely (rough CJK equivalent)
 _MIN_COMPRESSION_CHARS = 600
-# RAG 编号块标记（react._retrieve_context 产出的行首 [n] 行），保溯源压缩用
+# RAG 编号块标记（retrieval_pipeline.retrieve_context 产出的行首 [n] 行），保溯源压缩用
 _BLOCK_MARKER_RE = re.compile(r"(?m)^\[(\d{1,2})\][^\n]*\n")
 
 
@@ -416,7 +416,7 @@ class ExtractiveCompressionStrategy(BaseCompressionStrategy):
     ) -> tuple[str, list[int], bool]:
         """对 ``[n]`` 编号块上下文做**保溯源**压缩（RAG 引用约束的基座）。
 
-        编号块格式（见 ``react._retrieve_context``）::
+        编号块格式（见 ``retrieval_pipeline.retrieve_context``）::
 
             [1] (语义匹配, 相似度: 0.87)
             第一句。第二句。

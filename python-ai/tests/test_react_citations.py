@@ -1,13 +1,14 @@
 """A3 引用溯源纯函数测试：编号上下文格式化与答案 [n] 标注解析。
 
-覆盖 react 管线中"答案实际标注的引用"链路的确定性部分：
-- ``_format_numbered_context``：块编号与 sources 序号一一对应；
+覆盖管线中"答案实际标注的引用"链路的确定性部分：
+- ``retrieval_pipeline.format_numbered_context``：块编号与 sources 序号一一对应；
 - ``ReactAgent._parse_cited_chunk_ids``：[n] → chunk_id，越界/不可见标注忽略。
 """
 
 from types import SimpleNamespace
 
-from app.core.agent.react import ReactAgent, _format_numbered_context
+from app.core.agent.react import ReactAgent
+from app.core.agent.retrieval_pipeline import format_numbered_context
 
 
 def _result(source="vector", score=0.9, content="第一块内容。", chunk_id="a#1", title="文档A"):
@@ -23,7 +24,7 @@ def _result(source="vector", score=0.9, content="第一块内容。", chunk_id="
 
 
 def test_format_numbered_context_pairs_numbers_with_sources():
-    text, sources = _format_numbered_context([
+    text, sources = format_numbered_context([
         _result(),
         _result(source="keyword", score=0.5, content="第二块内容。", chunk_id="b#2", title="文档B"),
     ])

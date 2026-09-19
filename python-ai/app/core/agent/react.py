@@ -11,10 +11,8 @@ Agent V1 changes:
   WorkflowRuntime to read partial results on timeout.
 """
 
-import asyncio
 import json
 import logging
-import os
 import re
 import time
 from typing import Any, AsyncGenerator
@@ -22,40 +20,29 @@ from typing import Any, AsyncGenerator
 from ..llm import BaseLLM, ChatMessage, get_llm
 from ..policy import build_arguments_summary
 from ..rag import (
-    CompressionConfig,
-    CompressionStrategyType,
     EvaluationSample,
     EvaluationStrategyType,
     IntentResult,
     IntentType,
     ReflectionConfig,
     ReflectionStrategyType,
-    get_adaptive_retrieval_planner,
-    get_compressor,
     get_evaluator,
-    get_query_decomposer,
     get_reflector,
-    get_retriever,
 )
-from ..tools import ToolExecutionPolicy, ToolRegistry, create_v1_registry
-from ..tools.demo_business_tools import match_demo_tool
 from ..rag.config import get_config
 from ..rag.tokenization import tokenize
 from ..rag.utils import split_sentences
+from ..tools import ToolExecutionPolicy, ToolRegistry, create_v1_registry
+from ..tools.demo_business_tools import match_demo_tool
 from .agent import Agent, AgentResponse, AgentStep
 from .citation import normalize_source
-
-logger = logging.getLogger(__name__)
-
-NO_SUFFICIENT_EVIDENCE_REPLY = (
-    "我在当前知识库中未检索到足够依据，无法基于资料回答这个问题。"
-    "建议：1) 到「文档」页确认相关资料已完成解析；2) 换一种问法，或补充包含该内容的资料。"
-    "我不会编造知识库范围外的内容。"
+from .retrieval_pipeline import (
+    NO_SUFFICIENT_EVIDENCE_REPLY,
+    RETRIEVAL_UNAVAILABLE_REPLY,
+    RetrievalPipeline,
 )
 
-# M10: 检索服务故障 ≠ 知识库无资料 — 单独文案 + retrieval_error 状态，
-# 避免把 Milvus/embedding 故障伪装成"证据不足"误导用户
-RETRIEVAL_UNAVAILABLE_REPLY = "知识库检索服务暂时不可用，请稍后重试。"
+logger = logging.getLogger(__name__)
 
 
 def _approval_required_payload(
@@ -87,7 +74,6 @@ def _approval_required_payload(
 
 
 # ── Evidence integrity constants ───────────────────────────────────────
-_MIN_COMPRESSION_SAFETY_RATIO = 0.25
 _GROUNDLESS_MARKERS = [
     "未检索到足够依据", "未检索到依据", "证据不足", "无法基于资料",
     "未找到相关", "没有相关信息", "资料中未提及", "资料中未包含",
@@ -110,29 +96,6 @@ _STYLE_PROMPTS = {
         "每个断言需注明来源。"
     ),
 }
-
-_SOURCE_LABELS = {
-    "vector": "语义匹配",
-    "keyword": "关键词匹配",
-    "graph": "知识图谱",
-}
-
-
-def _format_numbered_context(results: list) -> tuple[str, list[dict[str, Any]]]:
-    """检索结果 → ``[n]`` 编号块上下文。
-
-    编号 n 与返回 sources 的 1-based 序号一一对应；答案中的 ``[n]`` 引用
-    标注据此映射回来源 chunk。保溯源压缩（``compress_numbered_blocks``）
-    会保持编号稳定——被压掉整个块的编号不再出现，其余编号不变。
-    """
-    parts: list[str] = []
-    sources: list[dict[str, Any]] = []
-    for i, r in enumerate(results, 1):
-        label = _SOURCE_LABELS.get(r.source, "检索")
-        parts.append(f"[{i}] ({label}, 相似度: {r.score:.2f})\n{r.content}")
-        sources.append(normalize_source(r))
-    return "\n\n".join(parts), sources
-
 
 # System prompt for ReAct agent
 REACT_SYSTEM_PROMPT = """你是一个智能助手，能够使用工具来回答问题。
@@ -204,6 +167,9 @@ class ReactAgent(Agent):
         # Agent V1: track tool calls and sources for partial-result reporting.
         self._tool_calls_count: int = 0
         self._last_sources: list[dict[str, Any]] = []
+
+        # 检索编排（第六十批抽出）：只吃知识库作用域两个字段，与 ReAct 循环无关。
+        self._retrieval = RetrievalPipeline(self.knowledge_base_id, self.retrieval_top_k)
 
     def _get_llm(self) -> BaseLLM:
         """Get LLM instance (lazy initialization)"""
@@ -532,108 +498,37 @@ class ReactAgent(Agent):
         self,
         query: str,
         history: list[dict] | None = None,
-        intent_result: IntentResult | None = None
-    ) -> tuple:
+        intent_result: IntentResult | None = None,
+    ) -> tuple[str, list[dict[str, Any]], int | None] | None:
+        """检索薄委托。
+
+        保留在 Agent 上而非让调用方直取 pipeline：单测以
+        ``agent._retrieve_context = <stub>`` 替换检索、不触达真实向量库
+        （test_agent_v1_contract 的审批流 e2e 依赖此桩位）。
         """
-        检索相关上下文
+        return await self._retrieval.retrieve_context(query, history, intent_result)
 
-        Args:
-            query: 用户查询
-            history: 对话历史
-            intent_result: 意图分类结果（可选）
-
-        Returns:
-            (格式化的上下文文本, 来源列表, 自动检测的知识库ID)；
-            检索服务故障时返回 None（与"检索成功但无结果"的 ("", [], kb) 区分，M10）
-        """
-        try:
-            retriever = get_retriever()
-            plan = await get_adaptive_retrieval_planner().plan(
-                query=query,
-                history=history,
-                intent_result=intent_result,
-            )
-            logger.info(f"[RAG] Calling retriever with knowledge_base_id={self.knowledge_base_id}")
-            result = await retriever.retrieve(
-                query=plan.query,
-                knowledge_base_id=self.knowledge_base_id,
-                conversation_history=history,
-                top_k=self.retrieval_top_k or plan.top_k,
-            )
-            logger.info(f"[RAG] Retriever returned {len(result.results)} results")
-
-            if not result.results:
-                logger.info("[RAG] No results found, returning empty context")
-                return "", [], self.knowledge_base_id
-
-            context, sources = _format_numbered_context(result.results)
-            return context, sources, self.knowledge_base_id
-
-        except Exception as e:
-            # M10: 不再伪装成"无证据"空上下文 — 返回 None 让调用方按服务故障处理
-            logger.error(f"RAG retrieval failed: {e}", exc_info=True)
-            return None
-
-    async def _safe_compress(
+    async def _retrieve_and_compress(
         self,
-        rag_context: str,
-        target_ratio: float | None = None,
-        query: str | None = None,
-    ) -> tuple[str, bool, list[int]]:
-        """Compress retrieval context with evidence-integrity guard.
+        query: str,
+        history: list[dict[str, str]] | None,
+        intent_result: Any | None,
+    ) -> tuple[str, list[dict[str, Any]], int | None, str, bool, list[int]] | None:
+        """检索 + 压缩的组合入口（``run`` 与 ``_run_stream_react`` 共用）。
 
-        ``query`` 透传给压缩器：句子评分加入与问题的重叠信号，避免把与
-        问题直接相关但事实密度低的句子无差别丢掉。
-
-        返回 ``(压缩后文本, 是否压缩, 可见块号)``：上下文为 [n] 编号块时走
-        保溯源压缩（``compress_numbered_blocks``），块号与 ``rag_sources``
-        的 1-based 序号一致——答案里的 [n] 引用标注据此映射回来源 chunk，
-        被压缩掉的块对生成器不可见、引用无效。
+        刻意留在 Agent 而非下沉到 pipeline：``_retrieve_context`` 的桩位必须
+        在真实调用链上生效。返回 ``(raw_context, rag_sources, kb_id,
+        rag_context, was_compressed, visible_block_numbers)``；检索服务故障时
+        返回 ``None``（M10：与"无证据"区分，各管线自行发对应错误事件）。
         """
-        if not rag_context:
-            return rag_context, False, []
-
-        compressor = get_compressor(CompressionStrategyType.EXTRACTIVE)
-        compressed, visible_numbers, did_compress = (
-            await compressor.strategy.compress_numbered_blocks(
-                rag_context,
-                # R18：压缩率单一来源化——走 RAGConfig.compression.target_ratio
-                # （默认 0.8，RAG_COMPRESSION_TARGET_RATIO 可覆盖）。0.6 旧默认
-                # 的过激压缩会丢答案句触发 insufficient_evidence 误杀
-                # （ADR-006 后记：真机 20 例对照实验 3/5 可复现修复）。
-                CompressionConfig(
-                    target_ratio=target_ratio
-                    if target_ratio is not None
-                    else get_config().compression.target_ratio
-                ),
-                query=query,
-            )
-        )
-
-        if not did_compress:
-            logger.info(
-                "[RAG] Compression skipped: context below minimum threshold "
-                f"({compressor.strategy.estimate_tokens(rag_context)} tokens)"
-            )
-            return rag_context, False, visible_numbers
-
-        compressed_tokens = compressor.strategy.estimate_tokens(compressed)
-        original_tokens = compressor.strategy.estimate_tokens(rag_context)
-        ratio = compressed_tokens / original_tokens if original_tokens else 1.0
-        if ratio < _MIN_COMPRESSION_SAFETY_RATIO and original_tokens > 500:
-            logger.warning(
-                f"[RAG] Compression over-aggressive "
-                f"({original_tokens} -> {compressed_tokens} tokens, "
-                f"ratio {ratio:.2f}); falling back to original"
-            )
-            return rag_context, False, compressor.strategy.list_block_numbers(rag_context)
-
-        logger.info(
-            f"[RAG] Compressed context: "
-            f"{original_tokens} -> {compressed_tokens} tokens, "
-            f"visible blocks: {len(visible_numbers)}"
-        )
-        return compressed, True, visible_numbers
+        retrieved = await self._retrieve_context(query, history, intent_result)
+        if retrieved is None:
+            return None
+        raw_context, rag_sources, auto_detected_kb_id = retrieved
+        rag_context, was_compressed, visible_numbers = await self._retrieval.safe_compress(
+            raw_context, query=query)
+        return (raw_context, rag_sources, auto_detected_kb_id,
+                rag_context, was_compressed, visible_numbers)
 
     async def _build_react_messages(
         self,
@@ -661,193 +556,6 @@ class ReactAgent(Agent):
             for msg in history[-10:]:
                 messages.append(ChatMessage(role=msg["role"], content=msg["content"]))
         return messages
-
-    async def _retrieve_and_compress(
-        self,
-        query: str,
-        history: list[dict[str, str]] | None,
-        intent_result: Any | None,
-    ) -> tuple[str, list[dict[str, Any]], int | None, str, bool] | None:
-        """Retrieve + compress core shared by run() and _run_stream_react().
-
-        Returns ``(raw_context, rag_sources, auto_detected_kb_id,
-        rag_context, was_compressed, visible_block_numbers)`` or ``None`` when
-        the retrieval service is unavailable (M10: distinct from "no evidence").
-        Exceptions from retrieval propagate to the caller — each pipeline
-        applies its own error emission.
-        """
-        retrieved = await self._retrieve_context(query, history, intent_result)
-        if retrieved is None:
-            return None
-        raw_context, rag_sources, auto_detected_kb_id = retrieved
-        rag_context, was_compressed, visible_numbers = await self._safe_compress(
-            raw_context, query=query)
-        return (raw_context, rag_sources, auto_detected_kb_id,
-                rag_context, was_compressed, visible_numbers)
-
-    async def _decompose_retrieve_merge_context(
-        self,
-        query: str,
-        history: list[dict[str, str]] | None,
-        intent_result: Any | None,
-    ) -> tuple[str, list[dict[str, Any]], str, bool, list[int], dict[str, Any]] | None:
-        """分解检索统一实现（第五十七批）：按依赖层并行检索子问题，
-        合并编号上下文后统一压缩。
-
-        run() 与 run_stream() 共用，终结两条语义分叉的旧实现：非流式
-        "逐子问题生成再模板拼接"（合并从未真正合成、token_count=0 绕过
-        计费、绕过证据门/忠实度守卫）与流式"顺序检索合并上下文"（无依赖
-        分层、无并行）。依赖分层的 execution_plan + can_execute 判据从旧
-        答案合并路径移植至此。答案由调用方的统一次生成产出——证据门、
-        Groundedness 重试与引用编号空间由此恢复一致。
-
-        Returns:
-            (raw_context, sources, rag_context, was_compressed,
-             visible_block_numbers, decomposition_dict)；
-            needs_decomposition=False 时返回 None（调用方回落单路检索）。
-
-        Raises:
-            RuntimeError: 全部子问题检索失败（调用方按检索服务故障口径处理，
-                与 M10"不伪装成无证据"一致）；单个子问题失败按空结果降级。
-        """
-        from ..rag import get_query_decomposer
-
-        decomposition_result = await get_query_decomposer().decompose(
-            query=query, intent_result=intent_result, history=history)
-        if not (
-            decomposition_result
-            and decomposition_result.needs_decomposition
-            and decomposition_result.sub_questions
-        ):
-            return None
-
-        retriever = get_retriever()
-        stats = {"attempted": 0, "failed": 0, "last_exc": None}
-
-        async def _sub_retrieve(sub_q: Any) -> list:
-            content = getattr(sub_q, "content", None) or str(sub_q)
-            stats["attempted"] += 1
-            try:
-                sub_plan = await get_adaptive_retrieval_planner().plan(
-                    query=content,
-                    history=history,
-                    intent_result=intent_result,
-                )
-                result = await retriever.retrieve(
-                    query=sub_plan.query,
-                    knowledge_base_id=self.knowledge_base_id,
-                    conversation_history=history,
-                    top_k=self.retrieval_top_k or sub_plan.top_k,
-                )
-                return list(result.results) if result and result.results else []
-            except Exception as exc:
-                # 单个子问题检索失败按空结果降级，不拖垮整批（M10 口径）；
-                # 全部失败在调用方聚合为 RuntimeError
-                stats["failed"] += 1
-                stats["last_exc"] = exc
-                logger.error("Sub-question %r retrieval failed: %s", content[:50], exc)
-                return []
-
-        all_results: list = []
-        completed_ids: set = set()
-        for level in decomposition_result.execution_plan or []:
-            batch = [q for q in level if q.can_execute(completed_ids)]
-            if not batch:
-                continue
-            results = await asyncio.gather(
-                *[_sub_retrieve(q) for q in batch], return_exceptions=True)
-            for q, sub_results in zip(batch, results):
-                if isinstance(sub_results, Exception):
-                    stats["failed"] += 1
-                    stats["last_exc"] = sub_results
-                    logger.error(
-                        "Sub-question %r retrieval failed: %s",
-                        getattr(q, "content", "?"), sub_results)
-                    sub_results = []
-                all_results.extend(sub_results)
-                completed_ids.add(q.id)
-
-        # 防御：execution_plan 未覆盖的子问题兜底检索，保持总量一致
-        planned_ids = {
-            q.id
-            for level in decomposition_result.execution_plan or []
-            for q in level
-        }
-        for q in decomposition_result.sub_questions:
-            if getattr(q, "id", None) not in planned_ids:
-                all_results.extend(await _sub_retrieve(q))
-
-        if stats["attempted"] and stats["failed"] == stats["attempted"]:
-            raise RuntimeError(
-                "all sub-question retrievals failed") from stats["last_exc"]
-
-        seen: set = set()
-        unique_results: list = []
-        for r in all_results:
-            content_val = getattr(r, "content", "") or ""
-            if content_val not in seen:
-                seen.add(content_val)
-                unique_results.append(r)
-
-        raw_context, sources = _format_numbered_context(unique_results)
-        rag_context, was_compressed, visible_numbers = await self._safe_compress(
-            raw_context, query=query)
-        logger.info(
-            "[RAG] Decomposed retrieval: %d sub-questions -> %d unique blocks (compressed=%s)",
-            len(decomposition_result.sub_questions), len(unique_results), was_compressed)
-        return (raw_context, sources, rag_context, was_compressed,
-                visible_numbers, decomposition_result.to_dict())
-
-    async def _empty_context_reply(self) -> str:
-        """Reply used when retrieval returned nothing for a selected KB.
-
-        Distinguishes "KB empty / still parsing" from "no relevant content"
-        so the user gets an actionable hint.
-        """
-        try:
-            # cluster 模式下 all_chunks 是同步分页网络 IO——必须挪出事件循环
-            from app.core.vectorstore.milvus_store import _get_store
-
-            def _all_chunks() -> list:
-                return _get_store().all_chunks(knowledge_base_id=self.knowledge_base_id)
-
-            corpus = await asyncio.to_thread(_all_chunks)
-            has_content = bool(corpus)
-        except Exception:
-            has_content = True  # 无法确认时按普通无依据处理
-        return (
-            "当前知识库还没有可检索的内容。如果资料刚上传，可能仍在解析中，"
-            "请稍候或到「文档」页查看解析状态；解析完成后即可基于资料回答。"
-            if not has_content
-            else NO_SUFFICIENT_EVIDENCE_REPLY
-        )
-
-    @staticmethod
-    def _evidence_gate_threshold() -> float:
-        """A4 证据门阈值，默认 0 = 关闭。
-
-        实测校准（2026-09-05 runtime）：融合分在单通道命中时上限约 0.5-0.7，
-        0.7 阈值会误杀合法查询（实测融合分 0.626 被拒）；而超纲查询的分数
-        与正常查询不可分（ADR-006 A1 节）。机制保留、默认关闭，待 runtime
-        校准后经 RAG_EVIDENCE_GATE_THRESHOLD 显式开启。
-        """
-        try:
-            return float(os.getenv("RAG_EVIDENCE_GATE_THRESHOLD", "0"))
-        except ValueError:
-            return 0.0
-
-    @staticmethod
-    def _below_evidence_gate(sources: list[dict[str, Any]], threshold: float) -> bool:
-        """A4 证据门判据：检索最高融合分是否低于路由置信阈值。
-
-        融合分（RRF 归一化到 0-1，顶块=跨通道一致性）构成"检索置信度"：
-        多通道一致命中同一顶块时≈1.0，通道分歧/弱相关显著走低。空检索
-        结果返回 False（由空上下文分支处理，不属于本门职责）。
-        """
-        if not sources:
-            return False
-        best = max(float(s.get("score") or 0.0) for s in sources)
-        return best < threshold
 
     @staticmethod
     def _answer_support_score(answer: str, context: str) -> tuple[float, bool]:
@@ -1233,7 +941,7 @@ class ReactAgent(Agent):
         decomposed = None
         if decomposition_requested and has_selected_kb:
             try:
-                decomposed = await self._decompose_retrieve_merge_context(
+                decomposed = await self._retrieval.decompose_retrieve_merge_context(
                     query, history, intent_result)
             except Exception as exc:
                 logger.error(
@@ -1284,7 +992,7 @@ class ReactAgent(Agent):
             # available, enter the ReAct loop anyway — the LLM may still call
             # a tool that doesn't depend on KB context.
             if not non_retrieval_tools:
-                reply = await self._empty_context_reply()
+                reply = await self._retrieval.empty_context_reply()
                 self._last_sources = []
                 return AgentResponse(
                     content=reply,
@@ -1308,11 +1016,11 @@ class ReactAgent(Agent):
         # 消费方，检索置信度从未参与"答不答"的决策。有非检索工具时与空
         # 上下文分支同样让位给 ReAct 循环。
         if has_selected_kb and rag_sources and not non_retrieval_tools:
-            evidence_gate_threshold = self._evidence_gate_threshold()
+            evidence_gate_threshold = RetrievalPipeline.evidence_gate_threshold()
             best_evidence_score = max(
                 float(s.get("score") or 0.0) for s in rag_sources
             )
-            if self._below_evidence_gate(rag_sources, evidence_gate_threshold):
+            if RetrievalPipeline.below_evidence_gate(rag_sources, evidence_gate_threshold):
                 logger.warning(
                     f"[RAG] Evidence gate triggered: best fused score "
                     f"{best_evidence_score:.3f} < threshold "
@@ -1696,7 +1404,6 @@ class ReactAgent(Agent):
             was_compressed = False
             visible_numbers: list[int] = []
             retrieval_duration_ms = 0.0
-            retriever = get_retriever()
 
             if has_selected_kb:
                 retrieval_start = _time.monotonic()
@@ -1705,26 +1412,20 @@ class ReactAgent(Agent):
                     # 合并编号上下文，终结与非流式路径的语义分叉（M12 只对齐了
                     # 触发条件）；needs_decomposition=False 回落单路检索，
                     # 全部子问题失败升格 RuntimeError 走既有错误事件口径
-                    decomposed = await self._decompose_retrieve_merge_context(
+                    decomposed = await self._retrieval.decompose_retrieve_merge_context(
                         query, history, intent_result)
                     if decomposed is not None:
                         raw_c, sources, context, was_compressed, visible_numbers, _meta = decomposed
                         raw_context = raw_c
                     else:
-                        retrieval_plan = await get_adaptive_retrieval_planner().plan(
-                            query=query,
-                            history=history,
-                            intent_result=intent_result,
-                        )
-                        result = await retriever.retrieve(
-                            query=retrieval_plan.query,
-                            knowledge_base_id=self.knowledge_base_id,
-                            top_k=retrieval_plan.top_k,
-                        )
-                        if result and result.results:
-                            raw_context, sources = _format_numbered_context(result.results)
-                            context, was_compressed, visible_numbers = await self._safe_compress(
-                                raw_context, query=query)
+                        # 单路检索走本管线自己的口径（历史只进规划器、top_k 用
+                        # 规划值、异常上抛转 tool_error 事件），见 pipeline docstring
+                        retrieved = await self._retrieval.retrieve_context_for_stream(
+                            query, history, intent_result)
+                        if retrieved is not None:
+                            raw_context, sources, _kb_id = retrieved
+                            context, was_compressed, visible_numbers = (
+                                await self._retrieval.safe_compress(raw_context, query=query))
 
                     retrieval_duration_ms = (_time.monotonic() - retrieval_start) * 1000
                 except Exception as e:
@@ -1764,13 +1465,13 @@ class ReactAgent(Agent):
             self._last_sources = sources
 
             if has_selected_kb and not context:
-                yield await self._empty_context_reply()
+                yield await self._retrieval.empty_context_reply()
                 return
 
             # ── A4 证据门（流式）：与 run() 同判据 ──
             if has_selected_kb and sources:
-                evidence_gate_threshold = self._evidence_gate_threshold()
-                if self._below_evidence_gate(sources, evidence_gate_threshold):
+                evidence_gate_threshold = RetrievalPipeline.evidence_gate_threshold()
+                if RetrievalPipeline.below_evidence_gate(sources, evidence_gate_threshold):
                     logger.warning(
                         f"[RAG:stream] Evidence gate triggered: best fused score "
                         f"{max(float(s.get('score') or 0.0) for s in sources):.3f} < threshold "

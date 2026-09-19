@@ -299,7 +299,7 @@
 
 | 编号 | 问题 | 证据 | 方案 |
 |---|---|---|---|
-| R15-20 | react.py 1648 行，run / run_stream / _run_stream_react 三份重复检索/压缩/组装/容错循环 | `app/core/agent/react.py:790, 1087, 1433` | 抽取共享管线，stream/非 stream 单循环 |
+| R15-20 | react.py 1648 行，run / run_stream / _run_stream_react 三份重复检索/压缩/组装/容错循环 | `app/core/agent/react.py:790, 1087, 1433` | 抽取共享管线，stream/非 stream 单循环。🟡 部分完成（第六十批 2026-10-05）：检索规划/分解/压缩/证据门已抽为 `app/core/agent/retrieval_pipeline.py`，三条管线共用，react.py 2178→1879 行；剩余：两条检索入口口径分叉的统一（`retrieve_context` vs `retrieve_context_for_stream`，需评测背书）、组装与容错循环合一 |
 | R15-21 | API 层几乎零测试：bid/ingest/rag/mcp/tools/gateway/guardrails 等约 10 个路由无任何测试 | `python-ai/tests/` 对照 `app/api/` | FastAPI TestClient 契约测试（对齐 `tests/test_chat_api.py` 模式） |
 | R15-22 | 测试基座漂移：H2 schema 手维护停在 V70、Flyway 关闭、tenant 拦截器在测试中关闭（核心隔离机制未被测试覆盖） | `application-test.yml`、`schema-h2.sql` | Testcontainers-MySQL（依赖已在 pom）抽样集成 + 至少一条 tenant 拦截器真实链路。✅ 2026-09-03 真机复跑：`TenantInterceptorIsolationTest` 连真实 MySQL（完整 Flyway V1–V83 链）2/2 通过 |
 | R15-23 | 内部 token guard 复制粘贴 6 份；`allow-circular-references: true` 掩盖循环依赖；manifest hash 拼接歧义 | 6 个 Internal*Controller、`application.yml:8`、`PluginServiceImpl.java:628-644` | 收敛为 servlet filter；解循环；规范化 JSON 重算 |

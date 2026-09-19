@@ -1892,7 +1892,7 @@ class TestCapabilityProfileApi:
         service's milvus_data.db."""
         import unittest.mock as _mock
         with _mock.patch(
-            "app.core.agent.react.get_retriever",
+            "app.core.agent.retrieval_pipeline.get_retriever",
             side_effect=_make_stub_retriever(),
         ), _mock.patch(
             "app.core.agent.react.get_llm",
@@ -1917,7 +1917,7 @@ class TestCapabilityProfileApi:
         service's milvus_data.db."""
         import unittest.mock as _mock
         with _mock.patch(
-            "app.core.agent.react.get_retriever",
+            "app.core.agent.retrieval_pipeline.get_retriever",
             side_effect=_make_stub_retriever(),
         ), _mock.patch(
             "app.core.agent.react.get_llm",

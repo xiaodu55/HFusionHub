@@ -67,7 +67,7 @@ def parse_args() -> argparse.Namespace:
                              "structural ceiling well below 1.0")
     parser.add_argument("--compress-target-ratio", type=float, default=0.6,
                         help="simulate the production extractive compression "
-                             "(react._safe_compress, default 0.6) over the merged "
+                             "(retrieval_pipeline.safe_compress, default 0.6) over the merged "
                              "retrieved context before the citation window: chunks "
                              "whose sentences are all compressed away are not "
                              "citable; 1.0 disables the compression simulation")

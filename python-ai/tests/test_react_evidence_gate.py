@@ -1,12 +1,13 @@
 """A4 证据门与 groundedness 守卫单测。
 
-覆盖 react 管线中"答不答"决策的确定性判据：
-- ``ReactAgent._below_evidence_gate``：检索最高融合分 vs 路由置信阈值；
-- ``ReactAgent._answer_support_score``：答案对上下文的词汇支持度；
+覆盖管线中"答不答"决策的确定性判据：
+- ``RetrievalPipeline.below_evidence_gate``：检索最高融合分 vs 路由置信阈值（检索侧）；
+- ``ReactAgent._answer_support_score``：答案对上下文的词汇支持度（答案侧）；
 - ``ReactAgent._is_groundless_answer``：文案匹配 OR 分数判据（A4 修洞）。
 """
 
 from app.core.agent.react import ReactAgent
+from app.core.agent.retrieval_pipeline import RetrievalPipeline
 
 _GROUNDED_CONTEXT = (
     "智能音箱 S1 支持两个唤醒词：小帆小帆与云帆云帆。"
@@ -20,32 +21,32 @@ _GROUNDED_CONTEXT = (
 
 def test_below_evidence_gate_false_for_strong_evidence():
     sources = [{"score": 0.92}, {"score": 0.41}]
-    assert ReactAgent._below_evidence_gate(sources, threshold=0.7) is False
+    assert RetrievalPipeline.below_evidence_gate(sources, threshold=0.7) is False
 
 
 def test_below_evidence_gate_true_for_weak_evidence():
     sources = [{"score": 0.31}, {"score": 0.28}]
-    assert ReactAgent._below_evidence_gate(sources, threshold=0.7) is True
+    assert RetrievalPipeline.below_evidence_gate(sources, threshold=0.7) is True
 
 
 def test_below_evidence_gate_false_for_empty_sources():
     # 空检索结果不归证据门管（由空上下文分支处理）
-    assert ReactAgent._below_evidence_gate([], threshold=0.7) is False
+    assert RetrievalPipeline.below_evidence_gate([], threshold=0.7) is False
 
 
 def test_below_evidence_gate_treats_missing_score_as_zero():
     sources = [{"score": None}, {"other": 1.0}]
-    assert ReactAgent._below_evidence_gate(sources, threshold=0.7) is True
+    assert RetrievalPipeline.below_evidence_gate(sources, threshold=0.7) is True
 
 
 def test_evidence_gate_threshold_defaults_off(monkeypatch):
     """A4 实测校准：融合分阈值默认关闭（0=不拒答），待 runtime 校准后显式开启。"""
     monkeypatch.delenv("RAG_EVIDENCE_GATE_THRESHOLD", raising=False)
-    assert ReactAgent._evidence_gate_threshold() == 0.0
+    assert RetrievalPipeline.evidence_gate_threshold() == 0.0
     monkeypatch.setenv("RAG_EVIDENCE_GATE_THRESHOLD", "0.7")
-    assert ReactAgent._evidence_gate_threshold() == 0.7
+    assert RetrievalPipeline.evidence_gate_threshold() == 0.7
     monkeypatch.setenv("RAG_EVIDENCE_GATE_THRESHOLD", "not-a-number")
-    assert ReactAgent._evidence_gate_threshold() == 0.0
+    assert RetrievalPipeline.evidence_gate_threshold() == 0.0
 
 
 # ---------------------------------------------------------------------------

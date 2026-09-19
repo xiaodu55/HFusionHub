@@ -11,6 +11,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第六十批（2026-10-05：检索编排自 react.py 抽出——RetrievalPipeline，R15-20 前半程）
+
+#### Changed
+- **新增 `python-ai/app/core/agent/retrieval_pipeline.py`（380 行）**，迁入 12 个原 react.py 模块级/私有实现（只依赖知识库作用域 `knowledge_base_id` / `retrieval_top_k`，与 ReAct 循环、工具协议无关）：
+  - 模块级：`NO_SUFFICIENT_EVIDENCE_REPLY`、`RETRIEVAL_UNAVAILABLE_REPLY`（M10 文案）、`_MIN_COMPRESSION_SAFETY_RATIO`、`_SOURCE_LABELS`、`_format_numbered_context` → `format_numbered_context`
+  - 实例/静态方法：`_safe_compress`、`_decompose_retrieve_merge_context`（含依赖分层并行内核 `_sub_retrieve`）、`_empty_context_reply`（含 `_all_chunks`）、`_evidence_gate_threshold`、`_below_evidence_gate` 收为 `RetrievalPipeline` 成员
+  - `_retrieve_context` / `_retrieve_and_compress` 的实现合并为 `_retrieve_core(..., *, forward_history, override_top_k, reraise)`，两条入口按各自历史口径实例化参数
+- **`ReactAgent.__init__` 持有 `RetrievalPipeline`，保留 `_retrieve_context` / `_retrieve_and_compress` 两个薄委托**：单测以 `agent._retrieve_context = <stub>` 替换检索（`test_agent_v1_contract.py` 四处猴补丁依赖该桩），委托必须留在实例上；其余调用点全部改走 `self._retrieval`
+- **react.py 2178 → 1879 行**（净 -299）；顺带消解第五十九批记录的 react.py lint 三连（I001/F401/F811，源于第五十七批把 `get_query_decomposer` 改为函数内导入后模块级导入未删）——迁走导入后自动清除，`ruff check` 对本批两个 app 文件全绿
+- **猴补丁锚点随模块迁移**：4 个测试文件中 `app.core.agent.react.get_retriever` / `rag.get_query_decomposer` 的补丁改指 `app.core.agent.retrieval_pipeline.*`；`react.get_llm`、`rag.get_intent_classifier` 的补丁不变（消费点仍在原模块，运行时查表生效）。4 处陈旧注释锚点（`context_compressor.py:42,419`、`eval_baseline.py:414`、`eval_offline.py:70`）改指新符号
+- **顺带修正类型注解 bug**：`_retrieve_and_compress` 原声明返回 5 元组，实际返回 6 元组（缺 `visible_numbers`）
+
+#### 决策记录：两条检索入口的分叉原样保留
+- `retrieve_context`（`run` / `_run_stream_react` 用）转发 `conversation_history`、以 `retrieval_top_k` 覆盖 `plan.top_k`、异常回落 `None` 走降级；`retrieve_context_for_stream`（`run_stream` 单路检索用）三者皆无、异常升格抛出走 `retrieval_error` 事件。**同一问句在"命中业务工具"与"未命中"两条路径下召回集合可以不同**——这是既存事实而非本批引入，本批只做等价搬迁，分叉已写进两个方法的 docstring
+- 统一它需要离线冻结套件 + 真机对比背书（会改变检索结果），留待独立批次
+- 范围边界（与本批规划一致）：ReAct 协议解析（`_parse_action` / `_parse_structured_action` / `_parse_final_answer`）与答案质量判据（`_is_groundless_answer` / `_answer_support_score` / `_parse_cited_chunk_ids`）留在 react.py——前者是工具循环协议、后者是答案侧判据，均不属检索规划
+
+#### 验证
+- Python 全量 **1602 passed / 8 skipped**，与拆分前逐条一致（本批"零行为变更"的判据）；被改动的 5 个测试文件单独运行 143 passed
+- `ruff check .` 从 12 项既存债务降至 9 项（剩余全部为本批未触碰文件，见第五十九批 Known debt）；static-checks 七项全绿（Java 697 / Python 1558 / 前端单测 101——本批不增测试，计数不变）
+- `docs/OPTIMIZATION_PLAN.md` R15-20 标注部分完成（检索/压缩已共享；三份循环的组装与容错仍在收敛范围）
+
 ### 第五十九批（2026-10-05：修复流式业务工具路由的 NameError——命中即整体失败）
 
 #### Fixed

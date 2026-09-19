@@ -41,12 +41,11 @@ class _StreamingLlm:
 @pytest.mark.asyncio
 async def test_selected_knowledge_base_requires_retrieved_evidence(monkeypatch):
     """A selected KB is the only retrieval scope and empty recall does not call the LLM."""
-    import app.core.agent.react as react_module
-    import app.core.rag as rag_module
+    import app.core.agent.retrieval_pipeline as retrieval_module
 
     retriever = _EmptyRetriever()
-    monkeypatch.setattr(react_module, "get_retriever", lambda *args, **kwargs: retriever)
-    monkeypatch.setattr(rag_module, "get_query_decomposer", lambda *args, **kwargs: _NoDecomposition())
+    monkeypatch.setattr(retrieval_module, "get_retriever", lambda *args, **kwargs: retriever)
+    monkeypatch.setattr(retrieval_module, "get_query_decomposer", lambda *args, **kwargs: _NoDecomposition())
 
     agent = ReactAgent(knowledge_base_id=7)
     chunks = [chunk async for chunk in agent.run_stream("文档里的发布日期是什么？")]
@@ -67,10 +66,11 @@ async def test_selected_knowledge_base_requires_retrieved_evidence(monkeypatch):
 @pytest.mark.asyncio
 async def test_general_chat_never_calls_retriever_without_a_selected_kb(monkeypatch):
     import app.core.agent.react as react_module
+    import app.core.agent.retrieval_pipeline as retrieval_module
     import app.core.rag as rag_module
 
     retriever = _EmptyRetriever()
-    monkeypatch.setattr(react_module, "get_retriever", lambda *args, **kwargs: retriever)
+    monkeypatch.setattr(retrieval_module, "get_retriever", lambda *args, **kwargs: retriever)
     monkeypatch.setattr(rag_module, "get_intent_classifier", lambda *args, **kwargs: _ChitchatClassifier())
     monkeypatch.setattr(react_module, "get_llm", lambda *args, **kwargs: _StreamingLlm())
 
@@ -85,10 +85,11 @@ async def test_general_chat_never_calls_retriever_without_a_selected_kb(monkeypa
 async def test_general_chat_bypasses_retrieval_with_a_selected_kb(monkeypatch):
     """Selecting a KB narrows retrieval but does not turn greetings into RAG queries."""
     import app.core.agent.react as react_module
+    import app.core.agent.retrieval_pipeline as retrieval_module
     import app.core.rag as rag_module
 
     retriever = _EmptyRetriever()
-    monkeypatch.setattr(react_module, "get_retriever", lambda: retriever)
+    monkeypatch.setattr(retrieval_module, "get_retriever", lambda: retriever)
     monkeypatch.setattr(rag_module, "get_intent_classifier", lambda: _ChitchatClassifier())
     monkeypatch.setattr(react_module, "get_llm", lambda *args, **kwargs: _StreamingLlm())
 

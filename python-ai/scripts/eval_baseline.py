@@ -411,7 +411,7 @@ async def compression_surviving_chunks(
 ) -> list[tuple[str, float]]:
     """压缩感知的引用模拟：返回合并上下文经抽取式压缩后仍"可见"的 chunk。
 
-    生产管线在生成前用 ``react._safe_compress`` → ``compress_numbered_blocks``
+    生产管线在生成前用 ``retrieval_pipeline.safe_compress`` → ``compress_numbered_blocks``
     压缩**合并后的**编号上下文（target_ratio=0.6）——被压掉全部句子的块对
     生成器不可见，也就不可能被引用。本函数把检索结果格式化成与生产一致的
     ``[n]`` 编号块文本，直接复用 ``compress_numbered_blocks`` 重放该过程，
