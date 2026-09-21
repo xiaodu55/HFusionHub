@@ -2,7 +2,8 @@
 
 覆盖此前零测试的路由（bid / rag，第六十三批的 gateway / guardrails /
 memory_internal / tools，第六十四批的 plugin_admin，第六十五批的
-agent_observability，第六十六批的 mcp_admin）。用 FastAPI TestClient 走真实
+agent_observability，第六十六批的 mcp_admin，第六十七批的 mcp 运行时
+JSON-RPC 面）。用 FastAPI TestClient 走真实
 请求-响应契约：鉴权守卫挂载、参数校验（422）、错误包装（status=error）、
 降级不 5xx、成功路径（monkeypatch 工作流），不依赖 LLM / Milvus。
 """
@@ -1246,4 +1247,224 @@ def test_mcp_remove_disconnects_before_removing_and_is_idempotent(client, mcp_ma
     body = client.delete("/api/mcp/servers/ghost").json()
     assert body == {"success": False, "message": "服务器 ghost 不存在"}
     assert [c[0] for c in manager.calls] == ["disconnect", "remove_server"]
+
+
+# ── mcp 运行时 JSON-RPC 面 API（第六十七批）───────────────────────────
+
+MCP_URL = "/mcp"
+
+MCP_PUBLIC_METHODS = ["initialize", "notifications/initialized", "tools/list"]
+MCP_PRIVATE_METHODS = ["tools/call", "resources/list", "prompts/list"]
+
+MCP_TOOL_SCHEMAS = [
+    {"name": "search_knowledge_base", "description": "检索知识库",
+     "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}},
+    {"name": "read_chunk", "description": "读取分块原文",
+     "inputSchema": {"type": "object"}},
+]
+
+
+class _RecordingMcpEndpoint:
+    """mcp_sse_endpoint 替身：记录 (forwarded body, kb_id)，结果可注入。"""
+
+    def __init__(self, *, result=None, raises: Exception | None = None):
+        self.calls: list[tuple[dict, int | None]] = []
+        self._result = result
+        self._raises = raises
+
+    async def __call__(self, body, knowledge_base_id=None):
+        self.calls.append((body, knowledge_base_id))
+        if self._raises is not None:
+            raise self._raises
+        return self._result
+
+
+def _rpc(method, *, params=None, request_id=1, jsonrpc="2.0"):
+    payload = {"jsonrpc": jsonrpc, "method": method}
+    if params is not None:
+        payload["params"] = params
+    if request_id is not None:
+        payload["id"] = request_id
+    return payload
+
+
+@pytest.fixture
+def mcp_endpoint(monkeypatch):
+    import app.api.mcp as mcp_api
+
+    def use(endpoint):
+        monkeypatch.setattr(mcp_api, "mcp_sse_endpoint", endpoint)
+        return endpoint
+
+    return use
+
+
+@pytest.fixture
+def mcp_schemas(monkeypatch):
+    import app.api.mcp as mcp_api
+
+    monkeypatch.setattr(mcp_api, "get_mcp_tool_schemas", lambda: MCP_TOOL_SCHEMAS)
+    return MCP_TOOL_SCHEMAS
+
+
+@pytest.mark.parametrize("method", MCP_PUBLIC_METHODS)
+def test_mcp_handshake_and_discovery_are_public(bare_client, mcp_endpoint, method):
+    """协议握手与 schema 发现不得要求内部 token（无 token 的 MCP 客户端要能连上）。"""
+    endpoint = mcp_endpoint(_RecordingMcpEndpoint(result={"jsonrpc": "2.0", "id": 1, "result": {}}))
+    resp = bare_client.post(MCP_URL, json=_rpc(method))
+    assert resp.status_code == 200
+    assert resp.json() == {"jsonrpc": "2.0", "id": 1, "result": {}}
+    assert endpoint.calls == [(_rpc(method), None)]
+
+
+@pytest.mark.parametrize("method", MCP_PRIVATE_METHODS)
+def test_mcp_non_public_methods_require_internal_token(bare_client, mcp_endpoint, method):
+    endpoint = mcp_endpoint(_RecordingMcpEndpoint(result={}))
+    resp = bare_client.post(MCP_URL, json=_rpc(method, params={"name": "get_current_time"}))
+    assert resp.status_code == 401
+    assert resp.json() == {
+        "code": 401,
+        "message": "X-Internal-Token header required for tool execution",
+    }
+    assert endpoint.calls == []
+
+
+def test_mcp_forged_internal_token_is_rejected_without_dispatch(client, mcp_endpoint):
+    endpoint = mcp_endpoint(_RecordingMcpEndpoint(result={}))
+    resp = client.post(MCP_URL, json=_rpc("tools/call", params={"name": "calculate"}),
+                       headers={"X-Internal-Token": "guess-me"})
+    assert resp.status_code == 403
+    assert resp.json() == {"code": 403, "message": "Invalid internal token"}
+    assert endpoint.calls == []
+
+
+def test_mcp_denies_tool_calls_when_server_token_unconfigured(bare_client, mcp_endpoint, monkeypatch):
+    """服务端未配置密钥时必须 fail-closed：任何 token 都不放行，且不下发到工具层。"""
+    from app.utils.config import config
+
+    monkeypatch.setattr(config, "INTERNAL_API_TOKEN", "")
+    endpoint = mcp_endpoint(_RecordingMcpEndpoint(result={}))
+    resp = bare_client.post(MCP_URL, json=_rpc("tools/call", params={"name": "calculate"}),
+                            headers={"X-Internal-Token": "anything"})
+    assert resp.status_code == 403
+    assert endpoint.calls == []
+
+
+def test_mcp_valid_token_forwards_jsonrpc_body_and_kb_header(client, mcp_endpoint):
+    endpoint = mcp_endpoint(_RecordingMcpEndpoint(
+        result={"jsonrpc": "2.0", "id": 7, "result": {"content": [{"type": "text", "text": "3"}]}}))
+    payload = _rpc("tools/call", request_id=7,
+                   params={"name": "calculate", "arguments": {"expression": "1+2"}})
+    resp = client.post(MCP_URL, json=payload, headers={"X-HFusionHub-KB-ID": "42"})
+    assert resp.status_code == 200
+    assert resp.json()["result"]["content"][0]["text"] == "3"
+    body, kb_id = endpoint.calls[0]
+    assert body == payload
+    assert kb_id == 42
+
+
+def test_mcp_omits_absent_fields_from_forwarded_body(client, mcp_endpoint):
+    """通知类请求没有 id / params：转发体不得出现 null 占位键。"""
+    endpoint = mcp_endpoint(_RecordingMcpEndpoint(result=None))
+    resp = client.post(MCP_URL, json={"jsonrpc": "2.0", "method": "notifications/initialized"})
+    assert resp.status_code == 200
+    body, kb_id = endpoint.calls[0]
+    assert body == {"jsonrpc": "2.0", "method": "notifications/initialized"}
+    assert "id" not in body and "params" not in body
+    assert kb_id is None
+
+
+def test_mcp_search_tool_requires_kb_id_header(client, mcp_endpoint):
+    endpoint = mcp_endpoint(_RecordingMcpEndpoint(result={}))
+    resp = client.post(MCP_URL, json=_rpc(
+        "tools/call", params={"name": "search_knowledge_base", "arguments": {"query": "某指标"}}))
+    assert resp.status_code == 400
+    assert resp.json() == {
+        "code": 400,
+        "message": "X-HFusionHub-KB-ID header required for search_knowledge_base tool",
+    }
+    assert endpoint.calls == []
+
+
+def test_mcp_non_search_tools_may_run_without_kb_header(client, mcp_endpoint):
+    endpoint = mcp_endpoint(_RecordingMcpEndpoint(result={"jsonrpc": "2.0", "id": 1, "result": {}}))
+    resp = client.post(MCP_URL, json=_rpc("tools/call", params={"name": "get_current_time"}))
+    assert resp.status_code == 200
+    assert endpoint.calls[0][1] is None
+
+
+@pytest.mark.parametrize("header", ["abc", "", "1.5"])
+def test_mcp_unparsable_kb_header_is_treated_as_absent(client, mcp_endpoint, header):
+    """KB 头解析失败按"未提供"处理 → 检索工具仍然 400，不会退化成无边界检索。"""
+    endpoint = mcp_endpoint(_RecordingMcpEndpoint(result={}))
+    resp = client.post(MCP_URL, headers={"X-HFusionHub-KB-ID": header}, json=_rpc(
+        "tools/call", params={"name": "search_knowledge_base", "arguments": {"query": "q"}}))
+    assert resp.status_code == 400
+    assert endpoint.calls == []
+
+
+def test_mcp_null_result_is_normalized_to_jsonrpc_envelope(client, mcp_endpoint):
+    """协议层对通知返回 None，HTTP 层必须回一个合法 JSON-RPC 体而不是空响应。"""
+    mcp_endpoint(_RecordingMcpEndpoint(result=None))
+    resp = client.post(MCP_URL, json=_rpc("notifications/initialized"))
+    assert resp.status_code == 200
+    assert resp.json() == {"jsonrpc": "2.0", "result": None}
+
+
+def test_mcp_endpoint_exception_maps_to_500_envelope(client, mcp_endpoint):
+    mcp_endpoint(_RecordingMcpEndpoint(raises=RuntimeError("transport closed")))
+    resp = client.post(MCP_URL, json=_rpc("initialize"))
+    assert resp.status_code == 500
+    assert resp.json() == {"code": 500, "message": "MCP error: transport closed"}
+
+
+def test_mcp_jsonrpc_version_is_validated_by_the_protocol_layer_not_http(client, mcp_endpoint):
+    """jsonrpc 字段非 2.0 属协议错误：由端点返回 JSON-RPC error，HTTP 层不得改判 4xx/5xx。"""
+    endpoint = mcp_endpoint(_RecordingMcpEndpoint(
+        result={"jsonrpc": "2.0", "id": 1, "error": {"code": -32600, "message": "Invalid JSON-RPC version"}}))
+    resp = client.post(MCP_URL, json=_rpc("initialize", jsonrpc="1.0"))
+    assert resp.status_code == 200
+    assert resp.json()["error"]["code"] == -32600
+    assert endpoint.calls[0][0]["jsonrpc"] == "1.0"
+
+
+@pytest.mark.parametrize("payload", [
+    {},                                        # 缺 method
+    {"jsonrpc": 2, "method": "initialize"},    # jsonrpc 非字符串
+    {"jsonrpc": "2.0"},                        # 缺 method
+    {"jsonrpc": "2.0", "method": 5},           # method 非字符串
+    {"jsonrpc": "2.0", "method": "tools/call", "params": "not-an-object"},
+    {"jsonrpc": "2.0", "method": "tools/call", "id": {"nested": 1}},
+])
+def test_mcp_request_shape_is_validated_before_dispatch(client, mcp_endpoint, payload):
+    """请求体形状由 pydantic 先把关：非法体不得进入鉴权与分发。"""
+    endpoint = mcp_endpoint(_RecordingMcpEndpoint(result={}))
+    resp = client.post(MCP_URL, json=payload)
+    assert resp.status_code == 422
+    assert endpoint.calls == []
+
+
+def test_mcp_health_reports_tool_names(client, mcp_schemas):
+    resp = client.get("/mcp/health")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "status": "healthy",
+        "protocol": "json-rpc-2.0",
+        "tool_count": len(MCP_TOOL_SCHEMAS),
+        "tools": ["search_knowledge_base", "read_chunk"],
+    }
+
+
+def test_mcp_tools_lists_full_schemas_without_auth(bare_client, mcp_schemas):
+    """schema 发现面公开：只回结构与描述，不含任何知识库数据。"""
+    resp = bare_client.get("/mcp/tools")
+    assert resp.status_code == 200
+    assert resp.json() == {"tools": MCP_TOOL_SCHEMAS}
+
+
+def test_mcp_runtime_surface_is_public_while_admin_surface_is_guarded(bare_client, mcp_schemas):
+    """两套 MCP 面的边界相反且都是有意为之：运行时握手公开、管理面必须内部 token。"""
+    assert bare_client.get("/mcp/tools").status_code == 200
+    assert bare_client.get("/mcp/health").status_code == 200
+    assert bare_client.get("/api/mcp/servers").status_code == 401
 

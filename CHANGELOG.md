@@ -11,6 +11,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第六十七批（2026-10-05：mcp 运行时 JSON-RPC 面契约测试——按方法分级鉴权首次成文）
+
+#### Added
+- **`tests/test_api_contract.py` +16 个用例（+27 收集）**，覆盖 `POST /mcp` 与 `/mcp/health`、`/mcp/tools` 共 3 个运行时端点。**本批零生产代码改动**
+  - **鉴权按 JSON-RPC 方法分级，不是整面一刀切**：`initialize` / `notifications/initialized` / `tools/list` 三个握手与 schema 发现方法**必须无 token 可达**（否则外部 MCP 客户端连不上），其余方法（含未知方法）一律要 `X-Internal-Token`——缺失 401、伪造 403，且两种失败都**一次都不调用** `mcp_sse_endpoint`
+  - **服务端未配置密钥时 fail-closed**：`config.INTERNAL_API_TOKEN` 为空 → 携带任何 token 都 403，工具执行不下发
+  - **`search_knowledge_base` 的知识库边界**：该工具缺 `X-HFusionHub-KB-ID` 直接 400；头值无法解析（`abc` / 空串 / `1.5`）按"未提供"处理、同样 400，不会退化成无边界检索；其他工具（如 `get_current_time`）不受该头约束，`knowledge_base_id` 以 None 下发
+  - **转发体不得含 null 占位**：通知请求没有 `id`/`params` 时，交给协议层的 body 恰为 `{"jsonrpc","method"}` 两键（`model_dump(exclude_none=True)`），避免下游"键存在即有效"的误判
+  - **协议错误留在 JSON-RPC 层表达**：`jsonrpc` 非 2.0 时 HTTP 仍 200、由端点回 `-32600`；端点对通知返回 None 时 HTTP 层补 `{"jsonrpc":"2.0","result":null}` 而不是空响应体
+  - **形状校验先于分发**：缺 `method`、`method` 非字符串、`params` 非对象、`id` 为对象等 6 类请求体 422 且零分发
+  - **两张公开读侧的形状**：`/mcp/health` 固定 `status=healthy` + `protocol=json-rpc-2.0` + `tool_count == len(tools)` + `tools` 只列名字；`/mcp/tools` 回完整 schema 且完全不需鉴权
+  - **两套 MCP 面边界相反且均有意为之**：对照用例把"运行时面公开握手 / 管理面必须内部 token"并置断言（`/mcp/tools`、`/mcp/health` 200 与 `/api/mcp/servers` 401）
+- **测试计数 1638 → 1654**：README badge 与三处正文、`README_EN.md`、`docs/ROADMAP.md` 同步
+- `docs/OPTIMIZATION_PLAN.md` R15-21 剩余无 API 层测试端点由 11 收窄到 8（`eval_harness` 7 / `ingest` 1）
+
+#### 决策记录
+- **本批不删 `/mcp` 的端点内鉴权（与第六十四批方向相反，须辨清）**：plugin_admin 的病灶是"router 守卫 + 端点自校验两套等价锁叠加"且校验的键恒空导致 403-by-construction；`app/api/mcp.py:65-74` 的端点内校验却是**唯一**鉴权点（`app/main.py:171` 注册 `mcp_router` 时不带依赖），因为它必须按方法分级放行握手。后续任何"鉴权去重"改造若把它当冗余删除，等于把工具执行面变成公开面——本批的 401/403 用例就是这道防线
+- **未把"服务端密钥未配置"从 403 改为 503**：`require_internal_token` 在 `INTERNAL_API_TOKEN` 未配置时回 503（服务侧配置错误），`/mcp` 回 403（视作凭证无效）。两者都 fail-closed，只差可观测性；改齐要动运行时面语义，本批按现状钉死，是否统一待确认
+- **未在 API 层重复 `knowledge_base_id > 0` 边界**：`X-HFusionHub-KB-ID: 0` / `-5` 会原样转发，真正的拒绝在 registry（`app/core/tools/registry.py:662` 对 ≤0 直接 `SCOPE_DENIED`），因此越界值不会变成无边界检索；是否把边界提前到 HTTP 层（失败更早、报错更准）待确认
+- **`/mcp` 的 500 文案仍回传内部异常文本**（`app/api/mcp.py:90`，`MCP error: {exc}`）：与第六十四批 plugin_admin 同一口径、同一未闭合问题，本批按现状断言
+- **公开面暴露范围已核实**：Java 侧只调用管理面 `/api/mcp/servers`（`java-backend/src/main/java/com/hfusionhub/client/AiClient.java:849,864`），仓内未见对 `/mcp` 的网关透传配置，故握手/schema 公开仅在 Python 服务端口直连时可达；若日后经网关对外，需重新评估 schema 披露面
+
+#### 验证
+- `tests/test_api_contract.py` **136/136 通过**（本文件 109 → 136 收集）；Python 全量 **1751 passed / 8 skipped**（第六十六批基线 1724 + 27 收集，既有用例零受影响）
+- `ruff check .`（python-ai）保持全绿；static-checks 八项全绿（含测试计数同步）
+- 本批生产代码零改动
+
 ### 第六十六批（2026-10-05：mcp_admin 契约测试——管理面密钥不回传、校验失败走 200 契约）
 
 #### Added
