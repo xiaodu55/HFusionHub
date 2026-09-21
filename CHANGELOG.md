@@ -11,6 +11,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第六十六批（2026-10-05：mcp_admin 契约测试——管理面密钥不回传、校验失败走 200 契约）
+
+#### Added
+- **`tests/test_api_contract.py` +11 个用例（+17 收集）**，覆盖 `/api/mcp/servers` 全部 4 个管理端点。**本批零生产代码改动**
+  - **鉴权挂载**：4 端点参数化断言缺 token / 伪造 token 一律 401；token 有效但缺 `X-Tenant-Id` 时 400（router 级 `tenant_dependencies`，`app/main.py:177`；本仓另一处 `mcp_router` 无守卫注册，属运行时面，留作后续）
+  - **管理面不得回传密钥**：`_server_payload` 只暴露 id/name/url/transport/status/tool_count/error_message 七个可见字段，测试用哨兵密钥（`api_key="sk-mcp-sentinel-key"`）断言响应文本内既不含哨兵值、也不出现 `api_key` 这个键名——将来给 payload 加字段很容易顺手把连接对象里的密钥一起带出去
+  - **状态与传输枚举落为字符串**：整份 `{"servers": [...]}` 全等断言，`transport`/`status` 必须是 `TransportType`/`ConnectionStatus` 的 `.value`（`connected` / `disconnected` / `error`），`tool_count` 由 `len(tools)` 得出，空 `error_message` 归一为 `None` 而非 `""`
+  - **校验失败按 200 + `success=False` 回给 Java 透传层**（而非 4xx）：空 id/url、非 http(s) 地址（含 `ftp://` 与 `//host/path` 形式）、`transport` 越界（`stdio` 不接受，配置期即拒）共 6 类，且**校验失败时 manager 一次调用都不发生**（不产生"注册了但配置非法"的残条目）；只有请求体本身不是 JSON 对象才 422（`null` / `[]` / `"str"` / `7`）
+  - **入参归一化必须落在转发给 manager 的配置上**：`" notion "`、`" https://… "`、`" Streamable-HTTP "`、`api_key: "  "` 转发后恰为 `{"id":"notion","name":"notion","url":"https://mcp.notion/sse","transport":"streamable-http","api_key":None}`（name 缺省取 id、空 api_key 归 None），随后才 `connect`；响应消息为 `MCP 服务器 'notion' 连接成功`
+  - **连接失败不回滚注册**：`connect` 返回 False 时条目保留、`status="error"`、`error_message` 原样回传，调用序列恰为 `[add_server, connect]`——若实现改成失败即删除，前端就没有可重试的服务器条目了
+  - **重连与移除的顺序契约**：未知 id 的 reconnect 只 `get_server`、绝不 `connect`；已知 id 走 `[get_server, connect]` 并回报结果；remove 一律**先 disconnect 再 remove_server**，且对不存在的 id 同样执行（幂等，200 + `success=False`，不是 404）
+- **测试计数 1627 → 1638**：README badge 与三处正文、`README_EN.md`、`docs/ROADMAP.md` 同步
+- `docs/OPTIMIZATION_PLAN.md` R15-21 剩余无 API 层测试端点由 15 收窄到 11（`eval_harness` 7 / `mcp` 3 / `ingest` 1）
+
+#### 决策记录
+- **不断言"移除未知服务器必须跳过 disconnect"**：现有实现无条件先断连再摘除，对未知 id 也如此——`disconnect` 在 manager 内部本就按 id 查表、无连接即空操作，多一次无害调用换来移除路径单一。测试因此把"未知 id 也走 `[disconnect, remove_server]`"钉成现状而非缺陷
+- **`transport=stdio` 在 HTTP 面拒绝，不改 manager**：`TransportType` 含 `stdio`，但管理 API 只接受 sse / streamable-http 两种远程传输——stdio 需要本机进程与命令白名单，不能由前端透传层任意注册，这条边界属于安全约束，测试把它固化为契约
+- **裸 app 与真实 app 继续并存**（承接第六十五批）：本批 4 端点全部走 `create_app()` 挂载，鉴权与租户守卫在同一层受测；`app/api/mcp.py`（运行时 MCP 调用面，3 端点、无守卫注册）语义更重，单独成批处理
+
+#### 验证
+- `tests/test_api_contract.py` **109/109 通过**（本文件 92 → 109 收集）；Python 全量 **1724 passed / 8 skipped**（第六十五批基线 1707 + 17 收集，既有用例零受影响）
+- `ruff check .`（python-ai）保持全绿；static-checks 八项全绿（含内部 token 键一致性、内部契约锚点与测试计数同步）
+- 本批生产代码零改动
+
 ### 第六十五批（2026-10-05：agent_observability 契约测试——观测面首次经过真实鉴权挂载）
 
 #### Added

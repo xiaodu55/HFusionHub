@@ -2,9 +2,9 @@
 
 覆盖此前零测试的路由（bid / rag，第六十三批的 gateway / guardrails /
 memory_internal / tools，第六十四批的 plugin_admin，第六十五批的
-agent_observability）。用 FastAPI TestClient 走真实请求-响应契约：鉴权守卫
-挂载、参数校验（422）、错误包装（status=error）、降级不 5xx、成功路径
-（monkeypatch 工作流），不依赖 LLM / Milvus。
+agent_observability，第六十六批的 mcp_admin）。用 FastAPI TestClient 走真实
+请求-响应契约：鉴权守卫挂载、参数校验（422）、错误包装（status=error）、
+降级不 5xx、成功路径（monkeypatch 工作流），不依赖 LLM / Milvus。
 """
 
 from __future__ import annotations
@@ -1019,4 +1019,231 @@ def test_evaluate_run_validates_batch(client, monkeypatch):
     for payload in bad_payloads:
         resp = client.post("/api/agent/observability/evaluate/run", json=payload)
         assert resp.status_code == 422, payload
+
+
+# ── mcp_admin API（第六十六批）────────────────────────────────────────
+
+MCP_ADMIN_ROUTES = [
+    ("get", "/api/mcp/servers"),
+    ("post", "/api/mcp/servers"),
+    ("post", "/api/mcp/servers/n1/reconnect"),
+    ("delete", "/api/mcp/servers/n1"),
+]
+
+MCP_SENTINEL_KEY = "sk-mcp-sentinel-key"
+
+
+class _FakeMcpManager:
+    """MCPClientManager 替身：记录调用次序，连接结果可注入。"""
+
+    def __init__(self, *, servers=(), connect_ok=True):
+        from app.core.tools.mcp_client import ConnectionStatus, MCPServerConnection
+
+        self._conn_cls = MCPServerConnection
+        self._connected = ConnectionStatus.CONNECTED
+        self._error = ConnectionStatus.ERROR
+        self.calls = []
+        self._servers = {c.server_id: c for c in servers}
+        self._connect_ok = connect_ok
+
+    def list_servers(self):
+        self.calls.append(("list_servers", None))
+        return list(self._servers.values())
+
+    def get_server(self, server_id):
+        self.calls.append(("get_server", server_id))
+        return self._servers.get(server_id)
+
+    def add_server(self, cfg):
+        from app.core.tools.mcp_client import TransportType
+
+        self.calls.append(("add_server", dict(cfg)))
+        conn = self._conn_cls(
+            server_id=cfg["id"], name=cfg["name"], url=cfg["url"],
+            transport=TransportType(cfg["transport"]), api_key=cfg.get("api_key"))
+        self._servers[cfg["id"]] = conn
+        return conn
+
+    async def connect(self, server_id):
+        self.calls.append(("connect", server_id))
+        conn = self._servers.get(server_id)
+        if conn is not None:
+            conn.status = self._connected if self._connect_ok else self._error
+            if not self._connect_ok:
+                conn.error_message = "connection refused"
+        return self._connect_ok
+
+    async def disconnect(self, server_id):
+        self.calls.append(("disconnect", server_id))
+
+    def remove_server(self, server_id):
+        self.calls.append(("remove_server", server_id))
+        return self._servers.pop(server_id, None) is not None
+
+
+def _conn(server_id="n1", *, status=None, **kwargs):
+    from app.core.tools.mcp_client import (
+        ConnectionStatus,
+        MCPServerConnection,
+        TransportType,
+    )
+
+    return MCPServerConnection(
+        server_id=server_id,
+        name=kwargs.get("name", server_id),
+        url=kwargs.get("url", "http://mcp.internal:9000/sse"),
+        transport=TransportType(kwargs.get("transport", "sse")),
+        api_key=kwargs.get("api_key"),
+        status=status or ConnectionStatus.DISCONNECTED,
+        tools=kwargs.get("tools", []),
+        error_message=kwargs.get("error_message", ""),
+    )
+
+
+@pytest.fixture
+def mcp_admin():
+    import app.api.mcp_admin as mcp_admin
+    return mcp_admin
+
+
+@pytest.fixture
+def mcp_manager(monkeypatch, mcp_admin):
+    """默认装一个带单个已存在服务器的 manager，返回工厂以便覆盖。"""
+    def use(manager):
+        monkeypatch.setattr(mcp_admin, "get_mcp_client_manager", lambda: manager)
+        return manager
+
+    return use
+
+
+@pytest.mark.parametrize("method,path", MCP_ADMIN_ROUTES)
+def test_mcp_admin_routes_reject_missing_and_forged_internal_token(
+        bare_client, method, path):
+    call = getattr(bare_client, method)
+    kwargs = {"json": {}} if method == "post" else {}
+    assert call(path, **kwargs).status_code == 401
+
+    forged = call(path, **kwargs, headers={"X-Internal-Token": "guess-me"})
+    assert forged.status_code == 401
+
+
+def test_mcp_admin_requires_verifiable_tenant():
+    bare = TestClient(create_app())
+    valid = {"X-Internal-Token": "test-internal-token"}
+    assert bare.get("/api/mcp/servers").status_code == 401
+    assert bare.get("/api/mcp/servers", headers=valid).status_code == 400
+
+
+def test_mcp_server_payload_shape_and_status_enums(client, mcp_manager):
+    from app.core.tools.mcp_client import ConnectionStatus
+
+    mcp_manager(_FakeMcpManager(servers=[
+        _conn("n1", status=ConnectionStatus.CONNECTED, tools=[{"name": "a"}, {"name": "b"}]),
+        _conn("n2", error_message="connection refused"),
+    ]))
+    body = client.get("/api/mcp/servers").json()
+    assert body == {"servers": [
+        {"id": "n1", "name": "n1", "url": "http://mcp.internal:9000/sse",
+         "transport": "sse", "status": "connected", "tool_count": 2,
+         "error_message": None},
+        {"id": "n2", "name": "n2", "url": "http://mcp.internal:9000/sse",
+         "transport": "sse", "status": "disconnected", "tool_count": 0,
+         "error_message": "connection refused"},
+    ]}
+
+
+def test_mcp_list_never_leaks_api_key(client, mcp_manager):
+    """管理面列表不得回传密钥——api_key 只存在于服务端连接对象与落盘配置。"""
+    mcp_manager(_FakeMcpManager(servers=[_conn("n1", api_key=MCP_SENTINEL_KEY)]))
+    text = str(client.get("/api/mcp/servers").json())
+    assert MCP_SENTINEL_KEY not in text
+    assert "api_key" not in text
+
+
+def test_mcp_add_server_rejects_invalid_payload_without_touching_manager(
+        client, mcp_manager):
+    """校验失败返回 200 + success=False（Java 透传给前端的契约），且不得注册。"""
+    manager = mcp_manager(_FakeMcpManager())
+    bad = [
+        ({}, "id 与 url 不能为空"),
+        ({"id": "x", "url": "  "}, "id 与 url 不能为空"),
+        ({"id": "", "url": "http://a/sse"}, "id 与 url 不能为空"),
+        ({"id": "x", "url": "ftp://a/sse"}, "url 必须是 http(s) 地址"),
+        ({"id": "x", "url": "//a/sse"}, "url 必须是 http(s) 地址"),
+        ({"id": "x", "url": "http://a", "transport": "stdio"},
+         "transport 仅支持 sse / streamable-http"),
+    ]
+    for payload, message in bad:
+        resp = client.post("/api/mcp/servers", json=payload)
+        assert resp.status_code == 200, payload
+        assert resp.json() == {"success": False, "message": message}, payload
+    assert manager.calls == []
+
+
+@pytest.mark.parametrize("body", [None, [], "not-an-object", 7])
+def test_mcp_add_server_requires_json_object(client, mcp_manager, body):
+    mcp_manager(_FakeMcpManager())
+    resp = client.post("/api/mcp/servers", json=body)
+    assert resp.status_code == 422
+
+
+def test_mcp_add_server_forwards_normalized_config_and_connects(client, mcp_manager):
+    """空白剔除、transport 归一小写、空 api_key 归 None、name 缺省取 id。"""
+    manager = mcp_manager(_FakeMcpManager())
+    resp = client.post("/api/mcp/servers", json={
+        "id": " notion ", "url": " https://mcp.notion/sse ",
+        "transport": " Streamable-HTTP ", "api_key": "  "})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is True
+    assert body["message"] == "MCP 服务器 'notion' 连接成功"
+    assert body["server"] == {
+        "id": "notion", "name": "notion", "url": "https://mcp.notion/sse",
+        "transport": "streamable-http", "status": "connected",
+        "tool_count": 0, "error_message": None}
+    assert manager.calls[0] == ("add_server", {
+        "id": "notion", "name": "notion", "url": "https://mcp.notion/sse",
+        "transport": "streamable-http", "api_key": None})
+    assert manager.calls[1] == ("connect", "notion")
+
+
+def test_mcp_add_server_reports_failed_connect_without_rolling_back(client, mcp_manager):
+    """连接失败仍保留注册（否则用户看不到可重试的服务器条目）。"""
+    manager = mcp_manager(_FakeMcpManager(connect_ok=False))
+    body = client.post("/api/mcp/servers", json={
+        "id": "n9", "url": "http://down:1/sse", "name": "离线服务"}).json()
+    assert body["success"] is False
+    assert body["message"] == "MCP 服务器 '离线服务' 连接失败"
+    assert body["server"]["status"] == "error"
+    assert body["server"]["error_message"] == "connection refused"
+    assert [c[0] for c in manager.calls] == ["add_server", "connect"]
+
+
+def test_mcp_reconnect_unknown_server_never_connects(client, mcp_manager):
+    manager = mcp_manager(_FakeMcpManager())
+    body = client.post("/api/mcp/servers/ghost/reconnect").json()
+    assert body == {"success": False, "message": "服务器 ghost 不存在"}
+    assert [c[0] for c in manager.calls] == ["get_server"]
+
+
+def test_mcp_reconnect_reports_result_for_known_server(client, mcp_manager):
+    manager = mcp_manager(_FakeMcpManager(servers=[_conn("n1")]))
+    body = client.post("/api/mcp/servers/n1/reconnect").json()
+    assert body["success"] is True
+    assert body["message"] == "MCP 服务器 'n1' 重新连接成功"
+    assert body["server"]["status"] == "connected"
+    assert [c[0] for c in manager.calls] == ["get_server", "connect"]
+
+
+def test_mcp_remove_disconnects_before_removing_and_is_idempotent(client, mcp_manager):
+    """先断连再摘除；摘不存在的服务器返回 200 + success=False，不是 404。"""
+    manager = mcp_manager(_FakeMcpManager(servers=[_conn("n1")]))
+    assert client.delete("/api/mcp/servers/n1").json() == {
+        "success": True, "message": "已移除"}
+    assert [c[0] for c in manager.calls] == ["disconnect", "remove_server"]
+
+    manager.calls.clear()
+    body = client.delete("/api/mcp/servers/ghost").json()
+    assert body == {"success": False, "message": "服务器 ghost 不存在"}
+    assert [c[0] for c in manager.calls] == ["disconnect", "remove_server"]
 
