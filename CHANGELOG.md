@@ -11,6 +11,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第七十一批（2026-10-06：test_eval_harness 的 API E2E 改走真实守卫——不再绕鉴权、不再污染仓库 data/、不再真出网）
+
+#### Changed
+- **`tests/test_eval_harness.py::test_api_runs_and_score_flow` 重写为"真实守卫 + 真实链路"**。该用例此前是仓内**唯一**用 `app.dependency_overrides` 把 `require_internal_token` / `require_tenant` 替换成空实现的 API 测试（全仓 `grep dependency_overrides` 现仅剩一条注释），于是它看起来"覆盖了评估 API"，实际从不经过任何鉴权；本批改用 `create_app()` 自建实例 + conftest 的真实内部 token，并新增"缺 token 必须 401 且不落任何产物"的断言。零生产代码改动
+- **同用例的三个副作用一并堵掉**：① 只 patch `runner_mod.default_runs_dir` 而不 patch `app.api.eval_harness.REPORTS_DIR`（模块级常量 `Path("data/eval_harness/reports")`，CWD 相对），历次运行把 `_report.md` 直接写进仓库 —— 修复前该目录已积累 **99 个文件**（靠 `.gitignore` 的 `python-ai/data/` 兜住才没进版本库），修复后本轮新增 0 个；② `_notify_java_record` 每轮都对 `config.JAVA_BACKEND_URL` 发一次真实 HTTP 请求（未起 Java 时是 502 + 白等）；③ 结尾 `app.dependency_overrides.clear()` 清空的是**全局 app** 的覆盖表，一旦中途断言失败就跳过清理、或把别的用例设的覆盖一起清掉。现三处统一改为 tmp_path / `httpx.Client` 打桩
+- **覆盖顺带补齐**：同一 E2E 里补跑 `/score`（分数文件 + 幻灯片落盘，正是第七十批修掉的 `request.label` 500 的回归位）与 `/diff`（同一运行自比 `has_regression=False`），使这条链路在"真 runner + 真评分 + 真报告"下全程可达，而不只像第七十批那样在打桩契约层验证
+
+#### 决策记录
+- **不删历史产物文件**：`python-ai/data/eval_harness/reports` 的 99 个文件是 gitignored 运行产物，其中最早的可追到 2026-08-30；删除属不可逆动作且可能有人拿去比对历史评分，留给你决定是否清空
+- **保留"真链路"而不把这条也改成全打桩**：第七十批的契约测试已把 runner/score/report/slides 四个函数全替身；本用例的价值恰在跑真内核（真 JSONL 落盘、真指标计算、真报告渲染），两者互补。若这里也打桩，评估 API 就没有一条用例能证明"模块之间参数对得上"
+- **`create_app()` 而非全局 `app`**：与 `tests/test_api_contract.py` 的 `client` / `bare_client` fixture 同一口径，也避免用例间共享 override 表
+
+#### 验证
+- `tests/test_eval_harness.py` **15/15 通过**（用例数不变，函数增删为 0）；Python 全量 **1821 passed / 8 skipped**（与第七十批基线逐项一致，零回归）
+- `ruff check .`（python-ai）全绿；static-checks 八项全绿；测试计数仍为 **1689**（本批未新增 `test_` 函数）
+- 生产代码零改动；`python-ai/data/eval_harness/reports` 本轮新增 0 个文件（以 mtime 核验）
+
 ### 第七十批（2026-10-05：eval_harness 评估中枢契约测试收口 R15-21——/score 必 500、/diff 缺目录穿越守卫）
 
 #### Fixed

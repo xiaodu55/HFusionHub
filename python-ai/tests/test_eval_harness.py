@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -166,26 +167,50 @@ def test_score_replay_and_diff(tmp_path: Path):
     assert {r["verdict"] for r in rows} & {diff_mod.REGRESSED}
 
 
-# ── API 端到端（TestClient + monkeypatch runner）─────────────────────────
+# ── API 端到端（真实守卫 + 真实 runner/score/report，只假出网的两条缝）──
+
+class _NoNetworkClient:
+    """httpx.Client 替身：runner 自调用与 Java 摘要回调都不许真出网。"""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def post(self, url, **kwargs):
+        return SimpleNamespace(status_code=200, text="ok")
+
 
 def test_api_runs_and_score_flow(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
+    import app.api.eval_harness as eval_api
     from app.core.eval_harness import runner as runner_mod
-    from app.main import app
+    from app.main import create_app
+    from app.utils.config import config
 
-    client = TestClient(app)
-    headers = {"X-Internal-Token": "test-token", "X-Tenant-Id": "1"}
+    # 自建 app + 真实守卫：不用 dependency_overrides，也不碰全局 app 的 override 表
+    client = TestClient(create_app())
+    headers = {"X-Internal-Token": config.INTERNAL_API_TOKEN, "X-Tenant-Id": "1"}
 
-    # 依赖守卫需要 token 一致 —— 直接 monkeypatch 校验函数最省事
-    from app.api.deps import require_tenant
-    from app.api.internal_auth import require_internal_token
-    app.dependency_overrides[require_internal_token] = lambda: None
-    app.dependency_overrides[require_tenant] = lambda: 1
-
+    # 三个落盘/出网缝全部改到 tmp_path：
+    # 只 patch default_runs_dir 会把报告与评分写进仓库的 data/eval_harness/reports，
+    # 并且每次运行都对 JAVA_BACKEND_URL 发一次真实 HTTP 请求
     monkeypatch.setattr(runner_mod, "_fetch_retrieval", lambda *a, **k: (["1"], ["ctx"]))
-    monkeypatch.setattr(runner_mod, "_run_chat_stream", lambda *a, **k: ("回答", 100.0, 700.0, "completed"))
+    monkeypatch.setattr(runner_mod, "_run_chat_stream",
+                        lambda *a, **k: ("回答", 100.0, 700.0, "completed"))
     monkeypatch.setattr(runner_mod, "default_runs_dir", lambda: tmp_path / "runs")
+    monkeypatch.setattr(eval_api, "REPORTS_DIR", tmp_path / "reports")
+    monkeypatch.setattr("httpx.Client", _NoNetworkClient)
+
+    # 守卫是真的：缺 token 必须 401，且不留任何产物
+    assert client.post("/api/eval-harness/run",
+                       json={"knowledge_base_id": 132}).status_code == 401
+    assert not (tmp_path / "reports").exists()
 
     # 无样本 → 422
     resp = client.post("/api/eval-harness/run", json={"knowledge_base_id": 132}, headers=headers)
@@ -194,13 +219,19 @@ def test_api_runs_and_score_flow(tmp_path, monkeypatch):
     # 正常运行（无 judge）
     resp = client.post("/api/eval-harness/run", headers=headers, json={
         "label": "api-test", "knowledge_base_id": 132,
-        "samples": [{"query_id": "q1", "query": "问题", "expected_document_ids": ["1"], "requires_rag": True}],
+        "samples": [{"query_id": "q1", "query": "问题",
+                     "expected_document_ids": ["1"], "requires_rag": True}],
     })
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["summary"]["retrieval_hit@5"] == 1.0
 
     run_file = body["run_file"]
+    # 全部产物只落在 tmp_path：仓库的 data/ 目录不得被单测写入
+    # /run 只出题报告（分数文件由 /score 或 /run 内的 score_run 之后按需落盘）
+    assert (tmp_path / "runs" / run_file).exists()
+    assert sorted(p.name for p in (tmp_path / "reports").iterdir()) == [
+        run_file.replace(".jsonl", "_report.md")]
 
     # runs 列表
     resp = client.get("/api/eval-harness/runs", headers=headers)
@@ -212,7 +243,18 @@ def test_api_runs_and_score_flow(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert "评估报告" in resp.json()["report"]
 
-    app.dependency_overrides.clear()
+    # 重放评分：/score 走同一份 run 文件，分数与幻灯片一并产出（第七十批修掉的 500 回归位）
+    resp = client.post("/api/eval-harness/score", headers=headers,
+                       json={"run_file": run_file, "retrieval_k": 5})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["scores_file"] == run_file.replace(".jsonl", "_scores.json")
+    assert (tmp_path / "reports" / run_file.replace(".jsonl", "_slides.html")).exists()
+
+    # A/B 对比：同一运行自比不得判出回归
+    resp = client.post("/api/eval-harness/diff", headers=headers,
+                       json={"base_run": run_file, "candidate_run": run_file})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["has_regression"] is False
 
 
 def test_score_by_tag_slicing(tmp_path: Path):
