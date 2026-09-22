@@ -48,7 +48,7 @@ async def ingest_url(request: UrlIngestRequest):
         raise ParsingException(message="网页抓取失败，请稍后重试") from exc
 
     if not text.strip():
-        raise ParsingException(message="该网页没有可提取的正文内容")
+        raise HTTPException(status_code=400, detail="该网页没有可提取的正文内容")
 
     storage_root = Path(config.DOCUMENT_STORAGE_ROOT).expanduser().resolve()
     storage_root.mkdir(parents=True, exist_ok=True)

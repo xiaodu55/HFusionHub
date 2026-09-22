@@ -1624,10 +1624,11 @@ def test_ingest_url_assigns_distinct_files_per_request(client, ingest_fetcher, i
 
 def test_ingest_url_rejects_blank_extracted_text_without_writing(
         client, ingest_fetcher, ingest_storage):
+    """抓到了页但没有正文属目标内容不可用：按 4xx 回给调用方，不记作服务故障。"""
     ingest_fetcher(_FakeFetcher(result=("空页", "   \n\t  ")))
     resp = client.post(INGEST_URL, json={"url": INGEST_TARGET})
-    assert resp.status_code == 500
-    assert resp.json() == {"code": 500, "message": "文档解析失败: 该网页没有可提取的正文内容"}
+    assert resp.status_code == 400
+    assert resp.json() == {"code": 400, "message": "该网页没有可提取的正文内容"}
     assert _staged(ingest_storage) == []
 
 

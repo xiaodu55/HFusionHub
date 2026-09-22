@@ -11,6 +11,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第六十九批（2026-10-05：ingest 正文空白改判 400——收口第六十八批留下的分级不一致）
+
+#### Fixed
+- **`app/api/ingest.py:51`：目标网页无可提取正文由 500 改判 400**。第六十八批把 URL 策略拒绝归到 4xx 后，"URL 合法、抓取成功、但页面没有可读正文"仍抛 `ParsingException` → 500 + "文档解析失败:" 前缀，与相邻的输入拒绝分级不一致：调用方换一条 URL 即可修正，服务端并没有故障。现统一为 `HTTPException(400, "该网页没有可提取的正文内容")`，端点的分级收敛为**入站可修正 → 400 且原因原样；服务侧故障（httpx 传输异常）→ 500 且文案泛化**
+
+#### Changed
+- `tests/test_api_contract.py::test_ingest_url_rejects_blank_extracted_text_without_writing` 由断言 500 前缀信封改为 400 原样文案，并补注该分支的语义；"失败不建目录、不留残档""抓取器被调用一次"两条断言保持不变
+- `docs/OPTIMIZATION_PLAN.md` R15-21 的 ingest 行补记该分级收口
+
+#### 决策记录
+- **选 400 而不是 422**：422 在本仓表示请求体形状/取值不合契约（本批的 5 例 422 就是这类）；正文空白通过了全部校验，是"这个目标地址取不到可用内容"，与 SSRF 拒绝同属调用方可换输入解决的一类，故沿用 400 + 原因原样
+- **Java 侧可见行为仍不变**：`AiClient.ingestUrl`（`java-backend/src/main/java/com/hfusionhub/client/AiClient.java:835,840`）对 4xx/5xx 一律落进同一 `catch (Exception)` 并返回自己的通用提示，因此本批改判只影响 HTTP 语义与 `hfusionhub.trace` 日志的错误归因，不改动前端文案；仓内除该端点与本次测试外没有别处引用这条消息
+- **不再往下扩**：`file_path` 写入失败（磁盘/权限）仍会抛未捕获异常并由全局 handler 记为 500 泛化文案，属真实服务故障，分级正确，不改
+
+#### 验证
+- `tests/test_api_contract.py` **159/159 通过**（用例数不变，仅一处断言随契约更新）；Python 全量 **1774 passed / 8 skipped**
+- `ruff check .`（python-ai）保持全绿；static-checks 八项全绿；测试计数仍为 1665（本批未新增 `test_` 函数）
+- 生产改动 1 行（`ingest.py:51`），`UrlIngestResponse` 字段不变
+
 ### 第六十八批（2026-10-05：ingest URL 摄取面契约测试 + URL 策略拒绝归 400、空白标题不再吞掉网页标题）
 
 #### Fixed
