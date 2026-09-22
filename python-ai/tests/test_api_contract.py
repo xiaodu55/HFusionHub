@@ -3,14 +3,18 @@
 覆盖此前零测试的路由（bid / rag，第六十三批的 gateway / guardrails /
 memory_internal / tools，第六十四批的 plugin_admin，第六十五批的
 agent_observability，第六十六批的 mcp_admin，第六十七批的 mcp 运行时
-JSON-RPC 面，第六十八批的 ingest URL 摄取面）。用 FastAPI TestClient 走真实
+JSON-RPC 面，第六十八批的 ingest URL 摄取面，第七十批的 eval_harness
+评估中枢面）。用 FastAPI TestClient 走真实
 请求-响应契约：鉴权守卫挂载、参数校验（422）、错误包装（status=error）、
 降级不 5xx、成功路径（monkeypatch 工作流），不依赖 LLM / Milvus。
 """
 
 from __future__ import annotations
 
+import inspect
+import json
 import re
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1651,4 +1655,516 @@ def test_ingest_url_hides_transport_failure_details(client, ingest_fetcher, inge
     assert "10.0.0.1" not in resp.text
     assert fetcher.calls == [INGEST_TARGET]
     assert _staged(ingest_storage) == []
+
+
+# ── eval_harness 评估中枢 API（第七十批）───────────────────────────────
+
+EVAL_BASE = "/api/eval-harness"
+EVAL_ROUTES = [
+    ("post", f"{EVAL_BASE}/run"),
+    ("post", f"{EVAL_BASE}/score"),
+    ("get", f"{EVAL_BASE}/runs"),
+    ("get", f"{EVAL_BASE}/slides"),
+    ("get", f"{EVAL_BASE}/report"),
+    ("post", f"{EVAL_BASE}/diff"),
+    ("get", f"{EVAL_BASE}/datasets"),
+]
+
+EVAL_RUN_FILE = "api-test_20261005_000000.jsonl"
+
+
+class _EvalStack:
+    """runner / score / report / slides 的记录型替身。"""
+
+    def __init__(self, *, result=None, score_raises: Exception | None = None,
+                 scores: dict[str, dict] | None = None):
+        self.calls: list[tuple] = []
+        self.result = result
+        self._score_raises = score_raises
+        self._scores = scores or {}
+
+    def run_dataset(self, *args):
+        self.calls.append(("run_dataset", args))
+        return Path(f"data/eval_harness/runs/{EVAL_RUN_FILE}")
+
+    def list_run_files(self):
+        self.calls.append(("list_run_files", ()))
+        return [{"file": EVAL_RUN_FILE, "records": 2}]
+
+    async def score_run(self, run_file, **kwargs):
+        self.calls.append(("score_run", (run_file,), kwargs))
+        if self._score_raises is not None:
+            raise self._score_raises
+        return self.result
+
+    def save_scores(self, result, reports_dir):
+        self.calls.append(("save_scores", (result, reports_dir)))
+        return Path(reports_dir) / f"{result.run_file.replace('.jsonl', '')}_scores.json"
+
+    def load_scores(self, reports_dir, run_file):
+        self.calls.append(("load_scores", (reports_dir, run_file)))
+        if run_file not in self._scores:
+            raise FileNotFoundError(f"scores not found for {run_file}; run score first")
+        return self._scores[run_file]
+
+    def save_report(self, result, reports_dir, title=""):
+        self.calls.append(("save_report", (result, reports_dir), {"title": title}))
+        return Path(reports_dir) / "x_report.md"
+
+    def save_slides(self, result, reports_dir, title=""):
+        self.calls.append(("save_slides", (result, reports_dir), {"title": title}))
+        return Path(reports_dir) / f"{result.run_file.replace('.jsonl', '')}_slides.html"
+
+
+class _RecordingHttpClient:
+    """httpx.Client 替身：_notify_java_record 是同步调用，绝不真出网。"""
+
+    posts: list[dict]
+
+    def __init__(self, posts, raises: Exception | None):
+        self._posts = posts
+        self._raises = raises
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def post(self, url, *, json, headers):
+        self._posts.append({"url": url, "json": json, "headers": headers})
+        if self._raises is not None:
+            raise self._raises
+        return SimpleNamespace(status_code=200, text="ok")
+
+
+@pytest.fixture
+def eval_dirs(monkeypatch, tmp_path):
+    """REPORTS_DIR / DATASET_DIR 是模块级常量：不 patch 会写进 python-ai/data 与 scripts/eval_sets。"""
+    import app.api.eval_harness as eval_api
+
+    reports = tmp_path / "reports"
+    datasets = tmp_path / "eval_sets"
+    monkeypatch.setattr(eval_api, "REPORTS_DIR", reports)
+    monkeypatch.setattr(eval_api, "DATASET_DIR", datasets)
+    return SimpleNamespace(reports=reports, datasets=datasets, root=tmp_path)
+
+
+@pytest.fixture
+def eval_stack(monkeypatch, eval_dirs):
+    def use(stack):
+        from app.core.eval_harness import report as report_mod
+        from app.core.eval_harness import runner as runner_mod
+        from app.core.eval_harness import score as score_mod
+        from app.core.eval_harness import slides as slides_mod
+
+        monkeypatch.setattr(runner_mod, "run_dataset", stack.run_dataset)
+        monkeypatch.setattr(runner_mod, "list_run_files", stack.list_run_files)
+        monkeypatch.setattr(score_mod, "score_run", stack.score_run)
+        monkeypatch.setattr(score_mod, "save_scores", stack.save_scores)
+        monkeypatch.setattr(score_mod, "load_scores", stack.load_scores)
+        monkeypatch.setattr(report_mod, "save_report", stack.save_report)
+        monkeypatch.setattr(slides_mod, "save_slides", stack.save_slides)
+        return stack
+
+    return use
+
+
+@pytest.fixture
+def eval_java_posts(monkeypatch):
+    """拦住 /run 尾部的 Java 摘要回调（同步 httpx，最阻塞 10s）。"""
+    posts: list[dict] = []
+    monkeypatch.setattr("httpx.Client", lambda **kwargs: _RecordingHttpClient(posts, None))
+    return posts
+
+
+@pytest.fixture
+def eval_java_boom(monkeypatch):
+    from app.utils.config import config
+
+    posts: list[dict] = []
+    monkeypatch.setattr(config, "JAVA_BACKEND_URL", "http://java:8080/api")
+    monkeypatch.setattr("httpx.Client",
+                        lambda **kwargs: _RecordingHttpClient(posts, RuntimeError("java down")))
+    return posts
+
+
+def _metric_result(*, run_file=EVAL_RUN_FILE, overall=None, cases=(), meta=None):
+    from app.core.eval_harness.schemas import CaseMetric, MetricResult
+
+    return MetricResult(
+        run_file=run_file,
+        overall=overall if overall is not None else {"retrieval_hit@5": 1.0},
+        cases=[CaseMetric(query_id=cid, metrics=metrics) for cid, metrics in cases],
+        meta=meta if meta is not None else {"record_count": 2, "requires_rag_count": 1},
+    )
+
+
+def _eval_sample_payload(query_id="q1", **extra):
+    payload = {"query_id": query_id, "query": f"问题 {query_id}",
+               "expected_document_ids": ["11"], "requires_rag": True}
+    payload.update(extra)
+    return payload
+
+
+@pytest.mark.parametrize("method,path", EVAL_ROUTES)
+def test_eval_harness_routes_reject_missing_and_forged_internal_token(
+        bare_client, method, path):
+    call = getattr(bare_client, method)
+    kwargs = {"json": {}} if method == "post" else {}
+    assert call(path, **kwargs).status_code == 401
+    assert call(path, **kwargs, headers={"X-Internal-Token": "guess-me"}).status_code == 401
+
+
+@pytest.mark.parametrize("method,path", EVAL_ROUTES)
+def test_eval_harness_requires_verifiable_tenant(bare_client, method, path):
+    call = getattr(bare_client, method)
+    kwargs = {"json": {}} if method == "post" else {}
+    valid = {"X-Internal-Token": "test-internal-token"}
+    assert call(path, **kwargs, headers=valid).status_code == 400
+    bad = {"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "acme"}
+    assert call(path, **kwargs, headers=bad).status_code == 400
+
+
+def test_eval_harness_run_forwards_the_full_runner_contract(
+        client, eval_stack, eval_java_posts, eval_dirs):
+    """run_dataset 全靠位置传参：位置一错就静默把 top_k 当并发用，故逐位绑定核对。"""
+    from app.core.eval_harness.runner import run_dataset as real_run_dataset
+    from app.utils.config import config
+
+    stack = eval_stack(_EvalStack(result=_metric_result()))
+    resp = client.post(f"{EVAL_BASE}/run", json={
+        "label": "第七十批", "knowledge_base_id": 132, "top_k": 8, "concurrency": 6,
+        "samples": [_eval_sample_payload()],
+    })
+    assert resp.status_code == 200, resp.text
+
+    args = stack.calls[0][1]
+    assert len(args) == 10, "start_run 以 10 个位置参数调用 run_dataset"
+    bound = inspect.signature(real_run_dataset).bind(*args)
+    bound.apply_defaults()
+    assert bound.arguments["base_url"] == config.EVAL_BASE_URL
+    assert bound.arguments["kb_id"] == 132
+    assert bound.arguments["top_k"] == 8
+    assert bound.arguments["concurrency"] == 6
+    assert bound.arguments["timeout"] == float(config.EVAL_TIMEOUT_S)
+    assert bound.arguments["runs_dir"] is None
+    assert bound.arguments["label"] == "第七十批"
+    assert bound.arguments["progress"] is None
+
+    headers = bound.arguments["headers"]
+    assert headers["X-Internal-Token"] == config.INTERNAL_API_TOKEN
+
+    samples = bound.arguments["samples"]
+    assert [type(s).__name__ for s in samples] == ["EvalSample"]
+    assert samples[0].query_id == "q1" and samples[0].query == "问题 q1"
+
+
+def test_eval_harness_run_applies_config_defaults_when_payload_omits_them(
+        client, eval_stack, eval_java_posts):
+    from app.core.eval_harness.runner import run_dataset as real_run_dataset
+    from app.utils.config import config
+
+    stack = eval_stack(_EvalStack(result=_metric_result()))
+    assert client.post(f"{EVAL_BASE}/run", json={
+        "knowledge_base_id": 1, "samples": [_eval_sample_payload()],
+    }).status_code == 200
+
+    bound = inspect.signature(real_run_dataset).bind(*stack.calls[0][1])
+    bound.apply_defaults()
+    assert bound.arguments["top_k"] == 5
+    assert bound.arguments["concurrency"] == config.EVAL_CONCURRENCY
+    assert bound.arguments["label"] == "run"
+
+
+def test_eval_harness_run_scores_then_reports_with_the_same_k(
+        client, eval_stack, eval_java_posts):
+    from app.utils.config import config
+
+    stack = eval_stack(_EvalStack(result=_metric_result()))
+    body = client.post(f"{EVAL_BASE}/run", json={
+        "label": "标签", "knowledge_base_id": 7, "top_k": 3,
+        "judge_runs": 2, "samples": [_eval_sample_payload()],
+    }).json()
+    assert body == {"run_file": EVAL_RUN_FILE,
+                    "summary": {"retrieval_hit@5": 1.0},
+                    "meta": {"record_count": 2, "requires_rag_count": 1}}
+
+    assert [c[0] for c in stack.calls] == ["run_dataset", "score_run", "save_report"]
+    assert stack.calls[1][1] == (EVAL_RUN_FILE,)
+    kwargs = stack.calls[1][2]
+    assert kwargs == {"enable_judge": False,
+                      "judge_model": config.EVAL_JUDGE_MODEL or None,
+                      "judge_runs": 2, "retrieval_k": 3}
+    assert stack.calls[2][2] == {"title": "标签"}
+
+
+def test_eval_harness_run_records_java_callback_without_api_suffix(
+        client, eval_stack, eval_java_posts, monkeypatch):
+    from app.utils.config import config
+
+    monkeypatch.setattr(config, "JAVA_BACKEND_URL", "http://java:8080/api")
+    eval_stack(_EvalStack(result=_metric_result(
+        overall={"retrieval_hit@5": 0.5},
+        cases=[("bad-1", {"retrieval_hit@5": 0.0}), ("good-1", {"retrieval_hit@5": 1.0})],
+        meta={"record_count": 2, "requires_rag_count": 2, "judge_enabled": True,
+              "judge_cases": 1})))
+    assert client.post(f"{EVAL_BASE}/run", json={
+        "knowledge_base_id": 9, "samples": [_eval_sample_payload()],
+    }).status_code == 200
+
+    assert len(eval_java_posts) == 1
+    post = eval_java_posts[0]
+    assert post["url"] == "http://java:8080/api/internal/eval-harness/record"
+    assert post["headers"]["X-Internal-Token"] == config.INTERNAL_API_TOKEN
+    assert post["json"] == {
+        "run_file": EVAL_RUN_FILE, "label": "run", "knowledge_base_id": 9, "top_k": 5,
+        "record_count": 2, "requires_rag_count": 2, "judge_enabled": True,
+        "judge_cases": 1, "overall": {"retrieval_hit@5": 0.5},
+        "failed_case_ids": {"failed": ["bad-1"]},
+    }
+
+
+def test_eval_harness_java_callback_caps_failed_case_ids(client, eval_stack, eval_java_posts):
+    eval_stack(_EvalStack(result=_metric_result(
+        cases=[(f"q{i}", {"retrieval_hit@5": 0.0}) for i in range(250)])))
+    assert client.post(f"{EVAL_BASE}/run", json={
+        "knowledge_base_id": 1, "samples": [_eval_sample_payload()],
+    }).status_code == 200
+    assert len(eval_java_posts[0]["json"]["failed_case_ids"]["failed"]) == 200
+
+
+def test_eval_harness_run_still_succeeds_when_java_callback_fails(
+        client, eval_stack, eval_java_boom):
+    """回调只告警：评估结果已经落盘，不能因为 Java 不可达而失败。"""
+    eval_stack(_EvalStack(result=_metric_result()))
+    resp = client.post(f"{EVAL_BASE}/run", json={
+        "knowledge_base_id": 1, "samples": [_eval_sample_payload()],
+    })
+    assert resp.status_code == 200
+    assert resp.json()["run_file"] == EVAL_RUN_FILE
+
+
+def test_eval_harness_run_rejects_empty_sample_id(client, eval_stack, eval_java_posts):
+    """query_id 缺省时按 case-<序号> 兜底，绝不落下空 ID。"""
+    from app.core.eval_harness.runner import run_dataset as real_run_dataset
+
+    stack = eval_stack(_EvalStack(result=_metric_result()))
+    assert client.post(f"{EVAL_BASE}/run", json={
+        "knowledge_base_id": 1,
+        "samples": [{"query": "无 ID 问题"}, {"query_id": "给定", "query": "另一问"}],
+    }).status_code == 200
+    samples = inspect.signature(real_run_dataset).bind(
+        *stack.calls[0][1]).arguments["samples"]
+    assert [s.query_id for s in samples] == ["case-1", "给定"]
+
+
+@pytest.mark.parametrize("payload,detail", [
+    ({"knowledge_base_id": 1}, "samples or dataset_name is required"),
+    ({"knowledge_base_id": 1, "samples": []}, "samples or dataset_name is required"),
+    ({"knowledge_base_id": 1, "samples": [{"query_id": "a"}]},
+     "sample 0 missing field: 'query'"),
+])
+def test_eval_harness_run_validates_sample_source(client, eval_stack, payload, detail):
+    stack = eval_stack(_EvalStack(result=_metric_result()))
+    resp = client.post(f"{EVAL_BASE}/run", json=payload)
+    assert resp.status_code == 422
+    assert resp.json()["message"] == detail
+    assert stack.calls == []
+
+
+@pytest.mark.parametrize("kb_id", [0, -1])
+def test_eval_harness_run_requires_a_positive_kb(client, eval_stack, kb_id):
+    stack = eval_stack(_EvalStack(result=_metric_result()))
+    assert client.post(f"{EVAL_BASE}/run", json={
+        "knowledge_base_id": kb_id, "samples": [_eval_sample_payload()],
+    }).status_code == 422
+    assert stack.calls == []
+
+
+@pytest.mark.parametrize("dataset_name", ["../evil.jsonl", "a/b.jsonl", "a\\b.jsonl",
+                                          "evil.txt", "no-extension"])
+def test_eval_harness_rejects_dataset_names_outside_the_whitelist(
+        client, eval_stack, eval_dirs, dataset_name):
+    stack = eval_stack(_EvalStack(result=_metric_result()))
+    resp = client.post(f"{EVAL_BASE}/run", json={
+        "knowledge_base_id": 1, "dataset_name": dataset_name})
+    assert resp.status_code == 422
+    assert resp.json()["message"] == "invalid dataset name"
+    assert stack.calls == []
+
+
+def test_eval_harness_loads_whitelisted_dataset_and_reports_missing(
+        client, eval_stack, eval_dirs, eval_java_posts):
+    from app.core.eval_harness.runner import run_dataset as real_run_dataset
+
+    stack = eval_stack(_EvalStack(result=_metric_result()))
+    (eval_dirs.datasets).mkdir(parents=True)
+    (eval_dirs.datasets / "smoke.jsonl").write_text(
+        json.dumps(_eval_sample_payload("d1")) + "\n"
+        + "\n"
+        + json.dumps(_eval_sample_payload("d2", tags={"kind": "投标"},
+                     history=[{"role": "user", "content": "上一轮"}])) + "\n",
+        encoding="utf-8",
+    )
+    assert client.post(f"{EVAL_BASE}/run", json={
+        "knowledge_base_id": 1, "dataset_name": "smoke.jsonl",
+    }).status_code == 200
+
+    samples = inspect.signature(real_run_dataset).bind(
+        *stack.calls[0][1]).arguments["samples"]
+    assert [s.query_id for s in samples] == ["d1", "d2"]
+    assert samples[1].tags == {"kind": "投标"}
+    assert samples[1].history == [{"role": "user", "content": "上一轮"}]
+
+    resp = client.post(f"{EVAL_BASE}/run", json={
+        "knowledge_base_id": 1, "dataset_name": "absent.jsonl"})
+    assert resp.status_code == 404
+    assert resp.json()["message"] == "dataset not found: absent.jsonl"
+
+
+def test_eval_harness_dataset_without_usable_lines_is_422(client, eval_stack, eval_dirs):
+    stack = eval_stack(_EvalStack(result=_metric_result()))
+    eval_dirs.datasets.mkdir(parents=True)
+    (eval_dirs.datasets / "blank.jsonl").write_text("\n\n  \n", encoding="utf-8")
+    resp = client.post(f"{EVAL_BASE}/run", json={
+        "knowledge_base_id": 1, "dataset_name": "blank.jsonl"})
+    assert resp.status_code == 422
+    assert resp.json()["message"] == "no usable samples"
+    assert stack.calls == []
+
+
+def test_eval_harness_runs_lists_runner_inventory(client, eval_stack):
+    stack = eval_stack(_EvalStack(result=_metric_result()))
+    assert client.get(f"{EVAL_BASE}/runs").json() == {
+        "runs": [{"file": EVAL_RUN_FILE, "records": 2}]}
+    assert stack.calls == [("list_run_files", ())]
+
+
+def test_eval_harness_datasets_lists_sorted_jsonl_only(client, eval_dirs):
+    eval_dirs.datasets.mkdir(parents=True)
+    for name in ("b.jsonl", "a.jsonl", "notes.md", "c.json"):
+        (eval_dirs.datasets / name).write_text("", encoding="utf-8")
+    assert client.get(f"{EVAL_BASE}/datasets").json() == {"datasets": ["a.jsonl", "b.jsonl"]}
+
+    shutil.rmtree(eval_dirs.datasets)
+    assert client.get(f"{EVAL_BASE}/datasets").json() == {"datasets": []}
+
+
+@pytest.mark.parametrize("method,path", [("get", f"{EVAL_BASE}/slides"),
+                                         ("get", f"{EVAL_BASE}/report")])
+def test_eval_harness_artifact_endpoints_block_path_traversal(
+        client, eval_stack, eval_dirs, method, path):
+    stack = eval_stack(_EvalStack(result=_metric_result()))
+    call = getattr(client, method)
+    for run_file in ("../x.jsonl", "a/b.jsonl", "..\\x.jsonl"):
+        resp = call(path, params={"run_file": run_file})
+        assert resp.status_code == 422, (run_file, resp.text)
+        assert resp.json()["message"] == "invalid run file name"
+    assert stack.calls == []
+
+
+@pytest.mark.parametrize("method,path,suffix,message", [
+    ("get", f"{EVAL_BASE}/slides", "_slides.html", "slides not found; run score first"),
+    ("get", f"{EVAL_BASE}/report", "_report.md", "report not found; run score first"),
+])
+def test_eval_harness_artifact_endpoints_404_before_score(
+        client, eval_stack, eval_dirs, method, path, suffix, message):
+    eval_stack(_EvalStack(result=_metric_result()))
+    resp = getattr(client, method)(path, params={"run_file": EVAL_RUN_FILE})
+    assert resp.status_code == 404
+    assert resp.json()["message"] == message
+
+    eval_dirs.reports.mkdir(parents=True)
+    body = "<html>幻灯片</html>" if "slides" in path else "评估报告正文"
+    (eval_dirs.reports / EVAL_RUN_FILE.replace(".jsonl", suffix)).write_text(
+        body, encoding="utf-8")
+    got = getattr(client, method)(path, params={"run_file": EVAL_RUN_FILE}).json()
+    assert got["run_file"] == EVAL_RUN_FILE
+    assert (got.get("html") or got.get("report")) == body
+
+
+def test_eval_harness_score_maps_missing_run_file_to_404(client, eval_stack):
+    stack = eval_stack(_EvalStack(result=None,
+                                  score_raises=FileNotFoundError("run file not found")))
+    resp = client.post(f"{EVAL_BASE}/score", json={"run_file": EVAL_RUN_FILE})
+    assert resp.status_code == 404
+    assert resp.json() == {"code": 404, "message": "run file not found"}
+    assert [c[0] for c in stack.calls] == ["score_run"]
+
+
+@pytest.mark.parametrize("path,payload", [
+    (f"{EVAL_BASE}/score", {"run_file": "../x.jsonl"}),
+    (f"{EVAL_BASE}/diff", {"base_run": "../a.jsonl", "candidate_run": "b.jsonl"}),
+    (f"{EVAL_BASE}/diff", {"base_run": "a.jsonl", "candidate_run": "b\\c.jsonl"}),
+])
+def test_eval_harness_score_and_diff_reject_traversal_before_touching_disk(
+        client, eval_stack, eval_dirs, path, payload):
+    """/score 的穿越串原先会漏进 runner 抛 ValueError（500）；现在四个读产物的端点同标准 422。"""
+    stack = eval_stack(_EvalStack(result=_metric_result(),
+                                  scores={"a.jsonl": {"overall": {}}}))
+    resp = client.post(path, json=payload)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["message"] == "invalid run file name"
+    assert stack.calls == []
+
+
+def test_eval_harness_score_saves_scores_and_slides(client, eval_stack, eval_dirs):
+    """重放评分必须同时产出分数文件与幻灯片，并回三件套。"""
+    stack = eval_stack(_EvalStack(result=_metric_result(
+        overall={"retrieval_hit@5": 0.8}, meta={"record_count": 1})))
+    resp = client.post(f"{EVAL_BASE}/score", json={
+        "run_file": EVAL_RUN_FILE, "enable_judge": True, "judge_model": "qwen-max",
+        "judge_runs": 3, "retrieval_k": 10})
+    assert resp.status_code == 200, resp.text
+    run_stem = EVAL_RUN_FILE.replace(".jsonl", "")
+    assert resp.json() == {
+        "scores_file": f"{run_stem}_scores.json",
+        "slides_file": f"{run_stem}_slides.html",
+        "result": _metric_result(overall={"retrieval_hit@5": 0.8},
+                                 meta={"record_count": 1}).to_dict(),
+    }
+    assert stack.calls[0][1] == (EVAL_RUN_FILE,)
+    assert stack.calls[0][2] == {"enable_judge": True, "judge_model": "qwen-max",
+                                 "judge_runs": 3, "retrieval_k": 10}
+    assert stack.calls[1][0] == "save_scores" and stack.calls[1][1][1] == eval_dirs.reports
+    assert stack.calls[2][0] == "save_slides" and stack.calls[2][1][1] == eval_dirs.reports
+    assert stack.calls[2][2] == {"title": EVAL_RUN_FILE}
+
+
+def test_eval_harness_diff_uses_real_comparison_and_regression_flag(client, eval_stack):
+    from app.core.eval_harness import diff as diff_mod
+
+    base = {"retrieval_hit@5": 0.9, "over_retrieval_rate": 0.1}
+    candidate = {"retrieval_hit@5": 0.5, "over_retrieval_rate": 0.4}
+    stack = eval_stack(_EvalStack(scores={"base.jsonl": {"overall": base},
+                                          "cand.jsonl": {"overall": candidate}}))
+    body = client.post(f"{EVAL_BASE}/diff", json={
+        "base_run": "base.jsonl", "candidate_run": "cand.jsonl"}).json()
+    assert body["base_run"] == "base.jsonl"
+    assert body["candidate_run"] == "cand.jsonl"
+    assert body["rows"] == diff_mod.diff_metrics(base, candidate)
+    assert body["has_regression"] is diff_mod.has_regression(body["rows"])
+    assert [c[1][1] for c in stack.calls] == ["base.jsonl", "cand.jsonl"]
+
+
+def test_eval_harness_diff_maps_missing_scores_to_404(client, eval_stack):
+    stack = eval_stack(_EvalStack(scores={"base.jsonl": {"overall": {}}}))
+    resp = client.post(f"{EVAL_BASE}/diff", json={
+        "base_run": "base.jsonl", "candidate_run": "ghost.jsonl"})
+    assert resp.status_code == 404
+    assert resp.json()["message"] == "scores not found for ghost.jsonl; run score first"
+    assert [c[1][1] for c in stack.calls] == ["base.jsonl", "ghost.jsonl"]
+
+
+def test_eval_harness_diff_rejects_traversal_like_run_names(client, eval_dirs):
+    """/diff 与 /slides、/report 同读 REPORTS_DIR，穿越串不得漏出目录外的文件。"""
+    eval_dirs.reports.mkdir(parents=True)
+    outside = eval_dirs.root / "outside_scores.json"
+    outside.write_text(json.dumps({"overall": {"retrieval_hit@5": 1.0}}), encoding="utf-8")
+    resp = client.post(f"{EVAL_BASE}/diff", json={
+        "base_run": "../outside.jsonl", "candidate_run": "../outside.jsonl"})
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["message"] == "invalid run file name"
+
 

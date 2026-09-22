@@ -31,6 +31,16 @@ DATASET_DIR = Path(__file__).resolve().parent.parent.parent / "scripts" / "eval_
 REPORTS_DIR = Path("data/eval_harness/reports")
 
 
+def _guard_run_file(name: str) -> None:
+    """run 文件名只能作目录内的相对文件名使用。
+
+    /score 少了这道检查时，穿越串会先撞进 runner.load_run_file 抛 ValueError（500）；
+    四个读产物的端点统一在入口拦成 422。
+    """
+    if "/" in name or "\\" in name or ".." in name:
+        raise HTTPException(status_code=422, detail="invalid run file name")
+
+
 class _RunRequest(BaseModel):
     label: str = Field(default="run", max_length=60)
     knowledge_base_id: int = Field(ge=1)
@@ -170,6 +180,7 @@ class _ScoreRequest(BaseModel):
 
 @router.post("/score")
 async def score(request: _ScoreRequest) -> dict[str, Any]:
+    _guard_run_file(request.run_file)
     try:
         result = await score_mod.score_run(
             request.run_file, enable_judge=request.enable_judge,
@@ -179,7 +190,7 @@ async def score(request: _ScoreRequest) -> dict[str, Any]:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     path = score_mod.save_scores(result, REPORTS_DIR)
-    slides_mod.save_slides(result, REPORTS_DIR, title=request.label)
+    slides_mod.save_slides(result, REPORTS_DIR, title=request.run_file)
     return {"scores_file": path.name, "slides_file": path.name.replace("_scores.json", "_slides.html"), "result": result.to_dict()}
 
 
@@ -190,8 +201,7 @@ async def list_runs() -> dict[str, Any]:
 
 @router.get("/slides")
 async def get_slides(run_file: str) -> dict[str, Any]:
-    if "/" in run_file or "\\" in run_file or ".." in run_file:
-        raise HTTPException(status_code=422, detail="invalid run file name")
+    _guard_run_file(run_file)
     slides_path = REPORTS_DIR / run_file.replace(".jsonl", "_slides.html")
     if not slides_path.exists():
         raise HTTPException(status_code=404, detail="slides not found; run score first")
@@ -200,8 +210,7 @@ async def get_slides(run_file: str) -> dict[str, Any]:
 
 @router.get("/report")
 async def get_report(run_file: str) -> dict[str, Any]:
-    if "/" in run_file or "\\" in run_file or ".." in run_file:
-        raise HTTPException(status_code=422, detail="invalid run file name")
+    _guard_run_file(run_file)
     report_path = REPORTS_DIR / run_file.replace(".jsonl", "_report.md")
     if not report_path.exists():
         raise HTTPException(status_code=404, detail="report not found; run score first")
@@ -215,6 +224,8 @@ class _DiffRequest(BaseModel):
 
 @router.post("/diff")
 async def diff(request: _DiffRequest) -> dict[str, Any]:
+    _guard_run_file(request.base_run)
+    _guard_run_file(request.candidate_run)
     try:
         base = score_mod.load_scores(REPORTS_DIR, request.base_run)
         candidate = score_mod.load_scores(REPORTS_DIR, request.candidate_run)

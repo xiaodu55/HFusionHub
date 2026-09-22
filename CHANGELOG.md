@@ -11,6 +11,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第七十批（2026-10-05：eval_harness 评估中枢契约测试收口 R15-21——/score 必 500、/diff 缺目录穿越守卫）
+
+#### Fixed
+- **`app/api/eval_harness.py:182`：`POST /api/eval-harness/score` 此前必然 500**。端点把不存在的 `request.label` 传给 `save_slides(title=...)`，`_ScoreRequest`（:163-168）只有 `run_file / enable_judge / judge_model / judge_runs / retrieval_k` 五个字段，于是 `AttributeError: '_ScoreRequest' object has no attribute 'label'` 在 `score_run` 与 `save_scores` **都成功之后**才抛——分数文件已写、幻灯片未写、调用方拿到 500 且响应体里的 `scores_file` 永远不存在。真实调用方在位（`hfusionhub-frontend/src/api/rag.ts:234`、`java-backend/.../EvalHarnessController.java:63`）。改为 `title=request.run_file`：`/score` 是重放评分、没有运行标签可用，用 run 文件名做幻灯片标题至少可追溯到具体一次运行，与 `/run` 侧 `title=request.label` 的"标题须可追溯"意图一致
+- **`app/api/eval_harness.py`：`/diff` 缺 `/slides`、`/report` 同款目录穿越检查**。两处产物读取端点各自内联 `"/" / "\\" / ".."` 拦 422，`/diff` 直接把 `base_run`/`candidate_run` 交给 `score.load_scores`（`score.py:103` 做 `reports_dir / run_file.replace(...)`）。实测 `base_run="../outside.jsonl"` 返回 **200 并读出 `REPORTS_DIR` 之外的 JSON**。抽出 `_guard_run_file()`，`/score`、`/slides`、`/report`、`/diff`（两个入参）共用。顺带修好同一道守卫缺位下的第三处表现：`/score` 的穿越串原先会漏进 `runner.load_run_file`（`runner.py:64-65` 抛 `ValueError`，端点只捕 `FileNotFoundError`）呈 500，现与其余端点一致在入口 422
+
+#### Added
+- **`tests/test_api_contract.py` +24 个用例（+47 收集，159 → 206）**，覆盖 `/api/eval-harness` 全部 7 个端点，**R15-21 列出的零测试路由就此收口**
+  - **鉴权挂载 ×14**：7 条路由 ×（缺 token / 伪造 token）401、×（有效 token 无租户 / `X-Tenant-Id: acme`）400；router 级守卫先于 pydantic 校验，故 `json={}` 也断言 401
+  - **`/run` 的位置参数契约**：`start_run` 以 10 个位置参数 `asyncio.to_thread(runner_mod.run_dataset, ...)` 驱动 runner，位置一错就把 `top_k` 当并发用而不报错。用例断言实参恰为 10 个，并用**真实** `run_dataset` 签名 `inspect.signature(...).bind()` 逐位核对 `base_url/kb_id/top_k/concurrency/timeout/runs_dir/label/progress`（替身须在导入真实签名之后再打桩，否则绑到替身的 `*args` 上取不到字段）
+  - **样本来源与白名单**：内联样本 / `dataset_name` 二选一，缺两者与空数组 → 422；`query_id` 缺省按 `case-<序号>` 兜底；`dataset_name` 含 `/`、`\`、`..`、非 `.jsonl`、无扩展名一律 422 且不触达 runner；白名单内 `.jsonl` 逐行解析（空行跳过、`tags`/`history` 原样进 `EvalSample`）、缺失 404、全空白文件 "no usable samples"
+  - **产物读取**：`/runs` 直接透传 runner 清单；`/datasets` 只列 `.jsonl` 且排序、目录不存在回空数组；`/slides`、`/report` 先 404 后按文件名读回正文；`/diff` 用**真实** `diff_metrics`/`has_regression` 比对，分数缺失 404
+  - **Java 摘要回调**：`/api` 后缀裁掉后拼 `/api/internal/eval-harness/record`，请求体逐字段核对（`overall` 原样、`failed_case_ids={"failed":[...]}`、`X-Internal-Token` 取 `config`）；失败用例 ID 截 200；**回调抛错或回 4xx/5xx 时评估仍 200** —— 结果已落盘，不因 Java 不可达而判评估失败
+  - 测试侧把 `REPORTS_DIR`/`DATASET_DIR` 两个模块级常量、四个 core 模块函数、`httpx.Client` 全部打桩：不打桩会往 `python-ai/data/eval_harness/reports` 与 `scripts/eval_sets` 写真实文件，并对 `JAVA_BACKEND_URL` 真出网（实测单例 3.5s 花在那次 502 上）
+
+#### 决策记录
+- **`/score` 标题选 run 文件名而非新增 `label` 字段**：补字段要同步改前端与 Java 透传层请求体，而该端点语义是"对既有运行重放评分"，文件名本身就是运行的唯一标识；等真要自定义标题时再加字段不迟
+- **穿越守卫抽函数而非在 `/diff` 内联两份**：三处内联副本已经证明"漏一处"的成因，`/diff` 有两个入参，再内联就是把同一判断复制第四、五遍
+- **两处缺陷在改动前先用红色用例呈现**：本批先交付按期望契约断言的 2 个用例（`/score` 200 + 三件套、`/diff` 422），把失败输出作为缺陷证据，再动生产代码——与第六十八批"不固化可疑行为成契约"的口径一致
+- **`TENANT_ID_HEADER = "1"` 与 `/run` 自调用头硬编码租户 1（:29、:132）本批不改**：单租户部署下无实际后果，多租户化时会静默串租户；改动涉及从请求上下文取租户，与评估运行器自调用链路一起处理更稳
+- **既有 `tests/test_eval_harness.py:171` 的覆盖假象留作下一批**：该用例用 `dependency_overrides` 绕过内部 token 与租户守卫，且只 patch `default_runs_dir` 不 patch `REPORTS_DIR`，一直在往 `python-ai/data/eval_harness/reports`（gitignored）写真实文件。它是仓内唯一"看起来覆盖了评估 API、实际从不经过守卫"的测试，值得改成走真实守卫 + 全量打桩，而非在本批顺手带改
+
+#### 验证
+- `tests/test_api_contract.py` **206/206 通过**（159 → 206 收集）；Python 全量 **1821 passed / 8 skipped**
+- `ruff check .`（python-ai）与 static-checks 八项全绿；测试计数 **1665 → 1689**（README badge 与三处正文、`README_EN.md`、`docs/ROADMAP.md` 同步）
+- 生产改动集中在 `app/api/eval_harness.py`（`_guard_run_file` 新增 + 5 处调用 + 1 处 `title=` 修正），响应结构不变；`docs/OPTIMIZATION_PLAN.md` R15-21 由 🟡 部分完成改判 ✅ 完成
+
 ### 第六十九批（2026-10-05：ingest 正文空白改判 400——收口第六十八批留下的分级不一致）
 
 #### Fixed
