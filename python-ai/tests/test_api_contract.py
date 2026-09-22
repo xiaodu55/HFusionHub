@@ -3,13 +3,15 @@
 覆盖此前零测试的路由（bid / rag，第六十三批的 gateway / guardrails /
 memory_internal / tools，第六十四批的 plugin_admin，第六十五批的
 agent_observability，第六十六批的 mcp_admin，第六十七批的 mcp 运行时
-JSON-RPC 面）。用 FastAPI TestClient 走真实
+JSON-RPC 面，第六十八批的 ingest URL 摄取面）。用 FastAPI TestClient 走真实
 请求-响应契约：鉴权守卫挂载、参数校验（422）、错误包装（status=error）、
 降级不 5xx、成功路径（monkeypatch 工作流），不依赖 LLM / Milvus。
 """
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -1467,4 +1469,185 @@ def test_mcp_runtime_surface_is_public_while_admin_surface_is_guarded(bare_clien
     assert bare_client.get("/mcp/tools").status_code == 200
     assert bare_client.get("/mcp/health").status_code == 200
     assert bare_client.get("/api/mcp/servers").status_code == 401
+
+
+# ── ingest URL 摄取 API（第六十八批）──────────────────────────────────
+
+INGEST_URL = "/api/ingest/url"
+INGEST_TARGET = "https://example.com/report"
+
+
+class _FakeFetcher:
+    """fetch_and_extract 替身：记录收到的 url，返回或抛出注入结果。"""
+
+    def __init__(self, *, result=("网页标题", "正文内容"), raises: Exception | None = None):
+        self.calls: list[str] = []
+        self._result = result
+        self._raises = raises
+
+    async def __call__(self, url):
+        self.calls.append(url)
+        if self._raises is not None:
+            raise self._raises
+        return self._result
+
+
+def _staged(root: Path) -> list[str]:
+    """暂存目录内的文件名清单；失败路径可能从未创建该目录。"""
+    return sorted(p.name for p in root.iterdir()) if root.exists() else []
+
+
+@pytest.fixture
+def ingest_storage(monkeypatch, tmp_path):
+    """摄取必须落到临时目录：默认 DOCUMENT_STORAGE_ROOT 指向 java-backend 上传目录。"""
+    from app.utils.config import config
+
+    root = tmp_path / "staged"
+    monkeypatch.setattr(config, "DOCUMENT_STORAGE_ROOT", str(root))
+    return root
+
+
+@pytest.fixture
+def ingest_fetcher(monkeypatch):
+    import app.api.ingest as ingest_api
+
+    def use(fetcher):
+        monkeypatch.setattr(ingest_api, "fetch_and_extract", fetcher)
+        return fetcher
+
+    return use
+
+
+@pytest.mark.parametrize("headers,code,message", [
+    ({}, 401, None),
+    ({"X-Internal-Token": "guess-me"}, 401, None),
+    ({"X-Internal-Token": "test-internal-token"}, 400,
+     "Tenant context required but missing"),
+    ({"X-Internal-Token": "test-internal-token", "X-Tenant-Id": "acme"}, 400,
+     "Invalid X-Tenant-Id header"),
+])
+def test_ingest_url_is_guarded_before_any_network_fetch(bare_client, ingest_fetcher,
+                                                        headers, code, message):
+    """鉴权/租户先于抓取：不允许未授权请求驱动服务端出网。"""
+    fetcher = ingest_fetcher(_FakeFetcher())
+    resp = bare_client.post(INGEST_URL, json={"url": INGEST_TARGET}, headers=headers)
+    assert resp.status_code == code
+    if message is not None:
+        assert resp.json()["message"] == message
+    assert fetcher.calls == []
+
+
+@pytest.mark.parametrize("payload", [
+    {},
+    {"url": None},
+    {"url": 5},
+    {"url": []},
+    {"title": "只有标题没有 url"},
+])
+def test_ingest_url_validates_request_shape(client, ingest_fetcher, ingest_storage, payload):
+    fetcher = ingest_fetcher(_FakeFetcher())
+    resp = client.post(INGEST_URL, json=payload)
+    assert resp.status_code == 422
+    assert fetcher.calls == []
+    assert not ingest_storage.exists()
+
+
+def test_ingest_url_stages_markdown_and_returns_storage_path(
+        client, ingest_fetcher, ingest_storage):
+    ingest_fetcher(_FakeFetcher(result=("季度经营分析", "全年营收 12.8 亿元。")))
+    resp = client.post(INGEST_URL, json={"url": INGEST_TARGET})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is True
+    assert body["file_type"] == "md"
+    assert body["title"] == "季度经营分析"
+    assert body["message"] == "网页已抓取并暂存，等待解析"
+    assert Path(body["file_path"]).parent == ingest_storage.resolve()
+    assert re.fullmatch(r"[0-9a-f]{32}\.md", Path(body["file_path"]).name)
+    assert Path(body["file_path"]).read_text(encoding="utf-8") == (
+        "# 季度经营分析\n\n来源: https://example.com/report\n\n全年营收 12.8 亿元。\n"
+    )
+    assert body["content_length"] == len(
+        "# 季度经营分析\n\n来源: https://example.com/report\n\n全年营收 12.8 亿元。\n"
+    )
+
+
+def test_ingest_url_creates_a_missing_storage_root(client, ingest_fetcher, tmp_path, monkeypatch):
+    from app.utils.config import config
+
+    root = tmp_path / "deep" / "nested" / "staged"
+    monkeypatch.setattr(config, "DOCUMENT_STORAGE_ROOT", str(root))
+    ingest_fetcher(_FakeFetcher())
+    assert client.post(INGEST_URL, json={"url": INGEST_TARGET}).status_code == 200
+    assert len(list(root.iterdir())) == 1
+
+
+@pytest.mark.parametrize("payload,page_title,expected", [
+    ({"url": INGEST_TARGET, "title": "指定标题"}, "网页标题", "指定标题"),
+    ({"url": INGEST_TARGET}, "网页标题", "网页标题"),
+    ({"url": INGEST_TARGET, "title": ""}, "网页标题", "网页标题"),
+    ({"url": INGEST_TARGET, "title": "   "}, "网页标题", "网页标题"),
+    ({"url": INGEST_TARGET, "title": " \t "}, "", INGEST_TARGET),
+    ({"url": INGEST_TARGET}, "", INGEST_TARGET),
+])
+def test_ingest_url_title_precedence(client, ingest_fetcher, ingest_storage,
+                                     payload, page_title, expected):
+    ingest_fetcher(_FakeFetcher(result=(page_title, "正文")))
+    body = client.post(INGEST_URL, json=payload).json()
+    assert body["title"] == expected
+    written = next(ingest_storage.iterdir()).read_text(encoding="utf-8")
+    assert written.startswith(f"# {expected}\n")
+
+
+def test_ingest_url_truncates_title_to_200_characters(client, ingest_fetcher, ingest_storage):
+    ingest_fetcher(_FakeFetcher(result=("标" * 300, "正文")))
+    body = client.post(INGEST_URL, json={"url": INGEST_TARGET}).json()
+    assert body["title"] == "标" * 200
+
+
+def test_ingest_url_filename_never_derives_from_user_input(
+        client, ingest_fetcher, ingest_storage):
+    """标题可含路径穿越，但文件名只有 uuid：暂存目录不可能被写到外部。"""
+    ingest_fetcher(_FakeFetcher(result=("../../escape", "正文")))
+    body = client.post(INGEST_URL, json={"url": INGEST_TARGET, "title": "../../etc/passwd"}).json()
+    assert Path(body["file_path"]).parent == ingest_storage.resolve()
+    assert [p.name for p in ingest_storage.iterdir()] == [Path(body["file_path"]).name]
+
+
+def test_ingest_url_assigns_distinct_files_per_request(client, ingest_fetcher, ingest_storage):
+    ingest_fetcher(_FakeFetcher())
+    first = client.post(INGEST_URL, json={"url": INGEST_TARGET}).json()["file_path"]
+    second = client.post(INGEST_URL, json={"url": INGEST_TARGET}).json()["file_path"]
+    assert first != second
+    assert len(list(ingest_storage.iterdir())) == 2
+
+
+def test_ingest_url_rejects_blank_extracted_text_without_writing(
+        client, ingest_fetcher, ingest_storage):
+    ingest_fetcher(_FakeFetcher(result=("空页", "   \n\t  ")))
+    resp = client.post(INGEST_URL, json={"url": INGEST_TARGET})
+    assert resp.status_code == 500
+    assert resp.json() == {"code": 500, "message": "文档解析失败: 该网页没有可提取的正文内容"}
+    assert _staged(ingest_storage) == []
+
+
+def test_ingest_url_reports_fetcher_value_error_as_bad_request(
+        client, ingest_fetcher, ingest_storage):
+    """URL 策略拒绝（SSRF / 协议白名单 / 非 HTML / 超 2MB）是调用方可修正的输入问题。"""
+    fetcher = ingest_fetcher(_FakeFetcher(raises=ValueError("仅支持公开的 HTTPS 网页地址")))
+    resp = client.post(INGEST_URL, json={"url": "https://169.254.169.254/latest/meta-data"})
+    assert resp.status_code == 400
+    assert resp.json() == {"code": 400, "message": "仅支持公开的 HTTPS 网页地址"}
+    assert fetcher.calls == ["https://169.254.169.254/latest/meta-data"]
+    assert _staged(ingest_storage) == []
+
+
+def test_ingest_url_hides_transport_failure_details(client, ingest_fetcher, ingest_storage):
+    fetcher = ingest_fetcher(_FakeFetcher(raises=RuntimeError("connect to 10.0.0.1:8081 refused")))
+    resp = client.post(INGEST_URL, json={"url": INGEST_TARGET})
+    assert resp.status_code == 500
+    assert resp.json() == {"code": 500, "message": "文档解析失败: 网页抓取失败，请稍后重试"}
+    assert "10.0.0.1" not in resp.text
+    assert fetcher.calls == [INGEST_TARGET]
+    assert _staged(ingest_storage) == []
 

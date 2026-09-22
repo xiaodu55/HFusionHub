@@ -10,7 +10,7 @@ import logging
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.exceptions import ParsingException
@@ -41,7 +41,8 @@ async def ingest_url(request: UrlIngestRequest):
     try:
         title, text = await fetch_and_extract(request.url)
     except ValueError as exc:
-        raise ParsingException(message=str(exc)) from exc
+        # URL 策略拒绝（SSRF 白名单、非 HTML、超 2MB）都是调用方可修正的输入问题
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # httpx transport errors and friends
         logger.warning("[ingest/url] fetch failed: %s", exc)
         raise ParsingException(message="网页抓取失败，请稍后重试") from exc
@@ -54,7 +55,7 @@ async def ingest_url(request: UrlIngestRequest):
     filename = f"{uuid.uuid4().hex}.md"
     file_path = storage_root / filename
 
-    effective_title = (request.title or title or request.url).strip()[:200]
+    effective_title = ((request.title or "").strip() or title or request.url).strip()[:200]
     content = f"# {effective_title}\n\n来源: {request.url}\n\n{text.strip()}\n"
     file_path.write_text(content, encoding="utf-8")
 

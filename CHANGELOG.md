@@ -11,6 +11,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第六十八批（2026-10-05：ingest URL 摄取面契约测试 + URL 策略拒绝归 400、空白标题不再吞掉网页标题）
+
+#### Fixed
+- **`app/api/ingest.py:43-45`：URL 策略拒绝由 500 改判 400**。抓取器的 `ValueError` 是调用方可修正的输入问题（`app/utils/ssrf_guard.py:58,60,63,70` 的 https/公网/凭据白名单拒绝，`app/core/ingest/url_fetcher.py:118,123` 的超 2MB 与非 HTML），此前被包成 `ParsingException` → `code=500` + "文档解析失败:" 前缀，把客户端错误记成服务端故障。现改抛 `HTTPException(400, str(exc))`，原因原样回传（`{"code": 400, "message": "仅支持公开的 HTTPS 网页地址"}`）；真实服务故障（httpx 传输异常）仍走 `ParsingException` 的 500 且文案泛化。**已核实现有调用方不受影响**：唯一调用者 `java-backend/.../AiClient.java:835` 用 `restTemplate.exchange`，4xx 与 5xx 都落进同一个 `catch (Exception)` 分支并返回它自己的通用提示，所以本次改判不改变 Java 侧可见行为，收益在 HTTP 语义正确、日志与错误归因不再把输入错误算作服务故障
+- **`app/api/ingest.py:57`：纯空白标题覆盖不再吞掉网页标题**。`(request.title or title or request.url).strip()` 里 `"   "` 是 truthy，会赢过网页 `<title>` 再被 `.strip()` 清空，导致文档 H1 与响应 `title` 同时为空串。现按本仓 `mcp_admin` 的"先 strip 再判空"归一口径改为 `((request.title or "").strip() or title or request.url)`（`title=None` 不得再触发 `AttributeError`，故 strip 前先兜空），超 200 字符截断保持不变。**Java 侧本来就不会传空白标题**（`AiClient.java:829` 已用 `!title.isBlank()` 过滤），该缺陷只在直连 HTTP 面可达，本批属边界加固
+
+#### Added
+- **`tests/test_api_contract.py` +11 个用例（+23 收集）**，覆盖 `POST /api/ingest/url`
+  - **守卫先于任何出网动作**：该端点会驱动服务端向外部 URL 发请求（SSRF 面），故 4 类非法请求（缺 token、伪造 token、有效 token 无租户、`X-Tenant-Id: acme`）必须分别 401 / 401 / 400 / 400，且 `fetch_and_extract` **一次都不调用**——鉴权失败不得留下任何对外请求痕迹
+  - **暂存产物形状**：响应 `file_type="md"`、`message="网页已抓取并暂存，等待解析"`、`file_path` 落在 `DOCUMENT_STORAGE_ROOT` 下且文件名恰为 `[0-9a-f]{32}\.md`；落盘正文为 `# {title}\n\n来源: {url}\n\n{正文}\n`；`content_length` 与文件内容逐字符一致（标题行与来源行也计入，不是正文字数）
+  - **标题优先级 6 例**：显式 `title` > 网页 `<title>` > 原始 URL；`""`、`"   "`、`" \t "` 一律视为未提供并逐级回落；超 200 字符截断
+  - **文件名与用户输入无关**：`title="../../etc/passwd"` 时 `file_path` 仍在暂存目录内、目录内只多出那一个 uuid 文件——穿越串只进正文标题，不参与路径构造
+  - **三条错误分级各自成文**：URL 策略 `ValueError` → 400 且原因原样；httpx 类传输异常 → 500 且泛化为 `文档解析失败: 网页抓取失败，请稍后重试`（断言响应不含 `10.0.0.1` 等内部地址细节）；正文全空白 → 500 `文档解析失败: 该网页没有可提取的正文内容`。三类失败都不产生文件，甚至不创建暂存目录
+  - **存储根自动建**：`DOCUMENT_STORAGE_ROOT` 指向不存在的多级目录时按 `parents=True` 创建再写入
+  - **请求形状先于分发**：缺 `url`、`url` 为 null / 数字 / 数组、只给 `title` 共 5 例 422 且零抓取
+  - 测试侧一律把 `DOCUMENT_STORAGE_ROOT` 改到 `tmp_path`：默认值 `../java-backend/uploads/documents` 直指 Java 上传目录，契约测试不得写真实暂存区
+- **测试计数 1654 → 1665**：README badge 与三处正文、`README_EN.md`、`docs/ROADMAP.md` 同步
+- `docs/OPTIMIZATION_PLAN.md` R15-21 剩余无 API 层测试端点由 8 收窄到 7（仅 `eval_harness`）
+
+#### 决策记录
+- **两处可疑行为都选 B（改生产代码）而非"按现状钉死"**：本批先只写测试、把两处行为摆出来后再动手，避免把 500 误分级和空白标题吞没固化成契约。改后仍保留"错误路径不建目录、不留残档"的全部断言，因为它们与状态码分级无关
+- **严重度经调用方核实后下调，但方向仍按 B 落地**：唯一 Java 调用方把 4xx/5xx 折叠成同一条通用提示、且不会传空白标题，所以这两处都不会造成线上可见故障。仍值得改的理由是：HTTP 层语义正确性、`hfusionhub.trace` 日志不再把输入错误记为服务故障，以及直连面（MCP Inspector、运维手测、后续网关）确实读 Python 的原始状态码与 message
+- **`ValueError` 通道经核实只承载输入拒绝**：`fetch_and_extract` 及其依赖（`ssrf_guard.validate_public_https`、`url_fetcher` 的大小与 content-type 检查）抛出的 `ValueError` 全部是调用方可修正的原因，无内部 bug 混入，所以整体改判 400 不会把真实故障伪装成客户端错误——这是 B 成立的前提
+- **正文空白仍留 500（待确认）**：`该网页没有可提取的正文内容` 与刚改判的 400 分级不完全一致。区别在于它不是请求本身非法（URL 合法、抓取成功），而是目标内容不可用，Java 侧按解析失败处理也讲得通；本批不动它，若要一并归 4xx 请单独示下
+- **`X-Tenant-Id: acme` 的 400 来自中间件而非端点**：断言按实际信封 `{"code":400,"message":"Invalid X-Tenant-Id header"}` 落，与 `require_tenant` 的 "Tenant context required but missing" 是两处不同来源，分别覆盖
+
+#### 验证
+- `tests/test_api_contract.py` **159/159 通过**（本文件 136 → 159 收集）；Python 全量 **1774 passed / 8 skipped**（第六十七批基线 1751 + 23 收集，既有用例零受影响）
+- `ruff check .`（python-ai）保持全绿；static-checks 八项全绿
+- 本批含 2 处生产代码改动（`app/api/ingest.py`），均为响应分级与标题归一，无接口形状变化（`UrlIngestResponse` 字段不变）
+
 ### 第六十七批（2026-10-05：mcp 运行时 JSON-RPC 面契约测试——按方法分级鉴权首次成文）
 
 #### Added
