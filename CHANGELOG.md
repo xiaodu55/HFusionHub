@@ -11,6 +11,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第七十二批（2026-10-06：eval_harness 出站租户改从请求上下文取——删掉写死的 tenant 1）
+
+#### Fixed
+- **`python-ai/app/api/eval_harness.py`：两条出站链路的 `X-Tenant-Id` 不再写死 `"1"`**。该常量 `TENANT_ID_HEADER = "1"`（原 :29）喂给 Java 摘要回调头，`/run` 给 runner 的自调用头里另有同字面量（原 :142）——两处各自决定一件不同的事：
+  - runner 用这组头**自调用本服务**的检索/对话端点（`config.EVAL_BASE_URL`），租户决定查哪个租户的向量分区与文档；
+  - Java `EvalHarnessInternalController.record`（`java-backend/src/main/java/com/hfusionhub/controller/EvalHarnessInternalController.java:55,62,79`）按回调头的 `X-Tenant-Id` 建租户上下文后才 `insert` `eval_harness_runs`。
+
+  现 `start_run` 以 `tenant_id: int = Depends(require_tenant)`（`app/api/deps.py:16`，缺租户 400 fail-closed）取入站租户，两处出站统一用 `str(tenant_id)`，`TENANT_ID_HEADER` 删除；`_notify_java_record` 相应加一个显式形参。**当前部署行为不变**：现网三个调用方（`EvalHarnessController.java:151`、`.github/workflows/eval-nightly.yml:142`、前端经 Java）都只发 tenant 1，故出站值仍是 `"1"`；本批消除的是"调用方声明了别的租户、Python 却按 1 执行并记账"这类静默串租户
+
+#### Added
+- **`tests/test_api_contract.py` +2 用例（收集 206 → 208）**
+  - `test_eval_harness_run_propagates_the_requesting_tenant_to_both_outbound_calls`：以 `X-Tenant-Id: 7` 打 `/run`，断言 runner 位置参数里的 `headers["X-Tenant-Id"] == "7"` 且 Java 回调头同为 `"7"`——把生产代码改回硬编码该用例即红（本批已实测：回退后 1 failed / 1 passed）
+  - `test_eval_harness_run_without_tenant_header_fails_closed_before_running`：有效 token 但无租户头 → 400，且 `run_dataset` **零调用**（评估一跑就是真实生产链路流量，不许"先跑再拒"）
+  - 第七十批两处只断言 `X-Internal-Token` 的头断言收紧为整字典相等，把租户一并钉住
+
+#### 决策记录
+- **用 `Depends(require_tenant)` 而非在函数体读 contextvar**：`asyncio.to_thread` 会复制上下文，线程里读 `get_tenant_id()` 同样取得到值，但那样租户成了"隐式全局"，`_notify_java_record` 的签名也不体现它依赖租户；显式形参让依赖在签名层可见，并复用同一处 fail-closed 守卫，新增 0 条判断分支。router 级已挂 `require_tenant`（`app/main.py:165`），端点级再声明只是取回同一个值，不改变校验顺序
+- **上游 Java 侧仍有一处写死，本批不动**：`EvalHarnessController.java:151` 的 `internalHeaders()` 把 `X-Tenant-Id` 写成 `"1"`，而同仓 `RagObservabilityController.java:296-298` 已经是 `TenantContext.getTenantId()`、取不到就不带头让 Python fail-closed。改它属 Java 面且要一并核 `record`/`import-corpus` 两个内部端点的 `defaultValue = "1"` 兜底，故单列一批；Python 侧先收口，是为了让"直连内部面"的调用方（脚本、CI）传什么都不会被静默改写
+- **对外契约零变化**：7 个端点的请求体、响应体、OpenAPI 参数均不变（`require_tenant` 无入参、读的是 header 派生的上下文），`_RunRequest` 字段不动
+
+#### 验证
+- `tests/test_api_contract.py` **208/208**（206 → 208）；`tests/test_eval_harness.py` 15/15 一并通过
+- Python 全量 **1823 passed / 8 skipped**（155.62s；第七十一批基线 1821 + 本批 2 例，零回归）
+- `ruff check .`（python-ai）全绿；static-checks 八项全绿，测试计数 **1689 → 1691**（README badge + 三处正文、`README_EN.md`、`docs/ROADMAP.md` 已同步）
+- 生产改动集中在 `eval_harness.py`：删 1 个常量、2 处出站头取值、1 个函数形参；7 个端点的请求体/响应体/OpenAPI 参数不变
+
 ### 第七十一批（2026-10-06：test_eval_harness 的 API E2E 改走真实守卫——不再绕鉴权、不再污染仓库 data/、不再真出网）
 
 #### Changed
@@ -19,7 +45,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **覆盖顺带补齐**：同一 E2E 里补跑 `/score`（分数文件 + 幻灯片落盘，正是第七十批修掉的 `request.label` 500 的回归位）与 `/diff`（同一运行自比 `has_regression=False`），使这条链路在"真 runner + 真评分 + 真报告"下全程可达，而不只像第七十批那样在打桩契约层验证
 
 #### 决策记录
-- **不删历史产物文件**：`python-ai/data/eval_harness/reports` 的 99 个文件是 gitignored 运行产物，其中最早的可追到 2026-08-30；删除属不可逆动作且可能有人拿去比对历史评分，留给你决定是否清空
+- **不删历史产物文件**：`python-ai/data/eval_harness/reports` 的 99 个文件是 gitignored 运行产物，其中最早的可追到 2026-08-30；删除属不可逆动作且可能有人拿去比对历史评分，留给你决定是否清空 **（同日追加：你已明确要求清空，`reports/` 99 个文件与 `runs/` 5 个 `.jsonl` 已删除；此后该目录只由评测运行重新填充）**
 - **保留"真链路"而不把这条也改成全打桩**：第七十批的契约测试已把 runner/score/report/slides 四个函数全替身；本用例的价值恰在跑真内核（真 JSONL 落盘、真指标计算、真报告渲染），两者互补。若这里也打桩，评估 API 就没有一条用例能证明"模块之间参数对得上"
 - **`create_app()` 而非全局 `app`**：与 `tests/test_api_contract.py` 的 `client` / `bare_client` fixture 同一口径，也避免用例间共享 override 表
 
@@ -47,7 +73,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`/score` 标题选 run 文件名而非新增 `label` 字段**：补字段要同步改前端与 Java 透传层请求体，而该端点语义是"对既有运行重放评分"，文件名本身就是运行的唯一标识；等真要自定义标题时再加字段不迟
 - **穿越守卫抽函数而非在 `/diff` 内联两份**：三处内联副本已经证明"漏一处"的成因，`/diff` 有两个入参，再内联就是把同一判断复制第四、五遍
 - **两处缺陷在改动前先用红色用例呈现**：本批先交付按期望契约断言的 2 个用例（`/score` 200 + 三件套、`/diff` 422），把失败输出作为缺陷证据，再动生产代码——与第六十八批"不固化可疑行为成契约"的口径一致
-- **`TENANT_ID_HEADER = "1"` 与 `/run` 自调用头硬编码租户 1（:29、:132）本批不改**：单租户部署下无实际后果，多租户化时会静默串租户；改动涉及从请求上下文取租户，与评估运行器自调用链路一起处理更稳
+- **`TENANT_ID_HEADER = "1"` 与 `/run` 自调用头硬编码租户 1（:29、:132）本批不改**：单租户部署下无实际后果，多租户化时会静默串租户；改动涉及从请求上下文取租户，与评估运行器自调用链路一起处理更稳 **（已由第七十二批按该口径收口）**
 - **既有 `tests/test_eval_harness.py:171` 的覆盖假象留作下一批**：该用例用 `dependency_overrides` 绕过内部 token 与租户守卫，且只 patch `default_runs_dir` 不 patch `REPORTS_DIR`，一直在往 `python-ai/data/eval_harness/reports`（gitignored）写真实文件。它是仓内唯一"看起来覆盖了评估 API、实际从不经过守卫"的测试，值得改成走真实守卫 + 全量打桩，而非在本批顺手带改
 
 #### 验证

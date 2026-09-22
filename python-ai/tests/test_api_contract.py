@@ -1853,7 +1853,7 @@ def test_eval_harness_run_forwards_the_full_runner_contract(
     assert bound.arguments["progress"] is None
 
     headers = bound.arguments["headers"]
-    assert headers["X-Internal-Token"] == config.INTERNAL_API_TOKEN
+    assert headers == {"X-Internal-Token": config.INTERNAL_API_TOKEN, "X-Tenant-Id": "1"}
 
     samples = bound.arguments["samples"]
     assert [type(s).__name__ for s in samples] == ["EvalSample"]
@@ -1875,6 +1875,35 @@ def test_eval_harness_run_applies_config_defaults_when_payload_omits_them(
     assert bound.arguments["top_k"] == 5
     assert bound.arguments["concurrency"] == config.EVAL_CONCURRENCY
     assert bound.arguments["label"] == "run"
+
+
+def test_eval_harness_run_propagates_the_requesting_tenant_to_both_outbound_calls(
+        client, eval_stack, eval_java_posts):
+    """出站租户必须跟着入站请求：硬编码成 1 时，tenant 7 的评测会打到 tenant 1 的
+    检索空间，Java 摘要也会记到 eval_harness_runs 的 tenant 1 行上。"""
+    from app.core.eval_harness.runner import run_dataset as real_run_dataset
+
+    stack = eval_stack(_EvalStack(result=_metric_result()))
+    resp = client.post(f"{EVAL_BASE}/run", headers={"X-Tenant-Id": "7"}, json={
+        "knowledge_base_id": 132, "samples": [_eval_sample_payload()],
+    })
+    assert resp.status_code == 200, resp.text
+
+    bound = inspect.signature(real_run_dataset).bind(*stack.calls[0][1])
+    bound.apply_defaults()
+    assert bound.arguments["headers"]["X-Tenant-Id"] == "7"
+    assert eval_java_posts[0]["headers"]["X-Tenant-Id"] == "7"
+
+
+def test_eval_harness_run_without_tenant_header_fails_closed_before_running(
+        bare_client, eval_stack):
+    """缺租户头时不得启动评估：runner 一跑就是真实生产链路流量。"""
+    stack = eval_stack(_EvalStack(result=_metric_result()))
+    resp = bare_client.post(f"{EVAL_BASE}/run",
+                            headers={"X-Internal-Token": "test-internal-token"},
+                            json={"knowledge_base_id": 1, "samples": [_eval_sample_payload()]})
+    assert resp.status_code == 400
+    assert stack.calls == []
 
 
 def test_eval_harness_run_scores_then_reports_with_the_same_k(
@@ -1916,7 +1945,8 @@ def test_eval_harness_run_records_java_callback_without_api_suffix(
     assert len(eval_java_posts) == 1
     post = eval_java_posts[0]
     assert post["url"] == "http://java:8080/api/internal/eval-harness/record"
-    assert post["headers"]["X-Internal-Token"] == config.INTERNAL_API_TOKEN
+    assert post["headers"] == {
+        "X-Internal-Token": config.INTERNAL_API_TOKEN, "X-Tenant-Id": "1"}
     assert post["json"] == {
         "run_file": EVAL_RUN_FILE, "label": "run", "knowledge_base_id": 9, "top_k": 5,
         "record_count": 2, "requires_rag_count": 2, "judge_enabled": True,

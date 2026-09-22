@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..core.eval_harness import EvalSample, MetricResult
@@ -21,12 +21,12 @@ from ..core.eval_harness import runner as runner_mod
 from ..core.eval_harness import score as score_mod
 from ..core.eval_harness import slides as slides_mod
 from ..utils.config import config
+from .deps import require_tenant
 
 router = APIRouter(prefix="/api/eval-harness", tags=["eval-harness"])
 
 # 数据集白名单目录：仅允许加载该目录下的 .jsonl（防目录穿越）
 logger = logging.getLogger(__name__)
-TENANT_ID_HEADER = "1"
 DATASET_DIR = Path(__file__).resolve().parent.parent.parent / "scripts" / "eval_sets"
 REPORTS_DIR = Path("data/eval_harness/reports")
 
@@ -53,7 +53,8 @@ class _RunRequest(BaseModel):
     judge_runs: int | None = Field(default=None, ge=1, le=5)
 
 
-def _notify_java_record(run_file: str, request: _RunRequest, result: MetricResult) -> None:
+def _notify_java_record(run_file: str, request: _RunRequest, result: MetricResult,
+                        tenant_id: int) -> None:
     """评估完成后回调 Java 记录聚合摘要（eval_harness_runs 表）。
 
     失败仅告警不影响评估结果 —— Java 侧可通过 /api/eval-harness/report 按需拉取。
@@ -84,7 +85,7 @@ def _notify_java_record(run_file: str, request: _RunRequest, result: MetricResul
                 json=body,
                 headers={
                     "X-Internal-Token": config.INTERNAL_API_TOKEN,
-                    "X-Tenant-Id": TENANT_ID_HEADER,
+                    "X-Tenant-Id": str(tenant_id),
                 },
             )
         if resp.status_code >= 400:
@@ -136,10 +137,15 @@ def _load_samples(request: _RunRequest) -> list[EvalSample]:
 
 
 @router.post("/run")
-async def start_run(request: _RunRequest) -> dict[str, Any]:
-    """驱动一次完整评估（同步执行；样本量大时耗时与并发配置相关）。"""
+async def start_run(request: _RunRequest,
+                    tenant_id: int = Depends(require_tenant)) -> dict[str, Any]:
+    """驱动一次完整评估（同步执行；样本量大时耗时与并发配置相关）。
+
+    评估运行会真实调用生产链路，回调 Java 也要落在同一租户，故两处出站头都从
+    入站请求上下文取租户（本仓无默认租户，缺租户的请求已在守卫处 400）。
+    """
+    headers = {"X-Internal-Token": config.INTERNAL_API_TOKEN, "X-Tenant-Id": str(tenant_id)}
     samples = _load_samples(request)
-    headers = {"X-Internal-Token": config.INTERNAL_API_TOKEN, "X-Tenant-Id": "1"}
     # runner 使用同步 httpx 自调用本服务 —— 必须进线程池执行，
     # 否则会阻塞事件循环造成"自己等自己"的死锁
     import asyncio
@@ -166,7 +172,7 @@ async def start_run(request: _RunRequest) -> dict[str, Any]:
     report_mod.save_report(result, REPORTS_DIR, title=request.label)
     import asyncio
     # 第五十四批：同步 httpx 回传最阻塞 10s，不得在事件循环上直接执行
-    await asyncio.to_thread(_notify_java_record, run_file.name, request, result)
+    await asyncio.to_thread(_notify_java_record, run_file.name, request, result, tenant_id)
     return {"run_file": run_file.name, "summary": result.overall, "meta": result.meta}
 
 
