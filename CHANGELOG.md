@@ -11,6 +11,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第七十四批（2026-10-06：内部评估回调面删掉默认租户——缺头改判 403，不再记到 tenant 1 名下）
+
+#### Fixed
+- **`java-backend/src/main/java/com/hfusionhub/controller/EvalHarnessInternalController.java`：`record` 与 `import-corpus` 两个内部端点不再把租户/用户默认成 1**。旧实现两处都是 `@RequestHeader(value = "X-Tenant-Id", defaultValue = "1")`（原 :55、:90）+ `catch (NumberFormatException) { tenantId = 1L; }`（原 :62-65、:97-103），`import-corpus` 的 `X-User-Id` 同构（原 :91）。这个默认值之所以是 fail-open 而非便利：`/internal/eval-harness/**` 同时被排除在 Sa-Token 登录白名单与租户拦截器的 `excludePathPatterns` 之外（`SaTokenConfig.java:42,115`），内部 token 是该面唯一守卫，头里的租户是**唯一**归属依据——缺头或写了非数字时，`TenantContext.runAs(1L, ...)`（原 :79、:106）会把评估摘要 / 整批语料文档记进 tenant 1 的分区，调用方却拿到 `R.ok`。现改为 `required = false` + 统一校验 `requirePositiveId(...)`：strip 后为空、非数字、或 `< 1` 一律 `BusinessException(StatusCode.FORBIDDEN, 头部名与原值)`，且校验排在 `evalHarnessRunMapper.insert` / `evalCorpusImportService.importCorpus` **之前**（令牌守卫仍最前，保持"先认身份再认租户"的原有顺序）
+
+#### Added
+- **`java-backend/src/test/java/com/hfusionhub/controller/EvalHarnessInternalControllerTest.java`（新文件，9 例）**——该控制器此前**零 Java 测试**
+  - `record`：缺头 / 纯空白 / `"seven"` / `"0"` / `"-3"` 四种入参各断 `BusinessException` + `StatusCode.FORBIDDEN` + `insert` 零调用（前四种是旧代码会静默写入的路径，`"0"`/`"-3"` 是旧代码会照收并 `runAs(0)` 的路径）
+  - `record` 正向：`X-Tenant-Id: 7` 时，在打桩的 `insert` 内部读 `TenantContext.requireTenantId()` 必须为 7（证明租户上下文真在建行前建立），并按 `ArgumentCaptor` 校 `run_file` / `record_count` 落进实体
+  - `import-corpus`：缺 `X-Tenant-Id` 或缺 `X-User-Id` 各一例（`importCorpus` 零调用）；正向例设外层 `TenantContext` 为 99、调用后要求**还原成 99**——`runAs` 必须回滚而不是留下 9 给同线程后续工作
+  - 令牌无效 + 缺租户头时返回 `R.fail(403)` 而不抛 `BusinessException`，把"校验顺序"钉住
+  - 打桩口径沿袭第七十三批：`mock(EvalHarnessRunMapper)` + `mock(EvalCorpusImportService)` 走构造注入，`ReflectionTestUtils` 注 `expectedToken`，`@AfterEach TenantContext.clear()`
+
+#### 决策记录
+- **回 403 而非 400（第七十二批记的待定项）**：与本仓自己的两处口径一致——`TenantContextInterceptor.rejectNoTenant`（:201-205）用 `SC_FORBIDDEN` + `"Tenant context required but not resolved"`，本类原有的令牌守卫也回 403；Python 侧 `TenantMiddleware` 用 400，是因为它面对全部入站流量、把"头值不合法"当请求问题。这里缺租户不是形状错误而是"无法为任何租户授权写入"。选 `BusinessException` 而非继续 `R.fail(403, ...)` 有实际后果：`GlobalExceptionHandler.handleBusinessException`（:31-42）会把 400–599 的码映射成**真实 HTTP 状态**，于是 Python 的 `_notify_java_record`（只判 `resp.status_code >= 400`，`python-ai/app/api/eval_harness.py:91-93`）能看见拒绝并打 warning；而 `R.fail(403,...)` 是 HTTP 200 + 信封码，会被记成"callback ok"
+- **`X-User-Id` 一并收紧（略超出"租户"字面范围）**：它与租户头共用同一个 `try/catch`，只收紧租户会留下"语料静默归到 user 1"这半条 fail-open；且二者同构，同一个 `requirePositiveId` 覆盖，无额外分支。若你希望本批只动租户，回退这一处是独立的两行
+- **现网影响面已核**：`/record` 唯一调用方是 Python `_notify_java_record`（第七十二批起恒带真实租户，`.github/workflows/eval-nightly.yml:142` 显式发 `X-Tenant-Id: 1` 也照旧通过）；`/internal/eval-harness/import-corpus` 在本仓**无调用方**——全仓 grep 只有 CI 的浏览器路径 `/api/demo/import-corpus`（`eval-nightly.yml:130`，带 `satoken`，走 `DemoController.java:50`，不经本类）。风险仅剩仓外初始化脚本若曾省略这两个头，将从"记到 1"变成"403 拒绝"，这正是本批想要的 fail-closed
+- **令牌拒绝仍是 HTTP 200 + 信封 403**：`R.fail(403,...)` 在两条路径上都没改成真实状态码（本批不动，避免把契约测试的响应形状一并重写）。后果是 Python 把"token 不对"记成 callback ok、丢一条摘要而无人报警——留作待办
+
+#### 验证
+- 红色先行：新测试对**未改动的生产代码**跑 → `Tests run: 9, Failures: 6`，6 条全是 `Expected BusinessException to be thrown, but nothing was thrown`（即缺头/空白/非数字/非正数/缺 user 头五类静默路径）；改完 9/9 通过
+- Java 全量 `mvn -o test` **BUILD SUCCESS，Tests run 708 / Failures 0 / Errors 0 / Skipped 52**（第七十三批 699 + 本批 9，零回归）
+- `scripts/static-checks.py` **8/8 通过**，测试计数 **Java 701 → 710**（README badge + 三处正文、`README_EN.md` 已同步）· Python 1691 · 前端 101；"内部契约锚点"一项仍 5 处头名/路径两侧一致
+- Python 侧本批零改动（未跑全量；无生产文件变动）
+- 生产改动 1 个文件（两处签名 + 一处私有校验 helper），新增测试文件 1 个；两条路径、请求体、`R` 成功响应体与 `EvalHarnessRun` 字段映射均不变，只有"缺租户/缺用户头"的响应从 `R.ok` 变成真实 403
+
 ### 第七十三批（2026-10-06：Java 评估网关按当前租户转发——补上第七十二批上游那处写死的 "1"）
 
 #### Fixed
@@ -25,7 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### 决策记录
 - **红色验证先行**：把那一行改回 `headers.set("X-Tenant-Id", "1")` 后重跑 → **3 例失败**（`expected: <7> but was: <1>`、`expected: <3> but was: <1>`、`expected: <null> but was: <1>`），"token 未配置" 1 例不受影响仍绿；随后从备份恢复实现。三例失败即本批契约的证据，而非靠断言自证
-- **不一并改 `EvalHarnessInternalController` 的 `defaultValue = "1"`**：`record`（:55）与 `import-corpus`（:90）都用 `@RequestHeader(defaultValue = "1")` + 解析失败兜 `1L`，而 `/internal/eval-harness/**` 同时被排除于登录检查与租户拦截器，内部 token 是唯一守卫——缺头时"默认记到 tenant 1"属 fail-open，与刚修的 `internalHeaders()` 是同一问题的另一侧。不在本批动，是因为改它要先定 Java 回 400 还是 403、并核 `.github/workflows/eval-nightly.yml:142`（它显式发 `-H "X-Tenant-Id: 1"`，本身不受影响）之外的 Python 侧调用面；本批之后 Python 恒带真实租户，该默认值已从"实际生效路径"降级为"缺头兜底"，风险显著变小
+- **不一并改 `EvalHarnessInternalController` 的 `defaultValue = "1"`**：`record`（:55）与 `import-corpus`（:90）都用 `@RequestHeader(defaultValue = "1")` + 解析失败兜 `1L`，而 `/internal/eval-harness/**` 同时被排除于登录检查与租户拦截器，内部 token 是唯一守卫——缺头时"默认记到 tenant 1"属 fail-open，与刚修的 `internalHeaders()` 是同一问题的另一侧。不在本批动，是因为改它要先定 Java 回 400 还是 403、并核 `.github/workflows/eval-nightly.yml:142`（它显式发 `-H "X-Tenant-Id: 1"`，本身不受影响）之外的 Python 侧调用面；本批之后 Python 恒带真实租户，该默认值已从"实际生效路径"降级为"缺头兜底"，风险显著变小 **（已由第七十四批收口：两个内部端点改为缺头/非数字/非正数直接 403）**
 - **不给评估网关加 `X-User-Clearance`**：`RagObservabilityController.internalHeaders()`（:284-286）会按 admin 角色带该头，本控制器不带，Python 侧走"头缺省 → `clear_clearance()`（`app/api/tenant_middleware.py:71-72`）→ `get_clearance()` 按最低权限 `general`"（`app/core/security/clearance.py:27,61-63`），是 fail-closed 一侧。评估是知识库所有者触发的运维面，收紧口径与前端无关，留待多租户 ACL 真需要时再对齐
 - **`docs/ROADMAP.md:16` 的 "Java 703" 未动**：该行自注为 2026-09-08 口径的历史快照，且 static-checks 的对账只读 README badge / AGENTS.md / CLAUDE.md（后两者本仓不存在）。本批把 README 与 README_EN 同步为 701，ROADMAP 那行仍是旧数，属文档自称不一致而非测试计数漂移——是否一并刷新留给你定
 
@@ -52,7 +78,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### 决策记录
 - **用 `Depends(require_tenant)` 而非在函数体读 contextvar**：`asyncio.to_thread` 会复制上下文，线程里读 `get_tenant_id()` 同样取得到值，但那样租户成了"隐式全局"，`_notify_java_record` 的签名也不体现它依赖租户；显式形参让依赖在签名层可见，并复用同一处 fail-closed 守卫，新增 0 条判断分支。router 级已挂 `require_tenant`（`app/main.py:165`），端点级再声明只是取回同一个值，不改变校验顺序
-- **上游 Java 侧仍有一处写死，本批不动**：`EvalHarnessController.java:151` 的 `internalHeaders()` 把 `X-Tenant-Id` 写成 `"1"`，而同仓 `RagObservabilityController.java:296-298` 已经是 `TenantContext.getTenantId()`、取不到就不带头让 Python fail-closed。改它属 Java 面且要一并核 `record`/`import-corpus` 两个内部端点的 `defaultValue = "1"` 兜底，故单列一批；Python 侧先收口，是为了让"直连内部面"的调用方（脚本、CI）传什么都不会被静默改写 **（`internalHeaders()` 已由第七十三批收口；两个内部端点的 `defaultValue = "1"` 仍留作待办）**
+- **上游 Java 侧仍有一处写死，本批不动**：`EvalHarnessController.java:151` 的 `internalHeaders()` 把 `X-Tenant-Id` 写成 `"1"`，而同仓 `RagObservabilityController.java:296-298` 已经是 `TenantContext.getTenantId()`、取不到就不带头让 Python fail-closed。改它属 Java 面且要一并核 `record`/`import-corpus` 两个内部端点的 `defaultValue = "1"` 兜底，故单列一批；Python 侧先收口，是为了让"直连内部面"的调用方（脚本、CI）传什么都不会被静默改写 **（`internalHeaders()` 已由第七十三批收口；两个内部端点的 `defaultValue = "1"` 已由第七十四批收口）**
 - **对外契约零变化**：7 个端点的请求体、响应体、OpenAPI 参数均不变（`require_tenant` 无入参、读的是 header 派生的上下文），`_RunRequest` 字段不动
 
 #### 验证

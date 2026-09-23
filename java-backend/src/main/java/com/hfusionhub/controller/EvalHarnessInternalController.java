@@ -1,5 +1,7 @@
 package com.hfusionhub.controller;
 
+import com.hfusionhub.common.constant.StatusCode;
+import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.result.R;
 import com.hfusionhub.common.utils.InternalTokenGuard;
 import com.hfusionhub.dto.EvalCorpusImportResultDTO;
@@ -46,23 +48,18 @@ public class EvalHarnessInternalController {
 
     /**
      * 记录一次评估运行的聚合摘要（python eval-harness run 完成后回调）。
-     * 租户上下文按回调头的 X-Tenant-Id 显式建立（内部通道无登录态）。
+     * 租户上下文按回调头的 X-Tenant-Id 显式建立（内部通道无登录态），缺头即拒绝。
      */
     @PostMapping("/record")
     @Operation(summary = "Record eval run summary (internal only)")
     public R<Map<String, Object>> record(
             @RequestHeader(value = "X-Internal-Token", required = false) String providedToken,
-            @RequestHeader(value = "X-Tenant-Id", defaultValue = "1") String tenantHeader,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantHeader,
             @RequestBody Map<String, Object> body) {
         if (!InternalTokenGuard.isAuthorized(expectedToken, providedToken)) {
             return R.fail(403, "Forbidden: invalid or missing X-Internal-Token");
         }
-        long tenantId;
-        try {
-            tenantId = Long.parseLong(tenantHeader);
-        } catch (NumberFormatException e) {
-            tenantId = 1L;
-        }
+        long tenantId = requirePositiveId(tenantHeader, "X-Tenant-Id");
 
         EvalHarnessRun run = new EvalHarnessRun();
         run.setRunFile(String.valueOf(body.getOrDefault("run_file", "")));
@@ -82,28 +79,40 @@ public class EvalHarnessInternalController {
         return R.ok(Map.of("recorded", true, "id", run.getId() == null ? 0 : run.getId()));
     }
 
-    /** 评测语料导入（内部通道供初始化脚本使用；浏览器走 /demo/import-corpus）。 */
+    /** 评测语料导入（内部通道供初始化脚本使用；浏览器走 /demo/import-corpus）。租户与归属用户均须显式给出。 */
     @PostMapping("/import-corpus")
     @Operation(summary = "Import evaluation corpus (internal only)")
     public R<EvalCorpusImportResultDTO> importCorpus(
             @RequestHeader(value = "X-Internal-Token", required = false) String providedToken,
-            @RequestHeader(value = "X-Tenant-Id", defaultValue = "1") String tenantHeader,
-            @RequestHeader(value = "X-User-Id", defaultValue = "1") String userHeader) {
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantHeader,
+            @RequestHeader(value = "X-User-Id", required = false) String userHeader) {
         if (!InternalTokenGuard.isAuthorized(expectedToken, providedToken)) {
             return R.fail(403, "Forbidden: invalid or missing X-Internal-Token");
         }
-        long tenantId;
-        long userId;
+        long tenantId = requirePositiveId(tenantHeader, "X-Tenant-Id");
+        long userId = requirePositiveId(userHeader, "X-User-Id");
+        return R.ok(TenantContext.runAs(tenantId, () -> evalCorpusImportService.importCorpus(userId)));
+    }
+
+    /**
+     * 内部通道没有登录态，也没有租户拦截器兜底，头里的租户/用户是唯一的归属依据：
+     * 缺省或解析失败必须拒绝（403，与 {@code TenantContextInterceptor.rejectNoTenant}
+     * 及本类的令牌守卫同档），不能回落成 tenant 1 —— 那会把一个租户的数据记到另一个租户名下。
+     */
+    private static long requirePositiveId(String headerValue, String headerName) {
+        String raw = headerValue == null ? "" : headerValue.strip();
+        long parsed;
         try {
-            tenantId = Long.parseLong(tenantHeader);
-            userId = Long.parseLong(userHeader);
+            parsed = Long.parseLong(raw);
         } catch (NumberFormatException e) {
-            tenantId = 1L;
-            userId = 1L;
+            throw new BusinessException(
+                    StatusCode.FORBIDDEN, "Missing or invalid " + headerName + " header: '" + raw + "'");
         }
-        final long tid = tenantId;
-        final long uid = userId;
-        return R.ok(TenantContext.runAs(tid, () -> evalCorpusImportService.importCorpus(uid)));
+        if (parsed < 1) {
+            throw new BusinessException(
+                    StatusCode.FORBIDDEN, headerName + " header must be a positive id: '" + raw + "'");
+        }
+        return parsed;
     }
 
     private Long toLong(Object value) {
