@@ -206,7 +206,13 @@ async def fetch_plugin_versions(plugin_id: str, java_backend_url: str, internal_
         headers={"X-Internal-Token": internal_token},
     )
     resp.raise_for_status()
-    data = resp.json()
+    # Java 回的是 R<List<Map>> 信封，且其内部拒绝是 HTTP 200 + 信封码，raise_for_status 看不见
+    envelope = resp.json()
+    if envelope.get("code") != 200:
+        raise RuntimeError(
+            f"Java backend rejected version fetch for plugin {plugin_id}: "
+            f"code={envelope.get('code')} message={envelope.get('message')}"
+        )
     return [
             PluginVersionInfo(
                 version=v["version"],
@@ -215,7 +221,7 @@ async def fetch_plugin_versions(plugin_id: str, java_backend_url: str, internal_
                 canary_weight=float(v.get("canary_weight", 0)),
                 is_stable=v.get("status") == "active" and float(v.get("canary_weight", 0)) == 0,
             )
-            for v in data
+            for v in (envelope.get("data") or [])
         ]
 
 

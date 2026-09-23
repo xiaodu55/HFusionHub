@@ -24,6 +24,7 @@ from app.core.plugin.container_runner import (
     compute_sticky_version,
     execute_in_container,
     execute_with_canary,
+    fetch_plugin_versions,
     select_canary_version,
 )
 
@@ -477,56 +478,68 @@ class TestExecuteWithCanary:
 # ═══════════════════════════════════════════════════════════════════════
 
 class TestFetchPluginVersions:
+    """Drive the real ``fetch_plugin_versions`` against Java's ``R<List<...>>`` envelope.
 
-    def test_fetch_parses_correctly(self):
-        """Verify that fetch_plugin_versions correctly parses Java response."""
+    ``GET /api/internal/plugin/{id}/versions`` returns ``InternalPluginController``
+    ``getPluginVersions`` — an ``R`` envelope, not a bare list — and its rejections
+    (403/404) are HTTP 200 + envelope code, so ``raise_for_status`` cannot catch them.
+    """
+
+    @staticmethod
+    def _client(payload: dict) -> AsyncMock:
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json = MagicMock(return_value=payload)
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=resp)
+        return client
+
+    def _run(self, payload: dict):
         import asyncio
 
-
-        java_data = [
-            {
-                "version": "1.0.0",
-                "container_image": "hfusionhub-plugin-test:1.0.0",
-                "image_digest": "sha256:abc123",
-                "canary_weight": 0,
-                "status": "active",
-            },
-            {
-                "version": "2.0.0-canary",
-                "container_image": "hfusionhub-plugin-test:2.0.0",
-                "image_digest": "sha256:def456",
-                "canary_weight": 0.3,
-                "status": "pending",
-            },
-        ]
-
-        async def _mock_fetch(*args, **kwargs):
-            return [
-                PluginVersionInfo(
-                    version=v["version"],
-                    container_image=v["container_image"],
-                    image_digest=v["image_digest"],
-                    canary_weight=float(v.get("canary_weight", 0)),
-                    is_stable=v.get("status") == "active"
-                              and float(v.get("canary_weight", 0)) == 0,
-                )
-                for v in java_data
-            ]
-
         with patch(
-            "app.core.plugin.container_runner.fetch_plugin_versions",
-            new=_mock_fetch,
+            "app.core.plugin.container_runner.get_shared_client",
+            return_value=self._client(payload),
         ):
-            versions = asyncio.run(
-                _mock_fetch("p1", "http://java:8080", "token")
-            )
+            return asyncio.run(fetch_plugin_versions("p1", "http://java:8080", "token123"))
 
-        assert len(versions) == 2
-        assert versions[0].version == "1.0.0"
+    def test_parses_the_java_envelope_rows(self):
+        versions = self._run({
+            "code": 200,
+            "message": "success",
+            "data": [
+                {
+                    "version": "1.0.0",
+                    "container_image": "hfusionhub-plugin-test:1.0.0",
+                    "image_digest": "sha256:abc123",
+                    "canary_weight": 0,
+                    "status": "active",
+                },
+                {
+                    "version": "2.0.0-canary",
+                    "container_image": "hfusionhub-plugin-test:2.0.0",
+                    "image_digest": "sha256:def456",
+                    "canary_weight": 0.3,
+                    "status": "pending",
+                },
+            ],
+        })
+
+        assert [v.version for v in versions] == ["1.0.0", "2.0.0-canary"]
         assert versions[0].is_stable is True  # active + canary_weight=0
-        assert versions[1].version == "2.0.0-canary"
         assert versions[1].is_stable is False  # pending + canary_weight>0
         assert versions[1].canary_weight == 0.3
+        assert versions[1].container_image == "hfusionhub-plugin-test:2.0.0"
+
+    def test_empty_version_list_is_not_an_error(self):
+        assert self._run({"code": 200, "message": "success", "data": []}) == []
+
+    def test_envelope_rejection_raises_with_the_java_reason(self):
+        # 拒绝形状是 HTTP 200 + 信封码：必须抛错让 execute_with_canary 报
+        # version_fetch_failed，而不是当成"这插件没有可用版本"
+        for code, message in ((403, "Forbidden: invalid or missing X-Internal-Token"), (404, "Plugin not found")):
+            with pytest.raises(RuntimeError, match=str(code)):
+                self._run({"code": code, "message": message, "data": None})
 
 
 # ═══════════════════════════════════════════════════════════════════════

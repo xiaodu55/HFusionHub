@@ -11,7 +11,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第七十六批（2026-10-06：修掉 fetch_plugin_versions 的信封迭代缺陷——灰度插件执行此前必失败）
+
+#### Fixed
+- **`python-ai/app/core/plugin/container_runner.py:208-226`：`fetch_plugin_versions` 不再把 Java 的 `R<List<Map>>` 信封当列表迭代**。`GET /api/internal/plugin/{pluginId}/versions` 由 `InternalPluginController.java:53-65` 返回 `R<List<Map<String,Object>>>`，即 `{"code":200,"message":"success","data":[...]}`，而旧代码 `data = resp.json()` 后直接 `for v in data`——迭代字典得到 `"code"/"message"/"data"` 三个字符串键，`v["version"]` 立即抛 `TypeError: string indices must be integers`（`container_runner.py:212` 旧行号），于是 `execute_with_canary`（:321-330）每次都兜成 `error_code="version_fetch_failed"`，**灰度路由下的插件执行整条路不可用**，且与 token、插件状态无关
+- **同一处补上"拒绝"判定**：Java 内部面的拒绝（403 令牌、404 插件不存在）是 **HTTP 200 + 信封码**，`resp.raise_for_status()` 拦不住，旧代码会一路走到迭代、以 `TypeError` 面目出现。现按 `envelope.get("code") != 200` 抛 `RuntimeError`（带 `code` 与 Java 的 `message`），让调用方日志里的 `version_fetch_failed` 说的是真因；本仓同类出站已有先例可对照——`registry.py:79` 按 `code == 200` 取数、`quota.py:48-57` 状态与信封双判、`write_note_tool.py:87-90` 先判状态再判码，`model_gateway.py:296` 则用 `RuntimeError` 表达"Java 后端拒绝"
+- **字段名不需要改**：`PluginServiceImpl.java:465-471` 写的是 `LinkedHashMap` 显式键 `version` / `container_image` / `image_digest` / `canary_weight` / `status`（snake_case），与 Python 侧读的一致；`is_stable` 依赖的 `status` 是 `VARCHAR(20) NOT NULL DEFAULT 'active'`（`V29__tool_plugin_sandbox.sql:21`），`== "active"` 的口径成立
+
+#### Added
+- **`python-ai/tests/test_plugin_container.py`：`TestFetchPluginVersions` 由 1 例假守护改为 3 例真缝测试（净 +2）**
+  - 旧例 `test_fetch_parses_correctly` 用 `patch("...container_runner.fetch_plugin_versions", new=_mock_fetch)` **把被测函数本身换掉**，`_mock_fetch` 里重抄了一遍同样的解析逻辑、喂的是**裸列表**，所以断言永远为真、缺陷永远看不见——这是"测试替身盖住被测对象"的典型
+  - 现改为 patch `app.core.plugin.container_runner.get_shared_client` 返回一个 `AsyncMock` 客户端（`.get` 给出 `raise_for_status()` 空操作、`.json()` 给出信封），驱动**真实函数**：`test_parses_the_java_envelope_rows`（两行版本，校 `version`/`container_image`/`canary_weight` 与 `is_stable` 的两种取值）、`test_empty_version_list_is_not_an_error`（`data: []` → `[]`，仍走调用方的 `no_version` 而非报错）、`test_envelope_rejection_raises_with_the_java_reason`（403 与 404 两码 → `RuntimeError` 且文案含该码）
+  - 另在文件头部的 `from app.core.plugin.container_runner import (...)` 补 `fetch_plugin_versions`——旧例从不 import 它，正是它能自证清白的原因
+
+#### 决策记录
+- **拒绝时抛错而非返回空列表**：`execute_with_canary` 把"抛错"报成 `version_fetch_failed`、把"空列表"报成 `no_version`（:321-340）。令牌不对若返回空列表，日志会谎称"这插件没有可用版本"，把配置问题伪装成数据问题；抛错保留真因，且两条路径都是 fail-closed
+- **不给 `canary_weight` 为 NULL 加兜底**：`float(v.get("canary_weight", 0))` 在值为 `None` 时会抛（列是 `DECIMAL(3,2) DEFAULT 0.00`，`V30__plugin_container_isolation.sql:7` 可空），但 `ALTER TABLE ... DEFAULT` 会回填既有行、新建路径也都带该列，构造不出 NULL 场景；本批不写一个无法用测试落地的分支，若线上真出现再按数据修复处理
+- **不顺手改 `audit.py` 的同族缺陷**：`app/core/plugin/audit.py:354,386` 两条审计同步路径同样只判 `resp.status_code == 200` 就返回"已同步"，而它打的 `POST /internal/plugin/audit-logs`（`InternalPluginController.java:100-104`）正是 `R.fail(403,…)` 站点之一——token 不匹配时整批插件审计被标记 synced 后从本地队列永久摘除，比丢一条评估摘要更重。已在第七十五批的审计更正里记为下一批候选；本批只做 `fetch_plugin_versions`，因为两者的修法选择（Java 侧改真实 403 vs Python 侧加码判定）需要一起定口径，混在一批里会把插件面两个不相关的写路径捆进同一个提交
+- **全仓"直接迭代 `resp.json()`"已穷尽**：按 `= resp.json()` 后接 `for ... in <该变量>` 与 `for ... in resp.json()` 两种形态 grep，仅剩 `app/core/rag/long_term_memory.py:112-114` 命中，而它写的是 `.get("data") or []`（形状正确，其弱点是信封码失明，另记）
+
+#### 验证
+- 红色先行：3 例新测试对**未改动的生产代码**跑 → `3 failed`，失败原文均为 `TypeError: string indices must be integers, not 'str'`（`container_runner.py:212`），含"空列表"与"拒绝信封"两例——证明缺陷对任何响应形状都成立，而非只在特定数据下
+- `tests/test_plugin_container.py` **36 passed / 6 skipped**（42 收集，6 为需 Docker 守护进程的集成例）；`ruff check`（0.16.3，`.venv` 内）对改动文件与被改测试文件均无告警
+- Python 全量 **1825 passed / 8 skipped**（160.17s；第七十五批基线 1823 + 本批净 +2，零回归）
+- `scripts/static-checks.py` **8/8**，测试计数 **Python 1691 → 1693**（README badge + 三处正文、`README_EN.md`、`docs/ROADMAP.md:16` 已同步）· Java 713 · 前端 101
+- Java 侧本批零改动；`fetch_plugin_versions` 的签名、返回类型 `list[PluginVersionInfo]`、`execute_with_canary` 的 `ContainerResult` 形状均不变，变的只有"能解析出真实 Java 响应"
+
 ### 第七十五批（2026-10-06：内部面的令牌拒绝改判真实 HTTP 403——被拒的评估回调不再记成 callback ok）
+
 
 #### Fixed
 - **`java-backend/src/main/java/com/hfusionhub/controller/EvalHarnessInternalController.java:60,90`：令牌校验失败不再 `return R.fail(403, ...)`，改为 `throw new BusinessException(StatusCode.FORBIDDEN, 同一句文案)`**。区别不在报文而在状态行：`R` 是普通返回体，`return R.fail(403,...)` 走的是 **HTTP 200 + 信封 `code:403`**；而 `GlobalExceptionHandler.handleBusinessException`（`common/exception/GlobalExceptionHandler.java:31-42`）对 400–599 的码做 `HttpStatus.resolve` 直映射，于是同一份 `R.fail(code,msg)` 现在带 **真实 403**。响应体逐字段不变（`{"code":403,"message":"Forbidden: invalid or missing X-Internal-Token"}`），只有状态行从 200 变 403
@@ -26,7 +53,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### 决策记录
 - **只改这 2 处，不动其余 10 处同构 `R.fail(403, ...)`**：全仓该文案共 12 处、分布在 8 个内部控制器（`AgentApprovalInternalController:50`、`FeatureFlagInternalController:41`、`InternalMemoryController:52,106`、`InternalNoteController:47`、`InternalPluginController:45,56,72,104`、`InternalPluginQuotaController:44`）。逐个核了 Python 侧调用方的判法，只有 `_notify_java_record` 会把"200 + 信封 403"误判成成功：`execution_token.py:68-89` 先判状态码、再读嵌套 `data.consumed`（拒绝 → `False`，fail-closed 正确）；`quota.py:48-57` 要求 `status == 200 且 envelope.code == 200`；`registry.py:79` 按 `code == 200` 取数；`write_note_tool.py:87-90` 状态与信封双重检查。故本批不制造"同一内部面两种拒绝形状"的无谓扩散，只补真有后果的那条
-- **审计中顺带查到一处独立的真缺陷（本批不修，记下来）**：`container_runner.py:201-218 fetch_plugin_versions` 对 Java `GET /api/internal/plugin/{pluginId}/versions` 的响应做 `data = resp.json()` 后直接 `for v in data`，而该端点回的是 `R<List<Map>>` 信封（`InternalPluginController.java:53-65`）——迭代字典得到 `"code"/"message"/"data"` 三个字符串键，`v["version"]` 必抛 `TypeError`。调用方 `container_runner.py:321-330` 把它兜成 `error_code="version_fetch_failed"`，所以是"灰度插件执行整条路必失败"而非静默错数据；守护它的 `tests/test_plugin_container.py:481-514` 用 `patch(fetch_plugin_versions, new=同一套解析逻辑)` 把被测函数本身替换掉了，且喂的是**裸列表**，因此从未见过真实形状。修复属插件面，与本批评估面不同轨，留作单独一批
+  - **本条审计不完整，第七十六批补记一处反例**：当时漏了 `python-ai/app/core/plugin/audit.py:354,386`——两条审计同步路径都只判 `resp.status_code == 200` 就返回"已同步"，而它打的 `POST /internal/plugin/audit-logs`（`InternalPluginController.receiveAuditLogs`，:100-104）正是 `R.fail(403)` 那批站点之一。后果比评估摘要更重：token 不匹配时整批插件审计被标记 synced 后**从本地队列永久摘除**，不重试、不报警。修法与本批同型（要么 Java 侧改抛真实 403，要么 Python 侧加信封码判定），属插件审计面，记为下一批候选，本批结论"只补真有后果的那条"应读作"只补评估面那两条"
+- **审计中顺带查到一处独立的真缺陷（本批不修，记下来）**：`container_runner.py:201-218 fetch_plugin_versions` 对 Java `GET /api/internal/plugin/{pluginId}/versions` 的响应做 `data = resp.json()` 后直接 `for v in data`，而该端点回的是 `R<List<Map>>` 信封（`InternalPluginController.java:53-65`）——迭代字典得到 `"code"/"message"/"data"` 三个字符串键，`v["version"]` 必抛 `TypeError`。调用方 `container_runner.py:321-330` 把它兜成 `error_code="version_fetch_failed"`，所以是"灰度插件执行整条路必失败"而非静默错数据；守护它的 `tests/test_plugin_container.py:481-514` 用 `patch(fetch_plugin_versions, new=同一套解析逻辑)` 把被测函数本身替换掉了，且喂的是**裸列表**，因此从未见过真实形状。修复属插件面，与本批评估面不同轨，留作单独一批 **（已由第七十六批收口，其守护测试同时改为打真 HTTP 缝）**
 - **仍然存在的下一处弱点（本批未修）**：`InternalMemoryController` 的两个读端点被 Python 以 `resp.raise_for_status()` + `.get("data") or []` 消费（`app/core/rag/long_term_memory.py:111-112,205`），HTTP 200 + 信封 403 时表现为"记忆为空"而非"被拒"——不会谎报成功，但会把鉴权失败伪装成正常的无数据。改它要连带 Python 侧改成区分信封码，且本仓无该面的契约测试，故单列
 - **不改方法返回类型为 `ResponseEntity<R<...>>`**：那会改动 2 个 `@Hidden` 端点的签名与 OpenAPI 形状，而 `BusinessException` 路径的响应体与旧 `R.fail` 逐字段相同、只换状态行，是更小的刀口；也顺带与本批已用的租户拒绝形状统一
 - **CI 与浏览器面均不经这条路**：`.github/workflows/eval-nightly.yml:130` 的语料导入走 `POST /api/demo/import-corpus`（`satoken`，`DemoController.java:50`），:142 打的是 Python 的 `/api/eval-harness/run`，全流程没有一处 curl `/internal/eval-harness/**`；`docs/api.md`、`docs/ACCESS_MAP.md` 亦无该内部面对外形状的描述，无文档需要跟改
