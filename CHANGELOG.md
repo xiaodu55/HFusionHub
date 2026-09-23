@@ -11,6 +11,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第七十五批（2026-10-06：内部面的令牌拒绝改判真实 HTTP 403——被拒的评估回调不再记成 callback ok）
+
+#### Fixed
+- **`java-backend/src/main/java/com/hfusionhub/controller/EvalHarnessInternalController.java:60,90`：令牌校验失败不再 `return R.fail(403, ...)`，改为 `throw new BusinessException(StatusCode.FORBIDDEN, 同一句文案)`**。区别不在报文而在状态行：`R` 是普通返回体，`return R.fail(403,...)` 走的是 **HTTP 200 + 信封 `code:403`**；而 `GlobalExceptionHandler.handleBusinessException`（`common/exception/GlobalExceptionHandler.java:31-42`）对 400–599 的码做 `HttpStatus.resolve` 直映射，于是同一份 `R.fail(code,msg)` 现在带 **真实 403**。响应体逐字段不变（`{"code":403,"message":"Forbidden: invalid or missing X-Internal-Token"}`），只有状态行从 200 变 403
+- **修的是第七十四批决策记录里点名的那条静默数据丢失**：唯一调用方 `python-ai/app/api/eval_harness.py:_notify_java_record` 只判 `resp.status_code >= 400`（:91-93），旧形状下"内部 token 不对/未配"会被记成 `[eval-harness] Java record callback ok`，而 `eval_harness_runs` 里那一行从未写入——运维看日志以为记账成功。改判后同一场景走 warning 分支并带 `resp.text[:200]`
+
+#### Added
+- **`EvalHarnessInternalControllerTest` 9 → 12 例，其中 3 例走 `MockMvc`**：`MockMvcBuilders.standaloneSetup(controller).setControllerAdvice(new GlobalExceptionHandler())`——挂真 advice 是关键，否则单元级 `assertThrows` 只证明"抛了异常"，证明不了"调用方看到的是 403 状态行"（本仓此前只有 `tenant/CallbackSignatureRealPathTest.java:53` 用 standaloneSetup，且不带 advice）
+  - `invalidTokenRejectsWithARealHttp403NotADefault200`：错 token + 合法租户头 → `status().isForbidden()` + `jsonPath("$.code") == 403` + `insert` 零调用（本批的红色例）
+  - `missingTenantHeaderRejectsWithARealHttp403`：第七十四批的租户拒绝同样钉到状态行层——它在改动前即通过，正好独立复核了 `BusinessException → 真实 403` 这条映射链在本仓成立
+  - `acceptedCallbackStillReturnsHttp200WithOkEnvelope`：放行路径仍是 200 + `code:200` + `data.recorded == true`，防"收紧拒绝面时顺手改坏成功形状"
+  - 原 `invalidTokenIsRejectedBeforeTenantValidation` 从"断信封 code"改为断 `BusinessException` 的 code **与 message**——令牌无效且租户头也缺时，回的是令牌那句，把"先认身份再认租户"的顺序契约钉得更死
+
+#### 决策记录
+- **只改这 2 处，不动其余 10 处同构 `R.fail(403, ...)`**：全仓该文案共 12 处、分布在 8 个内部控制器（`AgentApprovalInternalController:50`、`FeatureFlagInternalController:41`、`InternalMemoryController:52,106`、`InternalNoteController:47`、`InternalPluginController:45,56,72,104`、`InternalPluginQuotaController:44`）。逐个核了 Python 侧调用方的判法，只有 `_notify_java_record` 会把"200 + 信封 403"误判成成功：`execution_token.py:68-89` 先判状态码、再读嵌套 `data.consumed`（拒绝 → `False`，fail-closed 正确）；`quota.py:48-57` 要求 `status == 200 且 envelope.code == 200`；`registry.py:79` 按 `code == 200` 取数；`write_note_tool.py:87-90` 状态与信封双重检查。故本批不制造"同一内部面两种拒绝形状"的无谓扩散，只补真有后果的那条
+- **审计中顺带查到一处独立的真缺陷（本批不修，记下来）**：`container_runner.py:201-218 fetch_plugin_versions` 对 Java `GET /api/internal/plugin/{pluginId}/versions` 的响应做 `data = resp.json()` 后直接 `for v in data`，而该端点回的是 `R<List<Map>>` 信封（`InternalPluginController.java:53-65`）——迭代字典得到 `"code"/"message"/"data"` 三个字符串键，`v["version"]` 必抛 `TypeError`。调用方 `container_runner.py:321-330` 把它兜成 `error_code="version_fetch_failed"`，所以是"灰度插件执行整条路必失败"而非静默错数据；守护它的 `tests/test_plugin_container.py:481-514` 用 `patch(fetch_plugin_versions, new=同一套解析逻辑)` 把被测函数本身替换掉了，且喂的是**裸列表**，因此从未见过真实形状。修复属插件面，与本批评估面不同轨，留作单独一批
+- **仍然存在的下一处弱点（本批未修）**：`InternalMemoryController` 的两个读端点被 Python 以 `resp.raise_for_status()` + `.get("data") or []` 消费（`app/core/rag/long_term_memory.py:111-112,205`），HTTP 200 + 信封 403 时表现为"记忆为空"而非"被拒"——不会谎报成功，但会把鉴权失败伪装成正常的无数据。改它要连带 Python 侧改成区分信封码，且本仓无该面的契约测试，故单列
+- **不改方法返回类型为 `ResponseEntity<R<...>>`**：那会改动 2 个 `@Hidden` 端点的签名与 OpenAPI 形状，而 `BusinessException` 路径的响应体与旧 `R.fail` 逐字段相同、只换状态行，是更小的刀口；也顺带与本批已用的租户拒绝形状统一
+- **CI 与浏览器面均不经这条路**：`.github/workflows/eval-nightly.yml:130` 的语料导入走 `POST /api/demo/import-corpus`（`satoken`，`DemoController.java:50`），:142 打的是 Python 的 `/api/eval-harness/run`，全流程没有一处 curl `/internal/eval-harness/**`；`docs/api.md`、`docs/ACCESS_MAP.md` 亦无该内部面对外形状的描述，无文档需要跟改
+
+#### 验证
+- 红色先行：3 个 MockMvc 例与改写后的顺序例，对**未改动的生产代码**跑 → `Tests run: 12, Failures: 2`，失败原文即 `Status expected:<403> but was:<200>`（令牌例）与 `Expected BusinessException to be thrown, but nothing was thrown`；租户 403 例与成功例改动前即通过
+- 改后 `EvalHarnessInternalControllerTest` **12/12**；Java 全量 `mvn -o test` **BUILD SUCCESS，Tests run 711 / Failures 0 / Errors 0 / Skipped 52**（第七十四批 708 + 本批 3，零回归）
+- `scripts/static-checks.py` **8/8 通过**，测试计数 **Java 710 → 713**（README badge + 三处正文、`README_EN.md` 已同步）· Python 1691 · 前端 101
+- Python 侧本批零改动（`_notify_java_record` 一行未动，它的 `status_code >= 400` 分支正是本批要喂真的那条）
+- 生产改动 1 个文件的 2 行（+ 类 javadoc 说明形状），测试文件 +3 例；两处路径、请求体、成功响应体、拒绝响应体文案均不变，仅状态行 200 → 403
+
 ### 第七十四批（2026-10-06：内部评估回调面删掉默认租户——缺头改判 403，不再记到 tenant 1 名下）
 
 #### Fixed
@@ -28,7 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **回 403 而非 400（第七十二批记的待定项）**：与本仓自己的两处口径一致——`TenantContextInterceptor.rejectNoTenant`（:201-205）用 `SC_FORBIDDEN` + `"Tenant context required but not resolved"`，本类原有的令牌守卫也回 403；Python 侧 `TenantMiddleware` 用 400，是因为它面对全部入站流量、把"头值不合法"当请求问题。这里缺租户不是形状错误而是"无法为任何租户授权写入"。选 `BusinessException` 而非继续 `R.fail(403, ...)` 有实际后果：`GlobalExceptionHandler.handleBusinessException`（:31-42）会把 400–599 的码映射成**真实 HTTP 状态**，于是 Python 的 `_notify_java_record`（只判 `resp.status_code >= 400`，`python-ai/app/api/eval_harness.py:91-93`）能看见拒绝并打 warning；而 `R.fail(403,...)` 是 HTTP 200 + 信封码，会被记成"callback ok"
 - **`X-User-Id` 一并收紧（略超出"租户"字面范围）**：它与租户头共用同一个 `try/catch`，只收紧租户会留下"语料静默归到 user 1"这半条 fail-open；且二者同构，同一个 `requirePositiveId` 覆盖，无额外分支。若你希望本批只动租户，回退这一处是独立的两行
 - **现网影响面已核**：`/record` 唯一调用方是 Python `_notify_java_record`（第七十二批起恒带真实租户，`.github/workflows/eval-nightly.yml:142` 显式发 `X-Tenant-Id: 1` 也照旧通过）；`/internal/eval-harness/import-corpus` 在本仓**无调用方**——全仓 grep 只有 CI 的浏览器路径 `/api/demo/import-corpus`（`eval-nightly.yml:130`，带 `satoken`，走 `DemoController.java:50`，不经本类）。风险仅剩仓外初始化脚本若曾省略这两个头，将从"记到 1"变成"403 拒绝"，这正是本批想要的 fail-closed
-- **令牌拒绝仍是 HTTP 200 + 信封 403**：`R.fail(403,...)` 在两条路径上都没改成真实状态码（本批不动，避免把契约测试的响应形状一并重写）。后果是 Python 把"token 不对"记成 callback ok、丢一条摘要而无人报警——留作待办
+- **令牌拒绝仍是 HTTP 200 + 信封 403**：`R.fail(403,...)` 在两条路径上都没改成真实状态码（本批不动，避免把契约测试的响应形状一并重写）。后果是 Python 把"token 不对"记成 callback ok、丢一条摘要而无人报警——留作待办 **（已由第七十五批收口：两处改抛 `BusinessException`，走真实 403）**
 
 #### 验证
 - 红色先行：新测试对**未改动的生产代码**跑 → `Tests run: 9, Failures: 6`，6 条全是 `Expected BusinessException to be thrown, but nothing was thrown`（即缺头/空白/非数字/非正数/缺 user 头五类静默路径）；改完 9/9 通过

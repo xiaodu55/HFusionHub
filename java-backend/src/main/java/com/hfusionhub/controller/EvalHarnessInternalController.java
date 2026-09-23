@@ -30,6 +30,11 @@ import java.util.Map;
  * Internal-only endpoints for the evaluation harness (python-ai → Java).
  * Protected by X-Internal-Token with constant-time comparison.
  * Excluded from Sa-Token login check in SaTokenConfig.
+ *
+ * <p>Rejections (bad token, missing/invalid tenant) are thrown as
+ * {@link BusinessException} so {@code GlobalExceptionHandler} maps them onto a real
+ * HTTP 403 — python-ai's callback only inspects the status code, so an
+ * {@code R.fail(403)} carried over HTTP 200 would be logged as a successful record.</p>
  */
 @Hidden
 @Slf4j
@@ -57,7 +62,7 @@ public class EvalHarnessInternalController {
             @RequestHeader(value = "X-Tenant-Id", required = false) String tenantHeader,
             @RequestBody Map<String, Object> body) {
         if (!InternalTokenGuard.isAuthorized(expectedToken, providedToken)) {
-            return R.fail(403, "Forbidden: invalid or missing X-Internal-Token");
+            throw new BusinessException(StatusCode.FORBIDDEN, "Forbidden: invalid or missing X-Internal-Token");
         }
         long tenantId = requirePositiveId(tenantHeader, "X-Tenant-Id");
 
@@ -87,7 +92,7 @@ public class EvalHarnessInternalController {
             @RequestHeader(value = "X-Tenant-Id", required = false) String tenantHeader,
             @RequestHeader(value = "X-User-Id", required = false) String userHeader) {
         if (!InternalTokenGuard.isAuthorized(expectedToken, providedToken)) {
-            return R.fail(403, "Forbidden: invalid or missing X-Internal-Token");
+            throw new BusinessException(StatusCode.FORBIDDEN, "Forbidden: invalid or missing X-Internal-Token");
         }
         long tenantId = requirePositiveId(tenantHeader, "X-Tenant-Id");
         long userId = requirePositiveId(userHeader, "X-User-Id");
