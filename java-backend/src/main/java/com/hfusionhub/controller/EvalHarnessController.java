@@ -148,7 +148,12 @@ public class EvalHarnessController {
             throw new BusinessException(StatusCode.INTERNAL_ERROR, "PYTHON_AI_INTERNAL_TOKEN 未配置");
         }
         headers.set("X-Internal-Token", internalApiToken);
-        headers.set("X-Tenant-Id", "1");
+        // 与 RagObservabilityController 同款：租户取自当前请求上下文，取不到就不带头，
+        // 让 Python 侧 fail-closed（写死 1 会把调用方的租户静默改写成 tenant 1）
+        Long tenantId = com.hfusionhub.tenant.TenantContext.getTenantId();
+        if (tenantId != null) {
+            headers.set("X-Tenant-Id", tenantId.toString());
+        }
         return headers;
     }
 
