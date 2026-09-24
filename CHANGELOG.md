@@ -11,6 +11,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第七十七批（2026-10-06：插件审计同步的两处盲区一起收——被拒批次不再谎报"已同步"，出站地址归一到 `config.JAVA_BACKEND_URL` + `/api`）
+
+#### Fixed
+- **`python-ai/app/core/plugin/audit.py:337-359` 新增 `_is_sync_accepted(resp)`，两条出站链路（批量 `_post_to_java_backend_batch:379`、逐条 `_post_to_java_backend:408`）的判定从"只看 `resp.status_code == 200`"改为"状态 200 **且** 信封 `code == 200`"**。它们打的 `POST /internal/plugin/audit-logs`（`InternalPluginController.java:99-104`）令牌不符时回 `R.fail(403,…)`，即 **HTTP 200 + 信封码**（第七十五批已把这条形状钉成仓内共识），旧判定因此返回 True → `_do_flush`（:296-312）把整批 `_mark_synced`，条目从本地队列**永久摘除**：不重试、不进 dead-letter、日志还写"审计日志已同步到 Java 后端: N 条"。后果是插件 install/enable/disable/uninstall/工具执行审计**双侧同时丢失**（Java 从未落库、Python 也不再留存）且零告警——比第七十五批那条评估摘要更重，因为它把唯一副本也删了
+- **顺带把"解析不出信封"纳入未同步**：非 JSON、反代改写成的 HTML、空 body 一律 fail-closed（:348-352），保留 `_increment_retry` 与 `_MAX_RETRIES = 5` 的 dead-letter 语义；这三类在 HTTP 层都是 200，旧代码同样判成"已同步"。非 200 状态保持原 warning + `resp.text[:200]`（:345-347）
+- **`audit.py:366,394` 的出站地址从 `os.environ["JAVA_BASE_URL"]`（默认 `http://localhost:8080`）改为 `config.JAVA_BACKEND_URL`，`:55` 的端点常量补上 `/api` 前缀（现为 `/api/internal/plugin/audit-logs`）**。这是同一对函数里的第二个独立成因，与上面的判定缺陷不同：旧键**从未被部署侧赋值**——`python-ai/.env:29`、`docker/docker-compose.yml:301,354`、`deploy/docker-compose.prod.yml:228`、`deploy/helm/hfusionhub/templates/python.yaml:52` 配的都是 `JAVA_BACKEND_URL`（四处均按变量名核对，未取值）；而 `JAVA_BASE_URL` 是**前端 Playwright e2e 的变量**（`hfusionhub-frontend/e2e/helpers.ts:3`、`e2e/fixtures/base.ts:10`，默认 `http://localhost:8080/api`，由 `.github/workflows/e2e.yml:130,269` 注入），python-ai 借了这个名字却配了一条不带 `/api` 的路径，而 Java 的 `server.servlet.context-path` 正是 `/api`（`application.yml:3-4`）。结果：容器里主机名与路径双错、开发机默认值下少 `/api`，**审计同步在任何环境都从未成功过**——404 命中状态码分支，所以这里不撒谎，只是每条审计重试 5 次后进 dead-letter。仓内 Python→Java 内部出站共 **9 处**读 `config.JAVA_BACKEND_URL`（`app/utils/config.py:62`）并自带 `/api/...`：`api/eval_harness.py:66`、`core/llm/model_gateway.py:281`、`core/plugin/quota.py:33`、`core/rag/long_term_memory.py:98,191`、`core/tools/execution_token.py:50`、`core/tools/registry.py:72`、`core/tools/write_note_tool.py:72`、`utils/feature_flag.py:112`；本批把最后一个例外并入该口径
+
+#### Added
+- **`python-ai/tests/test_plugin_audit.py`：`TestBackendSyncEnvelopeJudgement` 5 例（净 +5）**——批量信封 403 → False、逐条信封 403 → False、**被拒批次留在队列**（`flush_to_backend() == 0` 且 `get_sync_status()["unsynced"] == 1`，这条才是"永久摘除"缺陷的直接反证）、503 → False、200 + body 不可解析 → False
+- **`TestBackendSyncAddress` 3 例（净 +3）**：两条链路各用**诱饵环境变量** `JAVA_BASE_URL=http://decoy:9999` 跑一次，断言 URL 恰等于 `http://java-backend:8080/api/internal/plugin/audit-logs` 且不含 `decoy`——旧代码实测产出 `http://decoy:9999/internal/plugin/audit-logs`，键选错与缺 `/api` 在同一条断言里一起暴露；第 3 例用 `inspect.getsource(audit)` 断言 `JAVA_BASE_URL` 已从审计模块消失（防回潮，避免有人"两处都读、取其一"改回去）
+- **两个信封 fixture `_rejected_response` / `_accepted_response`（:216-232 起）按 Java 真实形状构造**（拒绝：`{"code":403,"message":…,"data":null}`；接受：`{"code":200,"data":{"inserted","skipped","total"}}`，对应 `InternalPluginController.java:172-175`）。同时把 `TestBackendSyncToken` 两例原先的 `SimpleNamespace(status_code=200, text="")` 换成 `_accepted_response(MagicMock())`——那个假响应**没有 `.json()`**，正是旧判定能自证清白的原因；新 fixture 下两例仍须 patch `httpx.post`（而非被测函数本身）才测得到真链路
+- **两例既有 token 测试的 URL 断言由 `endswith("/internal/plugin/audit-logs")` 收成全等**（:184、:202）——`endswith` 对一条缺 `/api` 的地址同样成立，正是它让地址缺陷在测试里隐形
+
+#### 决策记录
+- **选"Python 侧读信封码"，不选"Java 侧改真实 403"**（第七十五批走的那条）：① 本批弱点不止 403，还包括任何"HTTP 200 但 body 不是成功信封"（网关/反代改写、空响应），改 Java 状态码修不了这些；② 与第七十六批 `container_runner.py:209-211` 同口径，插件面两条出站链路判定一致；③ 不动 Java 就不触碰其余 10 处 `R.fail(403)` 站点的既有契约，改动面收敛在一个文件；④ 本仓同类判定已有先例可循：`core/plugin/quota.py:48-51` 状态与信封双判、`core/tools/write_note_tool.py:86-91` 先 `is_error` 再判 `code`、`core/tools/registry.py:77-78` 按 `code == 200` 才取 `data`、`core/llm/model_gateway.py:296` 用 `RuntimeError` 表达"Java 后端拒绝"，而 `core/rag/long_term_memory.py:112` 只看 `data`（码失明，另记为候选）
+- **不读 `inserted/skipped/total` 参与判定**：Java 对重复条目 `skipped++`（`InternalPluginController.java:133,167`）是正常幂等，若把 `inserted == 0` 判成失败会造成永远重试、条目最终被 dead-letter；本批只回答"Java 是否接受了这次调用"，计数留给后续可观测性
+- **地址缺陷并入本批（用户选 A）而非另起一批**：两处缺陷同在 `_post_to_java_backend_batch` / `_post_to_java_backend` 这同一对函数里，且**只修判定会让本批交付一个"失败不再撒谎、但同步依旧不可能成功"的半成品**——测试会钉住"被拒不谎报"，却仍没有任何一条审计能落到 Java。这与第七十六批"两个不相关的插件写路径不进同一提交"不冲突：那条规则针对的是**跨函数的范围膨胀**，此处是同一对函数的两个成因，改的是同一处 `java_url` 赋值
+- **`JAVA_BASE_URL` 这个键保留、e2e workflow 不动**：它仍被前端 Playwright e2e 正当使用（`e2e/helpers.ts:3`、`e2e/fixtures/base.ts:10`），`.github/workflows/e2e.yml:130,269` 的注入是对的，只是 python-ai 不该读它。改动严格限定在 `python-ai/app/core/plugin/audit.py`，不触碰 CI 配置面
+
+#### 验证
+- 红色先行分两轮：
+  - **判定缺陷**：5 例新测试对未改动的生产代码 → **4 failed / 24 passed**。第 5 例（503）在旧代码下即通过，它钉的是"别把状态码分支弄丢"，属既有行为保留而非回归；4 个红点正是三条新链路（批量 403、逐条 403、批次被拒仍留在队列）与不可解析 body
+  - **地址缺陷**：URL 断言收成全等 + 新增 3 例后，对未改动的生产代码 → **5 failed / 26 passed**，失败原文为 `assert 'http://decoy:9999/internal/plugin/audit-logs' == 'http://java-backend:8080/api/internal/plugin/audit-logs'`——一条断言同时坐实"读错了键"和"少了 `/api`"
+- `tests/test_plugin_audit.py` **31 passed**（23 → 31，净 +8）
+- Python 全量 **1833 passed / 8 skipped**（159.63s；第七十六批基线 1825 + 本批净 +8，零回归）
+- `ruff check app tests`（0.16.3，`.venv` 内）**All checks passed**
+- `scripts/static-checks.py` **8/8**，测试计数 **Python 1693 → 1701**（README badge + 三处正文、`README_EN.md`、`docs/ROADMAP.md:16` 已同步）· Java 713 · 前端 101；其中"内部契约锚点 5 处"不含本端点（锚点表覆盖 `internal_auth.py` / `vectorization.py` 等），故路径加 `/api` 不影响门禁
+- Java 侧与部署侧零改动；`_post_to_java_backend*` 的签名与返回类型 `bool` 不变，`_do_flush` 的批量→逐条回退、`_increment_retry`、dead-letter 路径均未动。对外变化只有两件事：**什么算同步成功**，以及**请求打到哪个 URL**
+
+#### 遗留（不在本批范围）
+- **历史 dead-letter 存量不追溯回灌**：地址缺陷使历史审计长期 404 → 重试 5 次 → `audit_queue.dead_letter = 1`（:212-223），而 `_get_unsynced_entries` 的过滤是 `synced = 0 AND dead_letter = 0`（:231-232），所以这些行**永不再自动重试**。本批只保证新条目从此能同步；存量规模上线后读 `get_sync_status()["dead_letter"]`（:523-531）即可量化，是否回灌属数据修复，列为下一批候选
+
 ### 第七十六批（2026-10-06：修掉 fetch_plugin_versions 的信封迭代缺陷——灰度插件执行此前必失败）
 
 #### Fixed

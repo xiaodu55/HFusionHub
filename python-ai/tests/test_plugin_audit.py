@@ -168,19 +168,20 @@ class TestBackendSyncToken:
     @patch("app.core.plugin.audit.config")
     def test_batch_sync_uses_internal_api_token(self, mock_config, mock_post):
         import os
-        from types import SimpleNamespace
+        from unittest.mock import MagicMock
 
         from app.core.plugin.audit import _post_to_java_backend_batch
 
         mock_config.INTERNAL_API_TOKEN = "shared-internal-token"
-        mock_post.return_value = SimpleNamespace(status_code=200, text="")
+        mock_config.JAVA_BACKEND_URL = "http://java:8080"
+        mock_post.return_value = _accepted_response(MagicMock())
         entry = record_audit(plugin_id="pid-1", plugin_name="p", action="install")
 
         with patch.dict(os.environ, {"HFUSIONHUB_INTERNAL_TOKEN": "legacy-ignored"}):
             assert _post_to_java_backend_batch([entry]) is True
 
         url = mock_post.call_args.args[0]
-        assert url.endswith("/internal/plugin/audit-logs")
+        assert url == "http://java:8080/api/internal/plugin/audit-logs"
         assert mock_post.call_args.kwargs["headers"] == {
             "X-Internal-Token": "shared-internal-token"}
         assert isinstance(mock_post.call_args.kwargs["json"], list)
@@ -188,15 +189,17 @@ class TestBackendSyncToken:
     @patch("httpx.post")
     @patch("app.core.plugin.audit.config")
     def test_single_sync_uses_internal_api_token(self, mock_config, mock_post):
-        from types import SimpleNamespace
+        from unittest.mock import MagicMock
 
         from app.core.plugin.audit import _post_to_java_backend
 
         mock_config.INTERNAL_API_TOKEN = "shared-internal-token"
-        mock_post.return_value = SimpleNamespace(status_code=200, text="")
+        mock_config.JAVA_BACKEND_URL = "http://java:8080"
+        mock_post.return_value = _accepted_response(MagicMock())
         entry = record_audit(plugin_id="pid-1", plugin_name="p", action="enable")
 
         assert _post_to_java_backend(entry) is True
+        assert mock_post.call_args.args[0] == "http://java:8080/api/internal/plugin/audit-logs"
         assert mock_post.call_args.kwargs["headers"] == {
             "X-Internal-Token": "shared-internal-token"}
 
@@ -209,6 +212,161 @@ class TestBackendSyncToken:
         entry = record_audit(plugin_id="pid-1", plugin_name="p", action="install")
         assert _post_to_java_backend_batch([entry]) is False
         mock_post.assert_not_called()
+
+
+# ── Backend sync address ─────────────────────────────────────────────
+
+class TestBackendSyncAddress:
+    """出站地址只认部署侧真正配置的键，且必须带 Java 的 `/api` context path。
+
+    历史缺陷：两条链路读 `os.environ["JAVA_BASE_URL"]`（默认
+    `http://localhost:8080`），而 `JAVA_BASE_URL` 全仓只在
+    `.github/workflows/e2e.yml` 里赋值，docker/helm/`.env` 配的都是
+    `JAVA_BACKEND_URL`；端点常量又以 `/internal/...` 开头，而 Java 的
+    `server.servlet.context-path` 是 `/api`。主机名与路径双错 → 容器里必然
+    404、审计重试 5 次后 dead-letter。
+    """
+
+    @staticmethod
+    def _url_for(single: bool):
+        import os
+        from unittest.mock import MagicMock
+
+        from app.core.plugin.audit import _post_to_java_backend, _post_to_java_backend_batch
+
+        with patch("httpx.post") as mock_post, patch("app.core.plugin.audit.config") as mock_config:
+            mock_config.INTERNAL_API_TOKEN = "shared-internal-token"
+            mock_config.JAVA_BACKEND_URL = "http://java-backend:8080"
+            mock_post.return_value = _accepted_response(MagicMock())
+            entry = record_audit(plugin_id="pid-1", plugin_name="p", action="install")
+            # 诱饵：旧代码读的键。修复后不得出现在 URL 里
+            with patch.dict(os.environ, {"JAVA_BASE_URL": "http://decoy:9999"}):
+                (
+                    _post_to_java_backend(entry)
+                    if single else _post_to_java_backend_batch([entry])
+                )
+            return mock_post.call_args.args[0]
+
+    def test_batch_sync_ignores_java_base_url_and_uses_configured_backend(self):
+        url = self._url_for(single=False)
+        assert url == "http://java-backend:8080/api/internal/plugin/audit-logs"
+        assert "decoy" not in url
+
+    def test_single_sync_ignores_java_base_url_and_uses_configured_backend(self):
+        url = self._url_for(single=True)
+        assert url == "http://java-backend:8080/api/internal/plugin/audit-logs"
+        assert "decoy" not in url
+
+    def test_no_java_base_url_reference_remains_in_the_audit_module(self):
+        """`JAVA_BASE_URL` 这个键在审计出站里应彻底消失（防回潮）。"""
+        import inspect
+
+        from app.core.plugin import audit
+
+        assert "JAVA_BASE_URL" not in inspect.getsource(audit)
+
+
+# ── Backend sync envelope judgement ──────────────────────────────────
+
+def _rejected_response(resp):
+    """Java 内部面的拒绝形状：HTTP 200 + 信封 code 403（raise_for_status 看不见）。"""
+    resp.status_code = 200
+    resp.text = '{"code":403,"message":"Forbidden: invalid or missing X-Internal-Token"}'
+    resp.json.return_value = {"code": 403, "message": "Forbidden: invalid or missing X-Internal-Token",
+                              "data": None}
+    return resp
+
+
+def _accepted_response(resp, inserted=1, skipped=0):
+    resp.status_code = 200
+    resp.text = ""
+    resp.json.return_value = {
+        "code": 200, "message": "success",
+        "data": {"inserted": inserted, "skipped": skipped, "total": inserted + skipped},
+    }
+    return resp
+
+
+class TestBackendSyncEnvelopeJudgement:
+    """同步判定必须读信封码。
+
+    旧实现只判 `status_code == 200`，而 `POST /internal/plugin/audit-logs`
+    （InternalPluginController.receiveAuditLogs）令牌失败时回的是
+    `R.fail(403)` = HTTP 200 + 信封码：被拒的批次会被标记 synced 并从本地队列
+    永久摘除，不重试、不报警。
+    """
+
+    @patch("httpx.post")
+    @patch("app.core.plugin.audit.config")
+    def test_batch_sync_rejects_envelope_403_despite_http_200(self, mock_config, mock_post):
+        from unittest.mock import MagicMock
+
+        from app.core.plugin.audit import _post_to_java_backend_batch
+
+        mock_config.INTERNAL_API_TOKEN = "shared-internal-token"
+        mock_post.return_value = _rejected_response(MagicMock())
+        entry = record_audit(plugin_id="pid-1", plugin_name="p", action="install")
+
+        assert _post_to_java_backend_batch([entry]) is False
+
+    @patch("httpx.post")
+    @patch("app.core.plugin.audit.config")
+    def test_single_sync_rejects_envelope_403_despite_http_200(self, mock_config, mock_post):
+        from unittest.mock import MagicMock
+
+        from app.core.plugin.audit import _post_to_java_backend
+
+        mock_config.INTERNAL_API_TOKEN = "shared-internal-token"
+        mock_post.return_value = _rejected_response(MagicMock())
+        entry = record_audit(plugin_id="pid-1", plugin_name="p", action="enable")
+
+        assert _post_to_java_backend(entry) is False
+
+    @patch("httpx.post")
+    @patch("app.core.plugin.audit.config")
+    def test_rejected_batch_leaves_entries_unsynced(self, mock_config, mock_post):
+        from unittest.mock import MagicMock
+
+        mock_config.INTERNAL_API_TOKEN = "shared-internal-token"
+        mock_post.return_value = _rejected_response(MagicMock())
+        record_audit(plugin_id="pid-1", plugin_name="p", action="install")
+
+        assert flush_to_backend() == 0
+        assert get_sync_status()["unsynced"] == 1
+
+    @patch("httpx.post")
+    @patch("app.core.plugin.audit.config")
+    def test_http_error_status_is_still_not_synced(self, mock_config, mock_post):
+        from unittest.mock import MagicMock
+
+        from app.core.plugin.audit import _post_to_java_backend_batch
+
+        mock_config.INTERNAL_API_TOKEN = "shared-internal-token"
+        resp = MagicMock()
+        resp.status_code = 503
+        resp.text = "gateway down"
+        resp.json.side_effect = ValueError("no body")
+        mock_post.return_value = resp
+        entry = record_audit(plugin_id="pid-1", plugin_name="p", action="install")
+
+        assert _post_to_java_backend_batch([entry]) is False
+
+    @patch("httpx.post")
+    @patch("app.core.plugin.audit.config")
+    def test_unparseable_success_body_is_not_synced(self, mock_config, mock_post):
+        from unittest.mock import MagicMock
+
+        from app.core.plugin.audit import _post_to_java_backend_batch
+
+        mock_config.INTERNAL_API_TOKEN = "shared-internal-token"
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.text = "<html>proxy said ok</html>"
+        resp.json.side_effect = ValueError("Expecting value")
+        mock_post.return_value = resp
+        entry = record_audit(plugin_id="pid-1", plugin_name="p", action="install")
+
+        assert _post_to_java_backend_batch([entry]) is False
 
 
 # ── Valid actions ────────────────────────────────────────────────────

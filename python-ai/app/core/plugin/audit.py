@@ -51,8 +51,8 @@ _DB_DIR = os.environ.get(
 )
 _DB_PATH = os.path.join(_DB_DIR, "plugin_audit.db")
 
-# Java backend endpoint
-_JAVA_AUDIT_ENDPOINT = "/internal/plugin/audit-logs"
+# Java backend endpoint（Java 的 server.servlet.context-path 是 /api，路径必须自带）
+_JAVA_AUDIT_ENDPOINT = "/api/internal/plugin/audit-logs"
 
 # Retry config
 _MAX_RETRIES = 5
@@ -334,11 +334,36 @@ def _do_flush() -> int:
     return flushed
 
 
+def _is_sync_accepted(resp) -> bool:
+    """Judge whether Java actually stored the batch.
+
+    ``POST /internal/plugin/audit-logs`` answers a rejected token with
+    ``R.fail(403)`` — HTTP 200 plus an envelope code — so the status line alone
+    cannot prove the entries landed. Anything other than a 200 envelope is
+    treated as unsynced so retry and dead-lettering still apply.
+    """
+    if resp.status_code != 200:
+        logger.warning("Java 审计后端返回 %d: %s", resp.status_code, resp.text[:200])
+        return False
+    try:
+        envelope = resp.json()
+    except Exception as e:
+        logger.warning("Java 审计响应无法解析，按未同步处理: %s", e)
+        return False
+    code = envelope.get("code")
+    if code != 200:
+        logger.warning(
+            "Java 审计后端拒绝同步: code=%s message=%s", code, envelope.get("message")
+        )
+        return False
+    return True
+
+
 def _post_to_java_backend_batch(entries: list) -> bool:
     """POST all entries in one request. Returns True iff the whole batch synced."""
     try:
         import httpx
-        java_url = os.environ.get("JAVA_BASE_URL", "http://localhost:8080")
+        java_url = config.JAVA_BACKEND_URL
         internal_token = config.INTERNAL_API_TOKEN
 
         if not internal_token:
@@ -351,10 +376,7 @@ def _post_to_java_backend_batch(entries: list) -> bool:
             headers={"X-Internal-Token": internal_token},
             timeout=30.0,
         )
-        if resp.status_code == 200:
-            return True
-        logger.warning("Java 审计后端批量返回 %d: %s", resp.status_code, resp.text[:200])
-        return False
+        return _is_sync_accepted(resp)
     except Exception as e:
         logger.warning("审计批量同步到 Java 后端失败: %s", e)
         return False
@@ -369,7 +391,7 @@ def _post_to_java_backend(entry: AuditEntry) -> bool:
     """
     try:
         import httpx
-        java_url = os.environ.get("JAVA_BASE_URL", "http://localhost:8080")
+        java_url = config.JAVA_BACKEND_URL
         internal_token = config.INTERNAL_API_TOKEN
 
         if not internal_token:
@@ -383,11 +405,7 @@ def _post_to_java_backend(entry: AuditEntry) -> bool:
             headers={"X-Internal-Token": internal_token},
             timeout=10.0,
         )
-        if resp.status_code == 200:
-            return True
-        else:
-            logger.warning("Java 审计后端返回 %d: %s", resp.status_code, resp.text[:200])
-            return False
+        return _is_sync_accepted(resp)
     except ImportError:
         logger.warning("httpx 不可用，审计无法同步到 Java 后端")
         return False
