@@ -11,6 +11,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第七十八批（2026-10-06：长期记忆不再把 Java 的拒绝读成"这用户没记忆"——两个消费点改读信封码）
+
+#### Fixed
+- **`python-ai/app/core/rag/long_term_memory.py:55-80` 新增 `MemoryBackendRejected(RuntimeError)` 与 `_r_envelope_data(resp, endpoint)`，`:140`（读）与 `:239`（写）两条 Java 出站链路从 `resp.json().get("data") or …` 改为先读信封码再取 `data`**。`GET /api/internal/memory/relevant`（`InternalMemoryController.java:105-107`）与 `POST /api/internal/memory/entries`（:51-53）令牌不符时回 `R.fail(403,…)` = **HTTP 200 + 信封码**，`raise_for_status()` 拦不住；旧写法在 `data` 缺键时回落成 `[]` / `{"saved": 0}`，于是：
+  - 读侧——`build_memory_context` 得到空列表，表现为"这个用户没有长期记忆"，而真实原因是内部 token 配置不对，**每个用户的记忆同时消失却无人知晓**
+  - 写侧——`consolidate_conversation:271-273` 照样打 `info` 日志"extracted=N saved=0"，把一次鉴权故障记成一条数据事实（抽取成功、只是没存进去），Java 侧收到的响应体也是 `{"saved": 0}`
+- **`build_memory_context:166-175` 的降级保留、但分级改掉**：`MemoryBackendRejected` 走 **warning**，其余异常（网络抖动、超时）仍是原来的 debug 降噪。返回空串这件事不变——记忆注入是尽力而为，不该因为 Java 不可达就打断回答；变的是"这条到底为什么是空"必须可归因
+- **`_r_envelope_data` 对"HTTP 200 但 body 不是 JSON"同样抛错**（反代/网关改写、空响应），与第七十七批 `audit.py:_is_sync_accepted` 同一口径：失明不止 403
+
+#### Added
+- **`python-ai/tests/test_long_term_memory.py`：`TestJavaRejectionIsNotMaskedAsEmpty` 8 例（净 +8）**
+  - 两条拒绝链路的**必抛错**（`fetch_relevant`、`persist_entries`，断言异常文案同时含 `403` 与 Java 的原样 message）
+  - 两条**对照组**：`code=200 + data=[]` 与 `code=200 + saved=0` 是真·空、真·零，不得抛错——否则修复会从"伪装成功"翻车成"把空数据当故障"
+  - 日志分级三例：被拒 → WARNING 且文案带 403；body 不可解析 → WARNING；`connection refused` 这类传输失败 → **不得**出现 WARNING（守住"不把降级路径变成告警风暴"）
+  - 串联一例：`consolidate_conversation` 在写入被拒时向上抛，而不是返回 `{"saved": 0}` 让 `info` 日志把它说成"抽取到 1 条、保存 0 条"
+- **`FakeResponse` 由"裸 payload"改为按 Java `R` 信封构造**（`__init__(data, *, code=200, message="success", status_code=200)`，9 处调用点随之收形），并补 `UnparseableResponse`（`json()` 抛 `ValueError`）。这一步是本批能做干净的前提：旧替身写成 `FakeResponse({"data": []})`，**根本不携带 `code`**，所以消费侧对信封码失明在测试里永远不可见——与第七十七批那个没有 `.json()` 的 `SimpleNamespace` 是同一种缺陷形状
+
+#### 决策记录
+- **新增异常类而不是直接抛 `RuntimeError`**：`build_memory_context` 需要把"Java 说不了"与"联系不上 Java"分开记日志，靠 message 匹配既脆也脏；`MemoryBackendRejected` 继承 `RuntimeError`，因此所有只认 `RuntimeError` 的上游（`_safe_consolidate:319-323` 的 warning、FastAPI 端点的 500、`react.py:_safe_memory_context` 的兜底 except）行为不变
+- **Java 侧这 4 处 `R.fail(403/400/500)` 不改真实 HTTP 403**：与第七十七批同因——消费侧读码才覆盖"200 但 body 不是成功信封"整类；且 `relevant` 的 `R.fail(500,…)`（:115）一旦变真实 500，`raise_for_status` 抛错会让整轮对话的记忆注入直接失败，而它现在选择的是降级为空。改判状态码属于跨面口径统一，需要单独一批
+- **可见行为的两处变化（都是刻意的）**：① `/api/internal/memory/consolidate` 在 Java 拒绝时从 `200 {"saved":0}` 变成 500——调用方 `AiClient.consolidateMemoryOnConversationDeleted`（:1262，出站 :1277-1280，`catch (Exception)` 后 `log.warn` :1281-1283）本就 fire-and-forget，不受影响，且 500 比"保存了 0 条"诚实；② 后台每 N 轮触发路径不变，异常仍由 `_safe_consolidate` 收敛成 warning
+- **未顺手改的同族站点**：`utils/feature_flag.py:214-234` 形状一模一样（`raise_for_status` + `data.get("data") or []`），而它被拒时把 `self._cache` 整体替换成 `{}`、还照常推进 `_last_fetch`——**令牌一失效，全平台开关静默回到 default，且 except 分支的"using stale cache"文案恰恰说明它本该保留旧缓存**。这是独立且更大的blast radius，另起一批
+
+#### 验证
+- 红色先行：新 8 例对 **HEAD 版本的生产代码**跑 → **5 failed / 19 passed**（另外 3 例是对照组与既有行为守护，本就该绿）。失败里直接可见伪装痕迹：`DEBUG … long-term memory fetch failed (degraded to empty): Expecting value: line 1 column 1 (char 0)`——一次契约破坏只留下一行 debug
+- `tests/test_long_term_memory.py` **24 passed**（16 → 24，净 +8）
+- Python 全量 **1841 passed / 8 skipped**（159.33s；第七十七批基线 1833 + 本批净 +8，零回归）
+- `ruff check app tests`（0.16.3，`.venv` 内）**All checks passed**
+- `scripts/static-checks.py` **8/8**，测试计数 **Python 1701 → 1709**（README badge + 三处正文、`README_EN.md`、`docs/ROADMAP.md:16` 已同步）· Java 713 · 前端 101
+- Java 侧零改动；`fetch_relevant` / `persist_entries` / `build_memory_context` 的签名与返回类型不变，`is_enabled` 门控、category→type 映射、超长截断、重要性钳制、每 N 轮触发等既有契约全部由原有用例继续钉住
+
+#### 遗留（不在本批范围）
+1. `utils/feature_flag.py:214-234`：拒绝时清空快照而非保留旧缓存（见决策记录），建议下一批优先处理
+2. `audit.py` 历史 `dead_letter` 行的回灌（第七十七批遗留）
+3. `docs/ROADMAP.md:16` 的 Java 703 口径
+
 ### 第七十七批（2026-10-06：插件审计同步的两处盲区一起收——被拒批次不再谎报"已同步"，出站地址归一到 `config.JAVA_BACKEND_URL` + `/api`）
 
 #### Fixed

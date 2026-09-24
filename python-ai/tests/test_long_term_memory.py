@@ -30,8 +30,22 @@ from app.core.rag.long_term_memory import (
 
 
 class FakeResponse:
-    def __init__(self, payload: dict[str, Any], status_code: int = 200):
-        self._payload = payload
+    """Java ``R`` 信封替身：调用方只写 data，信封 ``code`` 默认 200。
+
+    刻意把信封构造收进替身本身：本仓出站点打到的 Java 内部面一律回
+    ``{"code":…,"message":…,"data":…}``，若替身允许按"裸 data"构造，消费侧对
+    信封码失明就永远测不出来（第七十七批同类教训）。
+    """
+
+    def __init__(
+        self,
+        data: Any = None,
+        *,
+        code: int = 200,
+        message: str = "success",
+        status_code: int = 200,
+    ):
+        self._payload = {"code": code, "message": message, "data": data}
         self.status_code = status_code
 
     def raise_for_status(self) -> None:
@@ -42,6 +56,13 @@ class FakeResponse:
 
     def json(self) -> dict[str, Any]:
         return self._payload
+
+
+class UnparseableResponse(FakeResponse):
+    """HTTP 200 但 body 不是 JSON（反代/网关改写的形状）。"""
+
+    def json(self) -> dict[str, Any]:
+        raise ValueError("Expecting value: line 1 column 1 (char 0)")
 
 
 class FakeAsyncClient:
@@ -61,11 +82,11 @@ class FakeAsyncClient:
 
     async def get(self, url: str, **kwargs: Any) -> FakeResponse:
         FakeAsyncClient.requests.append({"method": "GET", "url": url, **kwargs})
-        return FakeAsyncClient.response or FakeResponse({"data": []})
+        return FakeAsyncClient.response or FakeResponse([])
 
     async def post(self, url: str, **kwargs: Any) -> FakeResponse:
         FakeAsyncClient.requests.append({"method": "POST", "url": url, **kwargs})
-        return FakeAsyncClient.response or FakeResponse({"data": {"saved": 0}})
+        return FakeAsyncClient.response or FakeResponse({"saved": 0})
 
 
 @pytest.fixture(autouse=True)
@@ -148,7 +169,7 @@ class TestFlagGating:
 class TestPersistEntries:
     def test_category_mapping_truncation_and_clamp(self, monkeypatch: pytest.MonkeyPatch):
         _set_flag(monkeypatch, enabled=True)
-        _use_fake_http(monkeypatch, FakeResponse({"data": {"saved": 3}}))
+        _use_fake_http(monkeypatch, FakeResponse({"saved": 3}))
 
         service = LongTermMemoryService()
         entries = [
@@ -178,7 +199,7 @@ class TestPersistEntries:
 
     def test_over_batch_is_capped(self, monkeypatch: pytest.MonkeyPatch):
         _set_flag(monkeypatch, enabled=True)
-        _use_fake_http(monkeypatch, FakeResponse({"data": {"saved": 0}}))
+        _use_fake_http(monkeypatch, FakeResponse({"saved": 0}))
 
         service = LongTermMemoryService()
         entries = [
@@ -209,14 +230,11 @@ class TestFetchRelevant:
         _use_fake_http(
             monkeypatch,
             FakeResponse(
-                {
-                    "code": 200,
-                    "data": [
-                        {"type": "user_preference", "content": "喜欢简洁", "importance": 0.9},
-                        {"content": "", "importance": 0.8},  # 空内容被过滤
-                        {"type": "entity_fact", "content": "用户在深圳", "importance": None},
-                    ],
-                }
+                [
+                    {"type": "user_preference", "content": "喜欢简洁", "importance": 0.9},
+                    {"content": "", "importance": 0.8},  # 空内容被过滤
+                    {"type": "entity_fact", "content": "用户在深圳", "importance": None},
+                ]
             ),
         )
 
@@ -258,11 +276,7 @@ class TestBuildMemoryContext:
         _use_fake_http(
             monkeypatch,
             FakeResponse(
-                {
-                    "data": [
-                        {"type": "user_preference", "content": "偏好简短回答", "importance": 0.9}
-                    ]
-                }
+                [{"type": "user_preference", "content": "偏好简短回答", "importance": 0.9}]
             ),
         )
 
@@ -274,10 +288,148 @@ class TestBuildMemoryContext:
 
     def test_empty_memories_yield_empty_block(self, monkeypatch: pytest.MonkeyPatch):
         _set_flag(monkeypatch, enabled=True)
-        _use_fake_http(monkeypatch, FakeResponse({"data": []}))
+        _use_fake_http(monkeypatch, FakeResponse([]))
 
         service = LongTermMemoryService()
         assert asyncio.run(service.build_memory_context(user_id=1, query="q")) == ""
+
+
+# ── Java 拒绝不得伪装成"没有记忆" ─────────────────────────────────────────
+
+
+_REJECT_MSG = "Forbidden: invalid or missing X-Internal-Token"
+
+
+class TestJavaRejectionIsNotMaskedAsEmpty:
+    """两个读/写消费点必须区分"Java 明确拒绝"与"这用户没有记忆"。
+
+    `InternalMemoryController.relevant`（:105-107）与 `saveEntries`（:51-53）令牌
+    不符时回 `R.fail(403,…)` = **HTTP 200 + 信封码**，而消费侧写的是
+    `resp.json().get("data") or []` / `.get("saved", 0)`——被拒时既没有异常也不
+    有日志痕迹：注入侧表现为"用户无长期记忆"，写入侧表现为"保存了 0 条"。
+    """
+
+    def test_fetch_relevant_raises_on_envelope_rejection(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        _set_flag(monkeypatch, enabled=True)
+        _use_fake_http(monkeypatch, FakeResponse(None, code=403, message=_REJECT_MSG))
+
+        service = LongTermMemoryService()
+        with pytest.raises(RuntimeError) as exc:
+            asyncio.run(service.fetch_relevant(user_id=1, query="q"))
+        assert "403" in str(exc.value)
+        assert _REJECT_MSG in str(exc.value)
+
+    def test_persist_entries_raises_on_envelope_rejection(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        _set_flag(monkeypatch, enabled=True)
+        _use_fake_http(monkeypatch, FakeResponse(None, code=403, message=_REJECT_MSG))
+
+        service = LongTermMemoryService()
+        with pytest.raises(RuntimeError) as exc:
+            asyncio.run(service.persist_entries(
+                user_id=1, entries=[{"fact": "用户是项目经理"}]
+            ))
+        assert "403" in str(exc.value)
+
+    def test_zero_saved_from_java_is_not_treated_as_rejection(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """对照组：code=200 + saved=0 是真·零，不是被拒，不得抛错。"""
+        _set_flag(monkeypatch, enabled=True)
+        _use_fake_http(monkeypatch, FakeResponse({"saved": 0}))
+
+        service = LongTermMemoryService()
+        saved = asyncio.run(service.persist_entries(
+            user_id=1, entries=[{"fact": "团队用飞书"}]
+        ))
+        assert saved == 0
+
+    def test_empty_data_list_is_not_treated_as_rejection(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """对照组：code=200 + data=[] 是真·无记忆，不得抛错。"""
+        _set_flag(monkeypatch, enabled=True)
+        _use_fake_http(monkeypatch, FakeResponse([]))
+
+        service = LongTermMemoryService()
+        assert asyncio.run(service.fetch_relevant(user_id=1, query="q")) == []
+
+    def test_build_memory_context_warns_on_rejection(
+        self, monkeypatch: pytest.MonkeyPatch, caplog
+    ):
+        """降级为空串是设计，但必须在 WARNING 里留下可归因的痕迹。"""
+        import logging
+
+        _set_flag(monkeypatch, enabled=True)
+        _use_fake_http(monkeypatch, FakeResponse(None, code=403, message=_REJECT_MSG))
+
+        service = LongTermMemoryService()
+        with caplog.at_level(logging.DEBUG, logger="app.core.rag.long_term_memory"):
+            assert asyncio.run(service.build_memory_context(user_id=1, query="q")) == ""
+        warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert warnings, "Java 明确拒绝却只记 debug，运维无从区分配置错误与无记忆"
+        assert "403" in " ".join(r.getMessage() for r in warnings)
+
+    def test_unparseable_success_body_is_not_silently_empty(
+        self, monkeypatch: pytest.MonkeyPatch, caplog
+    ):
+        import logging
+
+        _set_flag(monkeypatch, enabled=True)
+        _use_fake_http(monkeypatch, UnparseableResponse())
+
+        service = LongTermMemoryService()
+        with caplog.at_level(logging.DEBUG, logger="app.core.rag.long_term_memory"):
+            assert asyncio.run(service.build_memory_context(user_id=1, query="q")) == ""
+        assert [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    def test_transport_failure_does_not_become_a_warning(
+        self, monkeypatch: pytest.MonkeyPatch, caplog
+    ):
+        """反向守护：网络抖动仍是 debug 降噪，本批不把降级路径变成告警风暴。"""
+        import logging
+
+        _set_flag(monkeypatch, enabled=True)
+
+        class FailingClient(FakeAsyncClient):
+            async def get(self, url: str, **kwargs: Any) -> FakeResponse:
+                raise RuntimeError("connection refused")
+
+        monkeypatch.setattr("httpx.AsyncClient", FailingClient)
+
+        service = LongTermMemoryService()
+        with caplog.at_level(logging.DEBUG, logger="app.core.rag.long_term_memory"):
+            assert asyncio.run(service.build_memory_context(user_id=1, query="q")) == ""
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    def test_consolidate_propagates_rejection_instead_of_reporting_zero(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """写入侧被拒不能上报"抽取到 N 条、保存 0 条"——那是把鉴权故障记成数据事实。"""
+        _set_flag(monkeypatch, enabled=True)
+        _use_fake_http(monkeypatch, FakeResponse(None, code=403, message=_REJECT_MSG))
+
+        class _FakeResult:
+            entries = [{"fact": "用户是项目经理", "category": "context", "importance": 0.8}]
+            summary = "1 memories"
+
+        class FakeConsolidator:
+            async def extract_memories(self, **kwargs: Any):
+                return _FakeResult()
+
+        monkeypatch.setattr(
+            "app.core.rag.memory_consolidator.get_memory_consolidator",
+            lambda: FakeConsolidator(),
+        )
+
+        service = LongTermMemoryService()
+        with pytest.raises(RuntimeError):
+            asyncio.run(service.consolidate_conversation(
+                conversation_id=42, user_id=7, messages=[{"role": "user", "content": "x"}]
+            ))
 
 
 # ── 每轮触发 ───────────────────────────────────────────────────────────────
@@ -343,7 +495,7 @@ class TestScheduleTurnConsolidation:
 class TestConsolidateConversation:
     def test_extracts_then_persists(self, monkeypatch: pytest.MonkeyPatch):
         _set_flag(monkeypatch, enabled=True)
-        _use_fake_http(monkeypatch, FakeResponse({"data": {"saved": 2}}))
+        _use_fake_http(monkeypatch, FakeResponse({"saved": 2}))
 
         class _FakeResult:
             entries = [
