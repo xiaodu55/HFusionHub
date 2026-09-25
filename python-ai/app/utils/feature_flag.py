@@ -213,6 +213,18 @@ class FeatureFlagClient:
             resp = httpx.get(self._fetch_url, headers=headers, timeout=5.0)
             resp.raise_for_status()
             data = resp.json()
+            if not isinstance(data, dict):
+                raise ValueError(f"Java 快照响应不是 R 信封对象: {type(data).__name__}")
+            # Java 的鉴权/契约失败走 R.fail(403, …)，那是 HTTP 200 + 信封 code != 200，
+            # raise_for_status() 看不见。它不代表"平台没配置任何旗标"：若按空快照覆盖
+            # 缓存，一次过期令牌就会清空整份在用快照并把重试推迟一个 TTL 周期。
+            code = data.get("code")
+            if code != 200:
+                logger.warning(
+                    f"Feature flag snapshot rejected by Java backend (code={code} "
+                    f"message={data.get('message')}): keeping stale cache"
+                )
+                return
             flags = data.get("data") or []
             new_cache = {}
             for f in flags:

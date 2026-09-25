@@ -4,9 +4,13 @@ Feature Flag 单元测试 — 覆盖评估逻辑、降级策略、五层优先�
 运行: pytest tests/test_feature_flag.py -v
 """
 
+import json
+import logging
 import os
 import time
 from unittest.mock import patch
+
+import httpx
 
 # Ensure transparent degradation for all tests (no Java backend)
 os.environ.setdefault("FEATURE_FLAG_DEGRADATION", "transparent")
@@ -305,3 +309,150 @@ class TestJsonContains:
 
     def test_empty_string(self):
         assert FeatureFlagClient._json_contains("", "1") is False
+
+
+# ── 快照拉取的信封判定（_fetch_all）─────────────────────────────────────────
+#
+# Java 的 /api/internal/feature-flags/snapshot 鉴权失败走 R.fail(403, …)，
+# 那是 HTTP 200 + 信封 code:403 + data:null。raise_for_status() 看不见它，
+# 于是"令牌坏了"会被写成"平台一个旗标都没配置"——整份在用缓存被清空。
+# 这里的 fake 必须带 code：本模块此前没有任何测试覆盖 _fetch_all，
+# 而没有信封形状的 fake 就看不见这个缺陷。
+
+_SNAPSHOT_URL = "http://java:8080/api/internal/feature-flags/snapshot"
+_REJECT_MSG = "Forbidden: invalid or missing X-Internal-Token"
+
+
+class _FakeSnapshotResponse:
+    def __init__(self, data=None, *, code=200, message="success", status_code=200):
+        self.status_code = status_code
+        self._payload = {"code": code, "message": message, "data": data}
+        self.text = json.dumps(self._payload)
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            request = httpx.Request("GET", _SNAPSHOT_URL)
+            raise httpx.HTTPStatusError(
+                f"HTTP {self.status_code}",
+                request=request,
+                response=httpx.Response(self.status_code, request=request),
+            )
+
+
+class _UnparseableSnapshotResponse(_FakeSnapshotResponse):
+    """HTTP 200 但正文不是 JSON（网关改写 / 空体）。"""
+
+    def json(self):
+        raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+
+def _client_with_flags(*keys):
+    client = FeatureFlagClient(cache_ttl=30)
+    client._fetch_url = _SNAPSHOT_URL
+    client._cache = {key: _make_flag(key, enabled=True) for key in keys}
+    client._last_fetch = 0.0
+    return client
+
+
+def _warning_records(caplog):
+    return [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+class TestSnapshotRejectionKeepsStaleCache:
+    def test_rejected_snapshot_does_not_wipe_cache(self):
+        client = _client_with_flags("agent.write_tools.enabled")
+        with patch(
+            "httpx.get",
+            return_value=_FakeSnapshotResponse(code=403, message=_REJECT_MSG),
+        ):
+            client._fetch_all(force=True)
+        assert "agent.write_tools.enabled" in client._cache
+
+    @patch("app.utils.feature_flag.DEGRADATION_MODE", "fail_closed")
+    def test_rejected_snapshot_keeps_flag_at_cached_value(self):
+        """被拒绝后读到的必须还是旧快照的值，而不是无缓存降级方向。"""
+        client = _client_with_flags("agent.write_tools.enabled")
+        with patch(
+            "httpx.get",
+            return_value=_FakeSnapshotResponse(code=403, message=_REJECT_MSG),
+        ):
+            client._fetch_all(force=True)
+        assert client.is_enabled("agent.write_tools.enabled") is True
+
+    def test_rejected_snapshot_does_not_advance_last_fetch(self):
+        client = _client_with_flags("guardrails.enabled")
+        with patch(
+            "httpx.get",
+            return_value=_FakeSnapshotResponse(code=403, message=_REJECT_MSG),
+        ):
+            client._fetch_all(force=True)
+        assert client._last_fetch == 0.0
+
+    def test_rejection_is_logged_at_warning(self, caplog):
+        client = _client_with_flags("agent.enabled")
+        with caplog.at_level(logging.DEBUG, logger="hfusionhub.feature_flag"):
+            with patch(
+                "httpx.get",
+                return_value=_FakeSnapshotResponse(code=403, message=_REJECT_MSG),
+            ):
+                client._fetch_all(force=True)
+        warnings = _warning_records(caplog)
+        assert warnings, "被 Java 拒绝却只记 debug，线上等同于静默"
+        assert "403" in " ".join(warnings)
+
+    def test_rejected_snapshot_is_retried_on_next_call(self):
+        calls = []
+
+        def _get(url, **kwargs):
+            calls.append(url)
+            return _FakeSnapshotResponse(code=403, message=_REJECT_MSG)
+
+        client = _client_with_flags("agent.enabled")
+        with patch("httpx.get", side_effect=_get):
+            client._fetch_all()
+            client._fetch_all()
+        assert len(calls) == 2, "拒绝却推进 _last_fetch，会把重试推迟一个 TTL 周期"
+
+    def test_envelope_without_code_is_treated_as_rejection(self):
+        """不是 R 信封的 200 正文按拒绝处理，不能当"零旗标"覆盖缓存。"""
+        client = _client_with_flags("guardrails.enabled")
+        resp = _FakeSnapshotResponse(data=[{"flagKey": "guardrails.enabled", "enabled": True}])
+        resp._payload.pop("code")
+        with patch("httpx.get", return_value=resp):
+            client._fetch_all(force=True)
+        assert client._last_fetch == 0.0
+
+    # ── 以下四例钉住"不是本缺陷"的路径，防止修复过度 ──
+
+    def test_legitimate_empty_snapshot_still_clears_cache(self):
+        client = _client_with_flags("agent.enabled")
+        with patch("httpx.get", return_value=_FakeSnapshotResponse(data=[])):
+            client._fetch_all(force=True)
+        assert client._cache == {}
+        assert client._last_fetch > 0.0
+
+    def test_success_snapshot_populates_cache(self):
+        client = _client_with_flags()
+        flag = {"flagKey": "rag.hybrid.enabled", "enabled": True, "flagType": "boolean", "rules": []}
+        with patch("httpx.get", return_value=_FakeSnapshotResponse(data=[flag])):
+            client._fetch_all(force=True)
+        assert client.is_enabled("rag.hybrid.enabled") is True
+
+    def test_real_http_error_keeps_cache_and_warns(self, caplog):
+        client = _client_with_flags("approval.required_for_write")
+        with caplog.at_level(logging.DEBUG, logger="hfusionhub.feature_flag"):
+            with patch("httpx.get", return_value=_FakeSnapshotResponse(status_code=500)):
+                client._fetch_all(force=True)
+        assert "approval.required_for_write" in client._cache
+        assert _warning_records(caplog)
+
+    def test_unparseable_200_body_keeps_cache_and_warns(self, caplog):
+        client = _client_with_flags("guardrails.enabled")
+        with caplog.at_level(logging.DEBUG, logger="hfusionhub.feature_flag"):
+            with patch("httpx.get", return_value=_UnparseableSnapshotResponse()):
+                client._fetch_all(force=True)
+        assert "guardrails.enabled" in client._cache
+        assert _warning_records(caplog)

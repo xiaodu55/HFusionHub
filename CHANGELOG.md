@@ -11,6 +11,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第七十九批（2026-10-06：旗标快照被 Java 拒绝时不再清空在用缓存——一次过期令牌不该让全平台开关静默回 default）
+
+#### Fixed
+- **`python-ai/app/utils/feature_flag.py:215-228` 在 `_fetch_all` 写缓存之前加入 `R` 信封码判定：`code != 200` 记 warning 并 `return`，`self._cache` 与 `self._last_fetch` 原样不动**。这是第七十七、七十八批同形状的第三处失明，而后果最重：`GET /api/internal/feature-flags/snapshot`（`FeatureFlagInternalController.java:41`）令牌不符时回 `R.fail(403,…)` = **HTTP 200 + 信封码 + `data:null`**，`resp.raise_for_status()`（:214）拦不住，旧写法接着算 `flags = data.get("data") or []` → **空列表**，然后照常执行 `self._cache = new_cache`（:245）与 `self._last_fetch = now`（:246）。三层后果：
+  - **在用快照整体消失**——`feature_flags` 是模块级单例（:382），生产代码 **22 处调用分布在 8 个模块**（`api/runtime.py` 7、`core/agent/__init__.py` 4、`core/tools/registry.py` 4、`core/agent/react.py` 2、`core/rag/query_router.py` 2、`core/policy/guardrails.py`、`core/rag/reranker.py`、`core/rag/long_term_memory.py` 各 1），缓存一空，每个 `is_enabled` 都改走"无缓存"分支：按生产默认的 `fail_closed`（:90），`agent.write_tools.enabled` / `agent.web_search.enabled` 直接变 False，`rag.hybrid.enabled` / `rag.reranker.enabled` / `agent.enabled` / `agent.multi_agent.enabled` / `memory.long_term.enabled` 回落到 env 派生值，**五层 scope 覆盖（kb/user/tenant/environment 规则、percentage 灰度、时间窗）全部失效**——按 kb 打开的灰度会静默退回全局值
+  - **重试被推迟**——`_last_fetch` 被推进后，:206 的 TTL 闸门在接下来 30 秒内让每次刷新直接 `return`，而 `_trigger_background_refresh`（:187-194）仍会为每次 miss 起一个立刻返回的守护线程
+  - **零信号**——只留一行 `debug "Feature flags refreshed: 0 flags"`（:247）；而 except 分支的文案（:249 `using stale cache`）恰恰说明设计意图就是保留旧快照，只是这条路径不抛异常，所以那次"保留"从未发生
+- **诚实边界（本缺陷不是安全豁免）**：`MUST_ENFORCE_FLAGS`（护栏总开关与 `approval.required_for_write`）在无缓存时降级为 **True**，即仍处强制方向，未知旗标也 fail-closed（`policy.admin_bypass_approval`，`core/tools/registry.py:1057` → False）。受损的是**能力旗标与灰度配置的正确性/可用性**，以及一次配置故障能不能被归因
+- **`_fetch_all:216-217` 把"HTTP 200 但 body 不是 JSON 对象"也归入拒绝**（抛 `ValueError` 交 except：保留缓存 + warning），与前两批同一口径——失明不止 403，网关改写成正文非 `R` 对象的 200 同样不能当成"零旗标"
+
+#### Added
+- **`python-ai/tests/test_feature_flag.py`：`TestSnapshotRejectionKeepsStaleCache` 10 例（净 +10）**
+  - 拒绝路径 6 例：缓存不被清空；`fail_closed` 下 `is_enabled("agent.write_tools.enabled")` 仍读到旧快照的 **True**（这条是"能力被静默关掉"的直接反证）；`_last_fetch` 不推进；拒绝必须记 **WARNING** 且文案含 `403`；非 force 的连续两次调用**都要**打网络（重试次数 2，钉住 TTL 闸门不被拒绝污染）；缺 `code` 键的 200 正文按拒绝处理
+  - 对照组 4 例（防修复过度）：`code=200 + data=[]` 仍**清空**缓存并推进 `_last_fetch`（合法空快照不是故障）；成功快照正常填充并可读；真 HTTP 500 保留缓存 + warning；200 + body 不可解析保留缓存 + warning
+- **`_FakeSnapshotResponse` / `_UnparseableSnapshotResponse` / `_client_with_flags` 替身**：按 Java `R` 三件套（`code`/`message`/`data`）构造，`raise_for_status()` 抛真实 `httpx.HTTPStatusError`（而非任意异常），URL 走 `http://java:8080/api/internal/feature-flags/snapshot`
+- 本模块此前 **`_fetch_all` 零覆盖**：全仓 `grep "_fetch_all|force_refresh"` 除定义处无任何命中，两个既有旗标测试文件只测评估逻辑与"无缓存降级"分支。没有带 `code` 的 fake 就没有 seam，这是该缺陷能长期存活的原因（与第七十六/七十七/七十八批同形：**消费侧的信封失明总是先在测试替身上失明**）
+
+#### 决策记录
+- **保留旧快照而不是抛异常**：`_fetch_all` 跑在后台守护线程（:193）里，向上抛只会变成线程未捕获异常打印，而它的消费方 `is_enabled` 的正确语义本就是"拿不到新快照就用旧的"。所以拒绝路径的处理是 `warning` + `return`，把 `_cache`/`_last_fetch` 完整留给下一个周期——与第七十八批"写入被拒要向上抛"相反，因为那里的调用方需要知道没存进去，这里的调用方在另一条线程上
+- **不改 Java 侧 `R.fail(403,…)`**（`FeatureFlagInternalController.java:41`）：与第七十七批同因，消费侧读码才覆盖"HTTP 200 但非成功信封"整类；该文案的 12 处里除第七十五批收口的 2 处外仍有 **10 处**（清单见第七十五批决策记录），统一改判真实 HTTP 状态属跨面口径工程，另批处理
+- **判定只认信封码，不认 `data` 是否为空**：`code=200 + data=[]` 是"平台确实没配置旗标"的真实状态，若一并保留旧缓存就会把已删除的旗标永久钉在使用位上；这条边界由对照组钉死
+- **未顺手改**：`docs/ROADMAP.md:16` 的 Java 703 口径（本批只按 static-checks 要求同步 Python 计数）
+
+#### 验证
+- 红色先行：10 例对 **HEAD 版本**的 `feature_flag.py`（改前 `git diff --stat` 该文件为空）跑 → **6 failed / 36 passed**，失败信息即缺陷痕迹：`assert 'agent.write_tools.enabled' in {}`、`assert False is True`、`assert 1791265856.6619103 == 0.0`、`AssertionError: 被 Java 拒绝却只记 debug，线上等同于静默` / `assert []`、`assert 1 == 2`
+- `tests/test_feature_flag.py` + `test_feature_flag_degradation.py` **53 passed**（42 → 53，净 +10；11 例既有降级用例零改动仍绿）
+- Python 全量 **1851 passed / 8 skipped**（160.63s；第七十八批基线 1841 + 本批净 +10，零回归）
+- `ruff check app tests`（0.16.3，`.venv` 内）**All checks passed**
+- `scripts/static-checks.py` **8/8**，测试计数 **Python 1709 → 1719**（README badge + 三处正文、`README_EN.md`、`docs/ROADMAP.md:16` 已同步）· Java 713 · 前端 101
+- 消费面零改动：`is_enabled` / `_evaluate` / `_scope_matches` / 五层优先级 / 三种降级模式（:90）的签名与语义全部不变，改的只是 `_fetch_all` 写缓存的**前置条件**
+
+#### 遗留（不在本批范围）
+1. `audit.py` 历史 `dead_letter` 行的回灌（第七十七批遗留，需活库按 `get_sync_status()["dead_letter"]` 定量）
+2. 仓内其余 10 处 Java `R.fail(403,…)` 是否统一改判真实 HTTP 403（第七十五批只收口了 `EvalHarnessInternalController` 的 2 处）
+3. `docs/ROADMAP.md:16` 的 Java 703 口径
+
 ### 第七十八批（2026-10-06：长期记忆不再把 Java 的拒绝读成"这用户没记忆"——两个消费点改读信封码）
 
 #### Fixed
