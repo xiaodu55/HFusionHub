@@ -11,6 +11,75 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第八十一批（2026-10-06：SIGTERM 前把审计队列排空——第八十批唯一会自我恶化的残留）
+
+#### 问题
+- 第八十批把队列落到按 `POD_NAME` 命名的目录后，留下的那条残留与其他遗留不同，它会**自己变严重**：
+  `_flush_worker` 只在 `_FLUSH_INTERVAL = 30.0` 的节拍上出站，进程被终止时队列里最多压着 30 秒的未确认数据；
+  而 Deployment 重建后 Pod 名变了，旧目录不会再有任何进程接手，残留只能靠运维偶然发现
+- `_do_flush` 没有内部截止时间：批量 POST `timeout=30.0`（:381），整批失败回退逐条、每条 `timeout=10.0`（:410），
+  积压 50 条最坏 500 秒——远超 K8s 默认优雅期。也就是说"等它跑完"不是一个可实现的方案
+- 与第七十七~七十九批同族的诚实性风险：`get_sync_status()`（:541-547）把"库读不到"降级成
+  `{total: 0, unsynced: 0, dead_letter: 0}`。退出路径若沿用它上报结果，"没确认"会被写成"已排空"
+
+#### 改动
+- `flush_on_shutdown()`（`app/core/plugin/audit.py:573-627`）：先 `_flush_stop.set()` 停后台线程，
+  对在途线程 `join(timeout=budget/3)` 让它那次出站先跑完，再起 daemon 线程做最后一次 `_do_flush()` 并
+  `join(timeout=budget)`；返回 `{flushed, remaining, timed_out, error, db_dir}`
+- `_SHUTDOWN_FLUSH_BUDGET = 10.0`（:64）：预算远小于优雅期 30s，给在途请求留余量；上限只能来自墙钟，
+  因为超预算就是 SIGKILL，继续等换不来同步成功
+- 新增 `_queue_counts()`（:527-539）作为**只抛不降级**的读数口径，`flush_on_shutdown` 用它取
+  `remaining = unsynced + dead_letter`；监控面 `get_sync_status` 保持旧的降级到零口径不变（两者故意分叉）
+- 日志按处置结果分三级：未排空 WARNING、无法确认 ERROR、排空 INFO，三种都把 `_DB_DIR` 打进去——
+  残留行躺在按 Pod 命名的卷目录里，不落点等于让运维去猜位置
+- 接线在 lifespan 退出路径**第一位**（`app/main.py:108-122`，import :114、`asyncio.to_thread` :115）：
+  排在 MCP client 关闭与共享 HTTP client 关闭之前（出站调用正需要这些连接还活着），
+  `to_thread` 包住以免最多 10 秒的阻塞把 event loop 卡在退出路径上
+
+#### 测试（先红后绿）
+- 红：8 failed —— 7 例 `AttributeError: module 'app.core.plugin.audit' has no attribute 'flush_on_shutdown'`
+  ＋ 1 例 `AssertionError: 退出路径没有排空审计队列`
+- 新增 `tests/test_plugin_audit.py:543` `TestFlushOnShutdown` 7 例：
+  `test_drains_the_queue_and_reports_zero_remaining`、
+  `test_empty_queue_reports_zero_without_touching_java`（side_effect 直接抛，证明空队列不发 HTTP）、
+  `test_rows_survive_when_java_refuses_and_the_location_is_logged`（caplog WARNING 必须含 `_DB_DIR`）、
+  `test_stops_the_background_thread`、
+  `test_returns_within_budget_when_java_hangs`（budget=1.0 断言 elapsed<3.0 且 unsynced 仍为 1）、
+  `test_db_failure_is_reported_as_unknown_not_as_drained`（`remaining is None` 且 error 含 "db locked"）、
+  `test_get_sync_status_still_degrades_to_zeros`（钉住监控面口径未被改动）
+- 新增 `tests/test_api_contract.py:530` 源码位置测试 `test_lifespan_shutdown_drains_the_audit_queue`：
+  把 `async def lifespan` 体按 `"    yield\n"` 切成 startup/shutdown 两半，断言 `flush_on_shutdown`
+  只在后半出现且带 `to_thread`。不进入真实 lifespan（要跑 MCP startup 与 gateway warmup），钉的是"接线掉回
+  startup 侧或被删"这类回归
+- 关键判据：排空 == "没有待发项"，不是"表空了"——synced 行按 7 天保留（`_cleanup_synced:267-278`），
+  故 drained 场景断言 `get_sync_status() == {"total": 2, "unsynced": 0, "dead_letter": 0}`
+- 绿：`tests/test_plugin_audit.py` + 该契约测试 **50 passed**；Python 全量 **1874 passed / 8 skipped**
+  （167.19s，1732 → 1740）；ruff（`.venv` 0.16.3）`app tests` All checks passed；
+  `scripts/static-checks.py` 计数同步后转绿（README.md/README_EN.md/docs/ROADMAP.md 三处 1740）
+
+#### 决策记录
+- **不加内部 deadline 到 `_do_flush`**：`requests/httpx` 的超时只约束单次 IO，重试链与逐条回退的总量管不了；
+  把截止时间塞进同步热路径会改动每批语义，代价大于收益。墙钟 + daemon 线程是唯一可靠的界
+- **超时后不 cancel**：Python 无法安全强杀线程；`timed_out=True` 如实上报，daemon 线程随 SIGKILL 一起消失，
+  数据仍在卷上——比"假装排空"好
+- **`remaining=None` 与 `0` 严格区分**：读不到库时把 error 一起返回并走 ERROR 日志，绝不写成 0。
+  这是信封盲区家族（77/78/79）在退出路径上的同一课
+- **不做旧 Pod 目录回收**（新 Pod 扫 `/data` 下别人的目录）：跨 Pod 打开他人的 SQLite 文件正好违反第八十批的
+  按 Pod 隔离前提；运维面已有 `get_sync_status` + `retry_dead_letters`(:549-570)，残留走显式处置
+- **不动 `_MAX_RETRIES` / 重试间隔**：退出路径只跑一次 `_do_flush`，上限由预算决定，不需要第二层节流
+
+#### 未核验
+- 无真集群：`terminationGracePeriodSeconds=30` 与到点 SIGKILL 按上游文档，未在本环境实测
+- 优雅期内"在途请求 + 10 秒排空预算"的实际余量未压测；helm 渲染仍无法验证（本机无 helm client，承第八十批）
+
+#### 遗留
+1. rollout 后旧 Pod 目录里的残留行仍需运维手动发现（本批只保证"退出时尽量排空 + 落点进日志"，没做自动回收）
+2. helm 侧存储类可写性与 `fsGroup`（承第八十批）
+3. `RAG_EVALUATION_DB_PATH` 是否落在卷上（同族 durability 问题）
+4. `.Values.python.taskQueueMode` 悬空引用（`python.yaml:51`，需 helm client 才能安全处理）
+5. Java 侧 10 处 `R.fail(403, ...)` 折叠成 HTTP 200 的状态码统一
+6. ROADMAP Java 计数 703 与实测 713 的口径
+
 ### 第八十批（2026-10-06：dead-letter 回灌先定量——本机没有可回灌的历史行，真正的问题是审计队列在三套 shipped 拓扑里都不落在卷上）
 
 #### 定量结论（原任务的答案，先给数）

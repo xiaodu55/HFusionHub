@@ -537,6 +537,121 @@ class TestRetryDeadLetters:
         assert [r for r in caplog.records if r.levelno >= logging.ERROR]
 
 
+# ── 退出前把队列排空 ──────────────────────────────────────────────────
+
+
+class TestFlushOnShutdown:
+    """SIGTERM 只做三件事：停后台线程、在预算内再同步一次、把没排空的量说清楚。
+
+    第八十批把队列放上了卷，但 helm 的落点是 `$(POD_NAME)` 子目录——Pod 换成新名字后
+    没有任何进程会去读旧目录，所以"在卷上"只有配上"退出前排空"才成立。
+    """
+
+    def test_drains_the_queue_and_reports_zero_remaining(self):
+        from app.core.plugin import audit as audit_mod
+
+        record_audit(plugin_id="pid-1", plugin_name="p", action="install")
+        record_audit(plugin_id="pid-1", plugin_name="p", action="enable")
+        with (
+            patch.object(audit_mod, "_post_to_java_backend_batch", return_value=True) as batch,
+            patch.object(audit_mod, "_post_to_java_backend", return_value=True),
+        ):
+            result = audit_mod.flush_on_shutdown()
+        assert batch.call_count == 1
+        assert result["flushed"] == 2
+        assert result["remaining"] == 0
+        # 排空的判据是"没有待发项"，不是"表空了"——synced 行按 7 天保留（_cleanup_synced:267-278）
+        assert get_sync_status() == {"total": 2, "unsynced": 0, "dead_letter": 0}
+
+    def test_empty_queue_reports_zero_without_touching_java(self):
+        from app.core.plugin import audit as audit_mod
+
+        def boom(*_a, **_k):
+            raise AssertionError("空队列不该发起出站")
+
+        with patch.object(audit_mod, "_post_to_java_backend_batch", side_effect=boom):
+            result = audit_mod.flush_on_shutdown()
+        assert result == {**result, "flushed": 0, "remaining": 0, "timed_out": False,
+                          "error": None}
+
+    def test_rows_survive_when_java_refuses_and_the_location_is_logged(self, caplog):
+        """被拒时不得把行清掉，也不得报告已排空——落点目录要出现在日志里，否则运维不知道该查哪个 Pod 目录。"""
+        import logging
+
+        from app.core.plugin import audit as audit_mod
+
+        record_audit(plugin_id="pid-1", plugin_name="p", action="install")
+        with (
+            patch.object(audit_mod, "_post_to_java_backend_batch", return_value=False),
+            patch.object(audit_mod, "_post_to_java_backend", return_value=False),
+            caplog.at_level(logging.WARNING, logger="app.core.plugin.audit"),
+        ):
+            result = audit_mod.flush_on_shutdown(budget_seconds=5)
+        assert result["flushed"] == 0
+        assert result["remaining"] == 1
+        assert _queue_rows(audit_mod)[0][1] == 0  # synced 仍为 0
+        messages = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any(str(audit_mod._DB_DIR) in m for m in messages), messages
+
+    def test_stops_the_background_thread(self):
+        from app.core.plugin import audit as audit_mod
+
+        audit_mod._ensure_flush_thread()
+        assert audit_mod._flush_thread.is_alive()
+        try:
+            with (
+                patch.object(audit_mod, "_post_to_java_backend_batch", return_value=True),
+                patch.object(audit_mod, "_post_to_java_backend", return_value=True),
+            ):
+                audit_mod.flush_on_shutdown()
+            assert audit_mod._flush_stop.is_set()
+            assert not audit_mod._flush_thread.is_alive()
+        finally:
+            audit_mod._flush_stop.clear()
+
+    def test_returns_within_budget_when_java_hangs(self):
+        """出站卡住时退出流程必须按时返回——优雅期一到就是 SIGKILL，拖延不会换来同步成功。"""
+        import threading
+        import time
+
+        from app.core.plugin import audit as audit_mod
+
+        record_audit(plugin_id="pid-1", plugin_name="p", action="install")
+        release = threading.Event()
+
+        def hang(_entries):
+            release.wait(timeout=10)
+            return False
+
+        started = time.monotonic()
+        try:
+            with patch.object(audit_mod, "_post_to_java_backend_batch", side_effect=hang):
+                result = audit_mod.flush_on_shutdown(budget_seconds=1.0)
+        finally:
+            release.set()
+        elapsed = time.monotonic() - started
+        assert result["timed_out"] is True
+        assert result["flushed"] == 0
+        assert elapsed < 3.0, f"退出被出站拖住 {elapsed:.1f}s"
+        assert get_sync_status()["unsynced"] == 1  # 超时不等于失败确认，行必须还在
+
+    def test_db_failure_is_reported_as_unknown_not_as_drained(self):
+        """读不到队列时 remaining 是 None：把"不可确认"写成 0 就是第七十七批那族失明。"""
+        from app.core.plugin import audit as audit_mod
+
+        with patch.object(audit_mod, "_get_db", side_effect=RuntimeError("db locked")):
+            result = audit_mod.flush_on_shutdown()
+        assert result["remaining"] is None
+        assert result["error"] and "db locked" in result["error"]
+
+    def test_get_sync_status_still_degrades_to_zeros(self):
+        """端点侧的降级口径不变：读不到就回三个 0，不能让 /audit/sync-status 500。"""
+        from app.core.plugin import audit as audit_mod
+
+        with patch.object(audit_mod, "_queue_counts", side_effect=RuntimeError("gone")):
+            assert audit_mod.get_sync_status() == {"total": 0, "unsynced": 0, "dead_letter": 0}
+
+
 # ── 审计队列的持久化落点（防回潮）─────────────────────────────────────
 
 

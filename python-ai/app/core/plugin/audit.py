@@ -4,6 +4,8 @@ Architecture:
   1. In-memory buffer (fast writes)
   2. Local SQLite file (crash recovery)
   3. Background thread flushes to Java backend with exponential backoff retry
+  4. ``flush_on_shutdown`` drains it once more on SIGTERM — the queue lives in a
+     per-pod directory, so nothing else will ever pick the leftovers up
 
 Every plugin mutation is recorded with:
   - trace_id for correlation
@@ -58,6 +60,8 @@ _JAVA_AUDIT_ENDPOINT = "/api/internal/plugin/audit-logs"
 _MAX_RETRIES = 5
 _RETRY_BASE_DELAY = 2.0  # seconds
 _FLUSH_INTERVAL = 30.0  # seconds
+# 退出排空预算：K8s 默认优雅期 30s，还要留给在途请求，故远小于它。
+_SHUTDOWN_FLUSH_BUDGET = 10.0
 
 
 @dataclass
@@ -520,15 +524,24 @@ def clear_buffer() -> int:
         return 0
 
 
+def _queue_counts() -> dict[str, int]:
+    """Read the queue counters. Raises if the database is unreadable."""
+    db = _get_db()
+    with _db_lock:
+        total = db.execute("SELECT COUNT(*) FROM audit_queue").fetchone()[0]
+        unsynced = db.execute(
+            "SELECT COUNT(*) FROM audit_queue WHERE synced = 0 AND dead_letter = 0"
+        ).fetchone()[0]
+        dead_letter = db.execute(
+            "SELECT COUNT(*) FROM audit_queue WHERE dead_letter = 1"
+        ).fetchone()[0]
+    return {"total": total, "unsynced": unsynced, "dead_letter": dead_letter}
+
+
 def get_sync_status() -> dict[str, Any]:
     """Get audit sync status for monitoring."""
     try:
-        db = _get_db()
-        with _db_lock:
-            total = db.execute("SELECT COUNT(*) FROM audit_queue").fetchone()[0]
-            unsynced = db.execute("SELECT COUNT(*) FROM audit_queue WHERE synced = 0 AND dead_letter = 0").fetchone()[0]
-            dead_letter = db.execute("SELECT COUNT(*) FROM audit_queue WHERE dead_letter = 1").fetchone()[0]
-        return {"total": total, "unsynced": unsynced, "dead_letter": dead_letter}
+        return _queue_counts()
     except Exception:
         return {"total": 0, "unsynced": 0, "dead_letter": 0}
 
@@ -555,6 +568,62 @@ def retry_dead_letters() -> int:
     except Exception as e:
         logger.error("dead-letter 回灌失败: %s", e)
         return 0
+
+
+def flush_on_shutdown(budget_seconds: float = _SHUTDOWN_FLUSH_BUDGET) -> dict[str, Any]:
+    """进程退出前停掉后台线程并把队列最后排空一次，返回处置结果。
+
+    调用方（lifespan shutdown）与 K8s 优雅终止共用一个事实：预算一到就是
+    SIGKILL，所以拖延换不来同步成功。`remaining=None` 表示队列读不到、
+    无法确认是否排空——这与把它写成 0 是两回事。
+    """
+    result: dict[str, Any] = {
+        "flushed": 0,
+        "remaining": 0,
+        "timed_out": False,
+        "error": None,
+        "db_dir": _DB_DIR,
+    }
+    _flush_stop.set()
+    worker = _flush_thread
+    if worker is not None and worker.is_alive():
+        worker.join(timeout=budget_seconds / 3)  # 等在途的那次出站跑完再补一次
+
+    outcome: dict[str, Any] = {}
+
+    def _run() -> None:
+        try:
+            outcome["flushed"] = _do_flush()
+        except Exception as e:
+            outcome["error"] = str(e)
+
+    final = threading.Thread(target=_run, daemon=True, name="audit-shutdown-flush")
+    final.start()
+    final.join(timeout=budget_seconds)
+    result["timed_out"] = final.is_alive()
+    result["flushed"] = outcome.get("flushed", 0)
+    result["error"] = outcome.get("error")
+
+    if result["error"] is None:
+        try:
+            counts = _queue_counts()
+            result["remaining"] = counts["unsynced"] + counts["dead_letter"]
+        except Exception as e:
+            result["remaining"] = None
+            result["error"] = str(e)
+
+    if result["remaining"]:
+        logger.warning(
+            "退出时审计队列未排空: remaining=%s timed_out=%s 落点=%s",
+            result["remaining"], result["timed_out"], result["db_dir"],
+        )
+    elif result["remaining"] is None or result["error"]:
+        logger.error(
+            "退出时无法确认审计队列状态: %s 落点=%s", result["error"], result["db_dir"]
+        )
+    else:
+        logger.info("审计队列已在退出前排空: flushed=%d", result["flushed"])
+    return result
 
 
 # ── Convenience functions ──────────────────────────────────────────

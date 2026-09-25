@@ -106,6 +106,19 @@ async def lifespan(_app: FastAPI):
     yield
 
     # ── shutdown ──────────────────────────────────────────────────────
+    # 审计队列排在第一位：它落在按 Pod 命名的目录里，越晚排空越可能被优雅期到点的
+    # SIGKILL 截断，而那些残留不会再有任何进程去接手。
+    import asyncio
+
+    try:
+        from app.core.plugin.audit import flush_on_shutdown
+        result = await asyncio.to_thread(flush_on_shutdown)
+        if result["remaining"]:
+            logging.getLogger("hfusionhub.startup").warning(
+                "Audit queue not drained at shutdown: %s", result)
+    except Exception as exc:
+        logging.getLogger("hfusionhub.startup").warning(
+            "Audit queue shutdown flush failed: %s", exc)
     try:
         from app.core.tools.mcp_client import get_mcp_client_manager
         await get_mcp_client_manager().shutdown()

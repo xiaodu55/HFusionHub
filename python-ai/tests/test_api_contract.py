@@ -527,6 +527,22 @@ def test_dead_letter_retry_endpoint_delegates_once(client, monkeypatch, plugin_a
     assert len(calls) == 1
 
 
+def test_lifespan_shutdown_drains_the_audit_queue():
+    """接线本身要钉住：卷上的落点（第八十批）只有配上退出前排空才不留下孤儿目录。
+
+    走源码位置而不是真的进 lifespan——startup 段会拉起 MCP 客户端与模型网关预热，
+    把它们拖进每个契约测试的耗时里不值得，而这条要防的是"这行被误删/挪到 startup"。
+    """
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+    body = text[text.index("async def lifespan"):]
+    head, _, tail = body.partition("    yield\n")
+    assert "flush_on_shutdown" in tail, "退出路径没有排空审计队列"
+    assert "flush_on_shutdown" not in head, "排空只属于 shutdown，startup 会让启动等一次出站"
+    assert "to_thread" in tail, "阻塞的排空不得占住事件循环"
+
+
 def test_plugin_list_reports_per_plugin_tool_count(client, monkeypatch, plugin_api):
     plugins = [
         _RegisteredPlugin("p1", tool_specs=({"name": "ocr"}, {"name": "table"})),
