@@ -65,11 +65,14 @@ pythonAi:
   port: 9000
   # Batch 8 任务队列模式：inline（默认，进程内）| arq（需另行部署 Redis + arq worker）
   taskQueueMode: "inline"
-  # Stateless: >=2 replicas in production. No per-pod RWO state is required
-  # because vector data lives in Milvus and uploads are on a shared RWX volume.
+  # Stateless: >=2 replicas in production. Vector data lives in Milvus and
+  # uploads on a shared RWX volume. The one exception is the plugin audit
+  # queue (SQLite), which is per-pod state and therefore gets its own RWX
+  # volume with one sub-directory per pod — see templates/python.yaml.
   replicas: 2
   minReplicas: 2
   maxReplicas: 8
+  auditQueueSize: 1Gi
   resources:
     requests:
       memory: "512Mi"

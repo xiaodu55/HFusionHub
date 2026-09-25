@@ -305,6 +305,9 @@ services:
       MILVUS_HOST: milvus
       MILVUS_PORT: "19530"
       UPLOAD_DIR: /data/uploads
+      # 插件审计队列（SQLite）落点：默认值落在运行用户的家目录，而家目录在镜像层里，
+      # 容器一重建未同步/dead-letter 行就一起消失；python-data 卷只挂在 /data。
+      HFUSIONHUB_AUDIT_DB_PATH: /data/hfusionhub-audit
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       RAG_HYBRID_ENABLED: "true"
       LLM_ALLOW_MOCK: "false"

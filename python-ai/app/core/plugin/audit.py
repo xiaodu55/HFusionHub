@@ -533,6 +533,30 @@ def get_sync_status() -> dict[str, Any]:
         return {"total": 0, "unsynced": 0, "dead_letter": 0}
 
 
+def retry_dead_letters() -> int:
+    """把 dead-letter 行重新放回重试队列，返回回灌条数（运维显式触发）。
+
+    修好出站地址并不会让历史 dead-letter 行自我恢复：`_get_unsynced_entries`
+    只取 `dead_letter = 0`。`retry_count` 一并清零，每行重新拿到完整的
+    `_MAX_RETRIES` 预算；已 synced 的行不受影响。
+    """
+    try:
+        db = _get_db()
+        with _db_lock:
+            cursor = db.execute(
+                "UPDATE audit_queue SET dead_letter = 0, retry_count = 0 "
+                "WHERE dead_letter = 1"
+            )
+            db.commit()
+            retried = cursor.rowcount
+        if retried:
+            logger.warning("dead-letter 审计行已重新入队: %d 条", retried)
+        return retried
+    except Exception as e:
+        logger.error("dead-letter 回灌失败: %s", e)
+        return 0
+
+
 # ── Convenience functions ──────────────────────────────────────────
 
 def record_install(plugin_id: str, plugin_name: str, manifest_hash: str,

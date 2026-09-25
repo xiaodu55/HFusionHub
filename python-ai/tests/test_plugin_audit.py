@@ -423,3 +423,194 @@ class TestAuditDeadLetter:
         assert "dead_letter" in status
         assert "unsynced" in status
         assert "total" in status
+
+
+# ── dead-letter 回灌 ────────────────────────────────────────────────────
+
+
+def _drain_to_dead_letter(audit_mod, plugin_id="pid-1"):
+    """造一条已耗尽重试的 dead-letter 行（第七十七批修地址之前的常见终态）。"""
+    record_audit(plugin_id=plugin_id, plugin_name="p", action="install")
+    with (
+        patch.object(audit_mod, "_post_to_java_backend_batch", return_value=False),
+        patch.object(audit_mod, "_post_to_java_backend", return_value=False),
+        patch.object(audit_mod, "_MAX_RETRIES", 2),
+    ):
+        for _ in range(3):
+            audit_mod._do_flush()
+    status = get_sync_status()
+    assert status["dead_letter"] == 1 and status["unsynced"] == 0
+    return status
+
+
+def _queue_rows(audit_mod):
+    with audit_mod._db_lock:
+        return audit_mod._get_db().execute(
+            "SELECT id, synced, dead_letter, retry_count FROM audit_queue"
+        ).fetchall()
+
+
+class TestRetryDeadLetters:
+    def test_retry_returns_count_and_clears_dead_letter(self):
+        from app.core.plugin import audit as audit_mod
+
+        _drain_to_dead_letter(audit_mod)
+        assert audit_mod.retry_dead_letters() == 1
+        status = get_sync_status()
+        assert status["dead_letter"] == 0
+        assert status["unsynced"] == 1
+
+    def test_retry_count_is_reset_so_the_row_gets_a_full_budget(self):
+        from app.core.plugin import audit as audit_mod
+
+        _drain_to_dead_letter(audit_mod)
+        audit_mod.retry_dead_letters()
+        rows = _queue_rows(audit_mod)
+        assert [(r[1], r[2], r[3]) for r in rows] == [(0, 0, 0)]
+
+    def test_requeued_row_is_actually_posted_by_the_next_flush(self):
+        """回灌的意义：地址已修（第七十七批）后，这一行必须真的再上一次出站。"""
+        from app.core.plugin import audit as audit_mod
+
+        _drain_to_dead_letter(audit_mod)
+        audit_mod.retry_dead_letters()
+        with patch.object(audit_mod, "_post_to_java_backend_batch", return_value=True) as batch:
+            assert audit_mod._do_flush() == 1
+        assert batch.call_count == 1
+        status = get_sync_status()
+        assert status["unsynced"] == 0 and status["dead_letter"] == 0
+
+    def test_second_retry_is_idempotent(self):
+        from app.core.plugin import audit as audit_mod
+
+        _drain_to_dead_letter(audit_mod)
+        audit_mod.retry_dead_letters()
+        assert audit_mod.retry_dead_letters() == 0
+        assert get_sync_status()["dead_letter"] == 0
+
+    def test_no_dead_letters_is_a_no_op(self):
+        from app.core.plugin import audit as audit_mod
+
+        record_audit(plugin_id="pid-ok", plugin_name="p", action="install")
+        assert audit_mod.retry_dead_letters() == 0
+        status = get_sync_status()
+        assert status["unsynced"] == 1 and status["dead_letter"] == 0
+
+    def test_synced_rows_are_untouched(self):
+        from app.core.plugin import audit as audit_mod
+
+        record_audit(plugin_id="pid-sync", plugin_name="p", action="install")
+        with patch.object(audit_mod, "_post_to_java_backend_batch", return_value=True):
+            audit_mod._do_flush()
+        assert get_sync_status()["unsynced"] == 0
+
+        with (
+            patch.object(audit_mod, "_post_to_java_backend_batch", return_value=False),
+            patch.object(audit_mod, "_post_to_java_backend", return_value=False),
+            patch.object(audit_mod, "_MAX_RETRIES", 0),
+        ):
+            record_audit(plugin_id="pid-dead", plugin_name="p", action="disable")
+            audit_mod._do_flush()
+        assert get_sync_status()["dead_letter"] == 1
+
+        assert audit_mod.retry_dead_letters() == 1
+        requeued = audit_mod._get_unsynced_entries(limit=10)
+        assert [e.plugin_id for e in requeued] == ["pid-dead"]
+        with audit_mod._db_lock:
+            still_synced = audit_mod._get_db().execute(
+                "SELECT COUNT(*) FROM audit_queue WHERE synced = 1"
+            ).fetchone()[0]
+        assert still_synced == 1
+
+    def test_db_failure_returns_zero_and_logs_error(self, caplog):
+        import logging
+
+        from app.core.plugin import audit as audit_mod
+
+        _drain_to_dead_letter(audit_mod)
+        with (
+            patch.object(audit_mod, "_get_db", side_effect=RuntimeError("database is locked")),
+            caplog.at_level(logging.ERROR, logger="app.core.plugin.audit"),
+        ):
+            assert audit_mod.retry_dead_letters() == 0
+        assert get_sync_status()["dead_letter"] == 1  # 失败不得把行清掉
+        assert [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+# ── 审计队列的持久化落点（防回潮）─────────────────────────────────────
+
+
+class TestAuditQueuePersistenceConfigured:
+    """队列只落在运行用户的家目录里，而三套拓扑的卷挂在 /data 与 /app/uploads。
+
+    第七十七批之前：地址错 → 每条审计重试 5 次进 dead-letter；
+    第七十七批之后：能同步，但同步前的积压（以及任何 dead-letter 行）
+    在容器重建时随镜像层一起消失——_persist_to_sqlite 的"crash recovery"
+    注释在 shipped 拓扑里本就不成立。故按变量名钉住部署侧已显式配好落点。
+    """
+
+    def test_compose_files_set_the_audit_db_path(self):
+        from pathlib import Path
+
+        import yaml
+
+        root = Path(__file__).resolve().parents[2]
+        for rel in ("docker/docker-compose.yml", "deploy/docker-compose.prod.yml"):
+            doc = yaml.safe_load((root / rel).read_text(encoding="utf-8"))
+            env = doc["services"]["python-ai"]["environment"]
+            assert "HFUSIONHUB_AUDIT_DB_PATH" in env, f"{rel} 未配置审计队列落点"
+            assert env["HFUSIONHUB_AUDIT_DB_PATH"].startswith("/data/"), (
+                f"{rel} 的审计落点不在已挂载的 /data 下"
+            )
+
+    def test_helm_python_sets_a_per_pod_audit_db_path(self):
+        """helm 的 python 是 2 副本，家目录里的队列随 Pod 重建消失，必须显式配落点。
+
+        `$(POD_NAME)` 只有在 env 列表里先定义 POD_NAME 才会展开（K8s 只用此前已定义的
+        变量做替换）；按每 Pod 分目录是因为多副本共享同一个 SQLite 文件会互相踩锁。
+        """
+        text = self._helm_text("templates/python.yaml")
+        env = self._helm_env(text)
+        assert "HFUSIONHUB_AUDIT_DB_PATH" in env, "helm 未配置审计队列落点"
+        assert env["HFUSIONHUB_AUDIT_DB_PATH"] == "/app/audit-queue/$(POD_NAME)"
+        assert "fieldRef" in text and "metadata.name" in text, "POD_NAME 未从 downward API 取"
+        assert text.index("- name: POD_NAME") < text.index("- name: HFUSIONHUB_AUDIT_DB_PATH"), (
+            "POD_NAME 必须排在 HFUSIONHUB_AUDIT_DB_PATH 之前，否则 $() 不展开"
+        )
+        assert "/app/audit-queue" in text, "审计路径没有落在挂载点上"
+
+    def test_helm_provides_an_rwx_audit_pvc(self):
+        """审计卷必须是 RWX：RWO 卷在 replicas=2 时会让第二个 Pod 卡在 Pending。"""
+        text = self._helm_text("templates/python.yaml")
+        claims = [blk for blk in text.split("---")
+                  if "kind: PersistentVolumeClaim" in blk and "audit-pvc" in blk]
+        assert len(claims) == 1, "审计 PVC 应恰好一个"
+        assert "ReadWriteMany" in claims[0], "审计卷不是 RWX，2 副本会卡 Pending"
+        values = self._helm_text("values.yaml")
+        assert "auditQueueSize" in values, "审计卷容量未进 values.yaml"
+
+    @staticmethod
+    def _helm_text(rel: str) -> str:
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[2]
+        return (root / "deploy/helm/hfusionhub" / rel).read_text(encoding="utf-8")
+
+    @staticmethod
+    def _helm_env(text: str) -> dict[str, str]:
+        """从 python.yaml 里按顺序抽出 `- name: X / value: Y` 环境变量对。"""
+        import re
+
+        return {name: value.strip('"') for name, value in re.findall(
+            r"^ *- name: (\S+)\n +value: (\S+)$", text, re.MULTILINE)}
+
+    def test_the_module_still_honours_the_env_var(self, monkeypatch, tmp_path):
+        """落点由环境变量决定，家目录只是本地开发兜底。"""
+        from app.core.plugin import audit as audit_mod
+
+        monkeypatch.setenv("HFUSIONHUB_AUDIT_DB_PATH", str(tmp_path / "audit"))
+        audit_mod._reset_db(None)
+        try:
+            assert audit_mod._DB_PATH == str(tmp_path / "audit" / "plugin_audit.db")
+        finally:
+            audit_mod._reset_db(str(tmp_path))

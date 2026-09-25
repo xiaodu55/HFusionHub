@@ -11,6 +11,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第八十批（2026-10-06：dead-letter 回灌先定量——本机没有可回灌的历史行，真正的问题是审计队列在三套 shipped 拓扑里都不落在卷上）
+
+#### 定量结论（原任务的答案，先给数）
+- 开发机 `~/.hfusionhub/audit/plugin_audit.db`（20480 字节）实测 **`audit_queue` total = 0**，`GROUP BY synced, dead_letter` 与 `GROUP BY retry_count` 均为空集，表结构完整（`id, entry_json, synced, dead_letter, retry_count, created_at, last_attempt_at`）。**本机不存在第七十七批之前那批需要回灌的 dead-letter 行**
+- 这个文件也不是使用痕迹：`tests/conftest.py:122-128` 的 autouse 隔离 fixture 在 setup 时 `_reset_db(tmp_path)`、teardown 时 `_reset_db(None)` 把落点还原成家目录，之后任何一次 `_get_db()` 就会走 `_init_db()` 的 `os.makedirs` + `sqlite3.connect` 建出空库（行数为 0 与此一致）
+- 因此本批把"回灌"从"数据修复"改成"补上让回灌有意义的前提"：队列得先在三套 shipped 拓扑里都活得过容器/Pod 重建，且运维要能看见队列、能显式触发重放
+
+#### Fixed
+- **两处 shipped compose 的 `python-ai` 服务显式配置 `HFUSIONHUB_AUDIT_DB_PATH=/data/hfusionhub-audit`（`docker/docker-compose.yml:310`、`deploy/docker-compose.prod.yml:240`）**。`audit.py:48-52` 的默认落点是 `os.path.expanduser("~")/.hfusionhub/audit`，而这个键**此前在全仓没有任何部署配置写过**（只在 `audit.py:49,181` 被读，compose/prod/helm/`.env` 均按变量名核对、未取值）；`deploy/Dockerfile.python:22-26` 用 `useradd -r -d /app` + `USER hfusionhub` 运行，家目录只可能是 `/app`（passwd 里写的）或 `/root`（HOME 未显式设置的另一种走法），**两条都不在挂载点上**——卷只挂在 `/data` 与 `/app/uploads`（dev `docker-compose.yml:319-322`、prod `:263-268`）。后果：`_persist_to_sqlite:187-188` 的 "for crash recovery" 注释在 shipped 拓扑里本就不成立，容器一重建，未同步行与 dead-letter 行一起消失——第七十七批修好出站地址之后，这才是在积压场景下真正的丢数据路径
+- **helm 的 python Deployment 补上第三处落点**：新增 RWX PVC `{{ .Release.Name }}-audit-pvc`（`templates/python.yaml:117-128`，容量键 `pythonAi.auditQueueSize: 1Gi`，`values.yaml:75`），挂到 `/app/audit-queue`（:108-109、:114-116），并设 `HFUSIONHUB_AUDIT_DB_PATH=/app/audit-queue/$(POD_NAME)`（:72-77，`POD_NAME` 走 downward API）。该模板此前只有 `shared-uploads` 一个 PVC（挂 `/app/uploads`），helm 拓扑里**没有 `/data`**——把 compose 的写法照搬过去只会伪装成已持久化、实际仍随 Pod 重建丢失
+
+#### Added
+- **`python-ai/app/core/plugin/audit.py:536-557` 新增 `retry_dead_letters() -> int`**：`UPDATE audit_queue SET dead_letter = 0, retry_count = 0 WHERE dead_letter = 1`，返回回灌条数并记 warning。`retry_count` 一并清零，每行重新拿到 `_MAX_RETRIES = 5`（:58）的完整预算；已 `synced = 1` 的行不动；DB 异常按模块既有风格返回 0 + `logger.error`，**不把行清掉**
+- **`python-ai/app/api/plugin_admin.py:216-226` 两个运维端点**：`GET /api/plugin/audit/sync-status`（直读 `get_sync_status()`，:523-533）与 `POST /api/plugin/audit/dead-letters/retry`。此前 `get_sync_status()` **没有任何 router 暴露**，运维只能进容器查 sqlite
+- **`python-ai/tests/test_plugin_audit.py`：`TestRetryDeadLetters` 7 例（:453 起）+ `TestAuditQueuePersistenceConfigured` 4 例（:543 起）**——回灌计数与 `dead_letter` 归零、`retry_count` 归零、**回灌后下一次 flush 真的把它再次出站**（`_post_to_java_backend_batch` 被调 1 次且状态转 synced，这条才是"回灌有用"的反证）、二次调用幂等、无 dead-letter 时是 no-op、`synced` 行不受影响、`_get_db` 抛错时返回 0 且行仍在；落点侧含 compose 双文件的 YAML 解析断言（键存在且以 `/data/` 开头）、helm 的 2 例正向断言（`HFUSIONHUB_AUDIT_DB_PATH` 必须等于 `/app/audit-queue/$(POD_NAME)`，且 `- name: POD_NAME` 排在它之前——K8s 只用**此前已定义**的变量做 `$()` 替换；审计 PVC 必须 RWX，因为 `pythonAi.replicas: 2`，RWO 会让第二个 Pod 卡在 Pending）、以及 `_reset_db(None)` 确实按环境变量取址的对照例
+- **`python-ai/tests/test_api_contract.py`**：`PLUGIN_ADMIN_ROUTES` 增至 10 条（新 2 条自动纳入既有的"缺 token / 伪造 token 一律 401"参数表），另加 2 例端点契约（sync-status 原样回传三计数；retry 委托恰好一次并回 `{"retried": n}`）
+
+#### 决策记录
+- **helm 落点选"独立审计 PVC"而不是复用 uploads PVC**：队列确实只由 python 写，但 uploads 卷的口径是文档——Java 与 python 各挂一次（`DOCUMENT_STORAGE_ROOT=/app/uploads/documents`），往里加一个每 Pod 都在写的 SQLite 会让清理、备份、配额三类动作同时打在两种性质完全不同的负载上；审计队列体积上限可预测（未同步行 + dead-letter），单卷多花 1Gi 换部署面清晰划界
+- **每 Pod 一个子目录（`$(POD_NAME)`）而不是共写同一个文件**：共享卷上同时打开同一个 SQLite 会跨进程争写锁，而模块只有进程内 `_db_lock`（:150），WAL 模式在 NFS 类共享卷上本就不可靠；分目录后每个队列仍是单写者，与"worker 服务不配同值"是同一条理由
+- **审计路径不做成可关项**：队列是 `plugin_admin` 的固有依赖，没有"关掉持久化"这种配置，`pythonAi.enabled` 就是它的开关，故 env 与 volume 都写在模板主体里
+- **worker 服务不配同一个值**：`app/core/tasks/arq_tasks.py` 只 import `app.utils.config`，不触碰插件 registry，故 dev 的 `python-ai-worker`（`docker-compose.yml:343`）不产审计行；把两个容器指向 `python-data` 上同一个 `plugin_audit.db` 会引入跨进程 SQLite 写锁竞争（模块只有进程内 `_db_lock`），属于用不必要的耦合换一个当前不存在的需求
+- **回灌做成显式运维动作、不自动跑**：dead-letter 的语义本就是"停止自动重试并保留证据"（`_mark_dead_letter:212-223` + `_get_unsynced_entries:232` 的 `dead_letter = 0` 过滤），自动复活会让第七十七批修好之前那批坏批次无上限重放；把决定权交给看到 `sync-status` 数字的人
+- **新端点不加端点内校验**：与第六十四批口径一致，`plugin_admin` 的鉴权只在 `app/main.py:176` 的 router 注册处（`tenant_dependencies` = internal token + 可验证租户），新 2 条与既有 8 条同档，由参数表统一钉住
+
+#### 验证
+- 红色先行分两轮取证（生产代码与配置均未改时）：
+  - 第一轮 **13 例红**——`test_plugin_audit.py` 9 例（`TestRetryDeadLetters` 7 例 `AttributeError: retry_dead_letters`、compose 与 helm 各 1 例"未配置审计队列落点"）+ `test_api_contract.py` 4 例（新 2 条路由在鉴权参数表上是 404 而非 401、2 个新端点用例 404）。对照例 `test_the_module_still_honours_the_env_var` 本就该绿（模块一直读这个环境变量，缺的只是部署侧赋值），它绿在这一步恰好说明缺陷位置在配置而不在代码
+  - 第二轮（把 helm 那条反向断言翻成正向、模板尚未改时）**2 例红**：`AssertionError: helm 未配置审计队列落点`、`AssertionError: 审计 PVC 应恰好一个`（`assert 0 == 1`）
+- `tests/test_plugin_audit.py` 单跑 **42 passed**；与 `tests/test_api_contract.py` 同跑 **254 passed**
+- Python 全量 **1866 passed / 8 skipped**（160.65s；第七十九批基线 1851 + 本批 15 个新实例 = 13 个新 `def test_` + 2 个新鉴权参数，零回归）
+- `ruff check app tests`（0.16.3，`.venv` 内）**All checks passed**
+- `scripts/static-checks.py` **全部通过**，测试计数 **Python 1719 → 1732**（README badge + 三处正文、`README_EN.md` badge、`docs/ROADMAP.md:16` 已同步）· Java 713 · 前端 101
+- 两个 compose 文件仍 `yaml.safe_load` 通过（由新断言顺带验证）；Java 侧零改动；`audit.py` 既有函数签名与 flush/retry/dead-letter 语义不变，只增一个函数
+- **未核验**：本机无 helm 客户端，`helm lint` / `helm template` 未跑（chart README 的 Validate 段是人工流程），新模板改动只经过文本级断言与和 `plugin-runner.yaml` PVC 写法的逐项比对
+
+#### 遗留（不在本批范围）
+1. **rollout 会留下孤儿队列目录**：Deployment 重建 Pod 时 `POD_NAME` 变，新 Pod 不接手旧目录里未同步的行——数据仍完整保存在卷上（可事后处置，比原先随镜像层消失好得多），但"退出前把队列排空"应当另批实现（SIGTERM 前 flush），那样这条遗留才真正归零
+2. **新卷的写权限依赖存储类**：`_init_db` 要在 `/app/audit-queue` 下 `os.makedirs`，而 Pod 以非 root 的 `hfusionhub` 运行（`Dockerfile.python:23-26`）、chart 未设 `fsGroup`（全 chart 只有 plugin-runner 设 securityContext）——这与 `/app/uploads` 的既有假设同档，未在实集群验证
+3. **同族第二处不持久路径**：`app/utils/config.py:147-149` 的 `RAG_EVALUATION_DB_PATH` 默认 `./data/rag_evaluation_runs.db`，容器 WORKDIR 是 `/app`（`Dockerfile.python:5`）→ 解析到 `/app/data`，同样不在卷上，且该键也没被任何部署配置赋值（已 grep 核实 compose/prod/helm）；评测运行历史随重建丢失，比审计队列轻，另批处理
+4. **helm 渲染期的另一处悬空引用**（本批只记录未改）：`templates/python.yaml:51` 取 `.Values.python.taskQueueMode`，而 `values.yaml` 里该键挂在 `pythonAi` 下、全 chart 无 `python:` 顶级键——缺 helm 客户端，未能证实它是渲染报错还是回落到 `default "inline"`
+5. 仓内其余 10 处 Java `R.fail(403,…)` 是否统一改判真实 HTTP 403
+6. `docs/ROADMAP.md:16` 的 Java 703 口径
+
 ### 第七十九批（2026-10-06：旗标快照被 Java 拒绝时不再清空在用缓存——一次过期令牌不该让全平台开关静默回 default）
 
 #### Fixed

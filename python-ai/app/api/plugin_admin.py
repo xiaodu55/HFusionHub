@@ -16,10 +16,12 @@ from pydantic import BaseModel
 
 from app.core.plugin.audit import (
     get_audit_log,
+    get_sync_status,
     record_disable,
     record_enable,
     record_install,
     record_uninstall,
+    retry_dead_letters,
 )
 from app.core.plugin.loader import PluginLoadError
 from app.core.plugin.registry import (
@@ -209,3 +211,15 @@ async def audit_logs(
         "entries": [e.to_dict() for e in entries],
         "total": len(entries),
     }
+
+
+@router.get("/audit/sync-status")
+async def audit_sync_status() -> dict[str, Any]:
+    """本地审计队列的同步状态（total / unsynced / dead_letter）。"""
+    return get_sync_status()
+
+
+@router.post("/audit/dead-letters/retry")
+async def audit_retry_dead_letters() -> dict[str, int]:
+    """把 dead-letter 行重新放回重试队列（地址修好后历史行不会自我恢复）。"""
+    return {"retried": retry_dead_letters()}

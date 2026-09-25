@@ -14,7 +14,7 @@ directory; the split is organizational only):
 | `mysql.yaml`        | MySQL Service + Deployment + PVC           | `mysql.enabled`        |
 | `redis.yaml`        | Redis Service + Deployment                 | `redis.enabled`        |
 | `java.yaml`         | Java backend Service + Deployment          | `javaBackend.enabled`  |
-| `python.yaml`       | Python AI Service + Deployment             | `pythonAi.enabled`     |
+| `python.yaml`       | Python AI Service + Deployment + audit-queue PVC | `pythonAi.enabled` |
 | `plugin-runner.yaml`| Isolated plugin runner Service + Deploy + PVC | `pluginRunner.enabled`|
 | `uploads-pvc.yaml`  | Shared Java/Python uploads RWX PVC         | always                 |
 | `etcd.yaml`         | etcd StatefulSet (Milvus dependency)       | `etcd.enabled`         |

@@ -67,6 +67,14 @@ spec:
               value: {{ .Values.vectorStore.collection | quote }}
             - name: DOCUMENT_STORAGE_ROOT
               value: /app/uploads/documents
+            # 审计队列（SQLite）落在 PVC 上：家目录在镜像层里，Pod 重建即丢积压。
+            # 每 Pod 一个子目录，避免多副本共写同一个 SQLite 文件（共享卷上 WAL 不可用）。
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HFUSIONHUB_AUDIT_DB_PATH
+              value: "/app/audit-queue/$(POD_NAME)"
             {{- if .Values.pluginRunner.enabled }}
             - name: PLUGIN_RUNNER_URL
               value: "http://{{ .Release.Name }}-plugin-runner:{{ .Values.pluginRunner.port }}"
@@ -97,8 +105,25 @@ spec:
           volumeMounts:
             - name: shared-uploads
               mountPath: /app/uploads
+            - name: audit-queue
+              mountPath: /app/audit-queue
       volumes:
         - name: shared-uploads
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-uploads-pvc
+        - name: audit-queue
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-audit-pvc
+---
+# 插件审计队列（SQLite）卷。RWX：python 有 2 副本，各写自己的 POD_NAME 子目录。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-audit-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: {{ .Values.pythonAi.auditQueueSize }}
 {{- end }}

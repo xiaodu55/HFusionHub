@@ -235,6 +235,9 @@ services:
       SERVER_ENV: production
       CHUNKS_STORE_PATH: /data/chunks_store.json
       UPLOAD_DIR: /data/uploads
+      # 插件审计队列（SQLite）落点：不配则落在镜像层里的用户家目录，容器重建即丢
+      # 未同步/dead-letter 行；python-data 卷只挂在 /data（与 chunks_store 同一惯例）
+      HFUSIONHUB_AUDIT_DB_PATH: /data/hfusionhub-audit
       DOCUMENT_STORAGE_ROOT: /app/uploads/documents
       RAG_HYBRID_ENABLED: "true"
       RAG_GRAPH_ENABLED: ${RAG_GRAPH_ENABLED:-false}

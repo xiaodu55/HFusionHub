@@ -434,6 +434,8 @@ PLUGIN_ADMIN_ROUTES = [
     ("post", "/api/plugin/uninstall"),
     ("post", "/api/plugin/verify"),
     ("get", "/api/plugin/audit-logs"),
+    ("get", "/api/plugin/audit/sync-status"),
+    ("post", "/api/plugin/audit/dead-letters/retry"),
 ]
 
 
@@ -499,6 +501,30 @@ def test_plugin_admin_requires_verifiable_tenant(plugin_api):
     assert bare.get("/api/plugin/list", headers=valid).status_code == 400
     assert bare.get(
         "/api/plugin/list", headers={**valid, "X-Tenant-Id": "acme"}).status_code == 400
+
+
+def test_audit_sync_status_endpoint_exposes_the_queue(client, monkeypatch, plugin_api):
+    """运维面此前只能进容器查 sqlite：get_sync_status 无任何 router 暴露。"""
+    monkeypatch.setattr(
+        plugin_api, "get_sync_status",
+        lambda: {"total": 3, "unsynced": 2, "dead_letter": 1})
+    resp = client.get("/api/plugin/audit/sync-status")
+    assert resp.status_code == 200
+    assert resp.json() == {"total": 3, "unsynced": 2, "dead_letter": 1}
+
+
+def test_dead_letter_retry_endpoint_delegates_once(client, monkeypatch, plugin_api):
+    calls = []
+
+    def fake_retry():
+        calls.append(1)
+        return 7
+
+    monkeypatch.setattr(plugin_api, "retry_dead_letters", fake_retry)
+    resp = client.post("/api/plugin/audit/dead-letters/retry")
+    assert resp.status_code == 200
+    assert resp.json() == {"retried": 7}
+    assert len(calls) == 1
 
 
 def test_plugin_list_reports_per_plugin_tool_count(client, monkeypatch, plugin_api):
