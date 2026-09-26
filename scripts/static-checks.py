@@ -27,11 +27,28 @@
   漂移超出 scripts/h2_schema_drift_baseline.json 基线（即新增漂移）时
   报错，防止手维护的 H2 schema 与真实迁移继续漂移。
 
+检查 6：当前态文档的声称-实现对账
+  README 等当前态文档不得声称已移除/未实现的能力（如"图谱召回"）。
+
+检查 7：Helm 模板引用的 .Values 根必须存在
+  模板里的 `.Values.<root>` 必须在 values.yaml 顶层有定义。Go 模板对不存在的根取
+  字段是执行期报错，`| default` 救不回来，整张 chart 渲染失败。
+
+检查 8：容器运行身份三处同源
+  deploy/Dockerfile.python 与 deploy/Dockerfile.java 用 -u/-g 钉死的 uid/gid，
+  必须与 helm values.yaml 的 podSecurity.runAsUser/runAsGroup/fsGroup 是同一组号。
+  卷能不能写取决于进程身份与卷属主是否对齐；未钉的 `-r`/`-S` 用户号由基镜像决定，
+  重建即漂移，而 fsGroup 是另一处手写的数字，无人核对就会各说各话。
+
 用法:
   python scripts/static-checks.py --tenant-columns
   python scripts/static-checks.py --internal-token-keys
   python scripts/static-checks.py --test-counts
   python scripts/static-checks.py --flyway-doc-sync
+  python scripts/static-checks.py --h2-schema-drift
+  python scripts/static-checks.py --readme-claims
+  python scripts/static-checks.py --helm-value-roots
+  python scripts/static-checks.py --container-uid
   python scripts/static-checks.py            # 全部检查
 退出码: 0=通过, 1=发现违规
 """
@@ -406,6 +423,100 @@ def check_helm_value_roots() -> None:
         print(f"[ok] Helm values 根一致性：{checked} 个模板引用的根全部在 values.yaml 定义")
 
 
+# ── 检查 8：容器运行身份三处同源 ────────────────────────────────────────
+
+DOCKERFILE_PYTHON = REPO / "deploy" / "Dockerfile.python"
+DOCKERFILE_JAVA = REPO / "deploy" / "Dockerfile.java"
+HELM_VALUES = HELM_CHART / "values.yaml"
+
+
+def _pinned_ids(text: str) -> tuple[list[str], list[str]]:
+    """返回镜像声明的 (uid 候选, gid 候选)；没写 -u/-g 就是空列表。
+
+    注释行要跳过：说明性文字里出现 `useradd -r` 不算一次声明。
+    """
+    joined = "\n".join(
+        ln for ln in text.splitlines() if not ln.lstrip().startswith("#")
+    )
+    uid = re.findall(r"\b(?:useradd|adduser)\b[^\n&]*? -u\s+(\d+)", joined)
+    gid = re.findall(r"\b(?:groupadd|addgroup)\b[^\n&]*? -g\s+(\d+)", joined)
+    return uid, gid
+
+
+def _pod_security_from_values(text: str) -> dict[str, int]:
+    """取 values.yaml 里 podSecurity 段的三个号。"""
+    block = re.search(r"^podSecurity:\n((?:[ \t]+\S.*\n)+)", text, re.MULTILINE)
+    if block is None:
+        return {}
+    return {
+        key: int(value)
+        for key, value in re.findall(
+            r"^\s+(runAsUser|runAsGroup|fsGroup):\s*(\d+)\s*$", block.group(1), re.MULTILINE
+        )
+    }
+
+
+def check_container_uid_consistency() -> None:
+    """java/python 镜像钉的 uid/gid 与 helm podSecurity 声明的必须是同一组号。
+
+    卷可写与否取决于"进程身份"与"卷属主"是否对齐。`useradd -r` / `adduser -S` 把身份
+    交给基镜像当时占了哪些号（系统池 100–999，重建即漂移），而 helm 的 fsGroup 是另一个
+    手写的数字——两处各写一遍、无人核对，正是第八十三批"模板读了一个不存在的键"的兄弟形态。
+    纯文本核对，CI 不需要 docker 或 helm。
+    """
+    images = (
+        ("deploy/Dockerfile.python", DOCKERFILE_PYTHON),
+        ("deploy/Dockerfile.java", DOCKERFILE_JAVA),
+    )
+    bad: list[str] = []
+    for label, path in images:
+        if not path.is_file():
+            bad.append(f"{label} 缺失")
+            continue
+        uid, gid = _pinned_ids(path.read_text(encoding="utf-8"))
+        if len(uid) != 1:
+            bad.append(
+                f"{label} 未用 -u 钉死 uid（找到 {len(uid)} 处；`-r`/`-S` 的号由基镜像决定）"
+            )
+        if len(gid) != 1:
+            bad.append(f"{label} 未用 -g 钉死 gid（找到 {len(gid)} 处）")
+        if len(uid) == 1 and len(gid) == 1 and uid[0] != gid[0]:
+            bad.append(f"{label} uid={uid[0]} 与 gid={gid[0]} 不同号，三处书写无法对齐")
+
+    if not HELM_VALUES.is_file():
+        bad.append(f"values.yaml 缺失：{HELM_VALUES}")
+    else:
+        values = _pod_security_from_values(HELM_VALUES.read_text(encoding="utf-8"))
+        for key in ("runAsUser", "runAsGroup", "fsGroup"):
+            if key not in values:
+                bad.append(f"values.yaml 的 podSecurity 缺 {key}（helm 侧未声明运行身份）")
+        if values:
+            for label, path in images:
+                if not path.is_file():
+                    continue
+                uid, gid = _pinned_ids(path.read_text(encoding="utf-8"))
+                if len(uid) != 1 or len(gid) != 1:
+                    continue
+                if int(uid[0]) != values.get("runAsUser") or int(gid[0]) != values.get("runAsGroup"):
+                    bad.append(
+                        f"{label} 钉的是 uid={uid[0]}/gid={gid[0]}，与 helm podSecurity"
+                        f"（runAsUser={values.get('runAsUser')}, "
+                        f"runAsGroup={values.get('runAsGroup')}, "
+                        f"fsGroup={values.get('fsGroup')}）不一致"
+                    )
+            if len(set(values.values())) > 1:
+                bad.append(
+                    f"values.yaml podSecurity 三个号不相同：{values}"
+                    "（runAsGroup 与 fsGroup 同号，java/python 才能在共用卷上互写）"
+                )
+
+    if bad:
+        problems.append("容器运行身份不一致:\n    " + "\n    ".join(bad))
+    else:
+        uid, _ = _pinned_ids(DOCKERFILE_PYTHON.read_text(encoding="utf-8"))
+        print(f"[ok] 容器运行身份同源：java/python 镜像与 helm podSecurity 均钉 uid={uid[0]}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
@@ -415,14 +526,15 @@ def main() -> int:
     parser.add_argument("--h2-schema-drift", action="store_true")
     parser.add_argument("--readme-claims", action="store_true")
     parser.add_argument("--helm-value-roots", action="store_true")
+    parser.add_argument("--container-uid", action="store_true")
     args = parser.parse_args()
 
     if not (args.tenant_columns or args.internal_token_keys or args.test_counts
             or args.flyway_doc_sync or args.h2_schema_drift
-            or args.readme_claims or args.helm_value_roots):
+            or args.readme_claims or args.helm_value_roots or args.container_uid):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
             args.flyway_doc_sync = args.h2_schema_drift = \
-            args.readme_claims = args.helm_value_roots = True
+            args.readme_claims = args.helm_value_roots = args.container_uid = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -438,6 +550,8 @@ def main() -> int:
         check_readme_claims()
     if args.helm_value_roots:
         check_helm_value_roots()
+    if args.container_uid:
+        check_container_uid_consistency()
 
     if problems:
         print("\n发现问题:")

@@ -26,6 +26,11 @@ spec:
       labels:
         app: {{ .Release.Name }}-java
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.podSecurity.runAsUser }}
+        runAsGroup: {{ .Values.podSecurity.runAsGroup }}
+        fsGroup: {{ .Values.podSecurity.fsGroup }}
       containers:
         - name: java-backend
           image: {{ .Values.javaBackend.image }}

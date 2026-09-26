@@ -30,6 +30,11 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
+        # 与 runAsGroup 同号：artifacts 卷是空的 PVC 时属主由 provisioner 决定，而容器
+        # 是 readOnlyRootFilesystem，/opt/plugin-artifacts 是唯一可写落点。
+        # 这个 1000 未进 --container-uid 门禁：镜像里 `useradd` 没钉 -u（遗留，见
+        # docs/PRODUCTION_OPS.md「卷属主与运行身份」）。
+        fsGroup: 1000
       containers:
         - name: plugin-runner
           image: {{ .Values.pluginRunner.image }}

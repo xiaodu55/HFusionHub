@@ -26,6 +26,7 @@
 - [ ] **Flyway 迁移验证** — 确保 V1–V78 全部成功应用；检查 `flyway_schema_history` 表状态
 - [ ] **备份策略** — 脚本已就绪：`scripts/backup-data.ps1`（MySQL mysqldump）+ `scripts/backup_milvus.sh`（Milvus 卷快照）；cron 示例 `0 3 * * * cd /opt/hfusionhub && ./scripts/backup_milvus.sh /backups/milvus`；恢复演练见下文「备份恢复演练」
 - [ ] **Redis 持久化** — AOF 已启用（`appendonly yes`）；RDB 每小时备份（`save 3600 1`）
+- [ ] **卷可写性** — 应用容器以钉死的 uid 10001 运行、helm 侧同号 fsGroup（见「10. 卷属主与运行身份」）；升级到钉死 uid 前建过的卷需一次性 chown
 
 ### 🚀 性能与扩展性
 
@@ -468,3 +469,82 @@ probe. It removes its temporary HTTP server and image unless `-KeepImage` is
 specified. Approval-token and quota reserve/settle remain tenant-bound
 application contracts and are verified by the Java/Python test suites rather
 than synthetic requests without a tenant, plugin record, and agent run.
+
+## 10. 卷属主与运行身份
+
+容器写不写得进卷，取决于两件事是否对齐：**进程身份**（uid/gid）与**卷属主**。第八十四批
+之前两侧都没约定过：应用镜像用 `useradd -r` / `adduser -S` 建用户（号由基镜像当时占了
+哪些号决定，系统池 100–999，重建即漂移），helm 里除 plugin-runner 外没有任何
+securityContext，也没有 fsGroup。现在三处钉成同一个号，由门禁核对：
+
+| 位置 | 键 | 号 |
+| --- | --- | --- |
+| `deploy/Dockerfile.python` | `groupadd -g` / `useradd -u` | 10001 |
+| `deploy/Dockerfile.java` | `addgroup -g` / `adduser -u` | 10001 |
+| `deploy/helm/hfusionhub/values.yaml` | `podSecurity.runAsUser` / `runAsGroup` / `fsGroup` | 10001 |
+
+- 门禁：`python scripts/static-checks.py --container-uid`（已并入默认全跑档）；红→绿的
+  两种漂移形态（某处换了号、fsGroup 与 runAsGroup 不同号）由
+  `python-ai/tests/test_container_identity.py` 钉住。
+- `fsGroup` 是关键项：空 PVC/空命名卷的属主由 provisioner 决定，镜像里的 `chown` 会被
+  挂载后的卷内容取代；有了与 runAsGroup 同号的 fsGroup，kubelet 会把卷交给这个组，
+  java 与 python（2 副本）才能在同一块 RWX uploads 卷上互写。
+- 镜像同时创建自己要挂载的目录（`/app/uploads`、java 侧同路径），这样 compose 的命名卷
+  首次初始化时就继承正确属主。
+- plugin-runner 用独立的 1000：镜像里 `useradd` 未钉 `-u`，所以号写在 chart 里（遗留项）。
+
+### 10.1 升级到钉死 uid 的一次性修复
+
+改动之前建下的卷，其内容属主仍是旧的系统号，新容器以 10001 启动后写旧文件会 `EACCES`。
+选一种执行（都需要一个停机窗口）：
+
+```bash
+# compose：命名卷逐个 chown（卷名前缀是 compose 项目名，用 docker volume ls 确认）
+docker run --rm -v <project>_uploads-data:/v alpine:3.20 chown -R 10001:10001 /v
+docker run --rm -v <project>_python-data:/v  alpine:3.20 chown -R 10001:10001 /v
+```
+
+```yaml
+# helm：给每块 PVC 各跑一次这个 Job（claimName 换成 <rel>-uploads-pvc / <rel>-audit-pvc）
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fix-volume-ownership
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: chown
+          image: alpine:3.20
+          command: ["sh", "-c", "chown -R 10001:10001 /v"]
+          volumeMounts:
+            - {name: vol, mountPath: /v}
+      volumes:
+        - name: vol
+          persistentVolumeClaim:
+            claimName: hf-uploads-pvc
+```
+
+### 10.2 实测（有 docker / 有集群时补一次）
+
+本批的核验只到渲染层（`helm template` 22 个对象、java 与 python 的 podSecurityContext
+三项齐备、0 个 `<no value>`）；两个应用镜像本身也未构建（写这一节时本机没有可用的
+docker 引擎），所以"钉号 + 建目录"这套命令第一次真实构建即是它的验收。"真的能写"
+要在真实环境各跑一次：
+
+```bash
+kubectl -n <ns> exec deploy/<rel>-python -- sh -c 'touch /app/uploads/.writable /app/audit-queue/.writable && echo ok'
+kubectl -n <ns> exec deploy/<rel>-java   -- sh -c 'mkdir -p /app/uploads/documents && echo ok'
+# compose 侧等价物
+docker compose exec python-ai sh -c 'touch /data/uploads/.writable && echo ok'
+```
+
+### 10.3 已知未收口
+
+- **compose 与 helm 的上传目录语义不等价**：compose 上 python 的 `UPLOAD_DIR=/data/uploads`
+  落在 `python-data`，java 写 `uploads-data:/app/uploads`，两个服务的上传分处两卷；
+  prod compose 还给 python 挂了 `uploads-data:/app/uploads` 但它从不写这个路径。helm 则
+  让两者共用一块 uploads-pvc。是否统一要先回答"java 与 python 是否需要互见对方写的文件"。
+- plugin-runner 镜像 uid 未钉 `-u`，1000 只写在 chart 里。
+- mysql/etcd/milvus/redis 仍无 pod securityContext（上游镜像以 root 起、入口脚本自 chown）。

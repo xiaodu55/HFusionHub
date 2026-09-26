@@ -26,6 +26,11 @@ spec:
       labels:
         app: {{ .Release.Name }}-python
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.podSecurity.runAsUser }}
+        runAsGroup: {{ .Values.podSecurity.runAsGroup }}
+        fsGroup: {{ .Values.podSecurity.fsGroup }}
       containers:
         - name: python-ai
           image: {{ .Values.pythonAi.image }}

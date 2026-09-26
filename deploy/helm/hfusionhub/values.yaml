@@ -8,6 +8,22 @@ global:
 sharedStorage:
   uploadsSize: 10Gi
 
+# --- 应用容器的运行身份（java / python 共用）---
+# 三个号必须与 deploy/Dockerfile.java、deploy/Dockerfile.python 里钉的 uid/gid
+# 完全一致，门禁：scripts/static-checks.py --container-uid。
+# fsGroup 是本批的关键：uploads 卷是 python(2 副本) 与 java 共用的 RWX 卷，没有
+# fsGroup 时 kubelet 不会把卷 chown 给任何一个组，卷属主由 storage class 决定，
+# 非 root 进程写 /app/uploads、/app/audit-queue 就是碰运气；同号的 runAsGroup +
+# fsGroup 让两个工作负载在同一块卷上互可读写（新建文件继承组）。
+# 号选 10001：Debian/Alpine 的系统 uid 池都是 100–999，池外的号不会与基镜像里
+# 已有的账号抢号。
+# 已有部署注意：升级镜像后卷里旧文件的属主仍是旧 uid，需要一次性 chown -R 10001:10001
+# 或删除卷重建（数据会丢），见 docs/PRODUCTION_OPS.md「卷属主与运行身份」。
+podSecurity:
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+
 # --- MySQL ---
 mysql:
   enabled: true

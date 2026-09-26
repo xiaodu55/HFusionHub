@@ -11,6 +11,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第八十四批（2026-10-06：卷能不能写，取决于两个此前从未在任何地方对齐过的数字）
+
+#### 结论（先给判定性质）
+- 第八十三批把"无 fsGroup、uid 未钉"从未知变成已确认缺失，本批把它修成**三处同源的一个常量**：镜像里的 uid/gid ＋ helm 的 `runAsUser/runAsGroup/fsGroup` 必须同号，由新门禁核对
+- 排查中确认这**不是 helm 独有的缺口**：`Dockerfile.java` 从未创建 `/app/uploads`，而 java 写的全部是 `user.dir`(=/app) 下的相对路径（`DocumentServiceImpl.java:64` uploads/documents、`ChatImageStorage.java:40` uploads/chat-images、`UserServiceImpl.java:72` uploads/avatars）。空命名卷/空 PVC 的属主只在镜像该路径**有内容**时才继承镜像属主，路径不存在则由 root 建 ⇒ compose 上 java 的第一次 mkdir 就是 AccessDenied，helm 上则是碰运气交给 provisioner
+- 身份本身也是漂的：`Dockerfile.python` 用 `useradd -r`（Debian 系统池 100–999）、`Dockerfile.java` 用 `adduser -S`（Alpine 同类），号由基镜像当时占了哪些号决定，重建即可能换号；而 helm 若要写 fsGroup 就必须知道这个号——两处各写一遍、无人核对，正是第八十三批"模板读了一个不存在的键"的兄弟形态
+
+#### 改动
+- `deploy/Dockerfile.python`：`groupadd -r -g 10001` ＋ `useradd -r -u 10001 -g 10001`，并把两个 helm 挂载点 `/app/uploads`、`/app/audit-queue` 一并 `mkdir` 后交给 `chown -R /app`
+- `deploy/Dockerfile.java`：`addgroup -S -g 10001` ＋ `adduser -S -u 10001 -G hfusionhub`，新增 `mkdir -p /app/uploads` ＋ chown（切换非 root 用户之前）
+- `values.yaml:22-25` 新增顶层 `podSecurity`（runAsUser/runAsGroup/fsGroup 全 10001，理由与旧卷升级提示写在注释里按变量名可检索）；`templates/python.yaml`、`templates/java.yaml` 的 pod 层加 `securityContext: runAsNonRoot + 三个 values 引用`，沿用第八十三批口径**不带 `| default`**
+- `templates/plugin-runner.yaml`：在已有的 pod securityContext 上补 `fsGroup: 1000`（与它的 runAsGroup 同号）。它是本类缺口的最近邻——`readOnlyRootFilesystem: true` 使 `/opt/plugin-artifacts` 成为唯一可写落点，而空 PVC 挂上来后镜像里的 chown 已被卷内容取代
+- `scripts/static-checks.py:426-517` 新增检查 8 `check_container_uid_consistency()`（＋ `--container-uid`，并入默认全跑档）：两个 Dockerfile 钉的号与 helm `podSecurity` 三个号必须一致且同号；`-r`/`-S` 没配 `-u`/`-g` 直接判"未钉身份"；注释行跳过，避免说明文字被当成声明
+- `docs/PRODUCTION_OPS.md` 新增「10. 卷属主与运行身份」：三处号码表、fsGroup 为什么是关键项、**旧卷的一次性 chown**（compose 命名卷一行命令 ＋ helm 一次性 Job 清单）、有集群/docker 时的实测命令、以及三条未收口
+
+#### 验证
+- 红→绿：`tests/test_container_identity.py` 新增 **13 例**先全红（`values.yaml 没有 podSecurity 段`、`Dockerfile.java 的用户必须用 -u 钉死 uid，实际找到 0 处`、`镜像没有创建挂载点 /app/uploads`、`templates/python.yaml 的 pod 层没有 securityContext`），实现后 13 passed
+- 门禁真能抓漂移（对真实文件临时注入，跑完用改前原文写回还原，不用 `git checkout`）：把 `runAsUser` 改 10002 → rc=1，两个 Dockerfile 各报一条不一致；把 `fsGroup` 改 20001 → rc=1 报"三个号不相同"
+- 接线不再可能哑火：`test_container_uid_gate_is_in_the_default_all_mode` 要求 `args.container_uid` 在 parse 之后、首个 dispatch 之前出现 ≥2 次（条件里一次、默认赋值链一次）。用第八十三批那次的破坏方式验证过这条测试本身是有效的——只删条件里那一处，它红
+- helm：`lint` → `0 chart(s) failed`；`template`（`secrets.*` 与 `pluginRunner.*` 用 RENDER-CHECK 占位）退出 0、22 个对象、701 行（恰好 +10 行 = 两个模板各 5 行）、0 个 `<no value>`。逐工作负载读渲染结果：`hf-java`/`hf-python` = runAsUser/runAsGroup/fsGroup 10001 ＋ runAsNonRoot，`hf-plugin-runner` = 1000/1000/1000，frontend/mysql/redis/etcd/milvus 仍为空（见遗留）
+- 回归：全量 pytest **1893 passed / 8 skipped**（含本批 13 例）；`ruff` 干净；`scripts/static-checks.py` 全跑档通过；Python 计数 1746→**1759**，已同步 README 徽章＋3 处正文、README_EN 徽章、docs/ROADMAP.md:16
+
+#### 遗留
+1. **"真的能写"仍未实测**：本机 Docker daemon 未运行、无集群，本批核验只到渲染层与文本门禁层。实测命令已写进 `docs/PRODUCTION_OPS.md` 10.2。两个镜像也**没有实际构建过**——`useradd -u/-g` 与 busybox `adduser -S -u/-G`、`addgroup -S -g` 的参数形态按各自手册写，首次真实构建即是它的验收
+2. 升级前建下的卷，其内容属主仍是旧系统号 ⇒ 必须一次性 chown（10.1 给了 compose 与 helm 两份操作），否则老部署在换镜像后写旧文件 EACCES
+3. compose 与 helm 的上传目录语义不等价：compose 上 python 的 `UPLOAD_DIR=/data/uploads`（进 `python-data`）与 java 的 `uploads-data:/app/uploads` 是两个卷，prod compose 还给 python 挂了它从不写的 `uploads-data:/app/uploads`；helm 则两者共用一块 uploads-pvc。是否统一取决于"java 与 python 是否需要互见对方写的文件"，本批按约定只登记不修
+4. plugin-runner 镜像的 uid 仍靠 `useradd` 默认分配（chart 硬编码 1000），未进 `--container-uid` 门禁
+5. frontend/mysql/redis/etcd/milvus 无 pod securityContext（上游镜像以 root 起、入口脚本自 chown）
+6. 承第八十三批：rollout 后旧 Pod 目录的审计残留、helm 评测历史不持久、`CHECKPOINT_DB_PATH` 落卷拓扑、Java 侧 10 处 `R.fail(403,...)`、ROADMAP Java 计数 703 vs 713、helm 结论未用 v4 复渲
+
+
 ### 第八十三批（2026-10-06：helm lint 把"记了但没验"判成了硬失败——这张 chart 从来渲染不出来）
 
 #### 结论（先给判定性质）
