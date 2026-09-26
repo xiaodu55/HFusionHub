@@ -209,3 +209,45 @@ class TestSingleton:
         first = cp_mod.get_checkpoint_manager()
         second = cp_mod.get_checkpoint_manager()
         assert first is second
+
+
+class TestCheckpointPathIsConfigurable:
+    """docs/ENVIRONMENT.md 把 CHECKPOINT_DB_PATH 列为可配变量，但代码里这个键不存在。
+
+    `CheckpointManager.__init__` 用 `getattr(config, "CHECKPOINT_DB_PATH", None)` 取它，
+    而 app/utils/config.py 从未定义该属性 → 恒为 None → 运维设了也不生效，永远落
+    `_CHECKPOINT_DB_DEFAULT`。这是"配置面声称 ≠ 代码事实"，比落点不在卷上更严重。
+    """
+
+    def test_config_defines_the_key_with_the_documented_default(self):
+        import pathlib
+
+        from app.utils.config import config
+
+        assert getattr(config, "CHECKPOINT_DB_PATH", None) == cp_mod._CHECKPOINT_DB_DEFAULT, (
+            "config 必须定义 CHECKPOINT_DB_PATH，且默认值与 checkpoint 模块兜底同源"
+        )
+
+        doc = (
+            pathlib.Path(__file__).resolve().parents[2] / "docs/ENVIRONMENT.md"
+        ).read_text(encoding="utf-8")
+        row = next((line for line in doc.splitlines()
+                    if line.startswith("| `CHECKPOINT_DB_PATH`")), None)
+        assert row is not None, "文档行缺失：本测试的口径来源是 ENVIRONMENT.md"
+        assert f"`{cp_mod._CHECKPOINT_DB_DEFAULT}`" in row, (
+            f"文档默认值与代码兜底不一致：{row}"
+        )
+
+    def test_manager_lands_on_the_configured_path(self, tmp_path, monkeypatch):
+        from app.utils.config import config
+
+        target = tmp_path / "cfg" / "checkpoints.db"
+        monkeypatch.setattr(config, "CHECKPOINT_DB_PATH", str(target))
+        assert CheckpointManager()._path == target
+
+    def test_explicit_argument_still_wins(self, tmp_path, monkeypatch):
+        from app.utils.config import config
+
+        monkeypatch.setattr(config, "CHECKPOINT_DB_PATH", str(tmp_path / "from_config.db"))
+        explicit = tmp_path / "explicit.db"
+        assert CheckpointManager(database_path=str(explicit))._path == explicit

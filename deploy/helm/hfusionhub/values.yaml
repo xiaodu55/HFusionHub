@@ -69,6 +69,11 @@ pythonAi:
   # uploads on a shared RWX volume. The one exception is the plugin audit
   # queue (SQLite), which is per-pod state and therefore gets its own RWX
   # volume with one sub-directory per pod — see templates/python.yaml.
+  # Deliberately NOT set here: RAG_EVALUATION_DB_PATH. The evaluation history
+  # is a read surface ("recent runs" panel), so a per-pod directory would show
+  # only the answering replica's runs, while 2 replicas sharing one SQLite file
+  # is exactly the lock-stomping the audit rule above forbids. Compose sets it
+  # (single writer); fixing it here needs a shared store, not a volume path.
   replicas: 2
   minReplicas: 2
   maxReplicas: 8

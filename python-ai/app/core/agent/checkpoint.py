@@ -108,7 +108,7 @@ class CheckpointManager:
     """
 
     def __init__(self, database_path: str | None = None):
-        self._path = Path(database_path or getattr(config, "CHECKPOINT_DB_PATH", None) or _CHECKPOINT_DB_DEFAULT)
+        self._path = Path(database_path or config.CHECKPOINT_DB_PATH or _CHECKPOINT_DB_DEFAULT)
         self._lock = threading.Lock()
         if str(self._path) != ":memory:":
             self._path.parent.mkdir(parents=True, exist_ok=True)

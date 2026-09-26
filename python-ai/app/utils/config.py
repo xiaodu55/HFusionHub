@@ -144,9 +144,17 @@ class Config:
     # Evaluation summaries survive AI-service restarts.  The store never
     # persists benchmark queries or chunk content, only aggregate metrics and
     # case identifiers for failed examples.
+    # Durability is deployment-dependent: both compose files point it at /data
+    # (single writer), while the helm chart deliberately leaves it unset —
+    # 2 replicas must not share one SQLite file, see values.yaml.
     RAG_EVALUATION_DB_PATH = os.getenv(
         "RAG_EVALUATION_DB_PATH", "./data/rag_evaluation_runs.db"
     )
+
+    # Agent 执行态检查点库。必须在这里定义：docs/ENVIRONMENT.md 已把这个变量列为可配项，
+    # 而 checkpoint.py 只认 config 上的属性——缺定义会让它成为一个设了也没用的死键。
+    # 默认值与 app/core/agent/checkpoint.py 的 _CHECKPOINT_DB_DEFAULT 同源（有测试钉住）。
+    CHECKPOINT_DB_PATH = os.getenv("CHECKPOINT_DB_PATH", "data/checkpoints.db")
 
     # Second-stage reranking is opt-in. ``lexical`` is a deterministic local
     # baseline; ``cross_encoder`` needs sentence-transformers and an explicitly

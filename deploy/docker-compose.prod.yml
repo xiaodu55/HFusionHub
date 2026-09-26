@@ -238,6 +238,9 @@ services:
       # 插件审计队列（SQLite）落点：不配则落在镜像层里的用户家目录，容器重建即丢
       # 未同步/dead-letter 行；python-data 卷只挂在 /data（与 chunks_store 同一惯例）
       HFUSIONHUB_AUDIT_DB_PATH: /data/hfusionhub-audit
+      # 评测历史同理：默认 ./data/... 解析到镜像层里的 /app/data，重建即清；本服务只有一个
+      # 写该库的 HTTP 进程，故与审计/chunks_store 一样落 /data（python-data 卷）
+      RAG_EVALUATION_DB_PATH: /data/rag_evaluation_runs.db
       DOCUMENT_STORAGE_ROOT: /app/uploads/documents
       RAG_HYBRID_ENABLED: "true"
       RAG_GRAPH_ENABLED: ${RAG_GRAPH_ENABLED:-false}

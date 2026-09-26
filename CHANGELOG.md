@@ -11,6 +11,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第八十二批（2026-10-06：评测历史落卷只有一半能安全修，另一撞出来的是文档里的死键）
+
+#### 两条发现（任务原问：`RAG_EVALUATION_DB_PATH` 是否在卷上）
+- **是同一个失效模式，但修法不对称**。三处声称持久——"Durable, privacy-conscious history（`evaluation_runs.py:1`）"、`config.py:144-146` 的"survive AI-service restarts"（该注释已就地补上"持久性取决于拓扑"的限定）、`rag.py:233` 的 "durable metric history"——而默认值 `./data/rag_evaluation_runs.db` 在容器里解析成 `/app/data`（WORKDIR=/app，Dockerfile.python:5），该键全仓只出现在 `python-ai/.env.example:74`，三套 shipped 拓扑都没赋值。面板"最近评测"（`Index.vue:452`，经 `RagObservabilityController.java:215` 透传）随重建清空
+- **compose 是简单的一半**：两个 compose 都没有 `replicas:`（单 HTTP 进程），唯一写点是 `rag.py:219`，`arq_worker.py` 从不 import 该 store → 落 `/data` 无共写
+- **helm 是难的一半**：`values.yaml:77` 是 `replicas: 2`（HPA 到 8）。这个库是**读面**，第八十批的按 Pod 分目录规则会让面板只显示应答副本的历史；而 2 副本共写一个 SQLite 文件正是那条规则禁止的事
+- **顺带查出的活缺陷（本批更严重的一条）**：`docs/ENVIRONMENT.md:120` 把 `CHECKPOINT_DB_PATH` 列为可配变量，但 `app/utils/config.py` 从未定义该属性，而 `checkpoint.py:111` 用 `getattr(config, "CHECKPOINT_DB_PATH", None)` 取它 → 恒为 None → **运维设了也完全不生效**，永远落模块兜底 `data/checkpoints.db`（容器里同样是 `/app/data`，且该库开 WAL）。判定顺序：这是"配置面声称 ≠ 代码事实"，比落点不在卷上更糟，因为它给运维一个假开关
+
+#### 改动（用户选 A）
+- `docker/docker-compose.yml:313` 与 `deploy/docker-compose.prod.yml:243`：`RAG_EVALUATION_DB_PATH: /data/rag_evaluation_runs.db`（与审计队列、`CHUNKS_STORE_PATH` 同一惯例）
+- `config.py:154` 补 `CHECKPOINT_DB_PATH = os.getenv(...)`，默认值与 `checkpoint.py:38` 的 `_CHECKPOINT_DB_DEFAULT` 同源；`checkpoint.py:111` 同时把 `getattr(..., None)` 改成直读属性——以后这个键缺失会直接抛，而不是静默退回兜底路径
+- helm **刻意不设**该键，并把原因按变量名写进 `deploy/helm/hfusionhub/values.yaml:72-76`：注释是测试的断言对象，防止下一个人当遗漏补上
+
+#### 决策记录
+- **第八十批那条规则的完整形式**："别让多副本共写一个 SQLite 文件"只说了一半，判据要看这个库的**读语义**是否 pod-local。审计队列是 outbox（各 Pod 只清自己的积压），按 Pod 分目录既安全又完整；评测历史是控制台聚合的 journal，按 Pod 分目录就把"丢数据"换成了"读到局部历史"。剩下的诚实选项只有三个：不声称持久、读侧跨 Pod 文件合并、换到真共享库（`EvaluationRunStore` 的类文档本身就预留了这个替换）
+- **不选 B（per-pod 目录 + 读侧合并）**：它引入"目录（每 Pod 一文件）vs 单文件"两种配置形状，本仓无先例，且本机没有 helm client，渲染不出来就无法自称修好
+- **不选 C（只改口径）**：compose 那一半的丢失是真丢，改文案不换修复
+- **checkpoint 落卷不进本批**：它是第三个同类问题（默认相对路径 + WAL + 多副本），把死键修成开关是本批的收口范围，落点选择需要单独的拓扑判断
+
+#### 验证
+- 红：5 failed —— compose 2 例（`docker-compose.yml`/`prod` 均未配置该键）＋ helm 决策未记名 1 例 ＋ checkpoint 3 例（`AttributeError: ... has no attribute "CHECKPOINT_DB_PATH"` ×2、口径断言 ×1）；先绿后扩到 24 passed（`test_evaluation_runs.py` 5 + `test_checkpoint.py` 19）
+- 新增 `tests/test_evaluation_runs.py:43` `TestEvaluationHistoryPersistenceConfigured`（compose 落点、helm 刻意不共享）+ `:92` `test_evaluation_run_store_honours_the_config_key`
+- 新增 `tests/test_checkpoint.py:214` `TestCheckpointPathIsConfigurable`：`test_config_defines_the_key_with_the_documented_default`（同时钉住 ENVIRONMENT.md 那一行的默认值与代码兜底同源）、`test_manager_lands_on_the_configured_path`、`test_explicit_argument_still_wins`（显式入参优先级不被配置键覆盖）
+- Python 全量 **1880 passed / 8 skipped**（163.21s，1740 → 1746）；ruff（.venv 0.16.3）All checks passed；`scripts/static-checks.py` 全通过；三个 YAML 文件解析后键值已核（compose 两处取到 `/data/...`，`values.yaml` 的 `replicas: 2` 未受影响）
+
+#### 未核验
+- 本机无 helm client：`values.yaml` 只做了 YAML 解析与文本断言，未 `helm lint` / `helm template`（承第八十批）
+- 没有跑过两副本真实并发：helm 侧"共享单文件会互踩锁"依据是上游对 NFS 类卷上 SQLite 文件锁的说明与第八十批的同族判断，非本机实测
+
+#### 遗留
+1. helm 拓扑里评测历史仍不持久，且面板按应答副本显示局部历史——需要的是共享库而非卷路径（本批决策记录的三个选项之一）
+2. `CHECKPOINT_DB_PATH` 现在是真开关，但默认仍落 `/app/data`（镜像层），且该库开 WAL，落共享卷前要先定拓扑
+3. rollout 后旧 Pod 目录里的审计残留仍需运维手动发现（承第八十一批）
+4. helm 存储类可写性与 `fsGroup`（承第八十批）
+5. `.Values.python.taskQueueMode` 悬空引用（`python.yaml:51`，键实际在 `pythonAi` 下，需 helm client 才能安全处理）
+6. Java 侧 10 处 `R.fail(403, ...)` 折叠成 HTTP 200 的状态码统一
+7. ROADMAP Java 计数 703 与实测 713 的口径
+
+
 ### 第八十一批（2026-10-06：SIGTERM 前把审计队列排空——第八十批唯一会自我恶化的残留）
 
 #### 问题
@@ -89,7 +128,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Fixed
 - **两处 shipped compose 的 `python-ai` 服务显式配置 `HFUSIONHUB_AUDIT_DB_PATH=/data/hfusionhub-audit`（`docker/docker-compose.yml:310`、`deploy/docker-compose.prod.yml:240`）**。`audit.py:48-52` 的默认落点是 `os.path.expanduser("~")/.hfusionhub/audit`，而这个键**此前在全仓没有任何部署配置写过**（只在 `audit.py:49,181` 被读，compose/prod/helm/`.env` 均按变量名核对、未取值）；`deploy/Dockerfile.python:22-26` 用 `useradd -r -d /app` + `USER hfusionhub` 运行，家目录只可能是 `/app`（passwd 里写的）或 `/root`（HOME 未显式设置的另一种走法），**两条都不在挂载点上**——卷只挂在 `/data` 与 `/app/uploads`（dev `docker-compose.yml:319-322`、prod `:263-268`）。后果：`_persist_to_sqlite:187-188` 的 "for crash recovery" 注释在 shipped 拓扑里本就不成立，容器一重建，未同步行与 dead-letter 行一起消失——第七十七批修好出站地址之后，这才是在积压场景下真正的丢数据路径
-- **helm 的 python Deployment 补上第三处落点**：新增 RWX PVC `{{ .Release.Name }}-audit-pvc`（`templates/python.yaml:117-128`，容量键 `pythonAi.auditQueueSize: 1Gi`，`values.yaml:75`），挂到 `/app/audit-queue`（:108-109、:114-116），并设 `HFUSIONHUB_AUDIT_DB_PATH=/app/audit-queue/$(POD_NAME)`（:72-77，`POD_NAME` 走 downward API）。该模板此前只有 `shared-uploads` 一个 PVC（挂 `/app/uploads`），helm 拓扑里**没有 `/data`**——把 compose 的写法照搬过去只会伪装成已持久化、实际仍随 Pod 重建丢失
+- **helm 的 python Deployment 补上第三处落点**：新增 RWX PVC `{{ .Release.Name }}-audit-pvc`（`templates/python.yaml:117-128`，容量键 `pythonAi.auditQueueSize: 1Gi`，`values.yaml:80`），挂到 `/app/audit-queue`（:108-109、:114-116），并设 `HFUSIONHUB_AUDIT_DB_PATH=/app/audit-queue/$(POD_NAME)`（:72-77，`POD_NAME` 走 downward API）。该模板此前只有 `shared-uploads` 一个 PVC（挂 `/app/uploads`），helm 拓扑里**没有 `/data`**——把 compose 的写法照搬过去只会伪装成已持久化、实际仍随 Pod 重建丢失
 
 #### Added
 - **`python-ai/app/core/plugin/audit.py:536-557` 新增 `retry_dead_letters() -> int`**：`UPDATE audit_queue SET dead_letter = 0, retry_count = 0 WHERE dead_letter = 1`，返回回灌条数并记 warning。`retry_count` 一并清零，每行重新拿到 `_MAX_RETRIES = 5`（:58）的完整预算；已 `synced = 1` 的行不动；DB 异常按模块既有风格返回 0 + `logger.error`，**不把行清掉**

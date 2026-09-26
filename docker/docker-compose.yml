@@ -308,6 +308,9 @@ services:
       # 插件审计队列（SQLite）落点：默认值落在运行用户的家目录，而家目录在镜像层里，
       # 容器一重建未同步/dead-letter 行就一起消失；python-data 卷只挂在 /data。
       HFUSIONHUB_AUDIT_DB_PATH: /data/hfusionhub-audit
+      # 评测历史（控制台的"最近评测"读面）同理：默认 ./data/... 落在镜像层里，重建即清。
+      # 本拓扑只有一个 HTTP 进程写它（arq worker 从不 import 该 store），故可安全共享 /data。
+      RAG_EVALUATION_DB_PATH: /data/rag_evaluation_runs.db
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       RAG_HYBRID_ENABLED: "true"
       LLM_ALLOW_MOCK: "false"
