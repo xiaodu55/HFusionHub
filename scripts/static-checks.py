@@ -370,6 +370,42 @@ def check_h2_schema_drift() -> None:
                 print(f"[ok] {cleaned}")
 
 
+# ── 检查 7：Helm chart 引用的 .Values 根必须存在 ────────────────────────
+
+HELM_CHART = REPO / "deploy" / "helm" / "hfusionhub"
+
+
+def check_helm_value_roots() -> None:
+    """模板里用到的 `.Values.<root>` 必须在 values.yaml 顶层有定义。
+
+    Go 模板对不存在的根取字段是**执行期报错**，不是静默走 default：
+    `{{ .Values.python.taskQueueMode | default "inline" }}` 在 `python` 根缺失时直接
+    抛 `nil pointer evaluating interface {}.taskQueueMode`，整张 chart 渲染失败——
+    即 `helm install` 根本装不起来。helm 二进制在 CI 与多数开发机上都没有，
+    故这里用纯文本核对同一件事，让这类笔误在评审阶段就红。
+    """
+    if not HELM_CHART.is_dir():
+        problems.append(f"helm chart 目录缺失：{HELM_CHART}")
+        return
+    values_text = (HELM_CHART / "values.yaml").read_text(encoding="utf-8")
+    declared = set(re.findall(r"^([A-Za-z_][\w-]*):", values_text, re.MULTILINE))
+    bad: list[str] = []
+    checked = 0
+    for tpl in sorted((HELM_CHART / "templates").glob("*.yaml")):
+        checked += 1
+        for lineno, line in enumerate(tpl.read_text(encoding="utf-8").splitlines(), 1):
+            for root in re.findall(r"\.Values\.([A-Za-z_][\w-]*)", line):
+                if root not in declared:
+                    bad.append(
+                        f"templates/{tpl.name}:{lineno} 引用 .Values.{root}，"
+                        f"但 values.yaml 顶层没有该键（可用根：{sorted(declared)}）"
+                    )
+    if bad:
+        problems.append("Helm 模板引用了未定义的 values 根:\n    " + "\n    ".join(bad))
+    else:
+        print(f"[ok] Helm values 根一致性：{checked} 个模板引用的根全部在 values.yaml 定义")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
@@ -378,14 +414,15 @@ def main() -> int:
     parser.add_argument("--flyway-doc-sync", action="store_true")
     parser.add_argument("--h2-schema-drift", action="store_true")
     parser.add_argument("--readme-claims", action="store_true")
+    parser.add_argument("--helm-value-roots", action="store_true")
     args = parser.parse_args()
 
     if not (args.tenant_columns or args.internal_token_keys or args.test_counts
             or args.flyway_doc_sync or args.h2_schema_drift
-            or args.readme_claims):
+            or args.readme_claims or args.helm_value_roots):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
             args.flyway_doc_sync = args.h2_schema_drift = \
-            args.readme_claims = True
+            args.readme_claims = args.helm_value_roots = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -399,6 +436,8 @@ def main() -> int:
         check_h2_schema_drift()
     if args.readme_claims:
         check_readme_claims()
+    if args.helm_value_roots:
+        check_helm_value_roots()
 
     if problems:
         print("\n发现问题:")

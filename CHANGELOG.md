@@ -11,6 +11,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第八十三批（2026-10-06：helm lint 把"记了但没验"判成了硬失败——这张 chart 从来渲染不出来）
+
+#### 结论（先给判定性质）
+- `helm lint deploy/helm/hfusionhub` → `[ERROR] templates/: template: hfusionhub/templates/python.yaml:51:31: executing ... at <.Values.python.taskQueueMode>: nil pointer evaluating interface {}.taskQueueMode`；`helm template`（带齐 `secrets.*` 占位值）同一错误直接终止
+- **不是静默走 `default "inline"`**。Go 模板管道左侧的字段访问在 nil map 上就报错，`default` 没有执行机会 → `helm install` 从一开始就失败。第八十批的审计 PVC、第八十二批的评测决策，此前都处在"写进了模板但整张图从未渲染成功过"的状态
+- 根级普查（模板用到的 `.Values.<root>` vs `values.yaml` 顶层键）：14 个引用根里只有 `python` 未定义，其余 13 个都有定义 → 单点笔误，不是系统性漂移
+
+#### 改动
+- `deploy/helm/hfusionhub/templates/python.yaml:51` → `.Values.pythonAi.taskQueueMode`（键已定义在 `values.yaml:67`），同时去掉 `| default "inline"`：全 chart 只有这一处用 `default`，其余模板一律直接读 values；而 `pythonAi` 整体缺键时 nil map 同样会炸，这个兜底既保护不了真实场景，又正是让笔误看起来无害的东西
+- `scripts/static-checks.py:373-408` 新增检查 7 `check_helm_value_roots()`（＋ CLI 开关 `--helm-value-roots`，并入"全部检查"默认档）：模板引用的 `.Values` 根必须在 `values.yaml` 顶层存在。纯文本核对、不需要 helm 二进制——CI 和开发机都没有 helm，而这正是缺陷能活到本次的原因
+
+#### 验证
+- 红（两条独立路径命中同一处）：新门禁在未修模板时 → `✗ Helm 模板引用了未定义的 values 根: templates/python.yaml:51 引用 .Values.python`；`helm lint` 与 `helm template` 各失败一次（错误原文见上）。修模板后：门禁转 `[ok] Helm values 根一致性：13 个模板引用的根全部在 values.yaml 定义`、`helm lint` → `1 chart(s) linted, 0 chart(s) failed`（只剩 Chart.yaml icon 的 INFO）、`helm template` 退出 0
+- 渲染产物核账（22 个对象 / 691 行 / **0 个 `<no value>`**，全部可被 `yaml.safe_load_all` 解析）——一次结掉 80/82 批留下的三条"未核验"：
+  1. `TASK_QUEUE_MODE` 渲染成 "inline"（修复生效）
+  2. python Deployment 里 `HFUSIONHUB_AUDIT_DB_PATH: /app/audit-queue/$(POD_NAME)`、`POD_NAME` 走 valueFrom、volumeMount 与 volume 指向 `hfusionhub-audit-pvc`，该 PVC 渲染为 `ReadWriteMany` / 1Gi，`replicas: 2` → 第八十批的卷设计在产物层面是真的
+  3. 渲染后的 python 容器环境**没有** `RAG_EVALUATION_DB_PATH` → 第八十二批"helm 刻意不设"成立
+- 回归面：`test_plugin_audit + test_evaluation_runs + test_checkpoint` **73 passed**（这些测试直接读 `python.yaml` 文本，改模板必须复跑）；`scripts/static-checks.py` 全通过；本批无新增 `def test_`，Python 计数仍 1746，文档无需再同步
+- 环境：helm 取官方 v3.22.0 二进制，解在仓库外 `D:/college/development/tools/helm/`，未进 PATH、未装到系统；官方 latest 已是 v4.3.0，本批未用 v4 复渲（待确认）
+
+#### 新定性的发现（本批只记不修）
+- 渲染显示 8 个工作负载里**只有 `plugin-runner` 带 securityContext**（pod `runAsUser`/`runAsGroup=1000` ＋ `runAsNonRoot`），python/java/mysql/redis/milvus/etcd 的 pod 与容器 securityContext 全为空——第八十批记的"无 `fsGroup`"由此从"未知"变成**已确认缺失**
+- 而且 uid 没法靠约定补：`Dockerfile.python:23` 用 `useradd -r hfusionhub` 不钉 `-u`，system uid 按可用区间顺分配，跨镜像重建不保证一致。合起来的真实风险是：非 root 容器 ＋ 无 `fsGroup` ＋ 卷属主由 provisioner 决定 → `/app/audit-queue`（以及同样挂 RWX 卷的 `/app/uploads`）能不能写，chart 层面没有任何保证
+- 不进本批修的理由：这是部署面行为变更（要同时决定钉 `runAsUser` 还是加 `podSecurityContext.fsGroup`），而本机没有集群，改完只能证明"能渲染"，证明不了"能写进去"
+
+#### 遗留
+1. python（与挂 RWX uploads 卷的 java）的卷写权限方案：钉 uid ＋ `fsGroup`，还是 initContainer 改权限——需真集群验证
+2. rollout 后旧 Pod 目录里的审计残留仍需运维手动发现（承第八十一批）
+3. helm 拓扑里评测历史仍不持久、面板按应答副本显示局部历史（承第八十二批）
+4. `CHECKPOINT_DB_PATH` 现在是真开关，但默认仍落镜像层，落卷要先定拓扑（承第八十二批）
+5. 本批 helm 结论基于 v3.22.0，未在 v4.3.0 上复渲对比
+6. Java 侧 10 处 `R.fail(403, ...)` 折叠成 HTTP 200 的状态码统一
+7. ROADMAP Java 计数 703 与实测 713 的口径
+
+
 ### 第八十二批（2026-10-06：评测历史落卷只有一半能安全修，另一撞出来的是文档里的死键）
 
 #### 两条发现（任务原问：`RAG_EVALUATION_DB_PATH` 是否在卷上）

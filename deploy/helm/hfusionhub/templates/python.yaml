@@ -48,7 +48,7 @@ spec:
                   name: {{ .Release.Name }}-secrets
                   key: callback-secret
             - name: TASK_QUEUE_MODE
-              value: {{ .Values.python.taskQueueMode | default "inline" | quote }}
+              value: {{ .Values.pythonAi.taskQueueMode | quote }}
             - name: JAVA_BACKEND_URL
               value: "http://{{ .Release.Name }}-java:{{ .Values.javaBackend.port }}"
             - name: SERVER_HOST
