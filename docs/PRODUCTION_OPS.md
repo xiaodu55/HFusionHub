@@ -540,11 +540,48 @@ kubectl -n <ns> exec deploy/<rel>-java   -- sh -c 'mkdir -p /app/uploads/documen
 docker compose exec python-ai sh -c 'touch /data/uploads/.writable && echo ok'
 ```
 
+跨服务的那一条要成对做（写的一方与读的一方都不是同一个进程）：
+
+```bash
+docker compose exec java-backend   sh -c 'mkdir -p /app/uploads/documents && echo from-java > /app/uploads/documents/.probe'
+docker compose exec python-ai      sh -c 'cat /app/uploads/documents/.probe && touch /app/uploads/documents/.from-python && echo ok'
+```
+
+`python-ai` 读不到就是 10.4 的契约没落地（挂载或 root 缺一处），Java 侧的解析会一律
+回 `文件不存在或不在允许的上传目录中`（code 10001）。
+
 ### 10.3 已知未收口
 
-- **compose 与 helm 的上传目录语义不等价**：compose 上 python 的 `UPLOAD_DIR=/data/uploads`
-  落在 `python-data`，java 写 `uploads-data:/app/uploads`，两个服务的上传分处两卷；
-  prod compose 还给 python 挂了 `uploads-data:/app/uploads` 但它从不写这个路径。helm 则
-  让两者共用一块 uploads-pvc。是否统一要先回答"java 与 python 是否需要互见对方写的文件"。
+- **"同路径互见"只做到了配置层对齐，没做过实测**：契约与三档现状见 10.4。真正的验证要
+  在起得来的栈里做一次"java 写、python 读"（10.2 末尾的命令对），本机无 docker 引擎。
+- **`UPLOAD_DIR` 与 `DOCUMENT_STORAGE_ROOT` 是两个不同的根**：前者是 python 自己的暂存/摄取
+  目录（compose 指 `/data/uploads`，进 `python-data`），后者是"允许解析 Java 文件"的围栏根。
+  看到两者不一致不代表配置错了，但它们各自挂哪个卷必须与挂载表一致。
 - plugin-runner 镜像 uid 未钉 `-u`，1000 只写在 chart 里。
 - mysql/etcd/milvus/redis 仍无 pod securityContext（上游镜像以 root 起、入口脚本自 chown）。
+
+### 10.4 文档目录的同路径契约（第八十五批）
+
+Java 与 python **必须**在同一个绝对路径上看见同一个文件，这不是可选优化：
+
+1. Java 把 `user.dir`(=运行阶段 WORKDIR `/app`) 下的绝对路径写进 `document.file_path`
+   （`DocumentServiceImpl.java:64` 的 `UPLOAD_DIR = "uploads/documents"`，`:528-529` 拼成绝对路径）；
+2. `VectorizationServiceImpl.java:737` 把它原样发给 python 的 `/api/parse`；
+3. python 只接受**自己容器里真实存在**、且在 `DOCUMENT_STORAGE_ROOT` 之下的路径
+   （`validators.py:87-103`：`resolve(strict=True)` + `relative_to`，否则 400 code 10001）；
+4. 反向同构：`/api/ingest/url` 返回的 `file_path` 由 Java 持久化（`DocumentServiceImpl.java:194-204`）
+   并回写正文，所以 python 的写入点也必须落在 Java 挂的那块卷上。
+
+⇒ 每个 python 工作负载都要**成对**具备：`DOCUMENT_STORAGE_ROOT=/app/uploads/documents`
+＋ 共享 uploads 卷挂在 `/app/uploads`（或其祖先）。
+
+| 部署面 | root | 挂载 | 状态 |
+|---|---|---|---|
+| prod compose | `deploy/docker-compose.prod.yml:244` | `:271` `uploads-data:/app/uploads` | 成对 |
+| helm | `templates/python.yaml:73-74` | `uploads-pvc` → `/app/uploads` | 成对 |
+| dev compose `python-ai` / `python-ai-worker` | 本批补齐 | 本批补齐 | 此前两处都缺 ⇒ 容器化一键启动下每次解析 400 |
+| 宿主开发态（`mvn spring-boot:run` + venv） | 镜像默认值 `../java-backend/uploads/documents` | 同一台机器同一文件系统 | 默认值就是为它设计的 |
+
+期望路径不是硬编码：`scripts/static-checks.py` 检查 9（`--document-storage-root`，已并入全跑档）
+从 `Dockerfile.java` 的运行阶段 WORKDIR 与 `DocumentServiceImpl.java` 的 `UPLOAD_DIR` **派生**，
+任一侧改动都会让三档同时报红。回归测试见 `python-ai/tests/test_upload_path_contract.py`。

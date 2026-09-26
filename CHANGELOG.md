@@ -11,6 +11,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第八十五批（2026-10-06：Java 与 python 之间传的是"路径"，而路径在两个容器里指向的不是同一个地方）
+
+#### 结论（先给判定性质）
+- 第八十四批 遗留 3 排查到底：Java→python 传的是**绝对路径**（`DocumentServiceImpl.java:64` 的 `UPLOAD_DIR="uploads/documents"` 在 `:528-529` 拼成 `user.dir`(=运行阶段 WORKDIR `/app`) 下的绝对路径，`VectorizationServiceImpl.java:737` 原样发出），python 侧 `validators.py:87-103` 要求它在**自己容器里**存在且在 `DOCUMENT_STORAGE_ROOT` 之下 ⇒ "共享 uploads 卷 + 同绝对路径"是契约本身。**本批同时收回上一批写下的判断**："prod compose 给 python 挂了它从不写的 `uploads-data:/app/uploads`"是错的——它与 `deploy/docker-compose.prod.yml:244` 的 root 是成对的必要配置，第八十四批 遗留 3 与 `docs/PRODUCTION_OPS.md` §10.3 的措辞已按此改写
+- 真正坏的是 **dev compose 的 fullstack 档**：`docker/docker-compose.yml` 的 `python-ai` 与 `python-ai-worker` 既没设 `DOCUMENT_STORAGE_ROOT` 也没挂 `uploads-data` ⇒ root 退回镜像默认值 `../java-backend/uploads/documents`（WORKDIR=/app → `/java-backend/uploads/documents`），Java 的 `/app/uploads/…` 在 python 容器里不存在，**每个上传文档的解析都 400 code 10001**；反向的 `/api/ingest/url` 更糟，它要 `mkdir` 出 root（`app/api/ingest.py:53-56`），而非 root 用户在 `/` 下建不出 `/java-backend`
+- 缺陷能活这么久是因为两头都照不到：宿主开发态（`mvn spring-boot:run` + venv，cwd=`python-ai/`）用同一个默认值恰好正确，而契约测试一律把 root monkeypatch 到 `tmp_path`（`test_api_contract.py:1552`、`test_internal_api_security.py:56`）——只有容器化档的这段配置处于无人核对状态
+
+#### 改动
+- `docker/docker-compose.yml`：`python-ai` 与 `python-ai-worker` 各补 `DOCUMENT_STORAGE_ROOT: /app/uploads/documents` ＋ `uploads-data:/app/uploads` 挂载（口径与 prod compose / helm 一致，那两档本批零改动）。上一批钉的 uid/gid=10001 是这次补齐的安全前提：java 与 python 现在**都往同一块卷写**（ingest 也写 root），co-write 靠的是同号的 runAsGroup/fsGroup
+- `scripts/static-checks.py` 新增检查 9 `check_document_storage_root_contract()`（＋ `--document-storage-root`，并入默认全跑档）：期望路径**派生**自 `Dockerfile.java` 运行阶段的 `WORKDIR` 与 `DocumentServiceImpl.java` 的 `UPLOAD_DIR`（锚点任一变动 → 三档同时报红，而不是让门禁与代码各说各话）；每个 python 工作负载要求"root 等于派生值"＋"有卷挂在该路径或其祖先上"成对成立，缺哪侧报哪侧，文案带上会观察到的错误码。compose 与 k8s 两种 env 写法都支持，注释行跳过
+- `docs/PRODUCTION_OPS.md`：§10.2 补"java 写、python 读"的成对实测命令（含读不到即契约未落地的判读）；新增 **§10.4 文档目录的同路径契约**——四步链路 ＋ 四档部署面（prod compose / helm / dev compose / 宿主开发态）状态表；§10.3 首条改为"只做到配置层对齐，未实测"
+
+#### 验证
+- 红→绿：`tests/test_upload_path_contract.py` 新增 **15 例**，首跑 **10 红 / 5 绿**（红：dev compose 两个服务各两条、四处 root 取值不唯一一条、门禁五条；绿：契约前提两条 + prod compose/helm 既有成对配置两条 + 派生值一条），实现后 15 passed
+- 门禁真能红：对**真实** `docker/docker-compose.yml` 只删 `python-ai` 的 root 一行 → rc=1 且报"没有 DOCUMENT_STORAGE_ROOT…解析一律 400"，随后用改前原文写回还原；"设了 root 却没挂卷"与"root 与 java 不同号"两种半修形态由 tmp 夹具覆盖
+- 锚点核实：`Dockerfile.java` 两处 WORKDIR 均为 `/app`（取 `FROM` 末段），派生值 `/app/uploads/documents` 与 prod compose/helm 的既有字面量逐字相同，故本批没引入第二个数字
+- 接线不可能哑火：`test_gate_is_in_the_default_all_mode` 要求 `args.document_storage_root` 在 parse 之后、首个 dispatch 之前出现 ≥2 次（第八十三批那处缺陷的形态）
+- 回归：全量 pytest **1908 passed / 8 skipped**（含本批 15 例）；`ruff` 干净；`scripts/static-checks.py` 全跑档通过（9 项）；Python 计数 1759→**1774**，已同步 README 徽章＋3 处正文、README_EN 徽章、docs/ROADMAP.md:16
+
+#### 遗留
+1. **"java 写、python 读"仍是纸面对齐**：本机无 docker 引擎，本批核验只到文本门禁层。10.2 末尾那对命令是唯一能证伪它的东西
+2. **`UPLOAD_DIR` 是个空转的键**：三档 compose 都设 `/data/uploads`，而 python 侧只有 `app/main.py:238` 建目录、没有任何读写方（ingest 用 `DOCUMENT_STORAGE_ROOT`）。删它涉及"是否有历史数据留在 `python-data:/data/uploads`"，需先看一次真实卷内容再定
+3. helm 的 python 是单 Deployment 多副本形态，若 `replicas>1` 且 uploads 卷为 RWX，两副本对 `/app/uploads/documents` 的并发写（ingest 同名文件）没有互斥——本批未触碰该语义
+4. 承第八十四批：旧卷一次性 chown、plugin-runner uid 未钉、第三方镜像无 pod securityContext、`CHECKPOINT_DB_PATH` 落卷、Java 侧 10 处 `R.fail(403,…)`、ROADMAP Java 计数 703 vs 713、helm 结论未用 v4 复渲
+
+
 ### 第八十四批（2026-10-06：卷能不能写，取决于两个此前从未在任何地方对齐过的数字）
 
 #### 结论（先给判定性质）
@@ -36,7 +62,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 #### 遗留
 1. **"真的能写"仍未实测**：本机 Docker daemon 未运行、无集群，本批核验只到渲染层与文本门禁层。实测命令已写进 `docs/PRODUCTION_OPS.md` 10.2。两个镜像也**没有实际构建过**——`useradd -u/-g` 与 busybox `adduser -S -u/-G`、`addgroup -S -g` 的参数形态按各自手册写，首次真实构建即是它的验收
 2. 升级前建下的卷，其内容属主仍是旧系统号 ⇒ 必须一次性 chown（10.1 给了 compose 与 helm 两份操作），否则老部署在换镜像后写旧文件 EACCES
-3. compose 与 helm 的上传目录语义不等价：compose 上 python 的 `UPLOAD_DIR=/data/uploads`（进 `python-data`）与 java 的 `uploads-data:/app/uploads` 是两个卷，prod compose 还给 python 挂了它从不写的 `uploads-data:/app/uploads`；helm 则两者共用一块 uploads-pvc。是否统一取决于"java 与 python 是否需要互见对方写的文件"，本批按约定只登记不修
+3. compose 与 helm 的上传目录语义不等价（本条初稿判断有误，已随排查更正）：**prod compose 给 python 挂的 `uploads-data:/app/uploads` 不是死挂载**，它和 `deploy/docker-compose.prod.yml:244` 的 `DOCUMENT_STORAGE_ROOT: /app/uploads/documents` 是一对——Java 写的绝对路径要能被 python 读到，靠的就是"同路径 + 同卷"。真正的缺口在**dev compose 的 fullstack 档**：`docker/docker-compose.yml` 的 `python-ai`（:286-347）与 `python-ai-worker`（:349-376）都没有 `DOCUMENT_STORAGE_ROOT`、也不挂 `uploads-data`，于是 python 的容器内根目录落到默认值 `../java-backend/uploads/documents`（WORKDIR=/app ⇒ `/java-backend/uploads/documents`），而 Java 传来的 `file_path` 是 `/app/uploads/documents/...`，`validate_file_path` 的 `resolve(strict=True)` 必然 ENOENT ⇒ `/api/parse` 一律 400（code 10001）。宿主开发态（`mvn spring-boot:run` + venv uvicorn）不受影响——默认值就是为它设计的
 4. plugin-runner 镜像的 uid 仍靠 `useradd` 默认分配（chart 硬编码 1000），未进 `--container-uid` 门禁
 5. frontend/mysql/redis/etcd/milvus 无 pod securityContext（上游镜像以 root 起、入口脚本自 chown）
 6. 承第八十三批：rollout 后旧 Pod 目录的审计残留、helm 评测历史不持久、`CHECKPOINT_DB_PATH` 落卷拓扑、Java 侧 10 处 `R.fail(403,...)`、ROADMAP Java 计数 703 vs 713、helm 结论未用 v4 复渲

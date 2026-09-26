@@ -40,6 +40,12 @@
   卷能不能写取决于进程身份与卷属主是否对齐；未钉的 `-r`/`-S` 用户号由基镜像决定，
   重建即漂移，而 fsGroup 是另一处手写的数字，无人核对就会各说各话。
 
+检查 9：Java↔Python 文档目录的路径契约
+  Java 入库的 file_path 是它容器内的绝对路径（Dockerfile.java 运行阶段 WORKDIR +
+  DocumentServiceImpl.UPLOAD_DIR），python 只能在自己的 DOCUMENT_STORAGE_ROOT 下读到它。
+  每个部署面（dev compose / prod compose / helm）的 python 工作负载都必须"挂 uploads 卷 +
+  设同号 root"成对出现，缺任一侧 Java→Python 的 /api/parse 就只会回 400。
+
 用法:
   python scripts/static-checks.py --tenant-columns
   python scripts/static-checks.py --internal-token-keys
@@ -49,6 +55,7 @@
   python scripts/static-checks.py --readme-claims
   python scripts/static-checks.py --helm-value-roots
   python scripts/static-checks.py --container-uid
+  python scripts/static-checks.py --document-storage-root
   python scripts/static-checks.py            # 全部检查
 退出码: 0=通过, 1=发现违规
 """
@@ -517,6 +524,161 @@ def check_container_uid_consistency() -> None:
         print(f"[ok] 容器运行身份同源：java/python 镜像与 helm podSecurity 均钉 uid={uid[0]}")
 
 
+# ── 检查 9：Java↔Python 文档目录的路径契约 ──────────────────────────────
+
+COMPOSE_DEV = REPO / "docker" / "docker-compose.yml"
+COMPOSE_PROD = REPO / "deploy" / "docker-compose.prod.yml"
+HELM_PYTHON_TEMPLATE = HELM_CHART / "templates" / "python.yaml"
+JAVA_DOCUMENT_SERVICE = (
+    REPO / "java-backend" / "src" / "main" / "java" / "com" / "hfusionhub"
+    / "service" / "impl" / "DocumentServiceImpl.java"
+)
+
+
+def _strip_comments(text: str) -> str:
+    return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+
+
+def _compose_service_blocks(text: str) -> dict[str, str]:
+    """compose 的 `services:` 段按两空格缩进切成 {服务名: 块文本}。"""
+    blocks: dict[str, str] = {}
+    current: str | None = None
+    buf: list[str] = []
+    inside = False
+    for line in text.splitlines():
+        if not inside:
+            inside = line.rstrip() == "services:"
+            continue
+        if line and not line.startswith((" ", "\t", "#")):
+            break
+        named = re.match(r"^  ([A-Za-z0-9_.-]+):\s*(#.*)?$", line)
+        if named:
+            if current is not None:
+                blocks[current] = "\n".join(buf)
+            current, buf = named.group(1), []
+            continue
+        if current is not None:
+            buf.append(line)
+    if current is not None:
+        blocks[current] = "\n".join(buf)
+    return blocks
+
+
+def _declared_document_root(block: str) -> str | None:
+    """python 工作负载声明的 DOCUMENT_STORAGE_ROOT，兼容 compose 与 k8s 两种写法。"""
+    block = _strip_comments(block)
+    flat = re.search(r'^\s*DOCUMENT_STORAGE_ROOT:\s*"?([^\n"]+)"?\s*$', block, re.MULTILINE)
+    if flat:
+        return flat.group(1).strip()
+    nested = re.search(
+        r'- name: DOCUMENT_STORAGE_ROOT\n\s+value:\s*"?([^\n"]+)"?\s*$', block, re.MULTILINE
+    )
+    return nested.group(1).strip() if nested else None
+
+
+def _mount_targets(block: str) -> list[str]:
+    """块内出现的所有挂载目标（compose 的 `src:dst[:ro]` 与 k8s 的 mountPath）。"""
+    text = _strip_comments(block)
+    targets = re.findall(r"^\s*-\s+\S+:(/\S+?)(?::\S+)?\s*$", text, re.MULTILINE)
+    targets += re.findall(r"^\s*mountPath:\s*(/\S+)\s*$", text, re.MULTILINE)
+    return [t.rstrip("/") for t in targets]
+
+
+def _covers(targets: list[str], path: str) -> bool:
+    return any(path == t or path.startswith(t + "/") for t in targets)
+
+
+def _java_document_root() -> tuple[str | None, list[str]]:
+    """java 运行容器里的文档目录 = 末段 WORKDIR + DocumentServiceImpl 的 UPLOAD_DIR。
+
+    派生而不是硬编码：这两个锚点一变，三处部署面的 root 就同时失效，必须让门禁先响。
+    """
+    if not DOCKERFILE_JAVA.is_file():
+        return None, [f"deploy/Dockerfile.java 缺失：{DOCKERFILE_JAVA}"]
+    stages = re.split(
+        r"^FROM\b", DOCKERFILE_JAVA.read_text(encoding="utf-8"), flags=re.MULTILINE
+    )[1:]
+    workdirs = re.findall(r"^WORKDIR\s+(/\S+)\s*$", stages[-1] if stages else "", re.MULTILINE)
+    if len(workdirs) != 1:
+        return None, [
+            f"Dockerfile.java 运行阶段的 WORKDIR 不唯一或缺失，无法派生 java 的文档目录：{workdirs}"
+        ]
+    if not JAVA_DOCUMENT_SERVICE.is_file():
+        return None, [f"DocumentServiceImpl.java 缺失：{JAVA_DOCUMENT_SERVICE}"]
+    upload_dir = re.search(
+        r'static\s+final\s+String\s+UPLOAD_DIR\s*=\s*"([^"]+)"',
+        JAVA_DOCUMENT_SERVICE.read_text(encoding="utf-8"),
+        re.IGNORECASE,
+    )
+    if upload_dir is None:
+        return None, [
+            "DocumentServiceImpl.java 里找不到 UPLOAD_DIR 常量（java 侧的上传锚点变了，本检查需同步）"
+        ]
+    return f"{workdirs[0].rstrip('/')}/{upload_dir.group(1).strip('/')}", []
+
+
+def check_document_storage_root_contract() -> None:
+    """每个部署面上，python 工作负载必须与 java 用**同一个绝对路径**看见文档文件。
+
+    java 入库的 `document.file_path` 是它自己容器内的绝对路径，`/api/parse` 收到后要求该
+    路径在 python 容器里真实存在且落在 `DOCUMENT_STORAGE_ROOT` 之下（validators.py 的
+    `resolve(strict=True)` + `relative_to`）；`/api/ingest/url` 的反向回传同样按路径落地。
+    于是"挂 uploads 卷"与"设 root"必须**成对**出现在同一个 python 工作负载上。dev compose
+    的 fullstack 档两处都缺过（`DOCUMENT_STORAGE_ROOT` 的镜像默认值是宿主开发态相对路径），
+    结果是容器化启动下每个文档解析都 400 code 10001——纯文本核对，CI 不需要 docker。
+    """
+    root, anchor_bad = _java_document_root()
+    bad = list(anchor_bad)
+    if root is None:
+        problems.append("文档目录路径契约无法核对:\n    " + "\n    ".join(bad))
+        return
+
+    workloads: list[tuple[str, str]] = []
+    for label, path in (
+        ("docker/docker-compose.yml", COMPOSE_DEV),
+        ("deploy/docker-compose.prod.yml", COMPOSE_PROD),
+    ):
+        if not path.is_file():
+            bad.append(f"{label} 缺失")
+            continue
+        for name, block in _compose_service_blocks(path.read_text(encoding="utf-8")).items():
+            if name.startswith("python"):
+                workloads.append((f"{label} 的服务 {name}", block))
+    if HELM_PYTHON_TEMPLATE.is_file():
+        workloads.append(
+            ("helm templates/python.yaml", HELM_PYTHON_TEMPLATE.read_text(encoding="utf-8"))
+        )
+    else:
+        bad.append(f"helm 的 python 模板缺失：{HELM_PYTHON_TEMPLATE}")
+
+    for label, block in workloads:
+        declared = _declared_document_root(block)
+        targets = _mount_targets(block)
+        if declared is None:
+            bad.append(
+                f"{label} 没有 DOCUMENT_STORAGE_ROOT：python 会退回镜像默认值 "
+                f"../java-backend/uploads/documents（宿主开发态路径），java 传来的 "
+                f"{root}/… 在它容器里不存在，解析一律 400"
+            )
+        elif declared != root:
+            bad.append(
+                f"{label} 的 DOCUMENT_STORAGE_ROOT={declared} 与 java 容器的文档目录 {root} "
+                f"不同号：同一份文件两边互相看不见，/api/parse 只会回 400"
+            )
+        if declared is not None and not _covers(targets, root):
+            bad.append(
+                f"{label} 声明了 root={declared}，却没有任何卷挂在 {root} 或它的祖先路径上："
+                f"读不到 java 写的文件，python 自己写的摄取暂存也会随容器重建消失"
+            )
+        elif declared is None and not _covers(targets, root):
+            bad.append(f"{label} 既没有 DOCUMENT_STORAGE_ROOT，也没有挂载覆盖 {root}")
+
+    if bad:
+        problems.append("文档目录路径契约不成立:\n    " + "\n    ".join(bad))
+    else:
+        print(f"[ok] 文档目录路径契约：{len(workloads)} 个 python 工作负载与 java 同用 {root}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
@@ -527,14 +689,17 @@ def main() -> int:
     parser.add_argument("--readme-claims", action="store_true")
     parser.add_argument("--helm-value-roots", action="store_true")
     parser.add_argument("--container-uid", action="store_true")
+    parser.add_argument("--document-storage-root", action="store_true")
     args = parser.parse_args()
 
     if not (args.tenant_columns or args.internal_token_keys or args.test_counts
             or args.flyway_doc_sync or args.h2_schema_drift
-            or args.readme_claims or args.helm_value_roots or args.container_uid):
+            or args.readme_claims or args.helm_value_roots or args.container_uid
+            or args.document_storage_root):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
             args.flyway_doc_sync = args.h2_schema_drift = \
-            args.readme_claims = args.helm_value_roots = args.container_uid = True
+            args.readme_claims = args.helm_value_roots = args.container_uid = \
+            args.document_storage_root = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -552,6 +717,8 @@ def main() -> int:
         check_helm_value_roots()
     if args.container_uid:
         check_container_uid_consistency()
+    if args.document_storage_root:
+        check_document_storage_root_contract()
 
     if problems:
         print("\n发现问题:")

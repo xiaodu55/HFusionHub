@@ -305,6 +305,11 @@ services:
       MILVUS_HOST: milvus
       MILVUS_PORT: "19530"
       UPLOAD_DIR: /data/uploads
+      # Java 传来的 file_path 是它自己容器内的绝对路径（WORKDIR=/app + uploads/documents），
+      # python 只能在同一个绝对路径上读到它 ⇒ root 必须等于下面的挂载点加 /documents，且与
+      # java 共用 uploads-data。缺这一对时默认值 ../java-backend/uploads/documents（宿主开发态用）
+      # 在容器里解析成 /java-backend/...，每次解析都是 400 code 10001。
+      DOCUMENT_STORAGE_ROOT: /app/uploads/documents
       # 插件审计队列（SQLite）落点：默认值落在运行用户的家目录，而家目录在镜像层里，
       # 容器一重建未同步/dead-letter 行就一起消失；python-data 卷只挂在 /data。
       HFUSIONHUB_AUDIT_DB_PATH: /data/hfusionhub-audit
@@ -324,6 +329,9 @@ services:
       ARQ_REDIS_DSN: "redis://:${REDIS_PASSWORD:-}@redis7:6379/2"
     volumes:
       - python-data:/data
+      # 与 java-backend 同一块卷、同一个绝对路径：Java 写在 uploads-data:/app/uploads，
+      # python 的 DOCUMENT_STORAGE_ROOT 也必须是 /app/uploads/documents（ ingest 还往里写）
+      - uploads-data:/app/uploads
       - ../python-ai/plugins/dist:/plugin-wheels:ro
       - ../python-ai/plugins/trust:/plugin-trust:ro
     depends_on:
@@ -362,6 +370,9 @@ services:
       MILVUS_HOST: milvus
       MILVUS_PORT: "19530"
       UPLOAD_DIR: /data/uploads
+      # arq worker 才是真正读文件做解析的进程，root 必须与 java 的挂载点同号，
+      # 否则失败只是从 API 层挪到队列里（口径见 python-ai 服务的同名键）
+      DOCUMENT_STORAGE_ROOT: /app/uploads/documents
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       RAG_HYBRID_ENABLED: "true"
       LLM_ALLOW_MOCK: "false"
@@ -371,6 +382,9 @@ services:
       ARQ_REDIS_DSN: "redis://:${REDIS_PASSWORD:-}@redis7:6379/2"
     volumes:
       - python-data:/data
+      # 与 java-backend 同一块卷、同一个绝对路径：Java 写在 uploads-data:/app/uploads，
+      # 本进程的 DOCUMENT_STORAGE_ROOT 也必须是 /app/uploads/documents
+      - uploads-data:/app/uploads
       - ../python-ai/plugins/dist:/plugin-wheels:ro
       - ../python-ai/plugins/trust:/plugin-trust:ro
     depends_on:
