@@ -11,6 +11,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第八十六批（2026-10-08：评测的三个落点写死在相对路径上，而没有任何一档拓扑把卷挂在那儿）
+
+#### 结论（先给判定性质）
+- 待办本是"CHECKPOINT_DB_PATH 的落点"，先取数就把它否掉了：`get_checkpoint_manager` 在 `app/` 下**没有任何调用方**（全仓扫描，只有模块自身与测试），所以讨论"它该落哪块卷"没有适用对象。但 `docs/ENVIRONMENT.md:120` 把它列为可配项——按第八十二批的口径，这类"文档声称有落点、代码没有写点"是假开关的兄弟形态，本批把措辞降级为"当前无生产写点"，并加一条**自我撤除**的文本断言：一旦 app/ 出现调用方而文档还带着这句限定，测试就红
+- 顺着"谁的产物不在卷上"查下去，撞出的是**已上线的缺陷**而不是留缝：评测产物的三个落点全是模块级硬编码的相对目录（`app/api/eval_harness.py:31`、`app/core/eval_harness/runner.py:25`、`app/core/eval_harness/metrics/llm_judge.py:63`），容器里 `WORKDIR=/app` ⇒ `/app/data`，而三档 shipped 拓扑没有一档把卷挂在那（compose 只挂 `/data`，helm 连 `/data` 都不存在）。`/score`、`/slides`、`/report`、`/diff` 四个端点是按"文件还在"读回的（`eval_harness.py:211/220/236-237`）⇒ 容器或 Pod 一重建就全部 404，helm 两副本下副本 A 生成的报告对副本 B 根本不可见。与第八十/八十二批同一失效形态（键在全仓任何部署配置里都没出现过），只是这次坏的不是持久性而是一次完整评测跑不出结果
+- **落点不能一把梭**，这是第八十二批"读语义决定拓扑"那条规则的又一次应用：runs/reports/scores 是"写一次、之后按文件名读回"⇒ 该共享（helm 必须 RWX，跨副本可见）；judge 缓存是整文件 read-modify-write（`llm_judge.py:73` 起）⇒ 与共享根同目录时副本互相静默丢条目，只能分面
+
+#### 改动
+- `app/utils/config.py:180-182` 新增 `EVAL_HARNESS_DATA_DIR`（默认 `data/eval_harness`）与 `EVAL_JUDGE_CACHE_PATH`（默认 `data/eval_harness/judge_cache.json`）——默认值逐字保持今天的相对布局，宿主开发态零变化；三处常量改为读这两把键（`REPORTS_DIR`/`_RUNS_DIR`/`_CACHE_PATH`）
+- `docker/docker-compose.yml`：`python-ai` 与 `python-ai-worker` 各设 `/data/eval-harness`，缓存分面成 `.http.json` / `.worker.json` 两个文件（同根不同进程共用一个 JSON 就是自我覆盖；worker 今天不 import 评测模块，设值是给未来的 arq 评测任务留落点）
+- `deploy/docker-compose.prod.yml`：`python-ai` 设 `/data/eval-harness` ＋ `/data/eval-judge-cache.json`（单进程写，理由按变量名写进注释）
+- `deploy/helm/hfusionhub`：`templates/python.yaml` 新增 `<rel>-eval-pvc`（**ReadWriteMany**，容量取新键 `pythonAi.evalReportsSize`=2Gi）挂到 `/app/eval-harness`，env 走 `/app/eval-harness` ＋ `/app/eval-harness/$(POD_NAME)/judge_cache.json`（复用第八十批已有的 downward-API `POD_NAME`）；沿用第八十三批口径**不带 `| default`**；`values.yaml` 里把"为什么一个共享一个分面"按变量名写成注释
+- `deploy/Dockerfile.python`：`mkdir -p` 补 `/app/eval-harness` —— 第八十四批的规则，空 PVC 的属主只在镜像该路径有内容时才继承，路径不存在就交给 provisioner
+- `scripts/static-checks.py` 新增检查 10 `check_eval_harness_storage()`（＋ `--eval-harness-storage`，并入默认全跑档）：每个 python 工作负载要求两把键都设成绝对路径且落在挂载点内，helm 侧还要求该挂载点背后的 PVC 是 RWX，缓存与共享根同目录时必须含 `$(POD_NAME)` 分隔；compose 与 k8s 两种 env 写法统一走 `_declared_env()`（检查 9 的 `_declared_document_root` 现在只是它的一层薄壳）
+- `docs/ENVIRONMENT.md:120` 降级 `CHECKPOINT_DB_PATH` 措辞，新增两行评测键；`python-ai/.env.example` 补两把键的默认值与"缓存为什么单独一键"的说明（`RAG_EVALUATION_DB_PATH` 此前也只在这儿出现，别让新键重复同一个孤证形态）；`docs/PRODUCTION_OPS.md` 新增 **§11 评测产物的落点**（五档落点表、"两条规则方向相反"的推导、跨 Pod 不命中缓存的代价如实记着、四条未收口）；§10.4 表内 prod compose 锚点随本次插入改指 `:249`/`:276`
+
+#### 验证
+- 红→绿：`tests/test_eval_harness_storage.py` 新增 **18 例**，其中 17 例首跑 **16 红 / 1 绿**（红：config 缺键两条、三处常量仍硬编码三条、四档落点核对四条、文档限定语一条、门禁六条），实现后 18 passed。共用的部署面读数抽到 `tests/deploy_surface.py`（与 `static-checks.py` 里的解析**各写一遍**，两边同时看错同一形状的概率远低于一方自证）
+- 第 18 例是第八十四批那条规则的自动化：`test_python_image_creates_every_helm_mount_point` 从 `templates/python.yaml` 的 `mountPath` **派生**清单，要求每个挂载点都出现在 `Dockerfile.python` 的 `RUN mkdir -p` 里——下一批加卷而忘了建路径，这条会自己变红。判它有效：真实 Dockerfile 去掉 `/app/eval-harness` → 报红"镜像没有创建这些挂载点：['/app/eval-harness']"，用备份还原后转绿
+- **一条真缺陷是测试逼出来的**：`_helm_rwx_mounts()` 最初用 `(\S+)` 取 PVC 名，而模板里的名字是 `{{ .Release.Name }}-eval-pvc`（含空格），于是每个名字都被读成 `{{`、所有 PVC 塌成一个键、访问模式互相顶包——把 eval PVC 真改成 ReadWriteOnce，门禁照样判绿。改为整行取值后，同一次注入（改真实文件、跑完用备份还原）报红"…没有挂在 ReadWriteMany PVC 上…"，还原后转绿；`test_gate_flags_an_rwo_eval_volume_in_helm` 把这条钉住
+- 门禁真能红：tmp 夹具覆盖"两把键都没设"（报缺 `EVAL_HARNESS_DATA_DIR`）、"root 落在 `/app/data` 不在挂载点"、"缓存与共享根同目录且未按 POD_NAME 分"三种形态，另有"helm 同卷按 `$(POD_NAME)` 分目录"必须判绿的放行例
+- 接线不可能哑火：`test_gate_is_in_the_default_all_mode` 要求 `args.eval_harness_storage` 在 parse 之后、首个 dispatch 之前出现 ≥2 次
+- helm（v3.22.0，绝对路径调用，`secrets.*` 与 `pluginRunner.*` 全用 RENDER-CHECK 占位）：`lint` → 0 failed；`template` 退出 0、**23 个对象**（+1 = eval PVC）、732 行（+31）、0 个 `<no value>`，逐对象读渲染结果 `rc-eval-pvc` = ReadWriteMany/2Gi，`rc-python` env = `/app/eval-harness` ＋ `$(POD_NAME)` 分面的缓存路径，volumeMounts 含 `/app/eval-harness`，replicas 2
+- 回归：全量 pytest **1926 passed / 8 skipped**（含本批 18 例）；相邻五套（本批 + 评测 + API 契约 + 容器身份 + 路径契约）273 passed；部署面三套（checkpoint / evaluation_runs / plugin_audit）73 passed；`ruff` 干净；`scripts/static-checks.py` 全跑档通过（10 项）；Python 计数 1774→**1792**，已同步 README 徽章＋3 处正文、README_EN 徽章、docs/ROADMAP.md:16
+
+#### 遗留
+1. **没有跑过一次真实评测**：本机无 docker 引擎、无集群，§11.1 的表是渲染层与文本层证据。判伪口径写在 §11.3（卷上 touch ＋ 跑一次 run、删 Pod、用新 Pod 读回同一份 report）
+2. **RWX 能不能拿到取决于 storage class**：chart 不声明 StorageClass，只支持 RWO 的提供方会在 `Pending` 才暴露，渲染期不报错
+3. **评测产物没有清理策略**：每次 run 都往卷里追加，`evalReportsSize` 是一口价 2Gi，无 TTL/归档
+4. **两把键 import 时绑定**：改环境变量必须重启进程，`RUNS_DIR`/`REPORTS_DIR`/`_CACHE_PATH` 都是模块级常量（测试因此一律 monkeypatch 常量）
+5. 承第八十五批：`UPLOAD_DIR` 空转键、Java 侧 10 处 `R.fail(403,…)` 统一、plugin-runner 镜像 uid 未进门禁、第三方镜像无 pod securityContext、helm 结论未用 v4 复渲、ROADMAP Java 计数 703 vs 713
+6. `tests/deploy_surface.py` 这层共用读数目前只被本批的测试用着：`test_upload_path_contract.py` 里那份同构解析器还在原地（两边各写一遍是有意的，但两份重复该合并成一份"故意独立"的而不是两份"偶然相同"的）。本批没动它，以免一次改动盖住两批的回归面
+
 ### 第八十五批（2026-10-06：Java 与 python 之间传的是"路径"，而路径在两个容器里指向的不是同一个地方）
 
 #### 结论（先给判定性质）

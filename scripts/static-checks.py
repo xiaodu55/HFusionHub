@@ -46,6 +46,12 @@
   每个部署面（dev compose / prod compose / helm）的 python 工作负载都必须"挂 uploads 卷 +
   设同号 root"成对出现，缺任一侧 Java→Python 的 /api/parse 就只会回 400。
 
+检查 10：评测产物落点在卷上、且与共享根分面
+  EVAL_HARNESS_DATA_DIR（runs/reports/scores）与 EVAL_JUDGE_CACHE_PATH 在每个 python
+  工作负载上都要设成绝对路径、落在挂载点内，helm 侧还得是 ReadWriteMany PVC；缓存与共享
+  根同目录时必须按 $(POD_NAME) 分面。产物是"写一次、按文件名读回"⇒ 该共享，judge 缓存是
+  整文件 read-modify-write ⇒ 共享即互相覆盖，两条规则方向相反，只能分开核对。
+
 用法:
   python scripts/static-checks.py --tenant-columns
   python scripts/static-checks.py --internal-token-keys
@@ -56,6 +62,7 @@
   python scripts/static-checks.py --helm-value-roots
   python scripts/static-checks.py --container-uid
   python scripts/static-checks.py --document-storage-root
+  python scripts/static-checks.py --eval-harness-storage
   python scripts/static-checks.py            # 全部检查
 退出码: 0=通过, 1=发现违规
 """
@@ -564,16 +571,21 @@ def _compose_service_blocks(text: str) -> dict[str, str]:
     return blocks
 
 
-def _declared_document_root(block: str) -> str | None:
-    """python 工作负载声明的 DOCUMENT_STORAGE_ROOT，兼容 compose 与 k8s 两种写法。"""
+def _declared_env(block: str, key: str) -> str | None:
+    """工作负载声明的环境变量，兼容 compose 的 `KEY: value` 与 k8s 的 name/value 两种写法。"""
     block = _strip_comments(block)
-    flat = re.search(r'^\s*DOCUMENT_STORAGE_ROOT:\s*"?([^\n"]+)"?\s*$', block, re.MULTILINE)
+    flat = re.search(rf"^\s*{re.escape(key)}:\s*\"?([^\n\"]+)\"?\s*$", block, re.MULTILINE)
     if flat:
         return flat.group(1).strip()
     nested = re.search(
-        r'- name: DOCUMENT_STORAGE_ROOT\n\s+value:\s*"?([^\n"]+)"?\s*$', block, re.MULTILINE
+        rf'- name: {re.escape(key)}\n\s+value:\s*"?([^\n"]+)"?\s*$', block, re.MULTILINE
     )
     return nested.group(1).strip() if nested else None
+
+
+def _declared_document_root(block: str) -> str | None:
+    """python 工作负载声明的 DOCUMENT_STORAGE_ROOT，兼容 compose 与 k8s 两种写法。"""
+    return _declared_env(block, "DOCUMENT_STORAGE_ROOT")
 
 
 def _mount_targets(block: str) -> list[str]:
@@ -679,6 +691,111 @@ def check_document_storage_root_contract() -> None:
         print(f"[ok] 文档目录路径契约：{len(workloads)} 个 python 工作负载与 java 同用 {root}")
 
 
+# ── 检查 10：评测产物落点在卷上、且与共享根分面 ──────────────────────────
+
+HELM_PYTHON_CONTAINER = "- name: python-ai"
+
+
+def _helm_rwx_mounts(text: str) -> set[str]:
+    """返回挂在 ReadWriteMany PVC 上的 mountPath（把 卷名→PVC 名→访问模式 串起来）。
+
+    名称一律取整行余量而不是 `\\S+`：模板里的 PVC 名是 `{{ .Release.Name }}-xxx`，
+    含空格，用 `\\S+` 会把每个名字都读成 `{{`，于是所有 PVC 塌成一个键、
+    访问模式互相顶包——RWO 也会被当成 RWX 放过。
+    """
+    modes_by_claim: dict[str, list[str]] = {}
+    for m in re.finditer(
+        r"kind: PersistentVolumeClaim\n(?:.*\n)*?^  accessModes:\n((?:\s+-\s+\S+\n)+)",
+        text,
+        re.MULTILINE,
+    ):
+        name = re.search(r"^  name:\s*(.+?)\s*$", text[m.start():m.end()], re.MULTILINE)
+        if name:
+            modes_by_claim[name.group(1)] = re.findall(r"^\s+-\s+(\S+)", m.group(1), re.MULTILINE)
+    modes_by_volume = dict(
+        re.findall(
+            r"- name:\s*(.+?)\s*\n\s+persistentVolumeClaim:\s*\n\s+claimName:\s*(.+?)\s*$",
+            text,
+            re.MULTILINE,
+        )
+    )
+    out: set[str] = set()
+    for volume, mount in re.findall(
+        r"- name:\s*(.+?)\s*\n\s+mountPath:\s*(.+?)\s*$", text, re.MULTILINE
+    ):
+        claim = modes_by_volume.get(volume)
+        if claim and "ReadWriteMany" in modes_by_claim.get(claim, []):
+            out.add(mount.rstrip("/"))
+    return out
+
+
+def check_eval_harness_storage() -> None:
+    """评测产物（runs/reports/scores）与 judge 缓存的落点必须在卷上，且两者分面。
+
+    三个落点此前是模块级硬编码的相对目录，容器里解析成 /app/data —— 三档 shipped 拓扑
+    没有任何一档把卷挂在那里（compose 只挂 /data，helm 连 /data 都不存在）。后果不是少了
+    一个优化：`/score`、`/slides`、`/report`、`/diff` 是按"文件还在"读回的，容器或 Pod
+    一重建就全部 404，helm 两副本下 A 生成的报告对 B 根本不可见。
+    落点也不能一把梭：产物是"写一次、之后按文件名读回"⇒ 该共享（helm 必须 RWX）；judge
+    缓存是整文件 read-modify-write ⇒ 与共享根同目录时副本会互相覆盖，只能按 POD_NAME 分。
+    """
+    workloads: list[tuple[str, str, bool]] = []
+    for label, path in (
+        ("docker/docker-compose.yml", COMPOSE_DEV),
+        ("deploy/docker-compose.prod.yml", COMPOSE_PROD),
+    ):
+        if not path.is_file():
+            problems.append(f"评测产物落点无法核对：{label} 缺失")
+            continue
+        for name, block in _compose_service_blocks(path.read_text(encoding="utf-8")).items():
+            if name.startswith("python"):
+                workloads.append((f"{label} 的服务 {name}", block, False))
+    if HELM_PYTHON_TEMPLATE.is_file():
+        text = HELM_PYTHON_TEMPLATE.read_text(encoding="utf-8")
+        # 模板里没有 python 容器时无从核对（本检查只管落点，不管副本数怎么来）
+        if HELM_PYTHON_CONTAINER in text:
+            workloads.append(("helm templates/python.yaml", text, True))
+
+    bad: list[str] = []
+    for label, block, is_helm in workloads:
+        data_dir = _declared_env(block, "EVAL_HARNESS_DATA_DIR")
+        cache = _declared_env(block, "EVAL_JUDGE_CACHE_PATH")
+        targets = _mount_targets(block)
+        if data_dir is None:
+            bad.append(
+                f"{label} 没有 EVAL_HARNESS_DATA_DIR：python 会退回镜像默认值 "
+                f"data/eval_harness（相对 WORKDIR=/app ⇒ /app/data，不在任何卷上），"
+                f"评测产物随容器重建消失"
+            )
+        elif not data_dir.startswith("/"):
+            bad.append(f"{label} 的 EVAL_HARNESS_DATA_DIR={data_dir} 不是绝对路径（仍在镜像层）")
+        elif not _covers(targets, data_dir):
+            bad.append(
+                f"{label} 的 EVAL_HARNESS_DATA_DIR={data_dir} 不在任何挂载点上："
+                f"/score、/slides、/report、/diff 四个读端点按文件名读回，重建即 404"
+            )
+        elif is_helm and data_dir not in _helm_rwx_mounts(block):
+            bad.append(
+                f"{label} 的 {data_dir} 没有挂在 ReadWriteMany PVC 上：python 有 2 副本，"
+                f"副本 A 生成的报告必须对副本 B 可见"
+            )
+        if cache is None:
+            bad.append(
+                f"{label} 没有 EVAL_JUDGE_CACHE_PATH：judge 缓存落回镜像层，"
+                f"且与共享产物同根时会整文件互相覆盖"
+            )
+        elif data_dir and cache.startswith(data_dir.rstrip("/") + "/") and "$(POD_NAME)" not in cache:
+            bad.append(
+                f"{label} 的缓存 {cache} 落在共享根 {data_dir} 下却没有按 $(POD_NAME) 分目录："
+                f"judge 缓存是整文件 read-modify-write，多进程/多副本共用一个文件会互相覆盖"
+            )
+
+    if bad:
+        problems.append("评测产物落点不成立:\n    " + "\n    ".join(bad))
+    else:
+        print(f"[ok] 评测产物落点：{len(workloads)} 个 python 工作负载的产物在卷上、缓存已分面")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
@@ -690,16 +807,17 @@ def main() -> int:
     parser.add_argument("--helm-value-roots", action="store_true")
     parser.add_argument("--container-uid", action="store_true")
     parser.add_argument("--document-storage-root", action="store_true")
+    parser.add_argument("--eval-harness-storage", action="store_true")
     args = parser.parse_args()
 
     if not (args.tenant_columns or args.internal_token_keys or args.test_counts
             or args.flyway_doc_sync or args.h2_schema_drift
             or args.readme_claims or args.helm_value_roots or args.container_uid
-            or args.document_storage_root):
+            or args.document_storage_root or args.eval_harness_storage):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
             args.flyway_doc_sync = args.h2_schema_drift = \
             args.readme_claims = args.helm_value_roots = args.container_uid = \
-            args.document_storage_root = True
+            args.document_storage_root = args.eval_harness_storage = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -719,6 +837,8 @@ def main() -> int:
         check_container_uid_consistency()
     if args.document_storage_root:
         check_document_storage_root_contract()
+    if args.eval_harness_storage:
+        check_eval_harness_storage()
 
     if problems:
         print("\n发现问题:")

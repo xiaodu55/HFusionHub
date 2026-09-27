@@ -117,7 +117,9 @@ Copy `python-ai/.env.example` to `python-ai/.env`:
 | `AGENT_TRACE_BACKEND` | No | `sqlite` | Agent 运行元数据后端选择（第五十六批生产纵深留缝）：当前仅实现 `sqlite`，未知值警告后回落；新后端实现 `AgentTraceBackend` 协议并登记 `_BACKEND_REGISTRY` 即可接入，调用方零改动 |
 | `AGENT_TRACE_DB_PATH` | No | `<milvus 数据目录>/agent_traces.db` | `sqlite` 后端的运行元数据库文件路径 |
 | `AGENT_CHECKPOINT_BACKEND` | No | `sqlite` | Agent 检查点后端选择（第五十六批留缝）：当前仅实现 `sqlite`（WAL）；多副本部署实现 `CheckpointBackend` 协议（MySQL/Redis 共享存储）后经此切换 |
-| `CHECKPOINT_DB_PATH` | No | `data/checkpoints.db` | `sqlite` 后端的检查点库文件路径 |
+| `CHECKPOINT_DB_PATH` | No | `data/checkpoints.db` | `sqlite` 后端的检查点库文件路径（当前无生产写点：`app/` 下没有 `get_checkpoint_manager` 调用方，接线时再定落点拓扑——设了会生效但落在镜像层，别误当成已持久化） |
+| `EVAL_HARNESS_DATA_DIR` | No | `data/eval_harness` | 评测产物根目录（`runs/`、`reports/`、`scores`），`/score`、`/slides`、`/report`、`/diff` 按文件名从这里读回；三档 shipped 拓扑都把它设成卷上的绝对路径，相对值在容器里落 `/app/data`（镜像层），重建即清 |
+| `EVAL_JUDGE_CACHE_PATH` | No | `data/eval_harness/judge_cache.json` | LLM 评审缓存文件路径。刻意与上面的共享根**分面**：它是整文件 read-modify-write，多进程/多副本共用一个文件会互相覆盖（helm 按 `$(POD_NAME)` 分目录，compose 单进程各用一个文件） |
 | `LLM_RETRY_BACKOFF_SECONDS` | No | `0.5` | 指数退避基础秒数（每次翻倍 + jitter，P3） |
 | `LLM_RESPONSE_CACHE_TTL_SECONDS` | No | `300` | LLM 响应缓存 TTL（P9）；设为 0 禁用缓存 |
 | `LLM_RESPONSE_CACHE_FUZZY_ENABLED` | No | `true` | LLM 响应缓存归一化模糊命中（精确 miss 后按空白折叠+casefold 二次查找）；设为 false 仅精确匹配 |

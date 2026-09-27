@@ -24,9 +24,9 @@ COPY app/ app/
 # 初始化时继承的镜像属主）都按这个数字对齐。10001 在两侧系统池之外，且与
 # deploy/Dockerfile.java、helm values.yaml 的 podSecurity 同号——三处由
 # scripts/static-checks.py --container-uid 核对。
-# /app/uploads 与 /app/audit-queue 是 helm 两个卷的挂载点：空卷的属主来自镜像在
-# 该路径上的内容，路径不存在则由 provisioner/root 建，非 root 进程就写不进去。
-RUN mkdir -p /data/uploads /data /app/uploads /app/audit-queue \
+# /app/uploads、/app/audit-queue 与 /app/eval-harness 是 helm 三个卷的挂载点：空卷的
+# 属主来自镜像在该路径上的内容，路径不存在则由 provisioner/root 建，非 root 进程就写不进去。
+RUN mkdir -p /data/uploads /data /app/uploads /app/audit-queue /app/eval-harness \
     && groupadd -r -g 10001 hfusionhub && useradd -r -u 10001 -g 10001 -d /app hfusionhub \
     && chown -R hfusionhub:hfusionhub /app /data
 

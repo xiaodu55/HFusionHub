@@ -16,6 +16,7 @@ import re
 import threading
 from pathlib import Path
 
+from ....utils.config import config
 from ...llm import ChatMessage, get_llm
 from ...llm.judge_gate import resolve_judge_model
 from ..schemas import CaseMetric, EvalRecord
@@ -60,7 +61,7 @@ def _parse_scores(text: str) -> dict[str, float] | None:
     return scores
 
 
-_CACHE_PATH = Path("data/eval_harness/judge_cache.json")
+_CACHE_PATH = Path(config.EVAL_JUDGE_CACHE_PATH)
 _cache_lock = threading.Lock()
 
 

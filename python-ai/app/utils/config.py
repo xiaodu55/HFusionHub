@@ -172,6 +172,15 @@ class Config:
     EVAL_CONCURRENCY = int(os.getenv("EVAL_CONCURRENCY", "4"))
     # 单样本调用超时（秒）
     EVAL_TIMEOUT_S = int(os.getenv("EVAL_TIMEOUT_S", "180"))
+    # 评测产物根目录（runs/reports/scores）与 judge 缓存落点。默认值保持宿主开发态的
+    # 相对布局；容器里 WORKDIR=/app，相对值会落到镜像层，故三档 shipped 拓扑都把它
+    # 们改成绝对路径并挂到卷上（见 docs/PRODUCTION_OPS.md）。
+    # 两者必须分面配置：runs/reports 是"写一次、之后按文件名读回"，可上共享卷；
+    # judge 缓存是整文件 read-modify-write，共享卷上会互相覆盖，只能按 Pod 分目录。
+    EVAL_HARNESS_DATA_DIR = os.getenv("EVAL_HARNESS_DATA_DIR", "data/eval_harness")
+    EVAL_JUDGE_CACHE_PATH = os.getenv(
+        "EVAL_JUDGE_CACHE_PATH", "data/eval_harness/judge_cache.json"
+    )
     RAG_RERANKER_MODEL = os.getenv("RAG_RERANKER_MODEL", "BAAI/bge-reranker-base")
     RAG_RERANK_CANDIDATE_COUNT = int(os.getenv("RAG_RERANK_CANDIDATE_COUNT", "20"))
 

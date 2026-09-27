@@ -577,7 +577,7 @@ Java 与 python **必须**在同一个绝对路径上看见同一个文件，这
 
 | 部署面 | root | 挂载 | 状态 |
 |---|---|---|---|
-| prod compose | `deploy/docker-compose.prod.yml:244` | `:271` `uploads-data:/app/uploads` | 成对 |
+| prod compose | `deploy/docker-compose.prod.yml:249` | `:276` `uploads-data:/app/uploads` | 成对 |
 | helm | `templates/python.yaml:73-74` | `uploads-pvc` → `/app/uploads` | 成对 |
 | dev compose `python-ai` / `python-ai-worker` | 本批补齐 | 本批补齐 | 此前两处都缺 ⇒ 容器化一键启动下每次解析 400 |
 | 宿主开发态（`mvn spring-boot:run` + venv） | 镜像默认值 `../java-backend/uploads/documents` | 同一台机器同一文件系统 | 默认值就是为它设计的 |
@@ -585,3 +585,51 @@ Java 与 python **必须**在同一个绝对路径上看见同一个文件，这
 期望路径不是硬编码：`scripts/static-checks.py` 检查 9（`--document-storage-root`，已并入全跑档）
 从 `Dockerfile.java` 的运行阶段 WORKDIR 与 `DocumentServiceImpl.java` 的 `UPLOAD_DIR` **派生**，
 任一侧改动都会让三档同时报红。回归测试见 `python-ai/tests/test_upload_path_contract.py`。
+
+## 11. 评测产物的落点（第八十六批）
+
+评测中枢的 `runs/`、`reports/`、`scores` 与 judge 缓存此前是三处模块级硬编码的**相对**目录
+（`app/api/eval_harness.py:31`、`app/core/eval_harness/runner.py:25`、
+`app/core/eval_harness/metrics/llm_judge.py:63`）。容器里 `WORKDIR=/app` ⇒ 落 `/app/data`，
+而三档 shipped 拓扑没有一档把卷挂在那儿（compose 只挂 `/data`，helm 连 `/data` 都不存在）。
+后果不是"少一个优化"而是功能本身不可用：`/score`、`/slides`、`/report`、`/diff` 四个端点是
+按"文件还在"读回的（`eval_harness.py:211/220/236-237`），容器或 Pod 一重建就全部 404，
+helm 两副本下副本 A 生成的报告对副本 B 根本不可见。
+
+### 11.1 现在的落点
+
+两把键都可配（`app/utils/config.py:180-182`），默认值保持宿主开发态的相对布局：
+
+| 部署面 | `EVAL_HARNESS_DATA_DIR` | `EVAL_JUDGE_CACHE_PATH` | 卷 |
+|---|---|---|---|
+| dev compose `python-ai` | `/data/eval-harness` | `/data/eval-judge-cache.http.json` | `python-data:/data` |
+| dev compose `python-ai-worker` | `/data/eval-harness` | `/data/eval-judge-cache.worker.json` | `python-data:/data` |
+| prod compose `python-ai` | `/data/eval-harness` | `/data/eval-judge-cache.json` | `python-data:/data` |
+| helm `python`（2 副本） | `/app/eval-harness` | `/app/eval-harness/$(POD_NAME)/judge_cache.json` | `<rel>-eval-pvc`（RWX，`pythonAi.evalReportsSize`=2Gi） |
+| 宿主开发态 | 默认 `data/eval_harness` | 默认 `data/eval_harness/judge_cache.json` | 直接落仓库目录 |
+
+### 11.2 为什么两条规则方向相反
+
+- **产物该共享**：一个 run 文件写一次，之后 `/diff`、`/report`、`/slides` 只按文件名读回，
+  没有并发写同一文件的场景 ⇒ 跨 Pod 可见是需求，helm 必须 RWX。
+- **judge 缓存不该共享**：读写缓存是整文件 read‑modify‑write（`llm_judge.py:73` 起），
+  两个进程共用一个文件 = 后写者丢弃先写者的条目，没有任何告警。所以它刻意与共享根**分面**：
+  compose 每进程一个文件，helm 落在同一块 RWX 卷上但按 `$(POD_NAME)` 分子目录。
+- 代价如实记着：**缓存按 Pod 分之后，跨 Pod 不命中**，同一问题在两个副本上会各判一次分（多花
+  一次评审调用），换来的是不会静默丢缓存。若要真共享缓存，得换成键值存储而不是一个 JSON 文件。
+
+### 11.3 未收口
+
+- **RWX 是否真能拿到，取决于 storage class**：本仓没有声明 StorageClass，`ReadWriteMany`
+  请求在只支持 RWO 的提供方上会以 `Pending` 表现，而不是渲染期报错。
+- **产物没有清理策略**：每次评测都往卷里追加 run/report 文件，`evalReportsSize` 目前是一口价
+  2Gi，没有 TTL 或归档动作。
+- **两把键在 import 时绑定**（模块级常量），改了环境变量必须重启进程才生效。
+- 11.1 的表是渲染层与文本层证据，**没有做过一次真实评测**：本机无 docker 引擎、无集群。
+  有集群时的实测口径：
+
+```bash
+kubectl -n <ns> exec deploy/<rel>-python -- sh -c 'touch /app/eval-harness/.w && echo ok'
+# 跑一次小样本评测，删掉 Pod，再用新 Pod 读回同一份报告
+curl -s -X POST http://<svc>/api/eval-harness/run -H "X-Internal-Token: …" -d @run.json
+```

@@ -80,6 +80,13 @@ spec:
                   fieldPath: metadata.name
             - name: HFUSIONHUB_AUDIT_DB_PATH
               value: "/app/audit-queue/$(POD_NAME)"
+            # 评测产物（runs/reports/scores）写一次、之后按文件名读回 ⇒ 共享 RWX 卷，
+            # 否则副本 A 生成的报告对副本 B 不可见，Pod 重建后四个读端点全 404。
+            - name: EVAL_HARNESS_DATA_DIR
+              value: /app/eval-harness
+            # judge 缓存是整文件 read-modify-write，与上面的共享根分面：同一块卷上按 Pod 分目录。
+            - name: EVAL_JUDGE_CACHE_PATH
+              value: "/app/eval-harness/$(POD_NAME)/judge_cache.json"
             {{- if .Values.pluginRunner.enabled }}
             - name: PLUGIN_RUNNER_URL
               value: "http://{{ .Release.Name }}-plugin-runner:{{ .Values.pluginRunner.port }}"
@@ -112,6 +119,8 @@ spec:
               mountPath: /app/uploads
             - name: audit-queue
               mountPath: /app/audit-queue
+            - name: eval-harness
+              mountPath: /app/eval-harness
       volumes:
         - name: shared-uploads
           persistentVolumeClaim:
@@ -119,6 +128,22 @@ spec:
         - name: audit-queue
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-audit-pvc
+        - name: eval-harness
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-eval-pvc
+---
+# 评测产物（runs/reports/scores）卷。RWX：2 副本里 A 生成、B 要能读回对比。
+# judge 缓存也在这一块上，但走 $(POD_NAME) 子目录，见上面的 env。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-eval-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: {{ .Values.pythonAi.evalReportsSize }}
 ---
 # 插件审计队列（SQLite）卷。RWX：python 有 2 副本，各写自己的 POD_NAME 子目录。
 apiVersion: v1

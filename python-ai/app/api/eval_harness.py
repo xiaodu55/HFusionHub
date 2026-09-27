@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api/eval-harness", tags=["eval-harness"])
 # 数据集白名单目录：仅允许加载该目录下的 .jsonl（防目录穿越）
 logger = logging.getLogger(__name__)
 DATASET_DIR = Path(__file__).resolve().parent.parent.parent / "scripts" / "eval_sets"
-REPORTS_DIR = Path("data/eval_harness/reports")
+REPORTS_DIR = Path(config.EVAL_HARNESS_DATA_DIR) / "reports"
 
 
 def _guard_run_file(name: str) -> None:

@@ -316,6 +316,12 @@ services:
       # 评测历史（控制台的"最近评测"读面）同理：默认 ./data/... 落在镜像层里，重建即清。
       # 本拓扑只有一个 HTTP 进程写它（arq worker 从不 import 该 store），故可安全共享 /data。
       RAG_EVALUATION_DB_PATH: /data/rag_evaluation_runs.db
+      # 评测产物（runs/reports/scores）+ judge 缓存：默认相对路径在容器里落 /app/data
+      # （镜像层，三档拓扑都没把卷挂在那儿），重建即清，而 /score、/slides、/report、
+      # /diff 四个端点是按"文件还在"读回的。与 python-ai-worker 同根，但它自己的缓存
+      # 文件单独一个——judge 缓存是整文件 read-modify-write，两进程共用一个会互相覆盖。
+      EVAL_HARNESS_DATA_DIR: /data/eval-harness
+      EVAL_JUDGE_CACHE_PATH: /data/eval-judge-cache.http.json
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       RAG_HYBRID_ENABLED: "true"
       LLM_ALLOW_MOCK: "false"
@@ -370,6 +376,11 @@ services:
       MILVUS_HOST: milvus
       MILVUS_PORT: "19530"
       UPLOAD_DIR: /data/uploads
+      # 与 python-ai 同根（run 文件名带时间戳，写一次后按名读回），但缓存文件各自一个：
+      # 现在 worker 不 import 评测模块，配置成同一值是给未来的 arq 评测任务留落点，
+      # 而共用一个 judge 缓存文件会让两个进程整文件互相覆盖。
+      EVAL_HARNESS_DATA_DIR: /data/eval-harness
+      EVAL_JUDGE_CACHE_PATH: /data/eval-judge-cache.worker.json
       # arq worker 才是真正读文件做解析的进程，root 必须与 java 的挂载点同号，
       # 否则失败只是从 API 层挪到队列里（口径见 python-ai 服务的同名键）
       DOCUMENT_STORAGE_ROOT: /app/uploads/documents

@@ -4,7 +4,8 @@
 - `POST /api/rag/eval`（生产检索链路 bypass）→ 召回文档 ID 与上下文；
 - `POST /api/chat/stream`（SSE 流式对话）→ 回答全文 + TTFT（首个内容分块）+ 总延迟。
 
-结果逐条追加到 `data/eval_harness/runs/<label>_<ts>.jsonl`，供 score 阶段重放评分。
+结果逐条追加到 `<EVAL_HARNESS_DATA_DIR>/runs/<label>_<ts>.jsonl`（默认
+`data/eval_harness`，容器里由部署面指到卷上），供 score 阶段重放评分。
 """
 
 from __future__ import annotations
@@ -20,9 +21,10 @@ from typing import Any, Callable
 
 import httpx
 
+from ...utils.config import config
 from .schemas import EvalRecord, EvalSample
 
-_RUNS_DIR = Path("data/eval_harness/runs")
+_RUNS_DIR = Path(config.EVAL_HARNESS_DATA_DIR) / "runs"
 
 
 def _now_iso() -> str:
