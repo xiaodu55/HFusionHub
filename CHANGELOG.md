@@ -11,6 +11,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第八十七批（2026-10-08：产物上了卷之后新的失效方式变成"卷被写满"，而本仓两个清理函数都没有调用方）
+
+#### 结论（先给判定性质）
+- 第八十六批 遗留 3（"评测产物没有清理策略"）本批收口。三个口径候选（数量 / 天数 / 字节）与三个执行点（run 收尾 / 后台节拍 / 运维端点）里取"**数量 ＋ `/run` 收尾**"，依据不是偏好而是**本仓自己的证据**：`checkpoint.prune`（`app/core/agent/checkpoint.py:220`）与 `approval_store.cleanup_expired`（`app/core/agent/approval_store.py:153`）按符号名扫 `app/`＋`scripts/` 是**零调用方**，全仓唯一真在跑的清理是 `audit.py:315/337` 那种挂在自己写路径上的。做成"等人调的端点"大概率是第 3 个死函数；做成后台任务则要多一个常驻线程和它的关停口径（第八十一批刚为关停排空付过一次代价）
+- 一次**先取证再判断**的转向：原本预计"删掉 python 侧文件会让 Java 的 `eval_harness_runs` 行悬空、界面点进 404"。取数否掉了后半句——该表在仓内**没有任何读点**（`EvalHarnessRun`/`EvalHarnessRunMapper` 只被 `EvalHarnessInternalController.java:81` 的一处 insert 引用；前端 `rag/Index.vue:452` 打的 `/rag/evaluation-runs` 走的是 python 侧 SQLite store，是另一张表）。删除对 UI 也无损：下拉数据来自 `/runs` 现列目录（`Index.vue:277`），文件没了名字就消失。所以留下的只是一行**无人读的聚合摘要**，本批**选择不删**（跨面改动，且现在没有任何读者会因它报错），代价按变量名写进 §11.3
+- 顺登记一条同根的：`V79__eval_harness_runs.sql:23` 在 `run_file` 上有 `uk_eval_harness_run_file` 唯一索引，而 `runner.new_run_file` 的时间戳是**秒级** ⇒ 同 label 同秒的两条 run 会让 Java 侧 insert 直接撞键。这是第八十五批"秒级命名可撞"的另一侧，本批只记不修
+
+#### 改动
+- `app/utils/config.py` 新增 `EVAL_RETENTION_KEEP`（默认 50，宿主与容器同一默认）
+- 新增 `app/core/eval_harness/retention.py`：`prune_runs(runs_dir, reports_dir, keep=None, protect=None)`。**淘汰顺序复用 `runner.list_run_files`** ⇒ "被删的那条"与"控制台认为最新的那批"同源，不会删掉界面还在列的文件；一组 = `<label>_<ts>.jsonl` ＋它派生的 `_scores.json`/`_report.md`/`_slides.html`（与 score/report/slides 三处 `save_*` 的命名一一对应）；**无主的派生产物一并删**（对旧 run 手动 `POST /score` 会重建报告，只按 run 文件淘汰就永远清不掉）；`protect` 不占 `keep` 名额 ⇒ 盘上最多 `keep+1` 组，`keep=0` 的含义是"只留本次"；`FileNotFoundError` 归为"对手副本先删的"（不计故障也不冒领），其它 `OSError` 记进 `skipped` 并告警；**不建目录**——挂载点属主归镜像（第八十四批那条规则）
+- `app/api/eval_harness.py`：`start_run` 在 `save_report` 之后、Java 摘要回调之前 `await asyncio.to_thread(retention.prune_runs, runner_mod.default_runs_dir(), REPORTS_DIR, protect=run_file.name)`（同步 stat+unlink 不压事件循环，沿用第 54/81 批口径），整段 `try/except` 只告警——**结果已落盘，清扫失败不能把一次成功的评估判失败**。**`/run` 的响应体不加键**（`docs/api.md` 与前端 `rag.ts` 类型零改动），保留读数走日志行 `[eval-harness] retention keep=… runs=… artifacts=… skipped=… dir=…`
+- **部署面零改动**：compose / prod compose / helm 三档都不设这个键，默认 50 全局生效。这与第八十六批"落点必须逐档配"相反且是有意的——那是**路径**（不配就落错地方），这是**策略**（不配也有合理值），放宽的责任在运维调 `EVAL_RETENTION_KEEP`，不在 chart
+- 文档：`docs/ENVIRONMENT.md` 新增 `EVAL_RETENTION_KEEP` 行（含 `keep=0` 语义与"三档拓扑都不必配"）；`python-ai/.env.example` 补键 ＋"为什么不是端点"；`docs/PRODUCTION_OPS.md` 新增 **§11.3 保留口径**（口径、与 `/runs` 同源、触发点、protect 语义、孤儿规则、两副本并发清扫的预期行为），并如实列出**三处不在这个口径内**的（judge 缓存不受本口径管理、Java 摘要行不删、没有按字节/按天数的上限）；原 §11.3 未收口顺延为 **§11.4**，实测命令补一条 retention 日志行作为可核对证据
+- 更正第八十六批的两处文档账：验证里"相邻五套 273 passed"按实测改 **274**（同一组文件重跑即暴露）；遗留 1 的 §11.3 锚点随本次插入改指 §11.4，遗留 3 标注已由本批收口
+
+#### 验证
+- 红→绿：新 `tests/test_eval_retention.py` **21 例**首跑**全红**（18 failed ＋ 3 例 fixture error，红因是 `retention` 模块不存在与 config 缺键），实现后 21 passed
+- 两条是实现期暴露的自有缺陷，不是先想清楚再写的：① env 覆盖用例最初用 `importlib.reload(app.utils.config)`——reload 把模块属性 `config` 换成**新类**，而 app 代码在导入期就绑死了旧类 ⇒ `/run` 的四个用例集体 **401**（conftest 把 `INTERNAL_API_TOKEN` 设在旧类上），且"钉住默认值"的用例其实在读一份生产代码不再读的对象。改成子进程探针，理由写进该用例 docstring。② `flaky` 替身里 `retention._remove(path)` 在 patch 之后指回自己 → RecursionError；改为先取原函数引用再委托
+- 语义钉子（三条非显然，各有用例）：protect 不占名额（`keep+1` 上限）、`keep=0` 是"只留本次"而不是"全删"、淘汰顺序来自 `list_run_files` —— 第三条的用例刻意让**真实 mtime 与伪装 listing 相反**，否则"复用了控制台顺序"这句话永远证不出来
+- 容忍面各有独立用例：ghost 文件（对手副本先删）不进 `deleted_*` 也不进 `skipped`；`OSError` 进 `skipped` 且不抛；两个目录都不存在时空操作**且不建目录**
+- 接线形状：`test_run_does_not_await_the_sweep_on_the_event_loop` 要求源码里出现 `to_thread(retention.prune_runs`；`test_run_prunes_after_its_own_artifacts_are_written` 用替身记录真实调用序列，要求清扫排在 `save_report` 之后（产物没写齐就扫会把它们当孤儿）、`protect` 是本次文件名、**`keep` 不在端点里写死**
+- CI 面核对过本批不会打疼自己：`.github/workflows/eval-nightly.yml:142` 每次只跑 1 个 run、workspace 全新，`:151` 上传 `python-ai/data/eval_harness/reports/` 时不可能已凑满 50 组触发淘汰
+- 回归：全量 pytest **1947 passed / 8 skipped**（1926 ＋ 本批 21 例）；相邻六套（评测落点 + 保留 + eval_harness + API 契约 + 容器身份 + 路径契约）**295 passed**；部署面三套（checkpoint / evaluation_runs / plugin_audit）**73 passed**；`ruff check app/` 干净（一条 I001 由 `--fix` 收：`retention` 并进 `from ..core.eval_harness import EvalSample, MetricResult, retention`）；`scripts/static-checks.py` 全跑档通过（10 项，本批**无新门禁**——没有部署面改动可钉）；文档计数按**用例数**口径同步 1792→**1813**（＋21，与 pytest 汇总行的 1947 不同口径，后者含参数化展开），已改 README 徽章＋3 处正文、README_EN 徽章、`docs/ROADMAP.md:16`
+
+#### 遗留
+1. **judge 缓存没有任何淘汰**：它不按 run 生长，但随评审次数单调增，本批口径管不到它；正解是换成键值存储，而不是再挂一个计数器（§11.3 已按变量名记着）
+2. **没有按字节/按天数的上限**：`keep` 是唯一旋钮，与 `pythonAi.evalReportsSize`（2Gi）没有联动，卷写满之前不会有任何动作，也没有告警
+3. **Java `eval_harness_runs` 的行不删**（仓内无读点，故是无害摘要而不是 404）；`uk_eval_harness_run_file` 与秒级文件名的撞键面同批登记未修。将来给这张表加读面（列表页 / A-B 选 run）时，必须先决定"悬空行怎么显示"
+4. **并发清扫只有单元层证据**：本机无集群，没跑过两副本真在同一块 RWX 卷上同时删；`FileNotFoundError` 的容忍有测试，真实 NFS/SMB 卷的删除语义未验证
+5. **只调 `/score` 的工作流不触发清扫**：淘汰只挂在 `/run` 上，孤儿规则能兜住它产出的文件，但要等下一次 run
+6. 承第八十五/八十六批：`UPLOAD_DIR` 空转键、Java 侧 10 处 `R.fail(403,…)` 统一、plugin-runner 镜像 uid 未进门禁、第三方镜像无 pod securityContext、helm 结论未用 v4 复渲、ROADMAP Java 计数 703 vs 713、`tests/deploy_surface.py` 与 `test_upload_path_contract.py` 两份同构解析器尚未合并、**没有跑过一次真实评测**（§11.4）
+
 ### 第八十六批（2026-10-08：评测的三个落点写死在相对路径上，而没有任何一档拓扑把卷挂在那儿）
 
 #### 结论（先给判定性质）
@@ -34,12 +66,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 门禁真能红：tmp 夹具覆盖"两把键都没设"（报缺 `EVAL_HARNESS_DATA_DIR`）、"root 落在 `/app/data` 不在挂载点"、"缓存与共享根同目录且未按 POD_NAME 分"三种形态，另有"helm 同卷按 `$(POD_NAME)` 分目录"必须判绿的放行例
 - 接线不可能哑火：`test_gate_is_in_the_default_all_mode` 要求 `args.eval_harness_storage` 在 parse 之后、首个 dispatch 之前出现 ≥2 次
 - helm（v3.22.0，绝对路径调用，`secrets.*` 与 `pluginRunner.*` 全用 RENDER-CHECK 占位）：`lint` → 0 failed；`template` 退出 0、**23 个对象**（+1 = eval PVC）、732 行（+31）、0 个 `<no value>`，逐对象读渲染结果 `rc-eval-pvc` = ReadWriteMany/2Gi，`rc-python` env = `/app/eval-harness` ＋ `$(POD_NAME)` 分面的缓存路径，volumeMounts 含 `/app/eval-harness`，replicas 2
-- 回归：全量 pytest **1926 passed / 8 skipped**（含本批 18 例）；相邻五套（本批 + 评测 + API 契约 + 容器身份 + 路径契约）273 passed；部署面三套（checkpoint / evaluation_runs / plugin_audit）73 passed；`ruff` 干净；`scripts/static-checks.py` 全跑档通过（10 项）；Python 计数 1774→**1792**，已同步 README 徽章＋3 处正文、README_EN 徽章、docs/ROADMAP.md:16
+- 回归：全量 pytest **1926 passed / 8 skipped**（含本批 18 例）；相邻五套（本批 + 评测 + API 契约 + 容器身份 + 路径契约）274 passed；部署面三套（checkpoint / evaluation_runs / plugin_audit）73 passed；`ruff` 干净；`scripts/static-checks.py` 全跑档通过（10 项）；Python 计数 1774→**1792**，已同步 README 徽章＋3 处正文、README_EN 徽章、docs/ROADMAP.md:16
 
 #### 遗留
-1. **没有跑过一次真实评测**：本机无 docker 引擎、无集群，§11.1 的表是渲染层与文本层证据。判伪口径写在 §11.3（卷上 touch ＋ 跑一次 run、删 Pod、用新 Pod 读回同一份 report）
+1. **没有跑过一次真实评测**：本机无 docker 引擎、无集群，§11.1 的表是渲染层与文本层证据。判伪口径写在 §11.4（卷上 touch ＋ 跑一次 run、删 Pod、用新 Pod 读回同一份 report；第八十七批起还可核对 retention 日志行）
 2. **RWX 能不能拿到取决于 storage class**：chart 不声明 StorageClass，只支持 RWO 的提供方会在 `Pending` 才暴露，渲染期不报错
-3. **评测产物没有清理策略**：每次 run 都往卷里追加，`evalReportsSize` 是一口价 2Gi，无 TTL/归档
+3. **评测产物没有清理策略**：每次 run 都往卷里追加，`evalReportsSize` 是一口价 2Gi，无 TTL/归档 **（已由第八十七批收口：按数量淘汰，口径与仍不在口径内的三条见 §11.3）**
 4. **两把键 import 时绑定**：改环境变量必须重启进程，`RUNS_DIR`/`REPORTS_DIR`/`_CACHE_PATH` 都是模块级常量（测试因此一律 monkeypatch 常量）
 5. 承第八十五批：`UPLOAD_DIR` 空转键、Java 侧 10 处 `R.fail(403,…)` 统一、plugin-runner 镜像 uid 未进门禁、第三方镜像无 pod securityContext、helm 结论未用 v4 复渲、ROADMAP Java 计数 703 vs 713
 6. `tests/deploy_surface.py` 这层共用读数目前只被本批的测试用着：`test_upload_path_contract.py` 里那份同构解析器还在原地（两边各写一遍是有意的，但两份重复该合并成一份"故意独立"的而不是两份"偶然相同"的）。本批没动它，以免一次改动盖住两批的回归面

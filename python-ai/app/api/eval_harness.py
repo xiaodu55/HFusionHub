@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from ..core.eval_harness import EvalSample, MetricResult
+from ..core.eval_harness import EvalSample, MetricResult, retention
 from ..core.eval_harness import diff as diff_mod
 from ..core.eval_harness import report as report_mod
 from ..core.eval_harness import runner as runner_mod
@@ -170,6 +170,17 @@ async def start_run(request: _RunRequest,
         retrieval_k=request.top_k,
     )
     report_mod.save_report(result, REPORTS_DIR, title=request.label)
+    # 本次产物已齐，收尾时就地淘汰旧 run（第八十七批）。清扫失败只告警：评估结果已经
+    # 落盘，不能因为卷上删不掉旧文件就把一次成功的评估判成失败。
+    try:
+        await asyncio.to_thread(
+            retention.prune_runs,
+            runner_mod.default_runs_dir(),
+            REPORTS_DIR,
+            protect=run_file.name,
+        )
+    except Exception as exc:
+        logger.warning("[eval-harness] retention sweep failed: %s", exc)
     import asyncio
     # 第五十四批：同步 httpx 回传最阻塞 10s，不得在事件循环上直接执行
     await asyncio.to_thread(_notify_java_record, run_file.name, request, result, tenant_id)

@@ -618,12 +618,44 @@ helm 两副本下副本 A 生成的报告对副本 B 根本不可见。
 - 代价如实记着：**缓存按 Pod 分之后，跨 Pod 不命中**，同一问题在两个副本上会各判一次分（多花
   一次评审调用），换来的是不会静默丢缓存。若要真共享缓存，得换成键值存储而不是一个 JSON 文件。
 
-### 11.3 未收口
+### 11.3 保留口径（第八十七批）
+
+第 86 批把产物搬上卷之后，失效方式从"重建即丢"换成"卷被写满"：一个 run 的 JSONL 逐样本
+存召回全文（`EvalRecord.contexts`，`app/core/eval_harness/schemas.py:44`），一次评测最多
+500 条样本、每条最多 top_k 篇原文，而 2Gi 的 eval PVC 一旦写满，同卷的其它写者会一起失败。
+
+- **口径是数量，不是天数也不是字节**：`EVAL_RETENTION_KEEP`（默认 50）约束"旧的留几组"，
+  一组 = `<label>_<ts>.jsonl` 与它派生的 `_scores.json`/`_report.md`/`_slides.html`
+  （命名由 `run_file.replace(".jsonl", …)` 决定，四处读回的端点都按这个名字找）。
+- **淘汰与 `/runs` 同源**：`retention.prune_runs` 复用 `runner.list_run_files` 的顺序，
+  所以"被删掉的那条"与"控制台认为最新的那批"永远是同一套判断，不会删掉界面还在列的文件。
+- **触发点是 `/run` 收尾**（`app/api/eval_harness.py` 的 `start_run`，产物写齐之后、
+  Java 摘要回调之前，走 `asyncio.to_thread`）。没有后台任务，也没有一个等着运维点的清理
+  端点：本仓已有 `checkpoint.prune`（`app/core/agent/checkpoint.py:220`）与
+  `approval_store.cleanup_expired`（`app/core/agent/approval_store.py:153`）两个**零调用方**
+  的清理函数，再加第三个不会更安全。
+- **本次那条受保护且不占名额**：时间戳是秒级，同秒两条时它未必排在最前，故显式 `protect`；
+  因此盘上最多 `keep+1` 组。`keep=0` 的含义是"只留本次"。
+- **孤儿派生产物一并删**：对一条旧 run 手动 `POST /score` 会重建它的报告文件，若只按 run
+  文件淘汰，这些没有对应 run 的文件永远清不掉。
+- **两副本在同一块 RWX 卷上并发清扫是预期行为**：对手副本先删掉某个文件不算故障
+  （`FileNotFoundError` 被吞、不计入本次的 `deleted_*`），删不掉的（权限/IO）记进
+  `skipped` 并告警，清扫失败不会把一次已完成的评估判失败。
+
+三处不在保留口径内，如实记着：
+
+- **judge 缓存不受这个口径管理**：它不按 run 生长（每个被评审的 case 一条），但也**没有任何
+  淘汰**，`EVAL_JUDGE_CACHE_PATH` 会随评测次数单调变大；处理它要换键值存储而不是加计数器。
+- **Java 摘要行不删**：`_notify_java_record` 写进 `eval_harness_runs` 的行会活得比明细文件
+  久（该表在仓内**没有读点**，所以留下的是无害的聚合摘要而不是 404；它的 `run_file` 上还有
+  `uk_eval_harness_run_file` 唯一索引，见 `V79__eval_harness_runs.sql:23`）。
+- **没有按字节/按天数的上限**：`keep` 是唯一旋钮，`evalReportsSize` 与它之间没有联动，
+  把卷调大只靠运维自己放宽 `EVAL_RETENTION_KEEP`。
+
+### 11.4 未收口
 
 - **RWX 是否真能拿到，取决于 storage class**：本仓没有声明 StorageClass，`ReadWriteMany`
   请求在只支持 RWO 的提供方上会以 `Pending` 表现，而不是渲染期报错。
-- **产物没有清理策略**：每次评测都往卷里追加 run/report 文件，`evalReportsSize` 目前是一口价
-  2Gi，没有 TTL 或归档动作。
 - **两把键在 import 时绑定**（模块级常量），改了环境变量必须重启进程才生效。
 - 11.1 的表是渲染层与文本层证据，**没有做过一次真实评测**：本机无 docker 引擎、无集群。
   有集群时的实测口径：
@@ -632,4 +664,6 @@ helm 两副本下副本 A 生成的报告对副本 B 根本不可见。
 kubectl -n <ns> exec deploy/<rel>-python -- sh -c 'touch /app/eval-harness/.w && echo ok'
 # 跑一次小样本评测，删掉 Pod，再用新 Pod 读回同一份报告
 curl -s -X POST http://<svc>/api/eval-harness/run -H "X-Internal-Token: …" -d @run.json
+# 保留口径生效与否的可核对证据：日志里这条只在真删了东西时出现
+# [eval-harness] retention keep=… runs=… artifacts=… skipped=… dir=…
 ```

@@ -181,6 +181,10 @@ class Config:
     EVAL_JUDGE_CACHE_PATH = os.getenv(
         "EVAL_JUDGE_CACHE_PATH", "data/eval_harness/judge_cache.json"
     )
+    # 评测产物的保留条数（一组 = 一个 run 的 JSONL + 它的三个派生报告）。淘汰在每次
+    # /run 收尾时就地执行（app/api/eval_harness.py），没有后台任务；protect 的那条另算，
+    # 故盘上最多 keep+1 组。judge 缓存不归这个口径管（它不按 run 生长）。
+    EVAL_RETENTION_KEEP = int(os.getenv("EVAL_RETENTION_KEEP", "50"))
     RAG_RERANKER_MODEL = os.getenv("RAG_RERANKER_MODEL", "BAAI/bge-reranker-base")
     RAG_RERANK_CANDIDATE_COUNT = int(os.getenv("RAG_RERANK_CANDIDATE_COUNT", "20"))
 
