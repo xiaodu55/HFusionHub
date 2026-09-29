@@ -95,6 +95,16 @@ class TestTraceMiddleware:
 class TestOtelTraceparentPropagation:
     """W3C traceparent 提取 → OTel 服务端 span（OTEL 启用时才生效）。"""
 
+    @pytest.fixture(autouse=True)
+    def _require_otel_sdk(self):
+        """这两个用例测的是"装了 SDK 时 span 怎么落地"，环境没装 OTel 就是前提不成立。
+
+        CI 的 python job 只装 `requirements-dev.txt`（ci.yml:155），而 OTel 不在那份锁里——
+        它是 `deploy/Dockerfile.python` 显式钉版装进镜像的（第八十八批）。所以缺模块在这里
+        是真实的"环境不具备"，不是代码坏了；这条覆盖的真正执行位置是镜像内。
+        """
+        pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
+
     @pytest.mark.asyncio
     async def test_traceparent_creates_child_server_span(self, transport, monkeypatch):
         from opentelemetry import trace as otel_trace

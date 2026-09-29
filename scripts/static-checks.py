@@ -52,6 +52,12 @@
   根同目录时必须按 $(POD_NAME) 分面。产物是"写一次、按文件名读回"⇒ 该共享，judge 缓存是
   整文件 read-modify-write ⇒ 共享即互相覆盖，两条规则方向相反，只能分开核对。
 
+检查 11：依赖锁的 Windows-only 条目必须带平台 marker
+  python-ai/requirements.txt 由 Windows 开发机上的 pip-compile 生成（命令里没有
+  --python-platform），Windows 分支上的传递依赖会以无 marker 的形式进锁。pywin32 在
+  PyPI 上只有 win32 wheel ⇒ `docker build -f deploy/Dockerfile.python` 在 linux/amd64
+  上死于 "from versions: none"，而宿主是 Windows 时这条完全不可见。
+
 用法:
   python scripts/static-checks.py --tenant-columns
   python scripts/static-checks.py --internal-token-keys
@@ -63,6 +69,7 @@
   python scripts/static-checks.py --container-uid
   python scripts/static-checks.py --document-storage-root
   python scripts/static-checks.py --eval-harness-storage
+  python scripts/static-checks.py --requirements-markers
   python scripts/static-checks.py            # 全部检查
 退出码: 0=通过, 1=发现违规
 """
@@ -796,6 +803,138 @@ def check_eval_harness_storage() -> None:
         print(f"[ok] 评测产物落点：{len(workloads)} 个 python 工作负载的产物在卷上、缓存已分面")
 
 
+# ── 检查 11：锁里的 Windows-only 依赖必须带平台 marker ────────────────────
+
+# 两份锁出自同一次单平台 pip-compile，所以同一个缺陷是两份一起坏：requirements.txt 是
+# 镜像装的（deploy/Dockerfile.python:16），requirements-dev.txt 是 CI 的 python job 装的
+# （ci.yml:155/178/215、plugin-security.yml:21、eval-nightly.yml:168，全部 ubuntu-latest）。
+# 只核前者会让 CI 继续死在同一行上。
+REQUIREMENTS_TXT = REPO / "python-ai" / "requirements.txt"
+REQUIREMENTS_DEV_TXT = REPO / "python-ai" / "requirements-dev.txt"
+LOCK_FILES = (REQUIREMENTS_TXT, REQUIREMENTS_DEV_TXT)
+
+# 上游只在 Windows 上需要的包，及其进锁的原因（`# via` 那句）。
+# pywin32 在 PyPI 上只有 win32 wheel、没有 sdist ⇒ linux/amd64 解析直接失败；
+# win32-setctime 装得上但不该装。新增 Windows-only 传递依赖时必须同步这里，
+# 否则门禁对新条目一无所知——锁是 pip-compile 在无 --python-platform 的宿主上生成的。
+WINDOWS_ONLY_PINS = {
+    "pywin32": "docker SDK",
+    "win32-setctime": "loguru",
+}
+
+# 方向相反的同一条款：只在**非** Windows 上才需要的包。uvicorn 的 `standard` extra 把
+# uvloop 钉在 `sys_platform != "win32"` 上，pip-compile 在 Windows 宿主上按 marker 为假
+# 直接不写它 ⇒ 锁里既没有这条 pin 也没有它的哈希；Linux 侧 marker 为真，pip 只好拿 extra
+# 自带的 `!=0.15.0,!=0.15.1,>=0.14.0` 去解析，而哈希模式不接受非 `==` 的传递依赖：
+#   2582.1 ERROR: In --require-hashes mode, all requirements must have their versions
+#                pinned with ==. These do not: uvloop!=0.15.0,!=0.15.1,>=0.14.0
+# 所以这里核两件事：条目存在，且 marker 排除 win32（无 marker 会让生成锁的那台 Windows
+# 宿主自己装不上）。新增非 Windows 专属传递依赖时同步这里，理由同上——锁是单平台编译的。
+NON_WINDOWS_ONLY_PINS = {
+    "uvloop": 'uvicorn[standard] extra（sys_platform != "win32"）',
+}
+
+
+def _lock_pins(text: str) -> list[tuple[str, str, int, int]]:
+    """返回 (规范化包名, marker, 行号, 哈希条数)，marker 只看条目首行。
+
+    条目形态：首行 `name[extras]==version [; marker] \\`，其后是 `--hash=` 续行和
+    `# via` 段。marker 只从首行读——从续行找回 marker 会让"有 marker"与"没 marker"看起来一样。
+    extras 参与匹配但不进包名：锁里 `uvicorn[standard]`、`jsonschema[format-nongpl]`、
+    `cyclonedx-python-lib[validation]` 都是这种形态，早先的正则不含 `[` ⇒ 它们从计数里
+    直接消失（prod 74/77、dev 97/102），一个手工追加的无哈希 `foo[bar]==1.2.3` 正好落在
+    这个盲点上。
+    """
+    out: list[list] = []
+    for lineno, raw in enumerate(text.splitlines(), start=1):
+        stripped = raw.strip()
+        if stripped.startswith("--hash=") and out:
+            out[-1][3] += 1
+            continue
+        if not stripped or stripped.startswith("#") or stripped.startswith("--"):
+            continue
+        head = stripped.split(" \\")[0].strip()
+        m = re.match(
+            r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]+\])?==([^;\s]+)(?:\s*;\s*(.*))?$",
+            head,
+        )
+        if m:
+            out.append([m.group(1).lower().replace("_", "-"), m.group(3) or "", lineno, 0])
+    return [(name, marker, lineno, counts) for name, marker, lineno, counts in out]
+
+
+def check_requirements_platform_markers() -> None:
+    """锁的可安装面：Windows-only 条目要带 marker，且哈希锁定不能只锁一半。两份锁都核。
+
+    两条都来自第八十八批第一次真实 `docker build -f deploy/Dockerfile.python`：
+    ① `pywin32==312` 没有 marker，pip 在 linux/amd64 上死于
+      `Could not find a version that satisfies the requirement pywin32==312 (from versions: none)`
+      —— PyPI 上它只有 win32 wheel、没有 sdist。宿主是 Windows 时解析得动，所以开发机不可见。
+    ② 修完 ① 之后撞到 `Hashes are required in --require-hashes mode, but they are missing
+      from some requirements`：`--require-hashes` 是 pip 在"任一条目带哈希"时**自动**开启的，
+      而 `65b3ef8b` 手工往锁尾追加了三条没有哈希的 opentelemetry pin（`requirements.in` 里
+      没有它们）。这条不限平台，CI 的 `pip install -r requirements.txt` 一起中招。
+    ③ 修完 ② 之后同一次构建走到 collect 末尾（2582 秒）死于 uvloop——它是 `uvicorn[standard]`
+      在非 Windows 上的依赖，单平台编译的锁里根本没有这一条（见 NON_WINDOWS_ONLY_PINS）。
+      形状与 ① 同根、方向相反，代价是"锁修好了但镜像仍装不上"，且要让 extra 自带的 >= 规格
+      解析到最后才报，所以反馈周期是一整次构建。
+    docs/PRODUCTION_OPS.md §10.2 把"首次构建即是验收"写成了两个 Dockerfile 的验收方式，
+    而 CI 的 docker-build 与 eval-nightly 恰好都断在这两行上，所以没有任何一处会报它。
+    """
+    missing = [lock for lock in LOCK_FILES if not lock.is_file()]
+    if missing:
+        problems.append("依赖锁缺失，无法核对可安装面: " + ", ".join(str(m) for m in missing))
+        return
+
+    ok_lines: list[str] = []
+    for lock in LOCK_FILES:
+        # 门禁测试会把 LOCK_FILES 换成 tmp_path 里的锁，那时 relative_to 会抛，退化成文件名即可
+        rel = lock.relative_to(REPO).as_posix() if lock.is_relative_to(REPO) else lock.name
+        pins = _lock_pins(lock.read_text(encoding="utf-8"))
+        bad = [
+            f"{rel}:{lineno} {name}==…（由 {WINDOWS_ONLY_PINS[name]} 引入）没有 marker："
+            f"Linux 环境会连 Windows-only 依赖一起要，pywin32 这类 PyPI 上只有 win32 wheel 的直接"
+            f"解析失败（docker build 死于 from versions: none），纯 Python 的那类则装进用不到的包"
+            for name, marker, lineno, _ in pins
+            if name in WINDOWS_ONLY_PINS and "win32" not in marker
+        ]
+        found = {name for name, _, _, _ in pins}
+        bad += [
+            f"{rel} 里根本没有 {name}（{NON_WINDOWS_ONLY_PINS[name]} 引入）："
+            f"锁在 Windows 宿主上编译时按 marker 为假把它跳过了，Linux 侧 pip 只能拿 extra 自带的"
+            f">= 规格去解析，而 --require-hashes 不接受非 == 的传递依赖（docker build 死于 "
+            f"'all requirements must have their versions pinned with =='）"
+            for name in sorted(NON_WINDOWS_ONLY_PINS)
+            if name not in found
+        ]
+        bad += [
+            f"{rel}:{lineno} {name}==… 的 marker 没有排除 win32（marker={marker or '无'}）："
+            f"生成这份锁的 Windows 宿主与本地开发态会装不上它"
+            for name, marker, lineno, _ in pins
+            if name in NON_WINDOWS_ONLY_PINS and ("win32" not in marker or "!=" not in marker)
+        ]
+        hashed = [pin for pin in pins if pin[3]]
+        if hashed and len(hashed) != len(pins):
+            bad += [
+                f"{rel}:{lineno} {name}==… 没有 --hash，而锁里另有 {len(hashed)} 条带哈希"
+                f"⇒ pip 自动进入 --require-hashes 并拒绝这一条（任何平台的 pip install -r 都失败）"
+                for name, _, lineno, counts in pins
+                if not counts
+            ]
+        if bad:
+            problems.append(f"依赖锁不是可安装的锁（{rel}）:\n    " + "\n    ".join(bad))
+            continue
+        windows_pins = sorted(n for n, _, _, _ in pins if n in WINDOWS_ONLY_PINS)
+        non_windows_pins = sorted(n for n, _, _, _ in pins if n in NON_WINDOWS_ONLY_PINS)
+        ok_lines.append(
+            f"{rel}：{len(pins)} 条 pin（{len(hashed)} 条带哈希，形态一致），"
+            f"Windows-only 已带 marker：{', '.join(windows_pins) or '无此类条目'}；"
+            f"非 Windows 专属依赖已钉且排除 win32：{', '.join(non_windows_pins) or '无此类条目'}"
+        )
+    if ok_lines:
+        print(f"[ok] 依赖锁可安装面：" + "；".join(ok_lines))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
@@ -808,16 +947,19 @@ def main() -> int:
     parser.add_argument("--container-uid", action="store_true")
     parser.add_argument("--document-storage-root", action="store_true")
     parser.add_argument("--eval-harness-storage", action="store_true")
+    parser.add_argument("--requirements-markers", action="store_true")
     args = parser.parse_args()
 
     if not (args.tenant_columns or args.internal_token_keys or args.test_counts
             or args.flyway_doc_sync or args.h2_schema_drift
             or args.readme_claims or args.helm_value_roots or args.container_uid
-            or args.document_storage_root or args.eval_harness_storage):
+            or args.document_storage_root or args.eval_harness_storage
+            or args.requirements_markers):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
             args.flyway_doc_sync = args.h2_schema_drift = \
             args.readme_claims = args.helm_value_roots = args.container_uid = \
-            args.document_storage_root = args.eval_harness_storage = True
+            args.document_storage_root = args.eval_harness_storage = \
+            args.requirements_markers = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -839,6 +981,8 @@ def main() -> int:
         check_document_storage_root_contract()
     if args.eval_harness_storage:
         check_eval_harness_storage()
+    if args.requirements_markers:
+        check_requirements_platform_markers()
 
     if problems:
         print("\n发现问题:")

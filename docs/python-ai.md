@@ -63,6 +63,17 @@ pip install -r requirements.txt
 pip install -r requirements-dev.txt
 ```
 
+`requirements.txt` 是 `pip-compile --generate-hashes` 的哈希锁：**不要手工往尾部追加不带
+`--hash=` 的条目**（任一条目带哈希时 pip 自动开启 `--require-hashes`，其余裸 pin 会被整体
+拒绝），也不要在 Windows-only 的传递依赖（`pywin32`、`win32-setctime`）上漏掉
+`sys_platform == "win32"` marker；反向同罪——只在**非** Windows 上需要的依赖（`uvicorn[standard]`
+的 `uvloop`）在 Windows 宿主上编译时会被 pip-compile 按 marker 为假直接跳过，锁里没有它，
+Linux 侧就会死于"extra 自带的 `>=` 规格不是 `==`"。`requirements-dev.txt` 由同一份 `.in`
+编译，两类问题都是**两份锁一起坏**，而 CI 的 python job 装的是 dev 锁。三条口径由
+`scripts/static-checks.py --requirements-markers` 纯文本核对，细节见
+[PRODUCTION_OPS §12](PRODUCTION_OPS.md)；`arq` 与 `opentelemetry` 两条由
+`deploy/Dockerfile.python` 显式钉版安装，不在锁里。
+
 ## Running
 
 ```bash

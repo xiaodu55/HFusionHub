@@ -11,6 +11,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第八十八批（2026-10-09：Docker 三项实测拿到了引擎，第一次真跑构建就把镜像装不出来 —— 同一个根因的三种形态）
+
+#### 结论（先给判定性质）
+- 待办是第八十四～八十七批反复写"本机无 docker 引擎，只到渲染层"的那三笔账。引擎起来后**第一次真实构建就失败**，而且失败的不是新东西：`python-ai/requirements.txt` 是 `pip-compile --generate-hashes` 在 Windows 宿主上**不带 `--python-platform`** 编出来的，于是它有三种"只在别的机器上发作"的形态，开发机一条都看不见——① 上游只在 Windows 上需要的包（`pywin32`、`win32-setctime`）没有 marker ⇒ linux 上 `from versions: none`；② 锁尾三条手工追加的裸 OTel pin ⇒ 任一条目带 `--hash=` 时 pip **自动**进入 `--require-hashes` 并整体拒绝裸 pin（任何平台都失败）；③ 与①同根、方向相反：`uvicorn[standard]` 的 `uvloop` 带 `sys_platform != 'win32'` marker，pip-compile 在 Windows 上按 marker 为假**直接跳过**，锁里从来没有它（另外 7 个 extra 依赖在 Windows 上不过滤，全进了锁），Linux 侧于是死于"extra 自带的 `>=` 规格不是 `==`"。所以本批不是"补个测试"，是**已 ship 的镜像构建必然失败**，且 prod 锁与 CI 的 9 处 `pip install -r` 同机制
+- 第三条只能靠**读上游 metadata**发现：它在 diff 里不存在（不是被删，是从来没出现过），"在另一个平台编译一次"也不会报——`pywin32` 那条同样是编译产物的一部分。据此把反向清单（`NON_WINDOWS_ONLY_PINS`）写进门禁，与原有的 `WINDOWS_ONLY_PINS` 成对，新增此类依赖时两侧一起同步
+- 顺带纠正一条错误的历史：`b69b0178` 撤掉 `sed 's/uvicorn\[standard\]/uvicorn/g'` 的前提是"`--require-hashes` 已不再使用"，这个前提是**错的**（①②都建立在它自动开启之上），它 commit message 里"为生产恢复事件循环"那句话因此从未成立过。撤掉之后这份 Dockerfile 再没被真实构建过，洞藏到本批
+- **OTel 的归属选"移出锁"而不是"补进锁"**（D 方案）：补哈希要求它的 closure（`opentelemetry-proto`/`-semantic-conventions`/`-exporter-otlp-proto-common`/`googleapis-common-protos`/`deprecated`）全部进锁，那是一次**含 arq/redis 归属决定**的完整重编译，不该夹带在本批；移到 `deploy/Dockerfile.python` 与 arq 同侧显式钉版，代价按变量名写在 `requirements.in` 里并留一条测试钉住"OTel 只能有一处声明"。版本不能停在 1.29.0——其 `opentelemetry-proto` 要 `protobuf<6.0`，与锁里的 `protobuf==7.35.1`（`# via pymilvus`）冲突；1.45.1 放宽到 `<8.0`。**连带后果如实登记**：OTel 只在镜像里 ⇒ CI 环境永远没有它，`TestOtelTraceparentPropagation` 必须显式 `importorskip`（装了 12 passed，假装没装 10 passed + 2 skipped），否则 dev 锁 marker 一修好，CI 第一次走到 pytest 就红在那里
+- 一个**看起来通过、其实没验证**的陷阱（写进 §10.2）：Git Bash 的 MSYS 在 spawn 外部程序时把形如 `key=/path` 的参数值改写成宿主路径，实测 `-e EVAL_HARNESS_DATA_DIR=/app/eval-harness` 进容器变成 `D:/college/Git/app/eval-harness`——POSIX 下这是相对路径 ⇒ 产物落进容器可写层，而 retention 探针照常打印"删了 3 个、跳过 0 个"。修法除了宿主侧 `MSYS2_ARG_CONV_EXCL='*'`，更根本的是**让探针自证**：目录必须绝对、且能在 `/proc/self/mounts` 里查见该挂载，否则 `SystemExit(2)`
+
+#### 改动
+- 两份锁（`python-ai/requirements.txt`、`requirements-dev.txt`，**必须一起改**，dev 锁由 `requirements-dev.in:4` 的 `-r requirements.in` 同源编译）：`pywin32==312`／`win32-setctime==1.2.0` 补 `; sys_platform == "win32"`；`uvloop==0.23.0` 整条加入（marker `sys_platform != "win32" and != "cygwin" and platform_python_implementation != "PyPy"` ＋ 该版本 61 个文件（60 wheel + sdist）的 sha256 升序，照 pip-compile 在 Linux 上会产出的形状；marker 必须留着，否则生成锁的那台 Windows 宿主自己装不上）；prod 锁尾三条裸 OTel pin 删除；两份文件头各加一段 provenance——**这两条不是编译产物，直接对现锁重编译会把它们抹掉，那不是修复而是把同一个失效方式放回锁里**
+- `python-ai/requirements.in`：写明 OTel 刻意不在此处、为什么，以及"改这里之前先完成那次重编译"的前置条件
+- `deploy/Dockerfile.python`：OTel 三条 `pip install` 显式钉版（与 arq 同形），注释更正为"`--require-hashes` 不需要谁显式开启，3cd5303 的 sed 绕的正是它"
+- `scripts/static-checks.py` 新增检查 11 `check_requirements_platform_markers()`（＋ `--requirements-markers`，并入默认全跑档）：Windows-only 条目带 marker、**非 Windows 专属条目存在且 marker 排除 win32**、锁的哈希形态一致；纯文本核对，不需要 docker 或网络。同批修掉一个**门禁与测试共同的盲点**：`_lock_pins` 的包名正则不含 `[` ⇒ `name[extra]==ver` 形态两条锁都看不见（prod 实际 77 条只数出 74、dev 102 只数出 97），一个手工追加的无哈希 `foo[bar]==1.2.3` 恰好落在盲点上
+- 新增 `python-ai/tests/test_requirements_platform_markers.py`（28 个方法 / 34 例）：三条规则、两份锁一起核、`[extra]` 形态必须被解析出来且两套解析器条目数一致、uvloop 的哈希集覆盖 `python:3.11-slim` 实际挑中的那个 wheel、钉住的版本落在 extra 自己的 `!=0.15.0,!=0.15.1,>=0.14.0` 里、OTel 只有一处声明、"两处都没有 ⇒ 追踪静默关闭"、构建期的 sed 绕法拒绝再出现
+- `tests/test_trace_middleware.py`：OTel 传播用例加 autouse `importorskip` 前提（上一条连带后果的落点）
+- 文档：`docs/PRODUCTION_OPS.md` 新增 **§12 依赖锁的可安装面**（三条规则的表、PyPI 原文 marker、历史线 3cd5303/b69b0178、解析器盲点、CI 推断段并明确标注"没有实测"、§12.1 两个锁外钉版为什么在锁外、§12.2 防回潮含"第三条没有便宜的复现命令"、§12.3 五条未收口）；**§10.2 由"只到渲染层"改写为实测事实**（构建四次、M0/M1/M2/M4 四条结论、MSYS 陷阱）；§10.3 的"没做过实测"按真实边界收窄为"java 镜像从未构建 ⇒ 单侧可写已证、互见未证"，并新登记慢网首次构建的超时面；§11.4 的"没有做过一次真实评测"补上已跑通的那半条（真卷写产物 → 换新容器读回）；`docs/python-ai.md` Setup 补反向规则；`docs/PROJECT_TOUR.md` 门禁十项→十一项；README/README_EN/ROADMAP 计数同步
+
+#### 验证
+- 红→绿**两轮**：21 例先对①②全红（现锁两条没 marker、锁尾三条裸 pin），改锁后绿；③暴露后补 13 例（含解析器盲区那两条）再次先红后绿，最终该文件 **34 passed**
+- 真实构建四次，前三次各死在一个缺陷上：`#9 2582.1 ERROR: In --require-hashes mode … uvloop!=0.15.0,!=0.15.1,>=0.14.0`（①修好后走到 ③）、`#9 2964.6 TimeoutError: The read operation timed out`（锁已对，宿主网络面：23–60 kB/s，pip 默认 15 秒读超时掐死在 4 MB wheel 的 0.3 MB 处）。**这三次失败各自都要一整次构建才有反馈**（collect 2000–3000 秒），是 §12.2 里"第三条没有便宜的复现命令"的由来。第四次（验证副本 `Dockerfile.validate`）成功：`#9 2329.3 Collecting uvloop==0.23.0 (from -r requirements.txt (line 1472))` → `#9 2443.2 Successfully installed … uvloop-0.23.0 …`，随后 `arq-0.26.3 redis-5.3.1`、`opentelemetry-api-1.45.1` 各成一层的日志都在 scratch
+- 四项运行时实测（`hfusionhub/python88:rc`，linux/amd64，三个空命名卷）：**M0** `User=hfusionhub WorkDir=/app`，`protobuf` 仍是 `7.35.1`（1.45.1 没有把它拖下去）；**M1** 三个挂载点 `uid=10001 gid=10001 mode=755` ＋ `WRITE_OK` ＋ 子目录 `mkdir` 成功（第八十四批"钉号 + 建目录"至今的第一次实证）；**M2** 真卷上 6 组由 `new_run_file`+`save_report` 写出的产物，`prune_runs(keep=2, protect=最新)` 删最旧 3 组及其 `_report.md`、`skipped=[]`、剩 3 组 = keep 2 + protect 1（`protect 不占名额`这条首次在真实文件系统上成立）；**M3** 换新容器挂同一块卷，`GET /runs` 列出 3 条含 `size_bytes`/`modified_at`，`GET /report?run_file=…` 取回正文，缺 token 回 **401**；**M4** root 属主的旧卷：写 `PermissionError [Errno 13]`，`prune_runs(keep=0)` **不抛**、两条记进 `skipped` 并各打一行告警 ⇒ 10.1 的一次性 chown 是有依据的
+- 回归：全量 pytest **1981 passed / 8 skipped**（1947 ＋ 本批 34 例）；`scripts/static-checks.py` 全跑档通过（11 项）；`ruff check app/` 干净；计数按**用例数**口径 1813→**1842**，已同步 README 徽章＋3 处正文、README_EN 徽章、`docs/ROADMAP.md:16`
+- **验证上限（不假装做过）**：CI 一次都没跑过（9 处 install 点的结论是从构建日志机制**推出来的**）；helm 侧无集群，仍是渲染层证据；`Dockerfile.java` 从未构建 ⇒ "java 写、python 读"未证；验证用的 `Dockerfile.validate` 与被验收的 Dockerfile 有两处已知差异（`PIP_DEFAULT_TIMEOUT=120`、cache mount 替 `--no-cache-dir`），生产那份在慢网上的首次构建仍未验证；探针与构建日志都在仓库外的 scratch，**未入库**，所以本文里的秒数与哈希无法从仓库复现
+
+#### 遗留
+1. **CI 上的结果仍未验收**：两条锁的 marker 都修了，但 `ci.yml:155/178/215/327`、`e2e.yml:61/200`、`eval-nightly.yml:76/168`、`plugin-security.yml:21/164` 要等下一次真实 run；本批只有本地镜像证据
+2. **锁仍然不是跨平台锁**：marker 只补在两个 Windows-only 条目加一个非 Windows 专属条目上，其余条目仍是单平台编译产物。正解是 `--python-platform linux` 重新生成，而那次重编译必须同时决定 arq/redis 的归属（对照实验：原样 `.in` 编译成功但产物没有 OTel，并新增 `arq==0.28.0` + `redis[hiredis]==5.3.1`，与现锁 diff 174 行）
+3. **runner 那份锁没跟上 extra**：`docker/Dockerfile.plugin-runner:12` 仍在 sed 剥 `uvicorn[standard]` ⇒ runner 容器没有 uvloop/httptools；与修好的锁兼容，但"runner 不跑 uvloop"写在构建命令里而不是锁里
+4. **OTel 在 CI 上永久跳过**：追踪行为的真实执行位置只有镜像内，没有 CI 或镜像内的执行记录；接进去要在 CI 里真构建并真跑 pytest
+5. **java 镜像从未构建**：`Dockerfile.java` 的 `adduser -u 10001` 与 `/app/uploads` 创建是按 Alpine 参数形态写的，第一次真实构建即是验收（§10.3）
+6. **慢网首次构建的超时面没进生产 Dockerfile**：`--no-cache-dir` ＋ pip 默认 15 秒读超时在 23–60 kB/s 前会随机死在大 wheel 中途；是否收 `PIP_DEFAULT_TIMEOUT` 取决于构建环境，本批不动那份文件
+7. judge 缓存无淘汰、`UPLOAD_DIR` 键空转、plugin-runner 镜像 uid 未进门禁、第三方镜像无 pod securityContext 等承第八十五～八十七批未收口清单
+
 ### 第八十七批（2026-10-08：产物上了卷之后新的失效方式变成"卷被写满"，而本仓两个清理函数都没有调用方）
 
 #### 结论（先给判定性质）

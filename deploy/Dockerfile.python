@@ -11,12 +11,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 # uvicorn[standard] installs uvloop + httptools for better streaming performance.
-# The sed workaround (3cd5303) was for --require-hashes mode, which is no longer
-# used. Restoring [standard] for production-grade event loop.
+# `--require-hashes` 不需要谁显式开启：锁里任一条目带 `--hash=` 时 pip 就自动进入该模式，
+# 并拒绝所有裸 pin（3cd5303 的 sed 绕法针对的正是它，它一直在生效）。因此往这份
+# pip-compile 哈希锁上手工追加无哈希条目，会让整镜像构建在 collect 之后整体失败。
 RUN pip install --no-cache-dir -r requirements.txt
 # Batch 8：arq（任务队列 worker）。requirements.txt 为 pip-compile 哈希锁文件，
 # arq 以显式钉版本在此单独安装（升级需同步修改此处与 requirements.in）。
 RUN pip install --no-cache-dir "arq==0.26.3"
+# OpenTelemetry 分布式追踪（app/utils/telemetry.py，未装则降级为 no-op）。同样不能进锁尾：
+# 补哈希要求它的 closure（opentelemetry-proto/-semantic-conventions/-exporter-otlp-proto-common/
+# googleapis-common-protos/deprecated）全部进锁，那是另一次重编译。版本不能停在 1.29.0——
+# 其 opentelemetry-proto 要 protobuf<6.0，与锁里的 protobuf==7.35.1（# via pymilvus）冲突；
+# 1.45.1 放宽到 <8.0，且 requires-python>=3.10 与本镜像 3.11 相符。
+RUN pip install --no-cache-dir \
+    "opentelemetry-api==1.45.1" \
+    "opentelemetry-sdk==1.45.1" \
+    "opentelemetry-exporter-otlp-proto-http==1.45.1"
 
 COPY app/ app/
 # 运行身份必须钉死：`useradd -r` 从 Debian 系统池（100–999）按基镜像当时占了哪些号

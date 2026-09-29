@@ -19,3 +19,8 @@ cyclonedx-bom>=4.0.0
 starlette>=0.46,<1.0
 # 任务队列 worker（Batch 8）：镜像经 Dockerfile 显式钉版安装；重新 pip-compile 后可移除该注释
 arq>=0.26
+# opentelemetry（第六十五批的 telemetry.py）刻意**不写在这里**：它曾以三条裸 pin 手工追加到
+# 锁尾（65b3ef8b），而锁是哈希锁——任一条目带 --hash= 时 pip 自动开启 --require-hashes 并
+# 拒绝其余裸 pin，镜像构建因此必然失败（第八十八批实测，1706 秒后死于缺哈希）。补哈希需要
+# 它的 closure 全部进锁，那是一次含 arq/redis 归属决定的重编译。当前由 deploy/Dockerfile.python
+# 显式钉版安装；把这里改成需求之前，先完成那次重编译。
