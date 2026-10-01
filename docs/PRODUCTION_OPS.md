@@ -26,7 +26,7 @@
 - [ ] **Flyway 迁移验证** — 确保 V1–V78 全部成功应用；检查 `flyway_schema_history` 表状态
 - [ ] **备份策略** — 脚本已就绪：`scripts/backup-data.ps1`（MySQL mysqldump）+ `scripts/backup_milvus.sh`（Milvus 卷快照）；cron 示例 `0 3 * * * cd /opt/hfusionhub && ./scripts/backup_milvus.sh /backups/milvus`；恢复演练见下文「备份恢复演练」
 - [ ] **Redis 持久化** — AOF 已启用（`appendonly yes`）；RDB 每小时备份（`save 3600 1`）
-- [ ] **卷可写性** — 应用容器以钉死的 uid 10001 运行、helm 侧同号 fsGroup（见「10. 卷属主与运行身份」）；升级到钉死 uid 前建过的卷需一次性 chown。已实测：python 镜像在真实 docker 上三个挂载点均可写（§10.2 M1）；未实测：java 镜像（从未构建）与集群侧 fsGroup 行为
+- [ ] **卷可写性** — 应用容器以钉死的 uid 10001 运行、helm 侧同号 fsGroup（见「10. 卷属主与运行身份」）；升级到钉死 uid 前建过的卷需一次性 chown。已实测：python 镜像在真实 docker 上三个挂载点均可写（§10.2 M1）；java 镜像首次真实构建通过，且与 python 在同一块卷上双向互见、`/api/parse` 认 java 写的绝对路径（§10.2 C1–C4）。未实测：集群侧 fsGroup 行为、整栈 compose 下的那条 `exec` 命令对
 
 ### 🚀 性能与扩展性
 
@@ -526,7 +526,7 @@ spec:
             claimName: hf-uploads-pvc
 ```
 
-### 10.2 实测（第八十八批：docker 侧已跑，集群侧仍未跑）
+### 10.2 实测（第八十八批 python 侧 + 第八十九批 java 侧与跨服务互见；集群侧仍未跑）
 
 本批第一次有可用的 docker 引擎，`deploy/Dockerfile.python` 从引入至今**首次真实构建成功**
 （linux/amd64，镜像 `hfusionhub/python88:rc`）。构建过程本身结掉了第 12 节的三个锁缺陷：
@@ -558,6 +558,35 @@ aliyun 镜像实测 23–60 kB/s，pip 默认 15 秒读超时在拉 uvloop 那�
 `MSYS_NO_PATHCONV=1`），并让探针自己断言：目录必须绝对、且从 `/proc/self/mounts` 里查得到
 `/app/eval-harness` 这条挂载，否则 `SystemExit(2)`。任何"往容器里传路径"的核对都该带这条自证。
 
+**第八十九批补的 java 侧与跨服务侧**（`hfusionhub-java:b89` + `hfusionhub/python88:rc` 挂
+**同一块**命名卷 `b89-shared-uploads`）：
+
+`deploy/Dockerfile.java` 也是从引入至今**首次真实构建**，未加任何改动一次通过——
+`#10 mvn dependency:go-offline` 568.5 秒、`#14 mvn -DskipTests package` 21.3 秒、
+产物 `/app/app.jar` 89,704,407 字节（全新构建，不是宿主 `target/` 里那份 9 月的旧 jar），
+`#12 addgroup -S -g 10001 && adduser -S -u 10001 -G hfusionhub && mkdir -p /app/uploads`
+**DONE 0.3s**：第八十四批按 Alpine 手册写的参数形态与挂载点创建，第一次构建即验收。
+构建环境事实（不是仓库改动）：宿主没有可用的 `mvn`（plexus `ClassNotFoundException`）、
+`~/.m2` 无 mirror 配置，基镜像走仓库默认 Central + 本机 registry mirror。
+
+| 编号 | 断言 | 实测结果 |
+| --- | --- | --- |
+| C1 | java 镜像的运行身份 + 空命名卷上的写入 | `id` = `uid=10001(hfusionhub) gid=10001`；卷在 `/app/uploads` 上 `uid=10001 gid=10001 mode=755`（属主来自镜像内容，印证 10.1）；挂载卷里**没有** `documents` 这一级，由 java 侧 `mkdir -p` 建出后写入 `.probe-b89`(32B) 与 `b89-cross.txt`(82B) |
+| C2 | java 写的字节在 python 镜像里看得见、且内容相同 | python 侧 `sha256` 与 C1 逐条相同（`9c09c7e6…`、`a2cc7689…`），并反向写 `.from-python`(`c53384b0…`) |
+| C4 | 互见是双向的 | 换回 java 容器 `cat` 到 python 落的文件，`sha256=c53384b0…` 与 C2 一致 |
+| C3 | 生产代码路径认这个路径 | python 服务带 `DOCUMENT_STORAGE_ROOT=/app/uploads/documents` 起栈，`POST /api/parse` 用 **java 写的绝对路径** → **200**（不再是 10001）；两个负例（卷外真实文件 `/etc/hostname`、卷内不存在的文件）均仍 400 `文件不存在或不在允许的上传目录中` ⇒ 围栏没被放宽 |
+
+C3 只证到**同步校验**这一层：响应 200 后的后台解析在这个探针环境里没有 Milvus/向量库，
+容器日志随后报 `pymilvus … AllocTimestamp … NotImplementedError`。"一次真评测/真文档全链路"
+仍在 11.4 与 10.3 的未收口里。
+
+**一条实测纠正的措辞（10.4 第 3 步）**：`code 10001` 在**响应体里不是字段**。
+`validators.py` 抛的是 `HTTPException(400, detail={"code":10001,…})`，而
+`exception_handlers.py:43` 用 `str(exc.detail)` 把 detail 压成字符串，所以线上信封是
+`{"code":400,"message":"{'code': 10001, 'message': '文件不存在或不在允许的上传目录中'}"}`。
+10001/10002/10005 这批业务码目前对机器不可读（Java 侧只取 message 文本，不解析 `code`，
+`grep` 全仓 java 代码只有 `OidcService.java:160` 用到过 `"code"` 且与此无关）。
+
 helm 侧仍未跑（本机无集群）：渲染层证据是第八十四批那份（22 个对象、java/python 的
 podSecurityContext 三项齐、0 个 `<no value>`），"真的能写"要在真实环境各跑一次：
 
@@ -576,18 +605,26 @@ docker compose exec python-ai      sh -c 'cat /app/uploads/documents/.probe && t
 ```
 
 `python-ai` 读不到就是 10.4 的契约没落地（挂载或 root 缺一处），Java 侧的解析会一律
-回 `文件不存在或不在允许的上传目录中`（code 10001）。**这两条本批都没做**：M1 里的
-`mkdir /app/uploads/documents` 是 python 容器自己建的，java 镜像至今未构建过。
+回 `文件不存在或不在允许的上传目录中`（这个 10001 只在 message 文本里，见上文信封那条）。
+**第八十九批已在镜像层把这一对跑通**（上表 C1/C2/C4 与 C3）：卷是同一块、写与读分属两个
+镜像、`/app/uploads/documents` 由 java 侧建、python 侧读到同哈希字节并反向落文件。
+上面这两条 `docker compose exec` 本身仍未跑——它们要 fullstack 档整栈起来（含 mysql/redis），
+本机没有跑过一次整栈；镜像层的等价命令在 `hfusionhub-scratch/b89cross.sh`。
 
 ### 10.3 已知未收口
 
-- **"同路径互见"只做到了配置层对齐 + 单侧可写**：10.2 的 M1 只证明 python 那侧写得上，
-  java 镜像从未构建（`Dockerfile.java` 的 `adduser -u 10001` 与 `/app/uploads` 创建按 Alpine
-  的 `adduser` 参数形态写，第一次真实构建即是验收），"java 写、python 读"仍要在起得来的
-  栈里做一次（10.2 末尾的命令对）。
+- **"同路径互见"已做到镜像层成对**（第八十九批，10.2 的 C1–C4 + C3）：同一块卷、两个镜像、
+  双向哈希一致、生产校验路径不再回 10001。还差两级：**整栈 compose 起栈后那条 `exec` 命令对**
+  （要 mysql/redis 一起起），以及**一次真实文档全链路**（后台解析需要向量库，探针里缺）。
+- **业务码在错误信封里不可机器读**：`exception_handlers.py:43` 的 `str(exc.detail)` 把
+  `{"code":10001,…}` 压成字符串，线上只剩外层 `code=400`。今天没有消费方按 `code` 分支
+  （Java 取 message 文本），所以是**契约债**而非活故障；要改得同时决定 401/403/400 三类
+  信封是否统一，属于接口变更，未在本批动。
 - **慢网上的首次构建**：`--no-cache-dir` ＋ pip 默认 15 秒读超时，在 23–60 kB/s 的镜像源前会
   随机死在大 wheel 中途；验证副本把超时提到 120 秒并改用 cache mount 才走通。生产 Dockerfile
-  是否要收这个调整，取决于构建环境，本批不动它。
+  是否要收这个调整，取决于构建环境，本批不动它。**java 侧同批实测无需这个调整**：
+  `mvn dependency:go-offline` 568.5 秒后 `package` 21.3 秒一次通过（未改 Dockerfile、未配 mirror），
+  但注意 `go-offline` 带 `|| true`——它失败也照样往下走，真正的判据是 `#14 package` 是否退出 0。
 - **`UPLOAD_DIR` 与 `DOCUMENT_STORAGE_ROOT` 是两个不同的根**：前者是 python 自己的暂存/摄取
   目录（compose 指 `/data/uploads`，进 `python-data`），后者是"允许解析 Java 文件"的围栏根。
   看到两者不一致不代表配置错了，但它们各自挂哪个卷必须与挂载表一致。
@@ -602,7 +639,8 @@ Java 与 python **必须**在同一个绝对路径上看见同一个文件，这
    （`DocumentServiceImpl.java:64` 的 `UPLOAD_DIR = "uploads/documents"`，`:528-529` 拼成绝对路径）；
 2. `VectorizationServiceImpl.java:737` 把它原样发给 python 的 `/api/parse`；
 3. python 只接受**自己容器里真实存在**、且在 `DOCUMENT_STORAGE_ROOT` 之下的路径
-   （`validators.py:87-103`：`resolve(strict=True)` + `relative_to`，否则 400 code 10001）；
+   （`validators.py:87-103`：`resolve(strict=True)` + `relative_to`，否则 400 code 10001；
+   这个码在线上是压进 `message` 文本的，不是响应字段——10.2 的信封一条，第八十九批实测）；
 4. 反向同构：`/api/ingest/url` 返回的 `file_path` 由 Java 持久化（`DocumentServiceImpl.java:194-204`）
    并回写正文，所以 python 的写入点也必须落在 Java 挂的那块卷上。
 

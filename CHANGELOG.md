@@ -11,6 +11,68 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第八十九批（2026-10-10：java 镜像第一次真实构建就通了，"java 写、python 读"补齐成双向哈希 —— 顺带发现 10001 从来不是一个字段）
+
+#### 结论（先给判定性质）
+- 这一批**不动生产代码与配置**，只结第八十四～八十八批一直挂在"未收口"上的两笔账：
+  `deploy/Dockerfile.java` **自引入至今第一次真实构建**（未改一行、一次通过），以及
+  第八十五批那条"同路径互见"契约唯一没证的半条——**java 写、python 读**。两者都在真 docker 上做到，
+  并且判据不是"`touch` 成功"这种弱断言：同一块命名卷、写与读分属两个镜像，**读回的 sha256 与写入侧逐条相同**，
+  再让 java 容器读回 python 落的文件（C4），最后用 python 的**生产入口** `POST /api/parse`
+  去认 java 写的那个绝对路径（C3）——它不再回 10001，而两个负例（卷外真实文件、卷内不存在的文件）
+  仍回 10001，证明放行的是"同一个文件"而不是把围栏放宽了
+- 构建侧一个此前只有文档口径的事实拿到了数：Alpine 的 `addgroup -S -g 10001 && adduser -S -u 10001 -G …`
+  与 `mkdir -p /app/uploads` 在真实基镜像上 **DONE 0.3s** 通过（第八十四批写"首次构建即验收"，本批即那次验收）。
+  运行身份实测 `uid=10001 gid=10001`，空命名卷挂上后 `/app/uploads` 属主即 10001（印证"属主来自镜像内容"），
+  而 `documents` 这一级**不在卷里**，由 java 侧 `mkdir -p` 建出——正是第八十四批补这条 mkdir 的理由
+- 实测顺手否掉一句自家文档的措辞：`code 10001` 在线上**不是响应字段**。`validators.py` 抛的是
+  `HTTPException(400, detail={"code":10001,…})`，而 `exception_handlers.py:43` 用 `str(exc.detail)` 压成字符串，
+  于是信封是 `{"code":400,"message":"{'code': 10001, …}"}`。按"不做假门禁/口径跟着事实走"的规矩就地改文档，
+  不开新缺陷号：今天没有任何消费方按 `code` 分支（全仓 java 只有 `OidcService.java:160` 出现过 `"code"`，与此无关），
+  所以这是**契约债**而不是活故障，要不要统一 401/403/400 三类信封是接口变更，本批不动
+
+#### 改动
+- 仅 `docs/PRODUCTION_OPS.md`：10.2 标题改为"第八十八批 python 侧 + 第八十九批 java 侧与跨服务互见"，
+  新增 java 构建账（568.5s go-offline / 21.3s package / 89,704,407 字节全新 jar / `#12` 身份层 0.3s 通过）
+  与 C1–C4 结果表，新增那条信封实测；把"这两条本批都没做""java 镜像从未构建"改成已测，
+  并写清**还差的两级**（整栈 compose 的 `exec` 命令对、一次真实全链路解析）；10.3 首条从"配置层对齐 + 单侧可写"
+  升级为"镜像层成对"，新增"业务码不可机器读"一条；10.3 慢网那条补上 java 侧同批无需该调整，
+  同时点明 `go-offline` 带 `|| true`——它失败也不会让构建失败，真实判据是 `#14 package` 的退出码；
+  10.4 第 3 步就地标注 10001 在线上是 message 文本；上线清单的卷可写性项同步为"java 侧已实测、集群侧与整栈未实测"
+
+#### 验证
+- 构建（未修改的 `deploy/Dockerfile.java`，context 与 compose 一致为 `java-backend`）：退出 0，
+  `#10 [build 4/6] mvn dependency:go-offline` DONE 568.5s → `#13 COPY src/` → `#14 mvn -DskipTests package` DONE 21.3s
+  → `#15 COPY --from=build /app/target/*.jar app.jar` → naming done；镜像内 `app.jar` 89,704,407 字节（全新构建，
+  不是宿主 `target/` 那份 9 月旧 jar），`/app/uploads` 属主 `hfusionhub`
+- 跨服务（`hfusionhub-java:b89` + `hfusionhub/python88:rc`，同一块 `b89-shared-uploads`）：
+  C1 写 `.probe-b89`(32B, `9c09c7e6…`) 与 `b89-cross.txt`(82B, `a2cc7689…`) ⇒ C2 python 侧逐条同哈希读回并写
+  `.from-python`(`c53384b0…`) ⇒ C4 java 侧 `cat` 到同一哈希；C3 服务带 `DOCUMENT_STORAGE_ROOT=/app/uploads/documents`，
+  正例两次 **HTTP 200**（`Document parsing started in background`），负例两次 **400 code 10001**；
+  探针自带 `/proc/self/mounts` 自证（第八十八批那条假绿规矩）
+- 文档锚点复核：`DocumentServiceImpl.java:64`、`:528-529`、`VectorizationServiceImpl.java:730`+`:737`
+  （`Map.entry("file_path", document.getFilePath())`）全部对得上，探针请求体按 java 实发字段对齐
+  （`document_id`/`file_path`/`file_type`/`index_version` 四个必填）
+- `static-checks.py` 全跑档：改文档前 exit 0（基线）、改后仍 exit 0；读 ops 文档的测试文件
+  `test_eval_retention` + `test_upload_path_contract` + `test_container_identity` **49 passed**
+- 全量回归（汇总行取自文件而非管道，teardown 的 MilvusLite 噪声会盖掉它）：**1981 passed, 8 skipped in 183.02s**，
+  与第八十八批收口时同数；`--collect-only` 1989 = 1981 + 8 skipped，两条独立口径一致
+- 本批无新增 `def test_`（纯实测＋文档），文档测试计数不动
+
+#### 遗留（只登记不修）
+- **整栈未跑**：10.2 末尾那对 `docker compose exec` 要 fullstack 档（mysql/redis 一起起），本机一次都没起过整栈；
+  本批是在镜像层用等价命令证的，"起得来的栈里"那一层仍缺
+- **C3 只到同步校验**：响应 200 后的后台解析在探针环境里没有向量库，容器日志报
+  `pymilvus … AllocTimestamp … NotImplementedError`。一次真实文档全链路（上传→解析→回调）仍未做
+- **错误信封把业务码压成字符串**（见结论第三条）：改它要同时决定 401/403/400 的统一形态，是接口变更
+- **`mvn dependency:go-offline -q || true`** 让"依赖预热"这步永远不可能让构建失败，真正的门在 `package`；
+  是否去掉 `|| true` 属构建脚本决策
+- java 侧构建环境事实未进仓库：宿主 `mvn` 不可用（plexus `ClassNotFoundException`）、`~/.m2` 无 mirror，
+  所以 CI 之外没人能脱离 maven 基镜像构建 java
+- 前批遗留继续挂着：CI 从未跑（9 处 `pip install -r`）、锁仍是单平台产物、runner lock 仍被 sed 剥掉 `[standard]`、
+  OTel 在 CI 永久 `importorskip`、judge 缓存淘汰、`UPLOAD_DIR` 键、plugin-runner uid 未进门禁、
+  mysql/etcd/milvus/redis 无 pod securityContext、helm 未在 v4 复渲
+
 ### 第八十八批（2026-10-09：Docker 三项实测拿到了引擎，第一次真跑构建就把镜像装不出来 —— 同一个根因的三种形态）
 
 #### 结论（先给判定性质）
