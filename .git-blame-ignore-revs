@@ -1,0 +1,13 @@
+# Revisions that `git blame` should skip.
+#
+# Enable once per clone (this is a local git setting, deliberately not scripted by the repo):
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# f68ac4b1b8d388bfdf2161f70f7621388ca0db74 — 2026-10-10, batch 93 (1/2)
+#   `mvn --batch-mode spotless:apply` over the whole Java module: 128 files, +1383/-1264.
+#   Whitespace reflow plus 32 unused imports removed; every file's code body is
+#   byte-identical to its parent once import lines and whitespace are dropped, so
+#   there is no statement to blame this commit for. See docs/CI_GATES.md section 3.
+
+f68ac4b1b8d388bfdf2161f70f7621388ca0db74

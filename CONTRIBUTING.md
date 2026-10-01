@@ -70,6 +70,25 @@ cd python-ai && pytest -q tests
 cd hfusionhub-frontend && npm run test && npm run build
 ```
 
+## Java code style (spotless)
+
+CI runs `mvn --batch-mode spotless:check` before the tests, so unformatted Java
+fails the job. Format locally before committing:
+
+```bash
+cd java-backend && mvn --batch-mode spotless:apply
+```
+
+The formatter is palantir-java-format 2.39.0 plus unused-import removal, so its
+output is whitespace and import lines only — it never rewrites a statement.
+
+The repository-wide reformat of 2026-10-10 is listed in
+[.git-blame-ignore-revs](.git-blame-ignore-revs). Tell git to skip it once per clone:
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
 ## Flyway Migrations
 
 - **Never modify** existing migration files (V1–V74)

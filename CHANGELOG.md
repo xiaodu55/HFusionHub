@@ -11,13 +11,77 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第九十三批（2026-10-10：java job 自 2026-08-17 起恒红的第一步修绿了，代价是同一次运行把第二步的真实状态暴露出来）
+
+#### 结论（先给判定性质）
+- `java` job 的第一关 `mvn --batch-mode spotless:check` 是**格式化欠账**，不是产品缺陷：插件在
+  `a27f6c40`（2026-08-16）进 `pom.xml`，CI 那一步在 `1ce30072`（2026-08-17）进 workflow，此后
+  128 / 532 个文件从未合格过。第九十批只把它测到"能生成补丁、补丁能编译打包"，本批把它修成绿。
+- "这只是格式化"这句话必须由判据支撑，因为配置里除 `palantirJavaFormat 2.39.0` 还有
+  **`removeUnusedImports`**，后者不是空白操作。两级逐文件比较（口径见 `docs/CI_GATES.md` 第 3 节）：
+  ① 丢掉所有 `import` 行、再删掉全部空白后与 HEAD 逐字节比——**128/128 代码体完全相同**，没有任何一条
+  语句被改写；② 比较 import 语句**集合**——107 个文件只是重排/分组，21 个文件删掉 32 条未引用 import，
+  **新增 0 条、通配符 0 处**。
+- 残余风险单独查了：`removeUnusedImports` 只认代码用法，所以逐条查"被删 import 是否仍在 Javadoc 散文里
+  有指代"——32 条里唯一命中是 `VectorizationServiceImpl.java` 那行"**故意不加** `@Transactional`"的说明，
+  讲的正是它的缺席；且 `pom.xml` 里没有 `maven-javadoc-plugin`，没有可被打破的 javadoc 构建。
+- 判权：`mvn -B spotless:check test` 重排后**越过 check 进入编译**，`Tests run: 711, Failures: 0,
+  Errors: 0, Skipped: 52`，与 HEAD 上同一条命令的结果逐字相同；JaCoCo 第三方对照见验证段。
+- **同一次运行把下一处红挖出来，且它不是本批造成的**：`jacoco:check` 绑在 `test` 阶段
+  （`java-backend/pom.xml:269-298`），实测 LINE 0.40 / BRANCH 0.31，下限 0.46 / 0.34。HEAD 上同样红
+  （0.4017 / 0.3116），所以与格式化无关。更深一层：这两道下限设于 2026-08-31 与 2026-09-08（第三十九批），
+  而那时 java job 已经在第一步死掉、`mvn test` 在 CI 里根本不会执行——**这道棘轮从未在被守护的环境里
+  被评估过**。`pom.xml:276-280` 的"CI 含 IT 会更高"是有依据的推测，但本地这 711 例里 52 例是
+  docker 门控的 IT、全部跳过，没有任何一次运行验过。
+
+#### 改动（三处，重排单独一笔）
+- `java-backend/`：128 个文件由 `mvn -B spotless:apply` 重排，**+1383/−1264**，无手写改动。
+- 新增 `.git-blame-ignore-revs`（第二笔，记第一笔的 sha）+ `CONTRIBUTING.md`「Java code style
+  (spotless)」：`apply` 命令、"改动面只有空白与 import" 的口径、以及每人 clone 一次的
+  `git config blame.ignoreRevsFile .git-blame-ignore-revs`。**这条配置不写进仓库脚本**——改 git config
+  是用户侧动作，CI 也不需要它。
+- `docs/CI_GATES.md`：把「CI 自己的两处自伤」改为「三处」（计数口径跟着事实走），新增第 3 节记上面的
+  判据、对照表与 jacoco 那条未收口。
+- **不新增门禁**：`spotless:check` 本身就是门禁且已在 CI 里跑（只是恒红）。再加一层"用正则数违规文件"
+  的文本判据是第九十一批 `vue-tsc` 那条口径的同一形态——工具链已拥有契约时，判据去执行它，不复制它的结论。
+  本批的判据就是命令本身：改前 exit 1，改后在同一次运行里通过 check 进入编译。
+
+#### 验证（取数全部实测，非转述）
+- 红侧：`mvn -B -o spotless:check` 在 HEAD **exit 1**，日志原文 `Violations also present in 125 other
+  files`（按截断日志字面读会数错——第九十批已纠正过一次，这里复现同一个坑）。
+- 绿侧：`mvn -B spotless:check test`（重排后）`Tests run: 711, Failures: 0, Errors: 0, Skipped: 52`，
+  与 HEAD 对照运行逐字相同；两次都在 `maven:3.9-eclipse-temurin-17` + 同一个 `.m2` 卷里跑。
+- JaCoCo 计数器对照：LINE `5529/13765=0.4017` → `5528/13798=0.4006`（总数 +33 是语句摊到更多行，
+  覆盖 −1），BRANCH 与 INSTRUCTION **总数不变**。顺带得到一条口径：INSTRUCTION 覆盖 −102 / METHOD −3
+  格式化解释不了，只能来自两次执行的路径差异 ⇒ **这道棘轮不承载 0.1 个百分点的精度**。
+- 行尾类缺陷在此不适用：`git ls-files --eol` 532 个 java 文件在 apply 前后都是 `i/lf w/lf`。
+- 可复现性三条：现采补丁与第九十批留档的 `b90_spotless.patch` 除 index 行外逐字节相同；
+  `git apply -R` 退回 HEAD 跑完对照再 `git apply` 回来，diff 与补丁文件逐字节相同（+1383/−1264/128 全部复现）。
+- Python 侧未受影响且实测：全量 `pytest -q tests` **2025 passed / 8 skipped**（与第九十二批同数），
+  因为多条门禁与测试是**按文本读 java 源码**的（`内部契约锚点：5 处` 等）；`static-checks.py` 全跑档
+  exit 0，Java 徽章仍 713（本批没有增删测试）。
+- 为什么这一批是**两笔提交**而不是一笔：`.git-blame-ignore-revs` 的内容是重排那一笔的 sha，
+  sha 只能在提交后得知。第一笔纯格式化（这样 `git blame` 才有意义、也才好回退），第二笔是文档与忽略表。
+
+#### 遗留（只登记不修）
+1. **jacoco 棘轮与 CI 的错位**（本批新发现，需要选路）：要么给本地补上 docker 让 52 例 IT 真跑，
+   量出"CI 口径"的覆盖率再决定下限；要么把补测当成一批正经工作（第三十九批的传统就是"补测后上调"）；
+   下调下限不在选项里——那正是假门禁。**在选路之前，即使推了本批，`java` job 也只是从第一步红变成
+   第二步红，不会变绿。**
+2. 其余 404 个 java 文件本来就合格，但 `pom.xml` 没配 `ratchet`/`ratchetFrom`，所以"新代码没格式化"
+   与"旧代码没格式化"在同一个门禁里不可区分——第九十批列过的 B′ 选项仍未决（要看 CI 的 checkout 深度）。
+3. spotless 未接本地 pre-commit / `static-checks.py`，格式化仍只由 CI 挡（刻意如此：避免第二套口径）。
+4. 32 条未引用 import 里 6 条集中在第七十四/七十五批改过的控制器（`EvalHarnessInternalController` 等），
+   是"重构后没跑 apply"的习惯残留；本批不逐条追问出处，因为判据已覆盖到"删的都是未被代码引用的"。
+
+
 ### 第九十二批（2026-10-10：冻结摘要钉的是"这台机器的换行"，于是四个完整性门禁在 CI 恒红、在本地恒绿）
 
 #### 结论（先给判定性质）
 - 这条红**不是用例被改过**。取数是决定性的：`evaluation/suite/cases.jsonl` 的 **git blob 是 79,321 字节、0 个 CR**，
   本地工作副本是 **79,541 字节、220 个 CR**（220 行，每行一个）。manifest 与六份基线钉的是
   `b02b9dd3…`＝**CRLF 字节的**摘要，CI 里 `python -c …verify_suite_integrity` 读到的是 blob 原文（Linux runner
-  默认 `core.autocrlf=false`）＝`15b0ea64…`。所以第九十个批记录那条"实际 vs 钉住"时，两边都是对的——
+  默认 `core.autocrlf=false`）＝`15b0ea64…`。所以第九十批记录那条"实际 vs 钉住"时，两边都是对的——
   **同一次 CI 用 LF 算，本地用 CRLF 算**，这条门禁测的是检出平台的换行风格，不是"篡改没有"。
 - 机制链完整：套件当年在 Windows 上由 `build_suite.py` 生成，`path.write_text(...)` 默认 `newline=None`
   会把 `\n` 翻译成本地换行 ⇒ Windows 产出 CRLF；`git add` 又按 `core.autocrlf` 把它归一回 LF 存进 blob；
