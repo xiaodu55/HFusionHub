@@ -11,6 +11,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第九十一批（2026-10-10：frontend 重新能 build —— 12 个死导入，加一个把 `apps` 漏掉的分组联合类型）
+
+#### 结论（先给判定性质）
+- 这一批**不新增门禁**。`npm run build`（= `vue-tsc -b && vite build`）本来就是 CI `frontend` job 的既有步骤，
+  两类错误它都自己抓出来了：TS6133（未使用的图标导入）和 TS2322（`group: 'apps'` 赋不进
+  `'use' | 'personal' | 'build' | 'admin'`）。所以本批的判据就是"红变绿"，不需要另立断言——
+  给编译器已经守着的契约再加一道文本门禁，属于重复门禁。
+- 但第二条的**修法**要先辨方向：报错看起来像"5 个 `apps` 项写错了"，实际是联合类型漏了一个值。
+  三处取数后才定性——`menuGroups`（`MainLayout.vue:147-152`）渲染的 key 恰是 `use/apps/build/admin`，
+  27 个菜单项的 `group:` 分布是 use 7 / apps 5 / build 8 / admin 7，`personal` **一次都没被用**。
+  也就是说改联合类型（补齐 `apps`、删掉 `personal`）让类型与渲染集合相等；反过来改那 5 项会让它们
+  **落到一个没有分组标题可渲染的 key 上**——`menuGroups` 只 filter 这四个值，第五个值的项会静默消失。
+  隐身比报错难发现得多，所以方向不能反。
+
+#### 改动
+- `hfusionhub-frontend/src/pages/dashboard/Index.vue`：删 12 个只出现在 import 行的图标
+  （Cpu/Wrench/Fingerprint/User/StickyNote/DollarSign/Cable/Rocket/GitBranch/Megaphone/Package/CreditCard），
+  逐个核过全文件出现次数恰为 1，即删的不是"模板里还在用"的东西。
+- `hfusionhub-frontend/src/components/layout/MainLayout.vue:90-91`：`group` 联合类型
+  `'personal'` → `'apps'`，并加一行契约注释（"必须与 menuGroups 渲染的 key 同集合：多一个值 = 该项没有分组标题可渲染，直接隐身"）——
+  这句是 WHY，不是复述类型。
+
+#### 验证
+- `vue-tsc -b` 退出 0；`npm run build` 退出 0（`✓ built in 30.09s`）；`npm run test` **101 passed（15 文件）**，
+  与改动前同数，说明删导入没有碰到任何被测试引用的东西。
+- 三集合核对（手工，写在这里而不是加门禁）：TS 联合 4 个值 == `menuGroups` 渲染 4 个 key == 菜单项实际用到 4 个值。
+- 本批不动 Python/Java 面，计数不变：全量 pytest 见第九十批那条（2000 passed / 8 skipped）。
+
+#### 遗留（只登记不修）
+- `nav.groups.ops` 与 `nav.groups.personal` 在 `src/locales/zh-CN.ts:11-12` 和 `en-US.ts:11-12` 都还在，
+  但没有任何分组渲染它们——**孤儿文案 key**。没有任何门禁会抓它（未使用的 i18n key 不是类型错误），
+  也不造成行为问题，故只登记。要不要顺手删，取决于"是否预留将来加 ops 分组"，这个判断归用户。
+
 ### 第九十批（2026-10-10：CI 的 P0 容器门禁在"跑干净"时必然红，compose 校验缺 4 个变量 —— 两处都是 CI 自己的错）
 
 #### 结论（先给判定性质）

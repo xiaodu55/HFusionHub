@@ -17,18 +17,6 @@ import {
   Search,
   Sparkles,
   UploadCloud,
-  Cpu,
-  Wrench,
-  Fingerprint,
-  User,
-  StickyNote,
-  DollarSign,
-  Cable,
-  Rocket,
-  GitBranch,
-  Megaphone,
-  Package,
-  CreditCard,
 } from 'lucide-vue-next'
 import * as knowledgeBaseApi from '@/api/knowledgeBase'
 import * as documentApi from '@/api/document'

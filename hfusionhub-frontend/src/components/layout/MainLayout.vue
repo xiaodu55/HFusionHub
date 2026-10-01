@@ -87,7 +87,8 @@ const menuItems: Array<{
   description: string
   icon: Component
   roles?: UserRole[]
-  group: 'use' | 'personal' | 'build' | 'admin'
+  /** 必须与下面 menuGroups 渲染的 key 同集合：多一个值 = 该项没有分组标题可渲染，直接隐身 */
+  group: 'use' | 'apps' | 'build' | 'admin'
   keywords: string[]
   /** false = 侧边栏瘦身时降级出侧边栏（仅「更多功能」/搜索可达） */
   sidebar?: boolean
