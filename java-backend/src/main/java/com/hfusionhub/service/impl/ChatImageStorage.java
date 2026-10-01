@@ -121,8 +121,7 @@ public class ChatImageStorage {
     }
 
     public String contentType(String name) {
-        return name.endsWith(".png") ? "image/png"
-                : name.endsWith(".webp") ? "image/webp" : "image/jpeg";
+        return name.endsWith(".png") ? "image/png" : name.endsWith(".webp") ? "image/webp" : "image/jpeg";
     }
 
     /** URL 列表 → JSON 字符串（message.images 落库格式）。 */
@@ -140,8 +139,7 @@ public class ChatImageStorage {
             return List.of();
         }
         try {
-            return mapper.readValue(json, mapper.getTypeFactory()
-                    .constructCollectionType(List.class, String.class));
+            return mapper.readValue(json, mapper.getTypeFactory().constructCollectionType(List.class, String.class));
         } catch (Exception e) {
             log.warn("message.images 反序列化失败，按无图片处理: {}", e.getMessage());
             return List.of();
@@ -155,8 +153,15 @@ public class ChatImageStorage {
         if (b.length >= 8 && (b[0] & 0xFF) == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G') {
             return ".png";
         }
-        if (b.length >= 12 && b[0] == 'R' && b[1] == 'I' && b[2] == 'F' && b[3] == 'F'
-                && b[8] == 'W' && b[9] == 'E' && b[10] == 'B' && b[11] == 'P') {
+        if (b.length >= 12
+                && b[0] == 'R'
+                && b[1] == 'I'
+                && b[2] == 'F'
+                && b[3] == 'F'
+                && b[8] == 'W'
+                && b[9] == 'E'
+                && b[10] == 'B'
+                && b[11] == 'P') {
             return ".webp";
         }
         return null;

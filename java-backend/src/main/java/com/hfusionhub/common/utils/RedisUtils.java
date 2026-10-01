@@ -62,8 +62,11 @@ public class RedisUtils {
      * @return 递增后的值
      */
     public Long incrementWithTtlIfAbsent(String key, long delta, long timeout, TimeUnit unit) {
-        return redisTemplate.execute(ATOMIC_INCREMENT_WITH_TTL, List.of(key),
-                String.valueOf(delta), String.valueOf(unit.toSeconds(timeout)));
+        return redisTemplate.execute(
+                ATOMIC_INCREMENT_WITH_TTL,
+                List.of(key),
+                String.valueOf(delta),
+                String.valueOf(unit.toSeconds(timeout)));
     }
 
     /**

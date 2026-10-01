@@ -1,8 +1,6 @@
 package com.hfusionhub.support;
 
 import java.util.List;
-
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
@@ -13,11 +11,12 @@ import org.junit.jupiter.api.extension.ExecutionCondition;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.containers.ContainerLaunchException;
+import org.testcontainers.containers.MySQLContainer;
 
 /**
  * 集成测试基类（C1）：真实 MySQL + 完整 Flyway 迁移链（V1..V85）。
@@ -62,16 +61,16 @@ public abstract class AbstractItMySQLTest {
                 containerReady = true;
             } catch (IllegalStateException | ContainerLaunchException e) {
                 // 无可用 Docker：留给 @BeforeAll 的 assume 跳过（不失败）
-                System.err.println("[IT] Testcontainers unavailable, integration tests will be skipped: "
-                        + e.getMessage());
+                System.err.println(
+                        "[IT] Testcontainers unavailable, integration tests will be skipped: " + e.getMessage());
             }
         }
     }
 
     @BeforeAll
     static void assumeEnvironmentAvailable() {
-        Assumptions.assumeTrue(USE_EXTERNAL_MYSQL || containerReady,
-                "真实 MySQL 不可用（未配置 HFH_IT_JDBC_URL 且 Docker/Testcontainers 不可用）");
+        Assumptions.assumeTrue(
+                USE_EXTERNAL_MYSQL || containerReady, "真实 MySQL 不可用（未配置 HFH_IT_JDBC_URL 且 Docker/Testcontainers 不可用）");
     }
 
     /**
@@ -91,8 +90,7 @@ public abstract class AbstractItMySQLTest {
             if (containerReady) {
                 return ConditionEvaluationResult.enabled("Testcontainers MySQL 已就绪");
             }
-            return ConditionEvaluationResult.disabled(
-                    "真实 MySQL 不可用（未配置 HFH_IT_JDBC_URL 且 Docker/Testcontainers 不可用）");
+            return ConditionEvaluationResult.disabled("真实 MySQL 不可用（未配置 HFH_IT_JDBC_URL 且 Docker/Testcontainers 不可用）");
         }
     }
 

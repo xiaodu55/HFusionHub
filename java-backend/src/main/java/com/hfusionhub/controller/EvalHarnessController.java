@@ -6,8 +6,8 @@ import com.hfusionhub.common.result.R;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
+import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -20,8 +20,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
-
-import java.util.Map;
 
 /**
  * 评估中枢（eval_harness）API 网关。
@@ -67,7 +65,8 @@ public class EvalHarnessController {
     @GetMapping("/runs")
     public R<Map> listRuns() {
         String url = UriComponentsBuilder.fromHttpUrl(aiServiceBaseUrl)
-                .path("/api/eval-harness/runs").toUriString();
+                .path("/api/eval-harness/runs")
+                .toUriString();
         return R.ok(get(url));
     }
 
@@ -76,7 +75,8 @@ public class EvalHarnessController {
     public R<Map> report(@org.springframework.web.bind.annotation.RequestParam String runFile) {
         String url = UriComponentsBuilder.fromHttpUrl(aiServiceBaseUrl)
                 .path("/api/eval-harness/report")
-                .queryParam("run_file", runFile).toUriString();
+                .queryParam("run_file", runFile)
+                .toUriString();
         return R.ok(get(url));
     }
 
@@ -85,7 +85,8 @@ public class EvalHarnessController {
     public R<Map> slides(@org.springframework.web.bind.annotation.RequestParam String runFile) {
         String url = UriComponentsBuilder.fromHttpUrl(aiServiceBaseUrl)
                 .path("/api/eval-harness/slides")
-                .queryParam("run_file", runFile).toUriString();
+                .queryParam("run_file", runFile)
+                .toUriString();
         return R.ok(get(url));
     }
 
@@ -99,7 +100,8 @@ public class EvalHarnessController {
     @GetMapping("/datasets")
     public R<Map> listDatasets() {
         String url = UriComponentsBuilder.fromHttpUrl(aiServiceBaseUrl)
-                .path("/api/eval-harness/datasets").toUriString();
+                .path("/api/eval-harness/datasets")
+                .toUriString();
         return R.ok(get(url));
     }
 
@@ -125,7 +127,10 @@ public class EvalHarnessController {
     private Map post(String path, Map<String, Object> body) {
         try {
             Map response = restTemplate
-                    .exchange(UriComponentsBuilder.fromHttpUrl(aiServiceBaseUrl).path(path).toUriString(),
+                    .exchange(
+                            UriComponentsBuilder.fromHttpUrl(aiServiceBaseUrl)
+                                    .path(path)
+                                    .toUriString(),
                             HttpMethod.POST,
                             new HttpEntity<>(body, jsonHeaders()),
                             Map.class)

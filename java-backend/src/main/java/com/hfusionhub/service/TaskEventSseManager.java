@@ -44,7 +44,8 @@ public class TaskEventSseManager {
 
     @jakarta.annotation.PostConstruct
     void initPollScheduler() {
-        int threads = pollThreads > 0 ? pollThreads : Math.max(4, Runtime.getRuntime().availableProcessors() / 2);
+        int threads =
+                pollThreads > 0 ? pollThreads : Math.max(4, Runtime.getRuntime().availableProcessors() / 2);
         pollScheduler = Executors.newScheduledThreadPool(threads, r -> {
             Thread t = new Thread(r, "sse-poll-");
             t.setDaemon(true);

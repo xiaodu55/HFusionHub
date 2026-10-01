@@ -26,7 +26,6 @@ import com.hfusionhub.tenant.TenantContext;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.Collections;
@@ -41,7 +40,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
@@ -224,9 +222,11 @@ public class VectorizationServiceImpl implements VectorizationService {
             // 主体级 ACL：用户请求（已通过 owner 校验）透传 clearance，保持与
             // MySQL 持久化路径同一可见语义；系统调用不带该头（Python 缺省 general）
             if (JwtUtils.isLogin()) {
-                headers.set("X-User-Clearance",
+                headers.set(
+                        "X-User-Clearance",
                         JwtUtils.hasRole(com.hfusionhub.common.constant.CommonConstants.ROLE_ADMIN)
-                                ? "admin" : "general");
+                                ? "admin"
+                                : "general");
             }
             ResponseEntity<String> response =
                     restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
@@ -308,8 +308,7 @@ public class VectorizationServiceImpl implements VectorizationService {
                 // 清完向量后重新插入，产生已删文档的可检索孤儿向量。任务直接
                 // 置 FAILED 收口；文档行本身归删除状态机管，这里不改动。
                 Document staleDocument = documentMapper.selectById(staleJob.getDocumentId());
-                if (staleDocument == null
-                        || DocumentStatus.DELETING.getCode().equals(staleDocument.getStatus())) {
+                if (staleDocument == null || DocumentStatus.DELETING.getCode().equals(staleDocument.getStatus())) {
                     staleJob.setStatus("FAILED");
                     staleJob.setErrorMessage("文档已删除/删除中，取消重派");
                     staleJob.setCompletedAt(LocalDateTime.now());
@@ -742,7 +741,8 @@ public class VectorizationServiceImpl implements VectorizationService {
                 // 主体级 ACL：可见性随索引写入 Milvus chunk metadata，检索按主体 clearance 过滤
                 Map.entry(
                         "visibility",
-                        document.getVisibility() != null && !document.getVisibility().isBlank()
+                        document.getVisibility() != null
+                                        && !document.getVisibility().isBlank()
                                 ? document.getVisibility()
                                 : CommonConstants.DOCUMENT_VISIBILITY_DEFAULT),
                 Map.entry("index_version", job.getIndexVersion()),
@@ -914,5 +914,4 @@ public class VectorizationServiceImpl implements VectorizationService {
             return owner == null ? null : owner.getTenantId();
         });
     }
-
 }

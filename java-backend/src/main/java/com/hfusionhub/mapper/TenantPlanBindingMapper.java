@@ -10,5 +10,4 @@ import org.apache.ibatis.annotations.Mapper;
  * @author HFusionHub Team
  */
 @Mapper
-public interface TenantPlanBindingMapper extends BaseMapper<TenantPlanBinding> {
-}
+public interface TenantPlanBindingMapper extends BaseMapper<TenantPlanBinding> {}

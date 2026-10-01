@@ -38,9 +38,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * 用户服务实现
@@ -524,10 +524,10 @@ public class UserServiceImpl implements UserService {
 
     /** 按魔数识别真实图片类型；不匹配时拒绝（防伪装扩展名） */
     private String detectImageExtension(MultipartFile file) {
-        String name = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase(Locale.ROOT);
-        String ext = name.contains(".")
-                ? name.substring(name.lastIndexOf('.') + 1)
-                : "";
+        String name = file.getOriginalFilename() == null
+                ? ""
+                : file.getOriginalFilename().toLowerCase(Locale.ROOT);
+        String ext = name.contains(".") ? name.substring(name.lastIndexOf('.') + 1) : "";
         if (!AVATAR_TYPES.containsKey(ext)) {
             throw new BusinessException("仅支持 JPG / PNG / WEBP / GIF 格式图片");
         }
@@ -538,18 +538,28 @@ public class UserServiceImpl implements UserService {
         } catch (IOException e) {
             throw new BusinessException("头像读取失败，请重试");
         }
-        boolean isJpeg = read >= 3 && (magic[0] & 0xFF) == 0xFF && (magic[1] & 0xFF) == 0xD8 && (magic[2] & 0xFF) == 0xFF;
-        boolean isPng = read >= 4 && (magic[0] & 0xFF) == 0x89 && magic[1] == 0x50 && magic[2] == 0x4E && magic[3] == 0x47;
+        boolean isJpeg =
+                read >= 3 && (magic[0] & 0xFF) == 0xFF && (magic[1] & 0xFF) == 0xD8 && (magic[2] & 0xFF) == 0xFF;
+        boolean isPng =
+                read >= 4 && (magic[0] & 0xFF) == 0x89 && magic[1] == 0x50 && magic[2] == 0x4E && magic[3] == 0x47;
         boolean isGif = read >= 4 && magic[0] == 0x47 && magic[1] == 0x49 && magic[2] == 0x46 && magic[3] == 0x38;
-        boolean isWebP = read >= 12 && magic[0] == 0x52 && magic[1] == 0x49 && magic[2] == 0x46 && magic[3] == 0x46
-                && magic[8] == 0x57 && magic[9] == 0x45 && magic[10] == 0x42 && magic[11] == 0x50;
-        boolean matches = switch (ext) {
-            case "jpg", "jpeg" -> isJpeg;
-            case "png" -> isPng;
-            case "gif" -> isGif;
-            case "webp" -> isWebP;
-            default -> false;
-        };
+        boolean isWebP = read >= 12
+                && magic[0] == 0x52
+                && magic[1] == 0x49
+                && magic[2] == 0x46
+                && magic[3] == 0x46
+                && magic[8] == 0x57
+                && magic[9] == 0x45
+                && magic[10] == 0x42
+                && magic[11] == 0x50;
+        boolean matches =
+                switch (ext) {
+                    case "jpg", "jpeg" -> isJpeg;
+                    case "png" -> isPng;
+                    case "gif" -> isGif;
+                    case "webp" -> isWebP;
+                    default -> false;
+                };
         if (!matches) {
             throw new BusinessException("图片内容与扩展名不符，请选择真实的图片文件");
         }
@@ -568,9 +578,7 @@ public class UserServiceImpl implements UserService {
 
     /** DB 存相对路径，DTO 统一转换为可访问 URL；未设置头像时返回 null（前端回退首字母头像） */
     private String avatarUrl(User user) {
-        return user.getAvatar() == null || user.getAvatar().isBlank()
-                ? null
-                : "/api/user/avatar/" + user.getId();
+        return user.getAvatar() == null || user.getAvatar().isBlank() ? null : "/api/user/avatar/" + user.getId();
     }
 
     /**

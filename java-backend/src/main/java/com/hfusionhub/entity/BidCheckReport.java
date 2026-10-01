@@ -20,11 +20,13 @@ public class BidCheckReport extends BaseEntity {
 
     /** 严重度 */
     public static final String SEVERITY_CRITICAL = "critical";
+
     public static final String SEVERITY_WARNING = "warning";
     public static final String SEVERITY_INFO = "info";
 
     /** 检查类别 */
     public static final String CATEGORY_DISQUALIFICATION = "disqualification";
+
     public static final String CATEGORY_SUBSTANTIVE = "substantive";
     public static final String CATEGORY_FORMAT = "format";
     public static final String CATEGORY_BOND = "bond";
@@ -32,6 +34,7 @@ public class BidCheckReport extends BaseEntity {
 
     /** 处理状态 */
     public static final String STATUS_OPEN = "open";
+
     public static final String STATUS_CONFIRMED = "confirmed";
     public static final String STATUS_FIXED = "fixed";
 

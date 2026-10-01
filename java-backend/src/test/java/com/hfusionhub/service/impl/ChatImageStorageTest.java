@@ -41,14 +41,16 @@ class ChatImageStorageTest {
     @Test
     void save_rejects_non_image_bytes() {
         MockMultipartFile file = new MockMultipartFile("file", "a.png", "image/png", "hello text".getBytes());
-        BusinessException e = assertThrows(BusinessException.class, () -> storage().save(file));
+        BusinessException e =
+                assertThrows(BusinessException.class, () -> storage().save(file));
         assertTrue(e.getMessage().contains("JPG"));
     }
 
     @Test
     void save_rejects_oversized_image() {
         MockMultipartFile file = new MockMultipartFile("file", "a.png", "image/png", pngBytes(6 * 1024 * 1024));
-        BusinessException e = assertThrows(BusinessException.class, () -> storage().save(file));
+        BusinessException e =
+                assertThrows(BusinessException.class, () -> storage().save(file));
         assertTrue(e.getMessage().contains("5MB"));
     }
 

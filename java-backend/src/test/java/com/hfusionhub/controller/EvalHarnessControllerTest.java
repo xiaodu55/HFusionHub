@@ -73,9 +73,12 @@ class EvalHarnessControllerTest {
         controller.score(Map.of("run_file", "a.jsonl"));
 
         ArgumentCaptor<HttpEntity> captor = ArgumentCaptor.forClass(HttpEntity.class);
-        verify(restTemplate).exchange(
-                eq("http://ai-service:9000/api/eval-harness/score"),
-                eq(HttpMethod.POST), captor.capture(), eq(Map.class));
+        verify(restTemplate)
+                .exchange(
+                        eq("http://ai-service:9000/api/eval-harness/score"),
+                        eq(HttpMethod.POST),
+                        captor.capture(),
+                        eq(Map.class));
         assertEquals("3", captor.getValue().getHeaders().getFirst("X-Tenant-Id"));
     }
 

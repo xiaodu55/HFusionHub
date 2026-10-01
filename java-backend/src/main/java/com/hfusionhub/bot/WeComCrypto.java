@@ -21,19 +21,17 @@ import javax.crypto.spec.SecretKeySpec;
  */
 public final class WeComCrypto {
 
-    private WeComCrypto() {
-    }
+    private WeComCrypto() {}
 
     /** 回调签名校验（常量时间比较）。 */
-    public static boolean verifySignature(String token, String timestamp, String nonce,
-                                          String encrypt, String msgSignature) {
+    public static boolean verifySignature(
+            String token, String timestamp, String nonce, String encrypt, String msgSignature) {
         String expected = signature(token, timestamp, nonce, encrypt);
         if (expected == null || msgSignature == null) {
             return false;
         }
         return MessageDigest.isEqual(
-                expected.getBytes(StandardCharsets.UTF_8),
-                msgSignature.getBytes(StandardCharsets.UTF_8));
+                expected.getBytes(StandardCharsets.UTF_8), msgSignature.getBytes(StandardCharsets.UTF_8));
     }
 
     public static String signature(String token, String timestamp, String nonce, String encrypt) {
@@ -61,9 +59,7 @@ public final class WeComCrypto {
                 throw new IllegalArgumentException("EncodingAESKey 非法（解码后须为 32 字节）");
             }
             Cipher cipher = Cipher.getInstance("AES/CBC/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE,
-                    new SecretKeySpec(aesKey, "AES"),
-                    new IvParameterSpec(aesKey, 0, 16));
+            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(aesKey, "AES"), new IvParameterSpec(aesKey, 0, 16));
             byte[] decrypted = cipher.doFinal(Base64.getDecoder().decode(encrypt));
             // PKCS7 去填充
             int pad = decrypted[decrypted.length - 1];
@@ -72,8 +68,10 @@ public final class WeComCrypto {
             }
             int end = decrypted.length - pad;
             // 明文结构：16B 随机 + 4B 网络序消息长度 + 消息 + receiveId
-            int msgLen = ((decrypted[16] & 0xFF) << 24) | ((decrypted[17] & 0xFF) << 16)
-                    | ((decrypted[18] & 0xFF) << 8) | (decrypted[19] & 0xFF);
+            int msgLen = ((decrypted[16] & 0xFF) << 24)
+                    | ((decrypted[17] & 0xFF) << 16)
+                    | ((decrypted[18] & 0xFF) << 8)
+                    | (decrypted[19] & 0xFF);
             if (msgLen < 0 || 20 + msgLen > end) {
                 throw new IllegalArgumentException("消息长度字段非法");
             }
@@ -108,9 +106,7 @@ public final class WeComCrypto {
                 plain[total + i] = (byte) pad;
             }
             Cipher cipher = Cipher.getInstance("AES/CBC/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE,
-                    new SecretKeySpec(aesKey, "AES"),
-                    new IvParameterSpec(aesKey, 0, 16));
+            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(aesKey, "AES"), new IvParameterSpec(aesKey, 0, 16));
             return Base64.getEncoder().encodeToString(cipher.doFinal(plain));
         } catch (Exception e) {
             throw new IllegalStateException("WeCom encrypt failed: " + e.getMessage(), e);

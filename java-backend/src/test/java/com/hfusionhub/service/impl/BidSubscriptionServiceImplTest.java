@@ -27,7 +27,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class BidSubscriptionServiceImplTest {
 
-    @Mock private BidSubscriptionMapper subscriptionMapper;
+    @Mock
+    private BidSubscriptionMapper subscriptionMapper;
 
     private BidSubscriptionServiceImpl service;
 

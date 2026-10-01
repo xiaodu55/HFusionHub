@@ -11,14 +11,12 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.hfusionhub.support.AbstractItMySQLTest;
-
 import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.context.SaTokenContext;
-import cn.dev33.satoken.context.model.SaTokenContextModelBox;
 import cn.dev33.satoken.context.model.SaRequest;
 import cn.dev33.satoken.context.model.SaResponse;
 import cn.dev33.satoken.context.model.SaStorage;
+import cn.dev33.satoken.context.model.SaTokenContextModelBox;
 import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.hfusionhub.client.AiClient;
@@ -41,6 +39,7 @@ import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.PromptTemplateMapper;
 import com.hfusionhub.mapper.PromptTestSetRunMapper;
 import com.hfusionhub.mapper.UserMapper;
+import com.hfusionhub.support.AbstractItMySQLTest;
 import com.hfusionhub.tenant.TenantContext;
 import java.util.HashMap;
 import java.util.List;
@@ -543,8 +542,8 @@ class PromptTestSetIntegrationTest extends AbstractItMySQLTest {
         // 与 worker 的轮询语义一致地短暂重试
         boolean discoverable = false;
         for (int i = 0; i < 20 && !discoverable; i++) {
-            boolean found = service.listQueuedRuns(100).stream()
-                    .anyMatch(r -> r.getId().equals(queued.getId()));
+            boolean found =
+                    service.listQueuedRuns(100).stream().anyMatch(r -> r.getId().equals(queued.getId()));
             if (found) {
                 discoverable = true;
             } else {
@@ -912,8 +911,7 @@ class PromptTestSetIntegrationTest extends AbstractItMySQLTest {
             Thread.sleep(300);
             assertFalse(
                     cancelDone.await(50, TimeUnit.MILLISECONDS),
-                    "cancel/retry must block on the worker's active transaction; cancelError="
-                            + cancelError.get());
+                    "cancel/retry must block on the worker's active transaction; cancelError=" + cancelError.get());
 
             // 释放 worker → 结果插入并提交事务 → 重试随后执行并清除其结果。
             releaseWorker.countDown();
@@ -944,8 +942,6 @@ class PromptTestSetIntegrationTest extends AbstractItMySQLTest {
 
         private SaTokenContextModelBox modelBox;
 
-    
-
         private MockSaTokenContext() {
 
             // 构造即装配 modelBox：SaManager.setSaTokenContext 之后立即可用
@@ -953,90 +949,57 @@ class PromptTestSetIntegrationTest extends AbstractItMySQLTest {
             setContext(mock(SaRequest.class), mock(SaResponse.class), new SaStorage() {
 
                 @Override
-
                 public Object getSource() {
 
                     return storage;
-
                 }
 
-    
-
                 @Override
-
                 public Object get(String key) {
 
                     return storage.get(key);
-
                 }
 
-    
-
                 @Override
-
                 public SaStorage set(String key, Object value) {
 
                     storage.put(key, value);
 
                     return this;
-
                 }
 
-    
-
                 @Override
-
                 public SaStorage delete(String key) {
 
                     storage.remove(key);
 
                     return this;
-
                 }
-
             });
-
         }
 
-    
-
         @Override
-
         public void setContext(SaRequest request, SaResponse response, SaStorage storage) {
 
             this.modelBox = new SaTokenContextModelBox(request, response, storage);
-
         }
 
-    
-
         @Override
-
         public void clearContext() {
 
             this.modelBox = null;
-
         }
 
-    
-
         @Override
-
         public boolean isValid() {
 
             return this.modelBox != null;
-
         }
 
-    
-
         @Override
-
         public SaTokenContextModelBox getModelBox() {
 
             return this.modelBox;
-
         }
-
     }
 }

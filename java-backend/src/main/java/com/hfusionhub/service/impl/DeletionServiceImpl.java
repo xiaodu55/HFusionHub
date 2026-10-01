@@ -98,14 +98,15 @@ public class DeletionServiceImpl implements DeletionService {
         deletionTaskMapper.updateById(task);
 
         try {
-            Runnable step = switch (task.getTaskType()) {
-                case "KB_DELETE" -> () -> executeKbDeleteStep(task);
-                case "KB_PURGE" -> () -> executeKbPurgeStep(task);
-                case "KB_DISABLE" -> () -> executeKbDisableStep(task);
-                case "DOCUMENT_DELETE" -> () -> executeDocumentDeleteStep(task);
-                case "DOCUMENT_PURGE" -> () -> executeDocumentPurgeStep(task);
-                default -> throw new BusinessException("未知删除任务类型: " + task.getTaskType());
-            };
+            Runnable step =
+                    switch (task.getTaskType()) {
+                        case "KB_DELETE" -> () -> executeKbDeleteStep(task);
+                        case "KB_PURGE" -> () -> executeKbPurgeStep(task);
+                        case "KB_DISABLE" -> () -> executeKbDisableStep(task);
+                        case "DOCUMENT_DELETE" -> () -> executeDocumentDeleteStep(task);
+                        case "DOCUMENT_PURGE" -> () -> executeDocumentPurgeStep(task);
+                        default -> throw new BusinessException("未知删除任务类型: " + task.getTaskType());
+                    };
             if (isVectorStep(task.getTaskType(), task.getStepIndex())) {
                 // 同步调 Python（最长 120s/次）——绝不进事务
                 step.run();

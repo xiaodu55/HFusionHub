@@ -281,9 +281,9 @@ public class RagObservabilityController {
         HttpHeaders headers = new HttpHeaders();
         addInternalToken(headers);
         // 主体级 ACL（V85）：调试/评测代理的检索同样按请求主体 clearance 过滤
-        headers.set("X-User-Clearance",
-                JwtUtils.hasRole(com.hfusionhub.common.constant.CommonConstants.ROLE_ADMIN)
-                        ? "admin" : "general");
+        headers.set(
+                "X-User-Clearance",
+                JwtUtils.hasRole(com.hfusionhub.common.constant.CommonConstants.ROLE_ADMIN) ? "admin" : "general");
         return headers;
     }
 

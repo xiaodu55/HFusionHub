@@ -3,7 +3,6 @@ package com.hfusionhub.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -20,7 +19,6 @@ import com.hfusionhub.webhook.WebhookDispatcher;
 import com.hfusionhub.webhook.WebhookEventTypes;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -54,8 +52,7 @@ class WebhookSubscriptionServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new WebhookSubscriptionServiceImpl(
-                subscriptionMapper, deliveryMapper, userMapper, webhookDispatcher);
+        service = new WebhookSubscriptionServiceImpl(subscriptionMapper, deliveryMapper, userMapper, webhookDispatcher);
     }
 
     private WebhookSubscription validSubscription() {
@@ -228,7 +225,8 @@ class WebhookSubscriptionServiceImplTest {
         WebhookDelivery result = service.testFire(USER_ID, 5L);
 
         assertThat(result).isSameAs(delivery);
-        verify(webhookDispatcher).deliverSync(
-                org.mockito.ArgumentMatchers.same(existing), org.mockito.ArgumentMatchers.eq("test"), any());
+        verify(webhookDispatcher)
+                .deliverSync(
+                        org.mockito.ArgumentMatchers.same(existing), org.mockito.ArgumentMatchers.eq("test"), any());
     }
 }

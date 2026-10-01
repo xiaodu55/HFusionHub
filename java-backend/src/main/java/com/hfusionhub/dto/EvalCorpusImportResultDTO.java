@@ -1,9 +1,8 @@
 package com.hfusionhub.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.Data;
-
 import java.util.Map;
+import lombok.Data;
 
 /**
  * 评测语料导入结果

@@ -9,13 +9,6 @@ import com.hfusionhub.mapper.DocumentMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.service.EvalCorpusImportService;
 import com.hfusionhub.service.VectorizationService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.Resource;
-import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
-import org.springframework.stereotype.Service;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -29,6 +22,12 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.stereotype.Service;
 
 /**
  * 评测语料导入服务实现（复用 DemoImportServiceImpl 的 classpath 资源导入模式）。
@@ -94,12 +93,14 @@ public class EvalCorpusImportServiceImpl implements EvalCorpusImportService {
             String title = docCode;
             if (documentExists(kb.getId(), title)) {
                 skipped++;
-                Document existing = documentMapper.selectList(
-                                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Document>()
-                                        .eq(Document::getKnowledgeBaseId, kb.getId())
-                                        .eq(Document::getTitle, title)
-                                        .last("LIMIT 1"))
-                        .stream().findFirst().orElse(null);
+                Document existing = documentMapper
+                        .selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Document>()
+                                .eq(Document::getKnowledgeBaseId, kb.getId())
+                                .eq(Document::getTitle, title)
+                                .last("LIMIT 1"))
+                        .stream()
+                        .findFirst()
+                        .orElse(null);
                 if (existing != null) {
                     docIdMap.put(docCode, String.valueOf(existing.getId()));
                 }
@@ -114,8 +115,7 @@ public class EvalCorpusImportServiceImpl implements EvalCorpusImportService {
                     vectorizationService.startVectorization(docId, null);
                 } catch (Exception e) {
                     parseFailed++;
-                    log.warn("评测语料触发解析失败: docId={}, docCode={}（可在文档页稍后重试）",
-                            docId, docCode, e);
+                    log.warn("评测语料触发解析失败: docId={}, docCode={}（可在文档页稍后重试）", docId, docCode, e);
                 }
             } catch (IOException e) {
                 log.error("评测语料写入失败: {}", docCode, e);
@@ -130,18 +130,24 @@ public class EvalCorpusImportServiceImpl implements EvalCorpusImportService {
         result.setSkippedCount(skipped);
         result.setParseFailedCount(parseFailed);
         result.setDocIdMap(docIdMap);
-        log.info("评测语料导入完成: kbId={}, imported={}, skipped={}, parseFailed={}",
-                kb.getId(), imported, skipped, parseFailed);
+        log.info(
+                "评测语料导入完成: kbId={}, imported={}, skipped={}, parseFailed={}",
+                kb.getId(),
+                imported,
+                skipped,
+                parseFailed);
         return result;
     }
 
     private KnowledgeBase findEvalKb(Long userId) {
-        return knowledgeBaseMapper.selectList(
-                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<KnowledgeBase>()
-                                .eq(KnowledgeBase::getUserId, userId)
-                                .eq(KnowledgeBase::getName, EVAL_KB_NAME)
-                                .last("LIMIT 1"))
-                .stream().findFirst().orElse(null);
+        return knowledgeBaseMapper
+                .selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<KnowledgeBase>()
+                        .eq(KnowledgeBase::getUserId, userId)
+                        .eq(KnowledgeBase::getName, EVAL_KB_NAME)
+                        .last("LIMIT 1"))
+                .stream()
+                .findFirst()
+                .orElse(null);
     }
 
     private List<Resource> loadCorpusResources() {
@@ -171,9 +177,10 @@ public class EvalCorpusImportServiceImpl implements EvalCorpusImportService {
 
     private boolean documentExists(Long kbId, String title) {
         return documentMapper.selectCount(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Document>()
-                        .eq(Document::getKnowledgeBaseId, kbId)
-                        .eq(Document::getTitle, title)) > 0;
+                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Document>()
+                                .eq(Document::getKnowledgeBaseId, kbId)
+                                .eq(Document::getTitle, title))
+                > 0;
     }
 
     private long createDocument(Long kbId, Resource resource, String title, String content) throws IOException {

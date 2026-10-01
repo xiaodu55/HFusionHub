@@ -10,14 +10,13 @@ import static org.mockito.Mockito.when;
 
 import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.context.SaTokenContext;
-import cn.dev33.satoken.context.model.SaTokenContextModelBox;
 import cn.dev33.satoken.context.model.SaRequest;
 import cn.dev33.satoken.context.model.SaResponse;
 import cn.dev33.satoken.context.model.SaStorage;
+import cn.dev33.satoken.context.model.SaTokenContextModelBox;
 import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.hfusionhub.support.AbstractItMySQLTest;
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.dto.MessageSendDTO;
 import com.hfusionhub.entity.AgentRun;
@@ -32,6 +31,7 @@ import com.hfusionhub.service.AgentTaskService;
 import com.hfusionhub.service.ConversationService;
 import com.hfusionhub.service.MemoryService;
 import com.hfusionhub.service.UsageLedgerService;
+import com.hfusionhub.support.AbstractItMySQLTest;
 import com.hfusionhub.tenant.TenantContext;
 import java.util.HashMap;
 import java.util.List;
@@ -134,7 +134,8 @@ class ConversationStreamingUsageTest extends AbstractItMySQLTest {
     void streamingCompletionSettlesUsageOnContextlessReactorThread() {
         // 异步 Flux：在 Schedulers.single 线程上发出 [DONE]，模拟无租户上下文的回调线程
         when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any()))
-                .thenReturn(Flux.just("data: [DONE]\n\n").subscribeOn(Schedulers.single()));;
+                .thenReturn(Flux.just("data: [DONE]\n\n").subscribeOn(Schedulers.single()));
+        ;
 
         // 新增 8 参重载（对话图片输入）：与 7 参等价
         when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any(), any()))
@@ -164,7 +165,8 @@ class ConversationStreamingUsageTest extends AbstractItMySQLTest {
         // Flux 立即报错：onError 在调度线程执行，必须 runAs 恢复上下文后 RELEASE
         when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any()))
                 .thenReturn(Flux.<String>error(new RuntimeException("simulated stream failure"))
-                        .subscribeOn(Schedulers.single()));;
+                        .subscribeOn(Schedulers.single()));
+        ;
 
         // 新增 8 参重载（对话图片输入）：与 7 参等价
         when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any(), any()))
@@ -201,7 +203,7 @@ class ConversationStreamingUsageTest extends AbstractItMySQLTest {
     private static class MockSaTokenContext implements SaTokenContext {
         private final Map<String, Object> storage = new HashMap<>();
         private SaTokenContextModelBox modelBox;
-    
+
         private MockSaTokenContext() {
             // 构造即装配 modelBox：SaManager.setSaTokenContext 之后立即可用
             setContext(mock(SaRequest.class), mock(SaResponse.class), new SaStorage() {
@@ -209,18 +211,18 @@ class ConversationStreamingUsageTest extends AbstractItMySQLTest {
                 public Object getSource() {
                     return storage;
                 }
-    
+
                 @Override
                 public Object get(String key) {
                     return storage.get(key);
                 }
-    
+
                 @Override
                 public SaStorage set(String key, Object value) {
                     storage.put(key, value);
                     return this;
                 }
-    
+
                 @Override
                 public SaStorage delete(String key) {
                     storage.remove(key);
@@ -228,22 +230,22 @@ class ConversationStreamingUsageTest extends AbstractItMySQLTest {
                 }
             });
         }
-    
+
         @Override
         public void setContext(SaRequest request, SaResponse response, SaStorage storage) {
             this.modelBox = new SaTokenContextModelBox(request, response, storage);
         }
-    
+
         @Override
         public void clearContext() {
             this.modelBox = null;
         }
-    
+
         @Override
         public boolean isValid() {
             return this.modelBox != null;
         }
-    
+
         @Override
         public SaTokenContextModelBox getModelBox() {
             return this.modelBox;

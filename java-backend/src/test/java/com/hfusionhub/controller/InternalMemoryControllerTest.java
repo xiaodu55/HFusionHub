@@ -1,11 +1,10 @@
 package com.hfusionhub.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -41,8 +40,7 @@ class InternalMemoryControllerTest {
 
     @Test
     void saveEntriesRejectsInvalidToken() {
-        R<Map<String, Object>> response =
-                controller.saveEntries(payload(), request("wrong-token"));
+        R<Map<String, Object>> response = controller.saveEntries(payload(), request("wrong-token"));
 
         assertEquals(403, response.getCode());
         verifyNoInteractions(memoryService);
@@ -50,8 +48,7 @@ class InternalMemoryControllerTest {
 
     @Test
     void relevantRejectsInvalidToken() {
-        R<List<MemoryEntry>> response =
-                controller.relevant(1L, "query", null, 8, request("wrong-token"));
+        R<List<MemoryEntry>> response = controller.relevant(1L, "query", null, 8, request("wrong-token"));
 
         assertEquals(403, response.getCode());
         verifyNoInteractions(memoryService);
@@ -69,8 +66,7 @@ class InternalMemoryControllerTest {
         assertEquals(2, response.getData().get("saved"));
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<MemoryEntry>> captor = ArgumentCaptor.forClass(List.class);
-        verify(memoryService)
-                .saveBatchForUser(eq(7L), eq(42L), eq(5L), captor.capture());
+        verify(memoryService).saveBatchForUser(eq(7L), eq(42L), eq(5L), captor.capture());
         List<MemoryEntry> entries = captor.getValue();
         assertEquals(2, entries.size());
         assertEquals("用户偏好简洁回答", entries.get(0).getContent());
@@ -142,11 +138,9 @@ class InternalMemoryControllerTest {
         MemoryEntry entry = new MemoryEntry();
         entry.setContent("用户偏好简洁回答");
         entry.setType("user_preference");
-        when(memoryService.getRelevantMemories(eq(7L), eq(5L), eq("偏好"), eq(8)))
-                .thenReturn(List.of(entry));
+        when(memoryService.getRelevantMemories(eq(7L), eq(5L), eq("偏好"), eq(8))).thenReturn(List.of(entry));
 
-        R<List<MemoryEntry>> response =
-                controller.relevant(7L, "偏好", 5L, 8, request(TOKEN));
+        R<List<MemoryEntry>> response = controller.relevant(7L, "偏好", 5L, 8, request(TOKEN));
 
         assertEquals(200, response.getCode());
         assertEquals(1, response.getData().size());
@@ -155,8 +149,7 @@ class InternalMemoryControllerTest {
 
     @Test
     void relevantRequiresPositiveUserId() {
-        R<List<MemoryEntry>> response =
-                controller.relevant(0L, "query", null, 8, request(TOKEN));
+        R<List<MemoryEntry>> response = controller.relevant(0L, "query", null, 8, request(TOKEN));
 
         assertEquals(400, response.getCode());
         verifyNoInteractions(memoryService);

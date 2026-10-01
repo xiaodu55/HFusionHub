@@ -3,8 +3,8 @@ package com.hfusionhub.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import java.util.List;
 import jakarta.validation.constraints.Size;
+import java.util.List;
 import lombok.Data;
 
 /**
@@ -37,8 +37,7 @@ public class MessageSendDTO {
     @Size(max = 50, message = "能力档位标识不能超过50个字符")
     private String capabilityProfile;
 
-    @Schema(description = "附带图片的相对URL列表（对话图片输入，≤4张；"
-            + "先经 POST /conversation/chat-image 上传取得 URL）")
+    @Schema(description = "附带图片的相对URL列表（对话图片输入，≤4张；" + "先经 POST /conversation/chat-image 上传取得 URL）")
     @Size(max = 4, message = "每次最多携带4张图片")
     private List<String> images;
 }

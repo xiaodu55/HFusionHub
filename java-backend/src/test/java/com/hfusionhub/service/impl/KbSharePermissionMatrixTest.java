@@ -8,7 +8,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
 import com.hfusionhub.entity.KbShare;
@@ -16,8 +15,6 @@ import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.mapper.KbShareMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.UserMapper;
-import com.hfusionhub.service.impl.KbShareServiceImpl;
-import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -61,8 +58,7 @@ class KbSharePermissionMatrixTest {
     @Test
     void shareRejectsInvalidPermission() {
         when(knowledgeBaseMapper.selectById(10L)).thenReturn(kb(1L));
-        assertThrows(BusinessException.class,
-                () -> service.share(10L, 2L, "admin"));
+        assertThrows(BusinessException.class, () -> service.share(10L, 2L, "admin"));
     }
 
     @Test

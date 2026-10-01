@@ -2,6 +2,12 @@ package com.hfusionhub.bot;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.Map;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpEntity;
@@ -14,13 +20,6 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
-
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * 钉钉机器人回调（Batch 6，企业内部机器人 HTTP 模式，默认关闭）。
@@ -82,16 +81,14 @@ public class DingTalkBotController {
 
     /** 钉钉回调加签校验：HMAC-SHA256(secret, timestamp + "\n" + secret) 再 Base64。 */
     static boolean verifySign(String secret, String timestamp, String sign) {
-        if (!StringUtils.hasText(secret) || !StringUtils.hasText(timestamp)
-                || !StringUtils.hasText(sign)) {
+        if (!StringUtils.hasText(secret) || !StringUtils.hasText(timestamp) || !StringUtils.hasText(sign)) {
             return false;
         }
         try {
             String expectedBase64 = computeSign(secret, timestamp);
             // 常量时间比较，防时序攻击
             return java.security.MessageDigest.isEqual(
-                    expectedBase64.getBytes(StandardCharsets.UTF_8),
-                    sign.getBytes(StandardCharsets.UTF_8));
+                    expectedBase64.getBytes(StandardCharsets.UTF_8), sign.getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             log.warn("DingTalk sign computation failed: {}", e.getMessage());
             return false;

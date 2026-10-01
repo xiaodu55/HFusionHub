@@ -31,8 +31,10 @@ public interface OpenApiService {
      * @param request 对话请求
      * @param emitter Spring SSE emitter
      */
-    void chatStream(String apiKey, OpenApiChatRequest request,
-                    org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter);
+    void chatStream(
+            String apiKey,
+            OpenApiChatRequest request,
+            org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter);
 
     /**
      * 开放 API 废标自检（P2-7 /openapi/bid/check）。

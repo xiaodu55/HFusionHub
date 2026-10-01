@@ -12,19 +12,15 @@ import com.hfusionhub.tenant.TenantContext;
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.servlet.http.HttpServletRequest;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
-import java.util.Map;
 
 /**
  * Internal-only endpoints for the evaluation harness (python-ai → Java).
@@ -49,7 +45,6 @@ public class EvalHarnessInternalController {
 
     @Value("${python-ai.internal-token:}")
     private String expectedToken;
-
 
     /**
      * 记录一次评估运行的聚合摘要（python eval-harness run 完成后回调）。
@@ -79,8 +74,7 @@ public class EvalHarnessInternalController {
         run.setFailedCaseIds(toMap(body.get("failed_case_ids")));
 
         TenantContext.runAs(tenantId, () -> evalHarnessRunMapper.insert(run));
-        log.info("评估运行摘要已记录: runFile={}, tenant={}, recordCount={}",
-                run.getRunFile(), tenantId, run.getRecordCount());
+        log.info("评估运行摘要已记录: runFile={}, tenant={}, recordCount={}", run.getRunFile(), tenantId, run.getRecordCount());
         return R.ok(Map.of("recorded", true, "id", run.getId() == null ? 0 : run.getId()));
     }
 

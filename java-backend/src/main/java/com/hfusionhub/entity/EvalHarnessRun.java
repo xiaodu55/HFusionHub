@@ -5,10 +5,9 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.hfusionhub.handler.JsonMapTypeHandler;
+import java.util.Map;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-
-import java.util.Map;
 
 /**
  * 评估中枢运行记录（V79）：python eval_harness 评估的聚合摘要。

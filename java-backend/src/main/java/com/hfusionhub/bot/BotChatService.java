@@ -52,8 +52,7 @@ public class BotChatService {
             String content = response == null ? null : response.getContent();
             return content == null || content.isBlank() ? ERROR_REPLY : content;
         } catch (BusinessException e) {
-            log.warn("Bot open-api call rejected: sender={}, code={}, msg={}",
-                    senderId, e.getCode(), e.getMessage());
+            log.warn("Bot open-api call rejected: sender={}, code={}, msg={}", senderId, e.getCode(), e.getMessage());
             return "调用受限：" + e.getMessage();
         } catch (Exception e) {
             log.warn("Bot open-api call failed: sender={}, err={}", senderId, e.getMessage());

@@ -51,6 +51,7 @@ public class BotProperties {
         private String appKey = "";
         /** 飞书自建应用凭证（tenant_access_token） */
         private String appId = "";
+
         private String appSecret = "";
         /** 事件订阅 verification token（明文模式；未配置则跳过校验） */
         private String verificationToken = "";
@@ -62,10 +63,12 @@ public class BotProperties {
         private String appKey = "";
         /** 企业微信凭证 */
         private String corpId = "";
+
         private String corpSecret = "";
         private Integer agentId = 0;
         /** 回调验签 Token 与消息加解密 EncodingAESKey（43 位 Base64） */
         private String token = "";
+
         private String encodingAesKey = "";
     }
 }

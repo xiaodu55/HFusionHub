@@ -12,8 +12,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -45,7 +45,8 @@ class VoiceControllerTest {
     @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
     void statusForwardsToPythonAndInjectsInternalToken() {
-        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class), any(Object[].class)))
+        when(restTemplate.exchange(
+                        anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class), any(Object[].class)))
                 .thenReturn(ResponseEntity.ok(Map.of("enabled", true, "stt", true, "tts", true)));
 
         R<Map<String, Object>> response = controller.status();
@@ -56,7 +57,8 @@ class VoiceControllerTest {
 
     @Test
     void statusFallsBackToDisabledWhenPythonUnreachable() {
-        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class), any(Object[].class)))
+        when(restTemplate.exchange(
+                        anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class), any(Object[].class)))
                 .thenThrow(new IllegalStateException("connection refused"));
 
         R<Map<String, Object>> response = controller.status();
@@ -76,7 +78,8 @@ class VoiceControllerTest {
     @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
     void transcribeForwardsAudioWithFilenameHeader() {
-        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class), any(Object[].class)))
+        when(restTemplate.exchange(
+                        anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class), any(Object[].class)))
                 .thenReturn(ResponseEntity.ok(Map.of("text", "你好")));
 
         R<Map<String, Object>> response = controller.transcribe(new byte[] {1, 2, 3}, "clip.webm", "zh");
@@ -88,7 +91,8 @@ class VoiceControllerTest {
     @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
     void transcribeReturns503WhenPythonUnreachable() {
-        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class), any(Object[].class)))
+        when(restTemplate.exchange(
+                        anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class), any(Object[].class)))
                 .thenThrow(new IllegalStateException("boom"));
 
         R<Map<String, Object>> response = controller.transcribe(new byte[] {1}, "clip.webm", null);
@@ -107,7 +111,8 @@ class VoiceControllerTest {
     void synthesizeForwardsAndPreservesContentType() {
         HttpHeaders upstream = new HttpHeaders();
         upstream.setContentType(MediaType.parseMediaType("audio/wav"));
-        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(byte[].class), any(Object[].class)))
+        when(restTemplate.exchange(
+                        anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(byte[].class), any(Object[].class)))
                 .thenReturn(ResponseEntity.ok().headers(upstream).body(new byte[] {1, 2, 3}));
 
         ResponseEntity<byte[]> response = controller.synthesize(Map.of("text", "播报一下"));
@@ -121,7 +126,8 @@ class VoiceControllerTest {
 
     @Test
     void synthesizeReturns500WhenPythonUnreachable() {
-        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(byte[].class), any(Object[].class)))
+        when(restTemplate.exchange(
+                        anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(byte[].class), any(Object[].class)))
                 .thenThrow(new IllegalStateException("boom"));
 
         ResponseEntity<byte[]> response = controller.synthesize(Map.of("text", "播报"));

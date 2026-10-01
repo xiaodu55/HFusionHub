@@ -77,8 +77,7 @@ public class ApprovalEventSseManager {
                     try {
                         TenantContext.runAs(pollTenantId, () -> {
                             try {
-                                List<AgentApproval> fresh =
-                                        approvalMapper.selectRecentByUserId(userId, SNAPSHOT_LIMIT);
+                                List<AgentApproval> fresh = approvalMapper.selectRecentByUserId(userId, SNAPSHOT_LIMIT);
                                 for (AgentApproval a : fresh) {
                                     String prev = known.put(a.getApprovalId(), a.getStatus());
                                     if (prev == null || !prev.equals(a.getStatus())) {

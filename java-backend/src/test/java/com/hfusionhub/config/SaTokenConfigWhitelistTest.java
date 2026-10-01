@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Arrays;
 import java.util.List;
-
 import org.junit.jupiter.api.Test;
 
 /**
@@ -20,10 +19,8 @@ import org.junit.jupiter.api.Test;
 class SaTokenConfigWhitelistTest {
 
     /** SSO 授权码流程的全部端点（SsoController @RequestMapping + @GetMapping）。 */
-    private static final List<String> SSO_ENDPOINTS = List.of(
-            "/user/sso/providers",
-            "/user/sso/authorize",
-            "/user/sso/callback");
+    private static final List<String> SSO_ENDPOINTS =
+            List.of("/user/sso/providers", "/user/sso/authorize", "/user/sso/callback");
 
     @Test
     void whitelistContainsSsoFlow() {
@@ -38,12 +35,10 @@ class SaTokenConfigWhitelistTest {
         // Sa-Token 的 AntPath 通配："/user/sso/**" 必须覆盖 SsoController 的每个端点。
         // 用最朴素的断言防止「端点新增后白名单 pattern 被改窄」的漂移。
         for (String endpoint : SSO_ENDPOINTS) {
-            assertTrue(endpoint.startsWith("/user/sso/"),
-                    "端点 " + endpoint + " 偏离 /user/sso/ 前缀，请同步更新白名单测试");
+            assertTrue(endpoint.startsWith("/user/sso/"), "端点 " + endpoint + " 偏离 /user/sso/ 前缀，请同步更新白名单测试");
         }
         List<String> whitelist = Arrays.asList(SaTokenConfig.AUTH_WHITELIST);
-        assertTrue(whitelist.contains("/user/sso/**"),
-                "SsoController 端点 " + SSO_ENDPOINTS + " 需要 /user/sso/** 放行");
+        assertTrue(whitelist.contains("/user/sso/**"), "SsoController 端点 " + SSO_ENDPOINTS + " 需要 /user/sso/** 放行");
     }
 
     @Test
@@ -51,7 +46,8 @@ class SaTokenConfigWhitelistTest {
         List<String> whitelist = Arrays.asList(SaTokenConfig.AUTH_WHITELIST);
         // 不允许出现把全部业务接口放行的过宽条目。
         for (String pattern : whitelist) {
-            assertTrue(!pattern.equals("/**") && !pattern.equals("/user/**") && !pattern.equals("/internal/**"),
+            assertTrue(
+                    !pattern.equals("/**") && !pattern.equals("/user/**") && !pattern.equals("/internal/**"),
                     "白名单条目过宽: " + pattern);
         }
     }
@@ -64,10 +60,10 @@ class SaTokenConfigWhitelistTest {
             assertEquals(pattern, pattern.trim(), "白名单条目不得带空白: " + pattern);
         }
         // 无重复
-        assertEquals(SaTokenConfig.AUTH_WHITELIST.length,
+        assertEquals(
+                SaTokenConfig.AUTH_WHITELIST.length,
                 Arrays.stream(SaTokenConfig.AUTH_WHITELIST).distinct().count(),
                 "白名单存在重复条目");
-        assertArrayEquals(SaTokenConfig.AUTH_WHITELIST, SaTokenConfig.AUTH_WHITELIST,
-                "sanity: constant is stable");
+        assertArrayEquals(SaTokenConfig.AUTH_WHITELIST, SaTokenConfig.AUTH_WHITELIST, "sanity: constant is stable");
     }
 }

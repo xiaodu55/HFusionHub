@@ -51,21 +51,19 @@ public class BidProjectServiceImpl implements BidProjectService {
     /** 低置信阈值：低于该值的需求要素强制人工确认 */
     private static final double LOW_CONFIDENCE = 0.6;
 
-    private static final Set<String> VALID_STATUSES =
-            Set.of(
-                    BidProject.STATUS_INTERPRETING,
-                    BidProject.STATUS_REQUIREMENTS,
-                    BidProject.STATUS_DRAFTING,
-                    BidProject.STATUS_CHECKING,
-                    BidProject.STATUS_SUBMITTED,
-                    BidProject.STATUS_ARCHIVED);
+    private static final Set<String> VALID_STATUSES = Set.of(
+            BidProject.STATUS_INTERPRETING,
+            BidProject.STATUS_REQUIREMENTS,
+            BidProject.STATUS_DRAFTING,
+            BidProject.STATUS_CHECKING,
+            BidProject.STATUS_SUBMITTED,
+            BidProject.STATUS_ARCHIVED);
 
-    private static final Set<String> VALID_REQUIREMENT_STATUSES =
-            Set.of(
-                    BidRequirement.STATUS_PENDING,
-                    BidRequirement.STATUS_DRAFTING,
-                    BidRequirement.STATUS_CHECKED,
-                    BidRequirement.STATUS_MANUAL_REVIEW);
+    private static final Set<String> VALID_REQUIREMENT_STATUSES = Set.of(
+            BidRequirement.STATUS_PENDING,
+            BidRequirement.STATUS_DRAFTING,
+            BidRequirement.STATUS_CHECKED,
+            BidRequirement.STATUS_MANUAL_REVIEW);
 
     private final BidProjectMapper bidProjectMapper;
     private final TenderElementMapper tenderElementMapper;
@@ -110,10 +108,10 @@ public class BidProjectServiceImpl implements BidProjectService {
 
         // 商业化骨架：投标项目数计量（P0-7），超额则抛 QUOTA_EXCEEDED 回滚创建
         String reservationKey = "bid-project:" + project.getId();
-        usageLedgerService.reserve(UsageMeter.BID_PROJECTS, reservationKey, 1, "bid_project",
-                String.valueOf(project.getId()));
-        usageLedgerService.settle(UsageMeter.BID_PROJECTS, reservationKey, 1, "bid_project",
-                String.valueOf(project.getId()));
+        usageLedgerService.reserve(
+                UsageMeter.BID_PROJECTS, reservationKey, 1, "bid_project", String.valueOf(project.getId()));
+        usageLedgerService.settle(
+                UsageMeter.BID_PROJECTS, reservationKey, 1, "bid_project", String.valueOf(project.getId()));
 
         log.info("投标项目创建成功，id: {}, title: {}", project.getId(), project.getTitle());
         return convertToInfoDTO(project);
@@ -152,9 +150,7 @@ public class BidProjectServiceImpl implements BidProjectService {
         wrapper.eq(BidProject::getCreatedBy, userId);
         if (StringUtils.hasText(queryDTO.getKeyword())) {
             String keyword = queryDTO.getKeyword().trim();
-            wrapper.and(w -> w.like(BidProject::getTitle, keyword)
-                    .or()
-                    .like(BidProject::getTenderNumber, keyword));
+            wrapper.and(w -> w.like(BidProject::getTitle, keyword).or().like(BidProject::getTenderNumber, keyword));
         }
         if (StringUtils.hasText(queryDTO.getStatus())) {
             wrapper.eq(BidProject::getStatus, queryDTO.getStatus());
@@ -168,18 +164,19 @@ public class BidProjectServiceImpl implements BidProjectService {
         List<Long> ids = result.getRecords().stream().map(BidProject::getId).collect(Collectors.toList());
         Map<Long, Long> reqCountMap = Map.of();
         if (!ids.isEmpty()) {
-            List<BidRequirement> reqs = bidRequirementMapper.selectList(
-                    new LambdaQueryWrapper<BidRequirement>()
-                            .in(BidRequirement::getProjectId, ids)
-                            .select(BidRequirement::getProjectId));
-            reqCountMap = reqs.stream().collect(Collectors.groupingBy(BidRequirement::getProjectId, Collectors.counting()));
+            List<BidRequirement> reqs = bidRequirementMapper.selectList(new LambdaQueryWrapper<BidRequirement>()
+                    .in(BidRequirement::getProjectId, ids)
+                    .select(BidRequirement::getProjectId));
+            reqCountMap =
+                    reqs.stream().collect(Collectors.groupingBy(BidRequirement::getProjectId, Collectors.counting()));
         }
 
         final Map<Long, Long> finalReqCountMap = reqCountMap;
         List<BidProjectInfoDTO> records = result.getRecords().stream()
                 .map(p -> {
                     BidProjectInfoDTO dto = convertToInfoDTO(p);
-                    dto.setRequirementCount(finalReqCountMap.getOrDefault(p.getId(), 0L).intValue());
+                    dto.setRequirementCount(
+                            finalReqCountMap.getOrDefault(p.getId(), 0L).intValue());
                     return dto;
                 })
                 .collect(Collectors.toList());
@@ -224,12 +221,10 @@ public class BidProjectServiceImpl implements BidProjectService {
         }
 
         // 3. 幂等落库：清空旧结果后写入
-        tenderElementMapper.delete(
-                new LambdaQueryWrapper<TenderElement>().eq(TenderElement::getProjectId, id));
+        tenderElementMapper.delete(new LambdaQueryWrapper<TenderElement>().eq(TenderElement::getProjectId, id));
         bidScoringMethodMapper.delete(
                 new LambdaQueryWrapper<BidScoringMethod>().eq(BidScoringMethod::getProjectId, id));
-        bidRequirementMapper.delete(
-                new LambdaQueryWrapper<BidRequirement>().eq(BidRequirement::getProjectId, id));
+        bidRequirementMapper.delete(new LambdaQueryWrapper<BidRequirement>().eq(BidRequirement::getProjectId, id));
 
         persistElements(project.getId(), result.get("elements"));
         persistScoringMethods(project.getId(), result.get("scoring_methods"));
@@ -242,17 +237,20 @@ public class BidProjectServiceImpl implements BidProjectService {
         long meterAmount = elementsCount + requirementsCount;
         if (meterAmount > 0) {
             String reservationKey = "bid-interpret:" + id;
-            usageLedgerService.reserve(UsageMeter.TENDER_ELEMENTS, reservationKey, meterAmount, "bid_project",
-                    String.valueOf(id));
-            usageLedgerService.settle(UsageMeter.TENDER_ELEMENTS, reservationKey, meterAmount, "bid_project",
-                    String.valueOf(id));
+            usageLedgerService.reserve(
+                    UsageMeter.TENDER_ELEMENTS, reservationKey, meterAmount, "bid_project", String.valueOf(id));
+            usageLedgerService.settle(
+                    UsageMeter.TENDER_ELEMENTS, reservationKey, meterAmount, "bid_project", String.valueOf(id));
         }
 
         // 4. 置为需求确认阶段
         project.setStatus(BidProject.STATUS_REQUIREMENTS);
         bidProjectMapper.updateById(project);
 
-        log.info("投标项目解读完成，id: {}, 需求数: {}", id, result.get("requirements") != null ? ((List<?>) result.get("requirements")).size() : 0);
+        log.info(
+                "投标项目解读完成，id: {}, 需求数: {}",
+                id,
+                result.get("requirements") != null ? ((List<?>) result.get("requirements")).size() : 0);
         return getDetail(id);
     }
 
@@ -344,7 +342,8 @@ public class BidProjectServiceImpl implements BidProjectService {
             // 低置信需求强制人工确认（P0-8 风险兜底）
             BigDecimal confidence = asBigDecimal(m.get("confidence"));
             boolean lowConfidence = confidence != null && confidence.doubleValue() < LOW_CONFIDENCE;
-            requirement.setSatisfiedStatus(lowConfidence ? BidRequirement.STATUS_MANUAL_REVIEW : BidRequirement.STATUS_PENDING);
+            requirement.setSatisfiedStatus(
+                    lowConfidence ? BidRequirement.STATUS_MANUAL_REVIEW : BidRequirement.STATUS_PENDING);
             if (requirement.getRequirement() == null) {
                 continue;
             }

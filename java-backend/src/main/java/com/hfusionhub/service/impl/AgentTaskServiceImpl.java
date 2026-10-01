@@ -479,7 +479,8 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         task.setCurrentRunId(newRun.getId());
         taskMapper.updateById(task);
 
-        log.info("Task {} retry scheduled: new run id={} attempt={}", taskId, newRun.getId(), newRun.getAttemptNumber());
+        log.info(
+                "Task {} retry scheduled: new run id={} attempt={}", taskId, newRun.getId(), newRun.getAttemptNumber());
         return newRun;
     }
 
@@ -503,7 +504,11 @@ public class AgentTaskServiceImpl implements AgentTaskService {
         try {
             runMapper.insert(run);
         } catch (DuplicateKeyException e) {
-            log.warn("Task {} {} rejected: duplicate attempt {} (concurrent enqueue/retry)", taskId, action, attemptNumber);
+            log.warn(
+                    "Task {} {} rejected: duplicate attempt {} (concurrent enqueue/retry)",
+                    taskId,
+                    action,
+                    attemptNumber);
             throw new BusinessException("任务正在重试中，请勿重复操作");
         }
         return run;
@@ -511,7 +516,9 @@ public class AgentTaskServiceImpl implements AgentTaskService {
 
     private String existingRunsModel(Long taskId) {
         List<AgentRun> existingRuns = runMapper.selectByTaskId(taskId);
-        return existingRuns.isEmpty() ? null : existingRuns.get(existingRuns.size() - 1).getModel();
+        return existingRuns.isEmpty()
+                ? null
+                : existingRuns.get(existingRuns.size() - 1).getModel();
     }
 
     // ================================================================
@@ -733,10 +740,12 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             if (a.getTaskId() != null) taskIds.add(a.getTaskId());
             if (a.getRunId() != null) runIds.add(a.getRunId());
         }
-        java.util.Map<Long, AgentTask> taskMap = taskIds.isEmpty() ? java.util.Map.of()
+        java.util.Map<Long, AgentTask> taskMap = taskIds.isEmpty()
+                ? java.util.Map.of()
                 : taskMapper.selectBatchIds(taskIds).stream()
                         .collect(java.util.stream.Collectors.toMap(AgentTask::getId, t -> t));
-        java.util.Map<Long, AgentRun> runMap = runIds.isEmpty() ? java.util.Map.of()
+        java.util.Map<Long, AgentRun> runMap = runIds.isEmpty()
+                ? java.util.Map.of()
                 : runMapper.selectBatchIds(runIds).stream()
                         .collect(java.util.stream.Collectors.toMap(AgentRun::getId, r -> r));
 
@@ -751,10 +760,9 @@ public class AgentTaskServiceImpl implements AgentTaskService {
             AgentRun run = runMap.get(a.getRunId());
             // S3/M3 行锁升级：与 decideApproval 的双向竞态由条件 UPDATE 行级判定——
             // 用户刚批准（run 已 RUNNING）的任务不会被过期调度覆盖为 FAILED
-            if (run != null && runLifecycle.failFromWaitingApproval(
-                    run.getId(),
-                    AgentConstants.ERR_APPROVAL_EXPIRED,
-                    "审批超时（5分钟未响应）")) {
+            if (run != null
+                    && runLifecycle.failFromWaitingApproval(
+                            run.getId(), AgentConstants.ERR_APPROVAL_EXPIRED, "审批超时（5分钟未响应）")) {
                 finalizeAgentRunUsage(run.getId(), AgentConstants.STATUS_FAILED, null);
             }
             // V13: record event

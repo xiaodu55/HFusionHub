@@ -351,10 +351,12 @@ class UserServiceImplTest {
 
     private org.springframework.mock.web.MockMultipartFile pngFile(String content) {
         // PNG 魔数 + 任意载荷
-        byte[] png = new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+        byte[] png = new byte[] {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
         byte[] body = content == null ? new byte[0] : content.getBytes();
         byte[] bytes = java.nio.ByteBuffer.allocate(png.length + body.length)
-                .put(png).put(body).array();
+                .put(png)
+                .put(body)
+                .array();
         return new org.springframework.mock.web.MockMultipartFile("file", "avatar.png", "image/png", bytes);
     }
 
@@ -377,8 +379,7 @@ class UserServiceImplTest {
 
         org.junit.jupiter.api.Assertions.assertEquals("/api/user/avatar/5", url);
         org.junit.jupiter.api.Assertions.assertEquals("uploads/avatars/5.png", user.getAvatar());
-        org.junit.jupiter.api.Assertions.assertTrue(java.nio.file.Files.exists(
-                tempDir.resolve("5.png")));
+        org.junit.jupiter.api.Assertions.assertTrue(java.nio.file.Files.exists(tempDir.resolve("5.png")));
     }
 
     @Test
@@ -390,12 +391,12 @@ class UserServiceImplTest {
 
         // 旧文件先落盘（伪造 jpg），新上传是 png
         try {
-            java.nio.file.Files.write(tempDir.resolve("5.jpg"), new byte[]{1, 2, 3});
+            java.nio.file.Files.write(tempDir.resolve("5.jpg"), new byte[] {1, 2, 3});
             String url = userService.updateAvatar(5L, pngFile(null));
 
             org.junit.jupiter.api.Assertions.assertEquals("/api/user/avatar/5", url);
-            org.junit.jupiter.api.Assertions.assertFalse(java.nio.file.Files.exists(tempDir.resolve("5.jpg")),
-                    "旧扩展名头像应被删除");
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    java.nio.file.Files.exists(tempDir.resolve("5.jpg")), "旧扩展名头像应被删除");
             org.junit.jupiter.api.Assertions.assertTrue(java.nio.file.Files.exists(tempDir.resolve("5.png")));
         } catch (java.io.IOException e) {
             throw new IllegalStateException(e);
@@ -412,8 +413,8 @@ class UserServiceImplTest {
         org.springframework.mock.web.MockMultipartFile oversized =
                 new org.springframework.mock.web.MockMultipartFile("file", "big.png", "image/png", big);
 
-        org.junit.jupiter.api.Assertions.assertThrows(com.hfusionhub.common.exception.BusinessException.class,
-                () -> userService.updateAvatar(5L, oversized));
+        org.junit.jupiter.api.Assertions.assertThrows(
+                com.hfusionhub.common.exception.BusinessException.class, () -> userService.updateAvatar(5L, oversized));
         org.mockito.Mockito.verify(userMapper, org.mockito.Mockito.never())
                 .updateById(any(com.hfusionhub.entity.User.class));
     }
@@ -421,17 +422,16 @@ class UserServiceImplTest {
     @Test
     void updateAvatarRejectsFakeExtension() {
         // 扩展名 png 但内容是纯文本 → 魔数校验拒绝
-        org.springframework.mock.web.MockMultipartFile fake =
-                new org.springframework.mock.web.MockMultipartFile("file", "fake.png", "image/png",
-                        "not-an-image".getBytes());
+        org.springframework.mock.web.MockMultipartFile fake = new org.springframework.mock.web.MockMultipartFile(
+                "file", "fake.png", "image/png", "not-an-image".getBytes());
 
-        org.junit.jupiter.api.Assertions.assertThrows(com.hfusionhub.common.exception.BusinessException.class,
-                () -> userService.updateAvatar(5L, fake));
+        org.junit.jupiter.api.Assertions.assertThrows(
+                com.hfusionhub.common.exception.BusinessException.class, () -> userService.updateAvatar(5L, fake));
     }
 
     @Test
     void getAvatarFileReturnsEmptyWhenMissing() {
-        org.junit.jupiter.api.Assertions.assertTrue(userService.getAvatarFile(999L).isEmpty());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                userService.getAvatarFile(999L).isEmpty());
     }
-
 }

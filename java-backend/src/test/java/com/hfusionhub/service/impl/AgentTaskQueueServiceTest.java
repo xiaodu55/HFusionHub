@@ -41,7 +41,8 @@ class AgentTaskQueueServiceTest {
     private ThreadPoolTaskExecutor workerExecutor;
     private MessageMapper messageMapper;
     private AgentRunLifecycleService agentRunLifecycle;
-    private ChatImageStorage chatImageStorage = new ChatImageStorage(java.nio.file.Path.of("target", "test-chat-images").toString());
+    private ChatImageStorage chatImageStorage = new ChatImageStorage(
+            java.nio.file.Path.of("target", "test-chat-images").toString());
     private TaskEventSseManager sseManager;
     private com.hfusionhub.mapper.UserMapper userMapper;
 
@@ -64,7 +65,8 @@ class AgentTaskQueueServiceTest {
         try {
             when(agentRunLifecycle.resolveRunTenant(any(), any())).thenAnswer(inv -> {
                 Object run = inv.getArgument(0);
-                return run == null ? null
+                return run == null
+                        ? null
                         : (Long) run.getClass().getMethod("getTenantId").invoke(run);
             });
         } catch (Exception ignored) {

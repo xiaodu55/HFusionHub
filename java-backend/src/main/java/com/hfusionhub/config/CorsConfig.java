@@ -86,8 +86,7 @@ public class CorsConfig {
             // 开发/内网穿透（cpolar 动态域名）：显式选择放行任意 Origin。
             // 通配 Origin + allowCredentials=true 会允许任意站点带凭据跨域调用，
             // 生产环境必须改用 allowed-origins 白名单——此处大声告警以便审计。
-            log.warn("CORS allow-any-origin=true：任意 Origin 均可携带凭据跨域调用，"
-                    + "生产环境请配置 app.cors.allowed-origins 白名单并关闭该项");
+            log.warn("CORS allow-any-origin=true：任意 Origin 均可携带凭据跨域调用，" + "生产环境请配置 app.cors.allowed-origins 白名单并关闭该项");
             config.addAllowedOriginPattern("*");
         } else {
             // 生产未配置白名单：注册空配置（仅放行同源），不放开任何跨域

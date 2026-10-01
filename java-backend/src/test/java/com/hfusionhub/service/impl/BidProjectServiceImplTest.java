@@ -45,15 +45,32 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class BidProjectServiceImplTest {
 
-    @Mock private BidProjectMapper bidProjectMapper;
-    @Mock private TenderElementMapper tenderElementMapper;
-    @Mock private BidScoringMethodMapper bidScoringMethodMapper;
-    @Mock private BidRequirementMapper bidRequirementMapper;
-    @Mock private KnowledgeBaseMapper knowledgeBaseMapper;
-    @Mock private JwtUtils jwtUtils;
-    @Mock private AiClient aiClient;
-    @Mock private UsageLedgerService usageLedgerService;
-    @Mock private BidPlanGateService bidPlanGateService;
+    @Mock
+    private BidProjectMapper bidProjectMapper;
+
+    @Mock
+    private TenderElementMapper tenderElementMapper;
+
+    @Mock
+    private BidScoringMethodMapper bidScoringMethodMapper;
+
+    @Mock
+    private BidRequirementMapper bidRequirementMapper;
+
+    @Mock
+    private KnowledgeBaseMapper knowledgeBaseMapper;
+
+    @Mock
+    private JwtUtils jwtUtils;
+
+    @Mock
+    private AiClient aiClient;
+
+    @Mock
+    private UsageLedgerService usageLedgerService;
+
+    @Mock
+    private BidPlanGateService bidPlanGateService;
 
     private BidProjectServiceImpl service;
     private MockedStatic<JwtUtils> jwtUtilsMock;
@@ -148,26 +165,39 @@ class BidProjectServiceImplTest {
 
         Map<String, Object> result = Map.of(
                 "status", "ok",
-                "elements", List.of(
-                        Map.of(
+                "elements",
+                        List.of(Map.of(
                                 "element_key", "budget",
                                 "element_value", "1200000",
                                 "confidence", 0.95,
                                 "source_clause", "预算不超过120万元",
                                 "evidence_chunk_ids", List.of("c1"))),
-                "scoring_methods", List.of(
-                        Map.of("method_type", "comprehensive", "total_score", 100, "points_json",
+                "scoring_methods",
+                        List.of(Map.of(
+                                "method_type",
+                                "comprehensive",
+                                "total_score",
+                                100,
+                                "points_json",
                                 "[{\"name\":\"技术分\",\"max_score\":50}]")),
-                "requirements", List.of(
-                        Map.of(
-                                "category", BidRequirement.CATEGORY_QUALIFICATION,
-                                "requirement", "须具备建筑智能化二级以上资质",
-                                "source_clause", "资质要求",
-                                "confidence", 0.4), // 低置信 → manual_review
-                        Map.of(
-                                "category", BidRequirement.CATEGORY_PERFORMANCE,
-                                "requirement", "近三年同类业绩不少于2项",
-                                "confidence", 0.9))); // 高置信 → pending
+                "requirements",
+                        List.of(
+                                Map.of(
+                                        "category",
+                                        BidRequirement.CATEGORY_QUALIFICATION,
+                                        "requirement",
+                                        "须具备建筑智能化二级以上资质",
+                                        "source_clause",
+                                        "资质要求",
+                                        "confidence",
+                                        0.4), // 低置信 → manual_review
+                                Map.of(
+                                        "category",
+                                        BidRequirement.CATEGORY_PERFORMANCE,
+                                        "requirement",
+                                        "近三年同类业绩不少于2项",
+                                        "confidence",
+                                        0.9))); // 高置信 → pending
         when(aiClient.bidInterpret(anyLong(), anyLong(), any(), any())).thenReturn(result);
 
         service.interpret(1L);
@@ -175,23 +205,22 @@ class BidProjectServiceImplTest {
         verify(tenderElementMapper).insert(any());
         verify(bidScoringMethodMapper).insert(any());
         // 捕获插入的需求，验证低置信兜底
-        org.mockito.ArgumentCaptor<BidRequirement> captor =
-                org.mockito.ArgumentCaptor.forClass(BidRequirement.class);
+        org.mockito.ArgumentCaptor<BidRequirement> captor = org.mockito.ArgumentCaptor.forClass(BidRequirement.class);
         verify(bidRequirementMapper, org.mockito.Mockito.times(2)).insert(captor.capture());
         java.util.List<BidRequirement> inserted = captor.getAllValues();
         assertEquals(2, inserted.size());
-        boolean hasManualReview = inserted.stream()
-                .anyMatch(r -> BidRequirement.STATUS_MANUAL_REVIEW.equals(r.getSatisfiedStatus()));
-        boolean hasPending = inserted.stream()
-                .anyMatch(r -> BidRequirement.STATUS_PENDING.equals(r.getSatisfiedStatus()));
+        boolean hasManualReview =
+                inserted.stream().anyMatch(r -> BidRequirement.STATUS_MANUAL_REVIEW.equals(r.getSatisfiedStatus()));
+        boolean hasPending =
+                inserted.stream().anyMatch(r -> BidRequirement.STATUS_PENDING.equals(r.getSatisfiedStatus()));
         assertEquals(true, hasManualReview);
         assertEquals(true, hasPending);
         assertEquals(BidProject.STATUS_REQUIREMENTS, p.getStatus());
         // 商业化骨架：解读即按 要素 + 需求 总数计量 TENDER_ELEMENTS（1 要素 + 2 需求 = 3）
-        verify(usageLedgerService).reserve(eq(UsageMeter.TENDER_ELEMENTS), eq("bid-interpret:1"), eq(3L),
-                eq("bid_project"), eq("1"));
-        verify(usageLedgerService).settle(eq(UsageMeter.TENDER_ELEMENTS), eq("bid-interpret:1"), eq(3L),
-                eq("bid_project"), eq("1"));
+        verify(usageLedgerService)
+                .reserve(eq(UsageMeter.TENDER_ELEMENTS), eq("bid-interpret:1"), eq(3L), eq("bid_project"), eq("1"));
+        verify(usageLedgerService)
+                .settle(eq(UsageMeter.TENDER_ELEMENTS), eq("bid-interpret:1"), eq(3L), eq("bid_project"), eq("1"));
     }
 
     @Test

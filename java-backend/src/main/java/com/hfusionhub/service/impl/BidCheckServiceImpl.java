@@ -62,8 +62,7 @@ public class BidCheckServiceImpl implements BidCheckService {
     @Transactional
     public Map<String, Object> check(Long projectId) {
         BidProject project = requireOwnedProject(projectId);
-        bidPlanGateService.requireModule(
-                TenantContext.requireTenantId(), BidSubscription.MODULE_CHECK, "废标自检");
+        bidPlanGateService.requireModule(TenantContext.requireTenantId(), BidSubscription.MODULE_CHECK, "废标自检");
         return runCheck(project);
     }
 
@@ -82,8 +81,8 @@ public class BidCheckServiceImpl implements BidCheckService {
     private Map<String, Object> runCheck(BidProject project) {
         Long projectId = project.getId();
 
-        List<BidDraft> drafts = bidDraftMapper.selectList(new LambdaQueryWrapper<BidDraft>()
-                .eq(BidDraft::getProjectId, projectId));
+        List<BidDraft> drafts =
+                bidDraftMapper.selectList(new LambdaQueryWrapper<BidDraft>().eq(BidDraft::getProjectId, projectId));
         List<Map<String, Object>> sectionMaps = new ArrayList<>();
         for (BidDraft draft : drafts) {
             Map<String, Object> map = new HashMap<>();
@@ -92,10 +91,9 @@ public class BidCheckServiceImpl implements BidCheckService {
             map.put("content", draft.getContent());
             sectionMaps.add(map);
         }
-        List<BidRequirement> requirements = bidRequirementMapper.selectList(
-                new LambdaQueryWrapper<BidRequirement>()
-                        .eq(BidRequirement::getProjectId, projectId)
-                        .orderByAsc(BidRequirement::getId));
+        List<BidRequirement> requirements = bidRequirementMapper.selectList(new LambdaQueryWrapper<BidRequirement>()
+                .eq(BidRequirement::getProjectId, projectId)
+                .orderByAsc(BidRequirement::getId));
         List<Map<String, Object>> reqMaps = new ArrayList<>();
         for (BidRequirement req : requirements) {
             Map<String, Object> map = new HashMap<>();
@@ -106,8 +104,12 @@ public class BidCheckServiceImpl implements BidCheckService {
         }
 
         Map<String, Object> result = aiClient.bidCheck(
-                projectId, project.getTitle(), project.getTenderNumber(),
-                List.of(project.getKnowledgeBaseId()), sectionMaps, reqMaps);
+                projectId,
+                project.getTitle(),
+                project.getTenderNumber(),
+                List.of(project.getKnowledgeBaseId()),
+                sectionMaps,
+                reqMaps);
         if (!"ok".equals(result.get("status"))) {
             throw new BusinessException(
                     StatusCode.SERVICE_UNAVAILABLE,
@@ -115,16 +117,16 @@ public class BidCheckServiceImpl implements BidCheckService {
         }
 
         // 幂等落库：清空旧报告后写入本次结果
-        bidCheckReportMapper.delete(new LambdaQueryWrapper<BidCheckReport>()
-                .eq(BidCheckReport::getProjectId, projectId));
+        bidCheckReportMapper.delete(
+                new LambdaQueryWrapper<BidCheckReport>().eq(BidCheckReport::getProjectId, projectId));
         List<BidCheckReport> reports = persistFindings(projectId, result.get("findings"));
         if (!reports.isEmpty()) {
             // 计量：自检报告份数（P1-7），按报告条数计
             String key = "bid-check:" + projectId;
-            usageLedgerService.reserve(UsageMeter.BID_CHECK_REPORTS, key, reports.size(), "bid_project",
-                    String.valueOf(projectId));
-            usageLedgerService.settle(UsageMeter.BID_CHECK_REPORTS, key, reports.size(), "bid_project",
-                    String.valueOf(projectId));
+            usageLedgerService.reserve(
+                    UsageMeter.BID_CHECK_REPORTS, key, reports.size(), "bid_project", String.valueOf(projectId));
+            usageLedgerService.settle(
+                    UsageMeter.BID_CHECK_REPORTS, key, reports.size(), "bid_project", String.valueOf(projectId));
         }
 
         project.setStatus(BidProject.STATUS_CHECKING);
@@ -144,11 +146,9 @@ public class BidCheckServiceImpl implements BidCheckService {
     public List<BidCheckReport> listReports(Long projectId) {
         requireOwnedProject(projectId);
         List<BidCheckReport> reports = bidCheckReportMapper.selectList(
-                new LambdaQueryWrapper<BidCheckReport>()
-                        .eq(BidCheckReport::getProjectId, projectId));
+                new LambdaQueryWrapper<BidCheckReport>().eq(BidCheckReport::getProjectId, projectId));
         reports.sort((a, b) -> Integer.compare(
-                SEVERITY_ORDER.getOrDefault(b.getSeverity(), 3),
-                SEVERITY_ORDER.getOrDefault(a.getSeverity(), 3)));
+                SEVERITY_ORDER.getOrDefault(b.getSeverity(), 3), SEVERITY_ORDER.getOrDefault(a.getSeverity(), 3)));
         return reports;
     }
 

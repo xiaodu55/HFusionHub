@@ -18,8 +18,7 @@ import java.util.Map;
  */
 final class VectorizationProgress {
 
-    private VectorizationProgress() {
-    }
+    private VectorizationProgress() {}
 
     static String statusName(Integer statusCode) {
         DocumentStatus status = DocumentStatus.fromCode(statusCode);

@@ -23,6 +23,7 @@ public class BidProject extends BaseEntity {
 
     /** 项目状态机 */
     public static final String STATUS_INTERPRETING = "interpreting";
+
     public static final String STATUS_REQUIREMENTS = "requirements";
     public static final String STATUS_DRAFTING = "drafting";
     public static final String STATUS_CHECKING = "checking";

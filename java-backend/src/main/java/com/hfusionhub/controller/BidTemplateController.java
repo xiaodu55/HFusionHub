@@ -49,8 +49,9 @@ public class BidTemplateController {
     @PostMapping
     @Operation(summary = "新建租户私有模板")
     public R<BidTemplate> create(@RequestBody BidTemplate template) {
-        return R.ok("模板已创建", templateService.create(
-                template, TenantContext.requireTenantId(), JwtUtils.getCurrentUserId()));
+        return R.ok(
+                "模板已创建",
+                templateService.create(template, TenantContext.requireTenantId(), JwtUtils.getCurrentUserId()));
     }
 
     @PutMapping

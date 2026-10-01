@@ -5,10 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -47,11 +45,20 @@ class OidcServiceTest {
     private static final String TOKEN_ENDPOINT = "https://idp.example.com/token";
     private static final String USERINFO_ENDPOINT = "https://idp.example.com/userinfo";
 
-    @Mock private RestTemplate restTemplate;
-    @Mock private RedisTemplate<String, Object> redisTemplate;
-    @Mock private ValueOperations<String, Object> valueOperations;
-    @Mock private UserMapper userMapper;
-    @Mock private TenantMemberMapper tenantMemberMapper;
+    @Mock
+    private RestTemplate restTemplate;
+
+    @Mock
+    private RedisTemplate<String, Object> redisTemplate;
+
+    @Mock
+    private ValueOperations<String, Object> valueOperations;
+
+    @Mock
+    private UserMapper userMapper;
+
+    @Mock
+    private TenantMemberMapper tenantMemberMapper;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private OidcService service;
@@ -79,16 +86,14 @@ class OidcServiceTest {
     }
 
     private void stubTokenExchange() throws Exception {
-        JsonNode tokenResponse =
-                objectMapper.readTree("{\"access_token\":\"at-123\",\"token_type\":\"Bearer\"}");
+        JsonNode tokenResponse = objectMapper.readTree("{\"access_token\":\"at-123\",\"token_type\":\"Bearer\"}");
         when(restTemplate.postForObject(eq(TOKEN_ENDPOINT), any(), eq(JsonNode.class)))
                 .thenReturn(tokenResponse);
     }
 
     private void stubUserInfo(String sub, String email, String preferredUsername, String name) throws Exception {
-        JsonNode info = objectMapper.readTree(
-                "{\"sub\":\"" + sub + "\",\"preferred_username\":\"" + preferredUsername
-                        + "\",\"email\":\"" + email + "\",\"name\":\"" + name + "\"}");
+        JsonNode info = objectMapper.readTree("{\"sub\":\"" + sub + "\",\"preferred_username\":\"" + preferredUsername
+                + "\",\"email\":\"" + email + "\",\"name\":\"" + name + "\"}");
         when(restTemplate.exchange(eq(USERINFO_ENDPOINT), eq(HttpMethod.GET), any(), eq(JsonNode.class)))
                 .thenReturn(ResponseEntity.ok(info));
     }
@@ -96,8 +101,7 @@ class OidcServiceTest {
     @Test
     void buildAuthorizationUrl_whenDisabled_throws() {
         ReflectionTestUtils.setField(service, "enabled", false);
-        BusinessException ex =
-                assertThrows(BusinessException.class, () -> service.buildAuthorizationUrl());
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.buildAuthorizationUrl());
         assertEquals(StatusCode.BAD_REQUEST, ex.getCode());
     }
 
@@ -133,11 +137,10 @@ class OidcServiceTest {
         // 无既有账号：selectOne(subject) → null，selectOne(email) → null
         when(userMapper.selectOne(any())).thenReturn(null);
         // MyBatis Plus insert 回填主键
-        when(userMapper.insert(any(User.class)))
-                .thenAnswer(inv -> {
-                    ((User) inv.getArgument(0)).setId(99L);
-                    return 1;
-                });
+        when(userMapper.insert(any(User.class))).thenAnswer(inv -> {
+            ((User) inv.getArgument(0)).setId(99L);
+            return 1;
+        });
 
         try (MockedStatic<JwtUtils> mocked = mockStatic(JwtUtils.class)) {
             mocked.when(JwtUtils::getTokenValue).thenReturn("sso-token-1");
@@ -182,8 +185,7 @@ class OidcServiceTest {
         disabled.setStatus(1);
         when(userMapper.selectOne(any())).thenReturn(disabled);
 
-        BusinessException ex =
-                assertThrows(BusinessException.class, () -> service.loginWithCode("code-3", "state-3"));
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.loginWithCode("code-3", "state-3"));
         assertEquals(StatusCode.USER_DISABLED, ex.getCode());
     }
 
@@ -193,8 +195,7 @@ class OidcServiceTest {
         when(restTemplate.postForObject(eq(TOKEN_ENDPOINT), any(), eq(JsonNode.class)))
                 .thenReturn(objectMapper.readTree("{\"error\":\"invalid_grant\"}"));
 
-        BusinessException ex =
-                assertThrows(BusinessException.class, () -> service.loginWithCode("code-4", "state-4"));
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.loginWithCode("code-4", "state-4"));
         assertEquals(StatusCode.LOGIN_ERROR, ex.getCode());
         verify(userMapper, never()).insert(any(User.class));
     }
@@ -206,8 +207,7 @@ class OidcServiceTest {
         when(restTemplate.exchange(eq(USERINFO_ENDPOINT), eq(HttpMethod.GET), any(), eq(JsonNode.class)))
                 .thenReturn(ResponseEntity.ok(objectMapper.readTree("{\"email\":\"no-sub@corp.com\"}")));
 
-        BusinessException ex =
-                assertThrows(BusinessException.class, () -> service.loginWithCode("code-5", "state-5"));
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.loginWithCode("code-5", "state-5"));
         assertEquals(StatusCode.LOGIN_ERROR, ex.getCode());
         verify(userMapper, never()).insert(any(User.class));
     }

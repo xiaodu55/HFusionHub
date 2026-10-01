@@ -20,12 +20,14 @@ public class BidDraft extends BaseEntity {
 
     /** 分节键：商务/技术/资质/格式 */
     public static final String SECTION_COMMERCIAL = "commercial";
+
     public static final String SECTION_TECHNICAL = "technical";
     public static final String SECTION_QUALIFICATION = "qualification";
     public static final String SECTION_FORMAT = "format";
 
     /** 分节状态 */
     public static final String STATUS_DRAFTING = "drafting";
+
     public static final String STATUS_APPROVED = "approved";
     public static final String STATUS_REJECTED = "rejected";
 

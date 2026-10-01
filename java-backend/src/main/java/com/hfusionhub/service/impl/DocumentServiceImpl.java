@@ -65,9 +65,19 @@ public class DocumentServiceImpl implements DocumentService {
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
     // 允许的文件扩展名（优先使用扩展名检查，比MIME类型更可靠）
     private static final List<String> ALLOWED_EXTENSIONS = List.of(
-            ".pdf", ".docx", ".txt", ".md", ".csv", ".xlsx",
+            ".pdf",
+            ".docx",
+            ".txt",
+            ".md",
+            ".csv",
+            ".xlsx",
             // Batch 4 解析扩展：PPTX / HTML / 图片 OCR
-            ".pptx", ".html", ".htm", ".png", ".jpg", ".jpeg");
+            ".pptx",
+            ".html",
+            ".htm",
+            ".png",
+            ".jpg",
+            ".jpeg");
     // 允许的MIME类型（作为辅助验证）。不含 application/octet-stream：
     // 它只在扩展名校验失败后的 MIME 兜底里生效，保留它等于允许任意扩展名
     // 声明 octet-stream 绕过白名单（合法文件本就由扩展名检查通过）。
@@ -82,8 +92,7 @@ public class DocumentServiceImpl implements DocumentService {
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             "text/html",
             "image/png",
-            "image/jpeg"
-            );
+            "image/jpeg");
 
     @Override
     @Transactional
@@ -301,8 +310,8 @@ public class DocumentServiceImpl implements DocumentService {
                 currentUserId, title, (queryDTO.getPage() - 1) * queryDTO.getPageSize(), queryDTO.getPageSize());
 
         // 批量预加载 KB 与拥有者用户名（消除此前每行 3 次查询的 N+1）
-        List<Long> recycleKbIds = records.stream()
-                .map(Document::getKnowledgeBaseId).distinct().collect(Collectors.toList());
+        List<Long> recycleKbIds =
+                records.stream().map(Document::getKnowledgeBaseId).distinct().collect(Collectors.toList());
         Map<Long, KnowledgeBase> kbMap = recycleKbIds.isEmpty()
                 ? Map.of()
                 : knowledgeBaseMapper.selectBatchIds(recycleKbIds).stream()
@@ -441,8 +450,8 @@ public class DocumentServiceImpl implements DocumentService {
 
             Map<Long, String> kbNameMap = userKbs.stream()
                     .collect(Collectors.toMap(KnowledgeBase::getId, KnowledgeBase::getName, (a, b) -> a));
-            List<Long> kbIds = new java.util.ArrayList<>(userKbs.stream()
-                    .map(KnowledgeBase::getId).collect(Collectors.toList()));
+            List<Long> kbIds = new java.util.ArrayList<>(
+                    userKbs.stream().map(KnowledgeBase::getId).collect(Collectors.toList()));
             for (KbShareInfoDTO shared : kbShareService.listSharedToMe()) {
                 Long sharedKbId = shared.getKnowledgeBaseId();
                 if (sharedKbId != null && !kbIds.contains(sharedKbId)) {

@@ -275,8 +275,18 @@ public class AiClient {
             String userRole,
             List<Map<String, Object>> intentContext) {
         return agentV1Chat(
-                message, conversationId, knowledgeBaseId, history, style, maxToolSteps,
-                requestId, userId, capabilityProfile, userRole, intentContext, null);
+                message,
+                conversationId,
+                knowledgeBaseId,
+                history,
+                style,
+                maxToolSteps,
+                requestId,
+                userId,
+                capabilityProfile,
+                userRole,
+                intentContext,
+                null);
     }
 
     /** 对话图片输入变体：images 为 base64 data URL 列表（可为空）。 */
@@ -372,8 +382,20 @@ public class AiClient {
             String userRole,
             List<Map<String, Object>> intentContext) {
         return doChatInternal(
-                path, message, conversationId, knowledgeBaseId, history, style, maxToolSteps,
-                requestId, userId, capabilityProfile, systemPrompt, userRole, intentContext, null);
+                path,
+                message,
+                conversationId,
+                knowledgeBaseId,
+                history,
+                style,
+                maxToolSteps,
+                requestId,
+                userId,
+                capabilityProfile,
+                systemPrompt,
+                userRole,
+                intentContext,
+                null);
     }
 
     /** 对话图片输入：images 为 base64 data URL 列表（由 ConversationServiceImpl 从本地文件读取）。 */
@@ -540,11 +562,14 @@ public class AiClient {
                 .onStatus(status -> status.isError(), clientResponse -> clientResponse
                         .bodyToMono(String.class)
                         .flatMap(body -> {
-                            log.warn("Python AI error status={} body={}", clientResponse.statusCode().value(),
+                            log.warn(
+                                    "Python AI error status={} body={}",
+                                    clientResponse.statusCode().value(),
                                     body.length() > 500 ? body.substring(0, 500) : body);
                             return reactor.core.publisher.Mono.error(new BusinessException(
                                     StatusCode.SERVICE_UNAVAILABLE,
-                                    "AI 服务暂时不可用（HTTP " + clientResponse.statusCode().value() + "），请稍后重试"));
+                                    "AI 服务暂时不可用（HTTP "
+                                            + clientResponse.statusCode().value() + "），请稍后重试"));
                         }))
                 .bodyToFlux(String.class)
                 .doOnNext(chunk -> log.debug("SSE raw chunk ({}B)", chunk.length()))
@@ -614,8 +639,16 @@ public class AiClient {
             String capabilityProfile,
             List<Map<String, Object>> intentContext) {
         return agentV1ChatStream(
-                message, conversationId, knowledgeBaseId, history, requestId, userId,
-                capabilityProfile, intentContext, null, null);
+                message,
+                conversationId,
+                knowledgeBaseId,
+                history,
+                requestId,
+                userId,
+                capabilityProfile,
+                intentContext,
+                null,
+                null);
     }
 
     /** 对话图片输入变体：images 为 base64 data URL 列表（可为空）。
@@ -691,11 +724,14 @@ public class AiClient {
                 .onStatus(status -> status.isError(), clientResponse -> clientResponse
                         .bodyToMono(String.class)
                         .flatMap(body -> {
-                            log.warn("Python AI error status={} body={}", clientResponse.statusCode().value(),
+                            log.warn(
+                                    "Python AI error status={} body={}",
+                                    clientResponse.statusCode().value(),
                                     body.length() > 500 ? body.substring(0, 500) : body);
                             return reactor.core.publisher.Mono.error(new BusinessException(
                                     StatusCode.SERVICE_UNAVAILABLE,
-                                    "AI 服务暂时不可用（HTTP " + clientResponse.statusCode().value() + "），请稍后重试"));
+                                    "AI 服务暂时不可用（HTTP "
+                                            + clientResponse.statusCode().value() + "），请稍后重试"));
                         }))
                 .bodyToFlux(String.class)
                 .doOnNext(chunk -> log.debug("Agent V1 SSE raw chunk ({}B)", chunk.length()))
@@ -1041,8 +1077,7 @@ public class AiClient {
      * @return 解读结果 map（含 status）
      */
     @SuppressWarnings("unchecked")
-    public Map<String, Object> bidInterpret(
-            Long projectId, Long knowledgeBaseId, String title, String tenderNumber) {
+    public Map<String, Object> bidInterpret(Long projectId, Long knowledgeBaseId, String title, String tenderNumber) {
         try {
             String url = baseUrl + "/api/bid/interpret";
             Map<String, Object> body = new HashMap<>();
@@ -1199,7 +1234,8 @@ public class AiClient {
         }
         // 捕获内部鉴权头，避免在 Netty 事件循环线程上访问请求线程上下文
         final HttpHeaders capturedHeaders = internalHeaders();
-        return webClient.post()
+        return webClient
+                .post()
                 .uri(url)
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.TEXT_EVENT_STREAM)
@@ -1209,11 +1245,14 @@ public class AiClient {
                 .onStatus(status -> status.isError(), clientResponse -> clientResponse
                         .bodyToMono(String.class)
                         .flatMap(body -> {
-                            log.warn("Python AI error status={} body={}", clientResponse.statusCode().value(),
+                            log.warn(
+                                    "Python AI error status={} body={}",
+                                    clientResponse.statusCode().value(),
                                     body.length() > 500 ? body.substring(0, 500) : body);
                             return reactor.core.publisher.Mono.error(new BusinessException(
                                     StatusCode.SERVICE_UNAVAILABLE,
-                                    "AI 服务暂时不可用（HTTP " + clientResponse.statusCode().value() + "），请稍后重试"));
+                                    "AI 服务暂时不可用（HTTP "
+                                            + clientResponse.statusCode().value() + "），请稍后重试"));
                         }))
                 .bodyToFlux(String.class)
                 .doOnError(ResourceAccessException.class, e -> {
@@ -1260,10 +1299,8 @@ public class AiClient {
      */
     @Async("housekeepingExecutor")
     public void consolidateMemoryOnConversationDeleted(
-            Long conversationId, Long userId, Long knowledgeBaseId, Long tenantId,
-            List<Map<String, String>> messages) {
-        if (internalApiToken == null || internalApiToken.isBlank()
-                || messages == null || messages.isEmpty()) {
+            Long conversationId, Long userId, Long knowledgeBaseId, Long tenantId, List<Map<String, String>> messages) {
+        if (internalApiToken == null || internalApiToken.isBlank() || messages == null || messages.isEmpty()) {
             return;
         }
         try {
@@ -1279,8 +1316,7 @@ public class AiClient {
                     String.class);
             log.info("Memory consolidation dispatched for deleted conversation {}", conversationId);
         } catch (Exception e) {
-            log.warn("Memory consolidation call failed for conversation {}: {}",
-                    conversationId, e.getMessage());
+            log.warn("Memory consolidation call failed for conversation {}: {}", conversationId, e.getMessage());
         }
     }
 

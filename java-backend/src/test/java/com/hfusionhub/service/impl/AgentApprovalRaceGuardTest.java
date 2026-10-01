@@ -56,30 +56,43 @@ class AgentApprovalRaceGuardTest {
 
     @Mock
     private AgentTaskMapper taskMapper;
+
     @Mock
     private AgentRunMapper runMapper;
+
     @Mock
     private AgentStepMapper stepMapper;
+
     @Mock
     private AgentApprovalMapper approvalMapper;
+
     @Mock
     private MessageMapper messageMapper;
+
     @Mock
     private UserMapper userMapper;
+
     @Mock
     private AiClient aiClient;
+
     @Mock
     private AgentTaskQueueService queueService;
+
     @Mock
     private AgentStatusEventService statusEventService;
+
     @Mock
     private RedisUtils redisUtils;
+
     @Mock
     private UsageLedgerService usageLedgerService;
+
     @Mock
     private QuotaProperties quotaProperties;
+
     @Mock
     private CostTrackingService costTrackingService;
+
     @Mock
     private AgentRunLifecycleService runLifecycle;
 
@@ -143,7 +156,8 @@ class AgentApprovalRaceGuardTest {
 
     private void stubApprovalFlow(String decision) {
         when(approvalMapper.selectByApprovalId("appr-1")).thenReturn(pendingApproval());
-        when(approvalMapper.updateDecision(eq(1L), eq(decision), any(), anyString(), any())).thenReturn(1);
+        when(approvalMapper.updateDecision(eq(1L), eq(decision), any(), anyString(), any()))
+                .thenReturn(1);
         when(taskMapper.selectById(TASK_ID)).thenReturn(waitingTask());
         when(runMapper.selectById(RUN_ID)).thenReturn(waitingRun());
     }
@@ -180,9 +194,9 @@ class AgentApprovalRaceGuardTest {
                 .thenReturn(1);
         when(runLifecycle.resumeFromWaitingApproval(RUN_ID)).thenReturn(true);
         when(aiClient.decideApproval(
-                any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), any(), any(),
-                any(), any())).thenThrow(new RuntimeException("python down"));
+                        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                        any()))
+                .thenThrow(new RuntimeException("python down"));
         // 恢复失败后的收敛：重读 run 仍非终态 → 条件迁移成功
         when(runMapper.selectById(RUN_ID)).thenReturn(waitingRun());
         when(runLifecycle.failUnlessTerminal(eq(RUN_ID), eq("internal_error"), anyString()))
@@ -203,9 +217,9 @@ class AgentApprovalRaceGuardTest {
                 .thenReturn(1);
         when(runLifecycle.resumeFromWaitingApproval(RUN_ID)).thenReturn(true);
         when(aiClient.decideApproval(
-                any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), any(), any(),
-                any(), any())).thenThrow(new RuntimeException("python down"));
+                        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                        any()))
+                .thenThrow(new RuntimeException("python down"));
         when(runMapper.selectById(RUN_ID)).thenReturn(waitingRun());
         // run 在恢复期间真实完成（SUCCEEDED）→ 条件迁移命中 0 行，绝不覆盖终态
         when(runLifecycle.failUnlessTerminal(eq(RUN_ID), eq("internal_error"), anyString()))
@@ -229,9 +243,9 @@ class AgentApprovalRaceGuardTest {
                 .hasMessageContaining("执行令牌签发失败");
 
         verify(aiClient, never())
-                .decideApproval(any(), any(), any(), any(), any(), any(),
-                        any(), any(), any(), any(), any(), any(),
-                        any(), any());
+                .decideApproval(
+                        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                        any());
         verify(runLifecycle, never()).resumeFromWaitingApproval(anyLong());
     }
 
@@ -248,9 +262,9 @@ class AgentApprovalRaceGuardTest {
                 .hasMessageContaining("执行令牌签发失败");
 
         verify(aiClient, never())
-                .decideApproval(any(), any(), any(), any(), any(), any(),
-                        any(), any(), any(), any(), any(), any(),
-                        any(), any());
+                .decideApproval(
+                        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                        any());
         verify(runLifecycle, never()).resumeFromWaitingApproval(anyLong());
     }
 
@@ -261,12 +275,11 @@ class AgentApprovalRaceGuardTest {
                 .thenReturn(1);
         when(runLifecycle.resumeFromWaitingApproval(RUN_ID)).thenReturn(true);
         // task 条件迁移命中 0 行（并发已迁移/终态）→ 不再退回 updateById 覆盖
-        when(taskMapper.transitionTaskGuarded(eq(TASK_ID), anyString(), any()))
-                .thenReturn(0);
+        when(taskMapper.transitionTaskGuarded(eq(TASK_ID), anyString(), any())).thenReturn(0);
         when(aiClient.decideApproval(
-                any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), any(), any(),
-                any(), any())).thenThrow(new RuntimeException("python down"));
+                        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                        any()))
+                .thenThrow(new RuntimeException("python down"));
         when(runMapper.selectById(RUN_ID)).thenReturn(waitingRun());
         when(runLifecycle.failUnlessTerminal(eq(RUN_ID), eq("internal_error"), anyString()))
                 .thenReturn(true);
@@ -286,15 +299,14 @@ class AgentApprovalRaceGuardTest {
                 .thenReturn(1);
         when(taskMapper.selectBatchIds(any())).thenReturn(List.of());
         when(runMapper.selectBatchIds(any())).thenReturn(List.of(waitingRun()));
-        when(runLifecycle.failFromWaitingApproval(
-                eq(RUN_ID), eq(AgentConstants.ERR_APPROVAL_EXPIRED), anyString()))
+        when(runLifecycle.failFromWaitingApproval(eq(RUN_ID), eq(AgentConstants.ERR_APPROVAL_EXPIRED), anyString()))
                 .thenReturn(true);
 
         int count = service.expireApprovals();
 
         assertThat(count).isEqualTo(1);
-        verify(runLifecycle).failFromWaitingApproval(
-                eq(RUN_ID), eq(AgentConstants.ERR_APPROVAL_EXPIRED), contains("审批超时"));
+        verify(runLifecycle)
+                .failFromWaitingApproval(eq(RUN_ID), eq(AgentConstants.ERR_APPROVAL_EXPIRED), contains("审批超时"));
         verify(runLifecycle).finalizeAgentRunUsage(RUN_ID, AgentConstants.STATUS_FAILED, null);
     }
 
@@ -307,8 +319,7 @@ class AgentApprovalRaceGuardTest {
         when(taskMapper.selectBatchIds(any())).thenReturn(List.of());
         when(runMapper.selectBatchIds(any())).thenReturn(List.of(waitingRun()));
         // 用户刚批准（run 已 RUNNING）→ 条件迁移命中 0 行，不得覆盖
-        when(runLifecycle.failFromWaitingApproval(
-                eq(RUN_ID), eq(AgentConstants.ERR_APPROVAL_EXPIRED), anyString()))
+        when(runLifecycle.failFromWaitingApproval(eq(RUN_ID), eq(AgentConstants.ERR_APPROVAL_EXPIRED), anyString()))
                 .thenReturn(false);
 
         int count = service.expireApprovals();

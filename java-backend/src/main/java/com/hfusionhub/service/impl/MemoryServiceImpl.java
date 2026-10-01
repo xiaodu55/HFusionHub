@@ -148,8 +148,10 @@ public class MemoryServiceImpl implements MemoryService {
                 .map(MemoryEntry::getContent)
                 .filter(StringUtils::hasText)
                 .toList();
-        Set<String> existing = contents.isEmpty() ? Set.of()
-                : memoryEntryMapper.selectList(new LambdaQueryWrapper<MemoryEntry>()
+        Set<String> existing = contents.isEmpty()
+                ? Set.of()
+                : memoryEntryMapper
+                        .selectList(new LambdaQueryWrapper<MemoryEntry>()
                                 .select(MemoryEntry::getContent)
                                 .eq(MemoryEntry::getUserId, userId)
                                 .in(MemoryEntry::getContent, contents))

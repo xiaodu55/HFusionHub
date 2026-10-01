@@ -9,7 +9,6 @@ import com.hfusionhub.tenant.TenantContext;
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -117,10 +116,10 @@ public class InternalPluginController {
             if (ids.isEmpty()) {
                 return java.util.Set.<String>of();
             }
-            return pluginAuditLogMapper.selectList(
-                            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PluginAuditLog>()
-                                    .in(PluginAuditLog::getEventId, ids)
-                                    .select(PluginAuditLog::getEventId))
+            return pluginAuditLogMapper
+                    .selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PluginAuditLog>()
+                            .in(PluginAuditLog::getEventId, ids)
+                            .select(PluginAuditLog::getEventId))
                     .stream()
                     .map(PluginAuditLog::getEventId)
                     .collect(java.util.stream.Collectors.toSet());
@@ -145,8 +144,7 @@ public class InternalPluginController {
                 // Resolve plugin_id from pluginId (UUID) to database ID
                 String pluginUuid = (String) entry.get("pluginId");
                 if (pluginUuid != null) {
-                    var plugin = TenantContext.runAsSystem(
-                            () -> pluginService.getByPluginId(pluginUuid));
+                    var plugin = TenantContext.runAsSystem(() -> pluginService.getByPluginId(pluginUuid));
                     if (plugin != null) {
                         log.setPluginId(plugin.getId());
                         // 审计行归属插件租户；平台内建插件（tenant_id NULL）归平台租户 1
@@ -175,5 +173,4 @@ public class InternalPluginController {
         log.info("Received audit logs from Python: inserted={}, skipped={}", inserted, skipped);
         return R.ok(result);
     }
-
 }

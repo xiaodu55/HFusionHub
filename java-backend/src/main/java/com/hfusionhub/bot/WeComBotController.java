@@ -1,6 +1,12 @@
 package com.hfusionhub.bot;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import java.io.ByteArrayInputStream;
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import javax.xml.parsers.DocumentBuilderFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpEntity;
@@ -15,13 +21,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
 import org.w3c.dom.Element;
-
-import javax.xml.parsers.DocumentBuilderFactory;
-import java.io.ByteArrayInputStream;
-import java.time.Instant;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 企业微信应用回调（Batch 6，默认关闭）。
@@ -47,10 +46,11 @@ public class WeComBotController {
 
     /** 回调 URL 验证：解密 echostr 后以明文返回。 */
     @GetMapping
-    public String verify(@RequestParam("msg_signature") String msgSignature,
-                         @RequestParam("timestamp") String timestamp,
-                         @RequestParam("nonce") String nonce,
-                         @RequestParam("echostr") String echostr) {
+    public String verify(
+            @RequestParam("msg_signature") String msgSignature,
+            @RequestParam("timestamp") String timestamp,
+            @RequestParam("nonce") String nonce,
+            @RequestParam("echostr") String echostr) {
         BotProperties.WeCom cfg = properties.getWecom();
         if (!cfg.isEnabled()) {
             return "disabled";
@@ -122,8 +122,7 @@ public class WeComBotController {
         payload.put("agentid", cfg.getAgentId());
         payload.put("text", Map.of("content", answer));
         restTemplate.postForEntity(
-                SEND_URL + "?access_token=" + accessToken,
-                new HttpEntity<>(payload, headers), String.class);
+                SEND_URL + "?access_token=" + accessToken, new HttpEntity<>(payload, headers), String.class);
     }
 
     private String accessToken(BotProperties.WeCom cfg) {

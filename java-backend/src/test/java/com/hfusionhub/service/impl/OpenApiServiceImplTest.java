@@ -214,7 +214,8 @@ class OpenApiServiceImplTest {
         when(appMapper.selectById(1L)).thenReturn(publishedApp(1L));
         when(redisUtils.increment(anyString(), anyLong())).thenReturn(1L);
         doThrow(new BusinessException(403, "投标开放 API 需要开通「投标开放 API」模块，请在套餐中心升级后重试"))
-                .when(bidCheckService).checkForApi(5L, 1L);
+                .when(bidCheckService)
+                .checkForApi(5L, 1L);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> openApiService.bidCheck(secret, 5L));
 
@@ -239,11 +240,10 @@ class OpenApiServiceImplTest {
         when(appMapper.selectById(1L)).thenReturn(app);
         when(redisUtils.increment(anyString(), anyLong())).thenReturn(1L);
         AtomicReference<Long> tenantAtCheck = new AtomicReference<>();
-        when(bidCheckService.checkForApi(eq(7L), eq(42L)))
-                .thenAnswer(inv -> {
-                    tenantAtCheck.set(TenantContext.getTenantId());
-                    return Map.of("total", 0);
-                });
+        when(bidCheckService.checkForApi(eq(7L), eq(42L))).thenAnswer(inv -> {
+            tenantAtCheck.set(TenantContext.getTenantId());
+            return Map.of("total", 0);
+        });
 
         OpenApiBidCheckResponse response = openApiService.bidCheck(secret, 7L);
 

@@ -1,11 +1,5 @@
 package com.hfusionhub.bot;
 
-import com.hfusionhub.common.exception.BusinessException;
-import com.hfusionhub.dto.OpenApiChatRequest;
-import com.hfusionhub.dto.OpenApiChatResponse;
-import com.hfusionhub.service.OpenApiService;
-import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -15,6 +9,12 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+
+import com.hfusionhub.common.exception.BusinessException;
+import com.hfusionhub.dto.OpenApiChatRequest;
+import com.hfusionhub.dto.OpenApiChatResponse;
+import com.hfusionhub.service.OpenApiService;
+import org.junit.jupiter.api.Test;
 
 class BotAdaptersTest {
 
@@ -43,10 +43,9 @@ class BotAdaptersTest {
     @Test
     void weComCryptoRoundTrip() {
         // EncodingAESKey 是 43 位 Base64（解码 32 字节）；构造合法 key
-        String aesKey = java.util.Base64.getEncoder()
-                .encodeToString(new byte[32]).substring(0, 43);
-        String plain = "<xml><ToUserName><![CDATA[corp]]></ToUserName>"
-                + "<Content><![CDATA[你好，机器人]]></Content></xml>";
+        String aesKey =
+                java.util.Base64.getEncoder().encodeToString(new byte[32]).substring(0, 43);
+        String plain = "<xml><ToUserName><![CDATA[corp]]></ToUserName>" + "<Content><![CDATA[你好，机器人]]></Content></xml>";
         String receiveId = "corp-id-1";
         String timestamp = "1700000000";
         String nonce = "nonce-1";
@@ -62,8 +61,8 @@ class BotAdaptersTest {
 
     @Test
     void weComDecryptRejectsTamperedData() {
-        String aesKey = java.util.Base64.getEncoder()
-                .encodeToString(new byte[32]).substring(0, 43);
+        String aesKey =
+                java.util.Base64.getEncoder().encodeToString(new byte[32]).substring(0, 43);
         String encrypted = WeComCrypto.encrypt(aesKey, "<xml/>", "corp");
         byte[] bytes = java.util.Base64.getDecoder().decode(encrypted);
         bytes[30] ^= 0x7F; // 破坏密文
@@ -125,8 +124,7 @@ class BotAdaptersTest {
         assertTrue(limited.contains("调用受限"));
 
         // 其他异常 → 兜底文案
-        when(openApi.chat(anyString(), any(OpenApiChatRequest.class)))
-                .thenThrow(new RuntimeException("boom"));
+        when(openApi.chat(anyString(), any(OpenApiChatRequest.class))).thenThrow(new RuntimeException("boom"));
         assertEquals(BotChatService.ERROR_REPLY, service.answer("app-key", "u", "q"));
 
         // 空回答 → 兜底文案

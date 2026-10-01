@@ -1,7 +1,6 @@
 package com.hfusionhub.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
@@ -22,7 +21,8 @@ import org.springframework.mock.web.MockHttpServletResponse;
 @ExtendWith(MockitoExtension.class)
 class SsoControllerTest {
 
-    @Mock private OidcService oidcService;
+    @Mock
+    private OidcService oidcService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private SsoController controller;

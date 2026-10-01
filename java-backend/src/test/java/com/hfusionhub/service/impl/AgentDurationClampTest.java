@@ -2,18 +2,15 @@ package com.hfusionhub.service.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.constant.AgentConstants;
 import com.hfusionhub.common.utils.RedisUtils;
 import com.hfusionhub.config.QuotaProperties;
-import com.hfusionhub.entity.AgentApproval;
 import com.hfusionhub.entity.AgentRun;
 import com.hfusionhub.entity.AgentTask;
 import com.hfusionhub.mapper.AgentApprovalMapper;
@@ -48,28 +45,40 @@ class AgentDurationClampTest {
 
     @Mock
     private AgentTaskMapper taskMapper;
+
     @Mock
     private AgentRunMapper runMapper;
+
     @Mock
     private AgentStepMapper stepMapper;
+
     @Mock
     private AgentApprovalMapper approvalMapper;
+
     @Mock
     private UserMapper userMapper;
+
     @Mock
     private AiClient aiClient;
+
     @Mock
     private AgentTaskQueueService queueService;
+
     @Mock
     private AgentStatusEventService statusEventService;
+
     @Mock
     private RedisUtils redisUtils;
+
     @Mock
     private UsageLedgerService usageLedgerService;
+
     @Mock
     private QuotaProperties quotaProperties;
+
     @Mock
     private CostTrackingService costTrackingService;
+
     @Mock
     private AgentRunLifecycleService runLifecycle;
 
@@ -78,9 +87,19 @@ class AgentDurationClampTest {
     @BeforeEach
     void setUp() {
         service = new AgentTaskServiceImpl(
-                taskMapper, runMapper, stepMapper, approvalMapper,
-                userMapper, aiClient, queueService, statusEventService, redisUtils,
-                usageLedgerService, quotaProperties, costTrackingService, runLifecycle);
+                taskMapper,
+                runMapper,
+                stepMapper,
+                approvalMapper,
+                userMapper,
+                aiClient,
+                queueService,
+                statusEventService,
+                redisUtils,
+                usageLedgerService,
+                quotaProperties,
+                costTrackingService,
+                runLifecycle);
     }
 
     private AgentRun runningRun(LocalDateTime startedAt) {
@@ -105,17 +124,15 @@ class AgentDurationClampTest {
         // 模拟时钟回拨：startedAt 在"当前"之后 10 分钟 → 相减为负，必须钳为 0
         when(runMapper.selectById(RUN_ID))
                 .thenReturn(runningRun(LocalDateTime.now().plusMinutes(10)));
-        when(runMapper.completeRunGuarded(
-                eq(RUN_ID), anyString(), isNull(), isNull(), isNull(), any()))
+        when(runMapper.completeRunGuarded(eq(RUN_ID), anyString(), isNull(), isNull(), isNull(), any()))
                 .thenReturn(1);
         when(taskMapper.selectById(TASK_ID)).thenReturn(owningTask());
 
-        service.completeRun(RUN_ID, AgentConstants.STATUS_SUCCEEDED,
-                null, null, 0, 0L, null, null, null);
+        service.completeRun(RUN_ID, AgentConstants.STATUS_SUCCEEDED, null, null, 0, 0L, null, null, null);
 
         ArgumentCaptor<Long> duration = ArgumentCaptor.forClass(Long.class);
-        org.mockito.Mockito.verify(runMapper).updateCompletionMetadata(
-                eq(RUN_ID), isNull(), isNull(), any(), duration.capture());
+        org.mockito.Mockito.verify(runMapper)
+                .updateCompletionMetadata(eq(RUN_ID), isNull(), isNull(), any(), duration.capture());
         assertThat(duration.getValue()).isZero();
     }
 
@@ -123,17 +140,15 @@ class AgentDurationClampTest {
     void completeRunKeepsPositiveCallerProvidedDuration() {
         when(runMapper.selectById(RUN_ID))
                 .thenReturn(runningRun(LocalDateTime.now().minusSeconds(30)));
-        when(runMapper.completeRunGuarded(
-                eq(RUN_ID), anyString(), isNull(), isNull(), isNull(), any()))
+        when(runMapper.completeRunGuarded(eq(RUN_ID), anyString(), isNull(), isNull(), isNull(), any()))
                 .thenReturn(1);
         when(taskMapper.selectById(TASK_ID)).thenReturn(owningTask());
 
-        service.completeRun(RUN_ID, AgentConstants.STATUS_SUCCEEDED,
-                null, null, 0, 5000L, null, null, null);
+        service.completeRun(RUN_ID, AgentConstants.STATUS_SUCCEEDED, null, null, 0, 5000L, null, null, null);
 
         ArgumentCaptor<Long> duration = ArgumentCaptor.forClass(Long.class);
-        org.mockito.Mockito.verify(runMapper).updateCompletionMetadata(
-                eq(RUN_ID), isNull(), isNull(), any(), duration.capture());
+        org.mockito.Mockito.verify(runMapper)
+                .updateCompletionMetadata(eq(RUN_ID), isNull(), isNull(), any(), duration.capture());
         assertThat(duration.getValue()).isEqualTo(5000L);
     }
 

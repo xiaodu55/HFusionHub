@@ -74,8 +74,11 @@ public class TenantPlanBindingServiceImpl implements TenantPlanBindingService {
             binding.setStatus(TenantPlanBinding.STATUS_ACTIVE);
             binding.setCreatedBy(jwtUtils.getCurrentUserId());
             bindingMapper.insert(binding);
-            log.info("租户套餐已绑定: tenantId={}, subscriptionId={}, planCode={}",
-                    tenantId, subscriptionId, subscription.getPlanCode());
+            log.info(
+                    "租户套餐已绑定: tenantId={}, subscriptionId={}, planCode={}",
+                    tenantId,
+                    subscriptionId,
+                    subscription.getPlanCode());
         }
         alignTenantTier(tenantId, subscription);
         return toDto(binding, subscription);

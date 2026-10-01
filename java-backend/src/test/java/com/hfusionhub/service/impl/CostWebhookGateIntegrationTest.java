@@ -5,8 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.hfusionhub.support.AbstractItMySQLTest;
-
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.hfusionhub.dto.GateResult;
@@ -25,6 +23,7 @@ import com.hfusionhub.mapper.WebhookSubscriptionMapper;
 import com.hfusionhub.service.CostTrackingService;
 import com.hfusionhub.service.EvaluationGateService;
 import com.hfusionhub.service.WebhookSubscriptionService;
+import com.hfusionhub.support.AbstractItMySQLTest;
 import com.hfusionhub.tenant.TenantContext;
 import com.hfusionhub.webhook.WebhookEventPublisher;
 import com.hfusionhub.webhook.WebhookEventTypes;
@@ -81,7 +80,6 @@ class CostWebhookGateIntegrationTest extends AbstractItMySQLTest {
     @Autowired
     private WebhookDeliveryMapper webhookDeliveryMapper;
 
-
     @Autowired
     private AgentEvaluationDatasetMapper datasetMapper;
 
@@ -131,7 +129,8 @@ class CostWebhookGateIntegrationTest extends AbstractItMySQLTest {
 
         var summary = costTrackingService.getCostSummary(1L);
         assertEquals(1L, summary.getUserId());
-        assertTrue(summary.getTotalRequests() >= 2,
+        assertTrue(
+                summary.getTotalRequests() >= 2,
                 "totalRequests=" + summary.getTotalRequests() + " totalCost=" + summary.getTotalCost());
         assertTrue(summary.getTotalCost().compareTo(BigDecimal.valueOf(3.23)) >= 0);
         assertNotNull(summary.getEstimatedMonthCost(), "应有本月预估成本");

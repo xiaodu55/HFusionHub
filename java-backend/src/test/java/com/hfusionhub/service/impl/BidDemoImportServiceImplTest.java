@@ -14,10 +14,10 @@ import static org.mockito.Mockito.when;
 
 import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.context.SaTokenContext;
-import cn.dev33.satoken.context.model.SaTokenContextModelBox;
 import cn.dev33.satoken.context.model.SaRequest;
 import cn.dev33.satoken.context.model.SaResponse;
 import cn.dev33.satoken.context.model.SaStorage;
+import cn.dev33.satoken.context.model.SaTokenContextModelBox;
 import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.hfusionhub.common.exception.BusinessException;
@@ -72,11 +72,7 @@ class BidDemoImportServiceImplTest {
         vectorizationService = mock(VectorizationService.class);
         knowledgeBaseService = mock(KnowledgeBaseService.class);
         service = new BidDemoImportServiceImpl(
-                knowledgeBaseMapper,
-                documentMapper,
-                bidProjectMapper,
-                vectorizationService,
-                knowledgeBaseService);
+                knowledgeBaseMapper, documentMapper, bidProjectMapper, vectorizationService, knowledgeBaseService);
         // 演示文档写入临时目录，避免污染工作区
         ReflectionTestUtils.setField(service, "uploadDir", tempDir.toString());
         StpUtil.login(1L);
@@ -120,8 +116,7 @@ class BidDemoImportServiceImplTest {
         assertEquals(201L, result.getKnowledgeBaseId());
         assertEquals("招投标演示知识库", result.getKnowledgeBaseName());
         // 知识库分类应为 tender（供投标项目解读工作流识别）
-        org.mockito.ArgumentCaptor<KnowledgeBase> kbCaptor =
-                org.mockito.ArgumentCaptor.forClass(KnowledgeBase.class);
+        org.mockito.ArgumentCaptor<KnowledgeBase> kbCaptor = org.mockito.ArgumentCaptor.forClass(KnowledgeBase.class);
         verify(knowledgeBaseMapper, times(3)).insert(kbCaptor.capture());
         assertEquals("tender", kbCaptor.getAllValues().get(0).getCategory());
         assertEquals("qualification", kbCaptor.getAllValues().get(1).getCategory());
@@ -253,14 +248,12 @@ class BidDemoImportServiceImplTest {
         assertEquals(301L, result.getKnowledgeBaseId());
         assertEquals("招投标演示·工程施工行业样例库", result.getKnowledgeBaseName());
         // 行业样例库分类为 tender（供投标项目解读工作流识别）
-        org.mockito.ArgumentCaptor<KnowledgeBase> kbCaptor =
-                org.mockito.ArgumentCaptor.forClass(KnowledgeBase.class);
+        org.mockito.ArgumentCaptor<KnowledgeBase> kbCaptor = org.mockito.ArgumentCaptor.forClass(KnowledgeBase.class);
         verify(knowledgeBaseMapper, times(1)).insert(kbCaptor.capture());
         assertEquals("tender", kbCaptor.getValue().getCategory());
         verify(vectorizationService, times(3)).startVectorization(anyLong(), isNull());
         // 示例投标项目（工程施工）
-        org.mockito.ArgumentCaptor<BidProject> projectCaptor =
-                org.mockito.ArgumentCaptor.forClass(BidProject.class);
+        org.mockito.ArgumentCaptor<BidProject> projectCaptor = org.mockito.ArgumentCaptor.forClass(BidProject.class);
         verify(bidProjectMapper, times(1)).insert(projectCaptor.capture());
         BidProject project = projectCaptor.getValue();
         assertEquals("示例：蓉城市政道路提升改造工程", project.getTitle());
@@ -304,7 +297,7 @@ class BidDemoImportServiceImplTest {
     private static class MockSaTokenContext implements SaTokenContext {
         private final Map<String, Object> storage = new HashMap<>();
         private SaTokenContextModelBox modelBox;
-    
+
         private MockSaTokenContext() {
             // 构造即装配 modelBox：SaManager.setSaTokenContext 之后立即可用
             setContext(mock(SaRequest.class), mock(SaResponse.class), new SaStorage() {
@@ -312,18 +305,18 @@ class BidDemoImportServiceImplTest {
                 public Object getSource() {
                     return storage;
                 }
-    
+
                 @Override
                 public Object get(String key) {
                     return storage.get(key);
                 }
-    
+
                 @Override
                 public SaStorage set(String key, Object value) {
                     storage.put(key, value);
                     return this;
                 }
-    
+
                 @Override
                 public SaStorage delete(String key) {
                     storage.remove(key);
@@ -331,22 +324,22 @@ class BidDemoImportServiceImplTest {
                 }
             });
         }
-    
+
         @Override
         public void setContext(SaRequest request, SaResponse response, SaStorage storage) {
             this.modelBox = new SaTokenContextModelBox(request, response, storage);
         }
-    
+
         @Override
         public void clearContext() {
             this.modelBox = null;
         }
-    
+
         @Override
         public boolean isValid() {
             return this.modelBox != null;
         }
-    
+
         @Override
         public SaTokenContextModelBox getModelBox() {
             return this.modelBox;

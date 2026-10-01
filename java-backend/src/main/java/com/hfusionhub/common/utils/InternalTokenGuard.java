@@ -12,8 +12,7 @@ import java.security.MessageDigest;
  */
 public final class InternalTokenGuard {
 
-    private InternalTokenGuard() {
-    }
+    private InternalTokenGuard() {}
 
     public static boolean isAuthorized(String expectedToken, String providedToken) {
         return constantTimeEquals(expectedToken, providedToken);
@@ -31,8 +30,7 @@ public final class InternalTokenGuard {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] a = digest.digest(expected.getBytes(StandardCharsets.UTF_8));
-            byte[] b = MessageDigest.getInstance("SHA-256")
-                    .digest(provided.getBytes(StandardCharsets.UTF_8));
+            byte[] b = MessageDigest.getInstance("SHA-256").digest(provided.getBytes(StandardCharsets.UTF_8));
             return MessageDigest.isEqual(a, b);
         } catch (Exception e) {
             return false;

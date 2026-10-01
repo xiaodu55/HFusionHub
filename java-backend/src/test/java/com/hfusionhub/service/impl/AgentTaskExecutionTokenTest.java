@@ -67,10 +67,7 @@ class AgentTaskExecutionTokenTest {
                 mock(com.hfusionhub.config.QuotaProperties.class),
                 mock(com.hfusionhub.service.CostTrackingService.class),
                 new AgentRunLifecycleService(
-                        runMapper,
-                        taskMapper,
-                        userMapper,
-                        mock(com.hfusionhub.service.UsageLedgerService.class)));
+                        runMapper, taskMapper, userMapper, mock(com.hfusionhub.service.UsageLedgerService.class)));
     }
 
     @Test

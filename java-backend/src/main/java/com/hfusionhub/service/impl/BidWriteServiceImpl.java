@@ -45,8 +45,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @RequiredArgsConstructor
 public class BidWriteServiceImpl implements BidWriteService {
 
-    private static final Set<String> VALID_DRAFT_STATUSES =
-            Set.of(BidDraft.STATUS_APPROVED, BidDraft.STATUS_REJECTED);
+    private static final Set<String> VALID_DRAFT_STATUSES = Set.of(BidDraft.STATUS_APPROVED, BidDraft.STATUS_REJECTED);
 
     private final BidProjectMapper bidProjectMapper;
     private final BidRequirementMapper bidRequirementMapper;
@@ -69,15 +68,14 @@ public class BidWriteServiceImpl implements BidWriteService {
     public List<BidDraft> write(Long projectId) {
         // ── 阶段 1：读取与门禁（自动提交，短连接）──
         BidProject project = requireOwnedProject(projectId);
-        bidPlanGateService.requireModule(
-                TenantContext.requireTenantId(), BidSubscription.MODULE_DRAFT, "标书撰写");
+        bidPlanGateService.requireModule(TenantContext.requireTenantId(), BidSubscription.MODULE_DRAFT, "标书撰写");
 
         List<Map<String, Object>> requirements = loadRequirements(projectId);
         List<Long> kbIds = loadKnowledgeBaseIds(project);
 
         // ── 阶段 2：事务外调用 AI ──
-        Map<String, Object> result = aiClient.bidWrite(
-                projectId, project.getTitle(), project.getTenderNumber(), kbIds, requirements, null);
+        Map<String, Object> result =
+                aiClient.bidWrite(projectId, project.getTitle(), project.getTenderNumber(), kbIds, requirements, null);
         if (!"ok".equals(result.get("status"))) {
             throw new BusinessException(
                     StatusCode.SERVICE_UNAVAILABLE,
@@ -123,7 +121,8 @@ public class BidWriteServiceImpl implements BidWriteService {
                             if (line.isEmpty()) {
                                 return;
                             }
-                            String json = line.startsWith("data:") ? line.substring(5).trim() : line;
+                            String json =
+                                    line.startsWith("data:") ? line.substring(5).trim() : line;
                             if (json.isEmpty() || "[DONE]".equals(json)) {
                                 return;
                             }
@@ -151,7 +150,8 @@ public class BidWriteServiceImpl implements BidWriteService {
                     log.warn("Bid write stream error: {}", error.getMessage());
                     try {
                         emitter.send(SseEmitter.event()
-                                .data(Map.of("event", "run_error", "error_detail", String.valueOf(error.getMessage()))));
+                                .data(Map.of(
+                                        "event", "run_error", "error_detail", String.valueOf(error.getMessage()))));
                     } catch (Exception ignored) {
                         // 前端已断开
                     }
@@ -215,7 +215,8 @@ public class BidWriteServiceImpl implements BidWriteService {
             return ids;
         }
         for (String category : List.of(KnowledgeBase.CATEGORY_QUALIFICATION, KnowledgeBase.CATEGORY_BID_HISTORY)) {
-            knowledgeBaseMapper.selectList(new LambdaQueryWrapper<KnowledgeBase>()
+            knowledgeBaseMapper
+                    .selectList(new LambdaQueryWrapper<KnowledgeBase>()
                             .eq(KnowledgeBase::getUserId, ownerId)
                             .eq(KnowledgeBase::getCategory, category)
                             .eq(KnowledgeBase::getStatus, KnowledgeBase.STATUS_NORMAL))
@@ -229,10 +230,9 @@ public class BidWriteServiceImpl implements BidWriteService {
     }
 
     private List<Map<String, Object>> loadRequirements(Long projectId) {
-        List<BidRequirement> requirements = bidRequirementMapper.selectList(
-                new LambdaQueryWrapper<BidRequirement>()
-                        .eq(BidRequirement::getProjectId, projectId)
-                        .orderByAsc(BidRequirement::getId));
+        List<BidRequirement> requirements = bidRequirementMapper.selectList(new LambdaQueryWrapper<BidRequirement>()
+                .eq(BidRequirement::getProjectId, projectId)
+                .orderByAsc(BidRequirement::getId));
         List<Map<String, Object>> maps = new ArrayList<>();
         for (BidRequirement req : requirements) {
             Map<String, Object> map = new HashMap<>();
@@ -295,10 +295,8 @@ public class BidWriteServiceImpl implements BidWriteService {
             return;
         }
         String key = "bid-draft:" + projectId;
-        usageLedgerService.reserve(UsageMeter.BID_DRAFT_CHARS, key, chars, "bid_project",
-                String.valueOf(projectId));
-        usageLedgerService.settle(UsageMeter.BID_DRAFT_CHARS, key, chars, "bid_project",
-                String.valueOf(projectId));
+        usageLedgerService.reserve(UsageMeter.BID_DRAFT_CHARS, key, chars, "bid_project", String.valueOf(projectId));
+        usageLedgerService.settle(UsageMeter.BID_DRAFT_CHARS, key, chars, "bid_project", String.valueOf(projectId));
     }
 
     private String asString(Object value) {

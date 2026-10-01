@@ -14,16 +14,16 @@ import com.hfusionhub.dto.UserSearchDTO;
 import com.hfusionhub.dto.UserUpdateDTO;
 import com.hfusionhub.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
-import java.util.Optional;
-import org.springframework.http.CacheControl;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.multipart.MultipartFile;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.List;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * 用户控制器
@@ -117,8 +117,8 @@ public class UserController {
         try {
             byte[] bytes = java.nio.file.Files.readAllBytes(file.get());
             String name = file.get().getFileName().toString();
-            String contentType =
-                    MediaType.parseMediaType("image/" + name.substring(name.lastIndexOf('.') + 1)).toString();
+            String contentType = MediaType.parseMediaType("image/" + name.substring(name.lastIndexOf('.') + 1))
+                    .toString();
             return ResponseEntity.ok()
                     .contentType(MediaType.parseMediaType(contentType.replace("image/jpg", "image/jpeg")))
                     .cacheControl(CacheControl.maxAge(java.time.Duration.ofHours(1)))
@@ -182,8 +182,7 @@ public class UserController {
     @SaCheckRole("admin")
     @PutMapping("/{userId}/password")
     @Operation(summary = "重置用户密码", description = "管理员为忘记密码的用户设置临时新密码（无需旧密码；不可用于自己，自己走「修改密码」）")
-    public R<UserInfoDTO> resetUserPassword(@PathVariable Long userId,
-                                            @Valid @RequestBody AdminPasswordResetDTO dto) {
+    public R<UserInfoDTO> resetUserPassword(@PathVariable Long userId, @Valid @RequestBody AdminPasswordResetDTO dto) {
         return R.ok("密码已重置，请将临时密码通过线下渠道告知用户", userService.resetUserPassword(userId, dto));
     }
 

@@ -1,11 +1,15 @@
 package com.hfusionhub.tenant;
 
+import static org.junit.jupiter.api.Assertions.*;
+
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.hfusionhub.config.MybatisPlusConfig;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
-import org.apache.ibatis.builder.MapperBuilderAssistant;
+import java.sql.Driver;
+import java.util.List;
+import javax.sql.DataSource;
 import org.apache.ibatis.logging.stdout.StdOutImpl;
 import org.apache.ibatis.mapping.Environment;
 import org.apache.ibatis.session.SqlSession;
@@ -16,14 +20,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MySQLContainer;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
-
-import javax.sql.DataSource;
-import java.sql.Driver;
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.*;
+import org.testcontainers.containers.MySQLContainer;
 
 /**
  * 租户行拦截器真实链路集成测试（R15-22）。
@@ -83,19 +81,16 @@ class TenantInterceptorIsolationTest {
         // 手动装配：@Value 不会注入，显式开启租户拦截器（生产由
         // hfusionhub.tenant.enabled 驱动，默认 true）
         MybatisPlusConfig mybatisPlusConfig = new MybatisPlusConfig();
-        org.springframework.test.util.ReflectionTestUtils
-                .setField(mybatisPlusConfig, "tenantEnabled", true);
+        org.springframework.test.util.ReflectionTestUtils.setField(mybatisPlusConfig, "tenantEnabled", true);
         MybatisPlusInterceptor interceptor = mybatisPlusConfig.mybatisPlusInterceptor();
 
         MybatisConfiguration configuration = new MybatisConfiguration();
         configuration.setLogImpl(StdOutImpl.class);
-        configuration.setEnvironment(new Environment(
-                "itest", new JdbcTransactionFactory(), dataSource));
+        configuration.setEnvironment(new Environment("itest", new JdbcTransactionFactory(), dataSource));
         configuration.addInterceptor(interceptor);
         // 注册 mapper（MybatisMapperRegistry 在 addMapper 时注册 TableInfo 元数据）
         configuration.addMapper(KnowledgeBaseMapper.class);
-        sqlSessionFactory = new org.apache.ibatis.session.SqlSessionFactoryBuilder()
-                .build(configuration);
+        sqlSessionFactory = new org.apache.ibatis.session.SqlSessionFactoryBuilder().build(configuration);
 
         seedTestUser(dataSource());
     }
@@ -103,10 +98,9 @@ class TenantInterceptorIsolationTest {
     /** knowledge_base.user_id 有 FK 指向 sys_user——补一个最小种子用户（id=1）。 */
     private static void seedTestUser(DataSource dataSource) throws Exception {
         try (var conn = dataSource.getConnection();
-             var ps = conn.prepareStatement(
-                     "INSERT INTO sys_user (id, username, password, tenant_id) "
-                             + "SELECT 1, 'it-seed-user', 'it-noop-password', 1 FROM DUAL "
-                             + "WHERE NOT EXISTS (SELECT 1 FROM sys_user WHERE id = 1)")) {
+                var ps = conn.prepareStatement("INSERT INTO sys_user (id, username, password, tenant_id) "
+                        + "SELECT 1, 'it-seed-user', 'it-noop-password', 1 FROM DUAL "
+                        + "WHERE NOT EXISTS (SELECT 1 FROM sys_user WHERE id = 1)")) {
             ps.executeUpdate();
         }
     }
@@ -172,21 +166,19 @@ class TenantInterceptorIsolationTest {
 
             // 租户 202 只能看到自己的库
             List<KnowledgeBase> visibleToB = mapper.selectList(null);
-            assertTrue(visibleToB.stream().allMatch(kb -> kb.getId() == kbB),
-                    "租户 202 不得看到租户 101 的知识库");
+            assertTrue(visibleToB.stream().allMatch(kb -> kb.getId() == kbB), "租户 202 不得看到租户 101 的知识库");
             assertTrue(visibleToB.stream().anyMatch(kb -> kb.getId() == kbB));
 
             // 租户 101 只能看到自己的库
             TenantContext.setTenantId(101L);
             List<KnowledgeBase> visibleToA = mapper.selectList(null);
-            assertTrue(visibleToA.stream().allMatch(kb -> kb.getId() == kbA),
-                    "租户 101 不得看到租户 202 的知识库");
+            assertTrue(visibleToA.stream().allMatch(kb -> kb.getId() == kbA), "租户 101 不得看到租户 202 的知识库");
 
             // 系统作用域跨租户可见
-            List<KnowledgeBase> systemVisible = TenantContext.runAsSystem(
-                    () -> mapper.selectList(null));
-            assertTrue(systemVisible.stream().anyMatch(kb -> kb.getId() == kbA)
-                    && systemVisible.stream().anyMatch(kb -> kb.getId() == kbB),
+            List<KnowledgeBase> systemVisible = TenantContext.runAsSystem(() -> mapper.selectList(null));
+            assertTrue(
+                    systemVisible.stream().anyMatch(kb -> kb.getId() == kbA)
+                            && systemVisible.stream().anyMatch(kb -> kb.getId() == kbB),
                     "系统作用域应跨租户可见");
         }
     }

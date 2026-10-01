@@ -20,6 +20,7 @@ public class BidRequirement extends BaseEntity {
 
     /** 需求类别 */
     public static final String CATEGORY_QUALIFICATION = "qualification";
+
     public static final String CATEGORY_PERFORMANCE = "performance";
     public static final String CATEGORY_TECHNICAL = "technical";
     public static final String CATEGORY_COMMERCIAL = "commercial";
@@ -28,6 +29,7 @@ public class BidRequirement extends BaseEntity {
 
     /** 满足状态 */
     public static final String STATUS_PENDING = "pending";
+
     public static final String STATUS_DRAFTING = "drafting";
     public static final String STATUS_CHECKED = "checked";
     /** 低置信要素强制人工确认 */

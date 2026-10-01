@@ -10,5 +10,4 @@ import org.apache.ibatis.annotations.Mapper;
  * @author HFusionHub Team
  */
 @Mapper
-public interface EvalHarnessRunMapper extends BaseMapper<EvalHarnessRun> {
-}
+public interface EvalHarnessRunMapper extends BaseMapper<EvalHarnessRun> {}

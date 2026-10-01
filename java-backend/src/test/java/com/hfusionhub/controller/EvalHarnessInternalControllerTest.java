@@ -69,7 +69,8 @@ class EvalHarnessInternalControllerTest {
     @Test
     void recordRejectsMissingTenantHeaderInsteadOfDefaultingToTenant1() {
         BusinessException exception = assertThrows(
-                BusinessException.class, () -> controller.record("test-internal-token", null, Map.of("run_file", "a.jsonl")));
+                BusinessException.class,
+                () -> controller.record("test-internal-token", null, Map.of("run_file", "a.jsonl")));
 
         assertEquals(StatusCode.FORBIDDEN, exception.getCode());
         verify(evalHarnessRunMapper, never()).insert(any(EvalHarnessRun.class));
@@ -77,7 +78,8 @@ class EvalHarnessInternalControllerTest {
 
     @Test
     void recordRejectsBlankTenantHeader() {
-        BusinessException exception = assertThrows(BusinessException.class,
+        BusinessException exception = assertThrows(
+                BusinessException.class,
                 () -> controller.record("test-internal-token", "   ", Map.of("run_file", "a.jsonl")));
 
         assertEquals(StatusCode.FORBIDDEN, exception.getCode());
@@ -86,7 +88,8 @@ class EvalHarnessInternalControllerTest {
 
     @Test
     void recordRejectsNonNumericTenantHeader() {
-        BusinessException exception = assertThrows(BusinessException.class,
+        BusinessException exception = assertThrows(
+                BusinessException.class,
                 () -> controller.record("test-internal-token", "seven", Map.of("run_file", "a.jsonl")));
 
         assertEquals(StatusCode.FORBIDDEN, exception.getCode());
@@ -95,9 +98,11 @@ class EvalHarnessInternalControllerTest {
 
     @Test
     void recordRejectsNonPositiveTenantHeader() {
-        assertThrows(BusinessException.class,
+        assertThrows(
+                BusinessException.class,
                 () -> controller.record("test-internal-token", "0", Map.of("run_file", "a.jsonl")));
-        assertThrows(BusinessException.class,
+        assertThrows(
+                BusinessException.class,
                 () -> controller.record("test-internal-token", "-3", Map.of("run_file", "a.jsonl")));
 
         verify(evalHarnessRunMapper, never()).insert(any(EvalHarnessRun.class));
@@ -124,8 +129,8 @@ class EvalHarnessInternalControllerTest {
 
     @Test
     void importCorpusRejectsMissingTenantHeader() {
-        BusinessException exception = assertThrows(
-                BusinessException.class, () -> controller.importCorpus("test-internal-token", null, "1"));
+        BusinessException exception =
+                assertThrows(BusinessException.class, () -> controller.importCorpus("test-internal-token", null, "1"));
 
         assertEquals(StatusCode.FORBIDDEN, exception.getCode());
         verify(evalCorpusImportService, never()).importCorpus(any());
@@ -133,8 +138,8 @@ class EvalHarnessInternalControllerTest {
 
     @Test
     void importCorpusRejectsMissingUserHeader() {
-        BusinessException exception = assertThrows(
-                BusinessException.class, () -> controller.importCorpus("test-internal-token", "7", null));
+        BusinessException exception =
+                assertThrows(BusinessException.class, () -> controller.importCorpus("test-internal-token", "7", null));
 
         assertEquals(StatusCode.FORBIDDEN, exception.getCode());
         verify(evalCorpusImportService, never()).importCorpus(any());
@@ -154,8 +159,8 @@ class EvalHarnessInternalControllerTest {
 
     @Test
     void invalidTokenIsRejectedBeforeTenantValidation() {
-        BusinessException exception = assertThrows(BusinessException.class,
-                () -> controller.record("wrong-token", null, Map.of("run_file", "a.jsonl")));
+        BusinessException exception = assertThrows(
+                BusinessException.class, () -> controller.record("wrong-token", null, Map.of("run_file", "a.jsonl")));
 
         assertEquals(StatusCode.FORBIDDEN, exception.getCode());
         // 顺序契约：先认身份再认租户，令牌无效时不应泄露"缺租户"这条内部口径

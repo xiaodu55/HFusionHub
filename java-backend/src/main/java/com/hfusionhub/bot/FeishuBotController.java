@@ -2,6 +2,10 @@ package com.hfusionhub.bot;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpEntity;
@@ -13,11 +17,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
-
-import java.time.Instant;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 飞书机器人回调（Batch 6，事件订阅明文模式，默认关闭）。
@@ -37,10 +36,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class FeishuBotController {
 
-    private static final String TOKEN_URL =
-            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal";
-    private static final String MESSAGE_URL =
-            "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id";
+    private static final String TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal";
+    private static final String MESSAGE_URL = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id";
 
     private final BotProperties properties;
     private final BotChatService botChatService;
@@ -78,8 +75,11 @@ public class FeishuBotController {
                 return Map.of("status", "ignored");
             }
             String chatId = message.path("chat_id").asText("");
-            String senderId = payload.path("event").path("sender")
-                    .path("sender_id").path("open_id").asText("unknown");
+            String senderId = payload.path("event")
+                    .path("sender")
+                    .path("sender_id")
+                    .path("open_id")
+                    .asText("unknown");
             // content 是内嵌 JSON 字符串：{"text":"..."}
             String contentJson = message.path("content").asText("{}");
             String text = objectMapper.readTree(contentJson).path("text").asText("");
@@ -123,8 +123,7 @@ public class FeishuBotController {
         payload.put("receive_id", chatId);
         payload.put("msg_type", "text");
         payload.put("content", contentJson);
-        restTemplate.postForEntity(
-                MESSAGE_URL, new HttpEntity<>(payload, headers), String.class);
+        restTemplate.postForEntity(MESSAGE_URL, new HttpEntity<>(payload, headers), String.class);
     }
 
     private String tenantAccessToken(BotProperties.Feishu cfg) {
@@ -137,9 +136,11 @@ public class FeishuBotController {
         Map<String, Object> body = new HashMap<>();
         body.put("app_id", cfg.getAppId());
         body.put("app_secret", cfg.getAppSecret());
-        JsonNode response = restTemplate.postForEntity(
-                TOKEN_URL, new HttpEntity<>(body, headers), JsonNode.class).getBody();
-        String token = response == null ? "" : response.path("tenant_access_token").asText("");
+        JsonNode response = restTemplate
+                .postForEntity(TOKEN_URL, new HttpEntity<>(body, headers), JsonNode.class)
+                .getBody();
+        String token =
+                response == null ? "" : response.path("tenant_access_token").asText("");
         long expire = response == null ? 0 : response.path("expire").asLong(0);
         if (token.isEmpty()) {
             throw new IllegalStateException("Feishu tenant_access_token 获取失败");

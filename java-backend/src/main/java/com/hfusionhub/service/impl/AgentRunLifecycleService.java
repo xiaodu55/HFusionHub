@@ -47,12 +47,13 @@ public class AgentRunLifecycleService {
      */
     public boolean failFromWaitingApproval(Long runId, String errorCode, String errorDetail) {
         return runMapper.transitionRunStatusGuarded(
-                runId,
-                AgentConstants.STATUS_WAITING_APPROVAL,
-                AgentConstants.STATUS_FAILED,
-                errorCode,
-                errorDetail,
-                LocalDateTime.now()) == 1;
+                        runId,
+                        AgentConstants.STATUS_WAITING_APPROVAL,
+                        AgentConstants.STATUS_FAILED,
+                        errorCode,
+                        errorDetail,
+                        LocalDateTime.now())
+                == 1;
     }
 
     /**
@@ -62,12 +63,8 @@ public class AgentRunLifecycleService {
      */
     public boolean resumeFromWaitingApproval(Long runId) {
         return runMapper.transitionRunStatusGuarded(
-                runId,
-                AgentConstants.STATUS_WAITING_APPROVAL,
-                AgentConstants.STATUS_RUNNING,
-                null,
-                null,
-                null) == 1;
+                        runId, AgentConstants.STATUS_WAITING_APPROVAL, AgentConstants.STATUS_RUNNING, null, null, null)
+                == 1;
     }
 
     /**
@@ -75,12 +72,13 @@ public class AgentRunLifecycleService {
      */
     public boolean failUnlessTerminal(Long runId, String errorCode, String errorDetail) {
         return runMapper.transitionRunStatusFromAnyActive(
-                runId,
-                AgentConstants.TERMINAL_STATUSES,
-                AgentConstants.STATUS_FAILED,
-                errorCode,
-                errorDetail,
-                LocalDateTime.now()) == 1;
+                        runId,
+                        AgentConstants.TERMINAL_STATUSES,
+                        AgentConstants.STATUS_FAILED,
+                        errorCode,
+                        errorDetail,
+                        LocalDateTime.now())
+                == 1;
     }
 
     /**

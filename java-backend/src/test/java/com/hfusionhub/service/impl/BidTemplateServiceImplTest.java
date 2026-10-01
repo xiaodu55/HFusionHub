@@ -28,7 +28,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class BidTemplateServiceImplTest {
 
-    @Mock private BidTemplateMapper templateMapper;
+    @Mock
+    private BidTemplateMapper templateMapper;
 
     private BidTemplateService service;
 
@@ -96,8 +97,8 @@ class BidTemplateServiceImplTest {
         BidTemplate platform = template(1L, null, "construction");
         when(templateMapper.selectById(1L)).thenReturn(platform);
 
-        BusinessException ex = assertThrows(
-                BusinessException.class, () -> service.update(template(1L, 7L, "construction"), 7L));
+        BusinessException ex =
+                assertThrows(BusinessException.class, () -> service.update(template(1L, 7L, "construction"), 7L));
 
         assertEquals(StatusCode.FORBIDDEN, ex.getCode());
     }

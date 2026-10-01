@@ -167,8 +167,7 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
                 final Long runTenantId = agentRunLifecycle.resolveRunTenant(run, task);
                 if (runTenantId == null) {
                     log.warn("Run {} tenant unresolvable (legacy row) — dead-lettering", run.getId());
-                    agentTaskService.failRun(
-                            run.getId(), "tenant_unresolvable", "run.tenant_id 为空且无法经任务归属解析", null);
+                    agentTaskService.failRun(run.getId(), "tenant_unresolvable", "run.tenant_id 为空且无法经任务归属解析", null);
                     if (task != null) {
                         // task 为 null 时（测试/孤儿 run）只死信 run 本身
                         handleTerminalFailure(task, run, "tenant_unresolvable", "run.tenant_id 为空且无法经任务归属解析");
@@ -294,10 +293,11 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
                                 .eq(Message::getRequestId, task.getRequestId())
                                 .eq(Message::getRole, "user")
                                 .last("LIMIT 1"));
-                if (queuedUserMessage != null && queuedUserMessage.getImages() != null
+                if (queuedUserMessage != null
+                        && queuedUserMessage.getImages() != null
                         && !queuedUserMessage.getImages().isBlank()) {
-                    imagePayloads = chatImageStorage.toDataUrls(
-                            chatImageStorage.fromJson(queuedUserMessage.getImages()));
+                    imagePayloads =
+                            chatImageStorage.toDataUrls(chatImageStorage.fromJson(queuedUserMessage.getImages()));
                 }
             }
 
@@ -444,8 +444,7 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
                 // 对齐同步/流式路径：超长 requestId 必须哈希为 64 字符，
                 // 否则 message.request_id(VARCHAR 64) 严格模式下 Data too long，
                 // 助手回复不落库（Answer lost）
-                String assistantRequestId = ConversationServiceImpl.assistantRequestId(
-                        executingTask.getRequestId());
+                String assistantRequestId = ConversationServiceImpl.assistantRequestId(executingTask.getRequestId());
                 try {
                     Message existing = messageMapper.selectOne(
                             new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Message>()
@@ -834,8 +833,7 @@ public class AgentTaskQueueServiceImpl implements AgentTaskQueueService {
         LocalDateTime scheduledAt = LocalDateTime.now(); // immediate re-dispatch
         int requeued = runMapper.requeueOrphan(run.getId(), newUuid, scheduledAt);
         if (requeued == 0) {
-            log.info(
-                    "Orphan run {} no longer running (terminal callback won the race) — skip reclaim", run.getId());
+            log.info("Orphan run {} no longer running (terminal callback won the race) — skip reclaim", run.getId());
             return;
         }
 

@@ -51,7 +51,5 @@ public interface AgentTaskMapper extends BaseMapper<AgentTask> {
      * 返回命中行数——并发下只有真正赢得迁移的一方生效，替代 check-then-act
      */
     int transitionTaskGuarded(
-            @Param("id") Long id,
-            @Param("target") String target,
-            @Param("fromStatuses") List<String> fromStatuses);
+            @Param("id") Long id, @Param("target") String target, @Param("fromStatuses") List<String> fromStatuses);
 }

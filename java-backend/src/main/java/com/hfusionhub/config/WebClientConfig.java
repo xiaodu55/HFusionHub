@@ -50,8 +50,7 @@ public class WebClientConfig {
         HttpClient httpClient = HttpClient.create()
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, CONNECT_TIMEOUT_MS)
                 .responseTimeout(RESPONSE_TIMEOUT);
-        return builder
-                .clientConnector(new ReactorClientHttpConnector(httpClient))
+        return builder.clientConnector(new ReactorClientHttpConnector(httpClient))
                 .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(10 * 1024 * 1024)) // 10MB
                 .build();
     }

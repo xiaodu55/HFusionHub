@@ -26,7 +26,9 @@ final class AgentTaskSupport {
     static long clampDuration(long durationMs, LocalDateTime startedAt) {
         long actual = durationMs;
         if (actual <= 0 && startedAt != null) {
-            actual = Math.max(0, java.time.Duration.between(startedAt, LocalDateTime.now()).toMillis());
+            actual = Math.max(
+                    0,
+                    java.time.Duration.between(startedAt, LocalDateTime.now()).toMillis());
         }
         return Math.max(0, actual);
     }

@@ -110,7 +110,8 @@ public class ChatUsageRecorder {
     /**
      * 同步聊天路径的模型用量落账（model_usage_record）。
      */
-    public void recordChatModelUsage(Long userId, Long conversationId, com.hfusionhub.client.AiClient.ChatResponse aiResponse) {
+    public void recordChatModelUsage(
+            Long userId, Long conversationId, com.hfusionhub.client.AiClient.ChatResponse aiResponse) {
         try {
             if (userId == null || userId <= 0) {
                 return;

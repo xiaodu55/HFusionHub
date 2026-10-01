@@ -35,9 +35,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class BidPlanGateServiceImplTest {
 
-    @Mock private TenantPlanBindingService bindingService;
-    @Mock private FeatureFlagService featureFlagService;
-    @Mock private TenantMemberMapper tenantMemberMapper;
+    @Mock
+    private TenantPlanBindingService bindingService;
+
+    @Mock
+    private FeatureFlagService featureFlagService;
+
+    @Mock
+    private TenantMemberMapper tenantMemberMapper;
 
     private BidPlanGateService service;
 
@@ -58,7 +63,8 @@ class BidPlanGateServiceImplTest {
     @Test
     void moduleDisabledWhenFlagOff() {
         when(bindingService.hasModule(7L, "draft")).thenReturn(true);
-        when(featureFlagService.isEnabled(anyString(), any(), any(), any(), any())).thenReturn(false);
+        when(featureFlagService.isEnabled(anyString(), any(), any(), any(), any()))
+                .thenReturn(false);
 
         assertFalse(service.isModuleEnabled(7L, "draft"));
     }
@@ -66,7 +72,8 @@ class BidPlanGateServiceImplTest {
     @Test
     void moduleEnabledWhenGrantedAndFlagOn() {
         when(bindingService.hasModule(7L, "draft")).thenReturn(true);
-        when(featureFlagService.isEnabled(anyString(), any(), any(), any(), any())).thenReturn(true);
+        when(featureFlagService.isEnabled(anyString(), any(), any(), any(), any()))
+                .thenReturn(true);
 
         assertTrue(service.isModuleEnabled(7L, "draft"));
     }
@@ -81,8 +88,7 @@ class BidPlanGateServiceImplTest {
     void requireModuleThrowsForbiddenWhenDisabled() {
         when(bindingService.hasModule(7L, "check")).thenReturn(false);
 
-        BusinessException ex = assertThrows(
-                BusinessException.class, () -> service.requireModule(7L, "check", "废标自检"));
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.requireModule(7L, "check", "废标自检"));
 
         assertEquals(StatusCode.FORBIDDEN, ex.getCode());
         assertTrue(ex.getMessage().contains("废标自检"));
@@ -92,7 +98,8 @@ class BidPlanGateServiceImplTest {
     @Test
     void requireModulePassesWhenEnabled() {
         when(bindingService.hasModule(7L, "draft")).thenReturn(true);
-        when(featureFlagService.isEnabled(anyString(), any(), any(), any(), any())).thenReturn(true);
+        when(featureFlagService.isEnabled(anyString(), any(), any(), any(), any()))
+                .thenReturn(true);
 
         service.requireModule(7L, "draft", "标书撰写"); // 不抛异常即通过
     }
@@ -100,7 +107,8 @@ class BidPlanGateServiceImplTest {
     @Test
     void moduleStatusMapsAllModuleKeys() {
         when(bindingService.hasModule(any(), any())).thenAnswer(inv -> "draft".equals(inv.getArgument(1)));
-        when(featureFlagService.isEnabled(anyString(), any(), any(), any(), any())).thenReturn(true);
+        when(featureFlagService.isEnabled(anyString(), any(), any(), any(), any()))
+                .thenReturn(true);
 
         Map<String, Boolean> status = service.moduleStatus(7L);
 

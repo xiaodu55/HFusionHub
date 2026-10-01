@@ -49,9 +49,7 @@ public class BidTemplateServiceImpl implements BidTemplateService {
         return templateMapper.selectList(new LambdaQueryWrapper<BidTemplate>()
                 .eq(BidTemplate::getIndustry, industry)
                 .eq(BidTemplate::getIsActive, 1)
-                .and(w -> w.isNull(BidTemplate::getTenantId)
-                        .or()
-                        .eq(BidTemplate::getTenantId, tenantId)));
+                .and(w -> w.isNull(BidTemplate::getTenantId).or().eq(BidTemplate::getTenantId, tenantId)));
     }
 
     @Override
@@ -103,9 +101,7 @@ public class BidTemplateServiceImpl implements BidTemplateService {
     private LambdaQueryWrapper<BidTemplate> queryVisible(Long tenantId, String industry) {
         LambdaQueryWrapper<BidTemplate> wrapper = new LambdaQueryWrapper<BidTemplate>()
                 .eq(BidTemplate::getIsActive, 1)
-                .and(w -> w.isNull(BidTemplate::getTenantId)
-                        .or()
-                        .eq(BidTemplate::getTenantId, tenantId));
+                .and(w -> w.isNull(BidTemplate::getTenantId).or().eq(BidTemplate::getTenantId, tenantId));
         if (industry != null && !industry.isBlank()) {
             wrapper.eq(BidTemplate::getIndustry, industry);
         }
@@ -113,7 +109,6 @@ public class BidTemplateServiceImpl implements BidTemplateService {
     }
 
     private boolean isVisible(BidTemplate template, Long tenantId) {
-        return template.getTenantId() == null
-                || tenantId != null && tenantId.equals(template.getTenantId());
+        return template.getTenantId() == null || tenantId != null && tenantId.equals(template.getTenantId());
     }
 }

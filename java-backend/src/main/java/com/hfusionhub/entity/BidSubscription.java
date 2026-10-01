@@ -23,14 +23,17 @@ public class BidSubscription extends BaseEntity {
 
     /** 套餐类型 */
     public static final String PLAN_TYPE_TIER = "tier";
+
     public static final String PLAN_TYPE_INDUSTRY = "industry";
 
     /** 状态 */
     public static final String STATUS_ACTIVE = "active";
+
     public static final String STATUS_ARCHIVED = "archived";
 
     /** 模块开关键（module_flags JSON） */
     public static final String MODULE_DRAFT = "draft";
+
     public static final String MODULE_CHECK = "check";
     public static final String MODULE_DOCX = "docx";
     public static final String MODULE_OPENAPI = "openapi";

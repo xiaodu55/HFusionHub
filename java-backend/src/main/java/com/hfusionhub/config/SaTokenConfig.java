@@ -33,23 +33,23 @@ public class SaTokenConfig implements WebMvcConfigurer {
      * 守护，新增未登录端点时必须同步维护。
      */
     public static final String[] AUTH_WHITELIST = {
-            "/user/login",
-            "/user/register",
-            "/user/sso/**",
-            "/health",
-            "/vectorize/*/callback",
-            "/internal/feature-flags/snapshot",
-            "/internal/eval-harness/**",
-            "/internal/agent/**",
-            "/internal/plugin/**",
-            "/internal/notes/**",
-            "/internal/memory/**",
-            "/openapi/**",
-            "/doc.html",
-            "/swagger-ui.html",
-            "/swagger-ui/**",
-            "/v3/api-docs/**",
-            "/webjars/**"
+        "/user/login",
+        "/user/register",
+        "/user/sso/**",
+        "/health",
+        "/vectorize/*/callback",
+        "/internal/feature-flags/snapshot",
+        "/internal/eval-harness/**",
+        "/internal/agent/**",
+        "/internal/plugin/**",
+        "/internal/notes/**",
+        "/internal/memory/**",
+        "/openapi/**",
+        "/doc.html",
+        "/swagger-ui.html",
+        "/swagger-ui/**",
+        "/v3/api-docs/**",
+        "/webjars/**"
     };
 
     /**
@@ -68,9 +68,7 @@ public class SaTokenConfig implements WebMvcConfigurer {
         // Spring removes server.servlet.context-path before interceptor
         // matching.  These patterns must therefore be relative to /api.
         registry.addInterceptor(new SaInterceptor(handle -> {
-                    SaRouter.match("/**")
-                            .notMatch(AUTH_WHITELIST)
-                            .check(r -> StpUtil.checkLogin());
+                    SaRouter.match("/**").notMatch(AUTH_WHITELIST).check(r -> StpUtil.checkLogin());
 
                     // Newly registered accounts may log in and inspect their account state,
                     // but cannot access any business capability until the sole super admin

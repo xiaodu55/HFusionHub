@@ -43,14 +43,29 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class BidWriteServiceImplTest {
 
-    @Mock private BidProjectMapper bidProjectMapper;
-    @Mock private BidRequirementMapper bidRequirementMapper;
-    @Mock private BidDraftMapper bidDraftMapper;
-    @Mock private KnowledgeBaseMapper knowledgeBaseMapper;
-    @Mock private JwtUtils jwtUtils;
-    @Mock private AiClient aiClient;
-    @Mock private UsageLedgerService usageLedgerService;
-    @Mock private BidPlanGateService bidPlanGateService;
+    @Mock
+    private BidProjectMapper bidProjectMapper;
+
+    @Mock
+    private BidRequirementMapper bidRequirementMapper;
+
+    @Mock
+    private BidDraftMapper bidDraftMapper;
+
+    @Mock
+    private KnowledgeBaseMapper knowledgeBaseMapper;
+
+    @Mock
+    private JwtUtils jwtUtils;
+
+    @Mock
+    private AiClient aiClient;
+
+    @Mock
+    private UsageLedgerService usageLedgerService;
+
+    @Mock
+    private BidPlanGateService bidPlanGateService;
 
     private BidWriteServiceImpl service;
     private MockedStatic<JwtUtils> jwtUtilsMock;
@@ -62,7 +77,8 @@ class BidWriteServiceImplTest {
         org.springframework.transaction.PlatformTransactionManager txManager =
                 org.mockito.Mockito.mock(org.springframework.transaction.PlatformTransactionManager.class);
         // 部分用例在到达事务阶段前即抛出，桩必须 lenient
-        org.mockito.Mockito.lenient().when(txManager.getTransaction(org.mockito.ArgumentMatchers.any()))
+        org.mockito.Mockito.lenient()
+                .when(txManager.getTransaction(org.mockito.ArgumentMatchers.any()))
                 .thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());
         service = new BidWriteServiceImpl(
                 bidProjectMapper,
@@ -106,9 +122,10 @@ class BidWriteServiceImplTest {
     @Test
     void writeBlockedWhenDraftModuleNotGranted() {
         when(bidProjectMapper.selectById(1L)).thenReturn(project(1L, 7L));
-        org.mockito.Mockito.doThrow(new BusinessException(
-                        com.hfusionhub.common.constant.StatusCode.FORBIDDEN, "标书撰写需要开通「标书撰写」模块"))
-                .when(bidPlanGateService).requireModule(anyLong(), any(), any());
+        org.mockito.Mockito.doThrow(
+                        new BusinessException(com.hfusionhub.common.constant.StatusCode.FORBIDDEN, "标书撰写需要开通「标书撰写」模块"))
+                .when(bidPlanGateService)
+                .requireModule(anyLong(), any(), any());
 
         assertThrows(BusinessException.class, () -> service.write(1L));
         // 模块未开通时不调用 Python 撰写，也不落库
@@ -120,19 +137,22 @@ class BidWriteServiceImplTest {
     void writePersistsSectionsAndMetersChars() {
         when(bidProjectMapper.selectById(1L)).thenReturn(project(1L, 7L));
         when(bidRequirementMapper.selectList(any())).thenReturn(List.of());
-        when(aiClient.bidWrite(anyLong(), any(), any(), any(), any(), any())).thenReturn(Map.of(
-                "status", "ok",
-                "sections", List.of(
-                        Map.of(
-                                "section_key", "commercial",
-                                "section_title", "商务标",
-                                "content", "报价说明与商务承诺。",
-                                "evidence_chunk_ids", List.of("c1")),
-                        Map.of(
-                                "section_key", "technical",
-                                "section_title", "技术方案",
-                                "content", "技术方案正文。",
-                                "evidence_chunk_ids", List.of("c2")))));
+        when(aiClient.bidWrite(anyLong(), any(), any(), any(), any(), any()))
+                .thenReturn(Map.of(
+                        "status",
+                        "ok",
+                        "sections",
+                        List.of(
+                                Map.of(
+                                        "section_key", "commercial",
+                                        "section_title", "商务标",
+                                        "content", "报价说明与商务承诺。",
+                                        "evidence_chunk_ids", List.of("c1")),
+                                Map.of(
+                                        "section_key", "technical",
+                                        "section_title", "技术方案",
+                                        "content", "技术方案正文。",
+                                        "evidence_chunk_ids", List.of("c2")))));
 
         java.util.List<BidDraft> drafts = service.write(1L);
 
@@ -150,10 +170,8 @@ class BidWriteServiceImplTest {
         verify(bidProjectMapper).updateById(projectCaptor.capture());
         assertEquals(BidProject.STATUS_DRAFTING, projectCaptor.getValue().getStatus());
         // 计量：按产出字符数（10 字 + 7 字 = 17）
-        verify(usageLedgerService).reserve(eq(UsageMeter.BID_DRAFT_CHARS), any(), eq(17L),
-                eq("bid_project"), any());
-        verify(usageLedgerService).settle(eq(UsageMeter.BID_DRAFT_CHARS), any(), eq(17L),
-                eq("bid_project"), any());
+        verify(usageLedgerService).reserve(eq(UsageMeter.BID_DRAFT_CHARS), any(), eq(17L), eq("bid_project"), any());
+        verify(usageLedgerService).settle(eq(UsageMeter.BID_DRAFT_CHARS), any(), eq(17L), eq("bid_project"), any());
     }
 
     @Test
@@ -172,11 +190,20 @@ class BidWriteServiceImplTest {
         histKb.setUserId(7L);
         histKb.setStatus(KnowledgeBase.STATUS_NORMAL);
         when(knowledgeBaseMapper.selectList(any())).thenReturn(List.of(qualKb, histKb));
-        when(aiClient.bidWrite(anyLong(), any(), any(), any(), any(), any())).thenReturn(Map.of(
-                "status", "ok",
-                "sections", List.of(
-                        Map.of("section_key", "commercial", "section_title", "商务标",
-                                "content", "报价说明与商务承诺。", "evidence_chunk_ids", List.of("c1")))));
+        when(aiClient.bidWrite(anyLong(), any(), any(), any(), any(), any()))
+                .thenReturn(Map.of(
+                        "status",
+                        "ok",
+                        "sections",
+                        List.of(Map.of(
+                                "section_key",
+                                "commercial",
+                                "section_title",
+                                "商务标",
+                                "content",
+                                "报价说明与商务承诺。",
+                                "evidence_chunk_ids",
+                                List.of("c1")))));
 
         service.write(1L);
 

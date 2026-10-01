@@ -73,9 +73,8 @@ public class SsoController {
     @GetMapping("/callback")
     @Operation(summary = "SSO 回调", description = "IdP 授权码回调：换 token、建号/关联、登录并回跳前端携带 satoken")
     public void callback(
-            @RequestParam String code,
-            @RequestParam(required = false) String state,
-            HttpServletResponse response) throws IOException {
+            @RequestParam String code, @RequestParam(required = false) String state, HttpServletResponse response)
+            throws IOException {
         String token = oidcService.loginWithCode(code, state);
         String target = oidcService.getFrontendRedirectUri();
         if (target == null || target.isBlank()) {

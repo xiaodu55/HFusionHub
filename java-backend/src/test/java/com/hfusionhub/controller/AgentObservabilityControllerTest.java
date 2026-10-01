@@ -2,8 +2,6 @@ package com.hfusionhub.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
@@ -114,7 +112,8 @@ class AgentObservabilityControllerTest {
 
     @Test
     void getAggregatedStatsPassesDays() {
-        when(metricsService.getAggregatedStats(USER_ID, null, 7)).thenReturn(Mockito.mock(com.hfusionhub.dto.AgentAggregatedStatsDTO.class));
+        when(metricsService.getAggregatedStats(USER_ID, null, 7))
+                .thenReturn(Mockito.mock(com.hfusionhub.dto.AgentAggregatedStatsDTO.class));
 
         R<com.hfusionhub.dto.AgentAggregatedStatsDTO> r = controller.getAggregatedStats(null, 7);
 
@@ -179,8 +178,7 @@ class AgentObservabilityControllerTest {
 
     @Test
     void listAlertEventsPaginates() {
-        when(alertService.listAlertEvents(USER_ID, 1, 20))
-                .thenReturn(PageResult.of(1, 20, 0, List.of()));
+        when(alertService.listAlertEvents(USER_ID, 1, 20)).thenReturn(PageResult.of(1, 20, 0, List.of()));
 
         R<PageResult<AgentAlertEvent>> r = controller.listAlertEvents(1, 20);
 
@@ -240,8 +238,7 @@ class AgentObservabilityControllerTest {
 
     @Test
     void listDatasetsPaginates() {
-        when(evaluationService.listDatasets(USER_ID, null, 1, 20))
-                .thenReturn(List.of(new AgentEvaluationDataset()));
+        when(evaluationService.listDatasets(USER_ID, null, 1, 20)).thenReturn(List.of(new AgentEvaluationDataset()));
 
         R<List<AgentEvaluationDataset>> r = controller.listDatasets(null, 1, 20);
 
@@ -301,8 +298,7 @@ class AgentObservabilityControllerTest {
 
     @Test
     void listEvaluationRunsPaginates() {
-        when(evaluationService.listEvaluationRuns(USER_ID, 3L, 1, 20))
-                .thenReturn(List.of(new AgentEvaluationRun()));
+        when(evaluationService.listEvaluationRuns(USER_ID, 3L, 1, 20)).thenReturn(List.of(new AgentEvaluationRun()));
 
         R<List<AgentEvaluationRun>> r = controller.listEvaluationRuns(3L, 1, 20);
 

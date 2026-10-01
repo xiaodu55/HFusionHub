@@ -43,14 +43,29 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class BidCheckServiceImplTest {
 
-    @Mock private BidProjectMapper bidProjectMapper;
-    @Mock private BidRequirementMapper bidRequirementMapper;
-    @Mock private BidDraftMapper bidDraftMapper;
-    @Mock private BidCheckReportMapper bidCheckReportMapper;
-    @Mock private JwtUtils jwtUtils;
-    @Mock private AiClient aiClient;
-    @Mock private UsageLedgerService usageLedgerService;
-    @Mock private BidPlanGateService bidPlanGateService;
+    @Mock
+    private BidProjectMapper bidProjectMapper;
+
+    @Mock
+    private BidRequirementMapper bidRequirementMapper;
+
+    @Mock
+    private BidDraftMapper bidDraftMapper;
+
+    @Mock
+    private BidCheckReportMapper bidCheckReportMapper;
+
+    @Mock
+    private JwtUtils jwtUtils;
+
+    @Mock
+    private AiClient aiClient;
+
+    @Mock
+    private UsageLedgerService usageLedgerService;
+
+    @Mock
+    private BidPlanGateService bidPlanGateService;
 
     private BidCheckServiceImpl service;
     private MockedStatic<JwtUtils> jwtUtilsMock;
@@ -107,9 +122,10 @@ class BidCheckServiceImplTest {
     @Test
     void checkBlockedWhenCheckModuleNotGranted() {
         when(bidProjectMapper.selectById(1L)).thenReturn(project(1L, 7L));
-        org.mockito.Mockito.doThrow(new BusinessException(
-                        com.hfusionhub.common.constant.StatusCode.FORBIDDEN, "废标自检需要开通「废标自检」模块"))
-                .when(bidPlanGateService).requireModule(anyLong(), any(), any());
+        org.mockito.Mockito.doThrow(
+                        new BusinessException(com.hfusionhub.common.constant.StatusCode.FORBIDDEN, "废标自检需要开通「废标自检」模块"))
+                .when(bidPlanGateService)
+                .requireModule(anyLong(), any(), any());
 
         assertThrows(BusinessException.class, () -> service.check(1L));
         // 模块未开通时不调用 Python 自检，也不落库
@@ -121,7 +137,8 @@ class BidCheckServiceImplTest {
     void checkForApiBlockedWhenOpenApiModuleNotGranted() {
         org.mockito.Mockito.doThrow(new BusinessException(
                         com.hfusionhub.common.constant.StatusCode.FORBIDDEN, "投标开放 API 需要开通「投标开放 API」模块"))
-                .when(bidPlanGateService).requireModule(7L, "openapi", "投标开放 API");
+                .when(bidPlanGateService)
+                .requireModule(7L, "openapi", "投标开放 API");
 
         assertThrows(BusinessException.class, () -> service.checkForApi(1L, 7L));
         verify(aiClient, never()).bidCheck(anyLong(), any(), any(), any(), any(), any());
@@ -133,10 +150,11 @@ class BidCheckServiceImplTest {
         when(bidProjectMapper.selectById(1L)).thenReturn(project(1L, 99L));
         when(bidDraftMapper.selectList(any())).thenReturn(List.of());
         when(bidRequirementMapper.selectList(any())).thenReturn(List.of());
-        when(aiClient.bidCheck(anyLong(), any(), any(), any(), any(), any())).thenReturn(Map.of(
-                "status", "ok",
-                "findings", List.of(),
-                "summary", Map.of("total", 0, "critical", 0, "warning", 0, "info", 0)));
+        when(aiClient.bidCheck(anyLong(), any(), any(), any(), any(), any()))
+                .thenReturn(Map.of(
+                        "status", "ok",
+                        "findings", List.of(),
+                        "summary", Map.of("total", 0, "critical", 0, "warning", 0, "info", 0)));
 
         Map<String, Object> summary = service.checkForApi(1L, 7L);
 
@@ -155,16 +173,17 @@ class BidCheckServiceImplTest {
         when(bidProjectMapper.selectById(1L)).thenReturn(project(1L, 7L));
         when(bidDraftMapper.selectList(any())).thenReturn(List.of(draft("technical")));
         when(bidRequirementMapper.selectList(any())).thenReturn(List.of());
-        when(aiClient.bidCheck(anyLong(), any(), any(), any(), any(), any())).thenReturn(Map.of(
-                "status", "ok",
-                "findings", List.of(
-                        Map.of(
-                                "severity", "critical",
-                                "category", "bond",
-                                "finding", "招标文件要求投标保证金 20万元，标书未体现",
-                                "evidence_chunk_ids", List.of("c1"),
-                                "suggested_fix", "在商务标补充保证金金额")),
-                "summary", Map.of("total", 1, "critical", 1, "warning", 0, "info", 0)));
+        when(aiClient.bidCheck(anyLong(), any(), any(), any(), any(), any()))
+                .thenReturn(Map.of(
+                        "status", "ok",
+                        "findings",
+                                List.of(Map.of(
+                                        "severity", "critical",
+                                        "category", "bond",
+                                        "finding", "招标文件要求投标保证金 20万元，标书未体现",
+                                        "evidence_chunk_ids", List.of("c1"),
+                                        "suggested_fix", "在商务标补充保证金金额")),
+                        "summary", Map.of("total", 1, "critical", 1, "warning", 0, "info", 0)));
 
         Map<String, Object> summary = service.check(1L);
 
@@ -181,10 +200,10 @@ class BidCheckServiceImplTest {
         verify(bidProjectMapper).updateById(projectCaptor.capture());
         assertEquals(BidProject.STATUS_CHECKING, projectCaptor.getValue().getStatus());
         // 计量：自检报告份数
-        verify(usageLedgerService).reserve(eq(UsageMeter.BID_CHECK_REPORTS), eq("bid-check:1"), eq(1L),
-                eq("bid_project"), eq("1"));
-        verify(usageLedgerService).settle(eq(UsageMeter.BID_CHECK_REPORTS), eq("bid-check:1"), eq(1L),
-                eq("bid_project"), eq("1"));
+        verify(usageLedgerService)
+                .reserve(eq(UsageMeter.BID_CHECK_REPORTS), eq("bid-check:1"), eq(1L), eq("bid_project"), eq("1"));
+        verify(usageLedgerService)
+                .settle(eq(UsageMeter.BID_CHECK_REPORTS), eq("bid-check:1"), eq(1L), eq("bid_project"), eq("1"));
     }
 
     @Test

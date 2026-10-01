@@ -23,6 +23,7 @@ public class TenderElement extends BaseEntity {
 
     /** 要素键枚举 */
     public static final String KEY_TENDER_NUMBER = "tender_number";
+
     public static final String KEY_BUDGET = "budget";
     public static final String KEY_QUALIFICATION_REQUIREMENTS = "qualification_requirements";
     public static final String KEY_SCORING_METHOD = "scoring_method";

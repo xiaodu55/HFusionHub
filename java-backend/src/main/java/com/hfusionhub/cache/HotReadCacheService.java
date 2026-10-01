@@ -1,10 +1,9 @@
 package com.hfusionhub.cache;
 
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.stereotype.Service;
-
 import java.security.SecureRandom;
 import java.time.Duration;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.stereotype.Service;
 
 /**
  * 热点读缓存组件（B3）。

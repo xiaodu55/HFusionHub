@@ -41,7 +41,8 @@ class AgentTaskQueueIntegrationTest {
     private AiClient aiClient;
     private MessageMapper messageMapper;
     private AgentRunLifecycleService agentRunLifecycle;
-    private ChatImageStorage chatImageStorage = new ChatImageStorage(java.nio.file.Path.of("target", "test-chat-images").toString());
+    private ChatImageStorage chatImageStorage = new ChatImageStorage(
+            java.nio.file.Path.of("target", "test-chat-images").toString());
     private TaskEventSseManager sseManager;
     private com.hfusionhub.common.utils.RedisUtils redisUtils;
     private com.hfusionhub.service.UsageLedgerService usageLedgerService;
@@ -85,20 +86,17 @@ class AgentTaskQueueIntegrationTest {
                 quotaProperties,
                 mock(com.hfusionhub.service.CostTrackingService.class),
                 new AgentRunLifecycleService(
-                        runMapper,
-                        taskMapper,
-                        mock(com.hfusionhub.mapper.UserMapper.class),
-                        usageLedgerService));
+                        runMapper, taskMapper, mock(com.hfusionhub.mapper.UserMapper.class), usageLedgerService));
         ReflectionTestUtils.setField(agentTaskService, "leaseSeconds", 120);
         ReflectionTestUtils.setField(agentTaskService, "cancelFlagTtlSeconds", 3600);
 
         agentRunLifecycle = mock(AgentRunLifecycleService.class);
-        when(agentRunLifecycle.resolveRunTenant(any(), any()))
-                .thenAnswer(inv -> {
-                    Object run = inv.getArgument(0);
-                    return run == null ? null
-                            : (Long) run.getClass().getMethod("getTenantId").invoke(run);
-                });
+        when(agentRunLifecycle.resolveRunTenant(any(), any())).thenAnswer(inv -> {
+            Object run = inv.getArgument(0);
+            return run == null
+                    ? null
+                    : (Long) run.getClass().getMethod("getTenantId").invoke(run);
+        });
 
         queueService = new AgentTaskQueueServiceImpl(
                 taskMapper,
@@ -283,7 +281,14 @@ class AgentTaskQueueIntegrationTest {
         reactor.core.publisher.Flux<String> contentFlux = reactor.core.publisher.Flux.just(
                 "data: {\"content\":\"Hello\"}", "data: {\"content\":\" World\"}", "data: [DONE]");
         when(aiClient.streamChat(
-                        eq("test query"), eq(50L), isNull(), anyList(), eq(pendingRun.getRunUuid()), anyLong(), any(), any()))
+                        eq("test query"),
+                        eq(50L),
+                        isNull(),
+                        anyList(),
+                        eq(pendingRun.getRunUuid()),
+                        anyLong(),
+                        any(),
+                        any()))
                 .thenReturn(contentFlux);
 
         // Act — SyncTaskExecutor makes executeRun complete within pollAndDispatch
@@ -427,7 +432,14 @@ class AgentTaskQueueIntegrationTest {
                         "data: {\"content\":\"partial\"}")
                 .concatWith(reactor.core.publisher.Flux.never());
         when(aiClient.streamChat(
-                        eq("stuck query"), isNull(), isNull(), anyList(), eq(run.getRunUuid()), anyLong(), any(), any()))
+                        eq("stuck query"),
+                        isNull(),
+                        isNull(),
+                        anyList(),
+                        eq(run.getRunUuid()),
+                        anyLong(),
+                        any(),
+                        any()))
                 .thenReturn(neverEnding);
 
         assertEquals(1, queueService.pollAndDispatch());
@@ -475,8 +487,16 @@ class AgentTaskQueueIntegrationTest {
         reactor.core.publisher.Flux<String> v1Flux = reactor.core.publisher.Flux.just(
                 "data: {\"event\":\"step_completed\",\"data\":{}}", "data: {\"event\":\"run_completed\",\"data\":{}}");
         when(aiClient.agentV1ChatStream(
-                        eq("kb query"), eq(52L), eq(5L), anyList(), eq(pendingRun.getRunUuid()), eq(1L),
-                        isNull(), any(), any(), any()))
+                        eq("kb query"),
+                        eq(52L),
+                        eq(5L),
+                        anyList(),
+                        eq(pendingRun.getRunUuid()),
+                        eq(1L),
+                        isNull(),
+                        any(),
+                        any(),
+                        any()))
                 .thenReturn(v1Flux);
 
         queueService.pollAndDispatch();

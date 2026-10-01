@@ -65,32 +65,46 @@ public class OidcService {
 
     @Value("${app.oidc.enabled:false}")
     private boolean enabled;
+
     @Value("${app.oidc.provider-name:generic}")
     private String providerName;
+
     @Value("${app.oidc.authorization-endpoint:}")
     private String authorizationEndpoint;
+
     @Value("${app.oidc.token-endpoint:}")
     private String tokenEndpoint;
+
     @Value("${app.oidc.user-info-endpoint:}")
     private String userInfoEndpoint;
+
     @Value("${app.oidc.client-id:}")
     private String clientId;
+
     @Value("${app.oidc.client-secret:}")
     private String clientSecret;
+
     @Value("${app.oidc.redirect-uri:}")
     private String redirectUri;
+
     @Value("${app.oidc.frontend-redirect-uri:}")
     private String frontendRedirectUri;
+
     @Value("${app.oidc.scopes:openid profile email}")
     private String scopes;
+
     @Value("${app.oidc.username-claim:preferred_username}")
     private String usernameClaim;
+
     @Value("${app.oidc.email-claim:email}")
     private String emailClaim;
+
     @Value("${app.oidc.name-claim:name}")
     private String nameClaim;
+
     @Value("${app.oidc.auto-provision:true}")
     private boolean autoProvision;
+
     @Value("${app.oidc.link-by-email:true}")
     private boolean linkByEmail;
 
@@ -206,7 +220,11 @@ public class OidcService {
         if (username == null || username.isBlank()) {
             username = subject;
         }
-        return new OidcUserInfo(subject, username, info.path(emailClaim).asText(null), name == null || name.isBlank() ? username : name);
+        return new OidcUserInfo(
+                subject,
+                username,
+                info.path(emailClaim).asText(null),
+                name == null || name.isBlank() ? username : name);
     }
 
     /**
@@ -277,7 +295,8 @@ public class OidcService {
     }
 
     private User provisionUser(OidcUserInfo info, String email) {
-        String base = (info.username() != null && !info.username().isBlank()) ? info.username() : "sso_" + info.subject();
+        String base =
+                (info.username() != null && !info.username().isBlank()) ? info.username() : "sso_" + info.subject();
         String username = base;
         if (userMapper.selectCount(new LambdaQueryWrapper<User>().eq(User::getUsername, username)) > 0) {
             username = base + "_" + RandomUtil.randomString(6);

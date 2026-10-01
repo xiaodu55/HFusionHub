@@ -1,6 +1,7 @@
 package com.hfusionhub.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.common.utils.JwtUtils;
@@ -13,8 +14,6 @@ import com.hfusionhub.mapper.ConversationMapper;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
 import com.hfusionhub.mapper.MessageMapper;
 import com.hfusionhub.service.KbShareService;
-import com.fasterxml.jackson.core.type.TypeReference;
-
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -253,9 +252,7 @@ public class MessagePersistenceService {
         List<String> images = null;
         if (message.getImages() != null && !message.getImages().isBlank()) {
             try {
-                images = imageMapper.readValue(
-                        message.getImages(),
-                        new TypeReference<List<String>>() {});
+                images = imageMapper.readValue(message.getImages(), new TypeReference<List<String>>() {});
             } catch (Exception e) {
                 log.warn("message.images 反序列化失败，按无图片处理: {}", e.getMessage());
             }

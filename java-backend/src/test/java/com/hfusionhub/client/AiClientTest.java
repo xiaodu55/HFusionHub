@@ -6,7 +6,6 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.service.UserModelConfigService;
 import java.util.List;
 import java.util.Map;

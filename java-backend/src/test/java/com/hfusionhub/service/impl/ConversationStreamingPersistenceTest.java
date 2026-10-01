@@ -12,15 +12,13 @@ import static org.mockito.Mockito.when;
 
 import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.context.SaTokenContext;
-import cn.dev33.satoken.context.model.SaTokenContextModelBox;
 import cn.dev33.satoken.context.model.SaRequest;
 import cn.dev33.satoken.context.model.SaResponse;
 import cn.dev33.satoken.context.model.SaStorage;
+import cn.dev33.satoken.context.model.SaTokenContextModelBox;
 import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
 import cn.dev33.satoken.stp.StpUtil;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.hfusionhub.support.AbstractItMySQLTest;
 import com.hfusionhub.client.AiClient;
 import com.hfusionhub.common.constant.AgentConstants;
 import com.hfusionhub.dto.MessageSendDTO;
@@ -41,6 +39,7 @@ import com.hfusionhub.mapper.UsageEventMapper;
 import com.hfusionhub.mapper.UsageReservationMapper;
 import com.hfusionhub.service.ConversationService;
 import com.hfusionhub.service.MemoryService;
+import com.hfusionhub.support.AbstractItMySQLTest;
 import com.hfusionhub.tenant.TenantContext;
 import java.util.HashMap;
 import java.util.List;
@@ -49,9 +48,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -181,7 +180,8 @@ class ConversationStreamingPersistenceTest extends AbstractItMySQLTest {
                                         + "\"tool_calls_count\":2,\"token_usage\":{\"prompt_tokens\":100,"
                                         + "\"completion_tokens\":40,\"total_tokens\":140}}\n\n",
                                 "data: [DONE]\n\n")
-                        .subscribeOn(Schedulers.single()));;
+                        .subscribeOn(Schedulers.single()));
+        ;
 
         // 新增 8 参重载（对话图片输入）：与 7 参等价
         when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any(), any()))
@@ -251,7 +251,8 @@ class ConversationStreamingPersistenceTest extends AbstractItMySQLTest {
                                 "data: {\"content\":\"Hello from pure content\"}\n\n",
                                 "data: {\"content\":\" stream\"}\n\n",
                                 "data: [DONE]\n\n")
-                        .subscribeOn(Schedulers.single()));;
+                        .subscribeOn(Schedulers.single()));
+        ;
 
         // 新增 8 参重载（对话图片输入）：与 7 参等价
         when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any(), any()))
@@ -295,8 +296,7 @@ class ConversationStreamingPersistenceTest extends AbstractItMySQLTest {
 
         // 记录型 emitter：桥接层全部经 SseEventBuilder 发送，按次计数即可断言
         // （content×2 + content_reset + [DONE] = 4 次）；配合持久化断言构成回归 bite
-        java.util.concurrent.atomic.AtomicInteger builderSends =
-                new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger builderSends = new java.util.concurrent.atomic.AtomicInteger();
         SseEmitter recordingEmitter = new SseEmitter() {
             @Override
             public void send(SseEventBuilder builder) throws java.io.IOException {
@@ -378,7 +378,7 @@ class ConversationStreamingPersistenceTest extends AbstractItMySQLTest {
     private static class MockSaTokenContext implements SaTokenContext {
         private final Map<String, Object> storage = new HashMap<>();
         private SaTokenContextModelBox modelBox;
-    
+
         private MockSaTokenContext() {
             // 构造即装配 modelBox：SaManager.setSaTokenContext 之后立即可用
             setContext(mock(SaRequest.class), mock(SaResponse.class), new SaStorage() {
@@ -386,18 +386,18 @@ class ConversationStreamingPersistenceTest extends AbstractItMySQLTest {
                 public Object getSource() {
                     return storage;
                 }
-    
+
                 @Override
                 public Object get(String key) {
                     return storage.get(key);
                 }
-    
+
                 @Override
                 public SaStorage set(String key, Object value) {
                     storage.put(key, value);
                     return this;
                 }
-    
+
                 @Override
                 public SaStorage delete(String key) {
                     storage.remove(key);
@@ -405,22 +405,22 @@ class ConversationStreamingPersistenceTest extends AbstractItMySQLTest {
                 }
             });
         }
-    
+
         @Override
         public void setContext(SaRequest request, SaResponse response, SaStorage storage) {
             this.modelBox = new SaTokenContextModelBox(request, response, storage);
         }
-    
+
         @Override
         public void clearContext() {
             this.modelBox = null;
         }
-    
+
         @Override
         public boolean isValid() {
             return this.modelBox != null;
         }
-    
+
         @Override
         public SaTokenContextModelBox getModelBox() {
             return this.modelBox;

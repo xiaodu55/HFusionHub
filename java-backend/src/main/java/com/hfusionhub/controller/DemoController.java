@@ -5,8 +5,8 @@ import com.hfusionhub.common.result.R;
 import com.hfusionhub.dto.DemoImportResultDTO;
 import com.hfusionhub.dto.EvalCorpusImportResultDTO;
 import com.hfusionhub.service.BidDemoImportService;
-import com.hfusionhub.service.EvalCorpusImportService;
 import com.hfusionhub.service.DemoImportService;
+import com.hfusionhub.service.EvalCorpusImportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -54,7 +54,8 @@ public class DemoController {
         if (denied != null) {
             return denied;
         }
-        return R.ok("评测语料导入已受理（解析在后台异步执行）",
+        return R.ok(
+                "评测语料导入已受理（解析在后台异步执行）",
                 evalCorpusImportService.importCorpus(com.hfusionhub.common.utils.JwtUtils.getCurrentUserId()));
     }
 
@@ -94,7 +95,9 @@ public class DemoController {
         return R.ok(bidDemoImportService.clearBidDemoData());
     }
 
-    @Operation(summary = "导入行业免费试用样例", description = "导入指定行业方案包的免费试用样例：行业样例知识库（3 篇脱敏招标文件）+ 示例投标项目，与行业方案包离线评测语料同源（幂等，仅管理员可用）")
+    @Operation(
+            summary = "导入行业免费试用样例",
+            description = "导入指定行业方案包的免费试用样例：行业样例知识库（3 篇脱敏招标文件）+ 示例投标项目，与行业方案包离线评测语料同源（幂等，仅管理员可用）")
     @PostMapping("/import-bid-industry")
     @SaCheckRole("admin")
     public R<DemoImportResultDTO> importBidIndustrySamples(@RequestParam String industry) {

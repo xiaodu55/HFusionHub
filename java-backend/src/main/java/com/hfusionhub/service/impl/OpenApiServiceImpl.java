@@ -119,8 +119,10 @@ public class OpenApiServiceImpl implements OpenApiService {
     }
 
     @Override
-    public void chatStream(String apiKey, OpenApiChatRequest request,
-                           org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter) {
+    public void chatStream(
+            String apiKey,
+            OpenApiChatRequest request,
+            org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter) {
         if (request.getQuery() == null || request.getQuery().isBlank()) {
             throw new BusinessException(400, "query 不能为空");
         }
@@ -161,8 +163,8 @@ public class OpenApiServiceImpl implements OpenApiService {
                             "user")
                     .doOnNext(chunk -> {
                         try {
-                            emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter
-                                    .event().data(chunk));
+                            emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                                    .data(chunk));
                         } catch (java.io.IOException io) {
                             throw new RuntimeException(io);
                         }
@@ -183,14 +185,13 @@ public class OpenApiServiceImpl implements OpenApiService {
                     })
                     .doOnError(e -> {
                         recordCall(app, key, "error", 0, 0, 0);
-                        log.warn("开放 API 流式调用失败: app={}, key={}, err={}",
-                                app.getId(), key.getId(), e.getMessage());
+                        log.warn("开放 API 流式调用失败: app={}, key={}, err={}", app.getId(), key.getId(), e.getMessage());
                         emitter.completeWithError(e);
                     })
                     .doOnComplete(() -> {
                         try {
-                            emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter
-                                    .event().data("[DONE]"));
+                            emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                                    .data("[DONE]"));
                         } catch (java.io.IOException ignored) {
                             // 客户端已断开
                         }
@@ -228,8 +229,8 @@ public class OpenApiServiceImpl implements OpenApiService {
             throw new BusinessException(403, "应用未归属租户，无法调用投标自检");
         }
         try {
-            Map<String, Object> summary = TenantContext.runAs(tenantId,
-                    () -> bidCheckService.checkForApi(projectId, tenantId));
+            Map<String, Object> summary =
+                    TenantContext.runAs(tenantId, () -> bidCheckService.checkForApi(projectId, tenantId));
             OpenApiBidCheckResponse response = new OpenApiBidCheckResponse();
             response.setStatus("ok");
             response.setProjectId(projectId);
@@ -287,7 +288,6 @@ public class OpenApiServiceImpl implements OpenApiService {
     private static int intOf(Object value) {
         return value instanceof Number number ? number.intValue() : 0;
     }
-
 
     private static int intVal(Map<String, Object> map, String key, int defaultValue) {
         if (map == null || !map.containsKey(key)) {

@@ -3,6 +3,7 @@ package com.hfusionhub.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.hfusionhub.cache.HotReadCacheService;
 import com.hfusionhub.common.constant.CommonConstants;
 import com.hfusionhub.common.constant.StatusCode;
 import com.hfusionhub.common.dto.PageResult;
@@ -16,12 +17,11 @@ import com.hfusionhub.entity.Document;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.DocumentMapper;
-import com.hfusionhub.cache.HotReadCacheService;
 import com.hfusionhub.mapper.KnowledgeBaseMapper;
-import com.hfusionhub.tenant.TenantContext;
 import com.hfusionhub.mapper.UserMapper;
 import com.hfusionhub.service.DeletionService;
 import com.hfusionhub.service.KnowledgeBaseService;
+import com.hfusionhub.tenant.TenantContext;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +57,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
     /** B3：知识库列表缓存命名空间与 TTL（秒） */
     private static final String KB_LIST_NS = "kb_list";
+
     private static final long KB_LIST_TTL_SECONDS = 300;
 
     private String versionKey(Long userId) {
@@ -79,6 +80,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
             hotReadCache.bumpVersion(key);
         }
     }
+
     private final DeletionService deletionService;
 
     /**
@@ -200,17 +202,17 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectById(id);
         if (knowledgeBase == null) {
             throw new BusinessException(StatusCode.KNOWLEDGE_BASE_NOT_FOUND, "知识库不存在");
-    }
+        }
 
         // 校验权限（只有创建者可以删除）
         Long currentUserId = jwtUtils.getCurrentUserId();
         if (!knowledgeBase.getUserId().equals(currentUserId)) {
             throw new BusinessException(StatusCode.FORBIDDEN, "无权操作此知识库");
-    }
+        }
 
         if (knowledgeBase.getDeleted() != null && knowledgeBase.getDeleted() == 1) {
             throw new BusinessException("知识库已在回收站中");
-    }
+        }
 
         // 知识库删除先进入回收站，保留文档、原文件和索引，确保可以完整恢复。
         LocalDateTime recycledAt = LocalDateTime.now();
@@ -218,7 +220,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                 knowledgeBaseMapper.markRecycled(id, recycledAt, recycledAt.plusDays(7), knowledgeBase.getStatus());
         if (updated != 1) {
             throw new BusinessException("知识库移入回收站失败");
-    }
+        }
 
         log.info("知识库已移入回收站，id: {}", id);
         bumpVersionAfterCommit(versionKey(knowledgeBase.getUserId()));
@@ -249,7 +251,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         if (knowledgeBase.getRecycleExpiresAt() != null
                 && knowledgeBase.getRecycleExpiresAt().isBefore(LocalDateTime.now())) {
             throw new BusinessException("该知识库已超过回收站保留期限");
-    }
+        }
 
         LambdaQueryWrapper<KnowledgeBase> duplicate = new LambdaQueryWrapper<>();
         duplicate
@@ -257,14 +259,14 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                 .eq(KnowledgeBase::getName, knowledgeBase.getName());
         if (knowledgeBaseMapper.selectCount(duplicate) > 0) {
             throw new BusinessException("已有同名知识库，请先修改现有知识库名称");
-    }
+        }
         int restoreStatus =
                 knowledgeBase.getStatus() != null && knowledgeBase.getStatus() == CommonConstants.KB_STATUS_DISABLED
                         ? CommonConstants.KB_STATUS_DISABLED
                         : CommonConstants.KB_STATUS_NORMAL;
         if (knowledgeBaseMapper.restoreFromRecycle(id, restoreStatus) != 1) {
             throw new BusinessException("恢复知识库失败");
-    }
+        }
         bumpVersionAfterCommit(versionKey(knowledgeBase.getUserId()));
     }
 
@@ -323,27 +325,34 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     public PageResult<KnowledgeBaseInfoDTO> listByCurrentUser(KnowledgeBaseQueryDTO queryDTO) {
         Long userId = jwtUtils.getCurrentUserId();
         // B3 热点读缓存：仅缓存无名称过滤的常规分页（模糊查询命中率低，不值得缓存）
-        boolean cacheable = userId != null && !StringUtils.hasText(queryDTO.getName())
-                && queryDTO.getPage() != null && queryDTO.getPage() <= 10;
+        boolean cacheable = userId != null
+                && !StringUtils.hasText(queryDTO.getName())
+                && queryDTO.getPage() != null
+                && queryDTO.getPage() <= 10;
         String dataKey = null;
         if (cacheable) {
             long version = hotReadCache.version(versionKey(userId));
-            dataKey = hotReadCache.dataKey(KB_LIST_NS, version, TenantContext.getTenantId(),
+            dataKey = hotReadCache.dataKey(
+                    KB_LIST_NS,
+                    version,
+                    TenantContext.getTenantId(),
                     "user:" + userId + ":p" + queryDTO.getPage() + ":s" + queryDTO.getPageSize());
-            HotReadCacheService.CacheResult<PageResult<KnowledgeBaseInfoDTO>> cached =
-                    hotReadCache.get(dataKey);
+            HotReadCacheService.CacheResult<PageResult<KnowledgeBaseInfoDTO>> cached = hotReadCache.get(dataKey);
             if (cached.hit()) {
                 // 空哨兵命中表示"该页确认无数据"
-                return cached.value() != null ? cached.value()
+                return cached.value() != null
+                        ? cached.value()
                         : PageResult.of(queryDTO.getPage(), queryDTO.getPageSize(), 0, List.of());
             }
         }
         PageResult<KnowledgeBaseInfoDTO> result = listInternal(userId, queryDTO);
         if (cacheable && dataKey != null) {
             // 空页也缓存（防穿透），哨兵由 put 内部处理
-            hotReadCache.put(dataKey,
-                    (result.getRecords() == null || result.getRecords().isEmpty())
-                            && result.getTotal() == 0 ? null : result,
+            hotReadCache.put(
+                    dataKey,
+                    (result.getRecords() == null || result.getRecords().isEmpty()) && result.getTotal() == 0
+                            ? null
+                            : result,
                     KB_LIST_TTL_SECONDS);
         }
         return result;

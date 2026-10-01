@@ -18,7 +18,6 @@ import com.hfusionhub.entity.AgentTask;
 import com.hfusionhub.entity.Conversation;
 import com.hfusionhub.entity.KnowledgeBase;
 import com.hfusionhub.entity.Message;
-import com.hfusionhub.entity.ModelUsageRecord;
 import com.hfusionhub.entity.PromptTemplate;
 import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.ConversationMapper;
@@ -34,7 +33,6 @@ import com.hfusionhub.service.FeatureFlagService;
 import com.hfusionhub.service.MemoryService;
 import com.hfusionhub.service.UsageLedgerService;
 import com.hfusionhub.tenant.TenantContext;
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HashMap;
@@ -195,9 +193,11 @@ public class ConversationServiceImpl implements ConversationService {
                     .filter(m -> ("user".equals(m.getRole()) || "assistant".equals(m.getRole()))
                             && StringUtils.hasText(m.getContent()))
                     // Python 端点校验 content ≤ 4000 字符，超长截断
-                    .map(m -> Map.of("role", m.getRole(),
-                            "content", m.getContent().length() > 4000
-                                    ? m.getContent().substring(0, 4000) : m.getContent()))
+                    .map(m -> Map.of(
+                            "role",
+                            m.getRole(),
+                            "content",
+                            m.getContent().length() > 4000 ? m.getContent().substring(0, 4000) : m.getContent()))
                     .toList();
             if (snapshot.isEmpty()) {
                 return;
@@ -209,8 +209,10 @@ public class ConversationServiceImpl implements ConversationService {
                     TenantContext.getTenantId(),
                     snapshot);
         } catch (Exception e) {
-            log.warn("Memory consolidation snapshot failed for conversation {}: {}",
-                    conversation.getId(), e.getMessage());
+            log.warn(
+                    "Memory consolidation snapshot failed for conversation {}: {}",
+                    conversation.getId(),
+                    e.getMessage());
         }
     }
 
@@ -359,9 +361,10 @@ public class ConversationServiceImpl implements ConversationService {
                             "Agent V1 配置错误：知识库会话需要已认证的用户上下文，但当前会话无法解析用户 ID。" + "请确认 JWT 令牌有效且包含 subject 声明。");
                 }
                 // 无图片时传 null：命中既有 AiClient 重载，请求体不含 images 键
-                List<String> imagePayloads = (dto.getImages() == null || dto.getImages().isEmpty())
-                        ? null
-                        : chatImageStorage.toDataUrls(dto.getImages());
+                List<String> imagePayloads =
+                        (dto.getImages() == null || dto.getImages().isEmpty())
+                                ? null
+                                : chatImageStorage.toDataUrls(dto.getImages());
                 aiResponse = aiClient.agentV1Chat(
                         dto.getContent(),
                         dto.getConversationId(),
@@ -415,7 +418,6 @@ public class ConversationServiceImpl implements ConversationService {
         return messagePersistence.saveAssistantMessageV1(
                 dto.getConversationId(), aiResponse, conversation, dto.getContent(), assistantRequestId);
     }
-
 
     static String normalizeRequestId(String requestId) {
         if (!StringUtils.hasText(requestId)) {
@@ -682,7 +684,9 @@ public class ConversationServiceImpl implements ConversationService {
         List<Message> messages = messageMapper.selectByConversationId(conversationId);
 
         // 4. 转换为 DTO
-        return messages.stream().map(messagePersistence::convertToMessageInfoDTO).collect(Collectors.toList());
+        return messages.stream()
+                .map(messagePersistence::convertToMessageInfoDTO)
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -911,9 +915,20 @@ public class ConversationServiceImpl implements ConversationService {
         // 第五十八批：流式会话状态与三个 Reactor 终端回调收敛进 StreamSession，
         // 主方法只保留编排（校验 → 幂等 → 持久化 → 任务创建 → 订阅接线）
         StreamSession session = new StreamSession(
-                dto, emitter, requestId, assistantRequestId, agentRun, cancelled,
-                streamTenantId, usageKey, streamReserveTokens, streamInputEstimate,
-                usageFinalized, responseBuilder, accumulatedSources, assistantSaved);
+                dto,
+                emitter,
+                requestId,
+                assistantRequestId,
+                agentRun,
+                cancelled,
+                streamTenantId,
+                usageKey,
+                streamReserveTokens,
+                streamInputEstimate,
+                usageFinalized,
+                responseBuilder,
+                accumulatedSources,
+                assistantSaved);
 
         reactor.core.Disposable subscription = sseFlux.subscribe(
                 chunk -> TenantContext.runAs(streamTenantId, () -> session.onChunk(chunk)),
@@ -1070,7 +1085,8 @@ public class ConversationServiceImpl implements ConversationService {
                 // 语义重试重置信号（content_reset=true，Python groundedness 重试路径）：
                 // 重置已累计的持久化内容并原样转发清空事件——前端收到后清空气泡，
                 // 后续 content 分片以替换语义重放（第二十五批修复）
-                if (jsonNode.has("content_reset") && jsonNode.get("content_reset").asBoolean()) {
+                if (jsonNode.has("content_reset")
+                        && jsonNode.get("content_reset").asBoolean()) {
                     responseBuilder.setLength(0);
                     Map<String, Object> resetEvent = new HashMap<>();
                     resetEvent.put("content_reset", true);
@@ -1078,8 +1094,10 @@ public class ConversationServiceImpl implements ConversationService {
                     return;
                 }
 
-                String content = jsonNode.has("content") ? jsonNode.get("content").asText() : "";
-                boolean isCancelled = jsonNode.has("cancelled") && jsonNode.get("cancelled").asBoolean();
+                String content =
+                        jsonNode.has("content") ? jsonNode.get("content").asText() : "";
+                boolean isCancelled =
+                        jsonNode.has("cancelled") && jsonNode.get("cancelled").asBoolean();
                 com.fasterxml.jackson.databind.JsonNode sourcesNode = jsonNode.get("sources");
 
                 if (isCancelled) {
@@ -1134,16 +1152,20 @@ public class ConversationServiceImpl implements ConversationService {
                         assistantRequestId);
             }
             chatUsageRecorder.finalizeChatUsage(
-                    tenantId, usageKey, streamReserveTokens, streamInputEstimate,
-                    usageFinalized, true, responseBuilder.length());
+                    tenantId,
+                    usageKey,
+                    streamReserveTokens,
+                    streamInputEstimate,
+                    usageFinalized,
+                    true,
+                    responseBuilder.length());
         }
 
         private void handleCancelledSignal() {
             log.info("Python AI request cancelled: {}", requestId);
             agentTaskService.cancelRun(agentRun.getId());
             chatUsageRecorder.finalizeChatUsage(
-                    tenantId, usageKey, streamReserveTokens, streamInputEstimate,
-                    usageFinalized, false, 0);
+                    tenantId, usageKey, streamReserveTokens, streamInputEstimate, usageFinalized, false, 0);
             try {
                 emitter.send(SseEmitter.event().data("[DONE]"));
                 emitter.complete();
@@ -1153,8 +1175,7 @@ public class ConversationServiceImpl implements ConversationService {
 
         void onError(Throwable error) {
             chatUsageRecorder.finalizeChatUsage(
-                    tenantId, usageKey, streamReserveTokens, streamInputEstimate,
-                    usageFinalized, false, 0);
+                    tenantId, usageKey, streamReserveTokens, streamInputEstimate, usageFinalized, false, 0);
             if (cancelled.get()) {
                 log.info("Stream cancelled by client, requestId: {}", requestId);
                 agentTaskService.cancelRun(agentRun.getId());
@@ -1195,8 +1216,13 @@ public class ConversationServiceImpl implements ConversationService {
 
         void onComplete() {
             chatUsageRecorder.finalizeChatUsage(
-                    tenantId, usageKey, streamReserveTokens, streamInputEstimate,
-                    usageFinalized, responseBuilder.length() > 0, responseBuilder.length());
+                    tenantId,
+                    usageKey,
+                    streamReserveTokens,
+                    streamInputEstimate,
+                    usageFinalized,
+                    responseBuilder.length() > 0,
+                    responseBuilder.length());
             // Agent V1 Step 5 safety net: 若流结束 run 仍是 running（未收到
             // run_completed / run_error / approval_required），强制收敛为 failed
             try {
@@ -1213,9 +1239,7 @@ public class ConversationServiceImpl implements ConversationService {
                             null);
                 }
             } catch (Exception convergenceError) {
-                log.warn(
-                        "Failed to check/converge agent run state on complete: {}",
-                        convergenceError.getMessage());
+                log.warn("Failed to check/converge agent run state on complete: {}", convergenceError.getMessage());
             }
             try {
                 emitter.send(SseEmitter.event().data("[DONE]"));

@@ -5,19 +5,19 @@ import static org.mockito.Mockito.mock;
 
 import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.context.SaTokenContext;
-import cn.dev33.satoken.context.model.SaTokenContextModelBox;
 import cn.dev33.satoken.context.model.SaRequest;
 import cn.dev33.satoken.context.model.SaResponse;
 import cn.dev33.satoken.context.model.SaStorage;
+import cn.dev33.satoken.context.model.SaTokenContextModelBox;
 import cn.dev33.satoken.dao.SaTokenDaoDefaultImpl;
 import cn.dev33.satoken.stp.StpUtil;
-import com.hfusionhub.support.AbstractItMySQLTest;
 import com.hfusionhub.common.exception.BusinessException;
 import com.hfusionhub.dto.PromptTemplateInfoDTO;
 import com.hfusionhub.dto.PromptTemplateSaveDTO;
 import com.hfusionhub.dto.PromptTemplateVersionDTO;
 import com.hfusionhub.entity.User;
 import com.hfusionhub.mapper.UserMapper;
+import com.hfusionhub.support.AbstractItMySQLTest;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -262,8 +262,6 @@ class PromptTemplateVersionIntegrationTest extends AbstractItMySQLTest {
 
         private SaTokenContextModelBox modelBox;
 
-    
-
         private MockSaTokenContext() {
 
             // 构造即装配 modelBox：SaManager.setSaTokenContext 之后立即可用
@@ -271,90 +269,57 @@ class PromptTemplateVersionIntegrationTest extends AbstractItMySQLTest {
             setContext(mock(SaRequest.class), mock(SaResponse.class), new SaStorage() {
 
                 @Override
-
                 public Object getSource() {
 
                     return storage;
-
                 }
 
-    
-
                 @Override
-
                 public Object get(String key) {
 
                     return storage.get(key);
-
                 }
 
-    
-
                 @Override
-
                 public SaStorage set(String key, Object value) {
 
                     storage.put(key, value);
 
                     return this;
-
                 }
 
-    
-
                 @Override
-
                 public SaStorage delete(String key) {
 
                     storage.remove(key);
 
                     return this;
-
                 }
-
             });
-
         }
 
-    
-
         @Override
-
         public void setContext(SaRequest request, SaResponse response, SaStorage storage) {
 
             this.modelBox = new SaTokenContextModelBox(request, response, storage);
-
         }
 
-    
-
         @Override
-
         public void clearContext() {
 
             this.modelBox = null;
-
         }
 
-    
-
         @Override
-
         public boolean isValid() {
 
             return this.modelBox != null;
-
         }
 
-    
-
         @Override
-
         public SaTokenContextModelBox getModelBox() {
 
             return this.modelBox;
-
         }
-
     }
 }

@@ -1,10 +1,10 @@
 package com.hfusionhub.client;
 
-import com.hfusionhub.support.AbstractItMySQLTest;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.hfusionhub.support.AbstractItMySQLTest;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;

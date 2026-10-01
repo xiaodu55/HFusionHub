@@ -49,8 +49,7 @@ public class MinioArtifactStore {
             // 不再回退 minioadmin 弱默认。
             this.minioClient = null;
             this.unconfiguredReason = "MINIO_ACCESS_KEY / MINIO_SECRET_KEY 未配置";
-            log.warn("MinIO 凭据未配置，插件工件存储已禁用"
-                    + "（设置 MINIO_ACCESS_KEY / MINIO_SECRET_KEY 后重启以启用）");
+            log.warn("MinIO 凭据未配置，插件工件存储已禁用" + "（设置 MINIO_ACCESS_KEY / MINIO_SECRET_KEY 后重启以启用）");
             return;
         }
         this.minioClient = MinioClient.builder()
@@ -86,17 +85,15 @@ public class MinioArtifactStore {
             return;
         }
         try {
-            boolean exists = requireClient().bucketExists(
-                    BucketExistsArgs.builder().bucket(bucket).build());
+            boolean exists = requireClient()
+                    .bucketExists(BucketExistsArgs.builder().bucket(bucket).build());
             if (!exists) {
-                minioClient.makeBucket(
-                        MakeBucketArgs.builder().bucket(bucket).build());
+                minioClient.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
                 log.info("Created MinIO bucket: {}", bucket);
             }
         } catch (Exception e) {
             knownBuckets.remove(bucket);
-            log.warn("MinIO not available, artifact storage disabled (bucket {}): {}",
-                    bucket, e.getMessage());
+            log.warn("MinIO not available, artifact storage disabled (bucket {}): {}", bucket, e.getMessage());
         }
     }
 
@@ -111,15 +108,16 @@ public class MinioArtifactStore {
      * @param size        wheel file size in bytes
      * @return MinIO object key
      */
-    public String uploadWheel(Long tenantId, String pluginName, String version, String artifactHash,
-                              InputStream data, long size) {
+    public String uploadWheel(
+            Long tenantId, String pluginName, String version, String artifactHash, InputStream data, long size) {
         String objectKey = buildObjectKey(pluginName, version, artifactHash);
         String bucket = resolveBucket(tenantId);
         ensureBucket(bucket);
         try {
-            requireClient().putObject(PutObjectArgs.builder().bucket(bucket).object(objectKey).stream(data, size, -1)
-                    .contentType("application/zip")
-                    .build());
+            requireClient()
+                    .putObject(PutObjectArgs.builder().bucket(bucket).object(objectKey).stream(data, size, -1)
+                            .contentType("application/zip")
+                            .build());
             log.info("Uploaded plugin wheel to {}: {} ({} bytes)", bucket, objectKey, size);
             return objectKey;
         } catch (Exception e) {
@@ -141,10 +139,11 @@ public class MinioArtifactStore {
      */
     public InputStream downloadWheel(Long tenantId, String objectKey) {
         try {
-            return requireClient().getObject(GetObjectArgs.builder()
-                    .bucket(resolveObjectBucket(tenantId, objectKey))
-                    .object(objectKey)
-                    .build());
+            return requireClient()
+                    .getObject(GetObjectArgs.builder()
+                            .bucket(resolveObjectBucket(tenantId, objectKey))
+                            .object(objectKey)
+                            .build());
         } catch (Exception e) {
             throw new RuntimeException("Failed to download artifact from MinIO: " + e.getMessage(), e);
         }
@@ -161,12 +160,13 @@ public class MinioArtifactStore {
      */
     public String getPresignedUrl(Long tenantId, String objectKey, Duration expiry) {
         try {
-            return requireClient().getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
-                    .method(Method.GET)
-                    .bucket(resolveObjectBucket(tenantId, objectKey))
-                    .object(objectKey)
-                    .expiry((int) expiry.getSeconds())
-                    .build());
+            return requireClient()
+                    .getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
+                            .method(Method.GET)
+                            .bucket(resolveObjectBucket(tenantId, objectKey))
+                            .object(objectKey)
+                            .expiry((int) expiry.getSeconds())
+                            .build());
         } catch (Exception e) {
             throw new RuntimeException("Failed to generate presigned URL: " + e.getMessage(), e);
         }
@@ -183,10 +183,11 @@ public class MinioArtifactStore {
      */
     public boolean exists(Long tenantId, String objectKey) {
         try {
-            requireClient().statObject(StatObjectArgs.builder()
-                    .bucket(resolveObjectBucket(tenantId, objectKey))
-                    .object(objectKey)
-                    .build());
+            requireClient()
+                    .statObject(StatObjectArgs.builder()
+                            .bucket(resolveObjectBucket(tenantId, objectKey))
+                            .object(objectKey)
+                            .build());
             return true;
         } catch (Exception e) {
             return false;
@@ -204,10 +205,11 @@ public class MinioArtifactStore {
      */
     public void deleteWheel(Long tenantId, String objectKey) {
         try {
-            requireClient().removeObject(RemoveObjectArgs.builder()
-                    .bucket(resolveObjectBucket(tenantId, objectKey))
-                    .object(objectKey)
-                    .build());
+            requireClient()
+                    .removeObject(RemoveObjectArgs.builder()
+                            .bucket(resolveObjectBucket(tenantId, objectKey))
+                            .object(objectKey)
+                            .build());
             log.info("Deleted plugin wheel: {}", objectKey);
         } catch (Exception e) {
             log.warn("Failed to delete artifact from MinIO: {}", e.getMessage());
@@ -257,7 +259,11 @@ public class MinioArtifactStore {
 
     private boolean objectInBucket(String bucket, String objectKey) {
         try {
-            requireClient().statObject(StatObjectArgs.builder().bucket(bucket).object(objectKey).build());
+            requireClient()
+                    .statObject(StatObjectArgs.builder()
+                            .bucket(bucket)
+                            .object(objectKey)
+                            .build());
             return true;
         } catch (Exception e) {
             return false;

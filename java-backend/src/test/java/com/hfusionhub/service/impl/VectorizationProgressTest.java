@@ -25,14 +25,17 @@ class VectorizationProgressTest {
     @Test
     void estimateProcessingSecondsClampsToBounds() {
         // 1MB PDF: base 45 + 1*25 = 70
-        assertThat(VectorizationProgress.estimateProcessingSeconds(document(1024 * 1024, "pdf"))).isEqualTo(70);
+        assertThat(VectorizationProgress.estimateProcessingSeconds(document(1024 * 1024, "pdf")))
+                .isEqualTo(70);
         // 超大文件封顶 900
         assertThat(VectorizationProgress.estimateProcessingSeconds(document(500L * 1024 * 1024, "pdf")))
                 .isEqualTo(900);
         // 未知类型按 30 起步;sizeMb 下限为 1(30+25=55)
-        assertThat(VectorizationProgress.estimateProcessingSeconds(document(1024, "xyz"))).isEqualTo(55);
+        assertThat(VectorizationProgress.estimateProcessingSeconds(document(1024, "xyz")))
+                .isEqualTo(55);
         // txt 15+25=40(下限 15 为防御性钳制)
-        assertThat(VectorizationProgress.estimateProcessingSeconds(document(0, "txt"))).isEqualTo(40);
+        assertThat(VectorizationProgress.estimateProcessingSeconds(document(0, "txt")))
+                .isEqualTo(40);
     }
 
     @Test
@@ -42,7 +45,8 @@ class VectorizationProgressTest {
         assertThat(VectorizationProgress.estimateProgress("PENDING", 10, 100)).isZero();
         // PROCESSING: 5% 起步、90% 封顶
         assertThat(VectorizationProgress.estimateProgress("PROCESSING", 0, 100)).isEqualTo(5);
-        assertThat(VectorizationProgress.estimateProgress("PROCESSING", 100000, 100)).isEqualTo(90);
+        assertThat(VectorizationProgress.estimateProgress("PROCESSING", 100000, 100))
+                .isEqualTo(90);
     }
 
     @Test
@@ -59,13 +63,18 @@ class VectorizationProgressTest {
     @Test
     void dynamicEstimatedSecondsStaysWithinBounds() {
         // 终态/低进度/零耗时 → 回落初始估算
-        assertThat(VectorizationProgress.dynamicEstimatedSeconds("COMPLETED", 60, 100, 100)).isEqualTo(100);
-        assertThat(VectorizationProgress.dynamicEstimatedSeconds("PROCESSING", 60, 5, 100)).isEqualTo(100);
-        assertThat(VectorizationProgress.dynamicEstimatedSeconds("PROCESSING", 0, 50, 100)).isEqualTo(100);
+        assertThat(VectorizationProgress.dynamicEstimatedSeconds("COMPLETED", 60, 100, 100))
+                .isEqualTo(100);
+        assertThat(VectorizationProgress.dynamicEstimatedSeconds("PROCESSING", 60, 5, 100))
+                .isEqualTo(100);
+        assertThat(VectorizationProgress.dynamicEstimatedSeconds("PROCESSING", 0, 50, 100))
+                .isEqualTo(100);
         // 观测外推:60s 走到 50% → 观测总时长 120s(>75% 初始)→ 动态估算 120
-        assertThat(VectorizationProgress.dynamicEstimatedSeconds("PROCESSING", 60, 50, 100)).isEqualTo(120);
+        assertThat(VectorizationProgress.dynamicEstimatedSeconds("PROCESSING", 60, 50, 100))
+                .isEqualTo(120);
         // 封顶 900
-        assertThat(VectorizationProgress.dynamicEstimatedSeconds("PROCESSING", 6000, 90, 100)).isEqualTo(900);
+        assertThat(VectorizationProgress.dynamicEstimatedSeconds("PROCESSING", 6000, 90, 100))
+                .isEqualTo(900);
     }
 
     @Test
@@ -108,8 +117,14 @@ class VectorizationProgressTest {
 
         VectorizationProgress.enrichWithEstimatedProgress(response, doc, job, "PROCESSING");
 
-        assertThat(response).containsKeys("stage", "progress", "elapsed_seconds",
-                "estimated_seconds", "initial_estimated_seconds", "remaining_seconds");
+        assertThat(response)
+                .containsKeys(
+                        "stage",
+                        "progress",
+                        "elapsed_seconds",
+                        "estimated_seconds",
+                        "initial_estimated_seconds",
+                        "remaining_seconds");
         assertThat(response.get("stage")).isEqualTo("parsing");
     }
 

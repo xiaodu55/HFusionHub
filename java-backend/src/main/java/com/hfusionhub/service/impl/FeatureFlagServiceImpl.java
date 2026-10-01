@@ -46,10 +46,11 @@ public class FeatureFlagServiceImpl implements FeatureFlagService {
     // 每次 agent/工具调用都会命中。flags/rules 变更频率极低且全部写路径
     // （create/update/delete*）都会失效缓存，因此 15s TTL + 写失效足够安全。
     private static final long EVAL_CACHE_TTL_MS = 15_000L;
-    private final java.util.concurrent.ConcurrentHashMap<String,
-            java.util.AbstractMap.SimpleEntry<FeatureFlag, Long>> flagCache = new java.util.concurrent.ConcurrentHashMap<>();
-    private final java.util.concurrent.ConcurrentHashMap<Long,
-            java.util.AbstractMap.SimpleEntry<List<FeatureFlagRule>, Long>> ruleCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentHashMap<String, java.util.AbstractMap.SimpleEntry<FeatureFlag, Long>>
+            flagCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentHashMap<
+                    Long, java.util.AbstractMap.SimpleEntry<List<FeatureFlagRule>, Long>>
+            ruleCache = new java.util.concurrent.ConcurrentHashMap<>();
 
     private void invalidateEvalCache() {
         flagCache.clear();

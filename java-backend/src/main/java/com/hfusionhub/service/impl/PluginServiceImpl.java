@@ -566,10 +566,12 @@ public class PluginServiceImpl implements PluginService {
         // IPv6 字面量（含 [::1] 已被 getHost 剥离方括号）
         if (host.contains(":")) {
             String lower = host.toLowerCase();
-            return lower.equals("::1") || lower.equals("::")
-                    || lower.startsWith("fc") || lower.startsWith("fd")  // ULA fc00::/7
-                    || lower.startsWith("fe80")                          // link-local
-                    || lower.startsWith("::ffff:");                      // IPv4-mapped
+            return lower.equals("::1")
+                    || lower.equals("::")
+                    || lower.startsWith("fc")
+                    || lower.startsWith("fd") // ULA fc00::/7
+                    || lower.startsWith("fe80") // link-local
+                    || lower.startsWith("::ffff:"); // IPv4-mapped
         }
         // 域名：解析后校验全部地址
         try {
@@ -601,12 +603,12 @@ public class PluginServiceImpl implements PluginService {
             }
             int a = Integer.parseInt(parts[0]);
             int b = Integer.parseInt(parts[1]);
-            if (a == 10 || a == 127 || a == 0) return true;                  // 10/8, loopback, 0/8
-            if (a == 172 && b >= 16 && b <= 31) return true;                 // 172.16/12
-            if (a == 192 && b == 168) return true;                           // 192.168/16
-            if (a == 169 && b == 254) return true;                           // link-local (含云元数据 169.254.169.254)
-            if (a == 100 && b >= 64 && b <= 127) return true;                // CGNAT 100.64/10
-            if (a >= 224) return true;                                       // multicast + reserved
+            if (a == 10 || a == 127 || a == 0) return true; // 10/8, loopback, 0/8
+            if (a == 172 && b >= 16 && b <= 31) return true; // 172.16/12
+            if (a == 192 && b == 168) return true; // 192.168/16
+            if (a == 169 && b == 254) return true; // link-local (含云元数据 169.254.169.254)
+            if (a == 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64/10
+            if (a >= 224) return true; // multicast + reserved
             return false;
         } catch (NumberFormatException e) {
             return true;
@@ -721,8 +723,7 @@ public class PluginServiceImpl implements PluginService {
     private String computeManifestHash(Map<String, Object> manifest) {
         try {
             java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(
-                    canonicalJson(manifest).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            byte[] hash = digest.digest(canonicalJson(manifest).getBytes(java.nio.charset.StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder();
             for (byte b : hash) {
                 sb.append(String.format("%02x", b));

@@ -47,8 +47,7 @@ class MinioArtifactStoreTest {
         Mockito.doAnswer(inv -> null).when(minioClient).putObject(any(PutObjectArgs.class));
 
         store.uploadWheel(
-                TENANT_ID, "demo", "1.0.0", "abcdef1234567890",
-                new ByteArrayInputStream(new byte[] {1, 2, 3}), 3);
+                TENANT_ID, "demo", "1.0.0", "abcdef1234567890", new ByteArrayInputStream(new byte[] {1, 2, 3}), 3);
 
         ArgumentCaptor<PutObjectArgs> captor = ArgumentCaptor.forClass(PutObjectArgs.class);
         Mockito.verify(minioClient).putObject(captor.capture());
@@ -59,8 +58,7 @@ class MinioArtifactStoreTest {
     void uploadWithoutTenantWritesToDefaultBucket() throws Exception {
         Mockito.doAnswer(inv -> null).when(minioClient).putObject(any(PutObjectArgs.class));
 
-        store.uploadWheel("demo", "1.0.0", "abcdef1234567890",
-                new ByteArrayInputStream(new byte[] {1}), 1);
+        store.uploadWheel("demo", "1.0.0", "abcdef1234567890", new ByteArrayInputStream(new byte[] {1}), 1);
 
         ArgumentCaptor<PutObjectArgs> captor = ArgumentCaptor.forClass(PutObjectArgs.class);
         Mockito.verify(minioClient).putObject(captor.capture());
@@ -73,16 +71,18 @@ class MinioArtifactStoreTest {
         when(minioClient.statObject(any(StatObjectArgs.class)))
                 .thenThrow(new RuntimeException("missing"))
                 .thenReturn(new StatObjectResponse(
-                        Headers.of(java.util.Map.of("last-modified", "Wed, 21 Oct 2026 07:28:00 GMT")), "hfusionhub", "us-east-1", "plugins/demo/1.0.0/demo-1.0.0-abcdef12.whl"));
+                        Headers.of(java.util.Map.of("last-modified", "Wed, 21 Oct 2026 07:28:00 GMT")),
+                        "hfusionhub",
+                        "us-east-1",
+                        "plugins/demo/1.0.0/demo-1.0.0-abcdef12.whl"));
         when(minioClient.getPresignedObjectUrl(any(GetPresignedObjectUrlArgs.class)))
                 .thenReturn("http://minio/hfusionhub/signed");
 
-        String url = store.getPresignedUrl(
-                TENANT_ID, "plugins/demo/1.0.0/demo-1.0.0-abcdef12.whl", Duration.ofMinutes(5));
+        String url =
+                store.getPresignedUrl(TENANT_ID, "plugins/demo/1.0.0/demo-1.0.0-abcdef12.whl", Duration.ofMinutes(5));
 
         assertThat(url).isEqualTo("http://minio/hfusionhub/signed");
-        ArgumentCaptor<GetPresignedObjectUrlArgs> captor =
-                ArgumentCaptor.forClass(GetPresignedObjectUrlArgs.class);
+        ArgumentCaptor<GetPresignedObjectUrlArgs> captor = ArgumentCaptor.forClass(GetPresignedObjectUrlArgs.class);
         Mockito.verify(minioClient).getPresignedObjectUrl(captor.capture());
         assertThat(captor.getValue().bucket()).isEqualTo("hfusionhub");
     }
@@ -90,16 +90,17 @@ class MinioArtifactStoreTest {
     @Test
     void presignUsesTenantBucketWhenObjectFoundThere() throws Exception {
         StatObjectResponse hit = new StatObjectResponse(
-                Headers.of(java.util.Map.of("last-modified", "Wed, 21 Oct 2026 07:28:00 GMT")), "hfusionhub-t7", "us-east-1", "plugins/demo/1.0.0/demo-1.0.0-abcdef12.whl");
+                Headers.of(java.util.Map.of("last-modified", "Wed, 21 Oct 2026 07:28:00 GMT")),
+                "hfusionhub-t7",
+                "us-east-1",
+                "plugins/demo/1.0.0/demo-1.0.0-abcdef12.whl");
         when(minioClient.statObject(any(StatObjectArgs.class))).thenReturn(hit);
         when(minioClient.getPresignedObjectUrl(any(GetPresignedObjectUrlArgs.class)))
                 .thenReturn("http://minio/signed");
 
-        store.getPresignedUrl(
-                TENANT_ID, "plugins/demo/1.0.0/demo-1.0.0-abcdef12.whl", Duration.ofMinutes(5));
+        store.getPresignedUrl(TENANT_ID, "plugins/demo/1.0.0/demo-1.0.0-abcdef12.whl", Duration.ofMinutes(5));
 
-        ArgumentCaptor<GetPresignedObjectUrlArgs> captor =
-                ArgumentCaptor.forClass(GetPresignedObjectUrlArgs.class);
+        ArgumentCaptor<GetPresignedObjectUrlArgs> captor = ArgumentCaptor.forClass(GetPresignedObjectUrlArgs.class);
         Mockito.verify(minioClient).getPresignedObjectUrl(captor.capture());
         assertThat(captor.getValue().bucket()).isEqualTo("hfusionhub-t7");
     }
@@ -107,7 +108,10 @@ class MinioArtifactStoreTest {
     @Test
     void deleteRemovesFromTenantBucketWhenPresent() throws Exception {
         StatObjectResponse hit = new StatObjectResponse(
-                Headers.of(java.util.Map.of("last-modified", "Wed, 21 Oct 2026 07:28:00 GMT")), "hfusionhub-t7", "us-east-1", "plugins/demo/1.0.0/x.whl");
+                Headers.of(java.util.Map.of("last-modified", "Wed, 21 Oct 2026 07:28:00 GMT")),
+                "hfusionhub-t7",
+                "us-east-1",
+                "plugins/demo/1.0.0/x.whl");
         when(minioClient.statObject(any(StatObjectArgs.class))).thenReturn(hit);
         Mockito.doAnswer(inv -> null).when(minioClient).removeObject(any(RemoveObjectArgs.class));
 

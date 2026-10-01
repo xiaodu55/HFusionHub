@@ -46,8 +46,8 @@ public class BidSubscriptionServiceImpl implements BidSubscriptionService {
 
     @Override
     public BidSubscription getByCode(String planCode) {
-        return subscriptionMapper.selectOne(new LambdaQueryWrapper<BidSubscription>()
-                .eq(BidSubscription::getPlanCode, planCode));
+        return subscriptionMapper.selectOne(
+                new LambdaQueryWrapper<BidSubscription>().eq(BidSubscription::getPlanCode, planCode));
     }
 
     @Override

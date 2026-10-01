@@ -1,10 +1,9 @@
 package com.hfusionhub.service.impl;
 
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.lang.reflect.Method;
-
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
 
 /**
  * 声明式插件端点 SSRF 校验（第十五轮 R15-19）。

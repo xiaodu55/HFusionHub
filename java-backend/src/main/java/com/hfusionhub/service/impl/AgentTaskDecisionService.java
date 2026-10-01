@@ -9,8 +9,8 @@ import com.hfusionhub.entity.AgentRun;
 import com.hfusionhub.entity.AgentTask;
 import com.hfusionhub.entity.Message;
 import com.hfusionhub.mapper.AgentApprovalMapper;
-import com.hfusionhub.mapper.AgentStepMapper;
 import com.hfusionhub.mapper.AgentRunMapper;
+import com.hfusionhub.mapper.AgentStepMapper;
 import com.hfusionhub.mapper.AgentTaskMapper;
 import com.hfusionhub.mapper.MessageMapper;
 import com.hfusionhub.service.AgentStatusEventService;
@@ -148,9 +148,7 @@ public class AgentTaskDecisionService {
                 // 迁移，与过期调度 expireApprovals 的竞态由数据库行级判定，不再依赖
                 // check-then-act 的内存态守卫；仅真正迁移成功的一方结算用量
                 boolean transitioned = runLifecycle.failFromWaitingApproval(
-                        run.getId(),
-                        "approval_denied",
-                        "审批被拒绝: " + (reason != null ? reason : "无理由"));
+                        run.getId(), "approval_denied", "审批被拒绝: " + (reason != null ? reason : "无理由"));
                 if (transitioned) {
                     // 用量账本：审批拒绝直接写终态，绕过 completeRun，退回预占
                     runLifecycle.finalizeAgentRunUsage(run.getId(), AgentConstants.STATUS_FAILED, null);
@@ -239,14 +237,16 @@ public class AgentTaskDecisionService {
                             boolean transitioned = runLifecycle.failUnlessTerminal(
                                     checkRun.getId(), "internal_error", "审批后恢复执行失败: " + errorMsg);
                             if (transitioned) {
-                                runLifecycle.finalizeAgentRunUsage(checkRun.getId(), AgentConstants.STATUS_FAILED, null);
+                                runLifecycle.finalizeAgentRunUsage(
+                                        checkRun.getId(), AgentConstants.STATUS_FAILED, null);
                                 AgentTask checkTask = taskMapper.selectById(checkRun.getTaskId());
                                 if (checkTask != null) {
                                     // 第五十四批：task 收敛同样走条件守卫，非终态才置 failed
                                     boolean taskSettled = taskMapper.transitionTaskGuarded(
-                                            checkTask.getId(),
-                                            AgentConstants.STATUS_FAILED,
-                                            AgentConstants.NON_TERMINAL_STATUSES) == 1;
+                                                    checkTask.getId(),
+                                                    AgentConstants.STATUS_FAILED,
+                                                    AgentConstants.NON_TERMINAL_STATUSES)
+                                            == 1;
                                     if (!taskSettled) {
                                         log.warn(
                                                 "Task {} already terminal — skipping failure convergence",
@@ -358,7 +358,8 @@ public class AgentTaskDecisionService {
                         ? stepEvent.get("error_code").toString()
                         : null;
 
-                agentTaskService.recordStep(runId, seq, stepType, action, inputSummary, outputSummary, sources, durationMs, errorCode);
+                agentTaskService.recordStep(
+                        runId, seq, stepType, action, inputSummary, outputSummary, sources, durationMs, errorCode);
             }
         }
 
@@ -413,9 +414,9 @@ public class AgentTaskDecisionService {
         // 守护终态迁移（同 completeRun 约定）：仅当 run 仍处 running/waiting_approval
         // 时写入 completed/failed——无条件 updateById 会覆盖并发完成/取消的终态，
         // 且账本按被覆盖后的状态结算，导致账本与真实终态不一致
-        boolean won = runMapper.completeRunGuarded(
-                        freshRun.getId(), mappedStatus, null, null, null, LocalDateTime.now())
-                == 1;
+        boolean won =
+                runMapper.completeRunGuarded(freshRun.getId(), mappedStatus, null, null, null, LocalDateTime.now())
+                        == 1;
         if (won) {
             runMapper.updateCompletionMetadata(
                     freshRun.getId(),
@@ -436,9 +437,8 @@ public class AgentTaskDecisionService {
         // 重读失败时退回原引用的 id，守卫语义不变
         AgentTask freshTask = taskMapper.selectById(freshRun.getTaskId());
         Long targetTaskId = freshTask != null ? freshTask.getId() : task.getId();
-        boolean taskSettled = taskMapper.transitionTaskGuarded(
-                        targetTaskId, mappedStatus, AgentConstants.NON_TERMINAL_STATUSES)
-                == 1;
+        boolean taskSettled =
+                taskMapper.transitionTaskGuarded(targetTaskId, mappedStatus, AgentConstants.NON_TERMINAL_STATUSES) == 1;
         if (!taskSettled) {
             log.warn(
                     "Task {} terminal state settled concurrently — skipping overwrite to {}",
@@ -504,5 +504,4 @@ public class AgentTaskDecisionService {
             return List.of();
         }
     }
-
 }

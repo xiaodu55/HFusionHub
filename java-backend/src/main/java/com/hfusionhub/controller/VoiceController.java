@@ -46,10 +46,7 @@ public class VoiceController {
     public R<Map<String, Object>> status() {
         try {
             ResponseEntity<Map> response = restTemplate.exchange(
-                    baseUrl + "/api/voice/status",
-                    HttpMethod.GET,
-                    new HttpEntity<>(internalHeaders()),
-                    Map.class);
+                    baseUrl + "/api/voice/status", HttpMethod.GET, new HttpEntity<>(internalHeaders()), Map.class);
             return R.ok(response.getBody());
         } catch (Exception e) {
             log.warn("Voice status forward failed: {}", e.getMessage());
@@ -60,8 +57,7 @@ public class VoiceController {
     @PostMapping(value = "/transcribe", consumes = MediaType.APPLICATION_OCTET_STREAM_VALUE)
     public R<Map<String, Object>> transcribe(
             @RequestBody byte[] audio,
-            @RequestHeader(value = "X-Audio-Filename", required = false, defaultValue = "audio.webm")
-            String filename,
+            @RequestHeader(value = "X-Audio-Filename", required = false, defaultValue = "audio.webm") String filename,
             @RequestParam(value = "language", required = false) String language) {
         if (audio == null || audio.length == 0) {
             return R.fail(400, "音频内容为空");
@@ -71,10 +67,10 @@ public class VoiceController {
             HttpHeaders headers = internalHeaders();
             headers.set("X-Audio-Filename", filename);
             headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
-            String url = baseUrl + "/api/voice/transcribe"
-                    + (StringUtils.hasText(language) ? "?language=" + language : "");
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.POST, new HttpEntity<>(audio, headers), Map.class);
+            String url =
+                    baseUrl + "/api/voice/transcribe" + (StringUtils.hasText(language) ? "?language=" + language : "");
+            ResponseEntity<Map> response =
+                    restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(audio, headers), Map.class);
             return R.ok(response.getBody());
         } catch (Exception e) {
             log.warn("Voice transcribe forward failed: {}", e.getMessage());
@@ -93,12 +89,8 @@ public class VoiceController {
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.setAccept(List.of(MediaType.APPLICATION_OCTET_STREAM, MediaType.ALL));
             ResponseEntity<byte[]> response = restTemplate.exchange(
-                    baseUrl + "/api/voice/synthesize",
-                    HttpMethod.POST,
-                    new HttpEntity<>(body, headers),
-                    byte[].class);
-            String contentType = String.valueOf(
-                    response.getHeaders().getFirst("Content-Type"));
+                    baseUrl + "/api/voice/synthesize", HttpMethod.POST, new HttpEntity<>(body, headers), byte[].class);
+            String contentType = String.valueOf(response.getHeaders().getFirst("Content-Type"));
             return ResponseEntity.ok()
                     .contentType(MediaType.parseMediaType(contentType))
                     .body(response.getBody());

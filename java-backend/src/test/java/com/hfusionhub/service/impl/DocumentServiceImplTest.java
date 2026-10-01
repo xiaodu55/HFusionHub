@@ -105,8 +105,7 @@ class DocumentServiceImplTest {
         Document document = document(10L, 20L, DocumentStatus.COMPLETED);
         // A5：编辑内容回写源文件——文本类文档 + 真实临时文件验证同源语义
         document.setFileType("md");
-        java.nio.file.Path sourceFile =
-                java.nio.file.Files.createTempFile("doc-update-test", ".md");
+        java.nio.file.Path sourceFile = java.nio.file.Files.createTempFile("doc-update-test", ".md");
         java.nio.file.Files.writeString(sourceFile, "original content");
         document.setFilePath(sourceFile.toString());
         DocumentUpdateDTO update = new DocumentUpdateDTO();
@@ -117,8 +116,7 @@ class DocumentServiceImplTest {
         documentService.update(10L, update);
 
         assertEquals("Updated content", document.getContent());
-        assertEquals("Updated content",
-                java.nio.file.Files.readString(sourceFile));
+        assertEquals("Updated content", java.nio.file.Files.readString(sourceFile));
         assertEquals(DocumentStatus.PENDING.getCode(), document.getStatus());
         verify(documentMapper, times(2)).updateById(document);
         java.nio.file.Files.deleteIfExists(sourceFile);

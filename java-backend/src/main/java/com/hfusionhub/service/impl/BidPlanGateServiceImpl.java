@@ -56,10 +56,9 @@ public class BidPlanGateServiceImpl implements BidPlanGateService {
     @Override
     public void requireModule(Long tenantId, String module, String actionLabel) {
         if (!isModuleEnabled(tenantId, module)) {
-            log.warn("投标套餐模块未开通被拦截: tenantId={}, module={}, action={}",
-                    tenantId, module, actionLabel);
-            throw new BusinessException(StatusCode.FORBIDDEN,
-                    actionLabel + "需要开通「" + moduleLabel(module) + "」模块，请在套餐中心升级后重试");
+            log.warn("投标套餐模块未开通被拦截: tenantId={}, module={}, action={}", tenantId, module, actionLabel);
+            throw new BusinessException(
+                    StatusCode.FORBIDDEN, actionLabel + "需要开通「" + moduleLabel(module) + "」模块，请在套餐中心升级后重试");
         }
     }
 
@@ -86,13 +85,11 @@ public class BidPlanGateServiceImpl implements BidPlanGateService {
         if (maxSeats == null) {
             return; // 未绑定 tier 套餐或无坐席上限，放行
         }
-        Long seatsUsed = tenantMemberMapper.selectCount(new LambdaQueryWrapper<TenantMember>()
-                .eq(TenantMember::getTenantId, tenantId));
+        Long seatsUsed = tenantMemberMapper.selectCount(
+                new LambdaQueryWrapper<TenantMember>().eq(TenantMember::getTenantId, tenantId));
         if (seatsUsed != null && seatsUsed >= maxSeats) {
-            log.warn("套餐坐席已满被拦截: tenantId={}, seatsUsed={}, maxSeats={}",
-                    tenantId, seatsUsed, maxSeats);
-            throw new BusinessException(StatusCode.FORBIDDEN,
-                    "当前套餐坐席已满（" + maxSeats + " 席），请升级套餐增加坐席");
+            log.warn("套餐坐席已满被拦截: tenantId={}, seatsUsed={}, maxSeats={}", tenantId, seatsUsed, maxSeats);
+            throw new BusinessException(StatusCode.FORBIDDEN, "当前套餐坐席已满（" + maxSeats + " 席），请升级套餐增加坐席");
         }
     }
 

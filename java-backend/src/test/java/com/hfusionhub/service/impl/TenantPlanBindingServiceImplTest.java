@@ -38,10 +38,17 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class TenantPlanBindingServiceImplTest {
 
-    @Mock private TenantPlanBindingMapper bindingMapper;
-    @Mock private BidSubscriptionMapper subscriptionMapper;
-    @Mock private TenantMapper tenantMapper;
-    @Mock private JwtUtils jwtUtils;
+    @Mock
+    private TenantPlanBindingMapper bindingMapper;
+
+    @Mock
+    private BidSubscriptionMapper subscriptionMapper;
+
+    @Mock
+    private TenantMapper tenantMapper;
+
+    @Mock
+    private JwtUtils jwtUtils;
 
     private TenantPlanBindingServiceImpl service;
 
@@ -89,8 +96,9 @@ class TenantPlanBindingServiceImplTest {
 
     @Test
     void bindCreatesBindingAndAlignsTenantTier() {
-        when(subscriptionMapper.selectById(10L)).thenReturn(plan(10L, "pro", "tier",
-                "{\"draft\":true,\"check\":true,\"docx\":false,\"openapi\":true}"));
+        when(subscriptionMapper.selectById(10L))
+                .thenReturn(
+                        plan(10L, "pro", "tier", "{\"draft\":true,\"check\":true,\"docx\":false,\"openapi\":true}"));
         when(bindingMapper.selectOne(any())).thenReturn(null);
         when(bindingMapper.insert(any(TenantPlanBinding.class))).thenAnswer(inv -> {
             inv.getArgument(0, TenantPlanBinding.class).setId(99L);
@@ -110,8 +118,8 @@ class TenantPlanBindingServiceImplTest {
 
     @Test
     void bindIsIdempotentReactivatesExisting() {
-        when(subscriptionMapper.selectById(10L)).thenReturn(plan(10L, "pro", "tier",
-                "{\"draft\":true,\"check\":true}"));
+        when(subscriptionMapper.selectById(10L))
+                .thenReturn(plan(10L, "pro", "tier", "{\"draft\":true,\"check\":true}"));
         TenantPlanBinding existing = new TenantPlanBinding();
         existing.setId(5L);
         existing.setTenantId(7L);
@@ -139,8 +147,8 @@ class TenantPlanBindingServiceImplTest {
 
     @Test
     void industryBindingDoesNotAlignTenantTier() {
-        when(subscriptionMapper.selectById(20L)).thenReturn(plan(20L, "industry_construction", "industry",
-                "{\"draft\":true,\"docx\":true}"));
+        when(subscriptionMapper.selectById(20L))
+                .thenReturn(plan(20L, "industry_construction", "industry", "{\"draft\":true,\"docx\":true}"));
         when(bindingMapper.selectOne(any())).thenReturn(null);
 
         bindWithCreator(20L);
@@ -200,9 +208,10 @@ class TenantPlanBindingServiceImplTest {
         b.setSubscriptionId(20L);
         b.setStatus(TenantPlanBinding.STATUS_ACTIVE);
         when(bindingMapper.selectList(any())).thenReturn(List.of(a, b));
-        when(subscriptionMapper.selectBatchIds(List.of(10L, 20L))).thenReturn(List.of(
-                plan(10L, "pro", "tier", "{\"draft\":true,\"check\":true,\"openapi\":true}"),
-                plan(20L, "industry_construction", "industry", "{\"docx\":true}")));
+        when(subscriptionMapper.selectBatchIds(List.of(10L, 20L)))
+                .thenReturn(List.of(
+                        plan(10L, "pro", "tier", "{\"draft\":true,\"check\":true,\"openapi\":true}"),
+                        plan(20L, "industry_construction", "industry", "{\"docx\":true}")));
 
         Set<String> modules = service.grantedModules(7L);
 
