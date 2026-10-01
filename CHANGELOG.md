@@ -11,6 +11,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第九十批（2026-10-10：CI 的 P0 容器门禁在"跑干净"时必然红，compose 校验缺 4 个变量 —— 两处都是 CI 自己的错）
+
+#### 结论（先给判定性质）
+- 本批修的两条都不是产品缺陷，是**门禁脚本自己写错**：一条在"套件一条 skip 都没有"这个理想形态下必然判红，
+  一条在校验第一个文件时就死在半路。两者都只影响 CI 是否能给出结论，不影响运行时行为。
+- 死因不是猜的，是**把 workflow 里那段 shell 原样抽出来在本地真执行**得到的（`python-ai/tests/test_ci_workflow_gates.py`
+  的 `TestContainerGateStepExecution`，用 `python` 桩喂五种形态）。这一步之前不存在，也正是它把第二条缺陷挖出来的：
+  我先"看着对"地写了 `pytest_status=${PIPESTATUS[0]}` + `gate_status=${PIPESTATUS[2]}` 两行分开取，
+  实测 `PIPESTATUS` 会被**任何**后续命令重置（第一条赋值自己就把它清了），于是 `gate_status` 取空、
+  `[ "$gate_status" -ne 0 ]` 报 "integer expression expected"，**有 6 个 skip 也判绿**。
+  只查文本的断言永远看不见这条——它语法合法、语义正确、跑起来哑火。
+- `pipefail` 那条同理：`skipped=$(… | grep -oE '[0-9]+ skipped' | …)` 在零命中时 grep 返回 1，pipefail 让赋值失败，
+  `set -e` 打死步骤。语义正好反了。改成独立 helper 不是为了复用，是为了**能被执行**（workflow 里的一段字符串没法真跑）。
+
+#### 改动
+- `scripts/ci/check_container_skips.sh`（新）：stdin 接 pytest 输出，只统计**汇总行**（`-rs` 的逐条原因行里也含
+  "1 skipped"，按行全查会重复计数）。退出码契约 0=有汇总行且 0 skip / 1=有 skip（把条数打出来）/ 2=读不到汇总行
+  （采集阶段就崩不能当成"0 skipped"放过去）。消息一律 ASCII——本批实测踩过一次：含破折号时宿主 GBK 解码失败，
+  `proc.stdout` 静默变成 `None`，退出码正确而判据其实什么都没读到。
+- `.github/workflows/ci.yml`：容器门禁步骤改成 `set +e` + `tee /dev/stdout` + helper，并用
+  `statuses=("${PIPESTATUS[@]}")` 一次性取整组状态再下标，先报 pytest 自己的退出码、再报门禁的。
+  dev compose 校验步骤补 4 个变量（`PYTHON_AI_INTERNAL_TOKEN`/`CALLBACK_SECRET`/`ADMIN_PASSWORD`/`PLUGIN_RUNNER_TOKEN`，
+  全沿用既有 `ci-test-*` 良性形态，无真实密钥）；monitoring 步骤补 `MYSQL_ROOT_PASSWORD`
+  （`GRAFANA_ADMIN_PASSWORD` 自带 default，按"只补缺的"原则不动）。
+- `python-ai/tests/test_ci_workflow_gates.py`（新，11 个 `def test_` / 19 例）：`TestComposeValidateEnvPairing`
+  从 compose 文件本身正则取 `${VAR:?}` 需求集，逐步骤核对"需求⊆供给"和"供给⊆需求"两个方向——**不重抄变量名**，
+  否则第四份手抄又会漂。`TestContainerSkipGate` 真执行 helper。`TestContainerGateStepExecution` 真执行步骤体。
+- `docs/CI_GATES.md`：新增「非评测门禁：CI 自己的两处自伤」，含逐文件需求-供给对照表、本地复现 CI 条件的配方
+  （`--env-file /tmp/empty.env`，因为本地按项目目录自动加载 `.env` 会把这条红掩掉）、0/1/2 契约、PIPESTATUS 那段
+  实测经过，以及规则"**凡是 CI 步骤里带 shell 逻辑的，都要有一段把它真跑一次的判据**"。
+
+#### 验证
+- 红→绿：helper 的 6 例先对旧的内联语义全红；步骤执行 5 形态（干净跑→0、有 skip→1、pytest 失败→沿用它的码、
+  读不到汇总行→2、pytest 崩且无汇总行→3）在改成数组取 PIPESTATUS 前，"有 skip"那条实测判绿。
+- 漂移注入 5 次各自判红（删 helper 调用、去掉 `| bash`、把数组取法改回分开取、dev 步骤少喂一个变量、
+  供给一个 compose 不认的变量），跑完用改前原文写回并核 sha256。
+- 本地真命令复现：`docker compose -f docker/docker-compose.yml --env-file /tmp/empty.env config -q`
+  改前 exit 1（`required variable ADMIN_PASSWORD is missing a value`），改后 exit 0；monitoring 同法复现与结清。
+- 全量回归：**2000 passed, 8 skipped in 495.15s**（= 第八十九批的 1981 ＋ 本批 19 例，无一条既有测试受影响）；
+  `scripts/static-checks.py` 全跑档通过，计数按用例数 1842→**1853**，已同步 README 徽章＋3 处正文、README_EN 徽章、
+  `docs/ROADMAP.md:16`。
+- `core.fileMode=false`，helper 的可执行位不会进 git；CI 用 `bash "$GITHUB_WORKSPACE/scripts/..."` 调用，
+  与仓内其余 `.sh`（如 `scripts/backup-mysql.sh`，同样 100644）一致，故不加 `--chmod=+x`。
+
+#### 遗留（只登记不修）
+- **java `spotless:check` 不是"一个文件"**：CI 日志被截断时只显式列出一个，原文写着 "Violations also present in
+  127 other files"。本地在 `maven:3.9-eclipse-temurin-17` 里实测：`spotless:check` 报 **128 / 532 个 java 文件**不合格，
+  `spotless:apply` 对这 128 个是 **+1383/−1264** 行。补丁已生成并留档，且证明格式化后仍能编译打包
+  （`docker build` 复用缓存的 `dependency:go-offline` 层 → 镜像 `hfusionhub/java90:fmt`，jar 89,704,424 字节）。
+  **这不是清理而是全仓改写的决策**（可加 `.git-blame-ignore-revs`，本仓目前没有；或改 `ratchetFrom` 只查变更文件，
+  但那要 CI 的 checkout 深度，本机验证不了），故未动，等用户选路。
+- CI 平台与本地的其余分歧仍只登记：`python` job 的 6 个 `TestRunnerIntegration`（预拉取的 tag 与测试的检测口径不一致）、
+  `test_plugin_security.py` 里的 `[Errno 24] Too many open files`、`test_timeout_enforcement` 的错误类别、
+  冻结套件 `cases_sha256` 实际 `15b0ea64…` 与基线钉的 `b02b9dd3…` 不一致（需重建 manifest）、
+  `pip-audit` 29 个漏洞/5 个包无忽略策略。本批只把"CI 自己写错"的两条清掉，没有碰这些。
+- 判据的可移植边界写清楚：`TestContainerGateStepExecution` 喂的是桩输出的 pytest 文本，证的是**那段 shell 的判定逻辑**，
+  不是 GitHub runner 上的真实容器套件；真实形态只能等下一次 push 后看 runner。2026-09-22 那批旧失败日志已不可下载，
+  那些 run 的具体死因未经核验，不写成结论。
+
 ### 第八十九批（2026-10-10：java 镜像第一次真实构建就通了，"java 写、python 读"补齐成双向哈希 —— 顺带发现 10001 从来不是一个字段）
 
 #### 结论（先给判定性质）

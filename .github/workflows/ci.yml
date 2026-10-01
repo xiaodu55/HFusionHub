@@ -25,11 +25,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate dev Docker Compose configuration
+        # docker/docker-compose.yml also hard-requires the app secrets via
+        # ${VAR:?}; `config -q` dies on the FIRST missing one, so the step was
+        # red before it ever rendered the graph. Benign values only — supply
+        # every required key (tests/test_ci_workflow_gates.py derives the set
+        # from the compose file itself, so a fourth hand copy cannot drift).
         run: docker compose -f docker/docker-compose.yml config -q
         env:
           MYSQL_ROOT_PASSWORD: ci-test-root
           MYSQL_PASSWORD: ci-test-pass
           REDIS_PASSWORD: ci-test-redis
+          PYTHON_AI_INTERNAL_TOKEN: ci-test-internal-token
+          CALLBACK_SECRET: ci-test-callback
+          ADMIN_PASSWORD: ci-test-admin
+          PLUGIN_RUNNER_TOKEN: ci-test-runner-token
       - name: Validate production Docker Compose configuration
         # deploy/docker-compose.prod.yml uses :?required to force secrets;
         # supply benign values so `config -q` renders the full graph (Java,
@@ -49,7 +58,11 @@ jobs:
           PLUGIN_RUNNER_CLIENT_CERT_FILE: deploy/runner-tls/cert.pem
           PLUGIN_RUNNER_CLIENT_KEY_FILE: deploy/runner-tls/key.pem
       - name: Validate monitoring Docker Compose configuration
+        # deploy/docker-compose.monitoring.yml requires MYSQL_ROOT_PASSWORD via
+        # ${VAR:?required}; GRAFANA_ADMIN_PASSWORD ships a default and is left alone.
         run: docker compose -f deploy/docker-compose.monitoring.yml config -q
+        env:
+          MYSQL_ROOT_PASSWORD: ci-test-root
 
   # ─── Helm Chart 渲染门禁 ───
   # 本机常缺 Helm，故真实渲染门禁放到 CI：helm lint 校验 chart 一致性，
@@ -183,19 +196,34 @@ jobs:
           docker image ls python:3.12-slim
           echo "::debug::Python base image ready"
       - name: Run container plugin gates (fail on ANY skip)
-        # Run the container suite exactly ONCE, capture the output, and fail if
-        # anything was skipped. Any skip (missing Docker daemon, missing base
-        # image, etc.) means the P0 container gate did not actually execute.
+        # Run the container suite exactly ONCE, echo it, and let the helper count
+        # the skips. Any skip (missing Docker daemon, missing base image, etc.)
+        # means the P0 container gate did not actually execute. The counting lives
+        # in scripts/ci/check_container_skips.sh rather than inline here because
+        # `set -o pipefail` + `grep '[0-9]+ skipped'` aborts the step precisely when
+        # NOTHING was skipped — the gate would then be red only on a clean run.
+        # `shell: bash` runs with -e -o pipefail, so the step turns both off and
+        # reads PIPESTATUS to report pytest's own status before the gate's.
         shell: bash
         run: |
-          set -euo pipefail
-          output=$(python -m pytest -q tests/test_plugin_container.py -rs 2>&1)
-          echo "$output"
-          # pytest summary formats: '39 passed in ...' or '33 passed, 6 skipped in ...'
-          skipped=$(echo "$output" | grep -oE '[0-9]+ skipped' | grep -oE '^[0-9]+' | awk '{s+=$1} END{print s+0}')
-          if [ "$skipped" -gt 0 ]; then
-            echo "::error::Container suite skipped ${skipped} test(s) — P0 container gate cannot pass."
-            exit 1
+          set +e
+          python -m pytest -q tests/test_plugin_container.py -rs 2>&1 \
+            | tee /dev/stdout \
+            | bash "$GITHUB_WORKSPACE/scripts/ci/check_container_skips.sh"
+          # PIPESTATUS 会被**任何**后续命令重置，所以先把整组状态取进数组再下标；
+          # 分开两行取 ${PIPESTATUS[0]} / ${PIPESTATUS[2]} 时，第二条读到的已经是
+          # 第一条赋值自己的状态（本地原样执行这段 shell 实测：gate_status 取空，
+          # `[ "$gate_status" -ne 0 ]` 报 integer expression expected，有 skip 也判绿）。
+          statuses=("${PIPESTATUS[@]}")
+          pytest_status=${statuses[0]}
+          gate_status=${statuses[2]}
+          if [ "$pytest_status" -ne 0 ]; then
+            echo "::error::Container suite failed (pytest exit ${pytest_status})."
+            exit "$pytest_status"
+          fi
+          if [ "$gate_status" -ne 0 ]; then
+            echo "::error::Container suite gate exit ${gate_status} - see the skip count above."
+            exit "$gate_status"
           fi
 
   # ─── Phase 1/2 评测门禁（离线，免模型免数据库，PR 阻断）───

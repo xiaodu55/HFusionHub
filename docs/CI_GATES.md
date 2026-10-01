@@ -88,6 +88,66 @@ main 已启用 branch protection（规则通过 GitHub API 创建）：
 - Nightly 运行时评测失败时在对应 action 中查看 `eval-runtime-report` artifact 定位问题。
 - 离线门禁失败时必须修复或按流程再冻结基线，不得带着失败合并。
 
+## 非评测门禁：CI 自己的两处自伤（第九十批）
+
+上面那张表之外的 job（`docker-compose-validate`、`python-container`、`java`、`frontend`）不评测量，
+但同样会阻断合并。本批记录两条判据——它们的共同点是**红的是 CI 自己，不是产品**。
+
+### 1. `docker-compose-validate` 的变量供给必须与 compose 文件成对
+
+三个 compose 文件用 `${VAR:?…}` 硬要求密钥，`docker compose config -q` 在**第一个**缺失变量处即报错，
+于是那一步从未真正渲染过整张图。供给集必须**从文件本身派生**，不能手抄：
+
+| 校验的文件 | 文件里 `${VAR:?}` 要求 | 修复前 CI 供给 | 缺 |
+|---|---|---|---|
+| `docker/docker-compose.yml` | ADMIN_PASSWORD, CALLBACK_SECRET, MYSQL_PASSWORD, MYSQL_ROOT_PASSWORD, PLUGIN_RUNNER_TOKEN, PYTHON_AI_INTERNAL_TOKEN | 只有 MYSQL×2 + REDIS | 4 |
+| `deploy/docker-compose.prod.yml` | 11 个 | 11 个 | — |
+| `deploy/docker-compose.monitoring.yml` | MYSQL_ROOT_PASSWORD | 无 | 1 |
+
+判据：`python-ai/tests/test_ci_workflow_gates.py::TestComposeValidateEnvPairing` 用
+`REQUIRED_VAR` 正则从 compose 原文抽必填集，与 workflow 里那一步的 `env:` 键集合做双向差集
+（缺变量判红，喂了文件不引用的变量也判红——后者是假配置面的兄弟形态）。
+
+**本地复现红侧的钥匙**：开发机上 `docker/.env`、`deploy/.env` 存在，compose 会自动按目录加载它，
+所以直接跑 `config -q` 永远是绿的——缺陷只在"没有 `.env` 的 CI"发作。用空 env-file 顶掉这次自动加载：
+
+```bash
+: > /tmp/empty.env
+MYSQL_ROOT_PASSWORD=ci-test-root MYSQL_PASSWORD=ci-test-pass REDIS_PASSWORD=ci-test-redis \
+  docker compose --env-file /tmp/empty.env -f docker/docker-compose.yml config -q
+# 修复前：required variable ADMIN_PASSWORD is missing a value（exit 1）
+# 补齐全 6 个变量后：exit 0
+```
+
+CI 里供给的一律是 `ci-test-*` 形态的良性占位值，绝不出现任何真实密钥。
+
+### 2. `python-container` 的"任何 skip 即失败"门禁
+
+这条 P0 门禁的语义原本是**反的**：`set -euo pipefail` 下
+`skipped=$(echo "$output" | grep -oE '[0-9]+ skipped' | …)` 在**没有任何 skip**时 `grep` 返回 1，
+`pipefail` 让赋值失败，`set -e` 直接打死步骤——套件跑得越干净越必然红。
+计数逻辑于是移出 workflow，落到 `scripts/ci/check_container_skips.sh`，退出码即契约：
+
+| 退出码 | 含义 |
+|---|---|
+| 0 | 有汇总行且 0 skipped |
+| 1 | 有 N 条 skipped（条数打进 stdout） |
+| 2 | 读不到汇总行（采集阶段就崩），绝不当成"0 skipped" 放过去 |
+
+只数**汇总行**：`-rs` 的逐条原因行里同样含 `1 skipped` 字样，按行全查会重复计数。
+
+步骤体本身也是被测对象。`TestContainerGateStepExecution` 把 ci.yml 里那段 shell **原样落盘**、
+用一个 `python` 桩喂给它、按 GitHub `shell: bash` 的真实起手（`--noprofile --norc -eo pipefail`）
+执行五种形态并断言退出码。本批正是靠它抓到：`pytest_status=${PIPESTATUS[0]}` 与
+`gate_status=${PIPESTATUS[2]}` 分成两条赋值时，第二条读到的 `PIPESTATUS` 已经是第一条赋值
+**自己**的状态 ⇒ `gate_status` 为空 ⇒ `[ "$gate_status" -ne 0 ]` 报
+`integer expression expected` ⇒ **有 6 条 skip 也判绿**。
+正确写法是先用数组接住整组状态：`statuses=("${PIPESTATUS[@]}")`，之后再下标。
+
+> 文本判据对这类缺陷完全无感。凡是"CI 步骤里带 shell 逻辑"的，都要有一段把它真跑一次的判据；
+> Windows 上执行时 `subprocess` 传 `"bash"` 会命中 App Execution Alias 而落到 WSL bash
+> （看不见仓库路径），必须用 `shutil.which("bash")` 返回的绝对路径。
+
 ## 相关文件
 
 - `.github/workflows/ci.yml` — push/PR 主 CI（含 `eval-offline` 门禁 job）
@@ -95,3 +155,5 @@ main 已启用 branch protection（规则通过 GitHub API 创建）：
 - `python-ai/scripts/eval_offline.py`、`python-ai/scripts/eval_runtime.py` — 双轨评测入口
 - `python-ai/app/core/rag/eval_baseline.py` — 共享报告 / 门禁 / 基线逻辑
 - `python-ai/evaluation/README.md` — 评测系统设计、用例、双轨与基线流程
+- `scripts/ci/check_container_skips.sh` — 容器专项 skip 计数门禁（0/1/2 退出码契约）
+- `python-ai/tests/test_ci_workflow_gates.py` — 上述两条非评测门禁的判据（含真执行 workflow 步骤体）
