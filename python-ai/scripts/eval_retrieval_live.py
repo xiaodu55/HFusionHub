@@ -37,7 +37,6 @@ runtime 答案层 0.550 与纯检索 0.830 的差值在答案层（与单任务 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 import time
@@ -56,7 +55,9 @@ DEFAULT_REGRESSION_TOLERANCE = 0.03
 
 
 def compute_cases_sha(cases_path: Path) -> str:
-    return hashlib.sha256(Path(cases_path).read_bytes()).hexdigest()
+    from eval_baseline import suite_content_digest
+
+    return suite_content_digest(Path(cases_path).read_bytes())
 
 
 def load_suite_version(manifest_path: Path | None) -> str:

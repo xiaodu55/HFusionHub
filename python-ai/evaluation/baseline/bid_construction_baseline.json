@@ -2,8 +2,8 @@
   "track": "offline",
   "suite_version": "1.0.0",
   "kb_version": "1.0.0",
-  "suite_sha256": "31d868549ab21bc1adf786feb4765807aa0e8011a3e4709378f8e44a4688f322",
-  "generated_at": "2026-09-05T04:20:17Z",
+  "suite_sha256": "6d8a045be41105c02bbcdf15440f0175a1ee2586cd34a0bee3df794b20ab2b9c",
+  "generated_at": "2026-10-10T08:37:10Z",
   "metrics": {
     "recall_at_5": 0.9642857142857143,
     "ndcg_at_10": 0.9468476620957498,

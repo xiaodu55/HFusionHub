@@ -11,6 +11,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第九十二批（2026-10-10：冻结摘要钉的是"这台机器的换行"，于是四个完整性门禁在 CI 恒红、在本地恒绿）
+
+#### 结论（先给判定性质）
+- 这条红**不是用例被改过**。取数是决定性的：`evaluation/suite/cases.jsonl` 的 **git blob 是 79,321 字节、0 个 CR**，
+  本地工作副本是 **79,541 字节、220 个 CR**（220 行，每行一个）。manifest 与六份基线钉的是
+  `b02b9dd3…`＝**CRLF 字节的**摘要，CI 里 `python -c …verify_suite_integrity` 读到的是 blob 原文（Linux runner
+  默认 `core.autocrlf=false`）＝`15b0ea64…`。所以第九十个批记录那条"实际 vs 钉住"时，两边都是对的——
+  **同一次 CI 用 LF 算，本地用 CRLF 算**，这条门禁测的是检出平台的换行风格，不是"篡改没有"。
+- 机制链完整：套件当年在 Windows 上由 `build_suite.py` 生成，`path.write_text(...)` 默认 `newline=None`
+  会把 `\n` 翻译成本地换行 ⇒ Windows 产出 CRLF；`git add` 又按 `core.autocrlf` 把它归一回 LF 存进 blob；
+  而 `.gitattributes` 里**没有 `*.jsonl` 规则**（只有 `.py/.json/.md/…`），于是检出侧由开发者决定。
+  四个套件全部如此（`suite_bid` 11,542/27 CR、`suite_bid_it` 10,521/24、`suite_bid_construction` 10,480/24）。
+- 判据先红：**21 failed + 2 errors**（钉值层 10 例、检出对称层 4 例、emit 层 4 例、规则同源层 3 例），
+  实现＋再钉后 **25 passed**。其中 `test_verify_still_rejects_real_tampering` 从一开始就是绿的，
+  它是邻居保护：规范化行尾**不等于**放弃篡改检测。
+
+#### 改动（三层，缺一层就还有一个平台读到另一个哈希）
+- `python-ai/scripts/eval_baseline.py`：新增 `suite_content_digest(data: bytes)`（CRLF→LF 后取 SHA-256，
+  docstring 写明为什么），`verify_suite_integrity` 改用它，文档串从"byte-identical"改成"identical (modulo line endings)"。
+- `python-ai/scripts/eval_retrieval_live.py:58`：`compute_cases_sha` 走同一 helper（顺带删掉该文件里已无用的
+  `import hashlib`）。这条重要：纯检索直测自己写基线摘要，它若还按裸字节算，就和 CI 用的规则分叉。
+- 四份 `build_suite.py` 的 `emit_cases(..., newline="\n")`：生成侧不再按平台翻译换行。
+- `.gitattributes`：`*.jsonl text eol=lf` ＋ 注释说明这条为什么存在。
+- **再绑定（不改内容）**：重跑四份 `build_suite.py` ⇒ `cases_sha256` 变为
+  `15b0ea64… / 135114f4… / f23c8bf0… / 6d8a045b…`；四份离线基线按 CI 原样参数 `--update-baseline` 重钉。
+  `retrieval_baseline.json` 与 `runtime_baseline.json` 只换绑定字段（本机没有 live 服务，指标**仍是
+  2026-09-09 真机跑批的值**——用例内容未变，这是再绑定不是重测），old→new 逐条记在 `docs/CI_GATES.md`。
+
+#### 验证
+- **重建后的四份 `cases.jsonl` 与 `HEAD` 的 blob 逐字节相同**（`blob==wt` 四例 True），`git add` 之后
+  暂存区对这四个文件**零变更** —— 这是"内容没动、只动绑定"的硬证据，不是靠人说。
+- 离线基线的 diff 每份恰好 2 行（`suite_sha256` ＋ `generated_at`），**指标一位没改** ⇒ 离线轨确定性复现。
+- CI 的步骤原样跑：四个 `Verify frozen suite integrity` 全打印 OK；四个离线门禁（含 `--fail-on-regression`
+  与 bid 的 4 个 0.9 阈值）退出码全 0；`eval_bid_workflow.py` 退出 0。
+- 判据：`tests/test_eval_suite_eol_binding.py` 25 例（11 个 `def test_`），其中 6/8 两组在 Windows 上红、
+  在 Linux 上绿——**这正是它们要钉住的东西**：一条判据不该随检出平台变颜色。
+- 全量回归：**2025 passed, 8 skipped**（= 第九十批的 2000 ＋ 本批 25 例），`tests/test_eval_baseline.py`
+  等既有评测测试 94 例一起绿；`scripts/static-checks.py` 全跑档通过，计数 1853→**1864** 已同步
+  README 徽章＋3 处正文、README_EN 徽章、`docs/ROADMAP.md:16`；`ruff check` 干净。
+- 顺带结掉一处**文档声称漂移**（按"就地纠正＋写进手册记录"处理，不另立缺陷号）：
+  `docs/CI_GATES.md:12` 与 `:156` 把共享模块写成 `python-ai/app/core/rag/eval_baseline.py`，而它在
+  2026-08-29 已 `git mv` 到 `python-ai/scripts/eval_baseline.py`（`docs/CLEANUP_BACKLOG.md:34` 记着这次移动）。
+  两处已改回真实路径并留下出处；`python-ai/evaluation/README.md` 的冻结段落补上"摘要按内容算"的精确说法，
+  否则读者会以为纯行尾改动也会被捕获。
+
+#### 遗留（只登记不修）
+- **Nightly 的 runtime 基线首次会落空**：cache 键是 `runtime-baseline-<cases 哈希>-<run_id>`，前缀哈希换了 ⇒
+  下一次定时跑 restore 不到旧基线，报告会是"无基线可对比"（门禁仍按绝对阈值走）。要恢复对比必须在真机上
+  跑通一次并勾选 `update_baseline` 重冻结——本机没有 live 服务，这一条只能等 push 后在 runner 上结。
+- `kb_manifest.json` **没有任何摘要钉扎**（grep 无 sha256）：知识库文档被改动不会触发完整性门禁，只有用例改动会。
+  是否要给 KB 也上一道冻结，取决于"文档改动是否需要显式再冻结仪式"，本批不决定。
+- 新 `.gitattributes` 规则**不会自动改写既有工作副本**（smudge 只在检出时生效）。本机已由 `build_suite` 重写成 LF，
+  其他机器要 `git checkout -- <file>` 或重克隆才一致——这也是把摘要做成行尾无关的第二个理由。
+- CI 与本地的其余平台分歧本批一条没碰：`Errno 24` fd 泄漏、`TestRunnerIntegration` 的预拉取 tag 口径、
+  `test_timeout_enforcement` 的错误类别、`pip-audit` 29 漏洞无策略、java spotless 的 128 文件（仍等选路）。
+
+
 ### 第九十一批（2026-10-10：frontend 重新能 build —— 12 个死导入，加一个把 `apps` 漏掉的分组联合类型）
 
 #### 结论（先给判定性质）

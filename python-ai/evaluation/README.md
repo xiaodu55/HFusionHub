@@ -72,6 +72,12 @@ suite-SHA 绑定、请求异常处理、拒答检测（拒答文本 / `insuffici
 脚本在运行前都会执行 `verify_suite_integrity` 做 SHA-256 校验：**篡改用例后脚本直接
 退出（exit 1）并提示差异**，不会带着旧哈希继续运行。
 
+摘要算的是**内容**而不是某台机器的换行风格：`suite_content_digest()` 先把 CRLF 折成 LF 再取
+SHA-256（第九十二批）。因此纯行尾改动不会被判成篡改——这是刻意的，否则同一份套件在 Windows
+工作副本与 Linux runner 检出的 blob 上会得到两个哈希，完整性门禁在 CI 恒红；生成侧的
+`emit_cases(..., newline="\n")` 与 `.gitattributes` 的 `*.jsonl text eol=lf` 一起保证新建冻结
+时字节就与平台无关。判据见 `tests/test_eval_suite_eol_binding.py`。
+
 ## 离线评测（PR 门禁，免模型免数据库）
 
 ```bash

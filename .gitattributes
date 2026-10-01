@@ -13,3 +13,8 @@
 *.json text eol=lf
 *.md text eol=lf
 *.xml text eol=lf
+
+# 冻结数据文件（evaluation 的 cases.jsonl 等）：钉进 suite_manifest 的摘要按字节算，
+# 检出侧若按开发者 core.autocrlf 插回 CR，同一个套件就有两个哈希（CI 检出 LF blob、
+# Windows 工作副本 CRLF），完整性门禁于是本地恒绿、CI 恒红。
+*.jsonl text eol=lf

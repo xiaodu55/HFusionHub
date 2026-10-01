@@ -147,7 +147,11 @@ def emit_cases(cases: list[dict], path: Path) -> None:
             json.dumps(case, ensure_ascii=False, sort_keys=True)
             for case in ordered
         ) + "\n",
+        # 冻结数据文件的字节必须与生成平台无关：newline=None 会把 \n 翻译成本地换行，
+        # 于是 Windows 上跑一次 build_suite 就产出一份 CRLF 的 cases.jsonl，
+        # 它的摘要与 Linux runner 检出的 LF blob 必然不同。
         encoding="utf-8",
+        newline="\n",
     )
 
 

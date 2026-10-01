@@ -110,10 +110,24 @@ def load_cases(path: Any) -> list[EvalCase]:
     return cases
 
 
-def verify_suite_integrity(cases_path: Any, suite_manifest_path: Any) -> dict:
-    """Verify the frozen suite is byte-identical to what was pinned at freeze time.
+def suite_content_digest(data: bytes) -> str:
+    """SHA-256 of the suite content with CRLF folded to LF.
 
-    Computes the SHA-256 of ``cases.jsonl`` and compares it against
+    The frozen hash must identify *the cases*, not the checkout.  ``cases.jsonl``
+    is a committed data file whose bytes depend on the platform that wrote it and
+    on ``core.autocrlf`` of whoever reads it, so a raw ``sha256(read_bytes())``
+    pins two different values for one suite: the suite was frozen on Windows
+    (CRLF working copy), while a Linux runner checks out the LF blob, and the
+    integrity gate is then unconditionally red in CI and green at home.
+    Normalising before hashing makes the digest a property of the content.
+    """
+    return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
+
+
+def verify_suite_integrity(cases_path: Any, suite_manifest_path: Any) -> dict:
+    """Verify the frozen suite is identical (modulo line endings) to what was pinned.
+
+    Computes :func:`suite_content_digest` of ``cases.jsonl`` and compares it against
     ``suite_manifest.json.cases_sha256``.  Any modification of the cases after
     freezing (intentional or not) raises ``ValueError``, so both evaluation
     tracks refuse to run against a tampered or drifted suite.
@@ -124,7 +138,7 @@ def verify_suite_integrity(cases_path: Any, suite_manifest_path: Any) -> dict:
         raise ValueError(
             f"{suite_manifest_path} is missing cases_sha256; freeze the suite first"
         )
-    digest = hashlib.sha256(Path(cases_path).read_bytes()).hexdigest()
+    digest = suite_content_digest(Path(cases_path).read_bytes())
     if digest != pinned:
         raise ValueError(
             f"cases.jsonl SHA-256 mismatch: computed {digest} != pinned {pinned}; "
