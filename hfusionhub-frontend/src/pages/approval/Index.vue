@@ -32,6 +32,7 @@ import { Label } from '@/components/ui/label'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import { useToast } from '@/composables/useToast'
 import { BADGE_TONE_CLASS, type BadgeTone } from '@/utils/badge'
+import { formatDateTime, parseServerTime } from '@/utils/date'
 
 type StatusTone = BadgeTone
 
@@ -108,11 +109,11 @@ const isPending = computed(() => selected.value?.status === 'pending')
 const isExpired = computed(() => selected.value?.status === 'expired')
 const canDecide = computed(() => isPending.value && !approving.value)
 
-const formatDate = (value?: string) => (value ? value.replace('T', ' ').slice(0, 16) : '—')
-const formatExpires = (value?: string) => (value ? value.replace('T', ' ').slice(0, 16) : '—')
+const formatDate = (value?: string) => (value ? formatDateTime(value).slice(0, 16) : '—')
+const formatExpires = (value?: string) => (value ? formatDateTime(value).slice(0, 16) : '—')
 const isExpiredRow = (a: approvalApi.AgentApproval) => {
-  // Safari 不支持 'yyyy-MM-dd HH:mm:ss' 构造——手动解析
-  const expires = a.expiresAt ? new Date(a.expiresAt.replace(' ', 'T')).getTime() : NaN
+  // 服务端给的是无偏移 UTC 串，倒计时必须和显示走同一个解析入口
+  const expires = a.expiresAt ? parseServerTime(a.expiresAt)?.getTime() ?? NaN : NaN
   return a.status === 'pending' && a.expiresAt != null && !Number.isNaN(expires) && expires < Date.now()
 }
 

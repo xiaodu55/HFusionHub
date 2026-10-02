@@ -46,6 +46,7 @@ import { Label } from '@/components/ui/label'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { useToast } from '@/composables/useToast'
 import { TEST_RUN_POLL_INTERVAL_MS } from '@/constants/timing'
+import { formatDateTime } from '@/utils/date'
 
 // ── State ──────────────────────────────────────────────────────────
 
@@ -1013,7 +1014,7 @@ const closeDialogOnEscape = (event: KeyboardEvent) => {
                   <button class="flex min-w-0 flex-1 items-center gap-3 text-left" @click="selectRunForDetail(r.id)">
                     <div class="min-w-0 flex-1">
                       <p class="truncate text-sm font-medium text-cyan-300">{{ runLabel(r) }}</p>
-                      <p class="text-xs text-muted-foreground">{{ r.createdAt?.slice(0, 19).replace('T', ' ') }}</p>
+                      <p class="text-xs text-muted-foreground">{{ formatDateTime(r.createdAt) }}</p>
                     </div>
                     <Badge variant="secondary">{{ r.successCount }}/{{ r.totalCases }} 成功</Badge>
                     <Badge variant="outline" class="border-violet-400/25 text-violet-200">通过 {{ r.passRate }}%</Badge>

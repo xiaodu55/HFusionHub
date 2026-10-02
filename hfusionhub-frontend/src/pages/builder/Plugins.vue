@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import EmptyState from '@/components/EmptyState.vue'
 import { useToast } from '@/composables/useToast'
+import { formatDateTime } from '@/utils/date'
 
 const toast = useToast()
 const route = useRoute()
@@ -882,7 +883,7 @@ onBeforeUnmount(() => {
                 <p class="text-muted-foreground">{{ log.reason || '无原因' }}</p>
                 <p class="text-xs text-muted-foreground mt-1">
                   操作人 #{{ log.operatorId || '系统' }} &middot;
-                  {{ new Date(log.createdAt).toLocaleString() }}
+                  {{ formatDateTime(log.createdAt) }}
                 </p>
               </div>
             </div>

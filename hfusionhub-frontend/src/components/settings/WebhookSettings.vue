@@ -20,6 +20,7 @@ import { useToast } from '@/composables/useToast'
 import { BADGE_TONE_CLASS } from '@/utils/badge'
 import * as webhookApi from '@/api/webhook'
 import type { WebhookDelivery, WebhookSubscription } from '@/api/webhook'
+import { formatDateTime } from '@/utils/date'
 
 const toast = useToast()
 
@@ -40,7 +41,7 @@ const deliveriesTarget = ref<WebhookSubscription | null>(null)
 const deliveries = ref<WebhookDelivery[]>([])
 const deliveriesLoading = ref(false)
 
-const formatTime = (value?: string) => (value ? value.replace('T', ' ').slice(0, 16) : '—')
+const formatTime = (value?: string) => (value ? formatDateTime(value).slice(0, 16) : '—')
 
 const load = async () => {
   loading.value = true

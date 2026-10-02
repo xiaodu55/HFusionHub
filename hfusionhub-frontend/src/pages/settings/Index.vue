@@ -27,6 +27,7 @@ import { useUserStore } from '@/stores/user'
 import * as userApi from '@/api/user'
 import * as systemApi from '@/api/system'
 import WebhookSettings from '@/components/settings/WebhookSettings.vue'
+import { parseServerTime } from '@/utils/date'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -96,9 +97,8 @@ const loadProviders = async () => {
 }
 
 const formatTime = (value?: string) => {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
+  const date = parseServerTime(value)
+  if (!date) return ''
   return new Intl.DateTimeFormat('zh-CN', {
     month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(date)

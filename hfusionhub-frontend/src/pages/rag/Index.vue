@@ -34,6 +34,7 @@ import * as ragApi from '@/api/rag'
 import * as knowledgeBaseApi from '@/api/knowledgeBase'
 import type { EvaluationReport, EvaluationRun, RetrievalTrace, TraceFilters, TraceStats } from '@/api/rag'
 import type { KnowledgeBase } from '@/api/types'
+import { formatDateTime } from '@/utils/date'
 
 const PAGE_SIZE = 20
 const emptyStats = (): TraceStats => ({
@@ -346,7 +347,7 @@ const formatMetric = (_key: string, value: number) =>
   value > 1.5 ? value.toLocaleString(undefined, { maximumFractionDigits: 1 }) : value.toFixed(4)
 
 const jumpToEvaluation = () => document.getElementById('retrieval-evaluation')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-const formatDate = (value?: string) => value ? value.replace('T', ' ').slice(0, 16) : '—'
+const formatDate = (value?: string) => value ? formatDateTime(value).slice(0, 16) : '—'
 
 onMounted(async () => {
   try {

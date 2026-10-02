@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import { formatDateTime } from '@/utils/date'
 
 const userStore = useUserStore()
 const toast = useToast()
@@ -34,7 +35,7 @@ const assignableRoles = roles.filter(item => item.value !== 'admin')
 const roleMeta = (role?: string) => roles.find(item => item.value === role) || roles[0]
 const currentUserId = computed(() => userStore.userInfo?.id)
 const viewingPending = computed(() => roleFilter.value === 'pending')
-const formatDate = (value?: string) => value ? value.replace('T', ' ').slice(0, 16) : '尚未登录'
+const formatDate = (value?: string) => value ? formatDateTime(value).slice(0, 16) : '尚未登录'
 const isSuperAdmin = (user: UserInfo) => user.role === 'admin' || user.username === 'admin'
 
 async function load(page = result.value.page || 1) {

@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import { formatDateOnly } from '@/utils/date'
 
 const toast = useToast()
 const loading = ref(false)
@@ -386,7 +387,7 @@ onMounted(() => {
           <article v-for="key in keys" :key="key.id" class="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-3 py-2">
             <div class="min-w-0">
               <p class="text-sm font-medium">{{ key.name }}</p>
-              <p class="font-mono text-xs text-muted-foreground">{{ key.keyPrefix }}****（创建于 {{ new Date(key.createdAt).toLocaleDateString('zh-CN') }}）</p>
+              <p class="font-mono text-xs text-muted-foreground">{{ key.keyPrefix }}****（创建于 {{ formatDateOnly(key.createdAt) }}）</p>
             </div>
             <Button size="sm" variant="outline" class="text-rose-300" @click="removeKey(key.id)">
               <Trash2 class="h-4 w-4" />

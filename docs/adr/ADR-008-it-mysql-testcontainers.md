@@ -62,6 +62,35 @@ CI 的 ubuntu runner 与 maven 容器里的 JVM 都是 UTC，于是会话 +08:00
 凡是「库比 JVM 快」的宿主（JVM 在库时区以西）都会红，因此把未过期余量也取 1 天，
 使两个方向的偏移都被覆盖。四种宿主×会话组合实测见 `docs/CI_GATES.md`。
 
+## 显示面口径的落定（2026-10-10，第九十五批）
+上面几段管的是"写进库的是哪个钟"，本段管"读出来给人看时按哪个钟解释"。此前仓库里
+**三套互相矛盾的 theory 并存**，各自能解释服务端的一种写法，合起来必然让同一份数据在
+不同页面显示成不同时刻：
+
+1. `hfusionhub-frontend/src/utils/date.ts` 注释断言"后端已存储北京时间（UTC+8）"，
+   并把无偏移串按**本地墙钟**解析；
+2. 8 个页面直接 `value.replace('T', ' ').slice(0, 16)`，即把服务端字面量当显示值，
+   既不解释偏移也不做位移；
+3. `src/pages/chat/Detail.vue` 手工 `+480` 分钟，把浏览器墙钟硬算成北京墙钟。
+
+实测出的线上形状（同一瞬间的四种写法）：java 的 Jackson + `LocalDateTime` 发**无偏移**
+ISO（`2026-10-10T11:58:12`）；python 的 `datetime.now(UTC).isoformat()` 带 `+00:00`、
+`strftime(...Z)` 带 `Z`、少数 `strftime("%Y-%m-%dT%H:%M:%S")` 无偏移。数组形式
+`[y,m,d,h,min,s]` 也在返回里。于是"统一 +8"这类整把偏移是错的（对已带偏移的值会二次位移），
+正确的口径只有三条：**无偏移一律按 UTC 解释、带偏移按偏移解释、渲染交给浏览器本地时区**；
+纯日期（`LocalDate`、日历日）不参与位移，按当地零点处理。
+
+落点：解析入口收敛到 `src/utils/date.ts`，14 个页面/组件改用 `formatDateTime` /
+`formatTime` / `formatDateOnly` / `parseServerTime`，防回潮由 `scripts/static-checks.py`
+检查 12（`--frontend-time-entry`）以纯文本方式禁止上述两种旧写法回到 `pages/`、
+`components/`、`api/`。契约用例在 `src/utils/__tests__/date.spec.ts`（16 例，红判据是
+HEAD 的实现下 14 例红）。
+
+**上限（不假装做过）**：本批只改显示面，API 与库里的值一字未动。生产容器里
+`TZ` / `-Duser.timezone` / MySQL `default-time-zone` 目前**在任何部署面上都没有声明**，
+写侧仍靠"JVM 与 MySQL 都恰好是 UTC"这一巧合（第八十四批已登记为遗留 #1 的同族）——
+把三者钉成三处同源的一个口径是下一批的内容。
+
 ## 结果与测量
 - 6/8 集成测试类在真实 MySQL 上全绿，`mvn test` 702 全过；
 - 上述 4 类问题在迁移当轮即被揪出并修复——这正是本 ADR 的价值证明：

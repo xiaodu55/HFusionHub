@@ -32,6 +32,7 @@ import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import { useToast } from '@/composables/useToast'
 import { BADGE_TONE_CLASS, type BadgeTone } from '@/utils/badge'
+import { formatDateTime } from '@/utils/date'
 
 type StatusTone = BadgeTone
 
@@ -184,7 +185,7 @@ const cancel = async () => {
   }
 }
 
-const formatDate = (value?: string) => value ? value.replace('T', ' ').slice(0, 16) : '—'
+const formatDate = (value?: string) => value ? formatDateTime(value).slice(0, 16) : '—'
 const formatNumber = (value?: number | null) => value == null ? '—' : new Intl.NumberFormat('zh-CN').format(value)
 const formatDuration = (value?: number | null) => {
   if (value == null) return '—'

@@ -13,6 +13,7 @@ import { Select } from '@/components/ui/select'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import { formatDateTime } from '@/utils/date'
 
 const toast = useToast()
 const loading = ref(false)
@@ -114,7 +115,7 @@ async function confirmDelete() {
 
 function formatTime(value?: string | null) {
   if (!value) return '—'
-  return new Date(value).toLocaleString('zh-CN', { hour12: false })
+  return formatDateTime(value)
 }
 
 onMounted(load)

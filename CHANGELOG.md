@@ -11,6 +11,96 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第九十五批（2026-10-10：显示时区按 A 方案落定——同一瞬间在前端曾有三套互相矛盾的解释，现在只剩一套）
+
+#### 结论（先给判定性质）
+- 第八十四批把"生产时区钉在哪"留成待办，本批先做**读取侧**（用户选定 A 方案：只修显示，
+  API 与库里的值一字不动）。取数得到的判定是：缺陷不在"偏移算错了一次"，而在**同一个瞬间
+  有三种互相矛盾的解释并存**，且三者各自能自圆其说：
+  ① `hfusionhub-frontend/src/utils/date.ts:3` 注释断言"后端已存储北京时间（UTC+8）"，
+     并把无偏移串按**本地墙钟**构造 `Date`；
+  ② 8 个页面绕过它，直接 `value.replace('T',' ').slice(0,16)`，即把服务端字面量当显示值；
+  ③ `src/pages/chat/Detail.vue:311` 手工 `getTimezoneOffset()+480`，把浏览器墙钟硬算成北京墙钟。
+- 线上形状实测（同一瞬间 `2026-10-10T11:58:12Z` 的四种写法）：java 的 Jackson+`LocalDateTime`
+  发**无偏移** ISO，python 分别发 `+00:00` / `Z` / 无偏移，另有数组形式 `[y,m,d,h,min,s]`。
+  推论：任何"统一 +8"的整把偏移都是错的（对已带偏移的值会二次位移）。成立的口径只有三条——
+  **无偏移按 UTC 解释、带偏移按偏移解释、渲染交给浏览器本地时区**，纯日期（`LocalDate`、
+  日历日）按当地零点处理、不参与位移。
+- 本批第一次红判据撞出的不是产品缺陷而是**我自己写的测试夹具**：`withTz` 用
+  `delete process.env.TZ` 复原，实测 `ZONE_INSIDE=America/New_York → ZONE_AFTER=America/New_York`
+  而 `envTZ=undefined`——node 在首次构造 Date/Intl 时缓存本地时区，删环境变量**不会**回到宿主时区，
+  而是停在最后一次显式设置的值。后果是 HEAD 那次红跑里 `formatRelativeTime` 的两例是假绿/假红
+  （泄漏的纽约时区让 11:58:12 落在未来 ⇒ 一律返回"刚刚"）。改为"把宿主时区名写回去"并补一条
+  夹具自检，才让红判据可信。
+
+#### 改动（唯一入口 + 14 处调用点 + 门禁 12，三处都必须有）
+- `hfusionhub-frontend/src/utils/date.ts`：删掉那句假前提，`parseServerTime` 改成三条口径
+  （`NAIVE_RE` 无偏移 ⇒ `Date.UTC(...)`，`DATE_ONLY_RE` ⇒ 当地零点，数组 ⇒ UTC，其余交给
+  `new Date(text)` 并拒 Invalid）；`formatDateTime` **保持原斜杠模板**（显示格式不变，本批只改
+  "显示的是哪个瞬间"），新增 `formatDateOnly`，`formatRelativeTime` 改用 `Date.now()-getTime()`
+  的瞬时差。四个格式化函数统一接受 `string | number[] | null | undefined`，不可解析原样返回。
+- 14 个页面/组件收口到该入口：`WebhookSettings.vue:44`、`admin/Users.vue:38`、`agent/Index.vue:188`、
+  `approval/Index.vue:112-116`（`isExpiredRow` 的倒计时与显示同入口，去掉 Safari 手解注释）、
+  `memory/Index.vue:136`、`rag/Index.vue:350`、`builder/TestSet.vue:1014`、`admin/Notices.vue:118`、
+  `builder/Apps.vue:390`、`builder/Plugins.vue:886`、`builder/Tools.vue:266`、`settings/Index.vue`、
+  `profile/Index.vue`（两处 `new Date(value)` 手解）、`chat/Detail.vue:309`（删 +480 硬算，
+  本地回显改发带偏移的 `toISOString()`）。
+- 防回潮：`scripts/static-checks.py` 新增**检查 12** `--frontend-time-entry`（并入默认全跑档），
+  在 `src/pages|components|api` 下禁 `replace('T'…)` 与 `getTimezoneOffset()` 两种字面写法，
+  目录缺失判红而非静默通过，`__tests__` 跳过以免误伤夹具。
+- 测试：新增 `src/utils/__tests__/date.spec.ts` 16 例（解析契约 9 / 渲染 4 / 相对量 2 / 夹具自检 1）；
+  新增 `python-ai/tests/test_frontend_time_entry.py` 6 例（真实仓库为绿、默认全跑档接线、
+  两种字面写法注入为红、夹具不误伤、根缺失不静默）。
+- 文档：`docs/adr/ADR-008-it-mysql-testcontainers.md` 新增「显示面口径的落定（第九十五批）」，
+  把三套 theory、四种线上写法、三条规则和"写侧仍未钉"的上限一起落在时钟口径唯一的归属处；
+  `docs/PROJECT_TOUR.md:327` 的门禁清单原写"十一项"却只列了 10 项（检查 10/11 加进去时漏改），
+  一并订正为十二项并补齐条目；`docs/CLEANUP_BACKLOG.md:4` 的"删除前先确认基线
+  （Java 572 · Python 1258 · 前端 49）"是一份早已不存在的号码，按门禁口径改成当前实测值。
+
+#### 验证（红→绿逐条，含门禁自己的红）
+- 红判据：把 HEAD 的 `date.ts` 放回原位（并补 `formatDateOnly` 等价 shim，使失败落在解析口径
+  而不是"导入不存在"），`vitest run src/utils/__tests__/date.spec.ts` = **14 failed | 2 passed (16)**，
+  日志 `hfusionhub-scratch/b95_vitest_red_head3.log`。仍绿的 2 例要如实写出：
+  `自带 +08:00 偏移的串按偏移读` 在 HEAD 上是**假绿**（HEAD 忽略偏移、把 19:58:12 当本地墙钟，
+  宿主恰好是 UTC+8 才对得上），另一例是本批新增的夹具自检，它检查的是夹具而非实现。
+- 门禁红→绿：对 HEAD 的 `hfusionhub-frontend/src` 跑同一函数报出 **9 处违规**（8 个文件的
+  `replace('T',' ')` + `Detail.vue` 的 `getTimezoneOffset()`）；对当前工作副本
+  `[ok] … 扫描 115 个文件，未见 …`。注入式红另测 4 例（`tmp_path` 假 src）。
+- 接线测试先红过一次：检查 12 第一次实现时只加了 `add_argument` 和默认全跑档赋值、**漏了
+  `main()` 里的 dispatch**，`test_time_gate_is_in_the_default_all_mode` 直接判红
+  （`assert 'check_frontend_time_entry()' in main_body`），补上后 6 passed——这正是第八十三批
+  那次哑火的形态被它自己设计的判据抓到。
+- 全量：前端 `vitest run` **117 passed / 16 files**；`vue-tsc -b --force` 退出 0（本批一度报
+  `approval/Index.vue:117 TS18048 'expires' is possibly 'undefined'`，改成 `?.getTime() ?? NaN` 后清；
+  `date.spec.ts` 里的 `process` 因 `tsconfig.app.json` 的 `types` 只有 `vite/client` 报 4 条 TS2591，
+  用一处局部类型声明解决，**没有**为此拖进 `@types/node`）；`eslint src` 0 error，
+  唯一落在改动文件里的 warning 是 `pages/rag/Index.vue:279` 的 `any`，在改动行（37、350）之外，属存量；
+  `python scripts/static-checks.py` 全跑通过。
+- 计数同步：Python 1864→**1870**、前端单测 101→**117**（Java 713 不变），改 README 徽章 + `:37/:47/:241`、
+  README_EN 徽章、`docs/ROADMAP.md:16` 共 6 处；`--test-counts` 由红转绿，门禁计数与 vitest 执行数同口径
+  （参数化用例已展开成独立 `it()`，否则 `it.each` 不计入门禁）。
+- 行尾：`git ls-files --eol` 核到 `src/utils/date.ts` 工作副本是 CRLF 而同批其余文件是 LF
+  （`i/lf` 一致，故提交侧无 blob 变化），已按第九十二批的教训统一成 LF；两个新文件均为 LF。
+
+#### 可见变化与上限（不假装做过）
+- 用户可见的格式变化（本批只改"显示的是哪个瞬间"，下述格式差异是走统一入口的副产物，逐条实测/核对过）：
+  原先 8 个页面用字符串切出来的 `2026-10-10 11:58`，现在是 `utils/date.ts` 的斜杠模板
+  `2026/10/10 19:58`（与该入口在个人中心、通知页上的既有口径一致，切片长度仍是页面自己 `.slice(0, 16)`）；
+  记忆页改用 `toLocaleDateString('zh-CN', 2-digit)`，本机 node 24 / ICU 76 实测输出 `2026-10-10`
+  与旧切法同形，但**分隔符从此由宿主 ICU 决定**而不是由字符串切法决定（zh-CN 的 `-` 是较近 CLDR 的行为，
+  旧 ICU 的浏览器可能给 `2026/10/10`——本批没有在真实浏览器里逐个实测，只在本机 node/jsdom 上测）。
+  时刻类显示的格式（`2026/10/10 19:58:12`）一字未动；但**显示的数值**在非 UTC 宿主上会与改动前相差一个本地偏移——那正是本批要修的错。
+- 检查 12 是纯文本门禁：只认两种字面写法，不证明其余页面解析正确，不覆盖 `new Date(serverStr)`
+  这种依赖引擎口径的写法，也不覆盖第三方日期库；契约正确性由 `date.spec.ts` 负责，写侧的钟由下一批负责。
+- 三条只登记不修：`admin/AuditLogs.vue:46` 的导出文件名前缀 `new Date().toISOString().slice(0,10)`
+  取的是 UTC 日而非本地日（>16:00 本地会写成"明天"，属 cosmetic 出站串，不在本批口径内）；
+  `admin/Notices.vue:81` 的出站仍是 `new Date(form.value.expiresAt).toISOString()`（写侧，带偏移是对的，
+  但它把 naive 输入按本地解释，与后端"无偏移按 UTC"的口径不同向）；`date.ts` 的数组分支此前是死代码，
+  现在由一条用例覆盖，但它是否真会出现在响应里仍未取到证据。纯日期分支（`DATE_ONLY_RE`）也一样取不到现行调用方——java 侧唯一的 `LocalDate` 字段是 `DailyCostDTO.statDate:18`，而成本页把 `api/cost.ts:13` 的 `statDate` 当字面量直接展示（`pages/cost/Index.vue:205` 等），不经这个入口；`utils/date.ts:9` 的注释因此改成只陈述契约，不再点名调用方（原写作 bid deadline，它是 `BidProject.java:51` 的 `String`，前端只当表格文本显示，同样不构成证据）。
+- 下一批（口径方案 B+ 的 1-6 项，已在第八十四批定下）：把 `-Duser.timezone`、MySQL
+  `--default-time-zone`、`serverTimezone` 钉成三处同源的一个 UTC 口径，6 处判定 SQL 改
+  `UTC_TIMESTAMP()`，审批过期去掉双钟，并配红先行的真库 IT（在 `SET time_zone='+08:00'` 下断言过期判定）。
+
 ### 第九十四批（2026-10-10：覆盖率棘轮第一次有了"含 IT"的数，取数过程撞出一个自 ADR-008 起就埋着的宿主假设）
 
 #### 结论（先给判定性质）

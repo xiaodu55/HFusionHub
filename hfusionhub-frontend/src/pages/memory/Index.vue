@@ -21,6 +21,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { useToast } from '@/composables/useToast'
+import { formatDateOnly } from '@/utils/date'
 
 type MemoryType = 'user_preference' | 'entity_fact' | 'conversation_summary'
 type TypeFilter = MemoryType | 'ALL'
@@ -132,7 +133,7 @@ const remove = async (id: number) => {
   }
 }
 
-const formatDate = (value?: string | null) => value ? value.replace('T', ' ').slice(0, 10) : '刚刚保存'
+const formatDate = (value?: string | null) => value ? formatDateOnly(value) : '刚刚保存'
 const importanceLabel = (importance?: number) => {
   if ((importance ?? 0.5) >= 0.75) return '高优先级'
   if ((importance ?? 0.5) >= 0.5) return '标准优先级'

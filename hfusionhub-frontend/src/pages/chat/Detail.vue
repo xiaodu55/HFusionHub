@@ -306,10 +306,8 @@ const runSendFlow = async () => {
   const requestId = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
   let pendingId: number | null = null
 
-  // 北京时间字符串 — 定义在 try 外以便 catch 块中错误消息使用
-  const now = new Date()
-  const beijingTime = new Date(now.getTime() + (now.getTimezoneOffset() + 480) * 60000)
-  const timeStr = `${beijingTime.getFullYear()}-${String(beijingTime.getMonth() + 1).padStart(2, '0')}-${String(beijingTime.getDate()).padStart(2, '0')} ${String(beijingTime.getHours()).padStart(2, '0')}:${String(beijingTime.getMinutes()).padStart(2, '0')}:${String(beijingTime.getSeconds()).padStart(2, '0')}`
+  // 本地回显用带偏移的 ISO：服务端写的也是同一瞬间，两者渲染必须一致
+  const timeStr = new Date().toISOString()
 
   try {
     // 1. 立即添加用户消息到列表

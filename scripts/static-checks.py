@@ -58,6 +58,11 @@
   PyPI 上只有 win32 wheel ⇒ `docker build -f deploy/Dockerfile.python` 在 linux/amd64
   上死于 "from versions: none"，而宿主是 Windows 时这条完全不可见。
 
+检查 12：前端时间显示只有一个入口
+  页面的服务端时间一律走 hfusionhub-frontend/src/utils/date.ts，不得再出现
+  replace('T',' ')（截字面量、丢偏移）或 getTimezoneOffset()（把某个国家的时区编进代码）。
+  第九十五批前同一份数据在三种互相矛盾的解析theory并存，合起来必然在不同页面显示成不同时刻。
+
 用法:
   python scripts/static-checks.py --tenant-columns
   python scripts/static-checks.py --internal-token-keys
@@ -70,6 +75,7 @@
   python scripts/static-checks.py --document-storage-root
   python scripts/static-checks.py --eval-harness-storage
   python scripts/static-checks.py --requirements-markers
+  python scripts/static-checks.py --frontend-time-entry
   python scripts/static-checks.py            # 全部检查
 退出码: 0=通过, 1=发现违规
 """
@@ -935,6 +941,75 @@ def check_requirements_platform_markers() -> None:
         print(f"[ok] 依赖锁可安装面：" + "；".join(ok_lines))
 
 
+# ── 检查 12：前端时间显示只有一个入口 ──────────────────────────────────
+
+FRONTEND_TIME_ROOTS = ("pages", "components", "api")
+
+# 这两条写法都是"把服务端墙钟当本地墙钟"的直接产物：
+#   replace('T', ' ')  把 ISO 串截成字面量，偏移与本地时区都被丢掉
+#   getTimezoneOffset() 手工加回偏移，等于把某个国家的时区编进代码
+FRONTEND_TIME_PATTERNS = (
+    re.compile(r"""replace\(['"]T['"]"""),
+    re.compile(r"getTimezoneOffset\(\)"),
+)
+
+
+def _frontend_rel(path: Path) -> str:
+    # 门禁测试把 FRONTEND_SRC_DIR 换成 tmp_path 下的假 src 时 relative_to 会抛，退化成文件名即可
+    return path.relative_to(REPO).as_posix() if path.is_relative_to(REPO) else path.name
+
+
+def _frontend_source_files(root: Path) -> list[Path]:
+    out: list[Path] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.suffix not in (".vue", ".ts"):
+            continue
+        if "__tests__" in path.parts:
+            continue
+        out.append(path)
+    return out
+
+
+def check_frontend_time_entry() -> None:
+    """服务端时间的解析必须只走 utils/date.ts，页面不得自行解析或手算偏移。
+
+    第九十五批之前同一份数据有三种互相矛盾的theory并存：utils/date.ts 的注释断言"后端已
+    存储北京时间（UTC+8）"并按本地墙钟解析、8 个页面直接 replace('T',' ') 截字面量、
+    chat/Detail.vue 手工 +480 分钟。三者各自能解释一种服务端写法，没有一处是错的，合起来
+    必然在不同页面上显示成不同时刻。现在解析入口收敛到一个函数，测试覆盖它的契约，本检查
+    保证旧写法不再回来。
+
+    局限（不假装覆盖）：这是纯文本门禁，只认这两条字面写法。它不证明其余页面解析正确——
+    直接 `new Date(serverStr)` 依赖引擎对无偏移串的口径，而且同一引擎内就不自洽：ES2016 起
+    无偏移 date-time 按本地时间解释（ES5 时代按 UTC），纯日期串却一律按 UTC，两种形状方向相反，
+    这正是 date.ts 里 NAIVE_RE / DATE_ONLY_RE 两条分支必须存在的原因。门禁也不覆盖 moment/dayjs
+    之类第三方格式化，更管不到 java/python 侧写进 DATETIME 的到底是哪个钟。那些要由
+    src/utils/__tests__/date.spec.ts 的契约用例与后端批次各自负责。
+    """
+    offenders: list[str] = []
+    scanned = 0
+    for name in FRONTEND_TIME_ROOTS:
+        root = FRONTEND_SRC_DIR / name
+        if not root.is_dir():
+            problems.append(f"前端时间入口检查：目录不存在 {_frontend_rel(root)}")
+            continue
+        for file in _frontend_source_files(root):
+            text = file.read_text(encoding="utf-8")
+            scanned += 1
+            for pattern in FRONTEND_TIME_PATTERNS:
+                for lineno, line in enumerate(text.splitlines(), 1):
+                    if pattern.search(line):
+                        offenders.append(
+                            f"{_frontend_rel(file)}:{lineno} {line.strip()}"
+                        )
+    if offenders:
+        problems.append(
+            "前端自行解析了服务端时间（应改用 utils/date.ts 的入口）:\n    " + "\n    ".join(offenders)
+        )
+    else:
+        print(f"[ok] 前端时间显示只有一个入口：扫描 {scanned} 个文件，未见 replace('T',…) / getTimezoneOffset()")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
@@ -948,18 +1023,19 @@ def main() -> int:
     parser.add_argument("--document-storage-root", action="store_true")
     parser.add_argument("--eval-harness-storage", action="store_true")
     parser.add_argument("--requirements-markers", action="store_true")
+    parser.add_argument("--frontend-time-entry", action="store_true")
     args = parser.parse_args()
 
     if not (args.tenant_columns or args.internal_token_keys or args.test_counts
             or args.flyway_doc_sync or args.h2_schema_drift
             or args.readme_claims or args.helm_value_roots or args.container_uid
             or args.document_storage_root or args.eval_harness_storage
-            or args.requirements_markers):
+            or args.requirements_markers or args.frontend_time_entry):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
             args.flyway_doc_sync = args.h2_schema_drift = \
             args.readme_claims = args.helm_value_roots = args.container_uid = \
             args.document_storage_root = args.eval_harness_storage = \
-            args.requirements_markers = True
+            args.requirements_markers = args.frontend_time_entry = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -983,6 +1059,8 @@ def main() -> int:
         check_eval_harness_storage()
     if args.requirements_markers:
         check_requirements_platform_markers()
+    if args.frontend_time_entry:
+        check_frontend_time_entry()
 
     if problems:
         print("\n发现问题:")

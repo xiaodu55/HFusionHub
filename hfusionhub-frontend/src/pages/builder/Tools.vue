@@ -34,6 +34,7 @@ import type { ToolEntry } from '@/api/tools'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useToast } from '@/composables/useToast'
+import { parseServerTime } from '@/utils/date'
 
 type AbilityGroup = 'knowledge' | 'utility' | 'external'
 
@@ -262,9 +263,8 @@ const formatMs = (milliseconds: number | null) => {
 }
 
 const formatTime = (value?: string) => {
-  if (!value) return '刚刚'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '刚刚'
+  const date = parseServerTime(value)
+  if (!date) return '刚刚'
   return new Intl.DateTimeFormat('zh-CN', {
     month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(date)

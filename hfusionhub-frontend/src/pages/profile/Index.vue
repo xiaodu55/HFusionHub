@@ -11,6 +11,7 @@ import { changePassword, uploadAvatar } from '@/api/user'
 import { useAvatarImage } from '@/composables/useAvatarImage'
 import type { UserRole } from '@/api/types'
 import { useToast } from '@/composables/useToast'
+import { parseServerTime } from '@/utils/date'
 
 const userStore = useUserStore()
 const toast = useToast()
@@ -48,14 +49,12 @@ const roleMeta = computed(() => ROLE_META[userStore.role] ?? ROLE_META.pending)
 const isAccountActive = computed(() => userStore.userInfo?.status === 0)
 
 const formatDate = (value?: string) => {
-  if (!value) return '—'
-  const d = new Date(value)
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+  const d = parseServerTime(value)
+  return d ? d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '—'
 }
 const formatDateTime = (value?: string) => {
-  if (!value) return '—'
-  const d = new Date(value)
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const d = parseServerTime(value)
+  return d ? d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'
 }
 
 // ── 头像上传 ──
