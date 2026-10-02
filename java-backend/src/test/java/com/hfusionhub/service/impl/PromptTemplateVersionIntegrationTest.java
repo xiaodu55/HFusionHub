@@ -31,7 +31,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * End-to-end persistence test against H2: create → edit twice →
+ * End-to-end persistence test against real MySQL: create → edit twice →
  * publish → unpublish → rollback.  Uses a real MyBatis-Plus mapper
  * stack; mocks only Redis (not needed for prompt templates).
  */

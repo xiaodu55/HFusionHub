@@ -70,6 +70,15 @@ cd python-ai && pytest -q tests
 cd hfusionhub-frontend && npm run test && npm run build
 ```
 
+`mvn test` also runs the coverage ratchet (`jacoco:check`, floors 0.46 LINE /
+0.34 BRANCH), and those floors are calibrated on the run **with** the integration
+tests. The 54 IT classes need a real MySQL: either Docker (Testcontainers) or
+`HFH_IT_JDBC_URL` plus `HFH_IT_JDBC_USER` / `HFH_IT_JDBC_PASS` pointing at an
+empty `hfusionhub_it` database. Without one the IT classes skip and the same run
+measures 0.40 / 0.31, so `jacoco:check` fails the build for a reason unrelated to
+your change. That is deliberate — a green `mvn test` means the integration suite
+actually executed.
+
 ## Java code style (spotless)
 
 CI runs `mvn --batch-mode spotless:check` before the tests, so unformatted Java

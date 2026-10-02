@@ -536,7 +536,7 @@ class PromptTestSetIntegrationTest extends AbstractItMySQLTest {
 
         // The queued run is visible to the worker queue
         // Other async-lifecycle cases can leave committed pending rows in the
-        // shared H2 context; use a window large enough to assert this run is
+        // shared MySQL context; use a window large enough to assert this run is
         // discoverable rather than assuming it is among the first ten.
         // scheduled_at 在 DATETIME(0) 上会秒级取整：立即查询可能差一秒不可见，
         // 与 worker 的轮询语义一致地短暂重试
@@ -689,7 +689,7 @@ class PromptTestSetIntegrationTest extends AbstractItMySQLTest {
      * AI 调用中阻塞的旧 Worker 在释放后第一次守卫写入（进度推进）即失效并中止，
      * 不会把结果写入新一轮任务，也不会覆盖新一轮的 pending 状态。
      *
-     * <p>此测试使用真实的 H2 + MyBatis-Plus（守卫更新为原子 SQL），且主线程与
+     * <p>此测试使用真实的 MySQL + MyBatis-Plus（守卫更新为原子 SQL），且主线程与
      * Worker 线程分别自动提交，以还原生产环境的并发时序。
      */
     @Test

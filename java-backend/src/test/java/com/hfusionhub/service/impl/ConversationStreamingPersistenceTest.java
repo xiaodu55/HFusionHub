@@ -61,7 +61,7 @@ import reactor.core.scheduler.Schedulers;
  * 流式聊天持久化集成测试。
  *
  * <p>与 {@link ConversationStreamingUsageTest} 不同，本测试使用真实的
- * {@code AgentTaskService}（真实 Mapper + H2），断言流式路径中
+ * {@code AgentTaskService}（真实 Mapper + MySQL），断言流式路径中
  * 结构化 Agent 事件（step_completed / run_completed）与助手消息
  * 均成功落库，而非仅验证用量结算。</p>
  */

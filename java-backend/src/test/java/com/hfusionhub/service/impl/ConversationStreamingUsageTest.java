@@ -99,7 +99,7 @@ class ConversationStreamingUsageTest extends AbstractItMySQLTest {
         SaManager.setSaTokenContext(new MockSaTokenContext());
         StpUtil.login(1L);
 
-        // 共享 H2 单 JVM 内持久：流式结算在 Reactor 线程单独提交，先清账本保证断言自洽
+        // 共享 MySQL 单 JVM 内持久：流式结算在 Reactor 线程单独提交，先清账本保证断言自洽
         usageEventMapper.delete(Wrappers.emptyWrapper());
         usageReservationMapper.delete(Wrappers.emptyWrapper());
         usageCounterMapper.delete(Wrappers.emptyWrapper());

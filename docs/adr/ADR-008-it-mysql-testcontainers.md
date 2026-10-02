@@ -45,10 +45,22 @@
 2. **DATETIME(0) 秒级取整**：`scheduled_at` 存库后四舍五入到下一秒，
    写后立即查询差 1 秒——H2 保留毫秒精度，测试通过、真库必挂；
 3. **时区**：MySQL 容器 UTC vs JVM +8，`NOW()`/按天聚合差 8 小时
-   （connection-init-sql 对齐时区解决）；
+   （2026-09-05 用 connection-init-sql 把会话对齐到 +08:00 解决；
+   2026-10-10 第九十四批撤掉——见下「时区口径的二次修正」）；
 4. **FK 环 + 逻辑删除行**：`agent_task↔agent_run` 外键环叠加逻辑删除，
    MyBatis-Plus 的 update/delete 命不中逻辑删除行——清理需
    `JdbcTemplate` 裸 SQL + FK 免检 + `runAsSystem` 重试。
+
+## 时区口径的二次修正（2026-10-10，第九十四批）
+当年那句「MySQL 容器是 UTC、JVM 是 +8」把**开发机**的 JVM 时区当成了常量。
+CI 的 ubuntu runner 与 maven 容器里的 JVM 都是 UTC，于是会话 +08:00 不再是
+「对齐」，而是凭空造出 8 小时：库的 `NOW()` 比 Java 侧快 8 小时，
+`recycle_expires_at = now + 1h` 的「未过期」行被判成过期——
+`DocumentMapperRecycleTest` 在 CI 口径下恒红（本机无库时整类跳过，所以从未暴露）。
+撤掉 `connection-init-sql` 后，会话取 MySQL 的 SYSTEM（=UTC），与容器/CI 一致。
+余下的一侧脆性在判据本身：过期行留 1 天余量、未过期行只留 1 小时，
+凡是「库比 JVM 快」的宿主（JVM 在库时区以西）都会红，因此把未过期余量也取 1 天，
+使两个方向的偏移都被覆盖。四种宿主×会话组合实测见 `docs/CI_GATES.md`。
 
 ## 结果与测量
 - 6/8 集成测试类在真实 MySQL 上全绿，`mvn test` 702 全过；

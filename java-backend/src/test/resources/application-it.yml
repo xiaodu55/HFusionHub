@@ -8,10 +8,10 @@
 spring:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    hikari:
-      # MySQL 容器是 UTC、JVM 是 +8：把会话时区对齐 JVM，
-      # 否则 NOW()/按天聚合与 Java 侧时间相差 8 小时
-      connection-init-sql: SET time_zone = '+08:00' 
+    # 会话时区不做额外偏移：MySQL 容器与 CI/容器里的 JVM 都是 UTC，两侧同源。
+    # 这里曾写 connection-init-sql: SET time_zone='+08:00' 去"对齐 JVM"，前提是
+    # 跑测试的机器 JVM 为 +8——该前提在 ubuntu runner 与 maven 容器上不成立，
+    # 于是 NOW() 比 Java 侧快 8 小时，把 now+1h 的"未过期"行也判成过期。
     # 实际坐标由 AbstractItMySQLTest 的 @DynamicPropertySource 注入
     url: ${IT_JDBC_URL:jdbc:mysql://localhost:3306/hfusionhub_it?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
     username: ${IT_JDBC_USER:itest}

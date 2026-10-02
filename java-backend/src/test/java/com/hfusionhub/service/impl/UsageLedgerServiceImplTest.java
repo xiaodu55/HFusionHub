@@ -33,7 +33,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 用量账本核心集成测试（H2，真实 MyBatis-Plus mapper 栈）。
+ * 用量账本核心集成测试（真实 MySQL，真实 MyBatis-Plus mapper 栈）。
  * 覆盖：预占/结算/退回、幂等、超额结算封顶、终态互斥、跨日窗口结算、
  * 跨租户相同 requestId 隔离、无租户上下文 fail-closed、并发重复预占。
  */
@@ -62,7 +62,7 @@ class UsageLedgerServiceImplTest extends AbstractItMySQLTest {
 
     @BeforeEach
     void setUp() {
-        // 共享 H2 在单 JVM 内跨测试方法持久；并发/独立线程用例会提交。
+        // 共享 MySQL 在单 JVM 内跨测试方法持久；并发/独立线程用例会提交。
         // 每用例前清空账本表，保证配额累计与断言自洽。
         usageEventMapper.delete(Wrappers.emptyWrapper());
         usageReservationMapper.delete(Wrappers.emptyWrapper());

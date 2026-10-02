@@ -277,7 +277,13 @@
                                  后续随补测逐步上调，不追历史。
                                  2026-09-08（R16-11）实测 LINE 46.15% / BRANCH 34.86%
                                  （本机口径：IT 类无 Docker 跳过；CI 含 IT 会更高），
-                                 新增 BRANCH 下限 0.34 防分支覆盖恶化，留缓冲防平台差异 -->
+                                 新增 BRANCH 下限 0.34 防分支覆盖恶化，留缓冲防平台差异。
+                                 2026-10-10（第九十四批）两个口径都实测过，棘轮钉的是"含 IT"
+                                 那一档：真实 MySQL（53 例 IT 实跑）LINE 47.99% / BRANCH 35.60%
+                                 两个下限都过；无 MySQL（IT 整类跳过）LINE 40.17% / BRANCH 31.16%
+                                 两个都不过 ⇒ mvn test 直接 BUILD FAILURE。本机要跑绿必须给测试库
+                                 （Docker 或 HFH_IT_JDBC_URL），见 CONTRIBUTING「Running Tests」。
+                                 09-08 那句"IT 跳过仍 46.15%"按今天的代码复现不出来，只作历史脉络。 -->
                             <rules>
                                 <rule>
                                     <element>BUNDLE</element>

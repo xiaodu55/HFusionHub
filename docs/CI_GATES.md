@@ -117,7 +117,7 @@ main 已启用 branch protection（规则通过 GitHub API 创建）：
 - Nightly 运行时评测失败时在对应 action 中查看 `eval-runtime-report` artifact 定位问题。
 - 离线门禁失败时必须修复或按流程再冻结基线，不得带着失败合并。
 
-## 非评测门禁：CI 自己的三处自伤（第九十批、第九十三批）
+## 非评测门禁：CI 自己的四处自伤（第九十批、第九十三批、第九十四批）
 
 上面那张表之外的 job（`docker-compose-validate`、`python-container`、`java`、`frontend`）不评测量，
 但同样会阻断合并。本节记录三条判据——它们的共同点是**红的是 CI 自己，不是产品**。
@@ -234,6 +234,59 @@ INSTRUCTION/METHOD/BRANCH 的**覆盖**那几点差异格式化解释不了（�
 全仓重排会污染 `git blame`，故重排单独一笔提交，其 sha 记在 `.git-blame-ignore-revs`，
 每人 clone 执行一次 `git config blame.ignoreRevsFile .git-blame-ignore-revs`（见 `CONTRIBUTING.md`）。
 这条配置**不写进仓库脚本**：改 git config 属用户侧动作，且 CI 不需要它。
+
+### 4. 覆盖率棘轮的"口径"与 it profile 的宿主时区假设（第九十四批）
+
+第九十三批留下一个只有真实 MySQL 才能回答的问题：`jacoco:check` 的下限
+（LINE 0.46 / BRANCH 0.34，`pom.xml:269-298`）到底是在哪个口径上钉的。
+用 `AbstractItMySQLTest` 自带的外部库通道（`HFH_IT_JDBC_URL`）把 54 例 docker 门控
+IT 真跑起来，两个口径同时有了数：
+
+| 口径 | LINE | BRANCH | 对下限 |
+| --- | --- | --- | --- |
+| 含 IT（CI 口径） | 6622/13798 = **0.4799** | 2161/6071 = **0.3560** | 两条都过，余量 +275 行 / +97 分支 |
+| IT 整类跳过（本机无库） | 5529/13765 = **0.4017** | 1892/6071 = **0.3116** | 两条都不过 ⇒ `mvn test` BUILD FAILURE |
+
+`pom.xml:279` 那句"CI 含 IT 会更高"第一次被实测（+7.8 pp），同一句里的
+"本机口径：IT 类无 Docker 跳过"则被实测成**低于自己的下限**——所以本机跑绿
+`mvn test` 的前提是给测试库，这条已写进 `CONTRIBUTING.md`「Running Tests」。
+`pom.xml:278` 声称 2026-09-08 在跳过口径上实测过 46.15%，今天同一口径只能测到
+40.17%：那句保留为历史脉络，不当作现行依据。
+
+同一轮取数撞出一个**活的缺陷**。`application-it.yml` 当年为"对齐 JVM"写了
+`connection-init-sql: SET time_zone='+08:00'`，前提是跑测试的机器 JVM 在 +8
+（ADR-008 第 3 条原话）。CI 的 ubuntu runner 和 maven 容器里 JVM 是 UTC，
+于是这个偏移不再是零，而是凭空造出 8 小时：`DocumentMapperRecycleTest` 里
+`recycle_expires_at = now + 1h` 的"未过期"行被库判成过期，
+`expected: <1> but was: <2>`——**这一步在 CI 里从未跑过**，因为第九十三批之前
+`spotless:check` 恒红，java job 走不到第 2 步。
+
+判据先红，再按四个"宿主 JVM × 会话时区"组合逐个取数：
+
+| JVM | it 会话 | 结果 |
+| --- | --- | --- |
+| UTC | +08:00（改前） | 1 failed（上面那条断言） |
+| UTC | 不偏移（改后） | 713 / 0 fail / 1 skip，`All coverage checks have been met` |
+| +08（`TZ=Asia/Shanghai`） | 不偏移 | 713 / 0 fail / 1 skip，checks met |
+| −05（`TZ=America/New_York`） | 不偏移，未过期余量 1h | **又红**：同一条断言、同一句消息 |
+
+第四行说明撤掉 +08 只解决了一半：配置能撤，判据里"过期侧留 1 天、未过期侧只留
+1 小时"的不对称余量还在，凡是**库比 JVM 快**的宿主都会红。于是把未过期余量也取
+1 天（`DocumentMapperRecycleTest.java:95` 与 `:105`，仍不改 mapper 语义），
+第五行（UTC + 不偏移 + 1 天余量）全量复跑 = 713 / 0 fail / 1 skip + BUILD SUCCESS。
+两侧余量都 >14 小时（地球上任意宿主的偏移上限），四个组合从此与宿主无关。
+
+顺带否掉第九十三批登记的一条怀疑：`ci.yml:365-368` 的冒烟步骤
+`mvn test -Dtest=PythonEngineSmokeTest` **不是**潜在红。jacoco 的
+`prepare-agent` 默认 `append=true`，同一 `target/jacoco.exec` 会累积，所以那一步的
+check 重述的是第 2 步的数据——实测单独跑 8 例的类报 `All coverage checks have been met`，
+而加 `-Djacoco.append=false` 重跑同一条命令则 `ratio is 0.00` + 两条 `Rule violated`。
+代价是这条 check 在那一步不增加任何信息；若要它成为每次运行的度量，
+冒烟步骤得显式 `-Djacoco.skip=true`，属部署面/CI 行为变更，本批不修，只登记。
+
+不新增门禁：时区偏移的判据就是那 53 例真跑在真库上的 IT 本身，
+而"会话不额外偏移"是配置缺省态——给它加一条文本判据，
+只会复制第九十一批 `vue-tsc` 那种"把工具的结论再抄一遍"的形态。
 
 ## 相关文件
 

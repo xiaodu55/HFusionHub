@@ -29,7 +29,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Verify DocumentMapper.selectExpiredRecycled against H2 —
+ * Verify DocumentMapper.selectExpiredRecycled against real MySQL —
  * only deleted + expired documents are returned.
  */
 @Transactional
@@ -83,13 +83,16 @@ class DocumentMapperRecycleTest extends AbstractItMySQLTest {
     void selectExpiredRecycledReturnsOnlyExpiredDeletedDocuments() {
         LocalDateTime now = LocalDateTime.now();
 
+        // 两侧余量都取 1 天：过期判定是 Java 写的 recycle_expires_at 与库里
+        // NOW() 相比，JVM 与会话时区在任何宿主上最多差 ±14 小时，余量必须
+        // 同时覆盖"库比 JVM 快"和"库比 JVM 慢"两个方向。
         // ── Expired: deleted=1, recycle_expires_at in the past → should appear ──
         Document expired = new Document();
         expired.setKnowledgeBaseId(kbId);
         expired.setTitle("expired-doc");
         expired.setDeleted(1);
         expired.setRecycledAt(now.minusDays(8));
-        expired.setRecycleExpiresAt(now.minusDays(1)); // 余量 > JVM 与 MySQL 容器的时区差
+        expired.setRecycleExpiresAt(now.minusDays(1));
         expired.setStatus(0);
         documentMapper.insert(expired);
 
@@ -99,7 +102,7 @@ class DocumentMapperRecycleTest extends AbstractItMySQLTest {
         future.setTitle("future-doc");
         future.setDeleted(1);
         future.setRecycledAt(now);
-        future.setRecycleExpiresAt(now.plusHours(1));
+        future.setRecycleExpiresAt(now.plusDays(1));
         future.setStatus(0);
         documentMapper.insert(future);
 

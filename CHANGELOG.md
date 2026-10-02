@@ -11,6 +11,82 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第九十四批（2026-10-10：覆盖率棘轮第一次有了"含 IT"的数，取数过程撞出一个自 ADR-008 起就埋着的宿主假设）
+
+#### 结论（先给判定性质）
+- 本批要回答的问题只有一个：`jacoco:check` 那两条下限（LINE 0.46 / BRANCH 0.34，`pom.xml:269-298`）
+  到底钉在哪个口径上。用 `AbstractItMySQLTest` 自带的外部库通道（`HFH_IT_JDBC_URL`，不为修 Testcontainers
+  的 Windows 管道探测）把 54 例 docker 门控 IT 真跑起来，两个口径第一次同时有数：
+  **含 IT = LINE 6622/13798 = 0.4799 / BRANCH 2161/6071 = 0.3560，两条下限都过**（余量 +275 行、+97 分支）；
+  **IT 整类跳过 = 0.4017 / 0.3116，两条都不过** ⇒ 无 MySQL 的 `mvn test` 在 `jacoco:check` 处 BUILD FAILURE
+  （第九十三批实测过两次，`b93_mvn_test_head.log:1567`、`b93_mvn_test.log:1710`）。
+  于是 `pom.xml:279` 那句"CI 含 IT 会更高"从声称变成实测（+7.8 pp）；同一句里"本机口径：IT 类无 Docker
+  跳过"被实测成低于自己的下限，而 `pom.xml:278` 声称 2026-09-08 正是在这一口径上测到 46.15%——今天同一口径
+  只能测到 40.17%，那句按历史脉络保留、不再当现行依据（改注释而不删，是为了留下"下限曾钉在一个复现不出的数上"）。
+- 取数撞出的是一条**活的缺陷**，不是环境噪声：`application-it.yml` 为"对齐 JVM"写了
+  `connection-init-sql: SET time_zone='+08:00'`，其前提（跑测试的机器 JVM 在 +8）写在 ADR-008 第 3 条里，
+  是**开发机**的事实而非仓库的事实。CI 的 ubuntu runner 与 maven 容器里 JVM 都是 UTC，于是会话与 JVM
+  不是对齐而是相差 8 小时，库的 `NOW()` 比 Java 侧快 8 小时 ⇒ `DocumentMapperRecycleTest` 里
+  `recycle_expires_at = now + 1h` 的"未过期"行被判成过期，`expected: <1> but was: <2>`。
+  这条从未见过光的原因与第九十三批同一条链：`spotless:check` 恒红，java job 走不到第 2 步。
+  机制是可算的，不是推测：`SELECT @@session.time_zone, NOW(), UTC_TIMESTAMP()` 在 +08:00 会话下给出
+  `+08 / 18:55 / 10:55`，同一容器同一时刻 JVM 侧 `date` 是 10:55 UTC。
+
+#### 改动（配置撤偏移 + 判据两侧余量对称，两处都必须有）
+- `application-it.yml:11-14`：删掉 `hikari.connection-init-sql` 那一行及其注释，代之以说明"会话不额外偏移、
+  这里曾写过什么、为什么它把 now+1h 判成过期"的注释。撤掉后 it 会话取 MySQL 的 SYSTEM（容器里 = UTC），
+  与 compose / helm / prod 三处的实际拓扑一致（普查：`TZ` 环境变量在 `docker/docker-compose.yml`、
+  `deploy/*.yml`、`Dockerfile.java` 里**一处都没有**，`serverTimezone=Asia/Shanghai` 只是 Connector/J 的
+  会话参数，移动不了 `NOW()`）。
+- `DocumentMapperRecycleTest.java:95` `:105`：未过期侧余量 `plusHours(1)` → `plusDays(1)`，与过期侧对称，
+  并在方法头写下为什么两侧都要 ≥1 天（宿主偏移上限 ±14 小时）。这不是迁就缺陷——第四个实测组合
+  （JVM 在 `America/New_York`，比库慢 5 小时）在只撤偏移、不改余量时**又红了**，同一条断言、同一句消息；
+  改余量后同一组合绿。mapper 语义一个字没动。
+- 顺带清掉 7 处声称"跑在 H2 上"的注释（`ConversationStreamingPersistenceTest`、
+  `ConversationStreamingUsageTest`、`PromptTemplateVersionIntegrationTest`、`PromptTestSetIntegrationTest`×2、
+  `UsageLedgerServiceImplTest`×2）与 `DocumentMapperRecycleTest` 类头那句 "against H2"——这些类自
+  `2063a548`（2026-09-05）起就跑真实 MySQL。**这批 stale 标签正是那 54 例被跳过却无人察觉的原因之一**：
+  读注释的人以为它们不需要外部服务。`CostWebhookGateIntegrationTest.java:47` 那句讲"H2 时代"的
+  是历史归因，保留。
+- `docs/adr/ADR-008-it-mysql-testcontainers.md`：第 3 条就地改写为"当年用 +08:00 对齐、第九十四批撤掉"，
+  并按该 ADR 自己的补记体例新增「时区口径的二次修正」一节（含四种组合的因果）。
+- `java-backend/pom.xml` 棘轮注释：补上两个口径的实测数与"本机要跑绿必须给测试库"。
+- `CONTRIBUTING.md`「Running Tests」：`mvn test` 之后说明两条下限是按含 IT 口径钉的、外部库的三个环境变量、
+  以及无库时 0.40/0.31 会红是**有意的**（绿就意味着集成套真跑过）。
+- `docs/CI_GATES.md`：「CI 自己的三处自伤」→ 四处（第九十批、第九十三批、第九十四批），新增第 4 节
+  放口径表、四组合表和 append 那条否证。
+
+#### 验证（判据先红 → 逐组合取数，共 7 次容器运行）
+- 红：JVM UTC × 会话 +08:00 ⇒ `Tests run: 713, Failures: 1`（`b94_mvn_test_with_it.log`；因 surefire 先失败，
+  `jacoco:report/check` 那一次根本没执行——顺带说明"棘轮从未在 CI 跑过"在第九十三批之后仍然成立，
+  直到本批把它修到能跑）。
+- 绿：撤偏移后 JVM UTC ⇒ 713 / 0 fail / 1 skip + `All coverage checks have been met` + BUILD SUCCESS（06:37 min）；
+  JVM +08（`TZ=Asia/Shanghai`，日志时间戳 19:1x 对 UTC 11:1x，证明确实生效）⇒ 同样 713/0/1 skip 且 checks met；
+  JVM −05 改余量后 ⇒ 单类绿；最终组合（UTC + 不偏移 + 1 天余量）全量复跑 713 / 0 / 1 skip + checks met。
+- 唯一剩下的 skip 是 `PythonEngineSmokeTest`（`@EnabledIfEnvironmentVariable(CI_SMOKE_PYTHON_URL)`，
+  本批未起 Python 服务，CI 里由第 4 步负责）。之前"52 skipped"这个口径本身也低估了：
+  `TenantInterceptorIsolationTest` 走 `@BeforeAll` assume 中止，surefire 记的是 `Tests run: 0`
+  （`b93_mvn_test_head.log:1421`），所以真实池子是 54 例——52 计入 skipped + 2 计成 0。
+- 否证一条第九十三批登记的怀疑：`ci.yml:365-368` 的 `mvn test -Dtest=PythonEngineSmokeTest` **不是**潜在红。
+  jacoco `prepare-agent` 默认 `append=true`，单独跑 8 例的类仍报 `All coverage checks have been met`；
+  加 `-Djacoco.append=false` 重跑同一条命令 ⇒ `ratio is 0.00` + 两条 `Rule violated`。
+  机制证实，结论翻转——那条怀疑是错的，写进文档时按"已被取数否掉"处理。
+- 格式化不回退：改完 7 个 Java 文件后 `mvn -B -o spotless:check` exit 0（第九十三批那一步的红不能由本批复发）。
+- XML 合法性：`pom.xml` 注释改动后用 ElementTree 解析通过（注释体内无 `--`）。
+
+#### 遗留（只登记不修）
+- **生产的时区口径没有任何一处钉住**：`recycle_expires_at` 由 JVM 时钟写（`recycledAt.plusDays(7)`，
+  `KnowledgeBaseServiceImpl.java:220` / `PromptTemplateServiceImpl.java:166` / `DeletionServiceImpl.java:383`），
+  读侧却是库的 `NOW()`（三个 mapper 各一条 `<= NOW()`）。今天两侧都默认 UTC 所以自洽，
+  而每个 JDBC URL 都写着 `serverTimezone=Asia/Shanghai`——若有人据此给 java 容器加 `TZ=Asia/Shanghai`
+  而不动 MySQL，7 天的回收窗口会静默偏 8 小时。修法要么两侧同时钉，要么把比较改成
+  `UTC_TIMESTAMP()`；属部署面/生产语义变更，需要先定方向。
+- `append=true` 使棘轮是"按 target 目录累积"的度量：本机反复 `mvn test -Dtest=Foo` 会一直拿着上一次全量运行的
+  数据过关。CI 每次全新 workspace 所以数值是真的，代价是冒烟那一步的 check 不增加信息；
+  要收紧就是给冒烟步显式 `-Djacoco.skip=true`。
+- `docs/ROADMAP.md:16` 的 Java 用例数：本批实测 CI 口径 713（无 IT 时 711），文档仍写 703。
+
+
 ### 第九十三批（2026-10-10：java job 自 2026-08-17 起恒红的第一步修绿了，代价是同一次运行把第二步的真实状态暴露出来）
 
 #### 结论（先给判定性质）
