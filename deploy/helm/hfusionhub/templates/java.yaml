@@ -67,6 +67,8 @@ spec:
               value: "http://{{ .Release.Name }}-python:{{ .Values.pythonAi.port }}"
             - name: JAVA_OPTS
               value: {{ .Values.javaBackend.javaOpts | quote }}
+            - name: JAVA_TOOL_OPTIONS
+              value: {{ .Values.javaBackend.javaToolOptions | quote }}
           resources:
             {{- toYaml .Values.javaBackend.resources | nindent 12 }}
           livenessProbe:

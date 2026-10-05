@@ -85,7 +85,7 @@
         FROM plugin
         WHERE status = 'circuit_open'
           AND circuit_open_until IS NOT NULL
-          AND circuit_open_until &lt; NOW()
+          AND circuit_open_until &lt; UTC_TIMESTAMP()
           AND deleted = 0
     </select>
 
@@ -142,7 +142,7 @@
     <update id="openCircuitBreaker">
         UPDATE plugin
         SET status = 'circuit_open',
-            circuit_open_until = DATE_ADD(NOW(), INTERVAL #{cooldownMinutes} MINUTE),
+            circuit_open_until = DATE_ADD(UTC_TIMESTAMP(), INTERVAL #{cooldownMinutes} MINUTE),
             updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id} AND deleted = 0
     </update>

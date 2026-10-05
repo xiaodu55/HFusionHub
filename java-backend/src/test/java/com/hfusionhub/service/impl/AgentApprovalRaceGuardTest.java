@@ -294,7 +294,7 @@ class AgentApprovalRaceGuardTest {
     @Test
     void expireSettlesUsageOnlyWhenGuardedTransitionWins() {
         AgentApproval expired = pendingApproval();
-        when(approvalMapper.selectExpiredPending(anyString())).thenReturn(List.of(expired));
+        when(approvalMapper.selectExpiredPending()).thenReturn(List.of(expired));
         when(approvalMapper.updateDecision(eq(1L), eq("expired"), any(), anyString(), anyString()))
                 .thenReturn(1);
         when(taskMapper.selectBatchIds(any())).thenReturn(List.of());
@@ -313,7 +313,7 @@ class AgentApprovalRaceGuardTest {
     @Test
     void expireSkipsUsageSettlementWhenRunAlreadyResumed() {
         AgentApproval expired = pendingApproval();
-        when(approvalMapper.selectExpiredPending(anyString())).thenReturn(List.of(expired));
+        when(approvalMapper.selectExpiredPending()).thenReturn(List.of(expired));
         when(approvalMapper.updateDecision(eq(1L), eq("expired"), any(), anyString(), anyString()))
                 .thenReturn(1);
         when(taskMapper.selectBatchIds(any())).thenReturn(List.of());

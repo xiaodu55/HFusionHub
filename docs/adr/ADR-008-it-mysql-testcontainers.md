@@ -86,10 +86,49 @@ ISO（`2026-10-10T11:58:12`）；python 的 `datetime.now(UTC).isoformat()` 带 
 `components/`、`api/`。契约用例在 `src/utils/__tests__/date.spec.ts`（16 例，红判据是
 HEAD 的实现下 14 例红）。
 
-**上限（不假装做过）**：本批只改显示面，API 与库里的值一字未动。生产容器里
-`TZ` / `-Duser.timezone` / MySQL `default-time-zone` 目前**在任何部署面上都没有声明**，
-写侧仍靠"JVM 与 MySQL 都恰好是 UTC"这一巧合（第八十四批已登记为遗留 #1 的同族）——
-把三者钉成三处同源的一个口径是下一批的内容。
+**上限（不假装做过）**：本批只改显示面，API 与库里的值一字未动。当时写侧的
+`-Duser.timezone` / MySQL `default-time-zone` **在任何部署面上都没有声明**（第九十六批推翻了
+这一句，见下一节；此处按"当时测到的事实"保留，并记下核对方式：在第九十五批的提交上
+`git grep -n -e user.timezone -e default-time-zone HEAD -- docker/ deploy/ java-backend/src`
+返回 **0 处**，而同一条 `git grep serverTimezone` 返回 5 处、其中 4 处写的是
+`Asia/Shanghai`、只有 helm 的 `templates/java.yaml` 写 `UTC`——三张钟面当时不仅没被钉，
+而且已经互相不一致）。
+
+## 写侧口径的钉住（2026-10-10，第九十六批）
+前两节把"读出来给人看按哪个钟"和"it 会话别再自己偏移"定了下来，但库里到底写的是
+哪个墙钟仍没人声明：`DATETIME` 存的是**不带时区的字面量**，谁写就用谁的钟——Java 侧
+`LocalDateTime.now()` 取 JVM 默认时区，谓词里的 `NOW()`/`CURRENT_TIMESTAMP` 取**会话**
+时区，两处都没被钉住，于是同一行的"是否过期"取决于这行由谁写、这次查询恰好落在哪条连接。
+
+本批把三张钟面钉成同一个 UTC，并把判定改成会话免疫的写法：
+
+- **判定 SQL**：`expires_at` / `recycle_expires_at` / `circuit_open_until` 三列的 7 处比较
+  与 2 处写入（熔断冷却）一律用 `UTC_TIMESTAMP()`——它取的是 UTC 墙钟，会话挪不动它。
+  审批过期清扫原有第二个钟（调用方把 JVM 的 `LocalDateTime.now()` 当 `#{now}` 传进谓词），
+  该入参已删，`selectExpiredPending()` 现在无参，双钟在结构上不存在了。
+- **JVM 默认时区**：`JAVA_TOOL_OPTIONS=-Duser.timezone=UTC`（两张 compose + helm 的
+  `javaBackend.javaToolOptions`，模板里真的引用了那个键）。不用 `JAVA_OPTS`：
+  `deploy/Dockerfile.java` 的 ENTRYPOINT 是 exec 形式，没有任何 shell 展开它，那行是死开关
+  （已登记 `docs/CLEANUP_BACKLOG.md`，删掉或改入口是独立决策）。
+- **MySQL 服务端**：`--default-time-zone=+00:00`（compose 的 `command` / helm 的 `args`）。
+- **JDBC**：`serverTimezone=UTC`，把原先 4 处 `Asia/Shanghai` 与 1 处 `UTC` 的分歧收成一个。
+- **Jackson `time-zone`**：一并改成 UTC，但它对 `LocalDateTime` 载荷是空转的
+  （`date-format` 只作用于 `java.util.Date`，而 `src/main/java` 下普查不到任何
+  `Date`/`Instant`/`OffsetDateTime`/`ZonedDateTime` 字段），改它只是为了不让配置里留一张
+  指向别的方向的钟面。
+
+判据两侧：`java-backend/src/test/java/com/hfusionhub/mapper/WriteClockCaliberTest`（真库，
+4 例，红判据阶段 3 例红）断言三处判定都不随 `SET time_zone='+08:00'` 翻转；
+`scripts/static-checks.py` 检查 13（`--write-clock-caliber`）是纯文本门禁，核对 10 张钟面
+是否都归一到 UTC、helm 模板是否真的消费了那两个 values 键、以及判定列有没有又被拿去和
+`NOW()` 比。
+
+**上限**：检查 13 只读文本，不启动容器；IT 走的 JDBC URL 由 `@DynamicPropertySource`
+注入（外部库或 Testcontainers），所以生产那条 URL 上的 `serverTimezone` 只有文本门禁在看。
+"JVM 默认钟 == 库钟"也**没有**写成断言——那等于要求每台开发机的系统时区都是 UTC，
+正是第九十四批刚从 `application-it.yml` 撤掉的那类宿主假设。python 侧仍不在本批口径内：
+`python-ai/app/core/tools/time_tool.py:21` 的 `datetime.now()` 取容器时区，而容器没有声明 `TZ`
+（已登记为独立缺陷）。
 
 ## 结果与测量
 - 6/8 集成测试类在真实 MySQL 上全绿，`mvn test` 702 全过；

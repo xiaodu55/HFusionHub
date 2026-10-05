@@ -1,7 +1,7 @@
 # 冗余功能与死代码清理清单
 
 > 2026-08-29 前端主题统一改造时盘点生成。本次**只登记不删除**，逐项评估后处理。
-> 删除前先确认测试基线（Java 713 · Python 1870 · 前端 117）仍全绿。
+> 删除前先确认测试基线（Java 717 · Python 1881 · 前端 117）仍全绿。
 
 ## A. 冻结的实验功能（治理决策：保留代码，待后续补强）
 
@@ -20,6 +20,15 @@
 - [x] ~~`AiClient.chatStream()`~~ — 已删除（含 `AiClientTest` 对应断言，2026-08-29）。
 - [x] ~~`VectorizationServiceImpl` 两个 `@Deprecated` 私有方法 `toChunkResponse()` / `fromJson()`~~ — 已删除（2026-08-29）。
 - [x] ~~`agent.py` 的 `agent_status` 字段~~ — 已退役（2026-08-29）：写入点全部改为 `status`，2 处直接断言的测试迁移完成；评测 API 的 `agent_call.agent_status` 为独立局部变量，不受影响。
+- [ ] **`JAVA_OPTS` 是死开关**（第九十六批登记）—— 三处声明：`docker/docker-compose.yml:269`、
+  `deploy/docker-compose.prod.yml:199`、`deploy/helm/hfusionhub/templates/java.yaml:68`（值来自
+  `values.yaml:68` 的 `javaBackend.javaOpts`）。消费方 **0 处**：`deploy/Dockerfile.java:26` 的
+  `ENTRYPOINT ["java", "-jar", "app.jar"]` 是 exec 形式，没有 shell 去展开 `$JAVA_OPTS`，
+  所以那行 `-Xmx512m -Xms256m` 从未进过 JVM。两条出路是**行为决策**而非清理：删掉这三处声明
+  （堆上限交回 `deploy.resources.limits` + `-XX:MaxRAMPercentage`），或把入口改成
+  `["sh","-c","java $JAVA_OPTS -jar app.jar"]`（那会真的把堆钉到 512m，而 helm values 里
+  的 requests/limits 是按别的数配的）。第九十六批只登记未动，同时纠正了
+  `docs/OPTIMIZATION_PLAN.md:220` 把 `JAVA_OPTS -Xmx512m` 当成生效堆上限的那句。
 
 ## C. 新旧双轨实现（待稳定后收敛）
 

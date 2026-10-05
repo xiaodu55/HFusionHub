@@ -41,7 +41,7 @@ public class NotificationController {
                 """
             SELECT sn.* FROM system_notice sn
             WHERE (sn.scope = 'all' OR sn.scope = 'admin')
-            AND (sn.expires_at IS NULL OR sn.expires_at > NOW())
+            AND (sn.expires_at IS NULL OR sn.expires_at > UTC_TIMESTAMP())
             ORDER BY sn.created_at DESC
             LIMIT 20
             """;
@@ -65,7 +65,7 @@ public class NotificationController {
                 """
             SELECT COUNT(*) FROM system_notice sn
             WHERE (sn.scope = 'all' OR sn.scope = 'admin')
-            AND (sn.expires_at IS NULL OR sn.expires_at > NOW())
+            AND (sn.expires_at IS NULL OR sn.expires_at > UTC_TIMESTAMP())
             AND sn.id NOT IN (
                 SELECT nr.notice_id FROM notice_recipient nr WHERE nr.user_id = ?
             )
@@ -81,7 +81,7 @@ public class NotificationController {
         jdbcTemplate.update(
                 """
             INSERT IGNORE INTO notice_recipient (notice_id, user_id, is_read, read_at)
-            VALUES (?, ?, 1, NOW())
+            VALUES (?, ?, 1, UTC_TIMESTAMP())
             """,
                 noticeId,
                 userId);

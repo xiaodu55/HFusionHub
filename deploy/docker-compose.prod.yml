@@ -25,6 +25,8 @@ services:
   mysql8:
     image: mysql:8.0.36
     container_name: hfusionhub-mysql
+    # 写侧时钟口径之一：服务端会话默认时区钉成 UTC（与 JVM/JDBC 同源，见 static-checks 检查 13）
+    command: ["--default-time-zone=+00:00"]
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
       MYSQL_DATABASE: hfusionhub
@@ -169,7 +171,7 @@ services:
     environment:
       DB_USERNAME: hfusionhub
       DB_PASSWORD: ${MYSQL_PASSWORD}
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql8:3306/hfusionhub?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql8:3306/hfusionhub?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATA_REDIS_HOST: redis7
       SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?required}
@@ -190,6 +192,10 @@ services:
       TRACING_SAMPLING: ${TRACING_SAMPLING:-1.0}
       AI_SERVICE_URL: http://python-ai:9000
       PYTHON_AI_CALLBACK_BASE_URL: http://java-backend:8080/api
+      # 写侧时钟口径之二：JVM 默认时区。Dockerfile.java 是 exec 形式 ENTRYPOINT，
+      # 没有任何 shell 读 JAVA_OPTS（死开关，登记在 docs/CLEANUP_BACKLOG.md）；
+      # JAVA_TOOL_OPTIONS 由 JVM 自身读取，"Picked up JAVA_TOOL_OPTIONS" 即生效证据。
+      JAVA_TOOL_OPTIONS: -Duser.timezone=UTC
       JAVA_OPTS: "-Xmx512m -Xms256m"
     volumes:
       - uploads-data:/app/uploads

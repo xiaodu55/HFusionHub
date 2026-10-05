@@ -728,7 +728,9 @@ public class AgentTaskServiceImpl implements AgentTaskService {
     @Transactional
     public int expireApprovals() {
         String nowStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-        List<AgentApproval> expired = approvalMapper.selectExpiredPending(nowStr);
+        // 过期判定不再传 JVM 的 nowStr：那会让"哪些审批过期"由进程默认时区决定，
+        // 与列表侧 selectPendingByUserId 的 DB 钟判定形成双钟。nowStr 只用于写 decided_at。
+        List<AgentApproval> expired = approvalMapper.selectExpiredPending();
         if (expired.isEmpty()) {
             return 0;
         }

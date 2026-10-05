@@ -77,7 +77,7 @@ public interface DocumentMapper extends BaseMapper<Document> {
             SELECT * FROM document
             WHERE deleted = 1
               AND recycle_expires_at IS NOT NULL
-              AND recycle_expires_at <= NOW()
+              AND recycle_expires_at <= UTC_TIMESTAMP()
             ORDER BY recycle_expires_at ASC
             LIMIT #{limit}
             """)

@@ -35,7 +35,12 @@ public interface AgentApprovalMapper extends BaseMapper<AgentApproval> {
      */
     int updateExecutionOutcome(@Param("id") Long id, @Param("status") String status);
 
-    List<AgentApproval> selectExpiredPending(@Param("now") String now);
+    /**
+     * Select pending approvals whose {@code expires_at} has passed. The clock is
+     * the database's UTC clock (see {@code AgentApprovalMapper.xml}); callers must
+     * not pass a JVM-derived "now", which would reintroduce a second clock.
+     */
+    List<AgentApproval> selectExpiredPending();
 
     int updateDecision(
             @Param("id") Long id,

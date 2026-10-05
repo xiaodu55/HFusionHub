@@ -11,6 +11,122 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第九十六批（2026-10-10：写侧三张钟面钉成同一个 UTC，判定 SQL 换成会话免疫的 `UTC_TIMESTAMP()`——红判据第一次栽在"MyBatis 一级缓存让二次读根本没问库"）
+
+#### 结论（先给判定性质）
+- 第九十五批把读取侧定完，本批做第八十四批定下的 B+ 方案 1–6 项（生产时区口径）。取数先
+  推翻一条现成声称：ADR-008:89 那句"`TZ` / `-Duser.timezone` / MySQL `default-time-zone`
+  目前在**任何部署面上都没有声明**"在第九十五批的提交上确实成立
+  （`git grep -n -e user.timezone -e default-time-zone HEAD -- docker/ deploy/ java-backend/src`
+  = **0 处**），但同一句里没写的是**已经存在的钟面自己就不一致**：`serverTimezone` 5 处里
+  4 处 `Asia/Shanghai`（`docker/docker-compose.yml:253`、`deploy/docker-compose.prod.yml:172`、
+  `application.yml:24`、`application.yml.example:13`）、只有 `templates/java.yaml:48` 写 `UTC`。
+  也就是说"没声明"的真实形态是"声明了三套、其中两套互相矛盾"。
+- 缺陷的落点不是"偏了 8 小时"，而是**同一行的判定随连接翻转**：`DATETIME` 存不带时区的字面
+  墙钟，写入用 JVM 默认钟（`LocalDateTime.now()`）、谓词里的 `NOW()` 用**会话**钟，两处都没被
+  钉住。翻不翻得动是可算的：一行 `expires_at` 落在 `(UTC 此刻, UTC 此刻+8h)` 这个窗口里时，
+  会话为 `+00:00` 判"未过期"、会话为 `+08:00` 判"过期"，而行内容是同一个字节。
+- 红判据（`WriteClockCaliberTest`，真库，第九十五批的树）：**4 run / 3 failed**
+  （`b96_it_red_head.log`），三条会话免疫断言各自红在 `assertTrue/assertFalse` 的对照行上；
+  第四条（缓存探针）本就是绿的，因为它钉的机制与钟无关。红阶段那条清扫用例叫
+  `expirySweepDoesNotDependOnWhichClockTheNowCameFrom`——它断言的是"JVM 传进来的 now"与"库钟"
+  两个来源会给出不同集合，修复把这个入参删掉之后，用例退成"清扫不随会话时区翻转"并改名，
+  这是**结构上不再可能有双钟**的证据，不是把断言放宽。
+- **本批第一次红判据拿到的是假绿**，且成因值得单独记：`@Transactional` 的 Spring 测试让整条
+  用例共用一个 SqlSession，MyBatis 一级缓存以 `{语句+参数}` 为键活在里面，于是"切了
+  `SET time_zone` 再读一次"同参数时**根本不去问库**，返回第一次的结果集——两条会话免疫用例
+  在缺陷存在时都是绿的。发现方式是临时诊断（同会话插一行新的、看它可不可见），现已钉成
+  第四条用例 `identicalStatementAndParamsAreServedFromTheMyBatisFirstLevelCache`；其余用例
+  要么换参数读（`selectExpiredRecycled(100)` / `(101)`、两个 user_id），要么（无参的清扫）
+  显式 `sqlSession.clearCache()` 后用"刚插入的行必须可见"自证这次读真的问了库。
+
+#### 改动（判定侧改写法 + 部署侧钉钟面，两侧都必须有）
+- **判定 SQL 10 处**全部从 `NOW()` 改成 `UTC_TIMESTAMP()`（8 处比较 + 2 处写入；第九十五批
+  的"下一批"指针写的是"6 处判定 SQL"，那是当时按 mapper XML 数的，实测口径见本条）：
+  `AgentApprovalMapper.xml:56`（待办列表）、`:74`（过期清扫）、`DocumentMapper.java:80`、
+  `KnowledgeBaseMapper.java:53`、`PromptTemplateMapper.java:63`（三处回收站过期）、
+  `PluginMapper.xml:88`（熔断到点）、`NotificationController.java:44/:68`（公告过期），
+  写入侧 `PluginMapper.xml:145`（`DATE_ADD(UTC_TIMESTAMP(), INTERVAL …)` 冷却）与
+  `NotificationController.java:84`。
+- **合掉审批双钟**：`AgentApprovalMapper.selectExpiredPending(@Param String now)` → 无参，
+  `AgentTaskServiceImpl.java:729` 不再传 JVM 的 `LocalDateTime.now()`（`nowStr` 只留给
+  `decided_at`），`AgentApprovalRaceGuardTest.java:297/:316` 的 stub 随之改。
+- **三张钟面钉成 UTC**：JVM `-Duser.timezone=UTC` 走 `JAVA_TOOL_OPTIONS`
+  （`docker/docker-compose.yml:268`、`deploy/docker-compose.prod.yml:198`、
+  `values.yaml:72` → `templates/java.yaml:70`）；MySQL `--default-time-zone=+00:00`
+  （compose `command` 两处 + `values.yaml:36` → `templates/mysql.yaml:34` 的 `args`）；
+  JDBC `serverTimezone=UTC`（4 处 `Asia/Shanghai` 收口 + `application.yml.example:13`、
+  `application-test.yml`、`application-it.yml`）。选 `JAVA_TOOL_OPTIONS` 而不是 `JAVA_OPTS`
+  是因为后者**不是通道**：`deploy/Dockerfile.java:26` 的 ENTRYPOINT 是 exec 形式，没有任何
+  shell 展开 `$JAVA_OPTS`（实测 `Picked up JAVA_TOOL_OPTIONS` 出现在 maven JVM 与 surefire
+  fork 两处，前者是 JVM 自己读的）。`JAVA_OPTS` 那三处按用户选定方案**本批不动**、另立缺陷
+  登记（删掉还是改入口是行为决策，会真的改变堆上限）。
+- `spring.jackson.time-zone` 一并改 UTC，但**注明它是空转的**：`date-format` 只作用于
+  `java.util.Date`，而 `src/main/java` 普查不到一处 `Date`/`Instant`/`OffsetDateTime`/
+  `ZonedDateTime` 字段，出站全是 `LocalDateTime`。改它是为了让配置里不留一张指向别处的钟面，
+  而不是因为它有效果。
+- **检查 13（`--write-clock-caliber`，已并入默认全跑档）**：10 张钟面必须都归一到 UTC、
+  helm 模板必须**真的引用**那两个 values 键（第八十三批"模板读了一个不存在的键"的反向形态：
+  键存在但没人读，同样是死配置）、三张判定列不得再和 `NOW()` 同处一个比较式；注释行不计入
+  声明（第八十四批规则）但行号保留，所以报告能指到真行。
+
+#### 验证（红→绿，逐条实测）
+- 判据类：`WriteClockCaliberTest` 红 **4 run / 3 failed** → 绿 **4 passed**（外部真库
+  `HFH_IT_JDBC_URL=…127.0.0.1:3308…serverTimezone=UTC`，`b96_it_green1.log`）。宿主时区实测
+  `+08:00`（maven 日志 `Finished at 2026-10-10T21:45:40+08:00`），判据仍绿 ⇒ 断言与宿主钟无关。
+- Java 全量：`mvn -B -o spotless:check test -Djacoco.skip=true` **BUILD SUCCESS，
+  Tests run: 717, Failures: 0, Errors: 0, Skipped: 1**（`b96_mvn_full.log`；第九十五批口径
+  713 ＋ 本批 4 例，唯一 skip 是 `PythonEngineSmokeTest`，由 `CI_SMOKE_PYTHON_URL` 门控，
+  与第九十四批同数）。
+- Python 全量：**2042 passed / 8 skipped**（`b96_pytest_full.log`）＝第九十二批 2025 ＋
+  第九十五批 6 ＋ 本批 11（`tests/test_write_clock_caliber.py`）。
+- 门禁：`static-checks.py` 全跑档除计数棘轮本批待同步外其余 [ok]，检查 13 绿
+  （`[ok] 写侧时钟三源同源（10 张钟面全部 = UTC），判定列不读会话钟：扫描 472 个 mapper XML
+  与 src/main/java 文件`）；红侧用**真实文件**注入三种漂移各判红一次并跑完还原
+  （JVM→`Asia/Shanghai`、`mysql.defaultTimeZone`→`+08:00`、模板删掉 `.Values.mysql.defaultTimeZone`
+  引用）。接线测试按第八十三批那次哑火的破坏方式实测过它自己会红
+  （要求 `args.write_clock_caliber` 在 parse 之后、首个 dispatch 之前出现 ≥2 次）。
+- helm：`lint` 0 failed；`template`（secrets/pluginRunner 用 RENDER-CHECK 占位）退出 0、
+  24 个对象、0 个 `<no value>`；与第九十五批树的渲染产物逐行 diff **恰好 +5 行**
+  （java 两行 `JAVA_TOOL_OPTIONS`、mysql 三行含 `args`），无其它改动。对照产物按
+  `git archive HEAD` 解到仓库外生成，不碰工作副本。
+- `ruff check` 干净；行尾纪律：三处被门禁注入过的文件工作副本一度被 Python 的
+  `read_text`/`write_text` 往返改成 CRLF，已按第九十二批口径改回 LF
+  （`git ls-files --eol` 现 `w/lf`，`git diff --stat` 只剩内容改动）。
+
+#### 上限（不假装做过）
+- 检查 13 只读文本：证明"声明存在且同源"，不证明 mysqld 真以该参数起过、也不证明三档拓扑
+  中任何一档起过容器。IT 的 JDBC URL 一律被 `@DynamicPropertySource` 覆盖，生产那条 URL 上
+  的 `serverTimezone` **没有任何一次真实连接**走过。
+- 存量数据"本来就是 UTC 字面量"是**三条已核事实的推论**（镜像未声明 `TZ`、字段全为
+  `LocalDateTime` 故驱动不做偏移换算、会话取 server 默认），不是对某个真库做过的普查；
+  `docs/PRODUCTION_OPS.md` §13.1 给了逐表核对的 SQL 与判读口径。
+- 本批没有把 JVM 默认钟 == 库钟写成断言——那等于要求每台开发机系统时区都是 UTC，正是第九十
+  四批刚从 `application-it.yml` 撤掉的那类宿主假设。
+
+#### 三条只登记不修
+- `JAVA_OPTS` 死开关（3 处声明 / 0 处消费）：见 `docs/CLEANUP_BACKLOG.md` B 节，并顺带纠正
+  `docs/OPTIMIZATION_PLAN.md:220` 把它当成生效堆上限的那句。
+- python 侧仍在口径之外：`python-ai/app/core/tools/time_tool.py:21` 的 `datetime.now()` 取
+  容器时区，而 4 个 python 工作负载都没有声明 `TZ`；同一容器里另有 `datetime.now(UTC)` 的写法。
+- `NotificationController.java:118` 把管理员输入的过期时刻按 naive 本地墙钟与
+  `LocalDateTime.now()` 比：钉住 JVM=UTC 之后它的语义变成"管理员按 UTC 填"，而前端
+  `admin/Notices.vue:81` 发的是带浏览器偏移的 ISO 串——谁负责换算没有定，属行为决策。
+
+#### 下一批（按可核验性排序，取数成本从低到高）
+1. **把 python 侧接进同一口径**：`app/core/tools/time_tool.py:21` 的 `datetime.now()` 与
+   4 个 python 工作负载未声明的 `TZ` 是同一条缺陷的两半，且检查 13 的钟面表已把 java 侧收口，
+   python 侧只需同一手法（compose/helm 各加一张钟面 + 门禁把它纳进 `expected` 集）。
+2. **整栈 compose 端到端跑一次**：本批 10 张钟面全部只有文本层与渲染层证据，§13.3 那句
+   "三档拓扑没起过任何一个容器"从第八十四批一路带到现在，是该收口的时候。
+3. 判定列的写入侧收口：`AgentTaskServiceImpl.java:669` 的 `setExpiresAt(LocalDateTime.now()
+   .plusMinutes(5))` 仍由 JVM 写，虽然 JVM 已钉 UTC，但"审批 5 分钟"这类时长更适合由
+   `DATE_ADD(UTC_TIMESTAMP(), INTERVAL 5 MINUTE)` 产生，使写入也会话免疫。
+4. CI-green 轨遗留：`Errno 24` fd 泄漏、pre-pull/tag 不匹配、`test_timeout_enforcement`、
+   `pip-audit`、spotless `ratchetFrom` B′、`-Djacoco.skip=true` 的显式配方。
+
+
+
 ### 第九十五批（2026-10-10：显示时区按 A 方案落定——同一瞬间在前端曾有三套互相矛盾的解释，现在只剩一套）
 
 #### 结论（先给判定性质）

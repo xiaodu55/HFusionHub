@@ -29,6 +29,9 @@ spec:
       containers:
         - name: mysql
           image: {{ .Values.mysql.image }}
+          # 写侧时钟口径之一：官方镜像把首个以 - 开头的参数直接传给 mysqld，
+          # 会话默认时区由此钉住（与 javaToolOptions、URL 的 serverTimezone 同源）
+          args: ["--default-time-zone={{ .Values.mysql.defaultTimeZone }}"]
           ports:
             - containerPort: 3306
           env:

@@ -27,6 +27,7 @@
 - [ ] **备份策略** — 脚本已就绪：`scripts/backup-data.ps1`（MySQL mysqldump）+ `scripts/backup_milvus.sh`（Milvus 卷快照）；cron 示例 `0 3 * * * cd /opt/hfusionhub && ./scripts/backup_milvus.sh /backups/milvus`；恢复演练见下文「备份恢复演练」
 - [ ] **Redis 持久化** — AOF 已启用（`appendonly yes`）；RDB 每小时备份（`save 3600 1`）
 - [ ] **卷可写性** — 应用容器以钉死的 uid 10001 运行、helm 侧同号 fsGroup（见「10. 卷属主与运行身份」）；升级到钉死 uid 前建过的卷需一次性 chown。已实测：python 镜像在真实 docker 上三个挂载点均可写（§10.2 M1）；java 镜像首次真实构建通过，且与 python 在同一块卷上双向互见、`/api/parse` 认 java 写的绝对路径（§10.2 C1–C4）。未实测：集群侧 fsGroup 行为、整栈 compose 下的那条 `exec` 命令对
+- [ ] **时钟口径** — JVM `-Duser.timezone=UTC`（走 `JAVA_TOOL_OPTIONS`，不是 `JAVA_OPTS`）、MySQL `--default-time-zone=+00:00`、JDBC `serverTimezone=UTC` 三处同源，判定 SQL 只读 `UTC_TIMESTAMP()`（见「13. 写侧时钟口径」）。核对命令 `python scripts/static-checks.py --write-clock-caliber`；曾自定义 `TZ` 起过 java 容器的环境，上线前按 §13.1 的 SQL 核一次存量行的偏移
 
 ### 🚀 性能与扩展性
 
@@ -858,3 +859,71 @@ OTel 12 passed，假装没装则 10 passed + 2 skipped）。这条覆盖真正�
   记录；把它接到镜像内的成本是要在 CI 里真构建并真跑一次 pytest。
 - arq 与 opentelemetry 的归属仍在 Dockerfile，锁与镜像不同源这件事没有消除，只是变得可核对。
 
+
+## 13. 写侧时钟口径（第九十六批）
+
+库里 `DATETIME` 存的是**不带时区的字面墙钟**，所以"这一行到底几点过期"由两件事决定：
+写它的那个进程的钟，和判定它时那条连接的钟。本批把三张钟面钉成同一个 UTC：
+
+| 钟面 | 现值 | 声明位置 | 谁来读它 |
+| --- | --- | --- | --- |
+| JVM 默认时区 | `-Duser.timezone=UTC` | `docker/docker-compose.yml:268`、`deploy/docker-compose.prod.yml:198`、`values.yaml:72`（`javaBackend.javaToolOptions`）→ `templates/java.yaml:70` | JVM 自己（`Picked up JAVA_TOOL_OPTIONS: …` 即生效证据） |
+| MySQL 服务端 | `--default-time-zone=+00:00` | `docker/docker-compose.yml:7`、`deploy/docker-compose.prod.yml:29`、`values.yaml:36`（`mysql.defaultTimeZone`）→ `templates/mysql.yaml:34` | mysqld 的会话默认 ⇒ `NOW()` / `CURRENT_TIMESTAMP` 的落点 |
+| JDBC 会话 | `serverTimezone=UTC` | `docker/docker-compose.yml:256`、`deploy/docker-compose.prod.yml:174`、`application.yml:24`、`templates/java.yaml:48` | Connector/J 对 `Timestamp`/`Date` 的换算 |
+
+判定 SQL 一律读库的 UTC 钟（`UTC_TIMESTAMP()` 会话免疫），不再用 `NOW()`：
+`expires_at`、`recycle_expires_at`、`circuit_open_until` 三列的 7 处比较 + 2 处写入
+（熔断冷却 `DATE_ADD(UTC_TIMESTAMP(), INTERVAL …)`）都在此列。审批过期清扫原先还收
+调用方传入的 JVM `now`，该入参已删（`AgentApprovalMapper.selectExpiredPending()` 无参）。
+
+### 13.1 存量数据要不要改
+
+**默认不用**，理由是三条已核的事实而非猜测：镜像内 OS 时区未被声明 ⇒ 容器里是 UTC；
+实体字段全是 `LocalDateTime`（`src/main/java` 普查不到 `java.util.Date` / `Instant` /
+`OffsetDateTime` / `ZonedDateTime`），Connector/J 对 `LocalDateTime` 不做偏移换算，写进去
+就是字面量；`NOW()`/`CURRENT_TIMESTAMP` 取会话钟，会话取 server 默认（`SYSTEM` = 容器 UTC）。
+也就是说旧数据本来就是 UTC 字面量，本批只是把"恰好如此"变成"声明如此"。
+
+上线前若要确认（尤其是曾用 `TZ=Asia/Shanghai` 起过 java 容器的环境），跑一次对照：
+
+```sql
+SELECT MAX(created_at) AS newest_literal, UTC_TIMESTAMP() AS utc_now,
+       TIMESTAMPDIFF(HOUR, MAX(created_at), UTC_TIMESTAMP()) AS lag_hours
+FROM agent_approval;
+-- lag_hours ≈ 0 ⇒ 存量是 UTC 字面量；≈ -8 ⇒ 有写入方按 +08 墙钟落库，需要按批迁移
+```
+
+判定"有没有 +8 写入方"要逐表做（上表只是形状示例），并且要选**没有过期风险**的列。
+`SET time_zone` 与 `--default-time-zone` 都不会改写已有行——挪钟只影响新的 `NOW()`。
+
+### 13.2 门禁与判据
+
+- 文本侧：`python scripts/static-checks.py --write-clock-caliber`（检查 13，已并入默认全跑档）。
+  核对 10 张钟面是否都归一到 UTC、helm 模板是否**真的引用**了那两个 values 键（第八十三批
+  "模板读了一个不存在的键"的反向形态：键存在但没人读，同样是死配置）、判定列有没有又被拿去
+  和 `NOW()` 比。注释行不计入声明，行号保留以便报告指到真行。
+- 行为侧：`java-backend/src/test/java/com/hfusionhub/mapper/WriteClockCaliberTest`（4 例，
+  真库；红判据阶段在第九十五批的树上 4 run / 3 failed）。它在 `SET time_zone='+08:00'` 下
+  重读同一判定，断言结论不翻转；另有一例专门把"MyBatis 一级缓存会让同参二次读根本不问库"
+  钉成用例——第一版判据正是栽在这里得到假绿的。
+
+### 13.3 未收口
+
+- **`JAVA_OPTS` 是死开关**：`docker/docker-compose.yml:269`、`deploy/docker-compose.prod.yml:199`、
+  `templates/java.yaml:68` 三处声明，而 `deploy/Dockerfile.java:26` 是 exec 形式 ENTRYPOINT
+  （`["java", "-jar", "app.jar"]`），没有任何 shell 展开它 ⇒ 那行 `-Xmx512m -Xms256m` 从未生效。
+  删掉它或把入口改成 shell 形式是**独立决策**（会真的改变堆上限），已登记
+  [CLEANUP_BACKLOG.md](CLEANUP_BACKLOG.md) B 节；顺带纠正 `docs/OPTIMIZATION_PLAN.md:220`
+  那句"除 `JAVA_OPTS -Xmx512m` 外……"——它把死开关当成了生效的堆上限。
+- **python 侧不在这套口径内**：`python-ai/app/core/tools/time_tool.py:21` 用 `datetime.now()`
+  取**容器时区**，而 4 个 python 工作负载都没有声明 `TZ`；同一容器里的 UTC 时间戳另有
+  `datetime.now(UTC)` 的写法。两种口径在 python 里并存，本批未收口。
+- **`NotificationController.java:118`** 把管理员输入的过期时刻按 naive 本地墙钟与
+  `LocalDateTime.now()` 比。钉住 JVM=UTC 之后它的语义变成"管理员按 UTC 填"，前端传的却是
+  带浏览器偏移的 ISO 串——谁该负责换算没有定，属行为决策，本批只登记。
+- **IT 从不走生产 URL**：`AbstractItMySQLTest` 的 `@DynamicPropertySource` 总是覆盖
+  `spring.datasource.url`（外部库或 Testcontainers），所以 `serverTimezone=UTC` 这条只有
+  文本门禁在看，没有一次真实连接是按生产那条 URL 建的。
+- **检查 13 只读文本**：它证明"声明存在且同源"，不证明 mysqld 真的以该参数起过、也不证明
+  compose/helm 三条拓扑起过任何一个容器。三档拓扑的实测仍是遗留项（见第八十四批起各批的
+  同一句上限声明）。

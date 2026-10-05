@@ -63,6 +63,12 @@
   replace('T',' ')（截字面量、丢偏移）或 getTimezoneOffset()（把某个国家的时区编进代码）。
   第九十五批前同一份数据在三种互相矛盾的解析theory并存，合起来必然在不同页面显示成不同时刻。
 
+检查 13：写侧时钟三源同源，且判定列不读会话钟
+  JVM `-Duser.timezone`、MySQL `--default-time-zone`、JDBC `serverTimezone` 在 dev/prod compose
+  与 helm（values + 模板引用）上必须都声明、且归一化后同为 UTC；模板引用了 values 键才算数，
+  只写键没人读=死配置。判定列（expires_at / recycle_expires_at / circuit_open_until）的比较式
+  里不得出现 NOW()——NOW() 取会话时区的墙钟，列里存的是另一套，同一行的过期判定会随连接翻转。
+
 用法:
   python scripts/static-checks.py --tenant-columns
   python scripts/static-checks.py --internal-token-keys
@@ -76,6 +82,7 @@
   python scripts/static-checks.py --eval-harness-storage
   python scripts/static-checks.py --requirements-markers
   python scripts/static-checks.py --frontend-time-entry
+  python scripts/static-checks.py --write-clock-caliber
   python scripts/static-checks.py            # 全部检查
 退出码: 0=通过, 1=发现违规
 """
@@ -1010,6 +1017,194 @@ def check_frontend_time_entry() -> None:
         print(f"[ok] 前端时间显示只有一个入口：扫描 {scanned} 个文件，未见 replace('T',…) / getTimezoneOffset()")
 
 
+# ── 检查 13：写侧时钟三源同源，且判定列不读会话钟 ─────────────────────────
+
+APP_YML = REPO / "java-backend" / "src" / "main" / "resources" / "application.yml"
+HELM_JAVA_TEMPLATE = HELM_CHART / "templates" / "java.yaml"
+HELM_MYSQL_TEMPLATE = HELM_CHART / "templates" / "mysql.yaml"
+JAVA_MAIN_JAVA = REPO / "java-backend" / "src" / "main" / "java"
+JAVA_MAPPER_XML_DIR = REPO / "java-backend" / "src" / "main" / "resources" / "mapper"
+
+# 同一个 UTC 只能按各自的语法写：MySQL 认 '+00:00'（命名时区要先装 tzinfo 表），
+# JVM 认 UTC，Connector/J 两种都收。不归一化就没法谈"三处一致"。
+_UTC_TOKENS = {"utc", "z", "gmt", "+0", "+00", "+0000", "+00:00"}
+
+_JVM_TZ_RE = re.compile(r"-Duser\.timezone=([^\s\"']+)")
+_MYSQL_TZ_RE = re.compile(r"--default-time-zone=([^\s\"',]+)")
+_JDBC_TZ_RE = re.compile(r"[?&]serverTimezone=([A-Za-z0-9_+:%./-]+)")
+
+# 判定列（过期/熔断到点）一旦和会话钟 NOW() 同处一个比较式，同一行的判定就随连接翻转。
+_DECISION_COLUMN_NOW_RE = re.compile(
+    r"\b(expires_at|recycle_expires_at|circuit_open_until)\b[^\n]*\bNOW\(\)"
+)
+
+
+def _strip_code_comments(text: str) -> str:
+    """去掉说明文字，只留代码——注释里同时提到判定列和 NOW() 不算违规。
+
+    块注释整体去掉；行注释只认"整行是注释/续行"的形态，避免把 SQL 字符串里的 `//`
+    （如 URL）当注释切断。第九十六批的 mapper 注释就在解释"为什么不用 NOW()"，
+    不剥注释的门禁会在自己的说明文字上判红。
+
+    报告里的行号必须指着真正的违规行，所以剥的时候保留行数：注释整行变空行。
+    """
+
+    def _blank(match: "re.Match[str]") -> str:
+        return "\n" * match.group(0).count("\n")
+
+    text = re.sub(r"<!--.*?-->", _blank, text, flags=re.DOTALL)
+    text = re.sub(r"/\*.*?\*/", _blank, text, flags=re.DOTALL)
+    kept = []
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        kept.append("" if stripped.startswith(("//", "*")) else line)
+    return "\n".join(kept)
+
+
+def _repo_rel(path: Path) -> str:
+    """仓库内路径用于报告；门禁测试把常量换成 tmp_path 时 relative_to 会抛，退化成文件名。"""
+    return path.relative_to(REPO).as_posix() if path.is_relative_to(REPO) else path.name
+
+
+def _normalized_clock(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    token = raw.strip().strip("'\"")
+    return "UTC" if token.lower() in _UTC_TOKENS else token
+
+
+def _compose_clock_faces(text: str, service: str) -> dict[str, str | None]:
+    """从 compose 的某个服务块里取三张"钟面"：JVM 参数、MySQL 参数、JDBC URL。"""
+    block = _compose_service_blocks(text).get(service)
+    if block is None:
+        return {}
+    block = _strip_comments(block)
+    jvm = _declared_env(block, "JAVA_TOOL_OPTIONS")
+    jdbc = _declared_env(block, "SPRING_DATASOURCE_URL")
+    return {
+        "jvm": _JVM_TZ_RE.search(jvm).group(1) if jvm and _JVM_TZ_RE.search(jvm) else None,
+        "mysql": _MYSQL_TZ_RE.search(block).group(1) if _MYSQL_TZ_RE.search(block) else None,
+        "jdbc": _JDBC_TZ_RE.search(jdbc).group(1) if jdbc and _JDBC_TZ_RE.search(jdbc) else None,
+    }
+
+
+def _values_clock_face(text: str, key: str) -> str | None:
+    block = _strip_comments(text)
+    m = re.search(rf"^\s*{re.escape(key)}:\s*(.+?)\s*$", block, re.MULTILINE)
+    if not m:
+        return None
+    value = m.group(1)
+    for pattern in (_JVM_TZ_RE, _MYSQL_TZ_RE, _JDBC_TZ_RE):
+        found = pattern.search(value)
+        if found:
+            return found.group(1)
+    # defaultTimeZone 这类键的值本身就是钟面（"+00:00"），不带旗标
+    return value.strip("'\"")
+
+
+def check_write_clock_caliber() -> None:
+    """写侧的三张钟面必须是同一个 UTC，判定列不得读会话钟。
+
+    DATETIME 列存的是字面墙钟，谁写用谁的钟：JVM 默认时区写 LocalDateTime.now()，
+    MySQL 的 NOW()/CURRENT_TIMESTAMP 默认值写会话时区的墙钟，Connector/J 再按
+    serverTimezone 解释时间戳。第九十六批之前三处都没被任何地方声明钉住，于是同一行
+    "是否过期"随连接落在哪个会话而翻转（真库实测：UTC 会话判未过期、+08:00 会话判过期）。
+
+    现在判定 SQL 一律读 UTC_TIMESTAMP()（会话挪不动它），写入侧三处必须同时钉成 UTC——
+    只要有一处不是，"判定用 UTC、列里存的是别的墙钟"就以另一种形式回来了。
+
+    局限（不假装覆盖）：纯文本门禁。它证明这三处**声明**了同一个口径，且模板真的读了
+    values 里那两个键（否则是没人消费的死配置），但不证明容器起来后 mysqld 真的带上了
+    该旗标、也不证明 JVM 真的 Picked up——那两条只在有引擎/集群时可实测，行为侧由
+    java-backend 的 WriteClockCaliberTest 在真库上覆盖会话免疫那一半。IT 的 JDBC URL
+    一律由 @DynamicPropertySource 注入，生产 URL 上的 serverTimezone 因此只能文本核对。
+    """
+    bad: list[str] = []
+    faces: dict[str, str] = {}
+
+    def note(label: str, raw: str | None) -> None:
+        if raw is None:
+            bad.append(f"{label} 没有声明时钟口径（未钉 = 随宿主/会话漂）")
+            return
+        normalized = _normalized_clock(raw)
+        faces[label] = normalized
+        if normalized != "UTC":
+            bad.append(f"{label} 钉的是 {raw}，而判定 SQL 读的是 UTC_TIMESTAMP()")
+
+    def read(path: Path) -> str:
+        if not path.is_file():
+            bad.append(f"{_repo_rel(path)} 缺失")
+            return ""
+        return path.read_text(encoding="utf-8")
+
+    for label, path, service in (
+        ("dev compose", COMPOSE_DEV, "java-backend"),
+        ("dev compose mysql8", COMPOSE_DEV, "mysql8"),
+        ("prod compose", COMPOSE_PROD, "java-backend"),
+        ("prod compose mysql8", COMPOSE_PROD, "mysql8"),
+    ):
+        faces_of_service = _compose_clock_faces(read(path), service)
+        if not faces_of_service:
+            bad.append(f"{label}：找不到服务 {service}")
+            continue
+        # 只取该服务真正负责的那张钟面：mysql8 没有 JVM，java 侧没有 mysqld 旗标
+        # （按 service 分支，不按 label —— label 是给人看的名字，不含服务名）
+        if service == "java-backend":
+            note(f"{label} JVM", faces_of_service["jvm"])
+            note(f"{label} JDBC", faces_of_service["jdbc"])
+        else:
+            note(f"{label} MySQL", faces_of_service["mysql"])
+
+    values_text = read(HELM_VALUES)
+    note("helm javaBackend.javaToolOptions", _values_clock_face(values_text, "javaToolOptions"))
+    note("helm mysql.defaultTimeZone", _values_clock_face(values_text, "defaultTimeZone"))
+
+    java_tpl = _strip_comments(read(HELM_JAVA_TEMPLATE))
+    mysql_tpl = _strip_comments(read(HELM_MYSQL_TEMPLATE))
+    # 键存在但没人引用 = 死配置（第八十三批"模板读了一个不存在的键"的反向形态）
+    for template_label, text, key, env in (
+        ("templates/java.yaml", java_tpl, ".Values.javaBackend.javaToolOptions", "JAVA_TOOL_OPTIONS"),
+        ("templates/mysql.yaml", mysql_tpl, ".Values.mysql.defaultTimeZone", "default-time-zone"),
+    ):
+        if key not in text:
+            bad.append(f"{template_label} 没有引用 {key}（values 里那行没人消费）")
+        if env not in text:
+            bad.append(f"{template_label} 没有把口径传给容器（缺 {env}）")
+    note("helm JDBC", _JDBC_TZ_RE.search(java_tpl).group(1) if _JDBC_TZ_RE.search(java_tpl) else None)
+
+    app_yml = _strip_comments(read(APP_YML))
+    note("application.yml 兜底 URL", _JDBC_TZ_RE.search(app_yml).group(1) if _JDBC_TZ_RE.search(app_yml) else None)
+
+    offenders: list[str] = []
+    scanned = 0
+    for root in (JAVA_MAPPER_XML_DIR, JAVA_MAIN_JAVA):
+        if not root.is_dir():
+            bad.append(f"{_repo_rel(root)} 缺失")
+            continue
+        for file in sorted(root.rglob("*")):
+            if file.suffix not in (".xml", ".java"):
+                continue
+            scanned += 1
+            code = _strip_code_comments(file.read_text(encoding="utf-8"))
+            for lineno, line in enumerate(code.splitlines(), 1):
+                if _DECISION_COLUMN_NOW_RE.search(line):
+                    offenders.append(
+                        f"{_repo_rel(file)}:{lineno} {line.strip()}"
+                    )
+    if offenders:
+        bad.append(
+            "判定列读了会话钟 NOW()（应改用 UTC_TIMESTAMP()）:\n    " + "\n    ".join(offenders)
+        )
+
+    if bad:
+        problems.append("写侧时钟口径不一致:\n    " + "\n    ".join(bad))
+    else:
+        print(
+            f"[ok] 写侧时钟三源同源（{len(faces)} 张钟面全部 = UTC），"
+            f"判定列不读会话钟：扫描 {scanned} 个 mapper XML 与 src/main/java 文件"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
@@ -1024,18 +1219,21 @@ def main() -> int:
     parser.add_argument("--eval-harness-storage", action="store_true")
     parser.add_argument("--requirements-markers", action="store_true")
     parser.add_argument("--frontend-time-entry", action="store_true")
+    parser.add_argument("--write-clock-caliber", action="store_true")
     args = parser.parse_args()
 
     if not (args.tenant_columns or args.internal_token_keys or args.test_counts
             or args.flyway_doc_sync or args.h2_schema_drift
             or args.readme_claims or args.helm_value_roots or args.container_uid
             or args.document_storage_root or args.eval_harness_storage
-            or args.requirements_markers or args.frontend_time_entry):
+            or args.requirements_markers or args.frontend_time_entry
+            or args.write_clock_caliber):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
             args.flyway_doc_sync = args.h2_schema_drift = \
             args.readme_claims = args.helm_value_roots = args.container_uid = \
             args.document_storage_root = args.eval_harness_storage = \
-            args.requirements_markers = args.frontend_time_entry = True
+            args.requirements_markers = args.frontend_time_entry = \
+            args.write_clock_caliber = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -1061,6 +1259,8 @@ def main() -> int:
         check_requirements_platform_markers()
     if args.frontend_time_entry:
         check_frontend_time_entry()
+    if args.write_clock_caliber:
+        check_write_clock_caliber()
 
     if problems:
         print("\n发现问题:")

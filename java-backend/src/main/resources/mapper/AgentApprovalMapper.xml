@@ -50,7 +50,10 @@
     <select id="selectPendingByUserId" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List"/>
         FROM agent_approval
-        WHERE user_id = #{userId} AND status = 'pending' AND expires_at > NOW()
+        <!-- expires_at 由 JVM 墙钟写入（AgentTaskServiceImpl 建审批时算的 LocalDateTime），
+             故判定侧一律用 UTC_TIMESTAMP() 而不是 NOW()：NOW() 取会话时区的墙钟，
+             列里存的是 UTC 字面量，会话一旦被挪到 +08:00 就会把未过期的审批判成过期。 -->
+        WHERE user_id = #{userId} AND status = 'pending' AND expires_at &gt; UTC_TIMESTAMP()
         ORDER BY created_at DESC
     </select>
 
@@ -62,10 +65,13 @@
         LIMIT #{limit}
     </select>
 
+    <!-- 不再有 #{now} 入参：旧签名由调用方传 JVM 的 LocalDateTime.now()，而列表侧
+         selectPendingByUserId 用 DB 钟判定，同一张审批因此同时存在两套过期时钟。
+         收口后两处一律读 DB 的 UTC 钟。 -->
     <select id="selectExpiredPending" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List"/>
         FROM agent_approval
-        WHERE status = 'pending' AND expires_at &lt;= #{now}
+        WHERE status = 'pending' AND expires_at &lt;= UTC_TIMESTAMP()
     </select>
 
     <update id="updateDecision">

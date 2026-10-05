@@ -217,7 +217,7 @@
 
 #### 4.1 生产/开发 compose 无资源限制 ✅ 已完成
 - **文件**：[docker-compose.prod.yml](../deploy/docker-compose.prod.yml)、[docker-compose.yml](../docker/docker-compose.yml)
-- **问题**：除 `JAVA_OPTS -Xmx512m` 外全服务无 mem/cpu limits（Compose 无 `deploy.resources`），无上限内存易致宿主机 OOM；`minio:latest` 未锁版本。
+- **问题**：除 `JAVA_OPTS -Xmx512m` 外全服务无 mem/cpu limits（Compose 无 `deploy.resources`），无上限内存易致宿主机 OOM；`minio:latest` 未锁版本。（第九十六批更正：这句把 `JAVA_OPTS` 当成了生效的堆上限，实际 `deploy/Dockerfile.java:26` 是 exec 形式 ENTRYPOINT、没有任何 shell 展开它，该变量从未生效——见 [CLEANUP_BACKLOG.md](CLEANUP_BACKLOG.md) B 节。）
 - **方案**：参考 [values.yaml](../deploy/helm/hfusionhub/values.yaml) 已定义的 limits 补齐；`minio:RELEASE.2024-xx` 锁版本。
 - **实际状态**：`docker-compose.prod.yml` 所有 10 个服务均已配置 `deploy.resources.limits`（memory + cpus），对齐 Helm values.yaml 的资源限制。
 

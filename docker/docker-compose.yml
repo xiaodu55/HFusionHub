@@ -2,6 +2,9 @@ services:
   mysql8:
     image: mysql:8.0.36
     container_name: mysql8
+    # 写侧时钟口径之一：把服务端会话默认时区钉成 UTC，NOW()/CURRENT_TIMESTAMP 才与
+    # JDBC serverTimezone=UTC、JVM -Duser.timezone=UTC 同源（门禁：static-checks 检查 13）。
+    command: ["--default-time-zone=+00:00"]
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
       MYSQL_DATABASE: hfusionhub
@@ -250,7 +253,7 @@ services:
     environment:
       DB_USERNAME: hfusionhub
       DB_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set}
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql8:3306/hfusionhub?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql8:3306/hfusionhub?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATA_REDIS_HOST: redis7
       PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?PYTHON_AI_INTERNAL_TOKEN must be set}
       CALLBACK_SECRET: ${CALLBACK_SECRET:?CALLBACK_SECRET must be set}
@@ -259,6 +262,10 @@ services:
       PYTHON_AI_CALLBACK_BASE_URL: http://java-backend:8080/api
       # 开发环境显式开启演示数据端点（应用默认已翻转为 false；/demo/clear 有破坏性）
       DEMO_ENDPOINTS_ENABLED: "true"
+      # 写侧时钟口径之二：JVM 默认时区。Dockerfile.java 是 exec 形式 ENTRYPOINT，
+      # 没有任何 shell 读 JAVA_OPTS（那行是死开关，登记在 docs/CLEANUP_BACKLOG.md）；
+      # JAVA_TOOL_OPTIONS 由 JVM 自身读取，"Picked up JAVA_TOOL_OPTIONS" 即生效证据。
+      JAVA_TOOL_OPTIONS: -Duser.timezone=UTC
       JAVA_OPTS: "-Xmx512m -Xms256m"
     volumes:
       - uploads-data:/app/uploads

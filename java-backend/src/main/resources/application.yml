@@ -21,7 +21,7 @@ spring:
   #   SPRING_DATA_REDIS_HOST=redis7
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/hfusionhub?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/hfusionhub?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
     username: ${DB_USERNAME:hfusionhub}
     password: ${DB_PASSWORD:}
     # 虚拟线程下平台线程不再是瓶颈，数据库连接池成为并发上限——
@@ -64,7 +64,11 @@ spring:
   # Jackson 配置
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
-    time-zone: Asia/Shanghai
+    # 与写侧同一口径（第九十六批）。注意它对 LocalDateTime 载荷是空转的——
+    # date-format 那行只作用于 java.util.Date，而出站时间字段全是 LocalDateTime
+    # （普查：main 下没有一处 java.util.Date / Instant / *DateTime 字段），
+    # 无偏移串按 UTC 读、按浏览器本地时区渲染是前端 utils/date.ts 的契约。
+    time-zone: UTC
     serialization:
       write-dates-as-timestamps: false
 

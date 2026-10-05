@@ -60,7 +60,7 @@ public interface PromptTemplateMapper extends BaseMapper<PromptTemplate> {
             SELECT * FROM prompt_template
             WHERE deleted = 1
               AND recycle_expires_at IS NOT NULL
-              AND recycle_expires_at <= NOW()
+              AND recycle_expires_at <= UTC_TIMESTAMP()
             ORDER BY recycle_expires_at ASC
             LIMIT #{limit}
             """)

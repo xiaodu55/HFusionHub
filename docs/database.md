@@ -135,12 +135,27 @@ sys_user (1) ──→ (N) app → (N) app_api_key
 ```yaml
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/hfusionhub?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://localhost:3306/hfusionhub?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
     username: ${DB_USERNAME:hfusionhub}
     password: ${DB_PASSWORD:}
 ```
 
 容器化部署用 `SPRING_DATASOURCE_URL` 覆盖（如 `jdbc:mysql://mysql8:3306/hfusionhub?...`），生产 Compose 与 Helm 已配置。
+
+### 时钟口径（第九十六批）
+
+`DATETIME` 列存的是**字面墙钟**，不带时区，所以"谁写的、谁读的"必须同源。仓库把三处钉成同一个 UTC：
+
+| 来源 | 钉法 | 位置 |
+| --- | --- | --- |
+| JVM 默认时区（`LocalDateTime.now()` 写入侧） | `JAVA_TOOL_OPTIONS=-Duser.timezone=UTC` | `docker/docker-compose.yml`、`deploy/docker-compose.prod.yml`、helm `javaBackend.javaToolOptions` |
+| MySQL 会话默认时区（`NOW()`/`CURRENT_TIMESTAMP` 默认值） | `--default-time-zone=+00:00` | 两套 compose 的 `mysql8.command`、helm `mysql.defaultTimeZone` → `templates/mysql.yaml` 的 `args` |
+| JDBC 的 `serverTimezone`（驱动解释时间戳的口径） | `serverTimezone=UTC` | 上述 URL 全部 |
+
+判定类 SQL 一律用 `UTC_TIMESTAMP()` 而不是 `NOW()`：前者不受会话时区影响，后者受，于是同一行的"是否过期"
+会随连接落在哪个会话而翻转。`JAVA_OPTS` **不是**时钟通道——`deploy/Dockerfile.java` 是 exec 形式
+ENTRYPOINT，没有 shell 读它（死开关，登记在 `docs/CLEANUP_BACKLOG.md`）。三处一致性由
+`scripts/static-checks.py` 的检查 13 把守，行为侧由 `WriteClockCaliberTest` 在真库上断言。
 
 ## 可视化 Schema
 

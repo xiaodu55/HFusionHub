@@ -31,7 +31,8 @@ spring:
 
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
-    time-zone: Asia/Shanghai
+    # 与 application.yml 同步维护：对 LocalDateTime 载荷是空转项，口径随写侧
+    time-zone: UTC
     serialization:
       write-dates-as-timestamps: false
 

@@ -31,6 +31,9 @@ mysql:
   port: 3306
   database: hfusionhub
   username: hfusionhub
+  # 写侧时钟口径之一：服务端会话默认时区。必须与 javaBackend.javaToolOptions 的
+  # -Duser.timezone、以及 templates/java.yaml 里 URL 的 serverTimezone 同源（检查 13）。
+  defaultTimeZone: "+00:00"
   persistence:
     size: 10Gi
   resources:
@@ -63,6 +66,10 @@ javaBackend:
   port: 8080
   replicas: 1
   javaOpts: "-Xmx512m -Xms256m"
+  # 写侧时钟口径之二：JVM 默认时区。只有 JAVA_TOOL_OPTIONS 会被 JVM 自己读取
+  # （Dockerfile.java 是 exec 形式 ENTRYPOINT，javaOpts 那行没有任何消费者，
+  #  作为死开关登记在 docs/CLEANUP_BACKLOG.md）。
+  javaToolOptions: "-Duser.timezone=UTC"
   resources:
     requests:
       memory: "512Mi"
