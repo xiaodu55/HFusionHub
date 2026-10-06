@@ -11,6 +11,73 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第九十七批（2026-10-11：招投标三道评测竖门自出生起从未在 CI 跑过——死因是 YAML 把 `run:` 的续行折叠成了空格；顺带在容器里把 `Errno 24` 那条链的量测完，"父进程漏 fd"的假设被否掉）
+
+#### 结论（先给判定性质）
+- 推送 `ad92367e` 后那轮 CI（run 38099630611）7 绿 4 红。红的是 `eval-offline`、`python`、
+  `frontend`（npm audit）、`python-lint`（pip-audit）。本批处理前两条，且第一条**与评测指标无关**：
+  `eval-offline` 的三步失败全是 argparse 的 `unrecognized arguments`，退出码 2。
+- 死因在 YAML 不在评测：`run: python scripts/eval_offline.py \` + 缩进续行是**一个 plain 多行标量**，
+  折叠规则把换行换成一个空格，`\` 原地留下，shell 收到的不是续行而是"被转义的空格"，argv 里就是
+  `' --cases'`。按 `git log` 定位出生：bid 门 `aabd3df6`（2026-08-25）、施工/IT 门 `f684d6bb` 同批引入，
+  **形态从第一天就是错的** ⇒ 三道竖门 47 天里没有阻断过一次合并。
+- 这条缺陷的形态值得单独记：它不产生"红"这种信号，只产生"门在但从不生效"。所以本批的门禁一半查形状、
+  一半查**存在性**（`--cases` 的 needle、用例文件在位、入口脚本在位），后者对应的是"门禁消失比门禁变红更安静"。
+
+#### 取证（先把推断做成可复算的）
+- argv 层复现：把 ci.yml 用 PyYAML 解析成 shell 实际收到的脚本，先吃掉 `\`+换行、再按 POSIX 切词，
+  历史写法产出 `['python', 'scripts/eval_offline.py', ' --cases', …]`，与 CI 日志里那句两倍空格的
+  `unrecognized arguments` 对齐；范围核查扫全仓 5 个 workflow / 81 个 `run` 步骤，命中 3 个（全在 ci.yml）。
+- **排掉"评测退化了"**：三套件在本地按正确引法各跑一遍，退出码 0 且 `gate_failures: []`。
+- 主门（通用套件）此前依赖 `eval_offline.py:46,53` 的默认值取用例，ci.yml 里不出现 `--cases` 字样，
+  于是检查 14 第一版误报"不再调用离线套件 suite"。处理是**把主门显式写出
+  `--cases evaluation/suite/cases.jsonl`**（与默认值逐字相同、行为中性），而不是把门禁放宽成数调用次数。
+
+#### 修复与判据
+- `.github/workflows/ci.yml`：三个竖门改 `run: |`，bid 那一步留了成因注释；主门改显式 `--cases`。
+- `scripts/static-checks.py` **检查 14**（`--workflow-run-scalars`，已并入默认全跑档）：行内值以 `\`
+  收尾、或存在"比 `run:` 键更缩进、又不是 key/列表项"的折行 ⇒ 红；再钉四道门的存在性。
+- `python-ai/tests/test_workflow_run_scalars.py`（15 例）：真仓库绿、接线（全跑档 `args.workflow_run_scalars`
+  出现 ≥2 次）、四门 argv 里 `--cases` 是独立 token 且无空格污染、**每个 `--flag` 都必须在 argparse 里声明过**
+  （形状对了仍可能拼错选项名，那同样是退出码 2）、`--cases` 相对路径必须命中 job 声明的
+  `working-directory: python-ai`、历史折叠形态真会产生 `' --cases'`（红判据不是纸面推断）；
+  漂移注入 6 例：行内反斜杠、plain 折行、门整步消失、用例文件缺失、入口脚本缺失、ci.yml 缺失。
+- 判据故意用 PyYAML 而生产码只用标准库——两个 oracle 不同源，检查 14 背错折叠规则时语义判据能发现。
+- 文档纠正：`docs/CI_GATES.md` 第 3 行"每个 push/PR 都跑离线评测门禁"与 `README.md:49` 的
+  "CI push 阻断门禁"此前只对主套件成立；新增第 5 节记录本批，并把"四处自伤"改成五处（正文里那句
+  "三条判据"在第九十四批就已经落后，一并纠正）、`相关文件` 里那条"上述两条判据"的旧措辞同样改对。
+- 诚实边界：CI 上那四次真实执行**尚未取到**（修法未推上 main），已写的核对记录只到本地 argv 与本地套件；
+  检查 14 也不保证门里的断言会过，`run:` 内 shell 逻辑对不对仍归"把步骤体落盘真跑"那类判据。
+
+#### B 链取证：`Errno 24` 不是漏 fd（容器内实测，未动生产码）
+- CI `python` job 那 5 条红是同一条链：都是 `[Errno 24] Too many open files: '<插件目录>/__init__.py'`，
+  `error_code=plugin_execution_error` ⇒ 异常在**子进程** `_subprocess_worker` 的 Step 3 import。
+  另 6 条 ERROR 是 `test_plugin_container.py` 的"无标签镜像就 `pytest.fail`"守卫，与本链无关。
+- `hfusionhub/python88:rc` 里量：裸 `python` 父进程 fd=4；一次成功调用的子进程看到 9 个 fd、
+  `RLIMIT_NOFILE=(64, 64)`；三条分支各跑 15/8/8 次，父进程 fd **before=after=after_gc=4，净增 0**
+  ⇒ `sandbox_runner.py:530`/`:538` 绕过 `finally`（`:572`）是代码事实，但 CPython 按引用计数在栈帧
+  展开时关连接，**"父进程漏 fd"这个怀疑作废**。
+- 决定性对照：父进程灌到 64/70/80/100/150/200 六档全部红且都栽在子进程第一个 import；父进程固定 150 时
+  `max_open_files` 64 红、128 红、**256 绿** ⇒ 限制变量是"上限 vs fork 时已继承的 fd 数"（`:99` 在 fork
+  之后设限，hard 也被钉死，子进程再也抬不回去）。故 CI 那 5 条红等价于"pytest 父进程当时 ≥64 fd"。
+- 本机看不见的机制：Windows 无 `resource` 模块，`:80` 的 `ImportError` 分支把三项限制全跳过 ⇒ 本机恒绿。
+- 同形状的 `sandbox.py:229` 经核查**生产不可达**（`apply_resource_limits` 的"调用方"只有 `:262` 的
+  docstring 示例）。三条出路（抬到"继承数+预算"且只动 soft／让子进程不继承／只改测试）登记在
+  `docs/CLEANUP_BACKLOG.md` 新增的 F 节，属行为决策，本批不动。
+
+#### 待确认（用户决定，本批未替用户拍）
+- `test_plugin_container.py` 那 6 条 ERROR：改 skip（CI 绿但"容器轨没跑"重新变成无信号）、CI 预构建镜像
+  （绿且真跑，代价是时间与网络依赖）、还是保留 `pytest.fail`（红着提醒）。
+
+#### 验证
+- 红→绿：修改前 `python scripts/static-checks.py --workflow-run-scalars` 退出码 1，点名
+  ci.yml:252 / :266 / :279；修改后同一命令 `[ok] … 扫描 5 个文件 / 81 个 run 步骤 … 四个离线评测门 … 用例文件在位`。
+- 新判据文件 15 例全绿；`python-ai` 全量 `pytest -q`（venv，python 3.11）**2293 passed / 11 skipped**，
+  退出码 0；`ruff check python-ai/tests/test_workflow_run_scalars.py`（venv，0.16.3）通过
+  —— `scripts/static-checks.py` 不在 lint 面内（CI 的 `ruff check .` 工作目录是 `python-ai`）。
+- 全量 static-checks 仅剩计数漂移一条，随本批把 Python 计数 1881→1896 同步后转绿
+  （README 4 处 + README_EN + `docs/CLEANUP_BACKLOG.md:4` + `docs/ROADMAP.md:16`）。
+
 ### 第九十六批（2026-10-10：写侧三张钟面钉成同一个 UTC，判定 SQL 换成会话免疫的 `UTC_TIMESTAMP()`——红判据第一次栽在"MyBatis 一级缓存让二次读根本没问库"）
 
 #### 结论（先给判定性质）

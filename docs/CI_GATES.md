@@ -117,10 +117,10 @@ main 已启用 branch protection（规则通过 GitHub API 创建）：
 - Nightly 运行时评测失败时在对应 action 中查看 `eval-runtime-report` artifact 定位问题。
 - 离线门禁失败时必须修复或按流程再冻结基线，不得带着失败合并。
 
-## 非评测门禁：CI 自己的四处自伤（第九十批、第九十三批、第九十四批）
+## 非评测门禁：CI 自己的五处自伤（第九十、九十三、九十四、九十七批）
 
 上面那张表之外的 job（`docker-compose-validate`、`python-container`、`java`、`frontend`）不评测量，
-但同样会阻断合并。本节记录三条判据——它们的共同点是**红的是 CI 自己，不是产品**。
+但同样会阻断合并。本节记录五条判据——它们的共同点是**红的是 CI 自己，不是产品**。
 
 ### 1. `docker-compose-validate` 的变量供给必须与 compose 文件成对
 
@@ -288,6 +288,55 @@ check 重述的是第 2 步的数据——实测单独跑 8 例的类报 `All co
 而"会话不额外偏移"是配置缺省态——给它加一条文本判据，
 只会复制第九十一批 `vue-tsc` 那种"把工具的结论再抄一遍"的形态。
 
+### 5. `run:` 写成行内标量时，那道门禁从未执行过（第九十七批）
+
+`eval-offline` job 里现在有**四道**离线门（主套件 + 招投标三竖门），但推送 `ad92367e` 那轮 CI
+只有一道在跑。三个竖门的写法是：
+
+```yaml
+- name: Run bid offline evaluation gate
+  run: python scripts/eval_offline.py \
+    --cases evaluation/suite_bid/cases.jsonl \
+    --fail-on-regression
+```
+
+`run:` 后面不带 `|` 时，整段是 YAML 的**plain 多行标量**：折叠规则把换行变成**一个空格**，
+`\` 于是留在原地，shell 看到的不是续行而是"一个被转义的空格"。把同一份文本按这套规则拼出来
+再交给 bash 打印 argv，得到的是 `' --cases'`（带前导空格），argparse 认不出它是选项 ⇒
+`unrecognized arguments` ⇒ 退出码 2。CI 日志（run 38099630611，job 114352691081）里那段错误
+正好是两倍空格的样子，与本地复现一致。
+
+按出生时间算，这三道门**自 2026-08-25 起一次也没跑过**（`aabd3df6` 引入 bid 门、`f684d6bb` 引入
+施工/IT 门，形态从第一天就是错的）。这类缺陷的形态决定了它不会被发现：步骤失败会被下一次
+成功的运行冲淡，而"门在但从未生效"根本不产生失败信号——**门禁消失比门禁变红更安静**。
+
+同轮否掉了"是不是评测退化了"这个猜测：把三套件在本地按正确引法各跑一遍，退出码 0 且
+`gate_failures: []`，红的一直是引号而不是指标。
+
+判据分两层，都不重复第九十二批那份摘要绑定（`test_eval_suite_eol_binding.py` 管内容）：
+
+| 层 | 位置 | 查什么 |
+|---|---|---|
+| 形状 + 存在性 | `scripts/static-checks.py` 检查 14（`--workflow-run-scalars`，已并入默认全跑档） | 扫 `.github/workflows/*.yml` 全部 81 个 `run` 步骤：行内值以 `\` 收尾、或有"比键更缩进又不是 key/列表项"的折行 ⇒ 红；另钉四道门仍在 ci.yml 调用、`--cases` 指向的用例文件在位、入口脚本在位 |
+| 语义 | `python-ai/tests/test_workflow_run_scalars.py`（15 例） | 用 PyYAML（生产码只用标准库，判据故意换一个 oracle）把 ci.yml 解析成 shell 实际收到的脚本，断言四道门各有独立的 `--cases` token 且无带前导空格的 token；断言门里每个 `--flag` 都在 `eval_offline.py` 的 argparse 里声明过；断言历史折叠形态真会产生 `' --cases'` |
+
+存在性那一半不是多余的：主门当时靠 argparse 默认值取用例，`--cases` 字样不出现在 ci.yml 里，
+检查 14 第一版就误报"ci.yml 不再调用离线套件 suite"。修法是**把主门也显式写出
+`--cases evaluation/suite/cases.jsonl`**（与 `eval_offline.py:46,53` 的默认值逐字相同，
+行为中性），而不是把门禁放宽成"数一下调用次数"。
+
+三条诚实的边界：检查 14 只回答"这行命令到没到 shell"和"门还在不在"，**不保证门里的断言会过**；
+它也不解释 YAML——是照 YAML 的折叠规则做文本判断，所以真解析器（上面那层语义判据）必须和它并
+存，否则规则背错了也没人知道；`run:` 里那段 shell **逻辑**对不对仍归 `test_ci_workflow_gates.py`
+那类"把步骤体落盘真跑"的判据，本批没有把它们推广到评测步骤。
+
+顺带纠正一处文档声称：本文第 3 行"每个 push/PR 到 main 都跑离线评测门禁"在第九十七批之前只对
+主套件成立，`README.md:49` 的"CI push 阻断门禁"同样只覆盖主套件；三竖门自出生起未阻断过任何
+合并。手工核对记录（不靠门禁）：修复后用 PyYAML 把 ci.yml 解析成 shell 实际收到的脚本、交给
+bash 打印 argv，四个门各自都是"前导空格 token 数 0、退出码 0"；三个竖门的套件另在本地按正确
+引法各跑一遍为绿。**CI 上那四次真实执行尚未取到**——修法还没推上 main，推上去之后要以 job 日志
+再核一次，不能拿本地 argv 顶替。
+
 ## 相关文件
 
 - `.github/workflows/ci.yml` — push/PR 主 CI（含 `eval-offline` 门禁 job）
@@ -296,6 +345,7 @@ check 重述的是第 2 步的数据——实测单独跑 8 例的类报 `All co
 - `python-ai/scripts/eval_baseline.py` — 共享报告 / 门禁 / 基线逻辑（2026-08-29 由 `app/core/rag/` `git mv` 而来，见 `docs/CLEANUP_BACKLOG.md:34`）
 - `python-ai/evaluation/README.md` — 评测系统设计、用例、双轨与基线流程
 - `scripts/ci/check_container_skips.sh` — 容器专项 skip 计数门禁（0/1/2 退出码契约）
-- `python-ai/tests/test_ci_workflow_gates.py` — 上述两条非评测门禁的判据（含真执行 workflow 步骤体）
+- `python-ai/tests/test_ci_workflow_gates.py` — 上述 compose/skip 两条非评测门禁的判据（含真执行 workflow 步骤体）
+- `python-ai/tests/test_workflow_run_scalars.py` — 检查 14 的判据：四道门的 argv 形状、`--flag` 与 argparse 的契约、历史折叠形态真会红
 - `python-ai/tests/test_eval_suite_eol_binding.py` — 冻结摘要与行尾无关的判据（钉值、两种检出形态、篡改仍红、emit 写 LF）
 - `.git-blame-ignore-revs` + `CONTRIBUTING.md`「Java code style (spotless)」— 全仓重排那一笔如何不污染 `git blame`

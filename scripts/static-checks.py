@@ -69,6 +69,12 @@
   只写键没人读=死配置。判定列（expires_at / recycle_expires_at / circuit_open_until）的比较式
   里不得出现 NOW()——NOW() 取会话时区的墙钟，列里存的是另一套，同一行的过期判定会随连接翻转。
 
+检查 14：workflow 的 run 必须是块标量，续行才会到达 shell
+  `run: cmd \\` + 缩进续行是 YAML 的 plain 多行标量：折行时换行被折叠成空格，shell 收到
+  `\\ `（转义空格）而非续行，选项串带前导空格进不去。带续行的命令必须写 `run: |`。
+  同时核对 ci.yml 仍调用四个离线冻结套件（通用 + 招投标三竖门）且用例文件在位——门禁消失
+  比门禁变红更安静，第九十七批的三个竖门就是这样"绿了 47 天其实一次没跑"。
+
 用法:
   python scripts/static-checks.py --tenant-columns
   python scripts/static-checks.py --internal-token-keys
@@ -1205,6 +1211,122 @@ def check_write_clock_caliber() -> None:
         )
 
 
+# ── 检查 14：workflow 的 run 必须是块标量，否则 shell 续行从未生效 ────────
+
+WORKFLOW_DIR = REPO / ".github" / "workflows"
+CI_WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
+EVAL_OFFLINE_SCRIPT = "scripts/eval_offline.py"
+EVAL_OFFLINE_ENTRY = REPO / "python-ai" / "scripts" / "eval_offline.py"
+EVAL_SUITES_ROOT = REPO / "python-ai" / "evaluation"
+# 四个离线冻结套件的调用面：suite(通用) + 招投标三竖门。门禁在这里钉"CI 还在调它们"，
+# 套件内容与摘要绑定由 python-ai/tests/test_eval_suite_eol_binding.py 负责。
+EVAL_GATE_SUITES = ("suite", "suite_bid", "suite_bid_construction", "suite_bid_it")
+
+_RUN_INLINE_RE = re.compile(r"^(?P<lead>\s*)(?:-\s+)?run:\s+(?P<value>\S.*)$")
+_BLOCK_INDICATOR_RE = re.compile(r"^[|>]")
+# 续行的形状：既不是 key: 也不是 - item，就只可能是 plain 标量的折行
+_YAML_STRUCTURAL_RE = re.compile(r"^\s*(?:-\s+)?[\w][\w.\-]*\s*:(\s|$)|^\s*-\s")
+
+
+def _run_key_column(line: str) -> int:
+    """`run:` 键所在列（列表项写法 `- run:` 再右移两格）。"""
+    lead = len(line) - len(line.lstrip())
+    if line.lstrip().startswith("- "):
+        return lead + 2
+    return lead
+
+
+def _workflow_run_values(path: Path) -> list[tuple[int, str, list[str]]]:
+    """返回 [(run: 所在行号, 行内值, 该值之后的更缩进续行), …]，纯文本、不依赖 YAML 库。
+
+    static-checks.py 的约定是只用标准库，所以这里不做完整解析，只回答一个问题：
+    这个 `run:` 的值是块标量（`|`/`>`，续行按字面进脚本）还是 plain 标量（换行被折叠成
+    空格）。判定按 YAML 的规则做：缩进大于 `run:` 键、又不是 key:/list-item 的紧随行，
+    就是 plain 标量的续行。
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    found: list[tuple[int, str, list[str]]] = []
+    for idx, line in enumerate(lines):
+        m = _RUN_INLINE_RE.match(line)
+        if not m:
+            continue
+        key_col = _run_key_column(line)
+        continuations: list[str] = []
+        for nxt in lines[idx + 1:]:
+            if not nxt.strip():
+                break
+            if len(nxt) - len(nxt.lstrip()) <= key_col:
+                break
+            if _YAML_STRUCTURAL_RE.match(nxt):
+                break
+            continuations.append(nxt.strip())
+        found.append((idx + 1, m.group("value"), continuations))
+    return found
+
+
+def check_workflow_run_scalars() -> None:
+    """CI 的 `run:` 若用行内（plain）标量，续行就永远不会到达 shell。
+
+    第九十七批在真实 CI 上量到的：`run: python scripts/eval_offline.py \\` 后面跟着缩进的
+    `--cases …`，YAML 把这当成 plain 多行标量的第一行，折行时把换行折叠成一个空格，于是
+    shell 收到的是 `… \\ --cases …`——`\\` 转义的是空格而不是换行。把解析出来的同一串交给
+    bash 打印 argv，得到的是 `' --cases'`（前导空格），argparse 认不出选项，退出码 2。
+    招投标三个竖门自 2026-08-25（aabd3df6 / f684d6bb）起就是这个形态，从未在 CI 跑过一次。
+
+    因此：带续行的命令必须写成块标量 `run: |`；而只有 `run: |` 里的反斜杠才是 shell 续行。
+    """
+    bad: list[str] = []
+    if not WORKFLOW_DIR.is_dir():
+        problems.append(f"检查 14：workflow 目录不存在 {_repo_rel(WORKFLOW_DIR)}")
+        return
+    files = sorted(p for p in WORKFLOW_DIR.iterdir() if p.suffix in (".yml", ".yaml"))
+    if not files:
+        problems.append(f"检查 14：{_repo_rel(WORKFLOW_DIR)} 下没有 workflow 文件")
+        return
+
+    steps = 0
+    for wf in files:
+        for lineno, value, conts in _workflow_run_values(wf):
+            steps += 1
+            if _BLOCK_INDICATOR_RE.match(value):
+                continue  # 块标量：反斜杠是真正的 shell 续行
+            where = f"{_repo_rel(wf)}:{lineno}"
+            if value.rstrip().endswith("\\"):
+                bad.append(
+                    f"{where} run 用行内标量且以反斜杠收尾——YAML 会折叠换行，"
+                    f"shell 收到的是被转义的空格而不是续行：{value[:70]}"
+                )
+            elif conts:
+                bad.append(
+                    f"{where} run 用 plain 多行标量（{len(conts)} 条折行），"
+                    f"命令会被拼成一行：{value[:50]} … {conts[0][:40]}"
+                )
+
+    if not CI_WORKFLOW.is_file():
+        bad.append(f"{_repo_rel(CI_WORKFLOW)} 缺失")
+    else:
+        ci_text = CI_WORKFLOW.read_text(encoding="utf-8")
+        for suite in EVAL_GATE_SUITES:
+            needle = f"--cases evaluation/{suite}/cases.jsonl"
+            if needle not in ci_text:
+                bad.append(f"ci.yml 不再调用离线套件 {suite}（{needle}）——门禁消失")
+            cases_file = EVAL_SUITES_ROOT / suite / "cases.jsonl"
+            if not cases_file.is_file():
+                bad.append(f"离线套件用例文件缺失：{_repo_rel(cases_file)}")
+        if EVAL_OFFLINE_SCRIPT not in ci_text:
+            bad.append(f"ci.yml 里没有任何 {EVAL_OFFLINE_SCRIPT} 调用")
+        if not EVAL_OFFLINE_ENTRY.is_file():
+            bad.append(f"离线评测入口不存在：{_repo_rel(EVAL_OFFLINE_ENTRY)}（ci.yml 仍在调它）")
+
+    if bad:
+        problems.append("workflow run 标量形态不合法:\n    " + "\n    ".join(bad))
+    else:
+        print(
+            f"[ok] workflow run 全部是块标量或单行命令（扫描 {len(files)} 个文件 / {steps} 个 run 步骤），"
+            f"四个离线评测门 {', '.join(EVAL_GATE_SUITES)} 仍在 ci.yml 调用且用例文件在位"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
@@ -1220,6 +1342,7 @@ def main() -> int:
     parser.add_argument("--requirements-markers", action="store_true")
     parser.add_argument("--frontend-time-entry", action="store_true")
     parser.add_argument("--write-clock-caliber", action="store_true")
+    parser.add_argument("--workflow-run-scalars", action="store_true")
     args = parser.parse_args()
 
     if not (args.tenant_columns or args.internal_token_keys or args.test_counts
@@ -1227,13 +1350,13 @@ def main() -> int:
             or args.readme_claims or args.helm_value_roots or args.container_uid
             or args.document_storage_root or args.eval_harness_storage
             or args.requirements_markers or args.frontend_time_entry
-            or args.write_clock_caliber):
+            or args.write_clock_caliber or args.workflow_run_scalars):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
             args.flyway_doc_sync = args.h2_schema_drift = \
             args.readme_claims = args.helm_value_roots = args.container_uid = \
             args.document_storage_root = args.eval_harness_storage = \
             args.requirements_markers = args.frontend_time_entry = \
-            args.write_clock_caliber = True
+            args.write_clock_caliber = args.workflow_run_scalars = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -1261,6 +1384,8 @@ def main() -> int:
         check_frontend_time_entry()
     if args.write_clock_caliber:
         check_write_clock_caliber()
+    if args.workflow_run_scalars:
+        check_workflow_run_scalars()
 
     if problems:
         print("\n发现问题:")
