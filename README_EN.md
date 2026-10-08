@@ -8,7 +8,7 @@
 ![Java](https://img.shields.io/badge/Java-17%2B-orange)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883)
-![Tests](https://img.shields.io/badge/Tests-Python%201907%20%7C%20Java%20717%20%7C%20Frontend%20117-success)
+![Tests](https://img.shields.io/badge/Tests-Python%201916%20%7C%20Java%20717%20%7C%20Frontend%20117-success)
 
 ## Overview
 

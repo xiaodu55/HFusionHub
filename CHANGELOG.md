@@ -11,6 +11,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百批（2026-10-11：容器轨的 owner 定为 `python-container`，`python` job 不再跑它；镜像守卫把"daemon 问不到"与"没带标签镜像"分成两句话）
+
+#### 结论（先给判定性质）
+- 本批处置 `docs/CLEANUP_BACKLOG.md` F 节第二条。三条候选里**没有采纳 skip**（那会把"容器轨没跑"
+  重新变成无信号），也没有"只靠红着提醒"：owner 收进 workflow 的结构里，守卫继续 fail-not-skip，
+  但必须说清它到底在抱怨哪一件事。
+- **前提不是推断，是 CI 日志原文**：第九十七批 run 38115360383 的 `python` job 是
+  `5 failed, 2047 passed, 7 skipped, 6 errors`，6 条 ERROR 逐条都是 `TestRunnerIntegration::*`，
+  文本全是 `Integration tests require a tagged local Python base image`，落点
+  `tests/test_plugin_container.py:761`（守卫那句 `pytest.fail`）；同一个 run 里 `python-container`
+  是 **success**（预拉镜像、跑该文件、接 skip 门禁）。⇒ "同一个文件被两个 job 以不同期待执行"
+  坐实，且第九十七批把这条登记成「`python-container` job 的 6 条 ERROR」**归属写错了**，
+  本批就地纠正（见下方"就地纠正"）。
+- 同 run 那 5 条 `failed` 是第九十九批的 fd 链，与本批无关；两条红是两条缺陷，不是一条。
+
+#### 修复与判据（判据先红，再动 workflow 与守卫）
+- 判据先行：`python-ai/tests/test_ci_workflow_gates.py:254` 起新增 9 例（`:292`
+  `TestContainerLaneOwnership` 4 例 + `:359` `TestContainerImageGuardDiagnostics` 5 例，
+  后者用注入的 fake client 真执行守卫本体）。对 HEAD 的 workflow 与守卫是
+  **4 failed / 5 passed**（`scratch-b99/b100_red_judgement.log`），红的正是归属两例、
+  daemon 误报一例、候选顺序一例——即本批要修的那四个面。改后同一文件 **28 passed**。
+- 改动一（归属）：`.github/workflows/ci.yml:177` 的 `python` job pytest 命令加
+  `--ignore=tests/test_plugin_container.py`，注释点名 owner 是 `python-container`；owner 侧
+  一字未动（`:200` 预拉、`:215` 跑文件并接 `check_container_skips.sh`）。判据钉的不只是"加了
+  `--ignore`"，还有**排除面**：`pytest -q tests` 的套件面、`--cov=app`、`--cov-fail-under` 必须
+  原样留着，且 `--ignore` 恰好出现一次（防止把"排除一个文件"悄悄长成"缩小套件"）。
+- 改动二（可诊断性）：`python-ai/tests/test_plugin_container.py:726` `_resolve_local_python_image`
+  改为**先** `client.images.list()`——它失败就是 daemon 不可达，单独报（带异常类型与
+  "先确认引擎在跑/DOCKER_HOST/socket 权限"），不再和"可达但无镜像"共用一句话；候选表按顺序命中，
+  表里没有再兜底任意带标签的 `python:*`，无标签镜像不会被静默拿去 `FROM`。预拉的标签由判据
+  `guard_candidate_tags()` 从守卫源码自己解析出来比对，标签名不再有第二份抄本。
+
+#### 成本（先声明判据，再量）
+- 排除文件会把该文件 36 例非 Docker 测试从 `python` job 的覆盖率口径里拿走，而棘轮是
+  `--cov-fail-under=74`——**改前先声明**："文件级 `--ignore` 只在 TOTAL 损失 < 0.5 个百分点时采用，
+  否则改成只摘 `TestRunnerIntegration`"。实测（本地全量，两次）：
+  含该文件 `2068 passed / 17 skipped`，`TOTAL 19163 stmts / 4281 miss` = 77.66%；
+  加 `--ignore` 后 `2032 passed / 11 skipped`，`TOTAL 19163 / 4350` = 77.30%
+  ⇒ **损失 0.36 个百分点**（69 条语句，集中在 `app/core/plugin/container_runner.py`：79% → 33%）。
+  判据满足，故保留文件级排除；棘轮余量从 ~3.7pp 降到 ~3.3pp，未动阈值。
+- 那 6 例 Docker 集成测试本地是 skip（venv 里 docker 不可用）、CI 里是 ERROR，两边都对它零覆盖，
+  该文件对 TOTAL 的贡献全部来自另外 36 例非 Docker 测试 ⇒ 本地量到的 0.36pp 就是 CI 侧的成本，不是它的下界。
+
+#### 诚实边界
+- CI 侧**尚未取证**：run 38134153636 跑的是第九十九批的码，`python` job 里那 6 条 ERROR 必然还在。
+  本批的判定证据是推送后新 run 的 `python` job 日志——期望形态：`6 errors` 消失、
+  只剩第九十九批那 5 条是否也消失（那是 fd 修复的判定），以及 TOTAL 仍 ≥ 74。
+- 守卫的 daemon 分支在本地不可执行（无 docker ⇒ 整类 skip），5 例判据是把 fake client 注进
+  **守卫本体**真跑，不是文本核对；真 daemon 故障那条文本仍只在 CI/人工环境里才会第一次出现。
+- `--ignore` 只解决"谁执行这个文件"，不解决"这个文件在 CI 里到底跑绿没有"——后者由 owner job 的
+  skip 门禁继续盯着，第九十批那套语义未变。
+
+#### 验证
+- `python -m pytest tests/test_ci_workflow_gates.py` ⇒ 28 passed；
+  `tests/test_plugin_container.py` ⇒ 36 passed / 6 skipped（与改前同形态，守卫重写未动非 Docker 面）；
+- 全量两次见"成本"段；`scripts/static-checks.py` 全绿（含计数同步 Python 1907 → **1916**，
+  README ×4 / README_EN / ROADMAP / CLEANUP_BACKLOG 共 7 处）；`ruff check` 两文件通过。
+
 ### 第九十九批（2026-10-11：插件子进程的 fd 上限从"绝对数"改成"继承数 + 预算"——CI 那 5 条 `Errno 24` 在容器里按 HEAD 代码原样复现，再原样消失）
 
 #### 结论（先给判定性质）

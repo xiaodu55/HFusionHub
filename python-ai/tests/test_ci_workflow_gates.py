@@ -248,3 +248,150 @@ class TestContainerGateStepExecution:
         proc = self.run_step(tmp_path, "33 passed, 6 skipped in 12.00s", 0)
         assert "6 skipped" in proc.stdout, f"步骤没转达 skip 条数：{proc.stdout!r}"
         assert "::error::" in proc.stdout, f"没有 GitHub 注解：{proc.stdout!r}"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 4. 容器轨的归属与守卫的可诊断性（第一百批）
+# ═══════════════════════════════════════════════════════════════════════
+
+CONTAINER_LANE_FILE = "tests/test_plugin_container.py"
+LANE_SOURCE = ROOT / "python-ai" / "tests" / "test_plugin_container.py"
+
+
+def job_steps(job: str) -> list[dict]:
+    doc = yaml.safe_load(CI_YML.read_text(encoding="utf-8"))
+    return doc["jobs"][job]["steps"]
+
+
+def pytest_runs(job: str) -> list[str]:
+    """该 job 里所有含 pytest 的 run 步骤体（反斜杠续行折平成一条逻辑行）。"""
+    runs = []
+    for step in job_steps(job):
+        run = step.get("run") or ""
+        if re.search(r"\bpytest\b", run):
+            runs.append(re.sub(r"\\s*\n\s*", " ", run))
+    return runs
+
+
+def guard_candidate_tags() -> list[str]:
+    """从守卫源码里读它认得的本地基础镜像候选，绝不把标签名抄第三遍。"""
+    source = LANE_SOURCE.read_text(encoding="utf-8")
+    block = source.split("def _resolve_local_python_image", 1)[1]
+    block = block.split("\n    def ", 1)[0] if "\n    def " in block else block
+    return re.findall(r'"(python:[^"]+)"', block)
+
+
+def pulled_image_tags(job: str) -> list[str]:
+    tags = []
+    for step in job_steps(job):
+        run = step.get("run") or ""
+        tags.extend(re.findall(r"docker pull\s+([^\s|]+)", run))
+    return tags
+
+
+class TestContainerLaneOwnership:
+    """容器轨只能有一个 owner job，且那个 job 预备的镜像必须是守卫认得的标签。
+
+    第九十批留下的形态：`python` job 跑整个 `tests/`（含容器专项），而它既不预置
+    Docker 基础镜像也不起 runner ⇒ 6 条 fixture ERROR 永远在；同时
+    `python-container` 那侧真的跑了 42 例。两个 job 对同一个文件的期待不一致，
+    ERROR 就成了"这个 job 本来就不该跑它"的噪音，把该文件真正的错误一起淹掉。
+    """
+
+    def test_python_job_does_not_run_the_container_lane(self):
+        runs = pytest_runs("python")
+        assert runs, "python job 里找不到 pytest 步骤，判据无从下手"
+        for run in runs:
+            assert f"--ignore={CONTAINER_LANE_FILE}" in run, (
+                f"容器专项仍被无镜像的 python job 执行：{run!r}"
+            )
+
+    def test_the_exclusion_is_one_file_not_a_shrunk_suite(self):
+        """排除只能针对那一个文件：整个套件与覆盖率棘轮必须原样留着。"""
+        run = pytest_runs("python")[0]
+        assert re.search(r"pytest\s+-q\s+tests\b", run), f"套件面被缩小：{run!r}"
+        assert "--cov=app" in run and "--cov-fail-under" in run, "覆盖率棘轮被顺手删了"
+        assert run.count("--ignore") == 1, f"--ignore 出现多次，容器轨之外还有别的排除：{run!r}"
+
+    def test_container_job_owns_the_lane_and_still_gates_skips(self):
+        runs = pytest_runs("python-container")
+        assert len(runs) == 1, f"容器轨被跑在 {len(runs)} 个步骤里，owner 不唯一"
+        assert CONTAINER_LANE_FILE in runs[0], f"owner job 没跑那个文件：{runs[0]!r}"
+        assert "check_container_skips.sh" in runs[0], "skip 门禁不再接住容器轨的输出"
+
+    def test_every_image_the_ci_pulls_is_one_the_guard_accepts(self):
+        """预拉与检测必须同源：候选表由守卫源码自己给出，不抄第二遍。"""
+        candidates = guard_candidate_tags()
+        assert candidates, f"读不到守卫的候选表，判据失效：{LANE_SOURCE}"
+        pulled = pulled_image_tags("python-container")
+        assert pulled, "python-container job 不再准备任何基础镜像 ⇒ 容器轨必然红"
+        unknown = [tag for tag in pulled if tag not in candidates]
+        assert not unknown, f"预拉了守卫不认得的标签 {unknown}，候选表：{candidates}"
+
+
+def _resolve_local_python_image():
+    from test_plugin_container import TestRunnerIntegration
+
+    return TestRunnerIntegration._resolve_local_python_image
+
+
+class _FakeImage:
+    def __init__(self, tags):
+        self.tags = list(tags)
+
+
+class _FakeImages:
+    def __init__(self, tags_per_image=(), error=None):
+        self._error = error
+        self._images = [_FakeImage(tags) for tags in tags_per_image]
+
+    def list(self):
+        if self._error is not None:
+            raise self._error
+        return self._images
+
+
+class _FakeClient:
+    def __init__(self, images):
+        self.images = images
+
+
+class TestContainerImageGuardDiagnostics:
+    """守卫可以一直"缺镜像就 fail"，但必须把**缺镜像**和**问不到 daemon**说成两件事。
+
+    原实现把 `client.images.get()` 与 `client.images.list()` 的异常全部吞掉，最后统一
+    fail 成 "Integration tests require a tagged local Python base image"，于是
+    daemon 不可达（DOCKER_HOST 错、socket 权限）也被报成"你没拉镜像"——第九十批 CI 日志里
+    "预拉步骤过了、测试却说无镜像"的说不通正是这个形态。
+    """
+
+    def test_daemon_unreachable_is_reported_as_daemon(self):
+        client = _FakeClient(_FakeImages(error=ConnectionError("No such file or directory")))
+        with pytest.raises(pytest.fail.Exception) as excinfo:
+            _resolve_local_python_image()(client)
+        message = str(excinfo.value)
+        assert "守护进程" in message, f"daemon 故障被报成了缺镜像：{message!r}"
+        assert "tagged local Python base image" not in message
+
+    def test_missing_image_is_still_a_fail_not_a_skip(self):
+        client = _FakeClient(_FakeImages(tags_per_image=[("alpine:3.20",)]))
+        with pytest.raises(pytest.fail.Exception) as excinfo:
+            _resolve_local_python_image()(client)
+        message = str(excinfo.value)
+        assert "守护进程" not in message, f"daemon 明明可达却报 daemon：{message!r}"
+        assert "python:3.12-slim" in message, f"没交代候选表：{message!r}"
+
+    def test_candidate_order_decides_when_several_are_present(self):
+        client = _FakeClient(
+            _FakeImages(tags_per_image=[("python:3.11-slim",), ("python:3.12-slim",)])
+        )
+        assert _resolve_local_python_image()(client) == "python:3.12-slim"
+
+    def test_fallback_accepts_any_tagged_python_image(self):
+        client = _FakeClient(_FakeImages(tags_per_image=[("python:3.13-slim",)]))
+        assert _resolve_local_python_image()(client) == "python:3.13-slim"
+
+    def test_untagged_local_image_is_not_silently_used(self):
+        client = _FakeClient(_FakeImages(tags_per_image=[()]))
+        with pytest.raises(pytest.fail.Exception):
+            _resolve_local_python_image()(client)

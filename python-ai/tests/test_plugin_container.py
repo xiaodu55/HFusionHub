@@ -731,6 +731,10 @@ class TestRunnerIntegration:
         (e.g. 'python:3.12-slim'). Requires a tagged python image — without
         one the integration tests cannot validate tool execution, network
         policy, or resource limits, so we fail rather than silently skip.
+
+        Missing image and unqueryable daemon are two different diagnoses: the
+        old form swallowed every docker-API exception and reported "no tagged
+        image", so a DOCKER_HOST/socket failure looked like a forgot-to-pull.
         """
         candidates = [
             "python:3.12-slim",
@@ -738,29 +742,33 @@ class TestRunnerIntegration:
             "python:3.10-slim",
             "python:3.9-slim",
         ]
-        for tag in candidates:
-            try:
-                img = client.images.get(tag)
-                if img.tags:
-                    return img.tags[0]
-            except Exception:
-                continue
 
-        # Try any locally-present, tagged python image.
         try:
             images = client.images.list()
-            for img in images:
-                if not img.tags:
-                    continue
-                first_tag = img.tags[0]
-                if first_tag.startswith("python:"):
-                    return first_tag
-        except Exception:
-            pass
+        except Exception as exc:
+            pytest.fail(
+                "容器专项无法查询本地镜像：Docker 守护进程不可达"
+                f"（client.images.list() 失败：{type(exc).__name__}: {exc}）。"
+                "这不代表镜像缺失——先确认 docker 引擎在跑、DOCKER_HOST 与 socket 权限。"
+            )
+
+        local_tags = []
+        for img in images:
+            local_tags.extend(t for t in (img.tags or ()) if t not in local_tags)
+
+        # Candidate order wins: the newest supported base we actually have.
+        for tag in candidates:
+            if tag in local_tags:
+                return tag
+
+        # Fallback: any locally-present, tagged python image.
+        for tag in local_tags:
+            if tag.startswith("python:"):
+                return tag
 
         pytest.fail(
-            "Integration tests require a tagged local Python base image "
-            "(e.g. 'python:3.12-slim'). Pull one to enable them."
+            "Docker daemon 可达，但本地没有带标签的 python 基础镜像。"
+            f"候选（按优先级）：{', '.join(candidates)}；先 docker pull 其中一个再跑容器专项。"
         )
 
     def test_health_endpoint(self):

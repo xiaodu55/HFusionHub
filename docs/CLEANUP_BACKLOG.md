@@ -1,7 +1,7 @@
 # 冗余功能与死代码清理清单
 
 > 2026-08-29 前端主题统一改造时盘点生成。本次**只登记不删除**，逐项评估后处理。
-> 删除前先确认测试基线（Java 717 · Python 1907 · 前端 117）仍全绿。
+> 删除前先确认测试基线（Java 717 · Python 1916 · 前端 117）仍全绿。
 
 ## A. 冻结的实验功能（治理决策：保留代码，待后续补强）
 
@@ -94,8 +94,36 @@
   session-start 灌 fd 的插件在 HEAD 代码上原样复现（`5 failed, 24 passed`），换修复后代码转绿。
   `sandbox.py:229` 那个同形状点位**本批仍未动**（生产不可达，见上），如需一并收口另立批次。
 
-- [ ] **`python-container` job 的 6 条 ERROR 是镜像守卫，处置方式待用户定**（第九十七批登记）——
+- [x] **容器轨的 6 条 ERROR：无镜像的 job 在跑只有 owner job 才跑得动的文件**（第九十七批登记，第一百批处置）——
   `tests/test_plugin_container.py` 的 fixture 在没有本地标签镜像时
   `pytest.fail("Integration tests require a tagged local Python base image …")`。三个选项的取舍：
   改成 skip（CI 绿，但"容器轨没跑"这件事再次变成无信号——正是第九十七批在评测门上抓到的形态）、
   CI 步骤预拉/预构建镜像（绿且真跑，代价是 job 时间与网络依赖）、保留 `pytest.fail`（红着提醒）。
+
+  处置（第一百批，两个面都动，未采纳 skip）：
+
+  - **归属**：`.github/workflows/ci.yml:177` 的 `python` job 加 `--ignore=tests/test_plugin_container.py`，
+    owner 唯一定为 `python-container`（`:200` 预拉 `python:3.12-slim`、`:215` 跑该文件并接 skip 门禁）。
+    判据 `python-ai/tests/test_ci_workflow_gates.py:292` `TestContainerLaneOwnership`（4 例）钉四件事：
+    `python` job 的每个 pytest 步骤都必须带该 `--ignore`；排除只针对这一个文件（`pytest -q tests` 面、
+    `--cov=app`、`--cov-fail-under` 原样，`--ignore` 恰好出现一次）；`python-container` 里 pytest 恰好
+    一步且跑的是那个文件、仍接 `check_container_skips.sh`；**预拉的标签必须出现在守卫自己的候选表里**
+    （候选表由 `:276 guard_candidate_tags()` 从守卫源码解析，绝不抄第三遍）。
+  - **可诊断性**：`_resolve_local_python_image` 改为先 `client.images.list()`，把"daemon 问不到"
+    （报「Docker 守护进程不可达」并带上异常类型与 DOCKER_HOST 提示）与"daemon 可达但无带标签镜像"
+    （报候选表）分成两条文本，fail-not-skip 语义与候选优先级不变。判据 `:359`
+    `TestContainerImageGuardDiagnostics`（5 例，注入 fake client）：daemon 故障不得再说成缺镜像、
+    缺镜像不得再说成 daemon、多个在位时按候选顺序取 `python:3.12-slim`、非候选的 `python:*` 仍可兜底、
+    无标签镜像不得被静默拿去 `FROM`。
+
+  成本实测（改前声明判据"文件级排除造成的 TOTAL 损失 < 0.5 个百分点才用 `--ignore`"）：
+  本地全量含该文件 `2068 passed / 17 skipped`，`TOTAL 19163 stmts / 4281 miss`；
+  加 `--ignore` 后 `2032 passed / 11 skipped`，`TOTAL 19163 / 4350` ⇒ 覆盖 77.66% → 77.30%，
+  **损失 0.36 个百分点（69 条语句，全部落在 `app/core/plugin/container_runner.py`：79% → 33%）**，
+  判据满足，故保留文件级排除而非"只摘 `TestRunnerIntegration`"。棘轮 74 的余量随之从 ~3.7pp 降到 ~3.3pp。
+
+  **就地纠正本条登记时的归属**：原文写的是「`python-container` job 的 6 条 ERROR」。第九十七批的
+  CI run 38115360383 里 `python-container` 是 **success**，6 条 ERROR 出在 **`python` job**
+  （`5 failed, 2047 passed, 7 skipped, 6 errors`，逐条都是 `TestRunnerIntegration::*`，
+  报错文本为那句 `Integration tests require a tagged local Python base image`，行号
+  `tests/test_plugin_container.py:761` = 守卫的 `pytest.fail`）。

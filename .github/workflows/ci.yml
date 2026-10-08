@@ -169,7 +169,12 @@ jobs:
       - name: Run tests
         # --cov-fail-under 覆盖率棘轮（R16-11）：2026-09-08 实测 TOTAL 75%，
         # 下限设 74 留缓冲防平台差异；后续随补测逐步上调
-        run: pytest -q tests --durations=20 --cov=app --cov-report=term-missing:skip-covered --cov-fail-under=74
+        #
+        # --ignore：容器专项（tests/test_plugin_container.py）的 owner 是下面的
+        # python-container job——只有它预置 Docker 基础镜像。本 job 既不预拉镜像也不起
+        # runner，跑它只能产出 6 条 fixture ERROR（第九十批以来的形态），把该文件
+        # 真正的错误一起淹掉。排除的只有这一个文件，套件面与覆盖率棘轮不变。
+        run: pytest -q tests --ignore=tests/test_plugin_container.py --durations=20 --cov=app --cov-report=term-missing:skip-covered --cov-fail-under=74
 
   # ─── Python AI 容器专项（阻断门禁）───
   # 数据面关键安全门禁：容器插件执行（digest 校验、固定入口、网络/资源限制）。
