@@ -1020,6 +1020,13 @@ public class ConversationServiceImpl implements ConversationService {
         private final StringBuilder responseBuilder;
         private final java.util.List<Map<String, Object>> accumulatedSources;
         private boolean assistantSaved;
+        /**
+         * 终止闸门（第一百零一批）：[DONE] + complete() 在一次会话里只允许走一次。
+         * Python 的 [DONE] 哨兵与 Reactor 的 onComplete 都会走到终止，此前"线上不重复"
+         * 只依赖"complete 之后再 send 会抛异常并被 catch 吞掉"这一实现细节。
+         */
+        private final AtomicBoolean terminalEmitted = new AtomicBoolean(false);
+
         private final com.fasterxml.jackson.databind.ObjectMapper objectMapper =
                 new com.fasterxml.jackson.databind.ObjectMapper();
 
@@ -1136,13 +1143,26 @@ public class ConversationServiceImpl implements ConversationService {
             }
         }
 
-        private void handleDone() {
-            log.info("Stream completed, requestId: {}", requestId);
+        /**
+         * 唯一的终止出口：哨兵 [DONE]、取消信号、错误分支与 Reactor onComplete 共用
+         * 这道闸门，先到先得，后来的调用直接返回。发送失败只记日志——用量结算与落库
+         * 在调用方各自的路径里，不依赖这里是否成功。
+         */
+        private void emitTerminal() {
+            if (!terminalEmitted.compareAndSet(false, true)) {
+                return;
+            }
             try {
                 emitter.send(SseEmitter.event().data("[DONE]"));
                 emitter.complete();
-            } catch (Exception ignored) {
+            } catch (Exception ex) {
+                log.debug("Failed to emit terminal [DONE], requestId: {}", requestId, ex);
             }
+        }
+
+        private void handleDone() {
+            log.info("Stream completed, requestId: {}", requestId);
+            emitTerminal();
             if (responseBuilder.length() > 0) {
                 assistantSaved = saveStreamAssistantMessage(
                         dto.getConversationId(),
@@ -1166,11 +1186,7 @@ public class ConversationServiceImpl implements ConversationService {
             agentTaskService.cancelRun(agentRun.getId());
             chatUsageRecorder.finalizeChatUsage(
                     tenantId, usageKey, streamReserveTokens, streamInputEstimate, usageFinalized, false, 0);
-            try {
-                emitter.send(SseEmitter.event().data("[DONE]"));
-                emitter.complete();
-            } catch (Exception ignored) {
-            }
+            emitTerminal();
         }
 
         void onError(Throwable error) {
@@ -1188,8 +1204,7 @@ public class ConversationServiceImpl implements ConversationService {
                                 accumulatedSources,
                                 assistantRequestId);
                     }
-                    emitter.send(SseEmitter.event().data("[DONE]"));
-                    emitter.complete();
+                    emitTerminal();
                 } catch (Exception completeError) {
                     log.debug("Failed to complete emitter after cancel: {}", completeError.getMessage());
                 }
@@ -1205,8 +1220,7 @@ public class ConversationServiceImpl implements ConversationService {
                 String errorMessage = aiUnavailableMessage(
                         error instanceof Exception ? (Exception) error : new RuntimeException(error));
                 emitter.send(SseEmitter.event().data(Map.of("content", errorMessage)));
-                emitter.send(SseEmitter.event().data("[DONE]"));
-                emitter.complete();
+                emitTerminal();
                 saveStreamAssistantMessage(
                         dto.getConversationId(), errorMessage, "error", List.of(), assistantRequestId);
             } catch (Exception ex) {
@@ -1241,12 +1255,7 @@ public class ConversationServiceImpl implements ConversationService {
             } catch (Exception convergenceError) {
                 log.warn("Failed to check/converge agent run state on complete: {}", convergenceError.getMessage());
             }
-            try {
-                emitter.send(SseEmitter.event().data("[DONE]"));
-                emitter.complete();
-            } catch (Exception alreadyComplete) {
-                // emitter already closed or IO error
-            }
+            emitTerminal();
             if (responseBuilder.length() > 0 && !assistantSaved) {
                 assistantSaved = saveStreamAssistantMessage(
                         dto.getConversationId(),

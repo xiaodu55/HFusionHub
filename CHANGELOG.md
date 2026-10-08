@@ -11,6 +11,69 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百零一批（2026-10-11：SSE 终止事件收敛为一道闸门——`[DONE]` 此前由哨兵与 `onComplete` 各发一次，"线上不重复"只靠"complete 之后再 send 会抛异常被吞掉"）
+
+#### 结论（先给判定性质）
+- 这是 CI 抓出的**真竞态**，不是环境抖动。main 上 `java` job 唯一那条红来自 run 38134153636
+  （第九十九批的 `3dba7e3d`，**零 Java 改动**下从第九十六/九十七批的 success 翻成 failure）：
+  `ConversationStreamingPersistenceTest.asyncContentResetClearsAccumulatedContentAndForwardsResetEvent:334
+  content_reset should be forwarded: content×2 + reset + [DONE] ==> expected: <4> but was: <5>`，
+  `Tests run: 717, Failures: 1`。
+- 根因由代码结构给出：`StreamSession` 的 `[DONE]` + `complete()` 有 **5 个出口**（哨兵 `handleDone`、
+  取消信号、`onError` 取消分支、`onError` 错误分支、`onComplete` 兜底）。Python 正常收尾时哨兵与
+  `onComplete` **必然都走到**，第二发 `send` 依赖 `SseEmitter.complete()` 之后再 `send` 抛异常、
+  被 `catch (Exception ignored)` 吞掉才没到线上——不变量挂在 emitter 的实现细节上，任何包装
+  （装饰器、按次计数的测试替身）都不再抛，重复就显形，于是同一份断言读数取决于流线程与主线程谁先到。
+- **本地复现率 0/8**：`-Dtest=<类>#<该方法>` 连跑 8 次全绿（scratch `b100_java_loop_1..8.log`，
+  每次 `Tests run: 1, Failures: 0`）⇒ 只能偶发，符合竞态形态；CI 那一次读到了 5。
+
+#### 修复与判据
+- **红判据先行**：新增 `doneSentinelAndStreamCompleteEmitExactlyOneTerminalEvent`
+  （`ConversationStreamingPersistenceTest:353`）——**同步 Flux**（不带 `subscribeOn`），订阅在测试线程
+  上跑完，计数没有竞态；记录型 emitter 把 `builder.build()` 的 `DataWithMediaType` 分段拼回一条再断言
+  "content + 恰好一个 `[DONE]`"、`complete()` 恰好一次。改前实测红：
+  `rendered payloads=[data:{content=可信回答}, data:[DONE], data:[DONE]] ==> expected: <2> but was: <3>`
+  （`b101_red4.log`）。
+- 判据自己也红过两轮才可用：第一版直接 `String.valueOf(builder.build())`，拿到的只有
+  `ResponseBodyEmitter$DataWithMediaType@…` 地址，`[DONE]` 计数取到 **0**（`b101_red.log` /
+  `b101_red2.log`）——不是"没有重复"，是渲染取不到载荷。记下来防后来人把这两种形态混淆。
+- **实现**：`ConversationServiceImpl:1028` 加 `terminalEmitted`（`AtomicBoolean`），`:1151`
+  `emitTerminal()` 为唯一终止出口（`compareAndSet` 先到先得，后来的直接返回，发送失败只记 debug），
+  5 处终止点全部改为调用它：`:1165`（哨兵）、`:1189`（取消信号）、`:1207`（`onError` 取消分支）、
+  `:1223`（`onError` 错误分支）、`:1258`（`onComplete` 兜底）。
+- **未采纳**：把既有断言从 `== 4` 放宽成 `>= 4`。那等于把这条 CI 红换成一个恒真的判据，信号消失。
+  也**没有**删掉 `onComplete` 兜底——"Python 没发 `[DONE]` 就结束流"仍要靠它收尾，两者只是收敛到同一道闸门。
+- 同类出口扫过一遍，缺陷面确认只有这 5 处：`OpenApiServiceImpl:194` 只在 `doOnComplete` 发一次
+  （`[DONE]` chunk 被跳过）、`AgentTaskQueueServiceImpl:361` 用自有 `terminalReceived` 闸门、
+  `ConversationServiceImpl:545`（幂等重放）是单一出口且没有第二条终止路径。
+- **这条不变量的守夜人是行为判据本身**，没有另加"源文件里 `[DONE]` 出现几次"的静态计数门禁：
+  任何人再写一处绕过 `emitTerminal()` 的裸 `send`，同步流用例的 payload 计数会立刻回到 3。
+
+#### 成本（修复带出的真实行为改变）
+- `onError` 非取消分支：`emitTerminal()` 自己吞掉发送失败，所以**错误消息落库不再被"send 抛异常"跳过**。
+  此前客户端已断开时会跳到 `catch → completeWithError`，那条 `status=error` 的助手消息不会写库；
+  现在会写。这是行为变更，不是等价重构。
+
+#### 诚实边界
+- 闸门只管**终止事件**。哨兵之后如果 Python 还推分片，content 分支照样会往已 `complete()` 的
+  emitter 上 `send`，仍靠 Spring 抛异常 + `onChunk` 的 `catch` 打 warn——本批没动它，也没法用同一道
+  闸门管（它不是"终止"语义）。
+- "竞态消失"的运行时证据只能由 CI 给：本地 8/8 绿 + 单例红→绿说明的是**机制**（第二发根本不再发生），
+  不等于 runner 上已观察到的 5 从此不再出现。本批推上去后 `java` job 的 `Tests run: 718 / 0 fail`
+  才是补证，登记在 `docs/CLEANUP_BACKLOG.md` F 节。
+
+#### 验证
+- 单例红→绿：改前 1 failure（3 发 / 两个 `[DONE]`），改后 `Tests run: 1, Failures: 0`（`b101_green1.log`）。
+- 全量：`mvn --batch-mode test` ⇒ **Tests run: 718, Failures: 0, Errors: 0, Skipped: 1**，
+  jacoco `check` 通过、BUILD SUCCESS（`b101_java_full.log`）。既有那条 `== 4` 断言未改，
+  在新结构下变成确定性的（助手行落库发生在终止发之后，计数只可能停在 4）。
+- `spotless:check` 由红（2 文件违规）转 `spotless:apply` 绿，apply 只动本次这 2 个文件。
+- 计数同步：Java 717 → **718**（README ×4、README_EN ×1、ROADMAP ×1 并把实测口径归到本批、
+  CLEANUP_BACKLOG ×1）。这一项**有**静态门禁：`scripts/static-checks.py` 的检查 3 数 Java 侧
+  `@Test` 注解（和 Python 的 `def test_`、前端的 `it/test` 一起）与文档比对，计数没跟上就是它先红——
+  本批跑通即为 718（静态 `@Test` 口径与 surefire 的 run 数在本批恰好相等：新增 1 个 `@Test`，
+  run 数 717→718）。
+
 ### 第一百批（2026-10-11：容器轨的 owner 定为 `python-container`，`python` job 不再跑它；镜像守卫把"daemon 问不到"与"没带标签镜像"分成两句话）
 
 #### 结论（先给判定性质）

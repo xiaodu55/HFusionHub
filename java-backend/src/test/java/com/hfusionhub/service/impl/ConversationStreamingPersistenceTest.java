@@ -41,10 +41,13 @@ import com.hfusionhub.service.ConversationService;
 import com.hfusionhub.service.MemoryService;
 import com.hfusionhub.support.AbstractItMySQLTest;
 import com.hfusionhub.tenant.TenantContext;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,6 +56,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
@@ -332,6 +336,75 @@ class ConversationStreamingPersistenceTest extends AbstractItMySQLTest {
         assertEquals("重试后的可信回答", assistant.getContent());
         // 前端桥接：content_reset 清空事件被转发（未修复时只有 3 次：content×2+[DONE]）
         assertEquals(4, builderSends.get(), "content_reset should be forwarded: content×2 + reset + [DONE]");
+    }
+
+    /**
+     * 终止事件唯一性（第一百零一批）：{@code data: [DONE]} 哨兵与 Reactor 的
+     * onComplete 各走一遍"[DONE] + complete()"，线上不出现重复仅仅因为
+     * "complete 之后再 send 会抛异常、异常被 catch 吞掉"。任何不抛该异常的
+     * emitter（装饰器、按次计数的测试替身）都会收到两个 [DONE]——上一条
+     * content_reset 用例的 `== 4` 读到 4 还是 5，取决于主线程轮询与流线程谁先跑完，
+     * CI java job 因此在零 Java 改动下偶发 {@code expected: <4> but was: <5>}。
+     *
+     * <p>本用例不带 subscribeOn，订阅在测试线程上同步跑完，计数没有竞态，
+     * 判据只指向"终止事件发了几次"。</p>
+     */
+    @Test
+    void doneSentinelAndStreamCompleteEmitExactlyOneTerminalEvent() {
+        String requestId = "persist-terminal-1";
+        String assistantRequestId = "persist-terminal-1:assistant";
+
+        List<String> payloads = Collections.synchronizedList(new ArrayList<>());
+        AtomicInteger completes = new AtomicInteger();
+        SseEmitter recordingEmitter = new SseEmitter() {
+            @Override
+            public void send(SseEventBuilder builder) {
+                // build() 给的是 DataWithMediaType 分段（"data:" 前缀 + 载荷 + 空行），
+                // 拼回一条才看得出这一发是 content 还是 [DONE]
+                StringBuilder wire = new StringBuilder();
+                for (Object part : builder.build()) {
+                    if (part instanceof ResponseBodyEmitter.DataWithMediaType item) {
+                        wire.append(item.getData());
+                    }
+                }
+                payloads.add(wire.toString());
+            }
+
+            @Override
+            public void complete() {
+                completes.incrementAndGet();
+            }
+        };
+
+        // 同步 Flux：sendMessageStream 返回时整条流（onNext + onComplete）已跑完
+        Flux<String> stream = Flux.just("data: {\"content\":\"可信回答\"}\n\n", "data: [DONE]\n\n");
+        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any()))
+                .thenReturn(stream);
+        when(aiClient.streamChat(anyString(), anyLong(), any(), any(), anyString(), anyLong(), any(), any()))
+                .thenReturn(stream);
+
+        MessageSendDTO dto = new MessageSendDTO();
+        dto.setConversationId(conversationId);
+        dto.setContent("terminal once");
+        dto.setRequestId(requestId);
+
+        conversationService.sendMessageStream(dto, recordingEmitter, 1L, new AtomicBoolean(false));
+
+        assertEquals(2, payloads.size(), "content + exactly one [DONE] (rendered payloads=" + payloads + ")");
+        assertEquals(1, completes.get(), "emitter must be completed exactly once");
+        long doneEvents = payloads.stream().filter(p -> p.contains("[DONE]")).count();
+        assertEquals(
+                1,
+                doneEvents,
+                "[DONE] must reach the wire exactly once: sentinel and onComplete share one gate (rendered payloads="
+                        + payloads
+                        + ")");
+
+        Message assistant = messageMapper.selectOne(Wrappers.<Message>lambdaQuery()
+                .eq(Message::getRole, "assistant")
+                .eq(Message::getRequestId, assistantRequestId));
+        assertNotNull(assistant, "assistant message should be persisted on the synchronous path");
+        assertEquals("可信回答", assistant.getContent());
     }
 
     private Message waitForAssistantMessage(String assistantRequestId) {

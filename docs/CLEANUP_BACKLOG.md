@@ -1,7 +1,7 @@
 # 冗余功能与死代码清理清单
 
 > 2026-08-29 前端主题统一改造时盘点生成。本次**只登记不删除**，逐项评估后处理。
-> 删除前先确认测试基线（Java 717 · Python 1916 · 前端 117）仍全绿。
+> 删除前先确认测试基线（Java 718 · Python 1916 · 前端 117）仍全绿。
 
 ## A. 冻结的实验功能（治理决策：保留代码，待后续补强）
 
@@ -47,6 +47,25 @@
 - [x] ~~统一缓存体系（OPTIMIZATION_PLAN.md 1.9）~~ — **已结清（2026-08-29 复查）**：flag 求值缓存已在 R15-16 落地（15s TTL + 写失效，`FeatureFlagServiceImpl` 头部）；`UsageLedger` 为预占/结算型账本（原子 SQL 保证配额正确性），加缓存反而有害，维持实时。
 
 ## F. 已取证、未修的缺陷（只登记，处置时逐项划掉）
+
+- [x] **流式会话的终止事件有两个出口**（第一百零一批取证并修）—— CI `java` job 在**零 Java 改动**下
+  从 success 翻成 failure：run 38134153636（第九十九批 `3dba7e3d`）报
+  `ConversationStreamingPersistenceTest.asyncContentResetClearsAccumulatedContentAndForwardsResetEvent:334
+  expected: <4> but was: <5>`（`Tests run: 717, Failures: 1`），而第九十六批 run 38099630611、
+  第九十七批 run 38115360383 的 `java` 都是 success。本地把该单例连跑 8 次 **0/8 复现**
+  ⇒ 竞态而非稳定错误。
+  机制：`StreamSession` 的 `[DONE]` + `complete()` 有 5 个出口，Python 正常收尾时哨兵
+  （`handleDone`）与 Reactor `onComplete` 兜底**必然都走到**，"线上不重复"只依赖
+  "`complete()` 之后再 `send()` 会抛异常、异常被 `catch (Exception ignored)` 吞掉"这一实现细节——
+  任何包装 emitter（装饰器、按次计数的测试替身）都不再抛，重复当场显形，断言读数取决于线程交错。
+  **处置（第一百零一批）**：`ConversationServiceImpl:1028` `terminalEmitted` + `:1151` `emitTerminal()`
+  收成唯一终止出口，`:1165/:1189/:1207/:1223/:1258` 五处全部改调它；红判据是新增的同步流用例
+  `ConversationStreamingPersistenceTest:353`（改前 `[data:{content=…}, data:[DONE], data:[DONE]]`
+  ⇒ expected 2 but was 3）。既有 `== 4` 断言**未放宽**，闸门落地后它成为确定性判据。
+  全量 `mvn --batch-mode test`：718 run / 0 fail / 1 skip，jacoco `check` 通过。
+  **待补证**：CI `java` job 上 718/0 fail 才是竞态消失的运行时证据（本地 8/8 只证明机制）。
+  同形出口已扫：`OpenApiServiceImpl:194`、`AgentTaskQueueServiceImpl:361`、
+  `ConversationServiceImpl:545`（幂等重放）各自只有一个终止出口，不在缺陷面内。
 
 - [x] **插件子进程的 fd 上限不看继承面**（第九十七批取证，第九十九批按 A 方案修）—— CI `python` job 里
   `tests/test_plugin_sandbox_runner.py` 那 5 条红是同一条链：报错都是
