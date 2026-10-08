@@ -46,8 +46,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 文档纠正：`docs/CI_GATES.md` 第 3 行"每个 push/PR 都跑离线评测门禁"与 `README.md:49` 的
   "CI push 阻断门禁"此前只对主套件成立；新增第 5 节记录本批，并把"四处自伤"改成五处（正文里那句
   "三条判据"在第九十四批就已经落后，一并纠正）、`相关文件` 里那条"上述两条判据"的旧措辞同样改对。
-- 诚实边界：CI 上那四次真实执行**尚未取到**（修法未推上 main），已写的核对记录只到本地 argv 与本地套件；
-  检查 14 也不保证门里的断言会过，`run:` 内 shell 逻辑对不对仍归"把步骤体落盘真跑"那类判据。
+- 诚实边界：检查 14 不保证门里的断言会过，`run:` 内 shell 逻辑对不对仍归"把步骤体落盘真跑"那类判据；
+  本批提交时 CI 上那四次真实执行**还没取到**，写的核对记录只到本地 argv 与本地套件（本地 argv 只是
+  必要条件，判定标准只能是 runner 日志）。推送后的补证见下面"验证"末段。
 
 #### B 链取证：`Errno 24` 不是漏 fd（容器内实测，未动生产码）
 - CI `python` job 那 5 条红是同一条链：都是 `[Errno 24] Too many open files: '<插件目录>/__init__.py'`，
@@ -77,6 +78,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   —— `scripts/static-checks.py` 不在 lint 面内（CI 的 `ruff check .` 工作目录是 `python-ai`）。
 - 全量 static-checks 仅剩计数漂移一条，随本批把 Python 计数 1881→1896 同步后转绿
   （README 4 处 + README_EN + `docs/CLEANUP_BACKLOG.md:4` + `docs/ROADMAP.md:16`）。
+- **补证（推送 `d3d31f36` 后取，run 38115360383 / job 114399072071）**：`eval-offline` 在本批修法
+  上线后的第一轮即 success，四道门各有一次带时间戳的 `##[group]Run python scripts/eval_offline.py`
+  （`05:47:11.2899680Z` 主门单行、`:12.9625378Z` bid、`:13.9317179Z` 施工、`:14.8539778Z` IT 三条
+  块标量续行被 runner 逐条回显）；四份报告的 `suite_sha256` 互不相同
+  （`15b0ea64…` / `135114f4…` / `6d8a045b…` / `f23c8bf0…`），bid 门 `case_count: 27`，主门
+  `citation_recall 0.8942`、`citation_f1 0.7409` 在 0.85 / 0.70 下限之上，三条竖门的四项
+  `*_recall / *_accuracy` 聚合 `1.0`，四份都停在 `"gate_failures": []` 且 `diffs` 逐项 `0.0`；
+  整份日志 `unrecognized arguments` / `ShellCommandUnresolved` 0 命中。`static-consistency` 同轮转绿
+  ⇒ 检查 14 在 CI 上执行。同一轮仍红的是 `python`（fd 上限那条链）、`frontend`（npm audit）、
+  `python-lint`（pip-audit），与本批的修法无关。`docs/CI_GATES.md` 第 5 节的手工核对记录已按这份
+  日志就地改写，本批的"尚未取到"因此结清。
 
 ### 第九十六批（2026-10-10：写侧三张钟面钉成同一个 UTC，判定 SQL 换成会话免疫的 `UTC_TIMESTAMP()`——红判据第一次栽在"MyBatis 一级缓存让二次读根本没问库"）
 

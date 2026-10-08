@@ -334,8 +334,32 @@ check 重述的是第 2 步的数据——实测单独跑 8 例的类报 `All co
 主套件成立，`README.md:49` 的"CI push 阻断门禁"同样只覆盖主套件；三竖门自出生起未阻断过任何
 合并。手工核对记录（不靠门禁）：修复后用 PyYAML 把 ci.yml 解析成 shell 实际收到的脚本、交给
 bash 打印 argv，四个门各自都是"前导空格 token 数 0、退出码 0"；三个竖门的套件另在本地按正确
-引法各跑一遍为绿。**CI 上那四次真实执行尚未取到**——修法还没推上 main，推上去之后要以 job 日志
-再核一次，不能拿本地 argv 顶替。
+引法各跑一遍为绿。
+
+**本地 argv 只是必要条件，不是本批的判定标准**——真正的标准是"CI 上这一步确实被 shell 执行了"，
+它只能从 runner 日志取。推送 `d3d31f36` 后（run 38115360383，job 114399072071，`eval-offline`
+**success**——本批修法上线后的第一轮）取到的四条执行证据：
+
+| 时间戳（runner 时钟） | 步骤 | 日志中的独立证据 |
+|---|---|---|
+| `05:47:11.2899680Z` | Run offline evaluation gate（主门） | `##[group]Run python scripts/eval_offline.py --cases evaluation/suite/cases.jsonl …` 单行 |
+| `05:47:12.9625378Z` | Run bid offline evaluation gate | `##[group]Run python scripts/eval_offline.py \` + 缩进续行，续行由 runner 逐条回显（块标量） |
+| `05:47:13.9317179Z` | Run construction offline evaluation gate | 同上 |
+| `05:47:14.8539778Z` | Run IT offline evaluation gate | 同上 |
+
+四步各打出自己的报告，且 `suite_sha256` **互不相同**（主门 `15b0ea64…`、bid `135114f4…`、
+施工 `6d8a045b…`、IT `f23c8bf0…`）——这一步排除了"四行日志其实重复跑了同一个套件"的假绿。
+报告是真算的：bid 门 `case_count: 27`、`category_counts.normal: 27`；主门的
+`citation_recall 0.8942 / citation_f1 0.7409` 落在 0.85 / 0.70 两条下限之上；三条竖门的
+`qualification_recall / disqualification_clause_recall / scoring_point_accuracy /
+bid_terminology_accuracy` 聚合值均为 `1.0`。四份报告末尾都是 `"gate_failures": []`，且
+`diffs` 块逐项 `0.0`（本轮指标与 `baseline_metrics` 完全相等）——也就是说门第一次真跑就站在
+自己的基线上，"回归即红"这条能力还没被一次真退化验证过。全份日志里 `unrecognized arguments`
+与 `ShellCommandUnresolved` **0 命中**，即死因词没有再生。同一轮 `static-consistency` 也转绿，
+检查 14 从此在 CI 上执行。
+
+诚实边界照旧：这四次执行证明的是"命令到了 shell、门按自己的套件跑完且没判红"，**不证明门里的阈值
+设置得当**；三道竖门今天第一次有历史数据，此前 47 天没有任何一次运行可以对照。
 
 ## 相关文件
 
