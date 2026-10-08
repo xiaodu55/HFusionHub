@@ -13,7 +13,7 @@
 - **Notifications**: System notice table + read tracking (V9)
 - **Production**: Docker Compose prod (MySQL/Redis/MinIO/Milvus/etcd/Attu/Java/Python/Plugin Runner), Helm chart, GHCR 镜像发布流水线（`v*` tag 自动构建推送）
 - **Release**: 版本 1.0.0；`scripts/setup.ps1/.sh` 一键启动 + `init-env` 自动生成随机密钥；演示数据一键导入；Setup 引导清单
-- **Tests**: Python 1896 ✅ | Java 717 ✅（CI 口径：9 个 IT 类共 56 例跑真实 MySQL，第九十六批实测 717 run / 0 fail / 1 skip；无库时 IT 整类跳过、覆盖率棘轮不达标，见 ADR-008 与 `docs/CI_GATES.md` 第 4 节） | Frontend 117 单测 + 73 E2E ✅（2026-09-08 口径）
+- **Tests**: Python 1907 ✅ | Java 717 ✅（CI 口径：9 个 IT 类共 56 例跑真实 MySQL，第九十六批实测 717 run / 0 fail / 1 skip；无库时 IT 整类跳过、覆盖率棘轮不达标，见 ADR-008 与 `docs/CI_GATES.md` 第 4 节） | Frontend 117 单测 + 73 E2E ✅（2026-09-08 口径）
 - **Security**: SECURITY.md / CODE_OF_CONDUCT / NOTICE / dependabot / gitleaks / ruff+pip-audit CI 门禁
 - **Frontend**: P0-P4 completed — dashboard cleanup, RAG trend chart, notification stub, SetupChecklist, 能力开关设置页
 

@@ -11,6 +11,87 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第九十九批（2026-10-11：插件子进程的 fd 上限从"绝对数"改成"继承数 + 预算"——CI 那 5 条 `Errno 24` 在容器里按 HEAD 代码原样复现，再原样消失）
+
+#### 结论（先给判定性质）
+- 本批是 `docs/CLEANUP_BACKLOG.md` F 节第一条的处置，方案由用户选定：**A**（设限前先数已打开的 fd，
+  上限钉成"继承数 + 预算"，只动 soft、hard 留给运行期）。B（让子进程不继承）与 C（只在测试里抬
+  `max_open_files`）未采纳，C 的形态本就是该清单反对的"把红压掉而缺陷留在生产码"。
+- **先做成 CI 级复现，而不是只写判据**：在 `hfusionhub/python88:rc` 里用一个 session-start 灌 fd 的
+  一次性插件（`scratch-b99/b99_fdload_plugin.py`，把 pytest 父进程抬到 200 个 fd）复现 CI 的主机形态，
+  跑的却是 **HEAD 的生产码 + HEAD 的两份既有测试**（`test_plugin_sandbox_runner.py` +
+  `test_plugin_security.py`，29 例）⇒ `5 failed, 24 passed`，且这 5 条与 CI `python` job 里那 5 条
+  **同名**：`test_fs_default_baseline_reads_own_plugin_dir`、
+  `test_fs_default_baseline_denies_paths_outside_baseline`、
+  `test_network_default_deny_blocks_connect_in_subprocess`、
+  `TestNetworkSandbox::test_network_access_to_allowed_domain`、`TestResourceLimits::test_timeout_enforcement`。
+  这条把第九十七批的推断（"CI 那 5 条红等价于 pytest 父进程当时握着 ≥64 个 fd"）从推理变成可复算。
+- 判据层的红同样先取到手：新文件对 HEAD 代码是 **6 failed / 2 passed**（当时 8 例，容器内），
+  红的正是这条缺陷的三个面——hard 被钉成预算、子进程抬不回 soft、soft 不含继承数。
+
+#### 修复与判据
+- `python-ai/app/core/plugin/sandbox_runner.py`（+42/−4，净 +38 行）：新增 `:72` `_FD_SCAN_CAP`、
+  `:75` `_count_open_fds()`（Linux 走 `/proc/self/fd`，其余按 `fstat` 扫到 4096）、
+  `:91` `_apply_fd_budget()`；`:132-141` 的 fd 分支由 `setrlimit((max_open_files, max_open_files))`
+  改为调用它。三条口径写进函数与 docstring：**soft = 设限时已打开的 fd 数 + 预算**；
+  **只按继承 hard 夹、不按继承 soft 夹**（按 soft 夹的话，继承 soft 比预算小就又退回 0 额度）；
+  **hard 保持继承值**（fork 之后设限，若把 hard 也钉死，非 root 的子进程连抬回去的余地都没有）。
+  `target == soft` 时不调 `setrlimit`，避免每次执行都做一次无谓系统调用。`:45` 的字段含义随之改注为
+  "新增 fd 的预算，非绝对上限"（它是 manifest 可声明项，`manifest.py:40` / `registry.py:73` 走的是同一条路）。
+- `python-ai/tests/test_sandbox_fd_budget.py`（11 例，6 个类）：`TestHardLimitStaysInherited`（hard
+  仍是继承值、子进程可把 soft 抬回继承 hard）、`TestSoftIsInheritedPlusBudget`（soft 含继承数；预算是
+  真上限而非绝对数；继承 soft 荒谬地大时仍会被下调）、`TestEndToEndWithLoadedParent`（父进程灌 200 fd
+  后 `execute_in_sandbox` 仍能跑通插件 import——即 CI 的失败点）、`TestBudgetNeverCrossesInheritedHard`
+  （`hard_floor = 当时 fd + 8` 且断言 `继承数 + 预算 > hard_floor`，让"夹"这一步真被执行到）、
+  `TestCountOpenFds`、`TestNoResourceModuleFailsLoudly`。计数全部由 fork 出的子进程现场回报
+  （`soft/hard_before`、`inherited`、新增可用 fd、能否抬回），不是父进程猜的。
+- 三处机制细节被钉成断言而非注释：① `os.listdir("/proc/self/fd")` 会数到自己那个目录 fd，
+  所以 `/proc` 通道恒比 `fstat` 扫描多 1 ⇒ **声明预算实际是"预算 + 1 富余"**
+  （`test_scan_fallback_is_exactly_one_below_proc` 钉差值恰为 1，上限也按 `BUDGET + 1` 算）；
+  ② 探测"额度用尽"必须**握着** fd 再计数（open-then-close 的循环永远碰不到上限，第一版因此把整轮
+  跑成 191 秒超时）；③ 观测用例必须抬 `memory_mb`，因为 fork 出的 pytest 子进程 VSZ 远超 256MB，
+  否则 `RLIMIT_AS` 先把子进程杀掉，红的是环境不是判据。
+
+#### 诚实边界
+- **CI 上这条修复的真执行尚未取到**（本批未推送）。已有的是容器内 HEAD/修复两版对跑的差异，
+  与第九十七批那条纪律一致：判定标准只能是 runner 日志，容器复算只是必要条件。
+- 本机永远验证不到主体：Windows 无 `resource` 模块，11 例里 **9 例按设计跳过**，只剩
+  `/proc` 计数与"无 resource 只 warning"两类跨平台例（本地 `2 passed, 9 skipped`）。
+  判据的真身在容器/CI，**不能拿本地的绿当作这条链被验证过**。
+- 未定位"pytest 父进程为什么握着那么多 fd"：本批消除的是"上限不看继承面"这个缺陷本身，
+  CI 里那份 fd 账本的来源没查，也不需要查（修好后它不再决定成败）。
+- A 方案的代价要说清：soft 现在随父进程 fd 数水涨船高，所以 `max_open_files` **不再是子进程可用 fd
+  的绝对资源上限**，只是"新增预算"。B 方案（`spawn` / `close_pipe_fds` / exec 干净进程）才能把父子
+  两类账本彻底分开，改动面更大，本批未做。
+- 同形状的 `python-ai/app/core/plugin/sandbox.py:229`（`_apply_posix`）**仍未动**——`apply_resource_limits`
+  全仓无真实调用点（`:262` 那段是 docstring 示例），生产不可达，收它要另立批次决定是否删。
+
+#### 待确认（用户决定，本批未替用户拍）
+- `python-container` job 那 6 条 ERROR（镜像缺失守卫）：skip / CI 预构建镜像 / 保留红着提醒——
+  已在 `docs/CLEANUP_BACKLOG.md` F 节第二条登记，本批未动。
+
+#### 验证
+- 红→绿：容器（`hfusionhub/python88:rc`，CI 同版本 `pytest==8.3.5` + `pytest-asyncio==0.25.3`，
+  `/app` 以 `:ro` 挂载 ⇒ 生产码运行时不可写）灌 200 fd 的 session 里，HEAD 生产码 + 两份既有测试
+  `5 failed, 24 passed`（`scratch-b99/b99_ci_replay_pre.log`）；换修复后代码，两份既有测试 + 新判据
+  共 40 例 **40 passed**（`b99_post_final_fdload.log`）；同一 40 例在不灌 fd 的裸 session 里也
+  **40 passed**（`b99_post_final_bare.log` ⇒ 新判据不是靠灌 fd 才绿的）。
+- 本地（venv，python 3.11）新文件 `2 passed, 9 skipped`；`python-ai` 全量 `pytest -q`
+  **2059 passed / 17 skipped**，退出码 0（第九十七批留存产物记的是 2057/8，差值恰为本批 +2 passed
+  /+9 skipped ⇒ 无回归）。
+- `ruff check`（venv，0.16.3）对 `tests/test_sandbox_fd_budget.py` 与
+  `app/core/plugin/sandbox_runner.py` 通过；全量 `static-checks.py` 仅剩计数漂移一条，随本批把
+  Python 计数 1896→1907 同步（README 4 处 + README_EN + `docs/CLEANUP_BACKLOG.md:4` +
+  `docs/ROADMAP.md:16`）后转绿。
+- `docs/CLEANUP_BACKLOG.md` F 节第一条划掉（`[x]`）并写出处置、锚点与代价；同节内因
+  `sandbox_runner.py` 净 +38 行而漂移的锚点就地改到现行行号（fd 设限点 `:99`→"`:132-141` 调 `_apply_fd_budget`"、
+  `:530/:538/:572`→`:568/:577/:611`、`:80`→`:116`），改后逐条 `sed` 复核落点。
+- **顺带纠正一条本仓自己的旧声称**：第九十七批"验证"里那句"全量 `pytest -q` **2293 passed / 11 skipped**"
+  与留存的该批产物对不上——`scratch-b97/b97_pytest_full.log` 记录的是 **2057 passed / 8 skipped**
+  （无 deselected），本批全量 2059/17 恰为 2057+2 / 8+9。2293 在当前测试面（静态 `def test_` 1907、
+  参数化后采集 2076）上不可能出现，来源无法复算，故就地改为产物记录的 2057/8 并注明口径出处。
+  手工核对记录：本批全量运行退出码 0，产物在 `scratch-b99/b99_local_full.log`。
+
 ### 第九十七批（2026-10-11：招投标三道评测竖门自出生起从未在 CI 跑过——死因是 YAML 把 `run:` 的续行折叠成了空格；顺带在容器里把 `Errno 24` 那条链的量测完，"父进程漏 fd"的假设被否掉）
 
 #### 结论（先给判定性质）
@@ -73,8 +154,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 #### 验证
 - 红→绿：修改前 `python scripts/static-checks.py --workflow-run-scalars` 退出码 1，点名
   ci.yml:252 / :266 / :279；修改后同一命令 `[ok] … 扫描 5 个文件 / 81 个 run 步骤 … 四个离线评测门 … 用例文件在位`。
-- 新判据文件 15 例全绿；`python-ai` 全量 `pytest -q`（venv，python 3.11）**2293 passed / 11 skipped**，
-  退出码 0；`ruff check python-ai/tests/test_workflow_run_scalars.py`（venv，0.16.3）通过
+- 新判据文件 15 例全绿；`python-ai` 全量 `pytest -q`（venv，python 3.11）**2057 passed / 8 skipped**
+  （第九十九批就地纠正：此处原写 2293/11，与该批留存产物 `scratch-b97/b97_pytest_full.log` 对不上，
+  2293 在当前测试面上不可能出现，详见第九十九批"验证"末段），退出码 0；
+  `ruff check python-ai/tests/test_workflow_run_scalars.py`（venv，0.16.3）通过
   —— `scripts/static-checks.py` 不在 lint 面内（CI 的 `ruff check .` 工作目录是 `python-ai`）。
 - 全量 static-checks 仅剩计数漂移一条，随本批把 Python 计数 1881→1896 同步后转绿
   （README 4 处 + README_EN + `docs/CLEANUP_BACKLOG.md:4` + `docs/ROADMAP.md:16`）。

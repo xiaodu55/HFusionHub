@@ -1,7 +1,7 @@
 # 冗余功能与死代码清理清单
 
 > 2026-08-29 前端主题统一改造时盘点生成。本次**只登记不删除**，逐项评估后处理。
-> 删除前先确认测试基线（Java 717 · Python 1896 · 前端 117）仍全绿。
+> 删除前先确认测试基线（Java 717 · Python 1907 · 前端 117）仍全绿。
 
 ## A. 冻结的实验功能（治理决策：保留代码，待后续补强）
 
@@ -48,13 +48,14 @@
 
 ## F. 已取证、未修的缺陷（只登记，处置时逐项划掉）
 
-- [ ] **插件子进程的 fd 上限不看继承面**（第九十七批取证）—— CI `python` job 里
+- [x] **插件子进程的 fd 上限不看继承面**（第九十七批取证，第九十九批按 A 方案修）—— CI `python` job 里
   `tests/test_plugin_sandbox_runner.py` 那 5 条红是同一条链：报错都是
   `[Errno 24] Too many open files: '<插件目录>/__init__.py'`，`error_code` 全是
   `plugin_execution_error` ⇒ 异常发生在**子进程**的 `_subprocess_worker` Step 3 import，
-  不是父进程调用处。生产码 `sandbox_runner.py:99` 在 fork **之后**把
-  `RLIMIT_NOFILE` 钉成 `(config.max_open_files, 同值)`（默认 64，`:45`），而子进程此刻已经
-  继承了父进程当时打开的全部 fd，这些同样计入那 64 的额度。
+  不是父进程调用处。改前的生产码在 fork **之后**把 `RLIMIT_NOFILE` 钉成
+  `(config.max_open_files, 同值)`（默认 64，`:45`；改前位于 `:99`，本批该文件 +38 行，现由
+  `:132-141` 的分支调 `_apply_fd_budget`），而子进程此刻已经继承了父进程当时打开的全部 fd，
+  这些同样计入那 64 的额度。
 
   容器内实测（镜像 `hfusionhub/python88:rc`，只测量、未改生产码）：
 
@@ -66,8 +67,8 @@
   | 父进程灌到 64 / 70 / 80 / 100 / 150 / 200 | 六档**全部** `Errno 24`，且都栽在子进程第一个 import 上 |
   | 父进程 150 时改 `max_open_files` = 64 / 128 / 256 | 64 红、128 红、**256 绿** |
 
-  两条结论：① **"父进程漏 fd"这个假设被否掉**——超时分支 `:530`、异常退出分支 `:538` 确实
-  绕过了 `finally: parent_conn.close()`（`:572`），但 CPython 在栈帧展开时按引用计数关掉连接，
+  两条结论：① **"父进程漏 fd"这个假设被否掉**——超时分支 `:568`、异常退出分支 `:577` 确实
+  绕过了 `finally: parent_conn.close()`（`:611`），但 CPython 在栈帧展开时按引用计数关掉连接，
   三条分支实测零增长，所以这条不能作为缺陷登记（此前的怀疑撤回）；
   ② 真正的限制变量是**上限 vs 继承数**，不是父进程的绝对 fd 数——所以 CI 那 5 条红等价于
   "pytest 父进程在那一刻已经握着 ≥64 个 fd"（CI 里子进程连插件 `__init__.py` 都没能打开）。
@@ -75,13 +76,23 @@
   同形状的 `sandbox.py:229`（`_apply_posix`）**在生产路径不可达**：`apply_resource_limits`
   的"调用方"只有 `:262` 那段 docstring 示例，全仓无真实调用点，故本条不涵盖它。
 
-  本地永远看不见这条：Windows 没有 `resource` 模块，`:80` 的 `ImportError` 分支把 CPU/内存/fd
+  本地永远看不见这条：Windows 没有 `resource` 模块，`:116` 的 `ImportError` 分支把 CPU/内存/fd
   三项限制全部跳过并只打一条 warning ⇒ 同一份代码本机全绿、Linux 恒红。
 
-  三条出路（**待确认**，本批未动）：A（推荐）设限前先读 `os.listdir('/proc/self/fd')` 或
+  三条出路（第九十九批按 **A** 修，B/C 未采纳）：A（推荐）设限前先读 `os.listdir('/proc/self/fd')` 或
   `getrlimit` 的当前值，把上限钉成"继承数 + 预算"，且只抬 soft、hard 留给运行期调；
   B 让子进程不继承（`spawn`/`close_pipe_fds`/exec 起干净进程），改动面最大但把两类 fd 账本彻底分开；
   C 只在测试里抬 `max_open_files`——这只让 CI 变绿，缺陷留在生产码，属本清单反对的形态。
+
+  **处置（第九十九批，2026-10-11）**：已按 A 落地。新增 `sandbox_runner.py:72` `_FD_SCAN_CAP`、
+  `:75` `_count_open_fds()`、`:91` `_apply_fd_budget()`，`:132-141` 的 fd 分支改为调用它——
+  soft = 设限时已打开的 fd 数 + `max_open_files`，只按继承 hard 夹（不按继承 soft 夹，否则继承 soft
+  比预算小又会退回 0 额度），hard 不再被钉死。判据 `tests/test_sandbox_fd_budget.py`（11 例）：
+  父进程灌 200 fd 后子进程仍能新开满预算、hard 保持继承值可被子进程自己抬回、预算不越过继承 hard、
+  `/proc` 计数与 fstat 扫描恒定差 1（`os.listdir` 数到自己那个目录 fd ⇒ 声明预算实为"预算 + 1 富余"）、
+  无 `resource` 模块时只 warning 不抛。容器内改前 6 例红、改后全绿；CI 那 5 条红的形态用
+  session-start 灌 fd 的插件在 HEAD 代码上原样复现（`5 failed, 24 passed`），换修复后代码转绿。
+  `sandbox.py:229` 那个同形状点位**本批仍未动**（生产不可达，见上），如需一并收口另立批次。
 
 - [ ] **`python-container` job 的 6 条 ERROR 是镜像守卫，处置方式待用户定**（第九十七批登记）——
   `tests/test_plugin_container.py` 的 fixture 在没有本地标签镜像时

@@ -42,7 +42,7 @@ class SubprocessConfig:
     cpu_seconds: float = 10.0
     memory_mb: int = 256
     timeout_seconds: float = 30.0
-    max_open_files: int = 64
+    max_open_files: int = 64  # 新增 fd 的预算，非绝对上限，见 _apply_fd_budget
     allowed_domains: list[str] = field(default_factory=list)
     blocked_domains: list[str] = field(default_factory=list)
     allowed_paths: list[str] = field(default_factory=list)
@@ -66,6 +66,42 @@ class SubprocessResult:
     error_code: str | None = None
     duration_ms: float = 0.0
     resource_usage: dict[str, Any] | None = None
+
+
+# 扫描 /proc 不可用平台时的 fd 计数上限（够大以便看出异常，又不至于拖慢每次调用）
+_FD_SCAN_CAP = 4096
+
+
+def _count_open_fds() -> int:
+    """本进程当前已打开的 fd 数（Linux 走 /proc，其余按 fstat 扫）。"""
+    try:
+        return len(os.listdir("/proc/self/fd"))
+    except OSError:
+        pass
+    count = 0
+    for fd in range(_FD_SCAN_CAP):
+        try:
+            os.fstat(fd)
+        except OSError:
+            continue
+        count += 1
+    return count
+
+
+def _apply_fd_budget(config: SubprocessConfig, resource) -> None:
+    """把 fd 限制设成「设限时已打开的 fd 数 + 预算」，只动 soft。
+
+    设限发生在 fork 之后，子进程继承的 fd 同样计入额度：把 max_open_files 当绝对数会先掐死
+    子进程自己的 import（第九十七批容器实测：父进程持有 200 个 fd 时新增可用 fd = 0，
+    报 [Errno 24] httpx/__init__.py）。hard 保持继承值，否则子进程连抬回去的余地都没有。
+    target 只按 hard 夹、不按继承的 soft 夹：继承 soft 比预算小时若按 soft 夹，又会退回 0 额度。
+    """
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    target = _count_open_fds() + config.max_open_files
+    if hard != resource.RLIM_INFINITY:
+        target = min(target, hard)
+    if target != soft:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
 
 
 def _apply_subprocess_limits(config: SubprocessConfig) -> None:
@@ -96,11 +132,13 @@ def _apply_subprocess_limits(config: SubprocessConfig) -> None:
     # Open files limit
     try:
         import resource
-        resource.setrlimit(resource.RLIMIT_NOFILE, (config.max_open_files, config.max_open_files))
     except ImportError:
         pass  # no `resource` module (Windows) — already warned by the CPU block above
-    except (ValueError, OSError) as exc:
-        logger.warning("Open-files rlimit not enforced for plugin subprocess: %s", exc)
+    else:
+        try:
+            _apply_fd_budget(config, resource)
+        except (ValueError, OSError) as exc:
+            logger.warning("Open-files rlimit not enforced for plugin subprocess: %s", exc)
 
 
 def _make_domain_check(allowed: list[str], blocked: list[str]) -> Callable[[str], None]:
