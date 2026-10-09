@@ -4,19 +4,25 @@
 fastapi>=0.141.1
 uvicorn[standard]>=0.27.0
 pydantic>=2.13.5
-python-dotenv>=1.0.1
+# 下面四条的下限是**漏洞下限**（第一百零三批）：pip-audit 给出的是"最早修复版本"，
+# 锁里钉的是那个版本。写下限的意义在于——重新 compile 时不会又落回带 PYSEC 的版本，
+# 否则同一批 CVE 会在下一次重编译里静默复活。
+python-dotenv>=1.2.2
 loguru>=0.7.3
-pypdf>=5.0.0
+pypdf>=6.19.0
 python-docx>=1.1.0
 pymilvus>=3.0.0
 milvus-lite>=3.1.0
-requests>=2.31.0
+requests>=2.33.0
 httpx>=0.28.1
 regex>=2023.10.3
 cryptography>=42.0.0
 docker>=7.0.0
 cyclonedx-bom>=4.0.0
-starlette>=0.46,<1.0
+# 原上界 <1.0 是 fastapi 尚未适配 starlette 1.x 时加的；fastapi 0.141.1 的元数据只写
+# starlette>=0.46.0（无上界），而 starlette 1.3.1 是清掉 PYSEC-2026-161/2280/2281/248/249
+# 的最早版本，故这里换成主版本守卫。
+starlette>=1.3.1,<2.0
 # 任务队列 worker（Batch 8）：镜像经 Dockerfile 显式钉版安装；重新 pip-compile 后可移除该注释
 arq>=0.26
 # opentelemetry（第六十五批的 telemetry.py）刻意**不写在这里**：它曾以三条裸 pin 手工追加到

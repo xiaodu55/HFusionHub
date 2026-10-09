@@ -42,6 +42,8 @@ HFusionHub 关注安全问题。如果你发现任何安全漏洞，请按照以
   生产部署必须使用强随机值（见 `scripts/init-env.ps1` / `init-env.sh`）。
 - **传输安全**：生产环境建议强制 HTTPS（Ingress / Nginx TLS）。
 - **依赖安全**：CI 执行 `npm audit`、gitleaks 密钥扫描、pip 依赖审计。
+  pip 侧的门覆盖 `python-ai/requirements.txt` 这把生产锁；
+  `requirements-dev.txt`（测试与工具链）目前不在任何审计门内，属已知边界。
 
 ## 更新密钥
 

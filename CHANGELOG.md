@@ -11,6 +11,118 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百零三批（2026-10-11：两条依赖审计门从红转绿——pip-audit 的 29 条与 npm audit 的 15 条，收口靠的是把锁钉到修复版本，不是放宽门）
+
+#### 结论（先给判定性质）
+- `ci.yml` 里剩下的两条红是本批对象：`python-lint` 的 pip-audit
+  `Found 29 known vulnerabilities in 5 packages`，`frontend` 的
+  `npm audit --audit-level=high` ⇒ `15 vulnerabilities (7 moderate, 8 high)`。
+  第一百零二批推送后的 run 38140336727 逐步骤核对过：同一条流水线里 `helm`、
+  `static-consistency`、`docker-compose-validate`、`gitleaks` 全绿，红的只有这两步。
+- **写这条之前"main 上只剩这两条红"的说法不成立**，那是只看了 `ci.yml` 的结论。
+  另一条工作流 `plugin-security.yml`（push 到 `python-ai/requirements*.in` 就会触发）
+  在 run 38134153670 里红了 3 个 job：`vulnerability-scan`（与本批同源，主锁修好后即绿）、
+  `sbom-generation`（`cyclonedx-py environment … --format json` ⇒
+  `error: unrecognized arguments: --format`，cyclonedx-bom 7.3.1 已不收这个旗标）、
+  `license-check`（`pip-licenses -f table` ⇒ `invalid choice: 'table'`，可选值是
+  `plain/markdown/json/…`）。后两条是 CLI 旗标与已安装版本对不上，与本批的锁升级无关，
+  已登记为待处置项（见 `docs/CLEANUP_BACKLOG.md` F 段）。
+- 门的形态**一个字都没动**：本批改的文件只有三样 python 清单（`requirements.txt` /
+  `requirements-dev.txt` / `requirements.in`）、两样 npm 清单（`package.json` /
+  `package-lock.json`）和 `src/api/request.ts`，`.github/workflows/` 整个目录不在 diff 里。
+  既没改 `--audit-level`，没加 `--ignore-vuln`，也没调任何阈值——被改的只有锁与需求下限。
+- 修复走的是"钉版本"而不是"加门禁"：主锁 4 条直接依赖 + 1 条传递依赖升级到 pip-audit
+  给出的最早修复版本，npm 侧用不带 `--force` 的 `npm audit fix`（`changed 39 packages`）。
+
+#### 修复与判据
+- **python 主锁**（`python-ai/requirements.txt`）：`pypdf 6.16.2→6.19.0`、
+  `python-dotenv 1.0.1→1.2.2`、`requests 2.31.0→2.33.0`、`starlette 0.52.1→1.3.1`、
+  `urllib3 2.7.0→2.8.0`。前四条是 `.in` 里的直接依赖，`urllib3` 只由 `requests` 带进来——
+  **不**把它写成直接依赖，否则 `.in` 与锁尾的 `# via` 就不同源了（那是第八十八批那条
+  "裸 pin 追加到哈希锁尾部"缺陷的另一种形态）。
+- **`requirements.in` 的下限改成漏洞下限**：`python-dotenv>=1.2.2`、`pypdf>=6.19.0`、
+  `requests>=2.33.0`、`starlette>=1.3.1,<2.0`。理由写进文件注释——只钉锁不改 `.in`，
+  下一次 `pip-compile` 会照着旧下限重新解析回带 PYSEC 的版本，同一批 CVE 静默复活。
+  `starlette` 原来的 `>=0.46,<1.0` 上界是 fastapi 未适配 1.x 时加的；实测 PyPI 元数据里
+  fastapi 0.141.1 只写 `starlette>=0.46.0`（无上界），故换成主版本守卫。
+- **dev 锁的幽灵条目**（第一百零三批取证的那条独立缺陷）：`requirements-dev.txt` 里
+  `pypdf2==3.0.1` 挂着 `# via -r requirements.in`，而 `requirements.in` 从未声明过 pypdf2，
+  生产码也没有任何 `PyPDF2` 导入（`pdf_parser.py:23`、`multimodal_evidence.py:291` 都是
+  `from pypdf import PdfReader`）。原地换成 `pypdf==6.19.0` 并与主锁同哈希。
+- **npm 侧**：`package-lock.json` 经 `npm audit fix` 后 0 漏洞；`package.json` 里 5 个
+  带公告的直接依赖把范围下界抬到修复版本（`axios ^1.18.1→^1.20.0`、
+  `dompurify ^3.4.12→^3.4.16`、`vue ^3.5.39→^3.5.43`、`vue-i18n ^10.0.7→^10.0.8`、
+  `vitest ^4.1.10→^4.1.11`），与 python 侧同一条纪律——钉锁之外还要钉下限。
+  其余（`brace-expansion`/`postcss`/`js-yaml`/`nanoid`/`glob`/`source-map-js`）是工具链的
+  传递依赖，由 audit fix 去重后自然升上去，`package.json` 里没有对应条目可抬。
+- **axios 1.20 的类型断点**（升级唯一的真实破坏面）：1.20 起实例方法返回
+  `Promise<AxiosResponseResult<T,R,D,P>>`，`R` 默认是 `unique symbol` 的
+  `AxiosResponseDefault`；响应拦截器把 `AxiosResponse` 拆成业务体之后，5 个封装函数
+  各自报 `TS2322`。修法是在**实例边界**上重述一次类型（`src/api/request.ts` 的
+  `UnwrappedClient`），而不是在 5 个封装和所有调用点各 cast 一次。
+  试过引 axios 内部符号 `rawAxiosResponseDefault`，两条路都堵：它是 `type` 形态，
+  `isolatedModules` 下报 `TS1484`，而 `noUnusedLocals` 又不允许留着不用。
+
+#### 诚实边界
+- 主锁的绿同时关掉**第三处**同源红：`plugin-security.yml:72-108` 的 `vulnerability-scan`
+  job 对同一把锁跑 `pip-audit --desc --format json`，并在下一步对**任何**漏洞 `sys.exit(1)`
+  （名字带 severity 色彩，实际没有过滤）。本批没有给它加过滤，只是让锁干净。
+- 门覆盖的是 `requirements.txt` 一条锁：`pip-audit -r requirements.txt --disable-pip`
+  （`ci.yml:149-152`），`requirements-dev.txt` **没有任何审计门**。本批把 dev 锁里与主锁
+  共享的 4 条对齐了，但 dev 锁仍留着 `pytest 8.3.5 → PYSEC-2026-1845（修复 9.0.3）`：
+  把它转绿需要 pytest 主版本升级 + `pytest-asyncio 0.25.3`/`pytest-cov` 的兼容链和 2087 例
+  重跑，本批没做，因此**没有**顺手给 dev 锁加一条红门（那是计划外的新红）。已登记为待处置项。
+- OSV 返回的行会重复：dev 锁那条在表里出现两行（`PYSEC-2026-1845` ×2，别名去重前的形态），
+  数"漏洞条数"时不能直接按行数算。
+- `starlette 0.52.1→1.3.1` 是**跨主版本**升级，本批的把握来自同一解释器上的前后对照重跑
+  （见验证：覆盖 starlette 后套件逐项数字与基线**完全相同**），不是来自读 changelog；
+  这条把握的口径限制要说清：对照跑的是本机 venv 的 `pytest 9.1.1`，而 dev 锁钉的是
+  `pytest 8.3.5`——两者不是同一个测试运行器版本。若 CI 的 `python` job 给出不同结论，以 CI 为准。
+- 行尾：`.gitattributes` 没绑 `.txt`（第九十二批只绑了 `.jsonl`），锁的工作副本因而跟
+  `core.autocrlf` 走。本批按字节核对过：入库侧两把锁都是纯 LF（`CRLF 0`），
+  差异只在检出副本，`pip` 与 `pip-audit` 对此不敏感。这是既有形态，不是本批引入的。
+- 哈希锁手工编辑的可核验判据（本批用的）：哈希行两把锁分别 1534 / 1854 条、畸形 0 条、
+  条目数主锁 75 条 `name==ver` + 3 条带 extras（`uvicorn[standard]`、`jsonschema[format-nongpl]`、
+  `cyclonedx-python-lib[validation]`）＝ **78**，dev 锁 98 + 5 ＝ **103**；无重复包名、
+  每个条目块都以 `# via` 收尾、无重复 `# via` 行。这两个总数与门禁 11 自己数出来的
+  "78 个 pin / 103 个 pin，每个 pin 都带哈希"是两条独立来源，本批两边都对上。
+  第一版脚本漏检过一处重复的 `# via -r requirements.in`（哈希行以 4 空格开头，而它按
+  `--hash=` 起首比对块尾），靠"无重复 `# via` 行"这条判据抓出来。
+
+#### 待补证
+- 推送后 CI 的 `python-lint`（pip-audit 那步）与 `frontend`（Audit dependencies 那步）
+  第一次在 Linux runner 上对**修复后的锁**给结论；本批的等价实测是在 `python:3.11-slim`
+  容器里以 CI 同款命令跑的（改前能逐条复现 CI 的 29 条表，改后 `No known vulnerabilities found`）。
+
+#### 验证
+- 改前取证（容器内，CI 同款命令）：`Found 29 known vulnerabilities in 5 packages`
+  ＝ CI run 38135767897 `python-lint` 的表逐行相同（scratch `b103_pip_audit_before.log`）。
+- 改后（同一容器、同一命令）：主锁 `No known vulnerabilities found`（`MAIN_EXIT=0`）；
+  dev 锁 `Found 2 known vulnerabilities in 1 package`（仅 pytest，见诚实边界；
+  scratch `b103_pip_audit_after_final.log`）。
+- `npm run audit`（`--audit-level=high` + 指定 registry，与 CI 同）：`found 0 vulnerabilities`
+  ——`package.json` 抬下限、`package-lock.json` 同步之后复测仍为 0。
+- `npm run build` 退出码 0；`npm run test` **16 个文件 / 117 例全绿**（与升级前同数）；
+  `npm run lint` 0 error（55 条既有 warning，退出码 0）。
+- `scripts/static-checks.py` 全跑档退出码 0、15 项全 [ok]（scratch `b103_static_final.log`）。
+  其中门禁 11 独立复核两把锁的 pin↔哈希配对：主锁 78 pin / 78 条带哈希、
+  dev 锁 103 pin / 103 条带哈希，Windows-only 两条 marker 仍在——手工编辑没有把锁改坏。
+  检查 3 读到 Java 718 · Python 1936 · 前端单测 117，本批没有增删用例，计数棘轮无需同步。
+- python（跨主版本那条的实测）：同一 venv、同一命令跑两遍。
+  基线 `pytest -q tests --ignore=tests/test_plugin_container.py` = **2051 passed / 12 skipped in 200.43 s**，
+  退出码 0；然后把本批五把升级（`starlette 1.3.1`、`pypdf 6.19.0`、`requests 2.33.0`、`urllib3 2.8.0`、
+  `python-dotenv 1.2.2`）用 `pip install --no-deps --target` 放到 `PYTHONPATH` 最前重跑 =
+  **2051 passed / 12 skipped in 237.46 s**，退出码同为 0——逐项数字与基线**完全相同**。
+  覆盖确实生效是核过的，不是假定：`starlette.__version__` 报 1.3.1、`starlette.__file__` 指向覆盖目录。
+  （scratch `b103_pytest_baseline.log` / `b103_pytest_overlay.log`）
+- 与第一百零二批的 2087/18 的逐位关系：那条口径是**含容器轨**的全量 `pytest -q`，本批两遍都按 CI 的
+  `--ignore` 排除它。对得上：`--collect-only tests/test_plugin_container.py` = **42 例**，
+  2051+12 = 2063，2063+42 = 2105 = 2087+18；容器轨自己贡献 36 passed / 6 skipped。
+- 仍待补：整套在**新 dev 锁**（`pytest 8.3.5`，本机 venv 是 9.1.1）下的重跑正在 `python:3.11-slim`
+  容器里进行（scratch `b103_pytest_newlock.log`，安装阶段受网络限速，27–160 kB/s 波动）；
+  最终判据是 CI 的 `python` job。
+
+
 ### 第一百零二批（2026-10-11：python 侧的钟面并入同一 UTC 口径——内置时间工具此前给模型的是裸本地墙钟，而三档拓扑里 python 工作负载的 `TZ` 声明为 0 处）
 
 #### 结论（先给判定性质）
@@ -79,9 +191,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 #### 就地纠正（文档声称与行为对不上）
 - `docs/PROJECT_TOUR.md:327` 写"静态一致性门禁（十三项…）"，而第九十七批起就已经是十四项——
   那批加了检查 14 却没动这句枚举。本批补成"十五项"并把两项（workflow run 标量形态 / python 钟面口径）
-  一起列进枚举。人工核对方式：`grep -c "^# ── 检查" scripts/static-checks.py` = 15，
-  与 `main()` 里 `parser.add_argument` 的门禁旗标数一致（另有 2 个 `--internal-*` 之外的复用检查项，
-  故不数旗标数，数分节标题）。
+  一起列进枚举。人工核对方式：`grep -c "parser.add_argument" scripts/static-checks.py` = 15，
+  与头 docstring 里"检查 1..15"的枚举逐条对得上。
+- 本批原先把核对方式写成 `grep -c "^# ── 检查"` = 15，**那是错的**：实测量出该模式只匹配 13 处，
+  缺的是检查 5（`--h2-schema-drift`）与检查 6（`--readme-claims`）——这两节从未用过 `# ── 检查`
+  分节横幅。用横幅数当门禁总数，等于把"漏写一条横幅"读成"门禁少一项"，而它既不是充分也不是
+  必要证据。旗标数才与 `main()` 的调度一一对应，故此处改为按旗标核对（第一百零三批就地纠正）。
 
 #### 验证
 - 新增两文件本地：`19 passed, 1 skipped`（skip 的那例是 `tzset` 缺失，Windows 无进程时区翻转能力）；

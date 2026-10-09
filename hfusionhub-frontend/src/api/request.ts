@@ -5,13 +5,27 @@ import router from '@/router'
 import { friendlyErrorMessage } from '@/utils/errorMessage'
 
 // 创建 axios 实例
-const service: AxiosInstance = axios.create({
+//
+// 下面的重述类型是为 axios 1.20 的回答（第一百零三批）：它的实例方法返回
+// `Promise<AxiosResponseResult<T, R, …>>`，R 缺省时解析成 AxiosResponse；而本文件的响应
+// 拦截器已经把 AxiosResponse 换成了裸 body。若沿用 AxiosInstance，每一个封装函数都要
+// 各自 cast 一次；把"这个实例的方法直接 resolve 成 body"在这一处说清，封装层保持原样。
+type UnwrappedClient = Omit<AxiosInstance, 'request' | 'get' | 'post' | 'put' | 'patch' | 'delete'> & {
+  request<T = any>(config: AxiosRequestConfig): Promise<T>
+  get<T = any>(url: string, config?: AxiosRequestConfig): Promise<T>
+  post<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T>
+  put<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T>
+  patch<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T>
+  delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<T>
+}
+
+const service = axios.create({
   baseURL: '/api',
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
-})
+}) as unknown as UnwrappedClient
 
 // 防止 401 处理重入——避免登出 API 调用自身再次触发 401 导致无限循环
 let isHandling401 = false

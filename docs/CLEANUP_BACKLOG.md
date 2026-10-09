@@ -170,8 +170,38 @@
   **待补证**：CI `python` job 里那条 `tzset` 免疫用例在 Linux runner 上真跑（本地 Windows 只能 skip），
   以及 `helm` job 渲染出的 `TZ` 值。第一百零二批的本地替代证据是容器内跑通同一判据 + `helm template` 实测。
 
-- [ ] **两条依赖审计门是红的**（第一百零二批取证，未处置）—— run 38135767897 的 `python-container` 与
+- [x] **两条依赖审计门是红的**（第一百零二批取证，第一百零三批处置）—— run 38135767897 的 `python-container` 与
   `java` 转绿后，main 上仅剩两条红：pip-audit `Found 29 known vulnerabilities in 5 packages`
   （pypdf / python-dotenv / requests / starlette / urllib3）与 `npm audit --audit-level=high`
   `15 vulnerabilities (7 moderate, 8 high)`（逐条都标着 "fix available via npm audit fix"）。
   处置方向只能是升级或写明豁免策略，**不得靠放宽 `--audit-level`、加 `--ignore-vuln` 或调阈值把门改绿**。
+  **就地纠正**：这句里的"main 上仅剩两条红"当时只核了 `ci.yml` 一条工作流，范围写宽了——
+  `plugin-security.yml`（push 碰到 `python-ai/requirements*.in` 即触发）在 run 38134153670 里
+  红了 3 个 job，其中两条与本批的锁无关，见下面新登记的那条。核对方式：
+  `gh api repos/xiaodu55/HFusionHub1/actions/runs/38134153670/jobs` 看每个 job 的 `conclusion`，
+  而不是只看 `ci.yml` 那条 run。
+  处置＝**升级**，且门一字未动（本批 diff 里没有任何 workflow 文件）：主锁 4 条直接依赖 +
+  1 条传递依赖（`urllib3` 只由 `requests` 带进来，**不**写成直接依赖，否则 `.in` 与锁尾的
+  `# via` 不同源）钉到 pip-audit 给出的最早修复版本；`requirements.in` 的下限同步改成**漏洞下限**
+  ——只钉锁不改 `.in`，下一次 `pip-compile` 会照旧下限重新解析回带 PYSEC 的版本，同一批 CVE 静默复活。
+  npm 侧用不带 `--force` 的 `npm audit fix`（`changed 39 packages`）后 `found 0 vulnerabilities`，
+  `package.json` 里 5 个带公告的直接依赖把范围下界抬到修复版本，与 python 侧同一条纪律。
+  顺带关掉**同源的第三处红**：`plugin-security.yml:72-108` 的 `vulnerability-scan` 对同一把锁
+  跑 `pip-audit --desc --format json`，下一步对**任何**漏洞 `sys.exit(1)`（名字带 severity 色彩，
+  实际无过滤）——没给它加过滤，只是让锁干净。
+- [ ] **dev 锁没有任何审计门，且里面有一条 PYSEC**（第一百零三批取证，未处置）——
+  `ci.yml:149-152` 只审 `requirements.txt`（`pip-audit -r requirements.txt --disable-pip`），
+  而 `python` job 实际装的是 `requirements-dev.txt`（`ci.yml:161-177`）。以 CI 同款命令实测这把
+  dev 锁：`Found 2 known vulnerabilities in 1 package` ＝ `pytest 8.3.5 → PYSEC-2026-1845`
+  （修复版本 9.0.3；表里两行是同一公告的别名，按 OSV 去重后是 1 条）。**没有**在本批顺手把
+  dev 锁纳入门禁——那会立刻造出一条计划外的红。处置需要 pytest 主版本升级 ＋
+  `pytest-asyncio 0.25.3`/`pytest-cov` 的兼容链 ＋ 2087 例重跑。
+- [ ] **`plugin-security.yml` 另外两个 job 从未过过：旗标与已装版本对不上**（第一百零三批
+  取证，未处置）—— run 38134153670（第九十九批 `3dba7e3d` 的 push；路径含 `requirements*.in`
+  才触发本流）里 3 个 job 红，除上面已收口的 `vulnerability-scan`，另两条与本批的锁无关：
+  `sbom-generation` 死在 `cyclonedx-py environment -o ../sbom-python.json --format json`
+  ⇒ `error: unrecognized arguments: --format`（锁里解析出的是 cyclonedx-bom 7.3.1，该子命令
+  不再收这个旗标，格式由输出文件扩展名决定）；`license-check` 死在 `pip-licenses -f table`
+  ⇒ `invalid choice: 'table'`（可选值是 `plain / markdown / json / …`）。两条都是"写门的人用的
+  CLI 与锁解析出的版本不同源"，与第八十八批那条 SBOM 缺陷同族——那批修的是哈希缺失，这次是旗标。
+  **处置时不得删掉这两个 job，也不得加 `continue-on-error` 变绿。**
