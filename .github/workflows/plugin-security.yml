@@ -5,6 +5,9 @@ on:
     paths: ['python-ai/plugins/**', 'python-ai/requirements*.in', 'python-ai/app/core/plugin/**']
   pull_request:
     paths: ['python-ai/plugins/**', 'python-ai/requirements*.in', 'python-ai/app/core/plugin/**']
+  # 手工触发不影响任何门禁，只是让这条安全流水线能在不改路径文件的前提下按需复跑
+  # （SBOM / 许可证扫描本来就有"随时想看一眼"的运维需求）。
+  workflow_dispatch:
 
 jobs:
   # ─── 签名验证 ───
@@ -78,7 +81,9 @@ jobs:
           python-version: '3.11'
           cache: pip
       - name: Install pip-audit
-        run: pip install pip-audit
+        # 钉版：runner 装的 2.10.1 把报告写成 {"dependencies": […]}，而门里的解析脚本
+        # 按"顶层是 list"迭代 —— 旗标与解析形态必须和实际装的版本同源（第一百零四批）。
+        run: pip install pip-audit==2.10.1
       - name: Scan Python AI dependencies
         run: |
           cd python-ai
@@ -87,26 +92,7 @@ jobs:
           cat /tmp/vuln-report.json
       - name: Check for critical/high vulnerabilities
         run: |
-          cd python-ai
-          python -c "
-          import json, sys
-          with open('/tmp/vuln-report.json') as f:
-              data = json.load(f)
-          vulns = []
-          for item in data:
-              for v in item.get('vulns', []):
-                  vulns.append({
-                      'id': v.get('id', ''),
-                      'package': item.get('name', ''),
-                      'version': item.get('version', ''),
-                  })
-          if vulns:
-              print(f'Found {len(vulns)} vulnerabilities:')
-              for v in vulns:
-                  print(f\"  {v['id']}: {v['package']}=={v['version']}\")
-              sys.exit(1)
-          print('No known vulnerabilities found')
-          "
+          python scripts/ci/vuln_report_gate.py /tmp/vuln-report.json
       - name: Upload vulnerability report
         if: always()
         uses: actions/upload-artifact@v4
@@ -125,11 +111,14 @@ jobs:
           python-version: '3.11'
           cache: pip
       - name: Install CycloneDX
-        run: pip install cyclonedx-bom
+        # 钉版 + 正确旗标：runner 装的 cyclonedx-bom 7.5.0 里 `environment` 子命令只认
+        # `--of/-o` 与 `--output-format {JSON,XML}`，旧的 `--format json` 不在旗标表里，
+        # 这个 job 因此从诞生起就没过过（第一百零四批，判据见 tests/test_plugin_security_gates.py）。
+        run: pip install cyclonedx-bom==7.5.0
       - name: Generate SBOM
         run: |
           cd python-ai
-          cyclonedx-py environment -o ../sbom-python.json --format json
+          cyclonedx-py environment -o ../sbom-python.json --output-format JSON
           echo "SBOM generated"
           python -c "
           import json, sys
@@ -157,14 +146,18 @@ jobs:
           python-version: '3.11'
           cache: pip
       - name: Install pip-licenses
-        run: pip install pip-licenses
+        # 钉版 + 正确旗标：runner 装的 pip-licenses 5.5.5，`-f/--format` 的可选值是
+        # plain / plain-vertical / markdown / rst / confluence / html / json /
+        # json-license-finder / csv（实测自该版本的 `pip-licenses --help`），没有 `table`，
+        # 旧旗标 ⇒ `invalid choice: 'table'`，job 从诞生起就没过过（第一百零四批）。
+        run: pip install pip-licenses==5.5.5
       - name: Check licenses
         run: |
           cd python-ai
           pip install -r requirements.txt
           pip-licenses --format=json --with-urls --output-file=/tmp/licenses.json
           echo "License scan complete"
-          pip-licenses --from=mixed --format=table --allow-only="MIT;Apache-2.0;BSD-3-Clause;BSD-2-Clause;ISC;PSF;MPL-2.0;Apache Software License;GNU General Public License v3 (GPLv3);GNU Lesser General Public License v3 (LGPLv3);Python Software Foundation License"
+          pip-licenses --from=mixed --format=plain --allow-only="MIT;Apache-2.0;BSD-3-Clause;BSD-2-Clause;ISC;PSF;MPL-2.0;Apache Software License;GNU General Public License v3 (GPLv3);GNU Lesser General Public License v3 (LGPLv3);Python Software Foundation License"
       - name: Verify no disallowed licenses
         run: |
           cd python-ai

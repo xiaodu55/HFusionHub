@@ -11,6 +11,97 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百零四批（2026-10-12：`plugin-security.yml` 三个"从诞生起就没绿过"的 job——修的是旗标与解析形态，门的强度一分没降）
+
+#### 结论（先给判定性质）
+- 对象是第一百零三批登记的那三条：`vulnerability-scan`、`sbom-generation`、`license-check`。
+  三条与锁无关（锁修干净前后红的是同样这三条），机理同族——**写门的人用的 CLI 与数据形态，
+  和 runner 实际装上去的版本不同源**，而那三个 `pip install <tool>` 全都没钉版。
+- 处置形态＝钉版 + 换成当版本真实存在的旗标 + 把内联解析搬进可测试的 helper。
+  **不删 job、不加 `continue-on-error`、不放宽任何过滤**；helper 里连 severity 过滤都不存在，
+  并且专门有一条用例钉住"low 也判红"，防止未来有人借"改旗标"之名把门改宽。
+- **结果不是三条全绿**：`license-check` 的旗标修好之后暴露出一条真实的清单语义红
+  （`--allow-only` 整串精确匹配不认 SPDX 复合表达式）。本批做的是把**假红**变成**真红**，
+  不是把红改成绿；真红那条已登记为第一百零五批对象。
+
+#### 修复与判据
+- `vulnerability-scan`：`pip install pip-audit==2.10.1`（runner 实测版本，报告顶层是
+  `{"dependencies": […]}`），判定步骤从 20 行内联 `python -c` 换成
+  `python scripts/ci/vuln_report_gate.py /tmp/vuln-report.json`。helper 的退出码契约写进文件头：
+  **0** ＝ 读得出且零漏洞；**1** ＝ 至少一条（不过滤 severity）；
+  **2** ＝ 报告打不开 / 形态不认识 / 依赖数为 0——把"读不出"当 0 就是一条永远绿的空转门。
+- `sbom-generation`：`pip install cyclonedx-bom==7.5.0` +
+  `cyclonedx-py environment -o ../sbom-python.json --output-format JSON`（旧写法 `--format json`
+  在该子命令的旗标表里不存在 ⇒ `unrecognized arguments: --format`）。
+- `license-check`：`pip install pip-licenses==5.5.5` + `--format=plain`
+  （该版本 `--help` 实测可选值：`plain / plain-vertical / markdown / rst / confluence / html /
+  json / json-license-finder / csv`，**没有** `table`）。`--allow-only` 清单一个字没动。
+- 判据落在 `python-ai/tests/test_plugin_security_gates.py`（14 例：9 例跑 helper 的退出码契约，
+  5 例核 workflow 的旗标、钉版与"没有被静音"）。文件头把四条 runner 事实逐条写明来源。
+- 一处**测试自身**的缺陷就地纠正：`test_the_three_jobs_are_not_silenced` 最初对所有步骤一律禁止
+  `if: always()`，于是把 `Upload vulnerability report` 也判成静音。那条 `always()` 的语义是
+  "门已经判红之后仍把报告留档"，不改变门的结论。钉法改成：执行步骤不得有条件跳过，
+  `actions/upload-artifact*` 例外；`continue-on-error` 仍然全面禁止。
+- 加了 `workflow_dispatch`：不动任何门禁，只是让这条安全流水线在不改路径文件时也能按需复跑。
+  不加它就没有 runner 证据可取——本批的 diff（workflow、`scripts/ci/`、`tests/`、文档）
+  恰好不落在 `push.paths` 的三个过滤里。
+
+#### 测量与证据
+- **红先行**：新判据第一次跑＝`10 failed, 4 passed`。而那 4 条"通过"是**空转**——
+  `python <不存在的脚本>` 自己就退出 2，正好等于 helper 的"读不出形态"码，所以所有
+  "必须退出 2"的用例在 helper 缺席时也会绿。补上 `assert GATE.is_file()` 之后
+  `14 passed` 才有意义；这条前置断言留在 helper 调用函数里，不在用例里。
+- **helper 对真实产物判过**：把 runner 日志里那份 pip-audit 报告原文（76 个 dependency 条目、
+  `{"dependencies": […], "fixes": []}` 形态）落盘后直接执行
+  `python scripts/ci/vuln_report_gate.py b104_real_report.json` ⇒
+  `No known vulnerabilities found (76 packages audited)`、退出码 0。同一份报告在旧内联脚本下是
+  `AttributeError: 'str' object has no attribute 'get'`（run 38145150133 第 284 行）。
+- **容器内实测新命令**（`python:3.11-slim`，scratch `b104_gates.log`）：
+  `PINS_EXIT=0`（7.5.0 与 5.5.5 都可装）、`CDX_EXIT=0`（`--output-format JSON` 成立）、
+  `LIC_JSON_EXIT=0`、`LIC_TABLE_EXIT=1` ＝
+  `license Apache-2.0 OR BSD-2-Clause not in allow-only licenses was found for package packaging:26.3`。
+  同一次 `REQ_EXIT=2` 是宿主网络把 aliyun 镜像读到 `ReadTimeoutError`，**不是**锁的问题；
+  主锁 `python-ai/requirements.txt:809` 钉的 `packaging==26.2` 的 PyPI 元数据
+  `license_expression` 是同一串，所以 CI 那套完整锁环境同样会撞上这条真红。
+- **套件**：`.venv/Scripts/python.exe -m pytest -q tests --ignore=tests/test_plugin_container.py`
+  ＝ `2065 passed, 12 skipped`，退出码 0。与第一百零三批基线 `2051 / 12` 的差值**正好**是本批
+  新增的 14 例，skip 面没动。
+- **一次差点误判成回归**：同一命令换成 bare `python` 跑，得到 `3 failed / 2098 passed / 18 skipped`
+  （全量口径 2119 ＝ CI 口径 2063 ＋ 容器轨 42 ＋ 本批 14，逐位对得上）。逐条查到底：
+  `D:\python3.11.9` 目录里有 `python311._pth` ⇒ `sys.flags.safe_path=True` ⇒
+  在 `python-ai/` 里 `python -c "import app"` 也 `ModuleNotFoundError: No module named 'app'`，
+  于是 `tests/test_eval_retention.py::test_env_override_is_honoured`（起子进程探针）必红，
+  `tests/test_milvus_tenant_migration_real.py` 两条报 `AttributeError: function_score`。
+  换回 venv 解释器三条全部复位——**这是宿主解释器的安装形态，不是套件回归**；
+  本机跑这套件的口径因此钉死为"必须用 `python-ai/.venv/Scripts/python.exe`"。
+- `scripts/static-checks.py` 全跑档退出码 0、15 项全 `[ok]`。检查 3 的 python 计数是
+  **静态 `def test_` 定义数**，与 CI 的"参数化展开后用例数"是两条口径，本批 1936 → **1950**
+  （＋14），README 四处同步；Java 718 与前端 117/73 没动。
+
+#### 诚实边界
+- 改了的 workflow 只有"旗标、钉版、触发方式"三类内容，三条门的**判定强度没有下降**：
+  helper 不过滤 severity、读不出形态判 2 不判 0、空依赖清单判红；`--allow-only` 清单与
+  第二步那份字面清单都没动（两份清单不同源这件事本身是缺陷，登记在第一百零五批）。
+- `sbom-generation` 里那段"components 为空只打印 `WARNING`"的内联脚本本批没动——
+  它不是一条门（空 SBOM 照样绿）。这是门的语义弱点，与许可证策略一并处置，不在本批偷加新红。
+- **本批没有"改后 runner 已绿"的说法**。plugin-security 的 CI 证据要推送之后手工触发才有
+  （`push.paths` 不含本批改动的文件），在那之前关于这三条门只有两个来源：runner 历史日志
+  （改前为什么红）＋ 容器实测（新命令在 Linux 上装得上、跑得起、判定是什么）。
+- 顺带取证的 `e2e.yml` 那条红（`e2e-full` 的 `Run Flyway migrations`，2026-10-10～10-12 连续 5 次
+  死在同一步）本批**只登记未处置**；更早 2026-09-22、09-29 两次 `failure` 的失败步骤不在 step
+  列表里，没有归到"同一步红"。
+
+#### 下一批（按红面与崩溃代价排序）
+1. **第一百零五批**：`license-check` 的许可证策略收敛——一份可测试的策略来源、按 SPDX 表达式
+   逐成分判定（任一成分不在允许集合即红），两步同源；不得靠追加复合表达式字符串把门改绿。
+2. **第一百零六批**：`_reset_db()` 全程持 `_db_lock`（消除与 flush 线程的段错误窗口），
+   配一条确定性红判据。
+3. **第一百零七批**：`e2e.yml` 的 Flyway 迁移步骤——插件配置与 `SPRING_DATASOURCE_*` 不同源，
+   钉版 + 传它真正读的那三个值，并证明迁移确实发生。
+4. **第一百零八批**：全栈 compose 活栈真跑一次（把"能写/能读"从镜像级升到活栈级）。
+5. **第一百零九批**：judge-cache 驱逐。另有 dev 锁审计门、`UPLOAD_DIR` 残留键、
+   错误信封 code 统一、Java 侧状态码统一四条待排。
+
 ### 第一百零三批（2026-10-11：两条依赖审计门从红转绿——pip-audit 的 29 条与 npm audit 的 15 条，收口靠的是把锁钉到修复版本，不是放宽门）
 
 #### 结论（先给判定性质）
@@ -23,7 +114,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   另一条工作流 `plugin-security.yml`（push 到 `python-ai/requirements*.in` 就会触发）
   在 run 38134153670 里红了 3 个 job：`vulnerability-scan`（与本批同源，主锁修好后即绿）、
   `sbom-generation`（`cyclonedx-py environment … --format json` ⇒
-  `error: unrecognized arguments: --format`，cyclonedx-bom 7.3.1 已不收这个旗标）、
+  `error: unrecognized arguments: --format`，cyclonedx-bom 已不收这个旗标；
+  **就地纠正**：这句当时写的是 `7.3.1`，那是没核 runner 版本就落的数字——第一百零四批
+  在容器内按 runner 实际版本实测为 `cyclonedx-bom 7.5.0`，runner 日志（run 38145150133）同口径）、
   `license-check`（`pip-licenses -f table` ⇒ `invalid choice: 'table'`，可选值是
   `plain/markdown/json/…`）。后两条是 CLI 旗标与已安装版本对不上，与本批的锁升级无关，
   已登记为待处置项（见 `docs/CLEANUP_BACKLOG.md` F 段）。

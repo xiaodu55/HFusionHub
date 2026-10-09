@@ -208,8 +208,8 @@
   （修复版本 9.0.3；表里两行是同一公告的别名，按 OSV 去重后是 1 条）。**没有**在本批顺手把
   dev 锁纳入门禁——那会立刻造出一条计划外的红。处置需要 pytest 主版本升级 ＋
   `pytest-asyncio 0.25.3`/`pytest-cov` 的兼容链 ＋ 2087 例重跑。
-- [ ] **`plugin-security.yml` 三个 job 从未过过：旗标/解析形态与已装版本对不上**（第一百零三批
-  取证，未处置）—— run 38134153670（第九十九批 `3dba7e3d` 的 push；路径含 `requirements*.in`
+- [x] **`plugin-security.yml` 三个 job 从未过过：旗标/解析形态与已装版本对不上**（第一百零三批
+  取证，第一百零四批处置）—— run 38134153670（第九十九批 `3dba7e3d` 的 push；路径含 `requirements*.in`
   才触发本流）里 3 个 job 红，第一百零三批把锁修干净之后 run 38145150133 **仍是同样这 3 个红**，
   而 `signature-verify`/`hash-verify`/`plugin-runner-build` 绿——所以它们与锁无关：
   `sbom-generation` 死在 `cyclonedx-py environment -o ../sbom-python.json --format json`
@@ -221,6 +221,24 @@
   与第八十八批那条 SBOM 缺陷同族——那批修的是哈希缺失，这次是旗标与解析形态。
   **处置时不得删掉这三个 job，也不得加 `continue-on-error` 变绿；把 `pip install cyclonedx-bom`
   与 `pip install pip-licenses` 钉版也只是把漂移冻住，仍需按当版本的正确旗标改。**
+  处置＝按 runner 实测版本钉版 + 换成当版本真实存在的旗标（`--output-format JSON`、
+  `--format=plain`），并把 pip-audit 报告的解析从内联 `python -c` 搬进
+  `scripts/ci/vuln_report_gate.py` 使它能被测试执行；三条门的判据在
+  `python-ai/tests/test_plugin_security_gates.py`。**结果不是三条全绿**：旗标修好后
+  `license-check` 暴露出一条真实的清单语义红，登记为下面那条。
+- [ ] **`license-check` 的 `--allow-only` 清单不认 SPDX 复合表达式 ⇒ 修好旗标后是一条真红**
+  （第一百零四批实测，未处置）—— 容器内（`python:3.11-slim`，`pip-licenses 5.5.5`）用正确旗标实测：
+  `pip-licenses --from=mixed --format=plain --allow-only="MIT;Apache-2.0;BSD-2-Clause;…"` ⇒
+  `license Apache-2.0 OR BSD-2-Clause not in allow-only licenses was found for package packaging:26.3`
+  ＋ 退出 1。这条不是 CLI 漂移：主锁 `python-ai/requirements.txt:809` 钉的 `packaging==26.2`，
+  其 PyPI 元数据 `license_expression = "Apache-2.0 OR BSD-2-Clause"`（两个成分**都**在允许清单里，
+  但 `--allow-only` 是整串精确匹配，复合表达式永远匹配不上）。同一 job 的第二步
+  `Verify no disallowed licenses` 用的是**另一套**更宽的字面清单，还带 `'MIT' in lic` /
+  `'Apache' in lic` 的子串放行——两道门对同一份数据持有两份不同的策略，本身就是缺陷。
+  处置方向（第一百零五批）：把许可证策略收敛成一个可测试的来源（清单住在脚本里、只读一份），
+  按 SPDX 表达式逐成分判定，**且不得**让 `GPL-3.0-only OR MIT` 这类"含 copyleft 的双许可"被
+  OR 语义放行——判定语义要写死并测：任一成分不在允许集合即红。不得靠往 `--allow-only`
+  里追加复合表达式字符串把门改绿（那是逐包手工放行，不是策略）。
 - [ ] **`_reset_db()` 关连接不持锁，与后台 flush 线程竞争 ⇒ 解释器段错误**（第一百零三批实测踩到，
   未处置）—— `python-ai/app/core/plugin/audit.py:165-190` 的 `_db_conn.close()` 与
   `_DB_DIR/_DB_PATH` 换绑整段不在 `with _db_lock:` 内，而 `:128` 的连接是
@@ -233,3 +251,23 @@
   `app/` 下当前无 `_reset_db` 调用方（生产今天不受影响），但任何把"重定向审计库"接进运维路径
   的改动都会走进同一窗口。处置方向见第一百零三批 CHANGELOG 的 A/B/C（推荐 A：`_reset_db` 全程
   持 `_db_lock`，配一条确定性红判据——持有锁时起线程调 `_reset_db`，断言它尚未完成）。
+- [ ] **`e2e.yml` 的 `e2e-full` 在 `Run Flyway migrations` 从诞生起就没过过：Flyway Maven 插件
+  收的是 `SPRING_DATASOURCE_*`，而它只认 `flyway.url/-Dflyway.*`/`FLYWAY_*`**（第一百零四批取证，
+  未处置）—— run 38221938525（＝ `8054f32e`）的 `e2e-full` job 死在这一步，日志原文：
+  `FlywayException: Unable to connect to the database. Configure the url, user and password!`
+  （scratch `ci_e2e_flyway.log` 第 617 行）。这一 `conclusion` 不是今天才有：2026-10-10 / 10-11（三次）/
+  10-12 连续 **5** 条 run 的 `e2e-full` 都死在**同一个步骤**（逐 run 核过
+  `gh run view <id> --json jobs --jq '.jobs[]|{name,conclusion,failed:[.steps[]|select(.conclusion=="failure")|.name]}'`），
+  中间另有几次是"被新 run 取消"而非通过；更早的 2026-09-22、09-29 两次 `failure` 的失败原因不在
+  step 列表里（`.steps` 全空），**本条没有把它们算进"同一步红"**，要归因得单独取日志。
+  机理核对：`.github/workflows/e2e.yml:75-82` 给步骤设的三个变量是
+  `SPRING_DATASOURCE_URL/USERNAME/PASSWORD`，而 `mvn --batch-mode flyway:migrate` 执行的是
+  flyway-maven-plugin，它读 `-Dflyway.url/user/password`、`flyway.conf` 或 `FLYWAY_*` 环境变量，
+  **不**读 Spring 的那三个名字；`java-backend/pom.xml` 里也**没有** `flyway-maven-plugin` 的
+  `<configuration>`（`:103-108` 只有 `flyway-core` 与 `flyway-mysql` 两个依赖），于是插件从
+  Maven central 前缀解析到最新版（日志里是 `flyway:11.7.2`，两次
+  `Could not transfer metadata … HTTP Status: 401` 就是那次解析的噪声）并拿到空配置。
+  ⇒ 与第一百零四批同族：**"runner 装了什么/工具读什么"与"门里写了什么"不同源**，而且这里的
+  插件版本也未钉住。处置方向（不得靠删掉这一步或加 `continue-on-error` 变绿）：在 pom 里显式声明
+  `flyway-maven-plugin` 钉版本，并把它该读的那三个值传给 `mvn -Dflyway.url=… -Dflyway.user=…`
+  （或改由 Spring Boot 启动时自迁移，那一步就该删得有交代——两者都要先在 e2e 判据上证明迁移真发生）。
