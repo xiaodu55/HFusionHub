@@ -177,8 +177,9 @@
   处置方向只能是升级或写明豁免策略，**不得靠放宽 `--audit-level`、加 `--ignore-vuln` 或调阈值把门改绿**。
   **就地纠正**：这句里的"main 上仅剩两条红"当时只核了 `ci.yml` 一条工作流，范围写宽了——
   `plugin-security.yml`（push 碰到 `python-ai/requirements*.in` 即触发）在 run 38134153670 里
-  红了 3 个 job，其中两条与本批的锁无关，见下面新登记的那条。核对方式：
-  `gh api repos/xiaodu55/HFusionHub1/actions/runs/38134153670/jobs` 看每个 job 的 `conclusion`，
+  红了 3 个 job；锁修干净之后 run 38145150133 红的还是那 3 个，说明三条都与锁无关，
+  见下面"三个从未过的 job"那条。核对方式：
+  `gh api repos/xiaodu55/HFusionHub1/actions/runs/<run>/jobs` 看每个 job 的 `conclusion`，
   而不是只看 `ci.yml` 那条 run。
   处置＝**升级**，且门一字未动（本批 diff 里没有任何 workflow 文件）：主锁 4 条直接依赖 +
   1 条传递依赖（`urllib3` 只由 `requests` 带进来，**不**写成直接依赖，否则 `.in` 与锁尾的
@@ -186,9 +187,20 @@
   ——只钉锁不改 `.in`，下一次 `pip-compile` 会照旧下限重新解析回带 PYSEC 的版本，同一批 CVE 静默复活。
   npm 侧用不带 `--force` 的 `npm audit fix`（`changed 39 packages`）后 `found 0 vulnerabilities`，
   `package.json` 里 5 个带公告的直接依赖把范围下界抬到修复版本，与 python 侧同一条纪律。
-  顺带关掉**同源的第三处红**：`plugin-security.yml:72-108` 的 `vulnerability-scan` 对同一把锁
-  跑 `pip-audit --desc --format json`，下一步对**任何**漏洞 `sys.exit(1)`（名字带 severity 色彩，
-  实际无过滤）——没给它加过滤，只是让锁干净。
+  **就地纠正**（判据来自 run 38145150133 的 job 日志，不是读 workflow）：本批**没有**关掉
+  `plugin-security.yml:72-108` 的 `vulnerability-scan`。该 job 有两处叠着的缺陷，前一处一直把
+  后一处挡在后面——① `pip-audit -r requirements.txt --desc --output … --format json` 自己在
+  有漏洞时退出 1（run 38134153670 死在这里）；② 锁修好后这一步打印
+  `No known vulnerabilities found` 并退出 0，但下一步的解析脚本按"顶层是 list"读 pip-audit 的
+  JSON，而它现在写 `{"dependencies": […]}`，于是
+  `AttributeError: 'str' object has no attribute 'get'`（runner 日志第 284 行）。
+  ⇒ 这个 job 从诞生起就没有绿过的能力。见下面"三个从未过的 job"那条。
+  **runner 级结论（run 38145150155 ＝ `06ea5607`）**：`ci.yml` 的 11 个 job 全 `success`——
+  `python-lint` 打印 `No known vulnerabilities found`，`frontend` 打印 `found 0 vulnerabilities`
+  且 `Test Files 16 passed (16)`，`python` 打印 `2056 passed, 7 skipped`、
+  `Total coverage: 77.09%`（棘轮 74），收集总数与本机 2051+12 同为 2063。
+  这也是"新 dev 锁在 Linux 上可安装"的 runner 证据（`--require-hashes` 自动生效下 `pip install
+  -r requirements-dev.txt` 成功）。
 - [ ] **dev 锁没有任何审计门，且里面有一条 PYSEC**（第一百零三批取证，未处置）——
   `ci.yml:149-152` 只审 `requirements.txt`（`pip-audit -r requirements.txt --disable-pip`），
   而 `python` job 实际装的是 `requirements-dev.txt`（`ci.yml:161-177`）。以 CI 同款命令实测这把
@@ -196,12 +208,28 @@
   （修复版本 9.0.3；表里两行是同一公告的别名，按 OSV 去重后是 1 条）。**没有**在本批顺手把
   dev 锁纳入门禁——那会立刻造出一条计划外的红。处置需要 pytest 主版本升级 ＋
   `pytest-asyncio 0.25.3`/`pytest-cov` 的兼容链 ＋ 2087 例重跑。
-- [ ] **`plugin-security.yml` 另外两个 job 从未过过：旗标与已装版本对不上**（第一百零三批
+- [ ] **`plugin-security.yml` 三个 job 从未过过：旗标/解析形态与已装版本对不上**（第一百零三批
   取证，未处置）—— run 38134153670（第九十九批 `3dba7e3d` 的 push；路径含 `requirements*.in`
-  才触发本流）里 3 个 job 红，除上面已收口的 `vulnerability-scan`，另两条与本批的锁无关：
+  才触发本流）里 3 个 job 红，第一百零三批把锁修干净之后 run 38145150133 **仍是同样这 3 个红**，
+  而 `signature-verify`/`hash-verify`/`plugin-runner-build` 绿——所以它们与锁无关：
   `sbom-generation` 死在 `cyclonedx-py environment -o ../sbom-python.json --format json`
-  ⇒ `error: unrecognized arguments: --format`（锁里解析出的是 cyclonedx-bom 7.3.1，该子命令
-  不再收这个旗标，格式由输出文件扩展名决定）；`license-check` 死在 `pip-licenses -f table`
-  ⇒ `invalid choice: 'table'`（可选值是 `plain / markdown / json / …`）。两条都是"写门的人用的
-  CLI 与锁解析出的版本不同源"，与第八十八批那条 SBOM 缺陷同族——那批修的是哈希缺失，这次是旗标。
-  **处置时不得删掉这两个 job，也不得加 `continue-on-error` 变绿。**
+  ⇒ `error: unrecognized arguments: --format`（runner 装的是 `cyclonedx-bom 7.5.0`，未钉版；
+  该子命令不再收这个旗标，格式由输出文件扩展名决定）；`license-check` 死在 `pip-licenses -f table`
+  ⇒ `invalid choice: 'table'`（runner 装 `pip-licenses 5.5.5`，可选值是
+  `plain / markdown / json / csv / …`）；`vulnerability-scan` 的解析脚本按 list 读 pip-audit 的
+  dict 顶层（见上面那条就地纠正）。三条都是"写门的人用的 CLI 与 runner 实际装的版本不同源"，
+  与第八十八批那条 SBOM 缺陷同族——那批修的是哈希缺失，这次是旗标与解析形态。
+  **处置时不得删掉这三个 job，也不得加 `continue-on-error` 变绿；把 `pip install cyclonedx-bom`
+  与 `pip install pip-licenses` 钉版也只是把漂移冻住，仍需按当版本的正确旗标改。**
+- [ ] **`_reset_db()` 关连接不持锁，与后台 flush 线程竞争 ⇒ 解释器段错误**（第一百零三批实测踩到，
+  未处置）—— `python-ai/app/core/plugin/audit.py:165-190` 的 `_db_conn.close()` 与
+  `_DB_DIR/_DB_PATH` 换绑整段不在 `with _db_lock:` 内，而 `:128` 的连接是
+  `check_same_thread=False`；`tests/conftest.py:126,128` 每条用例前后各调一次，
+  `audit-flusher`（`:425`，daemon）与 `audit-shutdown-flush`（`:600`）都可能在
+  `_do_flush`→`_increment_retry`（`:326`→`:258`）的 `execute` 中途被关连接。
+  实测形态：同一镜像、同一缓存卷、同一命令，第一次 `pytest -q` 退出码 0，第二次 62% 处
+  `Fatal Python error: Segmentation fault`（`PYTEST_EXIT=139`）——CI 的 `python` job 在同一把
+  锁上给的是 `2056 passed / 7 skipped`，所以这是**低概率但真实存在**的窗口，不是环境问题。
+  `app/` 下当前无 `_reset_db` 调用方（生产今天不受影响），但任何把"重定向审计库"接进运维路径
+  的改动都会走进同一窗口。处置方向见第一百零三批 CHANGELOG 的 A/B/C（推荐 A：`_reset_db` 全程
+  持 `_db_lock`，配一条确定性红判据——持有锁时起线程调 `_reset_db`，断言它尚未完成）。

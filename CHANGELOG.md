@@ -64,9 +64,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `isolatedModules` 下报 `TS1484`，而 `noUnusedLocals` 又不允许留着不用。
 
 #### 诚实边界
-- 主锁的绿同时关掉**第三处**同源红：`plugin-security.yml:72-108` 的 `vulnerability-scan`
-  job 对同一把锁跑 `pip-audit --desc --format json`，并在下一步对**任何**漏洞 `sys.exit(1)`
-  （名字带 severity 色彩，实际没有过滤）。本批没有给它加过滤，只是让锁干净。
+- 主锁的绿**没有**关掉第三处同源红——这句本批写错过，就地纠正。`plugin-security.yml:72-108` 的
+  `vulnerability-scan` job 有两处叠着的缺陷，前一处一直把后一处挡在后面：
+  ① `pip-audit -r requirements.txt --desc --output … --format json` 自己在发现漏洞时退出 1
+  （run 38134153670 停在这里：`Found 29 known vulnerabilities in 5 packages`）；
+  ② 锁修好后第①步转绿（run 38145150133 该步打印 `No known vulnerabilities found`），
+  下一步的解析脚本却按"顶层是 list"去读 pip-audit 的 JSON，而它现在写的是
+  `{"dependencies": […], …}`——`for item in data` 迭代到的是字符串键，
+  `AttributeError: 'str' object has no attribute 'get'`，job 仍红。
+  ⇒ 这个 job 从来没有绿过的能力：改锁前死在第①步，锁修好后死在第②步。
+  本批没给它加过滤、没改脚本，登记为第一百零四批对象。原先"主锁的绿同时关掉第三处同源红"
+  是从读 workflow 得出的纸面结论，与"CI runner 日志才是判据"这条纪律冲突。
 - 门覆盖的是 `requirements.txt` 一条锁：`pip-audit -r requirements.txt --disable-pip`
   （`ci.yml:149-152`），`requirements-dev.txt` **没有任何审计门**。本批把 dev 锁里与主锁
   共享的 4 条对齐了，但 dev 锁仍留着 `pytest 8.3.5 → PYSEC-2026-1845（修复 9.0.3）`：
@@ -77,7 +85,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `starlette 0.52.1→1.3.1` 是**跨主版本**升级，本批的把握来自同一解释器上的前后对照重跑
   （见验证：覆盖 starlette 后套件逐项数字与基线**完全相同**），不是来自读 changelog；
   这条把握的口径限制要说清：对照跑的是本机 venv 的 `pytest 9.1.1`，而 dev 锁钉的是
-  `pytest 8.3.5`——两者不是同一个测试运行器版本。若 CI 的 `python` job 给出不同结论，以 CI 为准。
+  `pytest 8.3.5`——两者不是同一个测试运行器版本。CI 已给出结论（见 CI 补证）：
+  runner 上按新 dev 锁装环境跑 = `2056 passed / 7 skipped`，覆盖率 77.09%。
 - 行尾：`.gitattributes` 没绑 `.txt`（第九十二批只绑了 `.jsonl`），锁的工作副本因而跟
   `core.autocrlf` 走。本批按字节核对过：入库侧两把锁都是纯 LF（`CRLF 0`），
   差异只在检出副本，`pip` 与 `pip-audit` 对此不敏感。这是既有形态，不是本批引入的。
@@ -89,10 +98,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   第一版脚本漏检过一处重复的 `# via -r requirements.in`（哈希行以 4 空格开头，而它按
   `--hash=` 起首比对块尾），靠"无重复 `# via` 行"这条判据抓出来。
 
-#### 待补证
-- 推送后 CI 的 `python-lint`（pip-audit 那步）与 `frontend`（Audit dependencies 那步）
-  第一次在 Linux runner 上对**修复后的锁**给结论；本批的等价实测是在 `python:3.11-slim`
-  容器里以 CI 同款命令跑的（改前能逐条复现 CI 的 29 条表，改后 `No known vulnerabilities found`）。
+#### CI 补证（run 38145150155 ＝ commit `06ea5607`，推送后第一次）
+- **CI 整条流水线第一次全绿：11 个 job 全部 success**
+  （`gitleaks, static-consistency, docker-compose-validate, helm, python-lint, python, python-container,
+  eval-offline, frontend, java, docker-build`）。这条"第一次"是按逐 run 核对说的，不是外推：
+  run 38137949997（第一百零一批）红的只有 `python-lint` + `frontend`，
+  run 38140336727（第一百零二批）红的也只有这两条，本 run 两者转绿后整条流水线没有别的红。
+  更早批次（第九十～九十九）的红另有 owner，见各批条目，本批没有把它们算进来。
+- `python-lint`：审计那步在 runner 上打印 `No known vulnerabilities found`
+  （scratch `ci_b103_python.log` 对应的 python-lint job 日志第 252 行）。
+- `frontend`：`found 0 vulnerabilities` 出现两次（安装后与 `npm run audit` 门本身），
+  `Test Files 16 passed (16)`。
+- `python`：`2056 passed, 7 skipped, 1 warning in 78.40 s`，`TOTAL 19164 4391 77%`，
+  `Required test coverage of 74% reached. Total coverage: 77.09%`。
+  收集总数与本机对齐：CI 2056+7 = **2063** ＝ 本机 2051+12 = 2063——同一批用例，
+  差的是 5 例在 Linux 上真跑而在 Windows 上 skip（不是新增或丢失）。
+  这条同时是**新 dev 锁可安装**的 runner 级证据：`pip install -r requirements-dev.txt`
+  在 `--require-hashes` 自动生效下成功，第八十八批那类"手工编辑把锁改坏"的缺陷没有复发。
+- `plugin-security.yml`（run 38145150133）仍是 3 红：`license-check`
+  （`pip-licenses 5.5.5`：`invalid choice: 'table'`）、`sbom-generation`
+  （`cyclonedx-bom 7.5.0`：`unrecognized arguments: --format`）、`vulnerability-scan`
+  （见诚实边界②：解析脚本按 list 读 dict）。三条都是 CLI/库漂移，与锁无关，
+  且都**没有**能力通过；`signature-verify`、`hash-verify`、`plugin-runner-build` 绿。
+  第一百零四批的对象就是这三条，处置纪律不变：修旗标与解析形态，不删 job、不加 `continue-on-error`。
+- 第一百零一批的 CI 补证同时补齐：run 38137949997 的 `java` job
+  `Tests run: 718, Failures: 0, Errors: 0, Skipped: 1`、`BUILD SUCCESS`（scratch
+  `ci_b101_java.log`）——SSE 终止闸门在 runner 上成立。
+  第一百零二批 run 38140336727 当时 `python=success / python-lint=failure / frontend=failure`，
+  即那批自己的钟面判据在 runner 上是绿的，红的只有本批修掉的这两条审计门。
 
 #### 验证
 - 改前取证（容器内，CI 同款命令）：`Found 29 known vulnerabilities in 5 packages`
@@ -118,9 +151,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 与第一百零二批的 2087/18 的逐位关系：那条口径是**含容器轨**的全量 `pytest -q`，本批两遍都按 CI 的
   `--ignore` 排除它。对得上：`--collect-only tests/test_plugin_container.py` = **42 例**，
   2051+12 = 2063，2063+42 = 2105 = 2087+18；容器轨自己贡献 36 passed / 6 skipped。
-- 仍待补：整套在**新 dev 锁**（`pytest 8.3.5`，本机 venv 是 9.1.1）下的重跑正在 `python:3.11-slim`
-  容器里进行（scratch `b103_pytest_newlock.log`，安装阶段受网络限速，27–160 kB/s 波动）；
-  最终判据是 CI 的 `python` job。
+- 整套在**新 dev 锁**下的 Linux 重跑：`python:3.11-slim` + 挂载仓库，`pip install -q -r requirements-dev.txt`
+  打印 `INSTALL_EXIT=0`（哈希锁在新版本下照样全量可装），容器内随后确认
+  `starlette 1.3.1 pypdf 6.19.0 requests 2.33.0 urllib3 2.8.0`。
+  第一次 `pytest -q tests --ignore=tests/test_plugin_container.py` 的 docker run 退出码为 0
+  （汇总行没留在日志里——重定向把 `-q` 的进度与汇总吞在 teardown 噪声之前，只能证退出码）；
+  同一镜像、同一缓存卷、同一命令的第二次在 62% 处 **`Fatal Python error: Segmentation fault`**，
+  `PYTEST_EXIT=139`（scratch `b103_container2_pytest.log` 第 23-28 行是崩溃线程栈）。
+  这条 segfault 与本批的锁升级无关（见下面的登记），而 CI 的 `python` job 在同一把锁上给的是
+  `2056 passed / 7 skipped`——所以锁与套件这两件事都判绿，容器那次崩溃单独追。
+
+
+#### 本批测量中发现的缺陷（登记，语义一字未动）
+- **`_reset_db()` 关闭 SQLite 连接时不持 `_db_lock`，与后台 flush 线程竞争，代价是解释器段错误。**
+  崩溃栈：`app/core/plugin/audit.py:258 _increment_retry ← :326 _do_flush ← :596 _run`，
+  即 `:600` 起的 `audit-shutdown-flush` 线程（`_flush_worker`／`audit-flusher`，`:425` 建，daemon）
+  走的是同一段 `_do_flush`。连接以 `check_same_thread=False` 建立（`:128`），
+  所有写路径都在 `with _db_lock:` 里；但 `_reset_db`（`:165-190`）先 `_db_conn.close()` 再换
+  `_DB_DIR/_DB_PATH`，**整段不持锁**。关闭一个正被另一线程 `execute` 的连接是 CPython 层的未定义行为，
+  于是表现为随机 segfault。
+- 触发面今天是测试面：全仓 `_reset_db` 的调用方只有 `tests/conftest.py:126,128`（每条用例前后各一次）
+  与 `tests/test_plugin_audit.py:727,731`，`app/` 下**没有调用方**——所以生产不受影响，
+  但它是一颗已被实测踩到的地雷：任何把"重定向审计库"接进运维路径的改动都会走进同一个窗口。
+- 这条也是"看起来像 CI/容器基础抖动"的红背后的自有缺陷：第一次跑绿、第二次崩，差别只在 flusher
+  线程有没有正好落在 close 的窗口里。以复现率描述它比以"偶发"打发它更有用（第一百零一批同一形态：
+  本地 0/8 而 CI 5 例）。
+- 处置选项（下一批由用户拍，推荐 A）：
+  **A.** `_reset_db` 全程持 `_db_lock` 再 close+换路径（3 行，不改任何生产语义）。
+  红判据可**确定性**写，不需要复现 segfault：测试里先持有 `_db_lock`，起线程调 `_reset_db`，
+  `join(timeout)` 断言它尚未完成，释放锁后断言完成——这把"关连接必须与写串行"这条不变量钉住。
+  **B.** A + 把该不变量写成注释并加静态门（扫描"`_db_conn.close()` 出现在 `with _db_lock` 之外"）。
+  **C.** flusher 可停：`_reset_db` 先置 stop event、等线程退出再 close（测试隔离最干净，改动面最大）。
 
 
 ### 第一百零二批（2026-10-11：python 侧的钟面并入同一 UTC 口径——内置时间工具此前给模型的是裸本地墙钟，而三档拓扑里 python 工作负载的 `TZ` 声明为 0 处）
