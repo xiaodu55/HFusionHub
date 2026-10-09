@@ -11,6 +11,97 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百零二批（2026-10-11：python 侧的钟面并入同一 UTC 口径——内置时间工具此前给模型的是裸本地墙钟，而三档拓扑里 python 工作负载的 `TZ` 声明为 0 处）
+
+#### 结论（先给判定性质）
+- 这是第九十六批自己在 `docs/PRODUCTION_OPS.md` §13.3 登记过的**未收口面**，不是新发现的抖动：
+  java 写侧三张钟面钉死后，仓库里剩下的另一套钟是 python 进程的墙钟。`datetime.now()` 的零参写法
+  取进程时区，容器里就是宿主/节点时区；实测 `docker/`、`deploy/`、`helm/` 三档 shipped 拓扑里
+  python 工作负载的 `TZ` 声明 **0 处**，而 `python-ai/app` 里唯一那处裸读法正落在内置
+  `get_current_time` 工具上（`time_tool.py:21`）。
+- 后果不是精度而是**口径静默**：那个工具把"现在几点"直接交给模型，返回值里没有任何口径标签，
+  同一句提问在 +08 节点与 UTC 节点上差 8 小时，调用方无从分辨。容器内取证
+  （`hfusionhub/python88:rc`，`time.tzset()` 把进程时区翻到 `Asia/Shanghai`）：
+  修前输出 `2026-10-11 20:14:58`，同一瞬间 UTC 是 `2026-10-11 12:14:58`。
+- 与第九十五/九十六批同族：那两批钉的是"前端渲染"和"java 写侧 + 判定 SQL"，本批钉最后一套钟。
+
+#### 修复与判据（红判据先行，两面都收）
+- **代码面**：`time_tool.py` 改 `datetime.now(UTC)`，并给返回值加 `caliber: "UTC"` 与 `iso8601`
+  （带 `+00:00` 偏移）——口径写在数据里，而不是只写在部署里。
+- **部署面**：`TZ: "UTC"` 补进 dev compose 的 `python-ai` / `python-ai-worker` / `plugin-runner`、
+  prod compose 的 `python-ai` / `plugin-runner`，helm 走 values 键
+  （`pythonAi.tz` / `pluginRunner.tz`）→ `templates/python.yaml` / `templates/plugin-runner.yaml`
+  引用，与 java 侧 `javaToolOptions` 同一个形状，避免"键写了没人消费"的死配置。
+- **判据**：`python-ai/tests/test_tool_clock_caliber.py`（3 例）——输出声明口径且数值等于本次调用的
+  UTC 瞬时、进程时区免疫、`app/` 无裸读法。免疫那例先自证翻转真的发生（`naive != UTC`），
+  否则那句免疫断言是空转的；它依赖 `time.tzset()`，Windows 上跳过，执行处是 CI 的 `python` job。
+- **门禁**：`scripts/static-checks.py` 新增检查 15（`--python-clock-caliber`，已并入默认全跑档）。
+  代码面用 `ast` 扫零参 `now()` / `utcnow()` / `today()` / `localtime()` / 少 tz 的 `fromtimestamp()`；
+  部署面按**镜像标记**（不是服务名）认出三档拓扑里的 python 工作负载，逐个核对 `TZ` 归一化为 UTC，
+  并核对 helm 模板真的引用了 values 里的 `tz` 键。
+- 为什么是 `ast` 而不是正则：`time_tool.py` 的 docstring 就在解释"此前用的是 `datetime.now()`"，
+  按原文扫的门禁会在自己的说明文字上判红——那种红只会教人删注释。判据文件那例用 `tokenize`
+  涂白注释与字符串，与门禁的 `ast` 分面（两个 oracle 同时看错同一形状的概率才低）。
+- **门禁自身的判据**：`python-ai/tests/test_python_clock_caliber_gate.py`（17 例）钉"真仓库绿 +
+  已并入默认全跑档 + 每种漂移都红"，包括两种"门禁消失"形态：工作负载镜像标记改名（认不出任何
+  工作负载必须自己报红，而不是静默通过）与拓扑文件缺失。
+- **红判据在真树上取过证**：把门禁常量指向本批改前的 HEAD 快照（`git archive HEAD` 的
+  `python-ai/app` + 两份 compose + helm values/模板），12 面齐红（scratch `b102_gate_red2.log`）——
+  1 处裸读法 `time_tool.py:21`、5 个工作负载缺 `TZ`、helm 6 面（两模板各缺 `- name: TZ`、
+  缺 `.Values.*.tz` 引用、values 缺键）。改后同一门禁绿：
+  `7 个 python 工作负载声明 TZ=UTC，app/ 扫描 183 个 .py 文件无裸本地墙钟读法`。
+
+#### 成本
+- `time_tool.py` 的返回体多两个键（`caliber` / `iso8601`），是**新增字段**不是改名，旧调用方按
+  `datetime`/`date`/`time`/`weekday` 读的值语义变了：从"容器时区墙钟"变成"UTC 墙钟"。在 `TZ`
+  从未声明的现行容器里镜像默认时区就是 UTC，所以对现存部署是一次**读数不变、口径显式化**的改动；
+  一旦有人曾给容器加过 `TZ=Asia/Shanghai`，那套环境的工具输出会平移 −8 小时——那正是本批要消除的
+  不确定性，`docs/PRODUCTION_OPS.md` §13.1 那段"曾用非常规时区起过容器的环境要核一次存量"的
+  提醒同样适用于此。
+- 检查 15 会拦住"在 `app/` 里写裸 `datetime.now()`"的改动，包括测试夹具之外的任何新代码；
+  需要本地时间显示的场景应显式 `.astimezone()` 而不是靠进程时区。
+
+#### 诚实边界
+- 检查 15 的代码面只覆盖 `python-ai/app`（我们自己的应用码）。跑在 plugin-runner 沙箱里的**插件代码**
+  管不了——那正是给那个工作负载钉 `TZ=UTC` 的理由，而不是相反。零参 `now()` 按方法名匹配、不看
+  接收者类型，别的类恰好有 `now()` 会误报（`app/` 目前没有）。
+- 部署面证明"三档拓扑声明了同一口径、且模板真的读了 values 键"，不证明 Pod 起来后容器里 `TZ`
+  真的生效。本批能给的最强的证据是**渲染产物**而非文本：helm 3.16.2（与 CI `helm` job 同版本，
+  本机无 helm 客户端，用 `alpine/helm:3.16.2` 容器跑）`helm lint` → `0 chart(s) failed`，
+  `helm template` → 746 行清单里 `hfusionhub-python` 与 `hfusionhub-plugin-runner` 各有一条
+  `- name: TZ / value: "UTC"`，`<no value>` 计数 0；compose 两档用 `docker compose config`
+  解析后同样核对（dev 需 `--profile fullstack`，否则 `python-ai` / `python-ai-worker` 根本不在
+  渲染结果里——这也是"文本绿而渲染态没核对"会漏掉的那一类）。
+- 但"容器里 `TZ` 环境变量真的把 python 的墙钟挪动了"这件事本批只在**测试容器**里证明过
+  （`tzset` 免疫用例），没有在 shipped 镜像起出的活容器里证明过；三档拓扑的活栈实测仍是遗留项。
+- 待补证：推送后 CI 的 `python` job（免疫那例在 Linux runner 上第一次由 CI 执行）与 `helm` job。
+
+#### 就地纠正（文档声称与行为对不上）
+- `docs/PROJECT_TOUR.md:327` 写"静态一致性门禁（十三项…）"，而第九十七批起就已经是十四项——
+  那批加了检查 14 却没动这句枚举。本批补成"十五项"并把两项（workflow run 标量形态 / python 钟面口径）
+  一起列进枚举。人工核对方式：`grep -c "^# ── 检查" scripts/static-checks.py` = 15，
+  与 `main()` 里 `parser.add_argument` 的门禁旗标数一致（另有 2 个 `--internal-*` 之外的复用检查项，
+  故不数旗标数，数分节标题）。
+
+#### 验证
+- 新增两文件本地：`19 passed, 1 skipped`（skip 的那例是 `tzset` 缺失，Windows 无进程时区翻转能力）；
+  在 `hfusionhub/python88:rc` 里同一批：**20 passed**（免疫用例在 Linux 上真执行）。
+- `python-ai` 全量 `pytest -q`（venv，python 3.11）：**2087 passed / 18 skipped**，退出码 0
+  （scratch `b102_py_green_container.log` / `.b102_full_suite.log`）＝第一百批留存的 2068 passed /
+  17 skipped ＋ 本批 20 例（19 通过 + 1 因平台跳过），既有用例一条状态没变。
+- `scripts/static-checks.py` 全绿，退出码 0（含新检查 15 与计数同步 Python 1916 → **1936**：
+  README ×4、README_EN ×1、ROADMAP ×1、CLEANUP_BACKLOG ×1 共 7 处）。
+- `ruff check`（venv 钉版，`python-ai` 工作目录）：`tests/ app/ scripts/` All checks passed
+  （新文件初稿有 4 条 `UP017`，`--fix` 后为 `datetime.UTC` 别名形态）。
+- CI 侧对本批改前的 main（第一百批 run 38135767897）读到的其余两条红已定位，均为依赖审计门：
+  `python-lint` 的 pip-audit `Found 29 known vulnerabilities in 5 packages`
+  （pypdf 6.16.2 / python-dotenv 1.0.1 / requests 2.31.0 / starlette 0.52.1 / urllib3 2.7.0），
+  `frontend` 的 `npm audit --audit-level=high` ⇒ `15 vulnerabilities (7 moderate, 8 high)`，
+  且 npm 侧逐条都写着 `fix available via npm audit fix`。同一 run 的 `java`、`python`、
+  `python-container`、`docker-build`、`helm`、`static-consistency`、`docker-compose-validate`、
+  `eval-offline`、`gitleaks` 全部 success ⇒ 第一百批那条"容器轨 6 条 ERROR"的补证到位。
+  审计两条是下一批（第一百零三批）的范围，不在本批动阈值。
+
 ### 第一百零一批（2026-10-11：SSE 终止事件收敛为一道闸门——`[DONE]` 此前由哨兵与 `onComplete` 各发一次，"线上不重复"只靠"complete 之后再 send 会抛异常被吞掉"）
 
 #### 结论（先给判定性质）

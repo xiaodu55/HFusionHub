@@ -324,9 +324,10 @@ bash scripts/rotate-db-password.sh --apply --dev --yes   # MySQL 新密码落实
 bash scripts/backup_milvus.sh                   # Milvus 向量卷快照
 ```
 
-另有静态一致性门禁 `scripts/static-checks.py`（十三项：租户列 / 内部令牌键 / 测试计数 /
+另有静态一致性门禁 `scripts/static-checks.py`（十五项：租户列 / 内部令牌键 / 测试计数 /
 Flyway 窗口 / H2 schema 漂移 / 文档声称对账 / helm values 根 / 容器运行身份 /
-文档目录路径契约 / 评测产物落点 / 依赖锁 marker / 前端时间唯一入口 / 写侧时钟三源同源），CI 与本地提交前均可运行；纯文本核对，不需要 docker 或 helm。
+文档目录路径契约 / 评测产物落点 / 依赖锁 marker / 前端时间唯一入口 / 写侧时钟三源同源 /
+workflow run 标量形态 / python 钟面口径），CI 与本地提交前均可运行；纯文本核对，不需要 docker 或 helm。
 
 ---
 

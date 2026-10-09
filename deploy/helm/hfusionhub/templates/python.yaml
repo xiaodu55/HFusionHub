@@ -37,6 +37,11 @@ spec:
           ports:
             - containerPort: {{ .Values.pythonAi.port }}
           env:
+            # 写侧时钟口径（第一百零二批）：Python 侧的墙钟读的是进程时区，
+            # 容器默认 TZ 跟随节点。不声明这一行，同一份代码在不同节点上给
+            # 模型的时间答案可以差 8 小时。与 dev/prod compose 的 TZ 成对。
+            - name: TZ
+              value: {{ .Values.pythonAi.tz | quote }}
             - name: DEEPSEEK_API_KEY
               valueFrom:
                 secretKeyRef:

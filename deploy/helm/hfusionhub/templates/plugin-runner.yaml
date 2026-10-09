@@ -41,6 +41,10 @@ spec:
           ports:
             - containerPort: {{ .Values.pluginRunner.port }}
           env:
+            # 与 python.yaml / dev+prod compose 的 TZ 成对（第一百零二批）：插件代码里
+            # 的 datetime.now() 读的是进程时区，容器默认跟随节点。
+            - name: TZ
+              value: {{ .Values.pluginRunner.tz | quote }}
             - name: PLUGIN_RUNNER_TOKEN
               valueFrom:
                 secretKeyRef:

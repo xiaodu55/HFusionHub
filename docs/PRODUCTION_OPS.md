@@ -860,10 +860,10 @@ OTel 12 passed，假装没装则 10 passed + 2 skipped）。这条覆盖真正�
 - arq 与 opentelemetry 的归属仍在 Dockerfile，锁与镜像不同源这件事没有消除，只是变得可核对。
 
 
-## 13. 写侧时钟口径（第九十六批）
+## 13. 写侧时钟口径（第九十六、一百零二批）
 
 库里 `DATETIME` 存的是**不带时区的字面墙钟**，所以"这一行到底几点过期"由两件事决定：
-写它的那个进程的钟，和判定它时那条连接的钟。本批把三张钟面钉成同一个 UTC：
+写它的那个进程的钟，和判定它时那条连接的钟。第九十六批把 java 写侧的三张钟面钉成同一个 UTC：
 
 | 钟面 | 现值 | 声明位置 | 谁来读它 |
 | --- | --- | --- | --- |
@@ -906,6 +906,9 @@ FROM agent_approval;
   真库；红判据阶段在第九十五批的树上 4 run / 3 failed）。它在 `SET time_zone='+08:00'` 下
   重读同一判定，断言结论不翻转；另有一例专门把"MyBatis 一级缓存会让同参二次读根本不问库"
   钉成用例——第一版判据正是栽在这里得到假绿的。
+- python 侧（第一百零二批）：`python scripts/static-checks.py --python-clock-caliber`
+  （检查 15，已并入默认全跑档），行为侧是 `python-ai/tests/test_tool_clock_caliber.py`
+  与门禁自身的 `python-ai/tests/test_python_clock_caliber_gate.py`，见 §13.4。
 
 ### 13.3 未收口
 
@@ -915,9 +918,13 @@ FROM agent_approval;
   删掉它或把入口改成 shell 形式是**独立决策**（会真的改变堆上限），已登记
   [CLEANUP_BACKLOG.md](CLEANUP_BACKLOG.md) B 节；顺带纠正 `docs/OPTIMIZATION_PLAN.md:220`
   那句"除 `JAVA_OPTS -Xmx512m` 外……"——它把死开关当成了生效的堆上限。
-- **python 侧不在这套口径内**：`python-ai/app/core/tools/time_tool.py:21` 用 `datetime.now()`
-  取**容器时区**，而 4 个 python 工作负载都没有声明 `TZ`；同一容器里的 UTC 时间戳另有
-  `datetime.now(UTC)` 的写法。两种口径在 python 里并存，本批未收口。
+- **判定列的写入侧还剩一处 JVM 计算**：`AgentTaskServiceImpl.java:669` 的
+  `approval.setExpiresAt(LocalDateTime.now().plusMinutes(5))` 用 JVM 钟算出字面量再写。
+  JVM 已钉成 UTC（检查 13 守那条声明），所以它现在与库同口径；把它改到库钟
+  （`UTC_TIMESTAMP() + INTERVAL 5 MINUTE`）是防"哪天 JVM 没钉住"的纵深，第九十六批已登记
+  （CHANGELOG 该批的后续项），尚未做。
+- **python 侧曾不在这套口径内**：`time_tool.py` 用裸 `datetime.now()`、4 个 python 工作负载
+  都没声明 `TZ`——这一条第一百零二批已收口，见 §13.4。
 - **`NotificationController.java:118`** 把管理员输入的过期时刻按 naive 本地墙钟与
   `LocalDateTime.now()` 比。钉住 JVM=UTC 之后它的语义变成"管理员按 UTC 填"，前端传的却是
   带浏览器偏移的 ISO 串——谁该负责换算没有定，属行为决策，本批只登记。
@@ -927,3 +934,43 @@ FROM agent_approval;
 - **检查 13 只读文本**：它证明"声明存在且同源"，不证明 mysqld 真的以该参数起过、也不证明
   compose/helm 三条拓扑起过任何一个容器。三档拓扑的实测仍是遗留项（见第八十四批起各批的
   同一句上限声明）。
+
+### 13.4 python 侧的钟面（第一百零二批）
+
+java 那三张钟面钉死后，仓库里剩下的另一套钟是 **python 进程的墙钟**。`datetime.now()` 的零参
+写法取的是进程时区，容器里就是宿主/节点的时区——第一百零二批实测：`docker/`、`deploy/`、`helm/`
+三档 shipped 拓扑里 python 工作负载的 `TZ` 声明为 **0 处**，而 `python-ai/app` 里唯一那处裸读法
+就在内置的 `get_current_time` 工具上。后果不是精度问题：那个工具把"现在几点"直接交给模型，
+同一句提问在 +08 节点和 UTC 节点上差 8 小时，而返回值里没有任何口径标签，调用方无从分辨。
+容器内实测（`hfusionhub/python88:rc`，把进程时区翻到 `Asia/Shanghai`）：修前输出
+`2026-10-11 20:14:58`，同一瞬间 UTC 是 `2026-10-11 12:14:58`。
+
+两面一起收：
+
+| 面 | 现值 | 声明位置 | 谁来读它 |
+| --- | --- | --- | --- |
+| 代码口径 | `datetime.now(UTC)`，返回值带 `caliber: "UTC"` 与 `iso8601` | `python-ai/app/core/tools/time_tool.py` | 调用方（模型）能看见口径，容器时区挪动也不改结论 |
+| 容器进程时区 | `TZ: "UTC"` | dev compose 的 `python-ai` / `python-ai-worker` / `plugin-runner`，prod compose 的 `python-ai` / `plugin-runner`，`values.yaml` 的 `pythonAi.tz` / `pluginRunner.tz` → `templates/python.yaml` / `templates/plugin-runner.yaml` | libc/python 的本地时间换算 ⇒ 依赖库与插件代码的墙钟 |
+
+只改代码不钉 `TZ`，正确性押在"全仓库永远没人写裸读法"上；只钉 `TZ` 不改代码，工具输出的口径
+押在部署上（helm 那档连 values 键都可以不填）。两道门禁分别守这两面：
+
+- 文本侧：`python scripts/static-checks.py --python-clock-caliber`（检查 15）。`ast` 扫
+  `python-ai/app/**/*.py` 的零参 `now()` / `utcnow()` / `today()` / `localtime()` / 少 tz 的
+  `fromtimestamp()`，再按**镜像标记**（不是服务名）认出三档拓扑里的 python 工作负载，逐个核对
+  `TZ` 已声明且归一化为 UTC，并核对 helm 模板**真的引用**了 values 里的 `tz` 键（否则是死配置）。
+  用 `ast` 而不是正则，是因为 `time_tool.py` 的 docstring 就在解释"此前用的是 `datetime.now()`"——
+  按原文扫的门禁会在自己的说明文字上判红。
+- 行为侧：`python-ai/tests/test_tool_clock_caliber.py`（3 例）。其中"进程时区免疫"那例依赖
+  `time.tzset()`（POSIX 专有，Windows 上跳过），并在翻转后**先自证翻转真的发生了**——否则那句
+  免疫断言是空转的。它在 `hfusionhub/python88:rc` 里跑通，本地 Windows 上跳过，所以 CI 的
+  `python` job 才是这条判据的执行处。
+- 门禁自身：`python-ai/tests/test_python_clock_caliber_gate.py`（17 例）钉"真仓库绿 + 已并入
+  默认全跑档 + 每一种漂移都会红"，并用 PyYAML 另写一个工作负载枚举 oracle（与门禁的文本解析
+  分面），以及用 HEAD 快照做过一次真实红判据：改前的树上 12 面齐红（1 处裸读法 + 5 个工作负载
+  缺 `TZ` + helm 6 面）。
+
+诚实边界：检查 15 的代码面只覆盖我们自己的 `python-ai/app`。跑在 plugin-runner 沙箱里的**插件
+代码**管不了——那正是给那个工作负载钉 `TZ=UTC` 的理由，而不是相反。部署面证明的是"三档拓扑声明
+了同一个口径、且模板真的读了 values 键"，不证明 Pod 起来后容器里 `TZ` 真的生效（本机无 helm
+客户端，`helm template` 由 CI 的 `helm` job 执行）。

@@ -226,6 +226,9 @@ services:
     ports:
       - "127.0.0.1:9000:9000"
     environment:
+      # 钟面口径：python 侧日志与任何 naive 读法都跟着容器默认时区走，而镜像默认时区
+      # 不是契约（第一百零二批，门禁=static-checks 检查 15；java 侧同理由 JAVA_TOOL_OPTIONS 钉）
+      TZ: "UTC"
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?required}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
@@ -313,6 +316,8 @@ services:
     expose:
       - "9100"
     environment:
+      # 钟面口径：沙箱里跑的是第三方插件代码，naive 读法同样随容器时区走（检查 15）
+      TZ: "UTC"
       PLUGIN_RUNNER_TOKEN: ${PLUGIN_RUNNER_TOKEN:?required}
       PLUGIN_ARTIFACTS_DIR: /opt/plugin-artifacts
       DOCKER_HOST: ${PLUGIN_RUNNER_DOCKER_HOST:?required}

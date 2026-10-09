@@ -1,7 +1,7 @@
 # 冗余功能与死代码清理清单
 
 > 2026-08-29 前端主题统一改造时盘点生成。本次**只登记不删除**，逐项评估后处理。
-> 删除前先确认测试基线（Java 718 · Python 1916 · 前端 117）仍全绿。
+> 删除前先确认测试基线（Java 718 · Python 1936 · 前端 117）仍全绿。
 
 ## A. 冻结的实验功能（治理决策：保留代码，待后续补强）
 
@@ -146,3 +146,32 @@
   （`5 failed, 2047 passed, 7 skipped, 6 errors`，逐条都是 `TestRunnerIntegration::*`，
   报错文本为那句 `Integration tests require a tagged local Python base image`，行号
   `tests/test_plugin_container.py:761` = 守卫的 `pytest.fail`）。
+
+- [x] **python 侧的钟面不在 UTC 口径内**（第九十六批登记于 `docs/PRODUCTION_OPS.md:13.3`，第一百零二批处置）——
+  第九十六批把 java 的三张钟面（JVM `-Duser.timezone` / MySQL `--default-time-zone` / JDBC `serverTimezone`）
+  钉成 UTC 并立检查 13，同时留下一句：python 侧不收口。留下的事实是两条——
+  `python-ai/app/core/tools/time_tool.py:21` 用无参 `datetime.now()`（取**进程**时区，容器里等于宿主/节点时区），
+  而当时没有任何一档拓扑给 python 工作负载声明 `TZ`。也就是说同一个瞬间，java 侧按 UTC 落库、
+  python 侧按 +08 墙钟答给模型，两侧都"自洽"且互相矛盾。
+
+  处置（第一百零二批，两面都做，不做单面赌注）：
+
+  - **代码面**：`time_tool.py` 改 `datetime.now(UTC)`，输出补 `caliber: "UTC"` 与 `iso8601`（带 `+00:00`），
+    把口径写进结果而不是让调用方猜。判据 `python-ai/tests/test_tool_clock_caliber.py`（3 例）：
+    口径声明与碎片字段自洽、`TZ=Asia/Shanghai` 下输出不翻（`tzset` 缺失时 skipif，且翻转前先自证
+    " naive 读数确实变了"——否则免疫断言是空过）、以及把 `app/**/*.py` 的裸无参墙钟读法钉成用例。
+    最后一条的正则跑在 `tokenize` 涂白后的"代码表面"上，与门禁的 `ast` 是两套 oracle（注释/文档串不得算违规）。
+  - **部署面**：dev compose 的 `python-ai`/`python-ai-worker`/`plugin-runner`、prod compose 的
+    `python-ai`/`plugin-runner` 各加 `TZ: "UTC"`；helm 两个模板 `- name: TZ / value: {{ .Values.<root>.tz }}`
+    与 `values.yaml` 的 `pythonAi.tz`/`pluginRunner.tz` 成对，双向都核（键存在但没人读＝死配置，第八十三批的反形态）。
+  - **门禁**：检查 15 `--python-clock-caliber`（并入默认全跑）。工作负载按**镜像 marker**枚举而非服务名——
+    改名会让门禁"没认出任何 python 工作负载"，那必须是红而不是绿；拓扑文件缺失同样报红。
+
+  **待补证**：CI `python` job 里那条 `tzset` 免疫用例在 Linux runner 上真跑（本地 Windows 只能 skip），
+  以及 `helm` job 渲染出的 `TZ` 值。第一百零二批的本地替代证据是容器内跑通同一判据 + `helm template` 实测。
+
+- [ ] **两条依赖审计门是红的**（第一百零二批取证，未处置）—— run 38135767897 的 `python-container` 与
+  `java` 转绿后，main 上仅剩两条红：pip-audit `Found 29 known vulnerabilities in 5 packages`
+  （pypdf / python-dotenv / requests / starlette / urllib3）与 `npm audit --audit-level=high`
+  `15 vulnerabilities (7 moderate, 8 high)`（逐条都标着 "fix available via npm audit fix"）。
+  处置方向只能是升级或写明豁免策略，**不得靠放宽 `--audit-level`、加 `--ignore-vuln` 或调阈值把门改绿**。

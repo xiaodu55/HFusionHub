@@ -75,6 +75,14 @@
   同时核对 ci.yml 仍调用四个离线冻结套件（通用 + 招投标三竖门）且用例文件在位——门禁消失
   比门禁变红更安静，第九十七批的三个竖门就是这样"绿了 47 天其实一次没跑"。
 
+检查 15：python 侧的钟面并入同一 UTC 口径
+  `datetime.now()`/`utcnow()`/`today()` 的零参写法、`time.localtime()`、少了 tz 的
+  `fromtimestamp()` 读的是**进程时区**墙钟，容器里就是宿主/节点时区；app/ 下不得出现
+  （ast 解析，注释与 docstring 里的说明文字不算违规）。同时 dev/prod compose 里每个
+  python 工作负载、helm 的 python.yaml 与 plugin-runner.yaml 都必须声明 TZ=UTC，且模板
+  真的引用 values 里的 tz 键——与检查 13 是同一件事的两半：13 钉 java 写侧三张钟面，
+  这里钉 python 的钟面，两侧都钉死才有"同一瞬间一个墙钟"。
+
 用法:
   python scripts/static-checks.py --tenant-columns
   python scripts/static-checks.py --internal-token-keys
@@ -89,11 +97,13 @@
   python scripts/static-checks.py --requirements-markers
   python scripts/static-checks.py --frontend-time-entry
   python scripts/static-checks.py --write-clock-caliber
+  python scripts/static-checks.py --python-clock-caliber
   python scripts/static-checks.py            # 全部检查
 退出码: 0=通过, 1=发现违规
 """
 
 import argparse
+import ast
 import re
 import subprocess
 import sys
@@ -1327,6 +1337,164 @@ def check_workflow_run_scalars() -> None:
         )
 
 
+# ── 检查 15：python 侧的钟面并入同一 UTC 口径 ────────────────────────────
+
+PYTHON_APP_DIR = REPO / "python-ai" / "app"
+HELM_PLUGIN_RUNNER_TEMPLATE = HELM_CHART / "templates" / "plugin-runner.yaml"
+
+# shipped 拓扑里"这是我们的 python 工作负载"的标记：镜像名或 build 的 Dockerfile 名。
+# 按标记认而不是按服务名认——服务改名不会让工作负载停止读墙钟。
+_PYTHON_WORKLOAD_MARKERS = ("hfusionhub-python", "hfusionhub-plugin-runner", "Dockerfile.plugin-runner")
+
+# 零参的 now()/utcnow()/today() 取的是**进程时区**的墙钟；localtime() 本身就是本地钟；
+# fromtimestamp() 少一个 tz 参数就退回本地时区。带参数的 now(UTC) / now(tz=...) 是显式口径，
+# 不算违规。
+_NAIVE_ZERO_ARG_ATTRS = ("now", "utcnow", "today")
+_NAIVE_ALWAYS_ATTRS = ("localtime",)
+
+
+def _naive_clock_reads(path: Path) -> list[str]:
+    """列出一个 .py 文件里的裸本地墙钟读法（`文件:行 代码`）。
+
+    用 ast 而不是正则：文件里的说明文字（docstring/注释）会解释"以前用的是 datetime.now()"，
+    正则门禁会在自己的解释上判红，那种红只会教人去删注释。
+    """
+    source = path.read_text(encoding="utf-8")
+    lines = source.splitlines()
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        return [f"{_repo_rel(path)} 解析失败（{exc.msg}），本检查无法核对它的钟面读法"]
+
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        attr = node.func.attr
+        keywords = {kw.arg for kw in node.keywords if kw.arg}
+        if attr in _NAIVE_ALWAYS_ATTRS:
+            offenders.append(node.lineno)
+        elif attr in _NAIVE_ZERO_ARG_ATTRS and not node.args and not keywords:
+            offenders.append(node.lineno)
+        elif attr == "fromtimestamp" and len(node.args) < 2 and "tz" not in keywords:
+            offenders.append(node.lineno)
+
+    return [
+        f"{_repo_rel(path)}:{lineno} {(lines[lineno - 1].strip() if lineno <= len(lines) else '')}"
+        for lineno in sorted(set(offenders))
+    ]
+
+
+def _python_workload_labels(text: str, topology: str) -> list[str]:
+    """compose 文本里属于我们 python 镜像的工作负载服务名。"""
+    found = []
+    for name, block in _compose_service_blocks(text).items():
+        if any(marker in block for marker in _PYTHON_WORKLOAD_MARKERS):
+            found.append(f"{topology} 的服务 {name}")
+    return found
+
+
+def check_python_clock_caliber() -> None:
+    """python 侧不许有裸本地墙钟读法，且每个 python 工作负载都要把进程时区钉成 UTC。
+
+    与检查 13 是同一件事的两半：13 钉的是 java 写侧的三张钟面（JVM/MySQL/JDBC），
+    这里钉的是 python 的钟面。`datetime.now()` 的零参写法读的是**进程时区**，容器里
+    就是宿主/节点的时区——第一百零二批之前没有任何一档拓扑为 python 工作负载声明过
+    `TZ`，而 JVM 侧早已三处钉死，于是同一瞬间在两条栈上可以是两个墙钟：TimeTool 给
+    模型的"现在几点"随节点漂 8 小时（容器内实测：进程时区翻到 Asia/Shanghai 后输出
+    跟着变成 20:14，同一时刻 UTC 是 12:14）。
+
+    两面都要成立：代码显式写 UTC 口径（否则 TZ 一变结果就变），部署声明 TZ=UTC
+    （否则第三方库、插件代码、日志格式仍会退回本地钟）。只改代码不钉 TZ，等于把
+    正确性押在"全仓库永远没人写裸读法"上；只钉 TZ 不改代码，等于把工具输出的口径
+    押在部署上——helm 那档连 values 键都可以不填。
+
+    局限（不假装覆盖）：代码面只扫 python-ai/app，即我们自己的应用码。跑在 plugin-runner
+    沙箱里的插件代码不是我们能静态约束的面——约束不了它，才给那个工作负载钉 TZ=UTC。
+    零参 `now()` 按方法名匹配、不看接收者类型，别的类恰好有 `now()` 会误报（app 里目前没有）；
+    按镜像标记认工作负载，标记改名会红而不是静默漏。部署面证明的是"这三档拓扑声明了同一个
+    口径、且模板真的读了 values 键"，不证明 Pod 起来后容器内 `TZ` 真的生效——行为侧由
+    python-ai/tests/test_tool_clock_caliber.py 的进程时区免疫用例在 POSIX 上覆盖。
+    """
+    bad: list[str] = []
+
+    # ── 代码面：app/ 下的裸读法
+    scanned = 0
+    for root in (PYTHON_APP_DIR,):
+        if not root.is_dir():
+            bad.append(f"{_repo_rel(root)} 缺失（python 应用目录改名，本检查需同步）")
+            continue
+        for file in sorted(root.rglob("*.py")):
+            scanned += 1
+            bad.extend(_naive_clock_reads(file))
+
+    # ── 部署面：compose 两档 + helm 两个模板
+    declared: list[str] = []
+    for label, path, topology in (
+        ("dev compose", COMPOSE_DEV, "docker/docker-compose.yml"),
+        ("prod compose", COMPOSE_PROD, "deploy/docker-compose.prod.yml"),
+    ):
+        if not path.is_file():
+            bad.append(f"{label} 缺失：无法核对 python 工作负载的 TZ")
+            continue
+        text = path.read_text(encoding="utf-8")
+        workloads = _python_workload_labels(text, label)
+        if not workloads:
+            bad.append(
+                f"{label}：按 {_PYTHON_WORKLOAD_MARKERS} 没认出任何 python 工作负载"
+                "（镜像标记变了，本检查需同步）"
+            )
+        for name, block in _compose_service_blocks(text).items():
+            if f"{label} 的服务 {name}" not in workloads:
+                continue
+            tz = _declared_env(block, "TZ")
+            if tz is None:
+                bad.append(
+                    f"{label} 的服务 {name} 没有声明 TZ：容器时区跟随宿主，"
+                    "naive 读法与依赖库的本地钟会随节点漂"
+                )
+            elif _normalized_clock(tz) != "UTC":
+                bad.append(f"{label} 的服务 {name} 的 TZ={tz}，与 java 写侧的 UTC 口径不一致")
+            else:
+                declared.append(f"{name}")
+
+    values_text = HELM_VALUES.read_text(encoding="utf-8") if HELM_VALUES.is_file() else ""
+    if not values_text:
+        bad.append(f"{_repo_rel(HELM_VALUES)} 缺失：无法核对 helm 的 TZ")
+    for template_label, template_path, root_key, workload in (
+        ("templates/python.yaml", HELM_PYTHON_TEMPLATE, "pythonAi", "python-ai"),
+        ("templates/plugin-runner.yaml", HELM_PLUGIN_RUNNER_TEMPLATE, "pluginRunner", "plugin-runner"),
+    ):
+        if not template_path.is_file():
+            bad.append(f"{template_label} 缺失：无法核对 {workload} 的 TZ")
+            continue
+        tpl = _strip_comments(template_path.read_text(encoding="utf-8"))
+        if "TZ" not in tpl:
+            bad.append(f"{template_label} 没有把 TZ 传给容器（缺 - name: TZ）")
+        key = f".Values.{root_key}.tz"
+        if key not in tpl:
+            bad.append(f"{template_label} 没有引用 {key}（values 里那行没人消费）")
+        # 只认该工作负载自己的根：values 里两个根都叫 tz，在全文件上取第一个会把两边算成同一个值
+        section = re.search(
+            rf"^{re.escape(root_key)}:\n((?:[ ]+\S.*\n|\n)*)", values_text, re.MULTILINE
+        )
+        raw = _values_clock_face(section.group(1), "tz") if section else None
+        if raw is None:
+            bad.append(f"helm values 的 {root_key}.tz 没有声明（未钉 = 随节点漂）")
+        elif _normalized_clock(raw) != "UTC":
+            bad.append(f"helm values 的 {root_key}.tz={raw}，与 java 写侧的 UTC 口径不一致")
+        else:
+            declared.append(workload)
+
+    if bad:
+        problems.append("python 钟面口径不一致:\n    " + "\n    ".join(bad))
+    else:
+        print(
+            f"[ok] python 钟面口径：{len(declared)} 个 python 工作负载声明 TZ=UTC"
+            f"（{', '.join(declared)}），app/ 扫描 {scanned} 个 .py 文件无裸本地墙钟读法"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
@@ -1342,6 +1510,7 @@ def main() -> int:
     parser.add_argument("--requirements-markers", action="store_true")
     parser.add_argument("--frontend-time-entry", action="store_true")
     parser.add_argument("--write-clock-caliber", action="store_true")
+    parser.add_argument("--python-clock-caliber", action="store_true")
     parser.add_argument("--workflow-run-scalars", action="store_true")
     args = parser.parse_args()
 
@@ -1350,13 +1519,15 @@ def main() -> int:
             or args.readme_claims or args.helm_value_roots or args.container_uid
             or args.document_storage_root or args.eval_harness_storage
             or args.requirements_markers or args.frontend_time_entry
-            or args.write_clock_caliber or args.workflow_run_scalars):
+            or args.write_clock_caliber or args.python_clock_caliber
+            or args.workflow_run_scalars):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
             args.flyway_doc_sync = args.h2_schema_drift = \
             args.readme_claims = args.helm_value_roots = args.container_uid = \
             args.document_storage_root = args.eval_harness_storage = \
             args.requirements_markers = args.frontend_time_entry = \
-            args.write_clock_caliber = args.workflow_run_scalars = True
+            args.write_clock_caliber = args.python_clock_caliber = \
+            args.workflow_run_scalars = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -1384,6 +1555,8 @@ def main() -> int:
         check_frontend_time_entry()
     if args.write_clock_caliber:
         check_write_clock_caliber()
+    if args.python_clock_caliber:
+        check_python_clock_caliber()
     if args.workflow_run_scalars:
         check_workflow_run_scalars()
 

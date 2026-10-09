@@ -85,6 +85,9 @@ javaBackend:
 pythonAi:
   enabled: true
   image: ghcr.io/xiaodu55/hfusionhub-python:latest
+  # 写侧时钟口径（第一百零二批）：Python 的墙钟读进程时区，容器默认 TZ 跟随节点，
+  # 所以这里必须显式钉住，与 dev/prod compose 的 TZ 成对声明。
+  tz: "UTC"
   port: 9000
   # Batch 8 任务队列模式：inline（默认，进程内）| arq（需另行部署 Redis + arq worker）
   taskQueueMode: "inline"
@@ -123,6 +126,8 @@ pythonAi:
 pluginRunner:
   enabled: true
   image: ghcr.io/xiaodu55/hfusionhub-plugin-runner:latest
+  # 与 pythonAi.tz / dev+prod compose 的 TZ 成对：插件代码里的墙钟读进程时区。
+  tz: "UTC"
   port: 9100
   dockerHost: ""
   tlsSecretName: ""
