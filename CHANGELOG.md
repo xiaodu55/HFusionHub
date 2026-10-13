@@ -11,6 +11,85 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百零八批（2026-10-12：Flyway 那一步在 CI 里红了一路——把连接信息搬到插件真读的名字上，顺带把插件版本钉成运行时的那个引用）
+
+#### 结论（先给判定性质）
+- 对象是第一百零四批登记、当时判为"跨面缺陷、处置要连 pom 一起"的那条红：
+  `e2e.yml` 两处与 `eval-nightly.yml` 一处的 `Run Flyway migrations` **从诞生起每次 execution 都失败**，
+  连续 5 条 run 的 `e2e-full` 停在同一句
+  `FlywayException: Unable to connect to the database. Configure the url, user and password!`
+  （本批再次从 run 38233532705 的日志第 620 行取到同一句）。
+- 机理不是"MySQL 起不来"：同仓 `ci.yml:380-391` 早已写成
+  `-Dflyway.url/user/password`，它在 runner 上是绿的。flyway-maven-plugin 只认
+  `-Dflyway.*`、`flyway.conf`、`FLYWAY_*`，**不认 `SPRING_DATASOURCE_*`**，仓库里也没有
+  `flyway.conf`（全仓 find 为零）⇒ 那三个 Spring 键是空转的开关，插件拿到空配置。
+- 第二半是**版本不同源**：`java-backend/pom.xml` 当时没有声明 `flyway-maven-plugin`，
+  `mvn flyway:migrate` 走 Maven 前缀从 central 浮动解析（日志里解析到 11.7.2，
+  外加两条 `Could not transfer metadata … 401` 噪声），于是"命令行插件版本"与运行时
+  `flyway-core` 的关系靠运气。
+- 两处都是把**判据/配置对齐到真实读取方**，没有任何放宽：没有删步骤、没有加
+  `continue-on-error`、没有把红的那一步改成软失败。
+
+#### 修复与判据
+- 三处站点统一成 `ci.yml` 的参照形态（块标量 + 三个 `-Dflyway.*`，库/账号取该 job 的
+  `services.mysql.env`＝`hfusionhub / e2e / e2e-pass`），并删掉步骤里空转的
+  `SPRING_DATASOURCE_*` 三键——`Start Java backend` 那一步**保留**它们（那边读 Spring 的是应用，不是插件）。
+  改后锚点 `e2e.yml:76-83`、`e2e.yml:215-222`、`eval-nightly.yml:90-97`。
+- `java-backend/pom.xml:211-219` 声明 `flyway-maven-plugin`，版本写 **`${flyway.version}`** 而不是数字：
+  `flyway-core` 依赖不带 `<version>`、由父 BOM 的同一个属性管理，写引用就是**结构同源**，
+  写 `11.7.2` 则是把同源复制成两处会各自漂移的常量。`spring-boot-dependencies:3.5.16` 里
+  `<flyway.version>11.7.2</flyway.version>` ⇒ 本批**没有**改变今天实际执行的版本，消除的是未来的悄悄换版。
+- 新增 `scripts/static-checks.py` **检查 17**（`--flyway-cli`，已并入默认全跑档：旗标声明 `:1866`／全跑档条件 `:1876`／默认置真 `:1883`／分派 `:1917`）：
+  缺任一 `-Dflyway.*`、flyway 步骤 env 里出现 `SPRING_DATASOURCE_URL/USERNAME/PASSWORD`、
+  步骤带 `continue-on-error: true`、按文件的调用数与 `FLYWAY_STEP_EXPECTATIONS`（ci 2 / e2e 2 / eval-nightly 1）不符
+  ⇒ 红；**适用面为空（一处 flyway 调用都找不到）本身判红**，所以"把红的那一步删掉/改 goal"这条路被堵住。
+- 门的门 `python-ai/tests/test_flyway_cli_gate.py`（19 例）：真仓库绿、默认全跑档接线在、
+  六种注入漂移各红一次（只给 Spring 键／正确旗标＋残留空转 env／`continue-on-error`／删一处步骤／
+  三处一起改 goal／pom 未钉·钉数字·缺 `<version>`·pom 缺失）；
+  旗标值按 PyYAML 与**同一 job 的 `services.mysql.env`** 逐字比对（形状对但指错库照样红）；
+  解析器反空转两例——文本解析出的脚本与 YAML 解析出的脚本按空白归一必须一致、步骤名不得为空。
+- 写这条门时先被自己踩到两个坑，都留在了代码与 docstring 里：
+  ① 步骤块若按"下一个 `- xxx:`"切，会一路吃进 job 级 `defaults:` 里那个**空的 `run:`**，
+  真脚本被空值盖掉 ⇒ 改成按缩进切块（`_step_block`）；
+  ② `- name:` 那行的键在列表符**后面**（6 空格 + `- `），只按纯缩进匹配会把步骤名读成空、
+  违规报告指不出是哪一步 ⇒ `_step_key` 同时接受 `key_col` 列与 `- ` 前缀两种形态。
+
+#### 验证
+- 红判据先行：改前 `--flyway-cli` 报 7 条违规（三站点 × 两条规则 ＋ pom），`ci.yml` 未被牵连；
+  改后 `[ok] 扫描 5 个 workflow / 5 处 flyway 调用`。
+- **活库行为判据**（本机 `mysql:8.0` 容器＝MySQL 8.0.46，库 `hfusionhub`、用户 `e2e/e2e-pass`，
+  与 workflow 的 service 同凭据）：① 旧形状（只有 `SPRING_DATASOURCE_*`）复现 CI 日志那句异常
+  （`b108_head_form.log:41`）；② 新形状 `Successfully applied 87 migrations to schema hfusionhub,
+  now at version v86`（`b108_fixed_form.log:106`）；③ `flyway:info` 绿；
+  ④ 库内侧 `COUNT(*)=87 / SUM(success=1)=87 / MAX(installed_rank)=87`，schema 落 70 张表
+  （迁移文件 87 个＝V1–V86 加一个 `V10_1`）。
+- 钉版真的解析得到：`mvn -o flyway:info` 报出的 goal 坐标是 `org.flywaydb:flyway-maven-plugin:11.7.2:info`
+  （离线只缺两个 jackson jar，说明 `${flyway.version}` 已展开、旗标已生效）。
+- `test_flyway_cli_gate.py` ＋ `test_workflow_run_scalars.py` ＝ **34 passed**；
+  `scripts/static-checks.py` 全模式退出 0（检查 14/15/16 同轮绿）；新测试文件 ruff 干净；
+  `mvn -o -B validate` 退出 0（pom 加了 `<plugin>` 之后模型仍能建起来），spotless 只管 Java 源码、不碰 pom。
+- 全套件连跑两轮一致：**2138 passed, 18 skipped**（205.93 s / 210.90 s，日志 `b108_pytest_run1/2.log`）。
+  与第一百零七批那轮的 `2083 passed, 12 skipped` 差额按文件对得平：本批新增 19 条
+  （`test_flyway_cli_gate.py`），其余 42 条来自 `tests/test_plugin_container.py`——那一轮的命令显式带了
+  `--ignore=tests/test_plugin_container.py`（本批这轮没带；该文件单独 `--collect-only` 恰为 42 条，
+  且第一百零七批那份日志里文件名 0 命中）。于是 2083 ＋ 19 ＋ (42−6) ＝ 2138、12 ＋ 6 ＝ 18，两侧闭合。
+  那 6 条以 `Docker daemon not available` 跳过，而同一时刻 `docker` CLI 与容器都在跑——
+  python 侧 `docker.from_env()` 的探测与 CLI 不同源，属环境事实，本批没有改动容器轨任何一条判据。
+- 计数：新增 19 个 `def test_` ⇒ README Python 1968 → **1987**（badge、第 37/47/241 行四处）。
+
+#### 诚实边界
+- 检查 17 只回答"旗标到没到命令行""插件钉没钉""步骤还在不在"，**不证明迁移内容正确，也不证明
+  改后的那一步在 runner 上会过**——后者只能在下一个 push 的 `e2e-full` 日志里看，本批没有跑 e2e 全栈。
+- 它也不查 `-Dflyway.locations` 等其余配置；库名/凭据同源由语义层兜，SQL 本身仍归检查 4/5。
+- 活库测的是"空库→迁移全绿"，没有业务行；`hfusionhub` 那份数据随容器一并删除。
+- `scripts/static-checks.py:974` 那条 ruff `f-string without placeholders` 是**第八十八批留下的既有行**，
+  不在本批 diff 里，按"不顺手清理无关行"留着（`ci.yml` 的 ruff 只跑 `python-ai/`，所以它从未让 CI 红）。
+- 旧 run 里的 `cancelled` 归因口径不变（`e2e.yml` 无 `concurrency`、日志无 timeout 声明，既不算过也不算被挤掉）。
+
+#### 下一批
+第一百零九批：全栈 compose 真跑一次（fullstack 档 + mysql/redis），把"能写/能读"从镜像级升到活栈级，
+顺带验 `UPLOAD_DIR` 那个空转键与 `docker compose exec` 那对命令。
+
 ### 第一百零七批（2026-10-12：审计 flush 的超限判定从"读快照"抬到"读当前行"——运维的 dead-letter 回灌不再被一条在途 flush 吞掉；顺带把 autouse fixture 的后台 flusher 停掉，修的是测试隔离）
 
 #### 结论（先给判定性质）

@@ -368,9 +368,9 @@
   是构成变了、不是规则匹配不上，`test_db_lock_lifetime_gate.py` 的 docstring 里写明了这笔账）；
   `scripts/static-checks.py` 全模式退出 0，检查 16 那行现为"扫描 1 个碰共享连接的模块、12 处引用"；
   全套件连跑两次绿（`2083 passed, 12 skipped`，日志 `b107_pytest_run1/2.log`）。
-- [ ] **Flyway 迁移步骤在 `e2e.yml` / `eval-nightly.yml` 从诞生起就没过过：插件只认
+- [x] **Flyway 迁移步骤在 `e2e.yml` / `eval-nightly.yml` 从诞生起就没过过：插件只认
   `-Dflyway.*`，而步骤给的是 `SPRING_DATASOURCE_*`（四处站点，`ci.yml` 里已有写对的那一份）**
-  （第一百零四批取证，未处置）—— run 38221938525（＝ `8054f32e`）的 `e2e-full` job 死在这一步，日志原文：
+  （第一百零四批取证，第一百零八批处置）—— run 38221938525（＝ `8054f32e`）的 `e2e-full` job 死在这一步，日志原文：
   `FlywayException: Unable to connect to the database. Configure the url, user and password!`
   （scratch `ci_e2e_flyway.log` 第 617 行）。这一 `conclusion` 不是今天才有：2026-10-10 / 10-11（三次）/
   10-12 连续 **5** 条 run 的 `e2e-full` 都死在**同一个步骤**（逐 run 核过
@@ -402,6 +402,36 @@
   **第一百零四批 CI 补证对本条的影响**：该批的 `E2E` run 38226782059 在
   `Run pip install -r requirements.txt` 停 19 分 22 秒后被取消，**没有走到 Flyway 那一步**，
   所以本条的判据仍然只用 run 38221938525 那一族历史日志；补证没有为"改后是否还红"取到任何证据。
+
+  **第一百零八批处置（2026-10-12）**：四处站点按对照证据统一成块标量＋三个 `-Dflyway.*` 旗标
+  （`e2e.yml:76-83`、`e2e.yml:215-222`、`eval-nightly.yml:90-97` 为改后锚点；上文 `:75-82` / `:82` /
+  `:221` / `:96` 是改前锚点，保留作取证原文），同时删掉那一步里空转的 `SPRING_DATASOURCE_*`
+  三个键（`Start Java backend` 步骤仍保留它们——那边读的是 Spring，不是插件）。旗标值不手写：
+  `python-ai/tests/test_flyway_cli_gate.py::TestFlagsMatchServiceCredentials` 按 PyYAML 解析
+  每个 job 的 `services.mysql.env`，断言 url 的库名、user、password 三项与 service 声明逐字相等
+  （`ci.yml` 是 `hfusionhub_test/testuser/testpass`，另两条是 `hfusionhub/e2e/e2e-pass`）——
+  形状对但指错库，这条也会红。
+  `java-backend/pom.xml:211-219` 显式声明 `flyway-maven-plugin`，版本写 **`${flyway.version}`**
+  （引用而非数字）：`flyway-core` 依赖不带 `<version>`、由父 BOM 的同一个属性管理，于是插件与
+  运行时同版本是**结构保证**；`spring-boot-dependencies:3.5.16` 里 `<flyway.version>11.7.2</flyway.version>`，
+  与该 run 日志里浮动解析到的版本一致 ⇒ 本批钉版**没有**改变今天实际执行的版本，它消除的是
+  "central 哪天发新版就悄悄换插件"这一条。解析已核：`mvn -o flyway:info` 报出的 goal 坐标是
+  `org.flywaydb:flyway-maven-plugin:11.7.2:info`（离线只缺两个 jackson jar，旗标已生效）。
+  行为侧判据在活库上量，不由文本门冒充：本机起 `mysql:8.0`（46）容器，库 `hfusionhub`、用户
+  `e2e/e2e-pass`，与 workflow 的 service 同凭据——
+  ① 旧形状（只给 `SPRING_DATASOURCE_*`）复现日志原文 `Unable to connect to the database.
+  Configure the url, user and password!`（scratch `b108_head_form.log:41`）；
+  ② 新形状 `Successfully applied 87 migrations to schema hfusionhub, now at version v86`
+  （`b108_fixed_form.log:106`）；③ `flyway:info` 绿（`b108_info.log`）；
+  ④ 库内侧核对 `SELECT COUNT(*), SUM(success=1), MAX(installed_rank) FROM flyway_schema_history`
+  ＝ `87 / 87 / 87`，schema 共 70 张表（迁移文件 87 个：V1-V86 加一个 V10_1）。
+  门禁：新增 `scripts/static-checks.py` 检查 17（`--flyway-cli`，已并入默认全跑档），规则四条——
+  缺任一 `-Dflyway.*`、flyway 步骤的 env 里出现 `SPRING_DATASOURCE_URL/USERNAME/PASSWORD`、
+  步骤带 `continue-on-error: true`、每个 workflow 的 flyway 调用数与 `FLYWAY_STEP_EXPECTATIONS`
+  （ci 2 / e2e 2 / eval-nightly 1）不符；适用面为空（一处 flyway 调用都找不到）本身判红，
+  所以"删步骤/改 goal"不会把门变绿。`test_flyway_cli_gate.py`（19 个用例）是这条门的门。
+  诚实边界：本批未跑 e2e 全栈（改后的这一步要在下一个 push 的 runner 上才见真章），
+  `hfusionhub` 库里的数据只是迁移产物、没有业务行；旧 run 的 `cancelled` 归因仍按上文口径不变。
 - [ ] **`eval-runtime` 把"活栈不可达"折叠成"错误率退化"——nightly 的红读起来像模型回归**
   （第一百零四批归因，未处置）—— run 38224268851 的 `eval-runtime` job（114727802659）里
   `Run runtime evaluation gate` 打的是：220 个用例**每一个都在 ≈0.1 秒内 ERR**，汇总

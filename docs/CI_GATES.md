@@ -361,6 +361,30 @@ bid_terminology_accuracy` 聚合值均为 `1.0`。四份报告末尾都是 `"gat
 诚实边界照旧：这四次执行证明的是"命令到了 shell、门按自己的套件跑完且没判红"，**不证明门里的阈值
 设置得当**；三道竖门今天第一次有历史数据，此前 47 天没有任何一次运行可以对照。
 
+## 检查 17：Flyway 步骤的旗标与插件钉版（第一百零八批）
+
+`e2e.yml` 两处与 `eval-nightly.yml` 一处 `Run Flyway migrations` 自出生起每次都红，命令只有
+`mvn --batch-mode flyway:migrate`，连接信息写在 `SPRING_DATASOURCE_*` 里——flyway-maven-plugin
+不读 Spring 的键，于是连续 5 条 run 的 `e2e-full` 都停在
+`FlywayException: Unable to connect to the database. Configure the url, user and password!`
+（取证见 `docs/CLEANUP_BACKLOG.md:371` 那一条）。同仓 `ci.yml:380-391` 早已写对，所以这不是环境问题。
+
+| 层 | 位置 | 查什么 |
+|---|---|---|
+| 形状 | `scripts/static-checks.py` 检查 17（`--flyway-cli`，已并入默认全跑档） | 每个 flyway 步骤必须显式带 `-Dflyway.url= / .user= / .password=`；步骤 env 里出现 `SPRING_DATASOURCE_URL/USERNAME/PASSWORD` 判红（空转开关）；`continue-on-error: true` 判红；按文件钉调用数（ci 2 / e2e 2 / eval-nightly 1），**适用面为空本身判红**，所以删步骤、改 goal 都不会把门变绿；pom 必须声明 `flyway-maven-plugin` 且版本写 `${flyway.version}` |
+| 语义 | `python-ai/tests/test_flyway_cli_gate.py`（19 例） | PyYAML 作第二个 oracle：断言每个 flyway 步骤的 url 库名 / user / password 与**同一 job 的 `services.mysql.env`** 逐字相等（形状对但指错库照样红）；断言文本解析器读到的脚本与 YAML 解析出的脚本按空白归一后一致、步骤名不为空（解析器瞎了门就是空的）；断言 `flyway-core` 不带 `<version>`——否则 `${flyway.version}` 不再等于运行时版本；六种注入漂移各红一次 |
+
+行为侧判据不由文本门冒充，在活库上量（本机 `mysql:8.0`→8.0.46 容器，库/账号与 workflow 的
+service 同凭据）：旧形状复现上面那句异常；新形状 `Successfully applied 87 migrations to schema
+hfusionhub, now at version v86`；`flyway_schema_history` 为 `87 行 / success 之和 87 /
+最大 installed_rank 87`，schema 落 70 张表；`flyway:info` 绿。钉版那一半的实际效果要说清：
+`spring-boot-dependencies:3.5.16` 声明 `<flyway.version>11.7.2</flyway.version>`，与历史日志里
+浮动解析到的版本相同 ⇒ **本批没有换掉今天执行的版本**，消除的是"central 哪天发新版就悄悄换插件"。
+
+诚实边界：检查 17 只看 workflow 文本与 pom 的形状，**不证明迁移内容正确、也不证明那一步在 runner
+上会过**（改后的步骤要等下一个 push 的 runner 才算真跑）；它也不查 `-Dflyway.locations` 之类的其余
+配置——库名与凭据同源由上面那层语义判据兜，SQL 本身仍由检查 4/5 那两条迁移链门管。
+
 ## 相关文件
 
 - `.github/workflows/ci.yml` — push/PR 主 CI（含 `eval-offline` 门禁 job）
@@ -375,6 +399,7 @@ bid_terminology_accuracy` 聚合值均为 `1.0`。四份报告末尾都是 `"gat
 - `python-ai/tests/test_tool_clock_caliber.py` — 内置时间工具的钟面行为判据（显式 UTC 口径 + 进程时区免疫，免疫那例在 POSIX 容器里执行、Windows 上跳过）
 - `python-ai/tests/test_db_lock_lifetime_gate.py` — 检查 16（审计库共享 SQLite 连接）的判据：真仓库绿、已并入默认全跑档、锁外取连接 / 锁外关连接 / 整组改名 / 适用面为空 / 语法坏掉这五种形态都红，同行 `with` 写法不误伤；行为侧的确定性红在 `test_plugin_audit.py::TestDbConnectionLifetime`。反空阈值现为 `>= 12`（9 个 `_get_db()` 调用点 ＋ `_reset_db` 里 3 处 `_db_conn` 读写），构成变化时按账改阈值、不改规则
 - `python-ai/tests/test_plugin_audit.py::TestFlushVerdictReadsCurrentRow` — 审计 flush 的超限判定必须读**行的当前状态**的判据：events 把在途 flush 卡在"快照 → 回写"之间，运维回灌后不得被旧快照翻回 dead-letter（第一百零七批）
+- `python-ai/tests/test_flyway_cli_gate.py` — 检查 17（Flyway 旗标与插件钉版）的判据：真仓库绿、已并入默认全跑档、六种漂移（只给 Spring 键 / 残留空转 env / `continue-on-error` / 删步骤 / 改 goal / pom 未钉或钉数字）各红一次，旗标值与 job 的 mysql service 凭据同源，解析器自身不与 YAML 分歧（第一百零八批）
 - `python-ai/tests/conftest.py::_stop_audit_flusher` + `test_plugin_audit.py::TestAuditFlusherIsolation` — 测试隔离门禁：autouse fixture 换库前后各停一次 `audit-flusher`（join 不掉直接 `pytest.fail`），配一条反空判定先证明 `record_audit` 真起了 daemon，否则"开局无残留线程"会凭空绿（第一百零七批）
 - `python-ai/tests/test_eval_suite_eol_binding.py` — 冻结摘要与行尾无关的判据（钉值、两种检出形态、篡改仍红、emit 写 LF）
 - `.git-blame-ignore-revs` + `CONTRIBUTING.md`「Java code style (spotless)」— 全仓重排那一笔如何不污染 `git blame`
