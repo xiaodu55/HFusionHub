@@ -83,6 +83,15 @@
   真的引用 values 里的 tz 键——与检查 13 是同一件事的两半：13 钉 java 写侧三张钟面，
   这里钉 python 的钟面，两侧都钉死才有"同一瞬间一个墙钟"。
 
+检查 16：审计库共享 SQLite 连接的取用与关闭都在 `_db_lock` 内
+  `app/core/plugin/audit.py` 那个 `check_same_thread=False` 的连接被后台 flush 线程和
+  请求线程共用。`db = _get_db()` 写在 `with _db_lock:` **之前**时，锁只排开"execute 撞
+  execute"，排不开"锁外取到的连接对象 vs `_reset_db()` 的 close()"——被关掉的原生句柄
+  再 execute 是解释器级 access violation，Python 异常接不住（第一百零三、一百零四批各
+  踩到一次，退出码 139）。所以按形判：`_get_db()` 调用、以及除 `_get_db` 本体以外对
+  `_db_conn` 的读写，都必须落在 `with _db_lock:` 的体内。适用面按"有没有碰这三个名字"
+  算，一个都没扫到就判红——只认锁名的话，整组改名会让这条门静默变成空扫描。
+
 用法:
   python scripts/static-checks.py --tenant-columns
   python scripts/static-checks.py --internal-token-keys
@@ -98,6 +107,7 @@
   python scripts/static-checks.py --frontend-time-entry
   python scripts/static-checks.py --write-clock-caliber
   python scripts/static-checks.py --python-clock-caliber
+  python scripts/static-checks.py --db-lock-lifetime
   python scripts/static-checks.py            # 全部检查
 退出码: 0=通过, 1=发现违规
 """
@@ -1495,6 +1505,128 @@ def check_python_clock_caliber() -> None:
         )
 
 
+# ── 检查 16：共享 SQLite 连接的取用与关闭都在 `_db_lock` 内 ───────────────
+
+# 第一百零三／一百零四批本地跑全套件两次踩到解释器级崩溃（退出码 139：一次
+# `Windows fatal exception: access violation`、容器里一次 `Fatal Python error:
+# Segmentation fault`），崩溃栈点名 `app/core/plugin/audit.py` 的 `_cleanup_synced`。
+# 形态是 `db = _get_db()` 写在 `with _db_lock:` **之前**：锁排开了"execute 撞 execute"，
+# 却排不开"锁外取到的连接对象 vs `_reset_db()` 的 close()"——线程握住旧对象，等 `_reset_db`
+# 放锁后对已关闭的原生句柄 execute，Python 的 `except Exception` 接不住。
+# 时序判据只能抽中这种窗口，形态判据不用赌运气，所以在这里钉形。
+DB_LOCK_NAME = "_db_lock"
+DB_CONN_NAME = "_db_conn"
+DB_GETTER_NAME = "_get_db"
+
+
+def _locked_line_ranges(tree: ast.AST) -> list[tuple[int, int]]:
+    """每个 `with _db_lock:` 语句体的行号区间（从体内第一条语句到该 with 块末行）。
+
+    起点取体内第一条语句而不是 `with` 那一行：`with` 头部的表达式（这里只有锁名本身）
+    不受这把锁保护。副作用是可接受的——`with _db_lock: db = _get_db()` 这种同行写法，
+    体首行号就等于 `with` 行号，会被正确判成"在锁内"。
+    """
+    ranges: list[tuple[int, int]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.With, ast.AsyncWith)):
+            continue
+        guarded = any(
+            isinstance(item.context_expr, ast.Name) and item.context_expr.id == DB_LOCK_NAME
+            for item in node.items
+        )
+        if guarded and node.body:
+            ranges.append((node.body[0].lineno, node.end_lineno or node.body[-1].end_lineno or 0))
+    return ranges
+
+
+def _db_lock_shape_offenders(source: str, rel: str) -> tuple[list[str], int]:
+    """一份源码里"锁外碰共享连接"的行，返回 (违规 `文件:行 代码`, 核对过的引用数)。
+
+    两条规则：
+      R1 取连接（`_get_db()`，含 `mod._get_db()` 的属性写法）必须出现在 `with _db_lock:` 体内；
+      R2 除 `_get_db` 本体（它只在锁内被调用）以外，任何对 `_db_conn` 的读写也必须在体内——
+         `_reset_db` 的 close＋换绑就属于这一类。
+    """
+    lines = source.splitlines()
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        return [f"{rel} 解析失败（{exc.msg}），本检查无法核对它的连接生命周期"], 0
+
+    ranges = _locked_line_ranges(tree)
+
+    def inside(lineno: int) -> bool:
+        return any(lo <= lineno <= hi for lo, hi in ranges)
+
+    offenders: list[str] = []
+    checked = 0
+    for node in ast.walk(tree):
+        func = getattr(node, "func", None)
+        callee = getattr(func, "id", None) or getattr(func, "attr", None)
+        if isinstance(node, ast.Call) and callee == DB_GETTER_NAME:
+            checked += 1
+            if not inside(node.lineno):
+                offenders.append(node.lineno)
+    # R2 需要按函数排除，单独走一遍 FunctionDef
+    for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
+        if fn.name == DB_GETTER_NAME:
+            continue
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Name) and node.id == DB_CONN_NAME:
+                checked += 1
+                if not inside(node.lineno):
+                    offenders.append(node.lineno)
+
+    return sorted(
+        {
+            f"{rel}:{lineno} {(lines[lineno - 1].strip() if lineno <= len(lines) else '')}"
+            for lineno in set(offenders)
+        }
+    ), checked
+
+
+def check_db_lock_lifetime() -> None:
+    """审计库那个跨线程共享的 sqlite3 连接，取用与关闭都必须在这把锁内。
+
+    本检查只管形状，不证明没有别的并发缺陷：它读不到 `_flush_stop`/线程生命周期，
+    也管不到测试自己起线程绕开封装直接操作连接。行为侧的那一半判据在
+    python-ai/tests/test_plugin_audit.py::TestDbConnectionLifetime。
+    """
+    all_offenders: list[str] = []
+    scanned = 0
+    references = 0
+    if not PYTHON_APP_DIR.is_dir():
+        problems.append(f"检查 16：python app 目录不存在 {_repo_rel(PYTHON_APP_DIR)}")
+        return
+    for path in sorted(PYTHON_APP_DIR.rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        # 适用面按"有没有碰这三个名字"判，不按"有没有那把锁"判：只认锁名的话，
+        # 把 `_db_lock` 连 `with` 一起改掉名就会让整个检查静默变成空扫描。
+        if not any(token in source for token in (DB_LOCK_NAME, DB_CONN_NAME, DB_GETTER_NAME)):
+            continue
+        scanned += 1
+        found, checked = _db_lock_shape_offenders(source, _repo_rel(path))
+        all_offenders.extend(found)
+        references += checked
+
+    if not scanned:
+        problems.append(
+            f"检查 16 的适用面为空：{_repo_rel(PYTHON_APP_DIR)} 下没有任何文件再引用 "
+            f"`{DB_LOCK_NAME}`/`{DB_CONN_NAME}`/`{DB_GETTER_NAME}`——改名或删模块会让这条门静默变绿"
+        )
+        return
+
+    if all_offenders:
+        problems.append(
+            "共享 SQLite 连接在 `_db_lock` 外被取用或关闭:\n    " + "\n    ".join(all_offenders)
+        )
+    else:
+        print(
+            f"[ok] 审计连接生命周期：扫描 {scanned} 个碰共享连接的模块、"
+            f"{references} 处引用，全部在 `with {DB_LOCK_NAME}:` 体内"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
@@ -1512,6 +1644,7 @@ def main() -> int:
     parser.add_argument("--write-clock-caliber", action="store_true")
     parser.add_argument("--python-clock-caliber", action="store_true")
     parser.add_argument("--workflow-run-scalars", action="store_true")
+    parser.add_argument("--db-lock-lifetime", action="store_true")
     args = parser.parse_args()
 
     if not (args.tenant_columns or args.internal_token_keys or args.test_counts
@@ -1520,14 +1653,14 @@ def main() -> int:
             or args.document_storage_root or args.eval_harness_storage
             or args.requirements_markers or args.frontend_time_entry
             or args.write_clock_caliber or args.python_clock_caliber
-            or args.workflow_run_scalars):
+            or args.workflow_run_scalars or args.db_lock_lifetime):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
             args.flyway_doc_sync = args.h2_schema_drift = \
             args.readme_claims = args.helm_value_roots = args.container_uid = \
             args.document_storage_root = args.eval_harness_storage = \
             args.requirements_markers = args.frontend_time_entry = \
             args.write_clock_caliber = args.python_clock_caliber = \
-            args.workflow_run_scalars = True
+            args.workflow_run_scalars = args.db_lock_lifetime = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -1559,6 +1692,8 @@ def main() -> int:
         check_python_clock_caliber()
     if args.workflow_run_scalars:
         check_workflow_run_scalars()
+    if args.db_lock_lifetime:
+        check_db_lock_lifetime()
 
     if problems:
         print("\n发现问题:")

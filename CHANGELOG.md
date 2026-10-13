@@ -11,6 +11,115 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百零六批（2026-10-12：审计库那个跨线程共享的 SQLite 连接——取用与关闭都收进 `_db_lock` 体内，并新增检查 16 把"锁外取引用"这种形态钉死）
+
+#### 结论（先给判定性质）
+- 对象是第一百零三批登记、第一百零四批补证时拿到崩溃栈的那条：本地跑全套件会**偶发**解释器级崩溃
+  （`PYTEST_EXIT=139`，一次 `Windows fatal exception: access violation`、更早容器里一次
+  `Fatal Python error: Segmentation fault`）。CI 的 `python` job 在同一把锁上一直是绿的
+  ⇒ 这是"本地跑法才有概率命中"的窗口，不是环境问题，也不因为不常发生就当噪声。
+- **判据不建立在"多跑几次看运气"上**：行为侧两条确定性红（其中一条改前是稳定红，不是概率红），
+  形态侧新增 `scripts/static-checks.py` 检查 16。崩溃本身本批没有复现，也**不声称**复现过——
+  关掉的是它赖以发生的形态。
+- 推荐方案的一半被否掉了：第一百零三批当时写的是"`_reset_db` 全程持 `_db_lock`"，**单做这一半
+  仍留窗口**，因为漏的是"引用在锁外取"。`_increment_retry`/`_cleanup_synced` 这些函数的形状是
+  `db = _get_db()` 然后 `with _db_lock:` —— 锁排开了"execute 撞 execute"，排不开
+  "锁外握住的对象 vs `close()`"。所以处置必须两半同做。
+
+#### 修复与判据
+- 行为侧 `python-ai/tests/test_plugin_audit.py::TestDbConnectionLifetime`（2 例，先跑红再改）：
+  - `test_reset_db_waits_for_the_db_lock`——主线程外起一个线程占住 `_db_lock`，再起线程调
+    `_reset_db(str(tmp_path / "relocated"))`，断言 0.3s 内**还没跑完**。改前红：
+    `AssertionError: _reset_db 不持 _db_lock：锁还被占着它就把连接关了`。
+  - `test_concurrent_first_use_builds_exactly_one_connection`——8 个线程并发首次写审计行，
+    数 `_init_db()` 被调用几次。改前**稳定红：8 个连接**（每个都真的 `makedirs`＋`connect`＋
+    建表＋commit，只有最后一个进 `_db_conn`，其余成为没人关的句柄）。
+    **就地纠正**：这条最初写进判据时标的是"防回潮、改前靠运气不是稳定红"，实测把它证伪了——
+    检查-然后-换绑的窗口在懒建连接这种慢路径上是**每次必中**，注释已按实测改写。
+    诚实说清代价面：这 8 个连接都写同一个文件且各自 commit，所以**不丢审计行**；
+    损失的是 fd 与"谁以为自己拥有这个库"的确定性。
+- 形态侧新增 **检查 16 `--db-lock-lifetime`**（已并入默认全跑档，CI 的 `python scripts/static-checks.py`
+  无参调用即覆盖）：用 `ast` 算出每个 `with _db_lock:` 体的行号区间，要求
+  R1 所有 `_get_db()` 调用（含 `mod._get_db()`）、R2 除 `_get_db` 本体以外所有 `_db_conn` 读写
+  都落在区间内。改前对 HEAD 的 `audit.py` 量到 **13 处违规 / 核对到 13 处引用**
+  （10 处 `db = _get_db()` 在锁外 ＋ `_reset_db` 里 3 处连接读写），改后 **0 处 / 仍是 13 处**——
+  两侧引用数相等，绿不是因为少扫。
+- 判据本身也要有判据：新增 `python-ai/tests/test_db_lock_lifetime_gate.py`（12 例）钉住
+  真仓库绿、接线进默认全跑档、锁外取连接红、锁外关连接红、整组改名**不会**静默变绿
+  （适用面按"有没有碰这三个名字"算，一个都没碰到就判红）、语法坏掉的模块报"无法核对"而不是跳过、
+  以及 `with _db_lock: db = _get_db()` 这种同行写法不误伤。
+- 实现（`python-ai/app/core/plugin/audit.py`）：`_reset_db` 的 close＋换绑整段进 `with _db_lock:`
+  （现 `:171`），10 处取连接全部挪进锁体内（`_persist_to_sqlite:200`、`_cleanup_synced:276`、
+  `_queue_counts:536` 等），`_get_db` 的 docstring 把前置条件写明——"调用方必须已经持有 `_db_lock`"
+  （`:158-166`），门禁测试钉这句话不消失。
+- **锁没有换成 `RLock`**：约定是"调用方持锁后再取连接"，`_get_db` 本体不取锁，因此不产生重入需求。
+  这条不是想当然——用 `ast` 扫过全部锁体，锁内再调用本模块其它 DB 函数的情况为 0
+  （只有 `json.dumps`、`time.time()`、sqlite 自己的 `execute/commit/fetch*`），换成 `Lock`
+  也不会自锁死。
+
+#### 验证
+- **套件连跑三次**（同一命令、venv 解释器口径）：改生产码后两次
+  `2068 passed, 12 skipped`（220.74s / 239.89s，scratch `b106_pytest_run1/2.log`），
+  加进门禁测试文件后第三次 `2080 passed, 12 skipped`（234.77s，`b106_pytest_run3.log`），
+  三次退出码全 0，日志里 `access violation` 与 `Segmentation fault` **0 命中**。
+  对账：第一百零四批基线 `2065` ＋ 补证那一笔加的 1 例（dev-lock 一致性）＋ 本批行为判据 2 例 ＝ 2068，
+  ＋ 检查 16 的门禁测试 12 例 ＝ 2080，逐位对得上。
+- `python-ai/tests/test_plugin_audit.py` 单跑 `51 passed`（49 → 51）。
+- **第四次全套件不是绿的**（这次把完整日志留在文件里，因为上一轮 `| tail -6` 只捞到 teardown 噪声、
+  汇总行被挤掉）：`1 failed, 2079 passed, 12 skipped`，退出码 1，红的是
+  `tests/test_plugin_audit.py::TestRetryDeadLetters::test_second_retry_is_idempotent`
+  （`assert retry_dead_letters() == 0` 实测 1，scratch `b106_pytest_run4.log`）。
+  **本批不把它算进"三次绿"，也不把它当 flaky 放过**：它是一条独立的、改前就在的竞争，
+  取证见下面"诚实边界"最后一条。
+- `scripts/static-checks.py` 全跑档退出码 0，检查 16 的 `[ok]` 句是
+  `审计连接生命周期：扫描 1 个碰共享连接的模块、13 处引用，全部在 with _db_lock: 体内`。
+- `ruff check` 对 `audit.py`、两个测试文件全通过。
+- 计数同步：README 四处 Python 计数 1951 → **1965**（＋14 ＝ 2 例行为判据 ＋ 12 例门禁测试，
+  检查 3 用的是静态 `def test_` 定义数，与 pytest 展开数在本批恰好相等，因为 14 例都没参数化）。
+
+#### 诚实边界
+- **崩溃没有被复现过第三次**，本批证明的是形态消失：锁外取不到引用 ⇒ 那个 use-after-close 的
+  对象来源被切断。若还有别的线程以别的方式握住同一个连接对象（例如有测试直接
+  `audit_mod._db_conn` 传给线程），检查 16 抓不到——它只覆盖 `_get_db()` 与 `_db_conn` 这两个名字，
+  且只扫 `python-ai/app/`，**不扫 `tests/`**（测试自己起线程构造竞争正是行为判据本身，不该被门禁判红）。
+- `flush_on_shutdown`（`:573`）预算到点仍**带着仍在跑的 daemon 线程返回**（`:603` 把
+  `final.is_alive()` 写成 `timed_out` 就算交差）。改后那个线程只会阻塞在 `_db_lock` 上，
+  不会再拿着已关闭的连接 ⇒ 崩溃窗口没了；但"退出函数返回时仍有出站未确认"这个事实**保留**，
+  已作为未处置观察登记在 `docs/CLEANUP_BACKLOG.md` 那条关闭记录里，没有混进本批的"已修"。
+- 三次绿是必要不是充分：本地命中窗口本来就是概率事件，第一百零三批那轮是"同一命令第一次 0、
+  第二次 139"。所以本批的判定分量全压在两条确定性判据＋一条形态门上。
+- 行为面有一处**有意的**代价：`_init_db()`（建目录＋建表）现在在锁内跑，进程首次并发写审计时
+  会串行等一次建表。换来的正是那条 8 连接红。
+- `ruff format --check` 对 `audit.py` 与 `test_plugin_audit.py` 报 `2 files would be reformatted`——
+  这一条**不是本批引入**：同一命令对 `git show HEAD` 落盘的同两个文件跑，结果一样是 2 files；
+  CI 只跑 `ruff check .`（`ci.yml:148`），没有格式化门。本批没有顺手重排它们，免得把"改动可审"变成噪声。
+- 本批跳过第一百零五批是**决策不是遗漏**：那条要定的是许可证策略（SPDX 复合表达式怎么判、
+  LGPLv2+ 这类 copyleft 成不成分），属于需要人拍板的口径，不能由改代码的一方顺手往允许清单里加名字。
+- 第四次那一条红的**归因不靠推测，靠同一套编排对两个版本各跑一遍**：`_do_flush` 是
+  "锁外取快照（`_get_unsynced_entries`）→ 出站 I/O → 按**快照里的** `entry.retry_count` 判超限 →
+  `_mark_dead_letter`"，判定读的是快照不是行的当前状态。后台那条每 30s 到点的 `audit-flusher` daemon
+  （`record_audit` 经 `_ensure_flush_thread`（`audit.py:480`）起的，`tests/conftest.py:122-128` 的隔离
+  fixture 只换库、**不停线程**）只要在运维 `retry_dead_letters()` 之前取到快照、在之后落
+  `_mark_dead_letter`，刚回灌的行就被翻回 dead-letter（运维这次点击等于没生效）。
+  套件里那次红的现场证据对得上：一次 drain 的三轮 `_do_flush` 只会越预算一次、只打一行
+  "超过最大重试次数"，而失败用例的 captured stdout 里**同一 id 打了两次**（42.107 与 42.113），
+  随后两次回灌各打一行（42.123 与 42.133）⇒ 第二条标记来自另一条线程。
+  确定性编排（events 把"取快照"与"落标记"卡在回灌两侧）在 HEAD 与工作区**各跑一遍，两边都红**
+  （`first=1 second=1`；同脚本的单线程对照组 `first=1 second=0`，scratch `repro_stale_snapshot_requeue.py`）
+  ⇒ 与本批的连接生命周期修复无关，没有把它折进本批"已修"，也没有把那条断言放宽。
+  对象登记在 `docs/CLEANUP_BACKLOG.md`，处置为**第一百零七批**；原先排在 107 的 Flyway 及其后的队列
+  整体顺延一位，相关的前向锚点已就地纠正（见下一批小节）。
+
+#### 下一批
+1. **第一百零七批**（本批直接下游，判据已就绪）：`_do_flush` 的超限判定改成读**行的当前状态**
+   （在同一个 `_db_lock` 里 `retry_count = retry_count + 1` 后再按当前值落 dead-letter），
+   配那条确定性编排红；顺带处置"隔离 fixture 不停后台 flusher"这一半测试串台。
+2. **第一百零八批**：Flyway 迁移步骤四处统一到 `-Dflyway.*`（原第一百零七批）。
+3. **第一百零九批**：全栈 compose 活栈真跑一次。**第一百一十批**：judge-cache 驱逐。
+   另有 dev 锁审计门、`UPLOAD_DIR` 残留键、错误信封 code 统一、Java 侧状态码统一四条待排。
+4. **第一百一十一批**：SBOM 组件面对象；**第一百一十二批**：`eval-runtime` 可达性前置探针。
+   第一百零五批（许可证策略）仍需人拍板，不由本批改。
+
 ### 第一百零四批（2026-10-12：`plugin-security.yml` 三个"从诞生起就没绿过"的 job——修的是旗标与解析形态，门的强度一分没降）
 
 #### 结论（先给判定性质）
@@ -103,7 +212,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `-Dflyway.url=… -Dflyway.user=… -Dflyway.password=…` 且为绿，所以这不是"MySQL 起不来"，
   是复制粘贴漂移（四处站点、`java-backend/pom.xml` 里插件未声明也未钉版）。
   更早 2026-09-22、09-29 两次 `failure` 的失败步骤不在 step 列表里，没有归到"同一步红"。
-  登记为第一百零七批对象。
+  登记为第一百零七批对象。**（第一百零六批就地纠正这条前向锚点：第一百零六批第四次全套件查出的
+  审计 flush 判定竞争已插入为第一百零七批，本条 Flyway 顺延为第一百零八批，其后队列整体 +1。）**
 
 #### CI 补证（run 38226827011 ＝ commit `488fa32d`，手工触发 Plugin Security）
 - `vulnerability-scan` ＝ **success**（这个 job 历史上从没绿过）。job 114736287138 的日志原文顺序：
@@ -128,7 +238,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   （08:58:10 开始，09:17:32 `##[error]The operation was canceled.`，停了 19 分 22 秒），
   **没有走到 Flyway 那一步**。取消来源无法从日志判定——`e2e.yml` 没有 `concurrency` 键，日志里
   也没有 timeout 声明，所以本批只把它登记成"证据未取到 ＋ 镜像装在阿里云镜像上停摆"，
-  第一百零七批的 Flyway 判据仍然只用 run 38221938525 那一族历史日志。
+  第一百零八批（原写作第一百零七批，第一百零六批就地纠正编号）的 Flyway 判据仍然只用 run 38221938525 那一族历史日志。
 
 #### 就地自我纠正（同一批内，改的是本批自己留下的两个来源错误）
 - **钉版的来源钉错了**：`Install CycloneDX` 一度钉成 `cyclonedx-bom==7.5.0`——那是"未钉版当时
@@ -145,7 +255,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`SBOM contains 35 components` 这句话的对象不是产品**：那个 job 从不 `pip install -r requirements.txt`，
   所以它生成的是 **runner 自带 python 环境**的 SBOM（35 个组件），而漏洞门读的是
   `requirements.txt`（76 个包）。同一个 workflow 里两条产物描述的不是同一个对象——本批只发现并登记，
-  不动它（登记为第一百一十批；同时那条"空组件表只打印 WARNING"的弱点一并处置）。
+  不动它（登记为第一百一十一批；第一百零六批就地纠正编号；同时那条"空组件表只打印 WARNING"的弱点一并处置）。
 - 顺带取到第一百零五批的实料：对着仓库 venv 生成的 126 组件里许可证串有 14 种形态，含分类器原文
   `License :: OSI Approved :: Apache Software License`、`PSF-2.0`、`Python-2.0`、`MIT-0`、`MIT-CMU`，
   以及 **`License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)`**
@@ -166,19 +276,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   所以这不是本批引入的回归，是本批把第一百零六批从"推断"抬成"有栈可查"。
 
 #### 下一批（按红面与崩溃代价排序）
+
+> 编号更正（第一百零六批）：第一百零六批第四次全套件查出的"审计 flush 按快照判定"竞争插入为
+> **第一百零七批**，下面 3～7 项整体 +1（Flyway 107→108、全栈 compose 108→109、judge-cache 109→110、
+> SBOM 110→111、eval-runtime 111→112）。
 1. **第一百零五批**：`license-check` 的许可证策略收敛——一份可测试的策略来源、按 SPDX 表达式
    逐成分判定（任一成分不在允许集合即红），两步同源；不得靠追加复合表达式字符串把门改绿。
 2. **第一百零六批**：`_reset_db()` 全程持 `_db_lock`（消除与 flush 线程的段错误窗口），
    配一条确定性红判据。
-3. **第一百零七批**：Flyway 迁移步骤四处统一到 `-Dflyway.*`（`e2e.yml:82/221`、`eval-nightly.yml:96`，
+3. **第一百零八批**：Flyway 迁移步骤四处统一到 `-Dflyway.*`（`e2e.yml:82/221`、`eval-nightly.yml:96`，
    参照 `ci.yml:382` 的现行正确形态），并在 pom 里声明＋钉住 `flyway-maven-plugin`，
    判据要证明迁移确实发生而不是步骤跑绿。
-4. **第一百零八批**：全栈 compose 活栈真跑一次（把"能写/能读"从镜像级升到活栈级）。
-5. **第一百零九批**：judge-cache 驱逐。另有 dev 锁审计门、`UPLOAD_DIR` 残留键、
+4. **第一百零九批**：全栈 compose 活栈真跑一次（把"能写/能读"从镜像级升到活栈级）。
+5. **第一百一十批**：judge-cache 驱逐。另有 dev 锁审计门、`UPLOAD_DIR` 残留键、
    错误信封 code 统一、Java 侧状态码统一四条待排。
-6. **第一百一十批**：`sbom-generation` 的组件面改成 python-ai 自己的依赖（现在那 35 个组件是
+6. **第一百一十一批**：`sbom-generation` 的组件面改成 python-ai 自己的依赖（现在那 35 个组件是
    runner 环境，漏洞门审的 76 个包一个都没进 SBOM），并把"组件表为空只打印 `WARNING`"改成判定。
-7. **第一百一十一批**：`eval-runtime` 的可达性前置探针（nightly 现在把"隧道不可达"报成
+7. **第一百一十二批**：`eval-runtime` 的可达性前置探针（nightly 现在把"隧道不可达"报成
    "错误率退化"：220 例每个 ≈0.1 秒 ERR、`error_rate=1.000 exceeds maximum 0.020`）。
 
 ### 第一百零三批（2026-10-11：两条依赖审计门从红转绿——pip-audit 的 29 条与 npm audit 的 15 条，收口靠的是把锁钉到修复版本，不是放宽门）

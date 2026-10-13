@@ -156,6 +156,12 @@ _db_conn: sqlite3.Connection | None = None
 
 
 def _get_db() -> sqlite3.Connection:
+    """懒建并复用连接。**调用方必须已经持有 `_db_lock`**。
+
+    连接是 `check_same_thread=False` 的共享对象，`_reset_db` 会在锁内关掉它；
+    在锁外取引用等于握着一个随时可能被别人关闭的原生句柄，sqlite3 对它的
+    `execute` 不是抛 Python 异常，而是解释器级 access violation。
+    """
     global _db_conn
     if _db_conn is None:
         _db_conn = _init_db()
@@ -167,32 +173,35 @@ def _reset_db(new_dir: str | None = None) -> None:
 
     Used by tests to isolate the audit database in a temp directory.
     Pass a directory path to redirect; pass None to restore the default.
+
+    关连接与换绑整段持 `_db_lock`：不持锁时它可以在任何一条在途语句中间把连接关掉。
     """
     global _db_conn, _DB_DIR, _DB_PATH
-    # Close existing connection
-    if _db_conn is not None:
-        try:
-            _db_conn.close()
-        except Exception:
-            pass
-        _db_conn = None
-    # Reconfigure path
-    if new_dir is not None:
-        _DB_DIR = new_dir
-        _DB_PATH = os.path.join(_DB_DIR, "plugin_audit.db")
-    else:
-        _DB_DIR = os.environ.get(
-            "HFUSIONHUB_AUDIT_DB_PATH",
-            os.path.join(os.path.expanduser("~"), ".hfusionhub", "audit"),
-        )
-        _DB_PATH = os.path.join(_DB_DIR, "plugin_audit.db")
+    with _db_lock:
+        # Close existing connection
+        if _db_conn is not None:
+            try:
+                _db_conn.close()
+            except Exception:
+                pass
+            _db_conn = None
+        # Reconfigure path
+        if new_dir is not None:
+            _DB_DIR = new_dir
+            _DB_PATH = os.path.join(_DB_DIR, "plugin_audit.db")
+        else:
+            _DB_DIR = os.environ.get(
+                "HFUSIONHUB_AUDIT_DB_PATH",
+                os.path.join(os.path.expanduser("~"), ".hfusionhub", "audit"),
+            )
+            _DB_PATH = os.path.join(_DB_DIR, "plugin_audit.db")
 
 
 def _persist_to_sqlite(entry: AuditEntry) -> None:
     """Write audit entry to SQLite for crash recovery."""
     try:
-        db = _get_db()
         with _db_lock:
+            db = _get_db()
             db.execute(
                 "INSERT OR REPLACE INTO audit_queue (id, entry_json, synced, retry_count, created_at) "
                 "VALUES (?, ?, 0, 0, ?)",
@@ -205,8 +214,8 @@ def _persist_to_sqlite(entry: AuditEntry) -> None:
 
 def _mark_synced(entry_id: str) -> None:
     try:
-        db = _get_db()
         with _db_lock:
+            db = _get_db()
             db.execute("UPDATE audit_queue SET synced = 1 WHERE id = ?", (entry_id,))
             db.commit()
     except Exception as e:
@@ -216,8 +225,8 @@ def _mark_synced(entry_id: str) -> None:
 def _mark_dead_letter(entry_id: str) -> None:
     """Mark an entry as dead-letter (exceeded max retries, never auto-cleaned)."""
     try:
-        db = _get_db()
         with _db_lock:
+            db = _get_db()
             db.execute(
                 "UPDATE audit_queue SET dead_letter = 1, synced = 0 WHERE id = ?",
                 (entry_id,),
@@ -229,8 +238,8 @@ def _mark_dead_letter(entry_id: str) -> None:
 
 def _get_unsynced_entries(limit: int = 100) -> list[AuditEntry]:
     try:
-        db = _get_db()
         with _db_lock:
+            db = _get_db()
             cursor = db.execute(
                 "SELECT entry_json, retry_count FROM audit_queue "
                 "WHERE synced = 0 AND dead_letter = 0 "
@@ -253,8 +262,8 @@ def _get_unsynced_entries(limit: int = 100) -> list[AuditEntry]:
 
 def _increment_retry(entry_id: str) -> None:
     try:
-        db = _get_db()
         with _db_lock:
+            db = _get_db()
             db.execute(
                 "UPDATE audit_queue SET retry_count = retry_count + 1, last_attempt_at = ? WHERE id = ?",
                 (time.time(), entry_id),
@@ -268,8 +277,8 @@ def _cleanup_synced() -> int:
     """Remove synced entries older than 7 days."""
     try:
         cutoff = time.time() - 7 * 86400
-        db = _get_db()
         with _db_lock:
+            db = _get_db()
             cursor = db.execute(
                 "DELETE FROM audit_queue WHERE synced = 1 AND created_at < ?", (cutoff,)
             )
@@ -482,8 +491,8 @@ def record_audit(
 def get_audit_log(plugin_id: str | None = None, limit: int = 50) -> list[AuditEntry]:
     """Get recent audit entries from SQLite (includes unsynced)."""
     try:
-        db = _get_db()
         with _db_lock:
+            db = _get_db()
             if plugin_id:
                 cursor = db.execute(
                     "SELECT entry_json FROM audit_queue WHERE json_extract(entry_json, '$.plugin_id') = ? "
@@ -515,8 +524,8 @@ def flush_to_backend() -> int:
 def clear_buffer() -> int:
     """Clear all audit data (SQLite + in-memory).  Returns count cleared."""
     try:
-        db = _get_db()
         with _db_lock:
+            db = _get_db()
             cursor = db.execute("DELETE FROM audit_queue")
             db.commit()
             return cursor.rowcount
@@ -526,8 +535,8 @@ def clear_buffer() -> int:
 
 def _queue_counts() -> dict[str, int]:
     """Read the queue counters. Raises if the database is unreadable."""
-    db = _get_db()
     with _db_lock:
+        db = _get_db()
         total = db.execute("SELECT COUNT(*) FROM audit_queue").fetchone()[0]
         unsynced = db.execute(
             "SELECT COUNT(*) FROM audit_queue WHERE synced = 0 AND dead_letter = 0"
@@ -554,8 +563,8 @@ def retry_dead_letters() -> int:
     `_MAX_RETRIES` 预算；已 synced 的行不受影响。
     """
     try:
-        db = _get_db()
         with _db_lock:
+            db = _get_db()
             cursor = db.execute(
                 "UPDATE audit_queue SET dead_letter = 0, retry_count = 0 "
                 "WHERE dead_letter = 1"

@@ -262,14 +262,14 @@
   于是产物里是 runner 的 35 个组件，而同一条流水线 `vulnerability-scan` 审的是 `requirements.txt`
   的 76 个包——两条产物不是同一个对象，SBOM 作为供应链凭证的价值目前是 0。
   本地对照实测：对 `python-ai/.venv` 生成的是 126 组件（scratch `b104_sbom_731.json`），
-  数量差异本身就说明了对象错位。处置方向（第一百一十批）：先装 `requirements.txt` 再生成
+  数量差异本身就说明了对象错位。处置方向（第一百一十一批，原写作第一百一十批）：先装 `requirements.txt` 再生成
   （或显式把 `<python>` 指到一个装有产品依赖的环境），组件数与锁的 pin 数做一致性判定，
   同时把"空组件表"从 `WARNING` 改成退出码非 0。**改的是产物描述的对象，不是把门放宽。**
-- [ ] **`_reset_db()` 关连接不持锁，与后台 flush 线程竞争 ⇒ 解释器崩溃**（第一百零三批实测踩到，
-  第一百零四批补证时再次踩到并拿到崩溃栈，未处置）—— `python-ai/app/core/plugin/audit.py:165-188`
+- [x] **`_reset_db()` 关连接不持锁，与后台 flush 线程竞争 ⇒ 解释器崩溃**（第一百零三批实测踩到，
+  第一百零四批补证时再次踩到并拿到崩溃栈，第一百零六批处置）—— `python-ai/app/core/plugin/audit.py:165-188`（改前）
   的 `_db_conn.close()` 与 `_DB_DIR/_DB_PATH` 换绑整段不在 `with _db_lock:` 内，而 `:128` 的连接是
   `check_same_thread=False`；`tests/conftest.py:126,128` 每条用例前后各调一次。
-  **机理纠正（第一百零四批，按崩溃栈改写）**：原先写的是"execute 中途被关连接"，暗示线程没拿锁——
+  **机理纠正（第一百零四批，按崩溃栈改写；本条内的 `:128`/`:158-162`/`:165-188`/`:256-257`/`:271-272` 等行号均为改前形态）**：原先写的是"execute 中途被关连接"，暗示线程没拿锁——
   不对。`_increment_retry`（`:256-257`）和 `_cleanup_synced`（`:271-272`）都在
   `db = _get_db()` **之后**才 `with _db_lock:`，而 `_get_db()` 本体（`:158-162`）读全局也不持锁。
   ⇒ 锁只排开"execute vs execute"，排不开"**锁外取到的连接对象** vs `close()`"：线程先握住旧对象，
@@ -292,6 +292,55 @@
   的改动都会走进同一窗口。
   **判据方向（第一百零六批）**：行为侧确定性红（持锁时起线程调 `_reset_db`，断言它尚未完成）
   ＋ 形态侧静态红（同一函数里 `db = _get_db()` 出现在 `with _db_lock:` 之前即判红——这条不赌时序）。
+  **处置（第一百零六批，两条判据都先量到红再改）**：
+  ①行为侧 `python-ai/tests/test_plugin_audit.py::TestDbConnectionLifetime` 两例——
+  `test_reset_db_waits_for_the_db_lock` 改前红（"锁还被占着，`_reset_db` 已经跑完"），
+  `test_concurrent_first_use_builds_exactly_one_connection` 改前是**稳定红而非概率红**：
+  8 线程并发首用量到 **8 个连接**（每个都真开了文件并跑完建表），原先写的"靠运气"据此纠正；
+  ②形态侧新增 `scripts/static-checks.py` 检查 16（`--db-lock-lifetime`，CI 无参全跑已覆盖）：
+  对 HEAD 的 `audit.py` 量到 **13 处**违规（10 处 `db = _get_db()` 在锁外 ＋ `_reset_db` 里 3 处
+  `_db_conn` 读写），改后 **0 处**，两侧核对到的引用数同为 13 ⇒ 不是靠少扫得到绿。
+  实现＝`_reset_db` 的 close＋换绑整段持锁、10 处取连接全部挪进 `with _db_lock:` 体内、
+  `_get_db` 的 docstring 写明"调用方必须已持锁"。锁**没有**换成 `RLock`：约定是调用方持锁后再取，
+  `_get_db` 本体不取锁，因此不产生重入需求；并用 AST 核过锁内没有再调用本模块任何 DB 函数。
+  改后本地全套件连跑三次——前两次（只含行为判据）`2068 passed / 12 skipped`，第三次
+  （加上检查 16 的 12 例门禁测试）`2080 passed / 12 skipped`，退出码全 0
+  （scratch `b106_pytest_run1/2/3.log`），三份日志里 `access violation` 与 `Segmentation fault` 0 命中。
+  崩溃本身没有被复现第三次，关掉的是它赖以发生的**形态**。
+  **第四次（完整日志留档 `b106_pytest_run4.log`）不是绿的**：`1 failed, 2079 passed / 12 skipped`，
+  红的是 `TestRetryDeadLetters::test_second_retry_is_idempotent`。已按同一套确定性编排对 **HEAD 与工作区
+  各跑一遍、两边都红**，判定为下面那条独立缺陷（与本批无关，既不算进本批的"三次绿"，也没有放宽那条断言）。
+  **未随本批处置的观察（不是本批引入）**：`flush_on_shutdown`（改前 `:573`）预算到点仍会
+  **带着仍在跑的 daemon 线程返回**——改后那个线程只会阻塞在 `_db_lock` 上，不会再拿着已关闭的连接，
+  所以崩溃没了；但"退出函数返回时仍有出站未确认"这一事实保留，判据方向是让它返回时把在途线程的
+  身份交给调用方（或干脆不另起线程，改为在预算内轮询 `outcome`）。生产侧今天无 `_reset_db` 调用方，
+  优先级低于第一百一十一/一百一十二批。
+- [ ] **审计 flush 的超限判定读的是快照而不是行的当前状态：一条在途的 flush 可以把运维刚回灌的
+  dead-letter 行再翻回 dead-letter**（第一百零六批第四次全套件踩到并取证，未处置）——
+  `python-ai/app/core/plugin/audit.py:309` 的 `_do_flush()` 是
+  「`_get_unsynced_entries()`（`:239`）取快照 → 锁外做出站 I/O → 用**快照里的** `entry.retry_count`
+  判 `>= _MAX_RETRIES`（`:336`）→ `_mark_dead_letter()`（`:225`）」，`_db_lock` 只保证每条语句原子，
+  从来不覆盖"快照 → 回写"这段距离。于是：后台 `audit-flusher` daemon（`record_audit` 经
+  `_ensure_flush_thread`（`:430`）起了，30s 一轮）取到快照时那一行还是 unsynced＋retry 超限，
+  运维随后调 `retry_dead_letters()`（`:558`，`SET dead_letter = 0, retry_count = 0`）把行回灌，
+  daemon 再把自己的判定落下去 ⇒ **运维这次回灌等于没生效**，行又变成 dead-letter 且
+  `retry_count` 被加回。测试面同一个机理还解释了全套件的偶发红：`tests/conftest.py:122-128` 的
+  autouse fixture 只 `_reset_db()` 换库、**不停后台线程**，所以任何一条到点的 flush 都会写进
+  "当下那条用例"的临时库。
+  **取证（确定性编排，不靠复现率）**：脚本用 events 把"取快照"与"落标记"卡在 `retry_dead_letters()`
+  两侧 ⇒ 对 HEAD 与工作区（第一百零六批改后）各跑一遍，**两边都红**
+  （`stray 看到的 retry_count=[2] first=1 second=1`），同脚本的单线程对照组给
+  `first=1 second=0` ⇒ 一条 drain 只会产生一次标记，套件那次失败日志里同一 id 打了两行
+  "超过最大重试次数"（42.107 / 42.113）必然是第二条线程（scratch `repro_stale_snapshot_requeue.py`、
+  `b106_pytest_run4.log`）。
+  **判据方向（第一百零七批）**：①把那条确定性编排做成 `test_plugin_audit.py` 里的红判据——
+  运维回灌之后，一条拿着旧快照的在途 flush **不得**再把该行翻回 dead-letter；
+  ②实现方向是"判定读当前行"：在同一个 `with _db_lock:` 里先 `retry_count = retry_count + 1`，
+  再按 `WHERE id = ? AND retry_count >= ?` 落 `dead_letter = 1`（预算值仍走绑定参数，测试对
+  `_MAX_RETRIES` 的 patch 不能失效），`_do_flush` 不再自己判超限；
+  ③测试串台那一半单独处置：autouse fixture 在换库前后把 `_flush_stop` 置位并 join 掉
+  `audit-flusher`，别让 daemon 写进别人的临时库——**这是修隔离，不是放宽任何断言**。
+  不得改成把 `assert retry_dead_letters() == 0` 放宽成 `<= 1`，也不得给该用例加 skip/重跑。
 - [ ] **Flyway 迁移步骤在 `e2e.yml` / `eval-nightly.yml` 从诞生起就没过过：插件只认
   `-Dflyway.*`，而步骤给的是 `SPRING_DATASOURCE_*`（四处站点，`ci.yml` 里已有写对的那一份）**
   （第一百零四批取证，未处置）—— run 38221938525（＝ `8054f32e`）的 `e2e-full` job 死在这一步，日志原文：
@@ -335,7 +384,7 @@
   `EVAL_BASE_URL` 是一条 cpolar 隧道（`https://aa9fbd2.r36.cpolar.top`），有值≠可达。
   ⇒ 0.1 秒/例的 100% 错误率只可能是连接层，不是检索或生成质量；今天的形态是**看日志的人会被
   指向"评测退化"**，而真实结论是"被测环境没起来"。
-  处置方向（第一百一十一批，不得靠放宽 `--maximum-error-rate` 或把门跳过）：在跑用例**之前**做一次
+  处置方向（第一百一十二批，原写作第一百一十一批；不得靠放宽 `--maximum-error-rate` 或把门跳过）：在跑用例**之前**做一次
   可达性/健康探针（对 `EVAL_BASE_URL` 的一个已知端点取一次成功响应，失败即单独判红并打印
   "活栈不可达"这句话）；并把"全部用例同因失败"这种形态本身做成判定——例如错误率＝1 且
   p95 时延接近 0 时输出连接类错误样本，而不是只报一个百分数。**判据要能区分"环境没起来"与

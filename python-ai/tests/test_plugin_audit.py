@@ -729,3 +729,95 @@ class TestAuditQueuePersistenceConfigured:
             assert audit_mod._DB_PATH == str(tmp_path / "audit" / "plugin_audit.db")
         finally:
             audit_mod._reset_db(str(tmp_path))
+
+
+# ── 连接生命周期：取连接和关连接共用车间锁 ────────────────────────────
+
+
+class TestDbConnectionLifetime:
+    """第一百零六批：本地全套件两次踩到解释器级崩溃（退出码 139，
+    `Windows fatal exception: access violation` / 容器里 `Fatal Python error: Segmentation fault`），
+    崩溃栈点名 `audit.py:273 _cleanup_synced`。
+
+    机理不是"execute 撞 execute"——那条 `_db_lock` 一直挡得住；窗口在
+    **锁外取到的连接对象** vs `_reset_db()` 里的 `close()`：线程先握住旧对象，
+    等 `_reset_db` 放锁后再对已关闭的对象 `execute`，sqlite3 在原生层崩溃，
+    Python 的 `except Exception` 接不住。
+    """
+
+    def test_reset_db_waits_for_the_db_lock(self, tmp_path):
+        """有语句在途时 `_reset_db` 必须等着——否则它关的正是别人手里的连接。
+
+        本批的红色判据：改前 `_reset_db`（:165-188）全程不碰 `_db_lock`，
+        所以它在锁被占着的时候照样能跑完，这一条断言直接翻红。
+        """
+        import threading
+
+        from app.core.plugin import audit as audit_mod
+
+        audit_mod._get_db()  # 先让连接存在，close() 才有对象可关
+        held = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+
+        def holder() -> None:
+            with audit_mod._db_lock:
+                held.set()
+                release.wait(timeout=5)
+
+        def resetter() -> None:
+            audit_mod._reset_db(str(tmp_path / "relocated"))
+            finished.set()
+
+        worker = threading.Thread(target=holder, name="lock-holder")
+        reset = threading.Thread(target=resetter, name="reset-db")
+        worker.start()
+        assert held.wait(timeout=5), "持锁线程没进入锁内"
+        try:
+            reset.start()
+            assert not finished.wait(timeout=0.3), (
+                "_reset_db 不持 _db_lock：锁还被占着它就把连接关了——"
+                "这就是全套件 67% 那次 access violation 的窗口"
+            )
+        finally:
+            release.set()
+            reset.join(timeout=5)
+            worker.join(timeout=5)
+
+        assert finished.is_set(), "释放锁后 _reset_db 仍然没跑完：判据写坏了"
+        assert not reset.is_alive() and not worker.is_alive()
+
+    def test_concurrent_first_use_builds_exactly_one_connection(self, tmp_path):
+        """懒建连接也得串行：两个线程都看见 `_db_conn is None` 时，后建的那个会把先建的
+        换成一个没人关的句柄。
+
+        改前实测**不是概率红**：8 线程并发首用直接量到 `8 个连接`（每个都真的开了文件、
+        跑了 CREATE/commit），只有最后落进 `_db_conn` 的那个会被后续读到。
+        """
+        import threading
+
+        from app.core.plugin import audit as audit_mod
+
+        audit_mod._reset_db(str(tmp_path / "lazy"))
+        built: list[int] = []
+        original_init = audit_mod._init_db
+
+        def counting_init():
+            conn = original_init()
+            built.append(id(conn))
+            return conn
+
+        with patch.object(audit_mod, "_init_db", side_effect=counting_init):
+            threads = [
+                threading.Thread(
+                    target=record_audit,
+                    kwargs={"plugin_id": f"pid-{i}", "plugin_name": "p", "action": "install"},
+                )
+                for i in range(8)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
+
+        assert len(built) == 1, f"懒建连接没串行：一次并发首用建了 {len(built)} 个连接"
