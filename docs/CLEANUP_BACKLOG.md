@@ -226,6 +226,14 @@
   `scripts/ci/vuln_report_gate.py` 使它能被测试执行；三条门的判据在
   `python-ai/tests/test_plugin_security_gates.py`。**结果不是三条全绿**：旗标修好后
   `license-check` 暴露出一条真实的清单语义红，登记为下面那条。
+  **CI 补证（run 38226827011 ＝ commit `488fa32d`，手工触发）**：`vulnerability-scan` 与
+  `sbom-generation` 均为该 job 历史上**首次 success**（前者日志里 helper 自己打印
+  `No known vulnerabilities found (76 packages audited)`，后者 `SBOM contains 35 components`），
+  `license-check` ＝ failure，红句是
+  `license BSD License not in allow-only licenses was found for package webcolors:25.10.0`。
+  **钉版来源就地纠正**：`Install CycloneDX` 一度钉成未钉版当时解析到的 7.5.0，而
+  `python-ai/requirements-dev.txt:452` 钉的是 7.3.1（eval-nightly 从锁装的也是 7.3.1）⇒ 改钉 7.3.1，
+  并加一条测试把"workflow 的钉版必须等于锁里的钉版"钉住；两版 `environment` 的旗标表实测一致。
 - [ ] **`license-check` 的 `--allow-only` 清单不认 SPDX 复合表达式 ⇒ 修好旗标后是一条真红**
   （第一百零四批实测，未处置）—— 容器内（`python:3.11-slim`，`pip-licenses 5.5.5`）用正确旗标实测：
   `pip-licenses --from=mixed --format=plain --allow-only="MIT;Apache-2.0;BSD-2-Clause;…"` ⇒
@@ -239,26 +247,61 @@
   按 SPDX 表达式逐成分判定，**且不得**让 `GPL-3.0-only OR MIT` 这类"含 copyleft 的双许可"被
   OR 语义放行——判定语义要写死并测：任一成分不在允许集合即红。不得靠往 `--allow-only`
   里追加复合表达式字符串把门改绿（那是逐包手工放行，不是策略）。
-- [ ] **`_reset_db()` 关连接不持锁，与后台 flush 线程竞争 ⇒ 解释器段错误**（第一百零三批实测踩到，
-  未处置）—— `python-ai/app/core/plugin/audit.py:165-190` 的 `_db_conn.close()` 与
-  `_DB_DIR/_DB_PATH` 换绑整段不在 `with _db_lock:` 内，而 `:128` 的连接是
-  `check_same_thread=False`；`tests/conftest.py:126,128` 每条用例前后各调一次，
-  `audit-flusher`（`:425`，daemon）与 `audit-shutdown-flush`（`:600`）都可能在
-  `_do_flush`→`_increment_retry`（`:326`→`:258`）的 `execute` 中途被关连接。
-  实测形态：同一镜像、同一缓存卷、同一命令，第一次 `pytest -q` 退出码 0，第二次 62% 处
-  `Fatal Python error: Segmentation fault`（`PYTEST_EXIT=139`）——CI 的 `python` job 在同一把
-  锁上给的是 `2056 passed / 7 skipped`，所以这是**低概率但真实存在**的窗口，不是环境问题。
+  **runner 上的第二种形态已经出现**（run 38226827011）：红的是
+  `license BSD License not in allow-only licenses was found for package webcolors:25.10.0`
+  ——`BSD License` 既不是 SPDX id 也不是复合表达式，是 pip 元数据里的**裸文本**许可名。
+  同一份依赖面用 `cyclonedx-bom 7.3.1` 生成的 126 组件里，许可证串共 14 种形态，除 SPDX id 外还有
+  分类器原文（`License :: OSI Approved :: Apache Software License`）、
+  `PSF-2.0`、`Python-2.0`、`MIT-0`、`MIT-CMU`，以及
+  **`License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)`**
+  ——允许清单里只有 LGPLv3，**没有 LGPLv2+**，所以策略收敛之后这一条要么按 copyleft 判红、
+  要么把该包从依赖面里换掉，不能靠给清单加名字放行 copyleft。
+- [ ] **`sbom-generation` 描述的对象不是产品依赖面（35 个组件 ＝ runner 自带环境），空组件表只打印
+  `WARNING` 不判红**（第一百零四批 CI 补证时发现，未处置）—— 那个 job 全程没有
+  `pip install -r requirements.txt`，`cyclonedx-py environment` 读的是当前解释器已装的包，
+  于是产物里是 runner 的 35 个组件，而同一条流水线 `vulnerability-scan` 审的是 `requirements.txt`
+  的 76 个包——两条产物不是同一个对象，SBOM 作为供应链凭证的价值目前是 0。
+  本地对照实测：对 `python-ai/.venv` 生成的是 126 组件（scratch `b104_sbom_731.json`），
+  数量差异本身就说明了对象错位。处置方向（第一百一十批）：先装 `requirements.txt` 再生成
+  （或显式把 `<python>` 指到一个装有产品依赖的环境），组件数与锁的 pin 数做一致性判定，
+  同时把"空组件表"从 `WARNING` 改成退出码非 0。**改的是产物描述的对象，不是把门放宽。**
+- [ ] **`_reset_db()` 关连接不持锁，与后台 flush 线程竞争 ⇒ 解释器崩溃**（第一百零三批实测踩到，
+  第一百零四批补证时再次踩到并拿到崩溃栈，未处置）—— `python-ai/app/core/plugin/audit.py:165-188`
+  的 `_db_conn.close()` 与 `_DB_DIR/_DB_PATH` 换绑整段不在 `with _db_lock:` 内，而 `:128` 的连接是
+  `check_same_thread=False`；`tests/conftest.py:126,128` 每条用例前后各调一次。
+  **机理纠正（第一百零四批，按崩溃栈改写）**：原先写的是"execute 中途被关连接"，暗示线程没拿锁——
+  不对。`_increment_retry`（`:256-257`）和 `_cleanup_synced`（`:271-272`）都在
+  `db = _get_db()` **之后**才 `with _db_lock:`，而 `_get_db()` 本体（`:158-162`）读全局也不持锁。
+  ⇒ 锁只排开"execute vs execute"，排不开"**锁外取到的连接对象** vs `close()`"：线程先握住旧对象，
+  再等 `_reset_db` 释放锁，然后对一个已经 `close()` 的对象 `execute`，sqlite3 在原生层
+  access violation，Python 的 `except Exception`（`:278`）接不住。
+  ⇒ 所以第一百零三批记的"推荐 A：`_reset_db` 全程持 `_db_lock`"**单独做仍然留窗口**，处置必须两半同做：
+  (i) `_reset_db` 的 close＋换绑全程持锁，(ii) 连接引用只能在锁内取（把 `_get_db()` 挪进
+  `with _db_lock:`，或让它自己持锁）。
+  **新增触发路径（不需要低概率也能打开窗口）**：`flush_on_shutdown(budget_seconds=…)`（`:573`）
+  在预算用尽时**带着仍在跑的线程返回**（`:603` `result["timed_out"] = final.is_alive()`），
+  调用方随后 `_reset_db()` 就是在关一个正在被使用的连接。
+  实测形态：①第一百零三批——同一镜像、同一缓存卷、同一命令，第一次 `pytest -q` 退出码 0，
+  第二次 62% 处 `Fatal Python error: Segmentation fault`（`PYTEST_EXIT=139`）；②第一百零四批补证跑
+  套件——67% 处 `Windows fatal exception: access violation`、`PYTEST_EXIT=139`，**Current thread**
+  栈逐帧点名：`audit.py:596 _run`（`audit-shutdown-flush`）→ `:337 _do_flush` → `:273 _cleanup_synced`，
+  同一 dump 里主线程在 `_pytest/fixtures.py` 的 fixture teardown（scratch `b104_pytest_full2.log`）。
+  ②把归因从推断升成"崩溃栈直接点名"。CI 的 `python` job 在同一把锁上给的是 `2056 passed / 7 skipped`，
+  所以这是**本地跑才有概率命中**的窗口，不是环境问题。
   `app/` 下当前无 `_reset_db` 调用方（生产今天不受影响），但任何把"重定向审计库"接进运维路径
-  的改动都会走进同一窗口。处置方向见第一百零三批 CHANGELOG 的 A/B/C（推荐 A：`_reset_db` 全程
-  持 `_db_lock`，配一条确定性红判据——持有锁时起线程调 `_reset_db`，断言它尚未完成）。
-- [ ] **`e2e.yml` 的 `e2e-full` 在 `Run Flyway migrations` 从诞生起就没过过：Flyway Maven 插件
-  收的是 `SPRING_DATASOURCE_*`，而它只认 `flyway.url/-Dflyway.*`/`FLYWAY_*`**（第一百零四批取证，
-  未处置）—— run 38221938525（＝ `8054f32e`）的 `e2e-full` job 死在这一步，日志原文：
+  的改动都会走进同一窗口。
+  **判据方向（第一百零六批）**：行为侧确定性红（持锁时起线程调 `_reset_db`，断言它尚未完成）
+  ＋ 形态侧静态红（同一函数里 `db = _get_db()` 出现在 `with _db_lock:` 之前即判红——这条不赌时序）。
+- [ ] **Flyway 迁移步骤在 `e2e.yml` / `eval-nightly.yml` 从诞生起就没过过：插件只认
+  `-Dflyway.*`，而步骤给的是 `SPRING_DATASOURCE_*`（四处站点，`ci.yml` 里已有写对的那一份）**
+  （第一百零四批取证，未处置）—— run 38221938525（＝ `8054f32e`）的 `e2e-full` job 死在这一步，日志原文：
   `FlywayException: Unable to connect to the database. Configure the url, user and password!`
   （scratch `ci_e2e_flyway.log` 第 617 行）。这一 `conclusion` 不是今天才有：2026-10-10 / 10-11（三次）/
   10-12 连续 **5** 条 run 的 `e2e-full` 都死在**同一个步骤**（逐 run 核过
   `gh run view <id> --json jobs --jq '.jobs[]|{name,conclusion,failed:[.steps[]|select(.conclusion=="failure")|.name]}'`），
-  中间另有几次是"被新 run 取消"而非通过；更早的 2026-09-22、09-29 两次 `failure` 的失败原因不在
+  中间另有几次是 `cancelled` 而非通过——**取消来源不能从日志判定**：`e2e.yml` 里没有 `concurrency`
+  键，日志里也没有 timeout 声明，所以这些 `cancelled` 既不能算"过"、也不能归因成"被新 run 挤掉"；
+  更早的 2026-09-22、09-29 两次 `failure` 的失败原因不在
   step 列表里（`.steps` 全空），**本条没有把它们算进"同一步红"**，要归因得单独取日志。
   机理核对：`.github/workflows/e2e.yml:75-82` 给步骤设的三个变量是
   `SPRING_DATASOURCE_URL/USERNAME/PASSWORD`，而 `mvn --batch-mode flyway:migrate` 执行的是
@@ -268,6 +311,32 @@
   Maven central 前缀解析到最新版（日志里是 `flyway:11.7.2`，两次
   `Could not transfer metadata … HTTP Status: 401` 就是那次解析的噪声）并拿到空配置。
   ⇒ 与第一百零四批同族：**"runner 装了什么/工具读什么"与"门里写了什么"不同源**，而且这里的
-  插件版本也未钉住。处置方向（不得靠删掉这一步或加 `continue-on-error` 变绿）：在 pom 里显式声明
-  `flyway-maven-plugin` 钉版本，并把它该读的那三个值传给 `mvn -Dflyway.url=… -Dflyway.user=…`
-  （或改由 Spring Boot 启动时自迁移，那一步就该删得有交代——两者都要先在 e2e 判据上证明迁移真发生）。
+  插件版本也未钉住。**同一缺陷的对照证据（第一百零四批顺带取证）**：`ci.yml:382-383` 的
+  `Validate Flyway migrations against MySQL` 用的是正确形态
+  `mvn --batch-mode flyway:migrate -Dflyway.url=… -Dflyway.user=… -Dflyway.password=…`，
+  它在 runner 上是绿的——所以这不是"MySQL 起不来"，是**同一个仓里已经有一份写对的**；
+  另外三处（`e2e.yml:82`、`e2e.yml:221`、`eval-nightly.yml:96`）都只给 `SPRING_DATASOURCE_*`。
+  `Nightly Evaluation (Runtime)` run 38224268851 的 `eval-harness` job 同样死在
+  `Run Flyway migrations`。**该 run 的第二条红已归因，但它是另一个缺陷**（`Run runtime evaluation
+  gate` ＝ 活栈不可达被折叠成"错误率退化"），见下面那条独立条目，本条不重复它的判据。
+  四处站点、三条工作流 ⇒ 处置时**四处一起改**，并在 `java-backend/pom.xml` 里显式声明并钉住
+  `flyway-maven-plugin`（现在四个 run 都在从 central 前缀浮动解析版本）。
+  处置方向（不得靠删这一步或加 `continue-on-error` 变绿）：把插件真读的那三个值传进去，
+  判据要证明迁移确实发生（表结构落到 e2e/eval 库），而不是只把步骤跑绿。
+  **第一百零四批 CI 补证对本条的影响**：该批的 `E2E` run 38226782059 在
+  `Run pip install -r requirements.txt` 停 19 分 22 秒后被取消，**没有走到 Flyway 那一步**，
+  所以本条的判据仍然只用 run 38221938525 那一族历史日志；补证没有为"改后是否还红"取到任何证据。
+- [ ] **`eval-runtime` 把"活栈不可达"折叠成"错误率退化"——nightly 的红读起来像模型回归**
+  （第一百零四批归因，未处置）—— run 38224268851 的 `eval-runtime` job（114727802659）里
+  `Run runtime evaluation gate` 打的是：220 个用例**每一个都在 ≈0.1 秒内 ERR**，汇总
+  `error_rate: 1.0`（基线 0.0），判据句 `错误率=1.000 exceeds maximum 0.020`，
+  `regressions` 同一条。而该步骤前置的那道检查只看**变量有没有值**
+  （`if [ -z "$EVAL_INTERNAL_TOKEN" ] || [ -z "$EVAL_BASE_URL" ]`），
+  `EVAL_BASE_URL` 是一条 cpolar 隧道（`https://aa9fbd2.r36.cpolar.top`），有值≠可达。
+  ⇒ 0.1 秒/例的 100% 错误率只可能是连接层，不是检索或生成质量；今天的形态是**看日志的人会被
+  指向"评测退化"**，而真实结论是"被测环境没起来"。
+  处置方向（第一百一十一批，不得靠放宽 `--maximum-error-rate` 或把门跳过）：在跑用例**之前**做一次
+  可达性/健康探针（对 `EVAL_BASE_URL` 的一个已知端点取一次成功响应，失败即单独判红并打印
+  "活栈不可达"这句话）；并把"全部用例同因失败"这种形态本身做成判定——例如错误率＝1 且
+  p95 时延接近 0 时输出连接类错误样本，而不是只报一个百分数。**判据要能区分"环境没起来"与
+  "模型变差"，两者都不许绿。**

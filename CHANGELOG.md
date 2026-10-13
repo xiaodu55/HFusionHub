@@ -57,7 +57,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `No known vulnerabilities found (76 packages audited)`、退出码 0。同一份报告在旧内联脚本下是
   `AttributeError: 'str' object has no attribute 'get'`（run 38145150133 第 284 行）。
 - **容器内实测新命令**（`python:3.11-slim`，scratch `b104_gates.log`）：
-  `PINS_EXIT=0`（7.5.0 与 5.5.5 都可装）、`CDX_EXIT=0`（`--output-format JSON` 成立）、
+  `PINS_EXIT=0`（7.5.0 与 5.5.5 都可装——这句是当时的可安装性实测，`Install CycloneDX`
+  现在钉的是 `requirements-dev.txt` 里的 **7.3.1**，见下面「就地自我纠正」）、
+  `CDX_EXIT=0`（`--output-format JSON` 成立）、
   `LIC_JSON_EXIT=0`、`LIC_TABLE_EXIT=1` ＝
   `license Apache-2.0 OR BSD-2-Clause not in allow-only licenses was found for package packaging:26.3`。
   同一次 `REQ_EXIT=2` 是宿主网络把 aliyun 镜像读到 `ReadTimeoutError`，**不是**锁的问题；
@@ -77,6 +79,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `scripts/static-checks.py` 全跑档退出码 0、15 项全 `[ok]`。检查 3 的 python 计数是
   **静态 `def test_` 定义数**，与 CI 的"参数化展开后用例数"是两条口径，本批 1936 → **1950**
   （＋14），README 四处同步；Java 718 与前端 117/73 没动。
+- **补证之后的重测**（钉版改 7.3.1 ＋ 新增一条"钉版必须等于锁"的判据，静态计数 1950 → **1951**，
+  README 四处同步；`static-checks.py` 再次全 `[ok]`、退出码 0）：
+  `tests/test_plugin_security_gates.py` 单档 ＝ `15 passed`；
+  全量口径（`pytest -q tests`，**含**容器轨，与上面 CI 的 `--ignore` 口径不同源，不可混读）
+  ＝ `2102 passed, 18 skipped`、退出码 0。CI 侧的数字仍只用 run 38226782026 的
+  `2070 passed / 7 skipped`（＝ commit `488fa32d`，不含这第 15 条判据）。
 
 #### 诚实边界
 - 改了的 workflow 只有"旗标、钉版、触发方式"三类内容，三条门的**判定强度没有下降**：
@@ -87,20 +95,91 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **本批没有"改后 runner 已绿"的说法**。plugin-security 的 CI 证据要推送之后手工触发才有
   （`push.paths` 不含本批改动的文件），在那之前关于这三条门只有两个来源：runner 历史日志
   （改前为什么红）＋ 容器实测（新命令在 Linux 上装得上、跑得起、判定是什么）。
-- 顺带取证的 `e2e.yml` 那条红（`e2e-full` 的 `Run Flyway migrations`，2026-10-10～10-12 连续 5 次
-  死在同一步）本批**只登记未处置**；更早 2026-09-22、09-29 两次 `failure` 的失败步骤不在 step
-  列表里，没有归到"同一步红"。
+  ⇒ 该说法的时效已由下面的「CI 补证」小节解除：两条门在 runner 上确实转绿，第三条按预期红。
+- 顺带取证的 Flyway 那条红本批**只登记未处置**：`e2e.yml:82`、`e2e.yml:221`、`eval-nightly.yml:96` 三处
+  的 `Run Flyway migrations` 只给 `SPRING_DATASOURCE_*`，而 flyway-maven-plugin 只认
+  `-Dflyway.url/user/password`；`e2e-full` 在 2026-10-10～10-12 连续 5 次死在同一步，nightly 的
+  `eval-harness` 也死在同一步。**同仓里已经有一份写对的**——`ci.yml:382-383` 用的正是
+  `-Dflyway.url=… -Dflyway.user=… -Dflyway.password=…` 且为绿，所以这不是"MySQL 起不来"，
+  是复制粘贴漂移（四处站点、`java-backend/pom.xml` 里插件未声明也未钉版）。
+  更早 2026-09-22、09-29 两次 `failure` 的失败步骤不在 step 列表里，没有归到"同一步红"。
+  登记为第一百零七批对象。
+
+#### CI 补证（run 38226827011 ＝ commit `488fa32d`，手工触发 Plugin Security）
+- `vulnerability-scan` ＝ **success**（这个 job 历史上从没绿过）。job 114736287138 的日志原文顺序：
+  `No known vulnerabilities found`（pip-audit 自身，第 249 行）→ 执行行
+  `python scripts/ci/vuln_report_gate.py /tmp/vuln-report.json`（第 252 行）→ helper 自己打印
+  `No known vulnerabilities found (76 packages audited)`（第 263 行）。最后那一行是**门真的读过报告**
+  的证据：旧的内联脚本在同样干净的报告上会 `AttributeError: 'str' object has no attribute 'get'`，
+  所以这不是"没有可审的东西所以绿"。
+- `sbom-generation` ＝ **success**，`SBOM contains 35 components`（第 273 行）——组件表非空，
+  那条只打印 `WARNING` 的分支没被走到。
+- `license-check` ＝ **failure**，红在 `Run Check licenses`：
+  `license BSD License not in allow-only licenses was found for package webcolors:25.10.0`
+  （job 114736287980 第 349 行）⇒ 本批"结果不是三条全绿"的预判兑现。这是**策略语义红**，
+  不是旗标红：允许清单一个字没改，也没有加 `continue-on-error`。处置＝第一百零五批。
+  **整个 run 的 `conclusion` ＝ failure**，红的来源只有这一条——不要把"run 红"读成"两条门又红了"。
+- 同一 commit 的 `CI` run 38226782026 ＝ **11 个 job 全 success**（`python / java / python-container /
+  docker-build / docker-compose-validate / helm / frontend / static-consistency / python-lint /
+  gitleaks / eval-offline`）。其中 `python` job（114736131160）给的是
+  `2070 passed, 7 skipped, 1 warning in 78.17s` ＋ `Required test coverage of 74% reached.
+  Total coverage: 77.11%`——这是第一百零四批 14 条新判据进 CI 之后的展开数口径。
+- `E2E` run 38226782059 ＝ **cancelled**：死在 `Run pip install -r requirements.txt`
+  （08:58:10 开始，09:17:32 `##[error]The operation was canceled.`，停了 19 分 22 秒），
+  **没有走到 Flyway 那一步**。取消来源无法从日志判定——`e2e.yml` 没有 `concurrency` 键，日志里
+  也没有 timeout 声明，所以本批只把它登记成"证据未取到 ＋ 镜像装在阿里云镜像上停摆"，
+  第一百零七批的 Flyway 判据仍然只用 run 38221938525 那一族历史日志。
+
+#### 就地自我纠正（同一批内，改的是本批自己留下的两个来源错误）
+- **钉版的来源钉错了**：`Install CycloneDX` 一度钉成 `cyclonedx-bom==7.5.0`——那是"未钉版当时
+  解析到的版本"，而 `python-ai/requirements-dev.txt:452` 早就钉着 **7.3.1**，eval-nightly 从锁装的
+  也是 7.3.1（run 38224268851 第 384 行 `Successfully installed … cyclonedx-bom-7.3.1 …`）。
+  钉成 7.5.0 等于让同一个仓里并存两个 cyclonedx-bom，"同一个工具"这句话就不再成立。
+  实测两版的旗标表一致（7.3.1 的 `environment --help`：`--of, --output-format`
+  `{choices: JSON, XML}`、`-o`），并用仓库 venv 真生成过 `specVersion 1.6 / 126 components`
+  的 SBOM（scratch `b104_sbom_731.json`）⇒ 工作流改钉 7.3.1，并新增一条
+  `test_pins_that_the_dev_lock_already_carries_agree_with_it` 把"版本号从哪来"钉住
+  （自带"没有任何钉版能与锁对照 ⇒ 空转"的反空转断言）。
+  **效力边界**：CI 那一步是用 7.5.0 跑绿的（run 38226827011），改成 7.3.1 之后这一步还没在 runner
+  上重跑，所以"7.3.1 也绿"只有本地实测这一层，不写成 runner 结论。
+- **`SBOM contains 35 components` 这句话的对象不是产品**：那个 job 从不 `pip install -r requirements.txt`，
+  所以它生成的是 **runner 自带 python 环境**的 SBOM（35 个组件），而漏洞门读的是
+  `requirements.txt`（76 个包）。同一个 workflow 里两条产物描述的不是同一个对象——本批只发现并登记，
+  不动它（登记为第一百一十批；同时那条"空组件表只打印 WARNING"的弱点一并处置）。
+- 顺带取到第一百零五批的实料：对着仓库 venv 生成的 126 组件里许可证串有 14 种形态，含分类器原文
+  `License :: OSI Approved :: Apache Software License`、`PSF-2.0`、`Python-2.0`、`MIT-0`、`MIT-CMU`，
+  以及 **`License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)`**
+  ——允许清单里只有 LGPLv3，没有 LGPLv2+。策略判定必须逐成分处理这些形态，不能靠往字面清单尾部
+  追加字符串。
+- **第一百零六批的处置方向被崩溃栈改写了**（本批只改写登记，未动生产代码）：改完补证重跑套件时，
+  67% 处 `Windows fatal exception: access violation`、`PYTEST_EXIT=139`，dump 的 **Current thread**
+  逐帧点名 `app/core/plugin/audit.py:596 _run`（线程名 `audit-shutdown-flush`）→ `:337 _do_flush`
+  → `:273 _cleanup_synced`，同一 dump 里主线程在 pytest 的 fixture teardown。
+  这**推翻了第一百零三批对根因的描述**：不是"线程没拿锁就 execute"，而是"**连接引用在锁外取**"——
+  `_increment_retry:256-257`、`_cleanup_synced:271-272`、`_persist_to_sqlite:194-195` 都是先
+  `db = _get_db()` 再 `with _db_lock:`，而 `_get_db()` 本体（`:158-162`）不持锁。
+  ⇒ 原来推荐的 A 方案（`_reset_db` 全程持锁）**单独做仍然留窗口**：线程握住旧对象、等锁释放、
+  再对已 `close()` 的对象 execute。处置必须两半同做（close＋换绑持锁 ＋ 取引用也在锁内），
+  并且还发现一条不需要低概率就能打开窗口的路径：`flush_on_shutdown`（`:573`）在预算用尽时
+  **带着仍在跑的线程返回**（`:603` `result["timed_out"] = final.is_alive()`）。
+  本批与此的因果关系也说清楚：改动只有 workflow YAML 与一份纯静态判据文件，**没碰 `app/`**，
+  所以这不是本批引入的回归，是本批把第一百零六批从"推断"抬成"有栈可查"。
 
 #### 下一批（按红面与崩溃代价排序）
 1. **第一百零五批**：`license-check` 的许可证策略收敛——一份可测试的策略来源、按 SPDX 表达式
    逐成分判定（任一成分不在允许集合即红），两步同源；不得靠追加复合表达式字符串把门改绿。
 2. **第一百零六批**：`_reset_db()` 全程持 `_db_lock`（消除与 flush 线程的段错误窗口），
    配一条确定性红判据。
-3. **第一百零七批**：`e2e.yml` 的 Flyway 迁移步骤——插件配置与 `SPRING_DATASOURCE_*` 不同源，
-   钉版 + 传它真正读的那三个值，并证明迁移确实发生。
+3. **第一百零七批**：Flyway 迁移步骤四处统一到 `-Dflyway.*`（`e2e.yml:82/221`、`eval-nightly.yml:96`，
+   参照 `ci.yml:382` 的现行正确形态），并在 pom 里声明＋钉住 `flyway-maven-plugin`，
+   判据要证明迁移确实发生而不是步骤跑绿。
 4. **第一百零八批**：全栈 compose 活栈真跑一次（把"能写/能读"从镜像级升到活栈级）。
 5. **第一百零九批**：judge-cache 驱逐。另有 dev 锁审计门、`UPLOAD_DIR` 残留键、
    错误信封 code 统一、Java 侧状态码统一四条待排。
+6. **第一百一十批**：`sbom-generation` 的组件面改成 python-ai 自己的依赖（现在那 35 个组件是
+   runner 环境，漏洞门审的 76 个包一个都没进 SBOM），并把"组件表为空只打印 `WARNING`"改成判定。
+7. **第一百一十一批**：`eval-runtime` 的可达性前置探针（nightly 现在把"隧道不可达"报成
+   "错误率退化"：220 例每个 ≈0.1 秒 ERR、`error_rate=1.000 exceeds maximum 0.020`）。
 
 ### 第一百零三批（2026-10-11：两条依赖审计门从红转绿——pip-audit 的 29 条与 npm audit 的 15 条，收口靠的是把锁钉到修复版本，不是放宽门）
 

@@ -111,10 +111,15 @@ jobs:
           python-version: '3.11'
           cache: pip
       - name: Install CycloneDX
-        # 钉版 + 正确旗标：runner 装的 cyclonedx-bom 7.5.0 里 `environment` 子命令只认
-        # `--of/-o` 与 `--output-format {JSON,XML}`，旧的 `--format json` 不在旗标表里，
-        # 这个 job 因此从诞生起就没过过（第一百零四批，判据见 tests/test_plugin_security_gates.py）。
-        run: pip install cyclonedx-bom==7.5.0
+        # 钉版 + 正确旗标：`environment` 子命令只认 `--of/-o` 与 `--output-format {JSON,XML}`，
+        # 旧的 `--format json` 不在旗标表里，这个 job 因此从诞生起就没过过（第一百零四批，
+        # 判据见 tests/test_plugin_security_gates.py）。
+        # 版本取 7.3.1 ＝ `python-ai/requirements-dev.txt` 自己钉的那一份（runner 从
+        # eval-nightly 的日志里装的也是 7.3.1）。改前一度钉成未钉版当时解析到的 7.5.0，
+        # 那等于在同一仓里同时存在两个 cyclonedx-bom 版本；实测 7.3.1 的旗标表与 7.5.0 一致
+        # （`--of/--output-format {choices: JSON, XML}`、`-o`），且用仓库 venv 真生成过
+        # specVersion 1.6 / 126 components 的 SBOM，所以收敛到锁里那版。
+        run: pip install cyclonedx-bom==7.3.1
       - name: Generate SBOM
         run: |
           cd python-ai

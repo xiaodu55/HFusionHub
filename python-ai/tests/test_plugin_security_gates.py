@@ -10,9 +10,12 @@
   `AttributeError: 'str' object has no attribute 'get'` —— pip-audit 的 JSON 顶层是
   `{"dependencies": […]}`，脚本按"顶层是 list"去迭代，迭代到的元素是字符串键。
   ⇒ 这个 job 有两个叠着的缺陷，前一个一直挡着后一个；只修锁不可能让它转绿。
-- `sbom-generation`：runner 装的是未钉版的 `cyclonedx-bom 7.5.0`，其 `environment` 子命令
-  只认 `--of / --output-format {JSON,XML}`，门里写的是 `--format json`
+- `sbom-generation`：runner 装的是未钉版的 `cyclonedx-bom`（当时解析到 7.5.0），其
+  `environment` 子命令只认 `--of / --output-format {JSON,XML}`，门里写的是 `--format json`
   ⇒ `error: unrecognized arguments: --format`。
+  钉版没有钉成 7.5.0 而是 `python-ai/requirements-dev.txt` 里已有的 **7.3.1**：实测两版的
+  旗标表一致，而钉成 7.5.0 会让同一个仓里并存两个 cyclonedx-bom 版本（eval-nightly 从
+  requirements-dev 装的就是 7.3.1，run 38224268851 的日志可查）。
 - `license-check`：runner 装的是未钉版的 `pip-licenses 5.5.5`，`-f/--format` 的可选值是
   `plain / plain-vertical / markdown / rst / confluence / html / json / json-license-finder / csv`，
   门里写的是 `--format=table` ⇒ `invalid choice: 'table'`。
@@ -24,6 +27,7 @@
 """
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +37,17 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "plugin-security.yml"
 GATE = ROOT / "scripts" / "ci" / "vuln_report_gate.py"
+DEV_LOCK = ROOT / "python-ai" / "requirements-dev.txt"
+
+
+def dev_lock_version(tool: str) -> str | None:
+    """requirements-dev.txt 里该工具的钉版（行形如 `cyclonedx-bom==7.3.1 \\` + hash 续行）。"""
+    pattern = re.compile(rf"^{re.escape(tool)}==([0-9][^ ;\\]*)")
+    for line in DEV_LOCK.read_text(encoding="utf-8").splitlines():
+        match = pattern.match(line.strip())
+        if match:
+            return match.group(1)
+    return None
 
 
 def job_steps(name: str) -> dict[str, str]:
@@ -159,6 +174,24 @@ class TestPluginSecurityWorkflowUsesCorrectFlags:
         text = WORKFLOW.read_text(encoding="utf-8")
         for tool in ("pip-audit", "cyclonedx-bom", "pip-licenses"):
             assert f"{tool}==" in text, f"{tool} 没有钉版"
+
+    def test_pins_that_the_dev_lock_already_carries_agree_with_it(self):
+        """同一个仓里同一个工具只能有一个版本——钉版的来源必须是锁。
+
+        第一百零四批自己踩过这一条：把 sbom 工具钉成"未钉版当时解析到的 7.5.0"，而
+        `python-ai/requirements-dev.txt` 早就钉着 7.3.1，eval-nightly 从锁装的就是 7.3.1。
+        于是 plugin-security 与 eval-nightly 跑的不是同一个 cyclonedx-bom —— 门仍然各自绿，
+        但"同一个工具"这句话已经不成立。这条测试钉的是版本号的**来源**，不钉任何具体版本。
+        """
+        text = WORKFLOW.read_text(encoding="utf-8")
+        compared = []
+        for tool, pinned in re.findall(r"pip install ([\w][\w.-]*)==(\S+)", text):
+            locked = dev_lock_version(tool)
+            if locked is None:
+                continue
+            compared.append(tool)
+            assert pinned == locked, f"{tool}: workflow 钉 {pinned}，requirements-dev.txt 钉 {locked}"
+        assert compared, "没有任何钉版能与锁对照——这条测试已经空转"
 
     def test_sbom_step_uses_output_format_not_the_removed_flag(self):
         body = job_steps("sbom-generation")["Generate SBOM"]
