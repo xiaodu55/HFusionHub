@@ -116,11 +116,17 @@ class TestCheck16OnTheRepo:
         assert "check_db_lock_lifetime()" in main_body
 
     def test_the_real_module_counts_enough_references(self):
-        """绿不能是"没数到引用"：真模块里至少 10 处取连接、3 处连接读写都要被核对到。"""
+        """绿不能是"没数到引用"：真模块里 9 处取连接、3 处连接读写都要被核对到。
+
+        12 = 9 个 `_get_db()` 调用点 ＋ `_reset_db` 里 3 处 `_db_conn` 读写。第一百零六批
+        量到的是 13（那时还有第 10 个调用点在 `_mark_dead_letter` 里）；第一百零七批把
+        自增与落标记折成 `_register_failed_attempt` 一个函数，调用点随之少一个——
+        是构成变了，不是规则匹配不上。
+        """
         module = _load_checker()
         offenders, checked = _offenders(module, AUDIT_MODULE.read_text(encoding="utf-8"))
         assert offenders == []
-        assert checked >= 13, f"只核对到 {checked} 处引用，规则多半没匹配上现行形态"
+        assert checked >= 12, f"只核对到 {checked} 处引用，规则多半没匹配上现行形态"
 
     def test_the_getter_documents_the_contract(self):
         """门禁管形，不管调用方读不读得懂：取连接的函数自己必须写明"调用方已持锁"。"""

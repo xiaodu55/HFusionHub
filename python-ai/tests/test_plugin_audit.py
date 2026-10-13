@@ -821,3 +821,89 @@ class TestDbConnectionLifetime:
                 t.join(timeout=10)
 
         assert len(built) == 1, f"懒建连接没串行：一次并发首用建了 {len(built)} 个连接"
+
+
+# ── 第一百零七批：flush 的超限判定读的是快照还是行 ──────────────────────
+
+
+class TestFlushVerdictReadsCurrentRow:
+    """`_do_flush` 的"要不要标 dead-letter"必须按**行的当前状态**判，不按它自己那份快照。
+
+    复现全套件第四次那条红（`TestRetryDeadLetters::test_second_retry_is_idempotent`，
+    `assert retry_dead_letters() == 0` 实测 1）。机理不需要低概率命中：一条在途 flush
+    在"取快照"与"落标记"之间被运维的 `retry_dead_letters()` 插进去，它就会按旧快照把
+    刚回灌的行翻回 dead-letter——运维那次点击等于没生效。
+    本用例用 events 把这个窗口摆成确定的时序，不赌线程调度。
+    """
+
+    def test_requeued_row_is_not_flipped_back_by_an_in_flight_flush(self, tmp_path):
+        import threading
+
+        from app.core.plugin import audit as audit_mod
+
+        audit_mod._reset_db(str(tmp_path / "race"))
+        record_audit(plugin_id="pid-1", plugin_name="p", action="install")
+
+        with (
+            patch.object(audit_mod, "_post_to_java_backend_batch", return_value=False),
+            patch.object(audit_mod, "_MAX_RETRIES", 2),
+        ):
+            # 把这一行推到 unsynced + retry_count=2（快照里已经"超限"，但还没落标记）
+            audit_mod._do_flush()
+            audit_mod._do_flush()
+            assert [row[1:] for row in _queue_rows(audit_mod)] == [(0, 0, 2)]
+
+            snapshot = threading.Event()
+            release = threading.Event()
+
+            def blocking_post(entry):
+                # 出站 I/O 就是那段"锁外的距离"：只有那条线程卡在快照与回写之间
+                if threading.current_thread().name == "in-flight-flush":
+                    snapshot.set()
+                    assert release.wait(timeout=5), "编排失效：主线程没有放行"
+                return False
+
+            with patch.object(audit_mod, "_post_to_java_backend", side_effect=blocking_post):
+                stray = threading.Thread(target=audit_mod._do_flush, name="in-flight-flush")
+                stray.start()
+                assert snapshot.wait(timeout=5), "在途 flush 没走到出站那一步，编排没成立"
+
+                audit_mod._do_flush()  # 主线程这一轮把行标成 dead-letter
+                first = audit_mod.retry_dead_letters()  # 运维显式回灌
+                release.set()
+                stray.join(timeout=5)
+                second = audit_mod.retry_dead_letters()
+
+            assert first == 1
+            assert second == 0, (
+                "在途 flush 按旧快照把刚回灌的行又标回了 dead-letter："
+                "运维的 retry_dead_letters() 被一条拿着过期 retry_count 的判定吞掉"
+            )
+            assert get_sync_status()["dead_letter"] == 0
+
+
+class TestAuditFlusherIsolation:
+    """隔离 fixture 只换库不停线程 ⇒ 后台 flusher 会写进"当下这条用例"的临时库。
+
+    两条用例按定义顺序跑：上一条把 daemon 起来，下一条才能测到"它活过了用例边界"。
+    """
+
+    def test_record_audit_really_starts_the_daemon(self):
+        """探针得先证明线程真的存在——否则下一条用例的"没线程"是假的绿。"""
+        import threading
+
+        from app.core.plugin import audit as audit_mod
+
+        record_audit(plugin_id="pid-iso", plugin_name="p", action="install")
+        daemons = [t for t in threading.enumerate() if t.name == "audit-flusher"]
+        assert len(daemons) == 1 and daemons[0].is_alive(), audit_mod._flush_thread
+        # 这里不手工停：停了，下一条用例就测不到 fixture 该做的事
+
+    def test_no_audit_flusher_survives_into_the_next_test(self):
+        import threading
+
+        stray = [t.name for t in threading.enumerate() if t.name == "audit-flusher"]
+        assert not stray, (
+            f"上一条用例留下的后台 flusher 还活着（{stray}）："
+            "它每 30s 跑一次 _do_flush()，写的就是当下这条用例的临时审计库"
+        )

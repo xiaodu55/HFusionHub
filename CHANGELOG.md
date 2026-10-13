@@ -11,6 +11,77 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百零七批（2026-10-12：审计 flush 的超限判定从"读快照"抬到"读当前行"——运维的 dead-letter 回灌不再被一条在途 flush 吞掉；顺带把 autouse fixture 的后台 flusher 停掉，修的是测试隔离）
+
+#### 结论（先给判定性质）
+- 对象是第一百零六批**第四次全套件**踩到的那条红（`TestRetryDeadLetters::test_second_retry_is_idempotent`，
+  `assert 1 == 0`）。当时已按同一套确定性编排对 HEAD 与第一百零六批改后**各跑一遍、两边都红**，
+  判定为独立缺陷、没有折进第一百零六批，也没有放宽那条断言——本批就是它的处置。
+- 缺陷在生产语义上是实的：`_do_flush` 把"取快照 → 锁外做出站 I/O → 按快照里的 `retry_count` 判超限 → 落 dead-letter"
+  分成四步，`_db_lock` 只保证每条语句原子，**从来不覆盖"快照 → 回写"这段距离**。于是运维点一次
+  `retry_dead_letters()`（`SET dead_letter = 0, retry_count = 0`）之后，一条在途的后台 flush
+  会拿着回灌前的 `retry_count` 把判定重新落下去 ⇒ **这次点击等于没生效**，行又翻回 dead-letter 且计数被加回。
+- 套件偶发红是**同一个机理的测试面**：autouse fixture 只换库、不停 daemon，上一条用例留下的
+  `audit-flusher` 会写进当下这条用例的临时库。一次 drain 只该打一行"超过最大重试次数"，
+  而那份日志里同一 id 打了**两次**（42.107 / 42.113）——第二次来自另一条线程。
+- 两处都是**改判据读的东西**，不是改判据的宽严：没有任何断言被放宽、没有加 skip／重跑／提高阈值。
+
+#### 修复与判据
+- 实现侧删掉 `_mark_dead_letter`（改前 `audit.py:225`）与 `_increment_retry`，合成
+  **`_register_failed_attempt(entry_id) -> bool`（现 `:249`）**：读 `retry_count`、自增、
+  落 `dead_letter = 1` 三步共用**同一次** `with _db_lock:`，返回值即"这一行是否被**本次调用**标成 dead-letter"。
+  比较的仍是"自增之前读到的计数"，与旧判定 `entry.retry_count >= _MAX_RETRIES` **同形**，
+  只是把读的对象从出站快照换成了行的当前状态；`_MAX_RETRIES` 走 Python 侧比较而非 SQL 常量拼接，
+  所以测试对它的 patch 照旧生效。`_do_flush`（现 `:312`）不再自己判超限，只按返回值决定要不要打 warning（`:339`）。
+- 行为判据 `python-ai/tests/test_plugin_audit.py::TestFlushVerdictReadsCurrentRow`：把取证脚本的确定性编排
+  搬进套件——在途线程的 `_post_to_java_backend` 被 patch 成"发出 `snapshot` 事件后卡在 `release`"，
+  主线程在这道窗口里跑完一轮 `_do_flush()` ＋ `retry_dead_letters()`，再放行在途线程并 join。
+  改前红（`first=1 second=1`，`get_sync_status()["dead_letter"] == 1`）⇒ 改后绿（`first=1 second=0`，`dead_letter == 0`）。
+- 隔离侧 `python-ai/tests/conftest.py`：新增 `_stop_audit_flusher()`
+  （置 `_flush_stop`、摘走 `_flush_thread` 句柄、join 30s；join 不掉就 `pytest.fail` 并写明死因是
+  "它会把这次 flush 写进下一条用例的临时审计库"，同时提示先查真实出站 POST 的 30s/10s 超时），
+  autouse fixture 在 `_reset_db()` **之前和之后**各调一次——换库前先停线程，只换库不停线程等于
+  让上一条用例留下的线程写当下这条的库。
+- 反空判定 `TestAuditFlusherIsolation::test_record_audit_really_starts_the_daemon`：先证明
+  `record_audit` 确实留下一个活着的 `audit-flusher`，否则"下一条用例开局没有残留线程"那条会凭空绿。
+
+#### 验证
+- 红判据改前：**2 failed, 1 passed, 51 deselected**——两条红分别是
+  "在途 flush 按旧快照把刚回灌的行又标回了 dead-letter" 与 "上一条用例留下的后台 flusher 还活着（`['audit-flusher']`）"。
+- `tests/test_plugin_audit.py` 51 → **54 passed**；
+  `test_db_lock_lifetime_gate.py + test_plugin_audit.py + test_plugin_security.py` 合跑 **84 passed**。
+- 检查 16 的反空阈值按**构成变化**从 `>= 13` 改成 `>= 12`：12 ＝ 9 个 `_get_db()` 调用点 ＋ `_reset_db` 里
+  3 处 `_db_conn` 读写；第一百零六批量到 13 是因为那时 `_mark_dead_letter` 里还有第 10 个调用点，
+  本批把它折进 `_register_failed_attempt` 就少一个。**是构成变了，不是规则匹配不上**，
+  这笔账写进了 `tests/test_db_lock_lifetime_gate.py` 的 docstring 与 `docs/CLEANUP_BACKLOG.md`。
+- `scripts/static-checks.py` 全模式退出 0，检查 16 那行现为"扫描 1 个碰共享连接的模块、**12 处**引用，
+  全部在 `with _db_lock:` 体内"；ruff 干净。
+- 全套件连跑两次绿：`2083 passed, 12 skipped`（日志 `b107_pytest_run1.log`、`b107_pytest_run2.log`）。
+  第一百零六批是"三次绿 ＋ 一次红（红的那条与本批无关）"，本批之后第四次那种红不再出现。
+- README 的 python 用例数按检查 3 同步 1965 → **1968**（四处站点，字节级替换保持 LF）。
+
+#### 诚实边界
+- 本批修的是**判定读当前行**，不是"给回灌加锁"。`retry_dead_letters()` 与 flush 之间仍无跨语句事务隔离：
+  若运维回灌发生在在途 flush **取快照之前**、而该行的出站又失败，那条行会被正常地再计一次数——
+  那是预算语义，不是本批的缺陷。本批关掉的是"判定用**已过期的**计数推翻**已生效的**回灌"。
+- `_register_failed_attempt` 的读＋自增＋落标记在同一次持锁里，因此**不需要** `RLock`，
+  第一百零六批"锁外取引用"的约定一分没退；检查 16 对新函数同样核对通过。
+- 停 flusher 的 fixture 只在测试面生效，生产侧 `flush_on_shutdown`（现 `:584`）"预算到点仍带着
+  在跑线程返回"那条观察**没有**随本批处置，仍登记在 `docs/CLEANUP_BACKLOG.md`，
+  优先级低于第一百一十一／一百一十二批。
+- 全套件历史 1-in-4 的偶发红，本批按机理关掉了一个来源（快照判定 × 跨用例 daemon）；
+  连跑两次的绿是"这两个来源不再出现"的证据，不是"再也不会红"的证明。
+
+#### 下一批（按红面与上线阻塞度排序）
+1. **第一百零八批**：Flyway 迁移步骤四处统一到 `-Dflyway.*`（`e2e.yml:82`、`e2e.yml:221`、`eval-nightly.yml:96`
+   三处只给 `SPRING_DATASOURCE_*`，`ci.yml:382-383` 已是写对的那一份）＋ 在 `java-backend/pom.xml`
+   显式声明并钉住 `flyway-maven-plugin`。判据要证明迁移**确实发生**（表结构落到 e2e/eval 库），
+   不得靠删步骤或 `continue-on-error` 变绿。
+2. **第一百零九批**：全栈 compose 真跑一次，把"能写／能读"从镜像级升到活栈级。
+3. **第一百一十批**：judge-cache 驱逐。
+4. **第一百一十一批**：SBOM 组件面。**第一百一十二批**：eval-runtime 可达性探针（那条 run 38224268851 的第二条红）。
+5. **第一百零五批仍搁置**：license-check 的 SPDX 复合表达式与 copyleft 口径要**人拍板**，
+   不能由改代码的一方顺手往允许清单里加名字。
 ### 第一百零六批（2026-10-12：审计库那个跨线程共享的 SQLite 连接——取用与关闭都收进 `_db_lock` 体内，并新增检查 16 把"锁外取引用"这种形态钉死）
 
 #### 结论（先给判定性质）
@@ -98,8 +169,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 第四次那一条红的**归因不靠推测，靠同一套编排对两个版本各跑一遍**：`_do_flush` 是
   "锁外取快照（`_get_unsynced_entries`）→ 出站 I/O → 按**快照里的** `entry.retry_count` 判超限 →
   `_mark_dead_letter`"，判定读的是快照不是行的当前状态。后台那条每 30s 到点的 `audit-flusher` daemon
-  （`record_audit` 经 `_ensure_flush_thread`（`audit.py:480`）起的，`tests/conftest.py:122-128` 的隔离
-  fixture 只换库、**不停线程**）只要在运维 `retry_dead_letters()` 之前取到快照、在之后落
+  （`record_audit` 经 `_ensure_flush_thread`（改前 `audit.py:480`，现 `:432`）起的，`tests/conftest.py:122-128`
+  的隔离 fixture（改前只换库、**不停线程**；第一百零七批已改成换库前后各停一次 `audit-flusher`））只要在运维 `retry_dead_letters()` 之前取到快照、在之后落
   `_mark_dead_letter`，刚回灌的行就被翻回 dead-letter（运维这次点击等于没生效）。
   套件里那次红的现场证据对得上：一次 drain 的三轮 `_do_flush` 只会越预算一次、只打一行
   "超过最大重试次数"，而失败用例的 captured stdout 里**同一 id 打了两次**（42.107 与 42.113），
@@ -107,7 +178,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   确定性编排（events 把"取快照"与"落标记"卡在回灌两侧）在 HEAD 与工作区**各跑一遍，两边都红**
   （`first=1 second=1`；同脚本的单线程对照组 `first=1 second=0`，scratch `repro_stale_snapshot_requeue.py`）
   ⇒ 与本批的连接生命周期修复无关，没有把它折进本批"已修"，也没有把那条断言放宽。
-  对象登记在 `docs/CLEANUP_BACKLOG.md`，处置为**第一百零七批**；原先排在 107 的 Flyway 及其后的队列
+  对象登记在 `docs/CLEANUP_BACKLOG.md`，处置为**第一百零七批**（已处置，见本文件第一百零七批条目：
+  判定抬到当前行 ＋ fixture 换库前后停掉 `audit-flusher`）；原先排在 107 的 Flyway 及其后的队列
   整体顺延一位，相关的前向锚点已就地纠正（见下一批小节）。
 
 #### 下一批

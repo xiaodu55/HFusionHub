@@ -119,10 +119,37 @@ def tmp_milvus_db(tmp_path, monkeypatch):
 
 # ── Audit SQLite 隔离 fixture ───────────────────────────────────────────
 
+def _stop_audit_flusher(audit_mod) -> None:
+    """停掉并 join `audit-flusher` daemon——换库之前必须先停它。
+
+    它每 `_FLUSH_INTERVAL`（30s）跑一次 `_do_flush()`，写的是**当时**模块级连接指向的库：
+    只换库不停线程，上一条用例留下的线程就会落进下一条用例的临时审计库（第一百零七批
+    全套件第四次那一条红的第二个来源）。线程起于 `record_audit` → `_ensure_flush_thread`，
+    所以只要有用例写过审计，它就活着跨过用例边界。
+    """
+    audit_mod._flush_stop.set()
+    worker = audit_mod._flush_thread
+    audit_mod._flush_thread = None
+    if worker is None or not worker.is_alive():
+        return
+    worker.join(timeout=30)
+    if worker.is_alive():
+        pytest.fail(
+            "audit-flusher 在 30s 内没退出：它会把这次 flush 写进下一条用例的临时审计库。"
+            "先看是不是有条真实出站 POST 卡住了（`_post_to_java_backend*` 的超时是 30s/10s）。"
+        )
+
+
 @pytest.fixture(autouse=True)
 def _isolate_audit_db(tmp_path):
-    """Redirect audit SQLite to a temp dir for every test, then restore."""
+    """Redirect audit SQLite to a temp dir for every test, then restore.
+
+    换库之前先停后台 flusher：只换库不停线程＝让上一条用例留下的线程写当下这条的库。
+    """
     from app.core.plugin import audit as audit_mod
+
+    _stop_audit_flusher(audit_mod)
     audit_mod._reset_db(str(tmp_path))
     yield
+    _stop_audit_flusher(audit_mod)
     audit_mod._reset_db(None)

@@ -12,7 +12,7 @@
 ![Java](https://img.shields.io/badge/Java-17%2B-orange)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883)
-![Tests](https://img.shields.io/badge/Tests-Python%201965%20%7C%20Java%20718%20%7C%20Frontend%20117-success)
+![Tests](https://img.shields.io/badge/Tests-Python%201968%20%7C%20Java%20718%20%7C%20Frontend%20117-success)
 
 ## 这个项目是什么（30 秒版）
 
@@ -34,7 +34,7 @@ HFusionHub 是一个可以私有部署的 AI Agent 平台：上传文档建知�
 - **并发与竞态治理**：任务状态机全部走条件 UPDATE 守卫迁移（completeRunGuarded / failUnlessTerminal），用量账本"只有赢得终态迁移的一方结算"，配套竞态回归测试。
 - **RAG 管线纵深**：意图分类 → 查询分解 → 多路检索（向量+BM25+RRF 融合）→ 上下文压缩 → 检索证据门（低置信拒答）→ Groundedness 守卫与重试 → 引用完整性校验；答案逐论断 `[n]` 引用溯源；Parent-Child 父子分块与语义分块（实验档）提升长文档召回。
 - **指标归因方法（R16/R17）**：评测双轨把"检索质量"与"答案层模型行为"解耦——`eval_retrieval_live.py` 纯检索探针绕过 LLM 直测冻结套件（真机 0.830，与历史水平一致），从而把 runtime 指标波动定位到答案层模型漂移（token 1582→774）；配套 token 漂移门禁与命中/延迟分解指标（`/metrics`）。归因实录见 [CI_GATES](docs/CI_GATES.md) 口径注记。
-- **测试与防漂移门禁**：Java 718（单测跑 H2 内存库；C1 集成测试跑真实 MySQL——Testcontainers，见 [ADR-008](docs/adr/ADR-008-it-mysql-testcontainers.md)）/ Python 1965 / 前端 117 单测 + 73 E2E；schema-h2 与迁移链**漂移零容忍**（漏同步直接 CI 红）、文档测试计数与代码强同步、离线评测门禁（recall/nDCG/引用 P·R·F1 基线，引用窗口按相关性自适应，见 [ADR-006](docs/adr/ADR-006-faithfulness-metric-recalibration.md)）。
+- **测试与防漂移门禁**：Java 718（单测跑 H2 内存库；C1 集成测试跑真实 MySQL——Testcontainers，见 [ADR-008](docs/adr/ADR-008-it-mysql-testcontainers.md)）/ Python 1968 / 前端 117 单测 + 73 E2E；schema-h2 与迁移链**漂移零容忍**（漏同步直接 CI 红）、文档测试计数与代码强同步、离线评测门禁（recall/nDCG/引用 P·R·F1 基线，引用窗口按相关性自适应，见 [ADR-006](docs/adr/ADR-006-faithfulness-metric-recalibration.md)）。
 - **数据规模**：Flyway 迁移链 V1–V86、26 轮自审修复批次（全部记录在 CHANGELOG）、48 项冒烟自测全过。
 
 ## 质量与验证口径（如实）
@@ -44,7 +44,7 @@ HFusionHub 是一个可以私有部署的 AI Agent 平台：上传文档建知�
 | 维度 | 口径 |
 |---|---|
 | 功能冒烟 | `scripts/smoke-test.ps1` 48 项 PASS / 0 FAIL（本地 Compose 全链路） |
-| 单元/集成 | Java 718（单测 H2 + 集成真 MySQL 9/9 类：Testcontainers 或外部库通道，smoke 那类另由 `CI_SMOKE_PYTHON_URL` 门控）/ Python 1965 / 前端 117 单测 |
+| 单元/集成 | Java 718（单测 H2 + 集成真 MySQL 9/9 类：Testcontainers 或外部库通道，smoke 那类另由 `CI_SMOKE_PYTHON_URL` 门控）/ Python 1968 / 前端 117 单测 |
 | E2E | Playwright 73 用例（登录/知识库/对话/审批/插件等关键路径，CI e2e job） |
 | 检索质量 | 离线冻结套件 220 用例（CI push 阻断门禁）+ nightly 纯检索轨（[R17](docs/OPTIMIZATION_PLAN.md)） |
 | 答案层质量 | runtime nightly（延迟/拒答/引用/工具成功率，非阻断监测，标注模型版本） |
@@ -238,7 +238,7 @@ docker compose -f deploy/docker-compose.prod.yml up -d
 ## 📖 文档索引（Documentation Index）
 
 > 所有文档位于 [docs/](docs/) 目录，按用途分三类：**开发**、**运维**、**治理**。
-> 关键事实基线：Java 718 测试 / Python 1965 / 前端 117 单测 + 73 E2E / Flyway V86 / Spring Boot 3.5.16。
+> 关键事实基线：Java 718 测试 / Python 1968 / 前端 117 单测 + 73 E2E / Flyway V86 / Spring Boot 3.5.16。
 > 离线评测基线（suite 1.1.0，2026-09-05 冻结，引用模拟含压缩感知）：Recall@5=0.932 / nDCG@10=0.903 / 引用准确率=0.942 / 引用忠实度 F1=0.741（精确率 0.703、召回率 0.894）。答案逐论断引用 `[n]` 标注经 `cited_chunk_ids` 透出，runtime 轨按答案实际标注的引用计分。
 > runtime 评测基线（suite 1.1.0，2026-09-05 首次实测、工具路由修复后重冻结，DeepSeek-v4-flash 单机全栈）：越界检索 0 / 错误率 0 / 引用忠实度（按答案标注引用）0.75 / 工具成功率 0.80 / 拒答正确率 0.625（注入 25/25 + 超纲 25/25 通过；权限类当时 0/30 拖累该值，主体级 ACL 收口后 permission 复测 30/30，见 CHANGELOG 第三十二批/第三十五批）/ runtime 召回 0.8564（Recall@5 过门禁；与离线 0.932 的差距为生产检索栈 vs 合成轨差异）。
 > 性能基线（单机全栈实测，2026-09-05，[docs/baselines/baseline-v1-20260905.txt](docs/baselines/baseline-v1-20260905.txt)）：Java API 五个读端点 P95 21~130ms / RAG 检索 P95 2261ms（瓶颈为本地 CPU 查询向量化）/ 文档处理端到端 P50 39.7s。

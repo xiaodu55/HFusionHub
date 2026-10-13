@@ -222,20 +222,6 @@ def _mark_synced(entry_id: str) -> None:
         logger.error("SQLite 标记同步失败: %s", e)
 
 
-def _mark_dead_letter(entry_id: str) -> None:
-    """Mark an entry as dead-letter (exceeded max retries, never auto-cleaned)."""
-    try:
-        with _db_lock:
-            db = _get_db()
-            db.execute(
-                "UPDATE audit_queue SET dead_letter = 1, synced = 0 WHERE id = ?",
-                (entry_id,),
-            )
-            db.commit()
-    except Exception as e:
-        logger.error("SQLite 标记 dead-letter 失败: %s", e)
-
-
 def _get_unsynced_entries(limit: int = 100) -> list[AuditEntry]:
     try:
         with _db_lock:
@@ -260,17 +246,34 @@ def _get_unsynced_entries(limit: int = 100) -> list[AuditEntry]:
         return []
 
 
-def _increment_retry(entry_id: str) -> None:
+def _register_failed_attempt(entry_id: str) -> bool:
+    """记一次失败的出站，返回这一行是否被**本次调用**标成 dead-letter。
+
+    读当前 retry_count、自增、落 dead-letter 三步共用同一次持锁。拆成"先自增、再按
+    `_do_flush` 那份快照判超限、最后落标记"就留了一道窗口：快照取回到回写之间，运维的
+    `retry_dead_letters()` 可以把行回灌（`dead_letter=0, retry_count=0`），而那条拿着过期
+    retry_count 的判定会把它翻回 dead-letter——回灌等于没生效（第一百零七批的对象）。
+    比的是"自增之前"读到的计数，与旧判定同形，只是把它从快照抬到了当前行。
+    """
     try:
         with _db_lock:
             db = _get_db()
+            row = db.execute("SELECT retry_count FROM audit_queue WHERE id = ?", (entry_id,)).fetchone()
             db.execute(
                 "UPDATE audit_queue SET retry_count = retry_count + 1, last_attempt_at = ? WHERE id = ?",
                 (time.time(), entry_id),
             )
+            exhausted = row is not None and row[0] >= _MAX_RETRIES
+            if exhausted:
+                db.execute(
+                    "UPDATE audit_queue SET dead_letter = 1, synced = 0 WHERE id = ?",
+                    (entry_id,),
+                )
             db.commit()
-    except Exception:
-        pass
+        return exhausted
+    except Exception as e:
+        logger.error("SQLite 记录失败重试次数出错: %s", e)
+        return False
 
 
 def _cleanup_synced() -> int:
@@ -332,13 +335,12 @@ def _do_flush() -> int:
             _mark_synced(entry.id)
             flushed += 1
         else:
-            _increment_retry(entry.id)
-            if entry.retry_count >= _MAX_RETRIES:
+            # 超限与否取回写的返回值，不取 entries 那份出站前读的快照
+            if _register_failed_attempt(entry.id):
                 logger.warning(
                     "审计条目超过最大重试次数，标记为 dead-letter（保留用于审计，不再自动重试）: %s",
                     entry.id,
                 )
-                _mark_dead_letter(entry.id)
 
     if flushed:
         logger.info("审计日志已同步到 Java 后端: %d 条", flushed)

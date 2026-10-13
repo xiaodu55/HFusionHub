@@ -373,6 +373,8 @@ bid_terminology_accuracy` 聚合值均为 `1.0`。四份报告末尾都是 `"gat
 - `python-ai/tests/test_workflow_run_scalars.py` — 检查 14 的判据：四道门的 argv 形状、`--flag` 与 argparse 的契约、历史折叠形态真会红
 - `python-ai/tests/test_python_clock_caliber_gate.py` — 检查 15（python 钟面口径）的判据：真仓库绿、已并入默认全跑档、每种漂移（裸读法 / `TZ` 缺失 / 非 UTC / helm 死键 / 工作负载标记改名）都红；工作负载集合另用 PyYAML 写一个 oracle
 - `python-ai/tests/test_tool_clock_caliber.py` — 内置时间工具的钟面行为判据（显式 UTC 口径 + 进程时区免疫，免疫那例在 POSIX 容器里执行、Windows 上跳过）
-- `python-ai/tests/test_db_lock_lifetime_gate.py` — 检查 16（审计库共享 SQLite 连接）的判据：真仓库绿、已并入默认全跑档、锁外取连接 / 锁外关连接 / 整组改名 / 适用面为空 / 语法坏掉这五种形态都红，同行 `with` 写法不误伤；行为侧的确定性红在 `test_plugin_audit.py::TestDbConnectionLifetime`
+- `python-ai/tests/test_db_lock_lifetime_gate.py` — 检查 16（审计库共享 SQLite 连接）的判据：真仓库绿、已并入默认全跑档、锁外取连接 / 锁外关连接 / 整组改名 / 适用面为空 / 语法坏掉这五种形态都红，同行 `with` 写法不误伤；行为侧的确定性红在 `test_plugin_audit.py::TestDbConnectionLifetime`。反空阈值现为 `>= 12`（9 个 `_get_db()` 调用点 ＋ `_reset_db` 里 3 处 `_db_conn` 读写），构成变化时按账改阈值、不改规则
+- `python-ai/tests/test_plugin_audit.py::TestFlushVerdictReadsCurrentRow` — 审计 flush 的超限判定必须读**行的当前状态**的判据：events 把在途 flush 卡在"快照 → 回写"之间，运维回灌后不得被旧快照翻回 dead-letter（第一百零七批）
+- `python-ai/tests/conftest.py::_stop_audit_flusher` + `test_plugin_audit.py::TestAuditFlusherIsolation` — 测试隔离门禁：autouse fixture 换库前后各停一次 `audit-flusher`（join 不掉直接 `pytest.fail`），配一条反空判定先证明 `record_audit` 真起了 daemon，否则"开局无残留线程"会凭空绿（第一百零七批）
 - `python-ai/tests/test_eval_suite_eol_binding.py` — 冻结摘要与行尾无关的判据（钉值、两种检出形态、篡改仍红、emit 写 LF）
 - `.git-blame-ignore-revs` + `CONTRIBUTING.md`「Java code style (spotless)」— 全仓重排那一笔如何不污染 `git blame`

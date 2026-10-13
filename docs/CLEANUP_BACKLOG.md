@@ -315,8 +315,8 @@
   所以崩溃没了；但"退出函数返回时仍有出站未确认"这一事实保留，判据方向是让它返回时把在途线程的
   身份交给调用方（或干脆不另起线程，改为在预算内轮询 `outcome`）。生产侧今天无 `_reset_db` 调用方，
   优先级低于第一百一十一/一百一十二批。
-- [ ] **审计 flush 的超限判定读的是快照而不是行的当前状态：一条在途的 flush 可以把运维刚回灌的
-  dead-letter 行再翻回 dead-letter**（第一百零六批第四次全套件踩到并取证，未处置）——
+- [x] **审计 flush 的超限判定读的是快照而不是行的当前状态：一条在途的 flush 可以把运维刚回灌的
+  dead-letter 行再翻回 dead-letter**（第一百零六批第四次全套件踩到并取证，第一百零七批处置）——
   `python-ai/app/core/plugin/audit.py:309` 的 `_do_flush()` 是
   「`_get_unsynced_entries()`（`:239`）取快照 → 锁外做出站 I/O → 用**快照里的** `entry.retry_count`
   判 `>= _MAX_RETRIES`（`:336`）→ `_mark_dead_letter()`（`:225`）」，`_db_lock` 只保证每条语句原子，
@@ -341,6 +341,33 @@
   ③测试串台那一半单独处置：autouse fixture 在换库前后把 `_flush_stop` 置位并 join 掉
   `audit-flusher`，别让 daemon 写进别人的临时库——**这是修隔离，不是放宽任何断言**。
   不得改成把 `assert retry_dead_letters() == 0` 放宽成 `<= 1`，也不得给该用例加 skip/重跑。
+  **处置（第一百零七批，2026-10-12）——两处都按判据方向改掉，没有任何断言被放宽**：
+  ①实现侧删掉 `_mark_dead_letter`（改前 `:225`）与 `_increment_retry`，合成
+  **`_register_failed_attempt(entry_id)`（现 `:249`）**：`retry_count` 的读、自增、落 `dead_letter = 1`
+  三步共用**同一次** `with _db_lock:`，超限与否比的是"自增之前读到的当前行计数"，与旧判定同形，
+  只是从快照抬到当前行；`_MAX_RETRIES` 仍走 Python 侧比较而**不是** SQL 常量拼接，
+  测试对 `_MAX_RETRIES` 的 patch 照旧生效。`_do_flush`（现 `:312`）不再自己判超限，
+  只按 `_register_failed_attempt` 的返回值决定要不要打那条 warning（现 `:339`）。
+  ②测试侧把取证用的确定性编排做成 `tests/test_plugin_audit.py::TestFlushVerdictReadsCurrentRow`：
+  在途 flush 的 `_post_to_java_backend` 被 patch 成"发出 `snapshot` 事件后卡在 `release` 上"，
+  主线程在这段窗口里跑完一轮 `_do_flush()` ＋ `retry_dead_letters()`，再放行在途线程
+  ⇒ 改前红（`first=1 second=1`，回灌的行又被翻回 dead-letter，且 `get_sync_status()["dead_letter"] == 1`），
+  改后绿（`first=1 second=0`，`dead_letter == 0`）。
+  ③串台那一半单独改成修隔离：`tests/conftest.py` 的 autouse fixture 在 `_reset_db()` **之前和之后**
+  都调用新的 `_stop_audit_flusher()`（置 `_flush_stop`、摘走 `_flush_thread` 句柄、join 30s，
+  join 不掉就 `pytest.fail` 并写明"它会把这次 flush 写进下一条用例的临时审计库"）——
+  换库前先停线程，避免上一条用例留下的 daemon 写当下这条用例的库。配套
+  `TestAuditFlusherIsolation::test_record_audit_really_starts_the_daemon` 是反空判定：
+  先证明 `record_audit` 确实留下一个活着的 `audit-flusher`，否则"没有残留线程"那条会凭空绿。
+  **改前那批行号（`:309/:239/:336/:225/:430/:558`）记的是取证时的位置，现行为**
+  `_do_flush :312 / _get_unsynced_entries :225 / _register_failed_attempt :249 / 调用点 :339 /
+  _ensure_flush_thread :432 / retry_dead_letters :560`（`grep -n "^def "` 于 `audit.py` 复核）。
+  验证：`tests/test_plugin_audit.py` 51 → **54 passed**；检查 16 的反空阈值按构成从 `>= 13` 改成 `>= 12`
+  （9 个 `_get_db()` 调用点 ＋ `_reset_db` 里 3 处 `_db_conn` 读写——第一百零六批量到 13 是因为那时
+  `_mark_dead_letter` 里还有第 10 个调用点，本批把它折进 `_register_failed_attempt` 少了一个；
+  是构成变了、不是规则匹配不上，`test_db_lock_lifetime_gate.py` 的 docstring 里写明了这笔账）；
+  `scripts/static-checks.py` 全模式退出 0，检查 16 那行现为"扫描 1 个碰共享连接的模块、12 处引用"；
+  全套件连跑两次绿（`2083 passed, 12 skipped`，日志 `b107_pytest_run1/2.log`）。
 - [ ] **Flyway 迁移步骤在 `e2e.yml` / `eval-nightly.yml` 从诞生起就没过过：插件只认
   `-Dflyway.*`，而步骤给的是 `SPRING_DATASOURCE_*`（四处站点，`ci.yml` 里已有写对的那一份）**
   （第一百零四批取证，未处置）—— run 38221938525（＝ `8054f32e`）的 `e2e-full` job 死在这一步，日志原文：
