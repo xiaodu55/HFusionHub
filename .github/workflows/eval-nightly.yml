@@ -89,11 +89,11 @@ jobs:
 
       - name: Run Flyway migrations
         working-directory: java-backend
-        env:
-          SPRING_DATASOURCE_URL: jdbc:mysql://localhost:3306/hfusionhub
-          SPRING_DATASOURCE_USERNAME: e2e
-          SPRING_DATASOURCE_PASSWORD: e2e-pass
-        run: mvn --batch-mode flyway:migrate
+        run: |
+          mvn --batch-mode flyway:migrate \
+            -Dflyway.url=jdbc:mysql://localhost:3306/hfusionhub \
+            -Dflyway.user=e2e \
+            -Dflyway.password=e2e-pass
 
       - name: Start Java backend
         working-directory: java-backend

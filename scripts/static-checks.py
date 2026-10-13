@@ -1627,6 +1627,224 @@ def check_db_lock_lifetime() -> None:
         )
 
 
+# ── 检查 17：Flyway 步骤必须把插件真读的那三个值传到命令行上 ──────────────
+
+JAVA_POM = REPO / "java-backend" / "pom.xml"
+
+# flyway-maven-plugin 的连接配置只认 `-Dflyway.url/user/password`、`flyway.conf` 或
+# `FLYWAY_*` 环境变量，**不**认 Spring 的 `SPRING_DATASOURCE_*`。第一百零八批的对象就是
+# 把连接信息只写进 Spring 键的那三处站点：步骤从诞生起就死在
+# `FlywayException: Unable to connect to the database. Configure the url, user and password!`
+FLYWAY_CONNECTION_FLAGS = ("-Dflyway.url=", "-Dflyway.user=", "-Dflyway.password=")
+SPRING_DB_KEYS = ("SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATASOURCE_PASSWORD")
+
+# 每个 workflow 里应当存在的 flyway 调用数（存在性也钉住——处置不得退化成"把红的那一步删掉"）。
+# ci.yml 是 1 个 migrate + 1 个 info；e2e.yml 两个 job 各 1 个 migrate；eval-nightly.yml 1 个。
+FLYWAY_STEP_EXPECTATIONS = {"ci.yml": 2, "e2e.yml": 2, "eval-nightly.yml": 1}
+
+_FLYWAY_GOAL_RE = re.compile(
+    r"flyway:(?:migrate|info|validate|clean|undo|baseline|repair)\b"
+)
+# 步骤起始行：`- <key>:` 才算（`- 22` 这类矩阵元素不是步骤，把它当边界会把步骤块切碎）
+_STEP_START_RE = re.compile(r"^(?P<indent> *)- (?P<key>[\w.-]+):(?P<rest>.*)$")
+
+
+def _step_block(lines: list[str], idx: int, indent: str) -> list[str]:
+    """一个步骤的文本范围：从 `- name:` 那行起，到下一条缩进不大于它的非空行为止。
+
+    按缩进切而不是按"下一个 `- xxx:`"切，是因为步骤块后面可能紧跟 job 级的键
+    （`  frontend:`）或 `defaults:` 里的 `run:`——它们都不是这个步骤的组成部分，
+    把后者当 `run:` 读会让真正的脚本正文被空值覆盖。
+    """
+    width = len(indent)
+    for j in range(idx + 1, len(lines)):
+        line = lines[j]
+        if not line.strip():
+            continue
+        if len(line) - len(line.lstrip()) <= width:
+            return lines[idx:j]
+    return lines[idx:]
+
+
+def _step_key(block: list[str], key_col: int, key: str) -> tuple[int, str]:
+    """步骤自己的那个键，返回 (块内行号, 行内值)；没有则 (-1, "")。
+
+    键要么正好落在 `key_col` 这一列，要么就挂在起始那个 `- ` 列表符后面（`- name:` 的
+    `name` 前面是 6 个空格加 `- `，不是 8 个空格）——只按纯缩进匹配会把步骤名读成空。
+    只认这一列的键：job 的 `defaults:` 里也有 `run:`，把它当成步骤脚本读，
+    真正的脚本正文就会被一个空值盖掉（第一百零八批写这条门时先踩过一次）。
+    """
+    pattern = re.compile(
+        "^(?:" + " " * key_col + "|" + " " * (key_col - 2) + r"- )"
+        + re.escape(key) + r":(?P<value>.*)$"
+    )
+    for offset, line in enumerate(block):
+        match = pattern.match(line)
+        if match:
+            return offset, match.group("value").strip()
+    return -1, ""
+
+
+def _workflow_steps(path: Path) -> list[dict]:
+    """把 workflow 文本切成步骤，返回 [{name, lineno, env, run}, …]，纯文本、不依赖 YAML 库。
+
+    `run:` 只解两种现行形态：块标量（`|`/`>`，取更深缩进的正文，**不含标量指示符本身**——
+    YAML 解析出的值里也没有它）与单行内联。带续行的行内标量由检查 14 单独判红，这里不重复它的结论。
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    steps: list[dict] = []
+    for idx, line in enumerate(lines):
+        match = _STEP_START_RE.match(line)
+        if not match:
+            continue
+        indent = match.group("indent")
+        block = _step_block(lines, idx, indent)
+        key_col = len(indent) + 2
+
+        _, name = _step_key(block, key_col, "name")
+        env_offset, _ = _step_key(block, key_col, "env")
+        run_offset, run_value = _step_key(block, key_col, "run")
+
+        env_rows: list[str] = []
+        if env_offset >= 0:
+            for nxt in block[env_offset + 1:]:
+                if not nxt.strip() or len(nxt) - len(nxt.lstrip()) <= key_col:
+                    break
+                env_rows.append(nxt)
+
+        run_text = run_value
+        if run_offset >= 0 and run_value[:1] in ("|", ">"):
+            body: list[str] = []
+            for nxt in block[run_offset + 1:]:
+                if not nxt.strip():
+                    body.append("")
+                    continue
+                if len(nxt) - len(nxt.lstrip()) <= key_col:
+                    break
+                body.append(nxt.strip())
+            run_text = "\n".join(body)
+
+        steps.append({
+            "name": name,
+            "lineno": idx + 1,
+            "env": "\n".join(env_rows),
+            "run": run_text,
+            "soft": any("continue-on-error: true" in b for b in block),
+        })
+    return steps
+
+
+def _flyway_offenders(wf_files: list[Path]) -> tuple[list[str], int]:
+    """返回 (违规清单, 核对到的 flyway 调用数)。"""
+    offenders: list[str] = []
+    counts: dict[str, int] = {}
+    for wf in wf_files:
+        counted = 0
+        for step in _workflow_steps(wf):
+            if not _FLYWAY_GOAL_RE.search(step["run"]):
+                continue
+            counted += 1
+            where = f"{_repo_rel(wf)}:{step['lineno']}（步骤 {step['name'] or '未命名'}）"
+            missing = [
+                flag for flag in FLYWAY_CONNECTION_FLAGS
+                if not re.search(re.escape(flag) + r"\S", step["run"])
+            ]
+            if missing:
+                offenders.append(
+                    f"{where} 命令行缺 {', '.join(missing)}——flyway-maven-plugin 不读别的名字，"
+                    "拿到空配置就报 `Unable to connect to the database`"
+                )
+            dead = [key for key in SPRING_DB_KEYS if key in step["env"]]
+            if dead:
+                offenders.append(
+                    f"{where} 的连接信息写成了 {', '.join(dead)}——插件不读 Spring 的键，"
+                    "这三个值是空转的开关"
+                )
+            if step["soft"]:
+                offenders.append(f"{where} 带 `continue-on-error: true`——迁移失败必须让 job 红")
+        counts[wf.name] = counts.get(wf.name, 0) + counted
+
+    for filename, expected in FLYWAY_STEP_EXPECTATIONS.items():
+        actual = counts.get(filename, 0)
+        if actual != expected:
+            offenders.append(
+                f"{filename} 里 flyway 调用数是 {actual}，预期 {expected}——"
+                "步骤被删或被改名会让这条门只剩「没东西可查」的空绿"
+            )
+
+    pom_offenders = _flyway_plugin_pin_offenders()
+    offenders.extend(pom_offenders)
+    return offenders, sum(counts.values())
+
+
+def _flyway_plugin_pin_offenders() -> list[str]:
+    """pom 必须显式声明 flyway-maven-plugin，且版本指向运行时那个 flyway。
+
+    没有声明时 `mvn flyway:migrate` 走 Maven 前缀解析，每次从 central 取**当时最新**版本
+    （日志里就出现过 `flyway:11.7.2` ＋两条 metadata 401 噪声）——插件版本与运行时
+    `flyway-core`（由 spring-boot-starter-parent 的 `flyway.version` 管理）分家，
+    同一条迁移链可能被两个大版本解释。所以钉的是 `${flyway.version}` 这个**引用**，
+    不是某个数字字面量：写字面量等于把同源关系复制成两处会各自漂移的常量。
+    """
+    if not JAVA_POM.is_file():
+        return [f"{_repo_rel(JAVA_POM)} 缺失，无法核对 flyway-maven-plugin 的钉版"]
+    pom = JAVA_POM.read_text(encoding="utf-8")
+    block = re.search(
+        r"<plugin>\s*<groupId>org\.flywaydb</groupId>\s*"
+        r"<artifactId>flyway-maven-plugin</artifactId>(.*?)</plugin>",
+        pom,
+        re.S,
+    )
+    if not block:
+        return [
+            "java-backend/pom.xml 没有声明 flyway-maven-plugin——`mvn flyway:migrate` 会按前缀"
+            "浮动解析最新版本，与运行时 flyway-core 不同源"
+        ]
+    version_match = re.search(r"<version>([^<]*)</version>", block.group(1))
+    if not version_match:
+        return ["pom 的 flyway-maven-plugin 没有 <version>——仍然是浮动解析"]
+    version = version_match.group(1).strip()
+    if version == "${flyway.version}":
+        return []
+    return [
+        f"pom 的 flyway-maven-plugin 钉的是 `{version}`，不是 `${{flyway.version}}`——"
+        "写成数字就把「插件与运行时 flyway 同版本」这件事从结构保证降级成一次人工同步"
+    ]
+
+
+def check_flyway_cli() -> None:
+    """CI 里每一次 flyway 调用都必须传插件真读的旗标，且插件版本与运行时同源。
+
+    行为侧的判据不在这里：本检查只管 workflow 文本与 pom 的形状。"迁移确实发生"是
+    第一百零八批在活 MySQL 8.0.46 上按同一行命令实测的（87 条迁移全部应用，
+    `flyway_schema_history` 87 行 success=1，schema 落到 v86），
+    证据记在 CHANGELOG 与 docs/CI_GATES.md，不由这条文本门冒充。
+    """
+    if not WORKFLOW_DIR.is_dir():
+        problems.append(f"检查 17：workflow 目录不存在 {_repo_rel(WORKFLOW_DIR)}")
+        return
+    wf_files = sorted(p for p in WORKFLOW_DIR.iterdir() if p.suffix in (".yml", ".yaml"))
+    if not wf_files:
+        problems.append(f"检查 17：{_repo_rel(WORKFLOW_DIR)} 下没有 workflow 文件")
+        return
+
+    offenders, calls = _flyway_offenders(wf_files)
+    if not calls:
+        problems.append(
+            f"检查 17 的适用面为空：没有任何 workflow 再调用 flyway——"
+            f"删掉这些步骤或把 goal 改名会让这条门静默变绿（预期 {FLYWAY_STEP_EXPECTATIONS}）"
+        )
+        return
+    if offenders:
+        problems.append("Flyway 命令行/钉版形态不合法:\n    " + "\n    ".join(offenders))
+    else:
+        print(
+            f"[ok] Flyway 命令行旗标：扫描 {len(wf_files)} 个 workflow / {calls} 处 flyway 调用，"
+            f"全部显式传 {', '.join(flag.rstrip('=') for flag in FLYWAY_CONNECTION_FLAGS)}，"
+            "且 pom 把 flyway-maven-plugin 钉到 ${flyway.version}"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
@@ -1645,6 +1863,7 @@ def main() -> int:
     parser.add_argument("--python-clock-caliber", action="store_true")
     parser.add_argument("--workflow-run-scalars", action="store_true")
     parser.add_argument("--db-lock-lifetime", action="store_true")
+    parser.add_argument("--flyway-cli", action="store_true")
     args = parser.parse_args()
 
     if not (args.tenant_columns or args.internal_token_keys or args.test_counts
@@ -1653,14 +1872,15 @@ def main() -> int:
             or args.document_storage_root or args.eval_harness_storage
             or args.requirements_markers or args.frontend_time_entry
             or args.write_clock_caliber or args.python_clock_caliber
-            or args.workflow_run_scalars or args.db_lock_lifetime):
+            or args.workflow_run_scalars or args.db_lock_lifetime
+            or args.flyway_cli):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
             args.flyway_doc_sync = args.h2_schema_drift = \
             args.readme_claims = args.helm_value_roots = args.container_uid = \
             args.document_storage_root = args.eval_harness_storage = \
             args.requirements_markers = args.frontend_time_entry = \
             args.write_clock_caliber = args.python_clock_caliber = \
-            args.workflow_run_scalars = args.db_lock_lifetime = True
+            args.workflow_run_scalars = args.db_lock_lifetime = args.flyway_cli = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -1694,6 +1914,8 @@ def main() -> int:
         check_workflow_run_scalars()
     if args.db_lock_lifetime:
         check_db_lock_lifetime()
+    if args.flyway_cli:
+        check_flyway_cli()
 
     if problems:
         print("\n发现问题:")

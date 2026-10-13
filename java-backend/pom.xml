@@ -208,6 +208,15 @@
 
     <build>
         <plugins>
+            <!-- 不声明这一段时，`mvn flyway:migrate` 会按 Maven 前缀浮动解析中央仓库最新版
+                 （第一百零八批实测：CI 日志里解析到的是 11.7.2，纯靠运气与运行时同版本）。
+                 钉成 ${flyway.version}——它由父 spring-boot-dependencies 声明，也就是
+                 flyway-core 依赖自己的版本，于是「命令行插件」与「运行时 Flyway」同源。 -->
+            <plugin>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-maven-plugin</artifactId>
+                <version>${flyway.version}</version>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
