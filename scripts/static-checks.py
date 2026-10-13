@@ -92,6 +92,27 @@
   `_db_conn` 的读写，都必须落在 `with _db_lock:` 的体内。适用面按"有没有碰这三个名字"
   算，一个都没扫到就判红——只认锁名的话，整组改名会让这条门静默变成空扫描。
 
+检查 17：Flyway 在 CI 里必须传插件真读的旗标，且插件与运行时同源
+  workflow 里的 `mvn flyway:migrate` 只认 `-Dflyway.url/user/password`，把连接信息写进
+  `SPRING_DATASOURCE_*` 环境变量等于没传（第一百零八批：那个步骤从诞生起就红）。同时
+  pom 必须把 flyway-maven-plugin 钉到 `${flyway.version}`——不声明时 Maven 按前缀浮动解析
+  中央仓库最新版，与运行时 flyway-core 各自漂移。适用面按"调用次数=预期表"算，对不上就红。
+
+检查 18：容器轨上"配置写了、实体或语义对不上"的四类断链
+  ① compose 的 command 里 `python -m arq <模块>.WorkerSettings` 的模块必须真在该服务
+  Dockerfile 的 COPY 集合里——第一百零九批实测：Dockerfile.python 只 COPY app/，worker 在
+  容器里 ModuleNotFoundError 崩溃循环，队列侧 job 滞留而 API 层全程正常。
+  ② 拓扑里的 redis 以 `--requirepass` 启动时，每个声明 `SPRING_DATA_REDIS_HOST` 的 java
+  工作负载必须成对声明密码键——dev compose 缺这一对时登录 500
+  RedisConnectionFailureException，而 prod compose 一直是成对的。
+  ③ java 侧读来当 python 基址的属性（`@Value("${...:http://host:9000}")`）必须在
+  application.yml 里写成 `${同一个环境变量:...}`，且那个变量在三档拓扑的 java 工作负载上都
+  得声明——python-ai.base-url / python-ai.engine.url 曾是裸字面量，容器里 java 把解析请求
+  打到自己的 localhost:9000（400 I/O error）。
+  ④ 跑 arq worker 的服务不得继承（或自定义）打 HTTP 端口的存活探针——它不监听 9000，实测
+  永久 unhealthy（probe_http=000），真正的崩溃循环反而被这片假红盖住。
+  四条的适用面都按数量核对（表面缩小或整族消失=前提变了，判红）；helm 的 redis 不起 requirepass 故不在②。
+
 用法:
   python scripts/static-checks.py --tenant-columns
   python scripts/static-checks.py --internal-token-keys
@@ -1845,6 +1866,469 @@ def check_flyway_cli() -> None:
         )
 
 
+# ── 检查 18：容器轨的两条"配置写了，但容器里没有对应实体"契约 ────────────────
+
+COMPOSE_TOPOLOGIES = (
+    ("docker/docker-compose.yml", COMPOSE_DEV),
+    ("deploy/docker-compose.prod.yml", COMPOSE_PROD),
+)
+
+# 规则③的下界（只防"越扫越少"，不防新增：新属性若没并进同一个环境变量，配对规则自然红）
+PYTHON_BASE_URL_MIN_PROPERTIES = 3
+PYTHON_BASE_URL_MIN_SITES = 10
+PYTHON_BASE_URL_RE = re.compile(
+    r'@Value\("\$\{([A-Za-z0-9_.-]+):(https?://[^/"}\s]+:9000[^/"}\s]*)\}"\)'
+)
+# java→python 出站地址在三个部署面上的落点（compose 取服务块，helm 取整份模板）
+PYTHON_BASE_URL_TOPOLOGIES = (
+    ("docker/docker-compose.yml", COMPOSE_DEV, "java-backend"),
+    ("deploy/docker-compose.prod.yml", COMPOSE_PROD, "java-backend"),
+    ("deploy/helm/hfusionhub/templates/java.yaml", HELM_JAVA_TEMPLATE, None),
+)
+
+# 预期适用面：数量漂移=前提变了，必须先响，不能悄悄变成空扫描。
+#   ARQ_WORKER_SERVICES：dev 拓扑恰有一个 `python -m arq` worker 服务
+#   REDIS_CLIENT_SERVICES：两拓扑各有一个声明 SPRING_DATA_REDIS_HOST 的 java 工作负载
+ARQ_WORKER_SERVICES = {"docker/docker-compose.yml": 1}
+REDIS_CLIENT_SERVICES = {
+    "docker/docker-compose.yml": 1,
+    "deploy/docker-compose.prod.yml": 1,
+}
+REDIS_PASSWORD_KEYS = ("SPRING_DATA_REDIS_PASSWORD", "REDIS_PASSWORD")
+ARQ_SETTINGS_SUFFIX = ".WorkerSettings"
+
+
+def _dockerfile_final_stage(text: str) -> str:
+    """Dockerfile 的运行阶段（最后一个 FROM 段）——只有它决定容器里最终有什么。"""
+    stages = re.split(r"^FROM\b", _strip_comments(text), flags=re.MULTILINE)[1:]
+    return stages[-1] if stages else ""
+
+
+def _command_tokens(block: str) -> list[str]:
+    """服务块里的 command，兼容 flow 列表与短横列表两种 YAML 写法。"""
+    text = _strip_comments(block)
+    flow = re.search(r"^\s*command:\s*\[(.*)\]\s*$", text, re.MULTILINE)
+    if flow:
+        return [tok.strip().strip("'\"") for tok in flow.group(1).split(",")]
+    head = re.search(r"^\s*command:\s*$", text, re.MULTILINE)
+    if not head:
+        return []
+    key_indent = len(head.group(0)) - len(head.group(0).lstrip())
+    tokens: list[str] = []
+    item_indent: int | None = None
+    for line in text[head.end() :].splitlines():
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        item = re.match(r"^\s*-\s+(.+?)\s*$", line)
+        if item is None or indent <= key_indent:
+            break
+        if item_indent is None:
+            item_indent = indent
+        elif indent != item_indent:
+            break
+        tokens.append(item.group(1).strip("'\""))
+    return tokens
+
+
+def _arq_entry_module(tokens: list[str]) -> tuple[str | None, str | None]:
+    """`python -m arq <模块>.WorkerSettings` 里的模块路径，返回 (模块, 形状问题)。"""
+    for idx, token in enumerate(tokens):
+        if token != "-m" or idx + 1 >= len(tokens) or tokens[idx + 1] != "arq":
+            continue
+        for arg in tokens[idx + 2 :]:
+            if arg.startswith("-"):
+                continue
+            if arg.endswith(ARQ_SETTINGS_SUFFIX):
+                return arg[: -len(ARQ_SETTINGS_SUFFIX)], None
+            return None, f"arq 的入口参数 {arg!r} 不是 `<模块>{ARQ_SETTINGS_SUFFIX}` 形状"
+        return None, "命令里有 `-m arq` 但没有入口参数"
+    return None, None
+
+
+def _copy_instructions(text: str) -> list[tuple[str, str]]:
+    """运行阶段的 COPY，展开成 [(源, 目标)]；`--from=`/`--chmod=` 等旗标先丢掉。"""
+    pairs: list[tuple[str, str]] = []
+    for line in _dockerfile_final_stage(text).splitlines():
+        matched = re.match(r"^COPY\s+(.*)$", line.strip())
+        if matched is None:
+            continue
+        parts = [tok for tok in matched.group(1).split() if not tok.startswith("--")]
+        if len(parts) < 2:
+            continue
+        *sources, target = parts
+        pairs.extend((src, target) for src in sources)
+    return pairs
+
+
+def _image_top_level_names(dockerfile: Path) -> set[str]:
+    """镜像在 WORKDIR 上可直接 import 的顶层名字，只认仓内实际用的两种 COPY 形状。
+
+    `COPY app/ app/` ⇒ 包 app（源与目标基名同号）；`COPY x.py .` ⇒ 顶层模块 x。
+    落到 WORKDIR 之外或另有目标名的形状一律不计入：这个集合只用来证明"覆盖"，
+    少判只会让门变红，不会让门变绿。
+    """
+    text = dockerfile.read_text(encoding="utf-8")
+    workdirs = re.findall(
+        r"^WORKDIR\s+(\S+)\s*$", _dockerfile_final_stage(text), re.MULTILINE
+    )
+    roots = {".", ""}
+    if workdirs:
+        roots.add(workdirs[-1].strip("/"))
+    names: set[str] = set()
+    for src, target in _copy_instructions(text):
+        source = src.rstrip("/")
+        dest = target.rstrip("/")
+        if source.endswith(".py"):
+            if dest in roots:
+                names.add(Path(source).stem)
+            continue
+        if "." in Path(source).name or "/" in dest:
+            continue
+        if dest == Path(source).name:
+            names.add(dest)
+    return names
+
+
+def _service_build_paths(block: str, compose_path: Path) -> tuple[Path | None, Path | None]:
+    """服务块里的 build.context 与 build.dockerfile，解析成仓库内的绝对路径。
+
+    Compose 规范里 `dockerfile` 相对于 `context`，dev/prod 两份都按这条写
+    （context=../python-ai，dockerfile=../deploy/Dockerfile.python ⇒ deploy/）。
+    """
+    text = _strip_comments(block)
+    context = re.search(r"^\s+context:\s*(\S+)\s*$", text, re.MULTILINE)
+    if context is None:
+        return None, None
+    ctx = (compose_path.parent / context.group(1)).resolve()
+    dockerfile = re.search(r"^\s+dockerfile:\s*(\S+)\s*$", text, re.MULTILINE)
+    df = (ctx / dockerfile.group(1)).resolve() if dockerfile else (ctx / "Dockerfile")
+    return ctx, df
+
+
+def _module_covered(module: str, names: set[str]) -> bool:
+    if "." in module:
+        return module.split(".", 1)[0] in names
+    return module in names
+
+
+def _worker_module_offenders() -> tuple[list[str], int]:
+    """规则①：compose 的 command 引用的 python 模块必须真在该服务镜像的 COPY 集合里。"""
+    offenders: list[str] = []
+    found: dict[str, int] = {}
+    for label, path in COMPOSE_TOPOLOGIES:
+        if not path.is_file():
+            offenders.append(f"{label} 不存在：{path}")
+            continue
+        blocks = _compose_service_blocks(path.read_text(encoding="utf-8"))
+        for service, block in sorted(blocks.items()):
+            module, shape_problem = _arq_entry_module(_command_tokens(block))
+            if shape_problem is not None:
+                offenders.append(f"{label}/{service}: {shape_problem}")
+                found[label] = found.get(label, 0) + 1
+                continue
+            if module is None:
+                continue
+            found[label] = found.get(label, 0) + 1
+            ctx, dockerfile = _service_build_paths(block, path)
+            if ctx is None or dockerfile is None:
+                offenders.append(
+                    f"{label}/{service}: command 引用 {module}，但该服务没有 build.context，"
+                    "无从核对镜像里到底有什么"
+                )
+                continue
+            if not dockerfile.is_file():
+                offenders.append(f"{label}/{service}: Dockerfile 不存在 {dockerfile}")
+                continue
+            names = _image_top_level_names(dockerfile)
+            if not _module_covered(module, names):
+                offenders.append(
+                    f"{label}/{service}: `{module}{ARQ_SETTINGS_SUFFIX}` 不在 {dockerfile.name} "
+                    f"的 COPY 派生顶层模块 {sorted(names)} 里——容器内死于 "
+                    f"ModuleNotFoundError: No module named '{module}'，而失败点在队列侧"
+                    "（job 滞留、解析永不回调），API 层看着一切正常"
+                )
+                continue
+            source = ctx / f"{module.replace('.', '/')}.py"
+            if not source.is_file():
+                offenders.append(f"{label}/{service}: 构建上下文里没有 {source}（COPY 的源不存在）")
+    for label, expected in ARQ_WORKER_SERVICES.items():
+        got = found.get(label, 0)
+        if got != expected:
+            offenders.append(
+                f"{label} 里 `python -m arq` 的 worker 服务数 = {got}，预期 {expected}"
+                "（适用面漂移：删掉该服务或改掉命令形状会让这条规则不再检查任何东西）"
+            )
+    return offenders, sum(found.values())
+
+
+def _redis_auth_offenders() -> tuple[list[str], int]:
+    """规则②：拓扑里的 redis 起 `--requirepass` 时，连它的 java 工作负载必须成对给 host＋密码。
+
+    helm 不在适用面上：deploy/helm/hfusionhub/templates/redis.yaml 的 redis 容器没有
+    requirepass（第一百零九批核对），java.yaml 因此只需 host。日后 helm 给 redis 上密码，
+    要把该拓扑并进 COMPOSE_TOPOLOGIES 同类的扫描清单。
+    """
+    offenders: list[str] = []
+    clients = 0
+    for label, path in COMPOSE_TOPOLOGIES:
+        if not path.is_file():
+            continue
+        text = _strip_comments(path.read_text(encoding="utf-8"))
+        if "--requirepass" not in text:
+            continue
+        blocks = _compose_service_blocks(text)
+        hosts = sorted(
+            service
+            for service, block in blocks.items()
+            if _declared_env(block, "SPRING_DATA_REDIS_HOST") is not None
+        )
+        for service in hosts:
+            clients += 1
+            block = blocks[service]
+            if all(_declared_env(block, key) is None for key in REDIS_PASSWORD_KEYS):
+                offenders.append(
+                    f"{label}/{service}: 该拓扑的 redis 以 --requirepass 启动，工作负载声明了 "
+                    f"SPRING_DATA_REDIS_HOST 却没声明 {' 或 '.join(REDIS_PASSWORD_KEYS)} "
+                    "里的任何一个——Sa-Token 会话存进的就是这个 redis，握手失败落在第一个"
+                    "要用会话的接口上（第一百零九批实测：登录 500 "
+                    "RedisConnectionFailureException）"
+                )
+        expected = REDIS_CLIENT_SERVICES.get(label)
+        if expected is not None and len(hosts) != expected:
+            offenders.append(
+                f"{label} 里声明 SPRING_DATA_REDIS_HOST 的工作负载数 = {len(hosts)}，"
+                f"预期 {expected}（适用面漂移）"
+            )
+    if clients == 0:
+        offenders.append(
+            "检查 18 规则②的适用面为空：没有任何 compose 拓扑再以 --requirepass 起 redis——"
+            "去掉密码或把旗标改名会让这条门静默变绿"
+        )
+    return offenders, clients
+
+
+def _flatten_yaml_scalars(text: str) -> dict[str, str]:
+    """application.yml 的标量按 `a.b.c` 摊平（两空格缩进、只认 `key: value` 行）。
+
+    只为规则③服务：Spring 的 `@Value("${python-ai.engine.url:...}")` 对应的 yml 键是嵌套的，
+    按点号路径查才能对上。列表、多行标量与锚点不参与——那些形状里放的不是出站地址。
+    """
+    flat: dict[str, str] = {}
+    stack: list[tuple[int, str]] = []
+    for raw in text.splitlines():
+        line = re.sub(r"(^|\s)#.*$", "", raw).rstrip()
+        if not line.strip() or line.lstrip().startswith("-"):
+            continue
+        matched = re.match(r"^([A-Za-z0-9_.-]+):(.*)$", line.strip())
+        if matched is None:
+            continue
+        indent = len(line) - len(line.lstrip())
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        key, value = matched.group(1), matched.group(2).strip()
+        path = ".".join([*[name for _, name in stack], key])
+        if value:
+            flat[path] = value.strip("'\"")
+        else:
+            stack.append((indent, key))
+    return flat
+
+
+def _java_python_base_url_sites() -> list[tuple[str, str, str]]:
+    """java 侧读来当 python 出站基址的 @Value 位点：(文件, 属性名, 代码里的缺省值)。"""
+    if not JAVA_MAIN_JAVA.is_dir():
+        return []
+    sites: list[tuple[str, str, str]] = []
+    for path in sorted(JAVA_MAIN_JAVA.rglob("*.java")):
+        text = _strip_code_comments(path.read_text(encoding="utf-8", errors="ignore"))
+        for matched in PYTHON_BASE_URL_RE.finditer(text):
+            sites.append((_repo_rel(path), matched.group(1), matched.group(2)))
+    return sites
+
+
+def _python_base_url_offenders() -> tuple[list[str], int]:
+    """规则③：java→python 的出站基址属性必须全部由同一个环境变量喂，且三档拓扑都设了它。
+
+    第一百零九批实测的形状是"键名不同、来源也不同"：`ai-service.base-url` 写成
+    `${AI_SERVICE_URL:...}`，而 `python-ai.base-url` / `python-ai.engine.url` 是裸字面量
+    `http://localhost:9000`；三档拓扑只设 AI_SERVICE_URL，于是容器里 java 调 python 的解析
+    请求打到 java 自己身上（POST /api/document/204/parse → 400 I/O error，
+    traceId 9dae81714a9a41a1812c0cb3155fca89）。
+    """
+    offenders: list[str] = []
+    sites = _java_python_base_url_sites()
+    if not sites:
+        return [
+            "检查 18 规则③的适用面为空：java 侧再没有任何 @Value 以 python 的 :9000 地址作缺省值——"
+            "整族改名会让这条门静默变绿"
+        ], 0
+    properties = sorted({prop for _, prop, _ in sites})
+    if len(properties) < PYTHON_BASE_URL_MIN_PROPERTIES or len(sites) < PYTHON_BASE_URL_MIN_SITES:
+        offenders.append(
+            f"规则③的适用面缩小了：{len(sites)} 处 @Value / {len(properties)} 个属性，"
+            f"预期至少 {PYTHON_BASE_URL_MIN_SITES} 处 / {PYTHON_BASE_URL_MIN_PROPERTIES} 个"
+            f"（现存属性：{properties}）"
+        )
+    if not APP_YML.is_file():
+        return [*offenders, f"application.yml 不存在：{APP_YML}"], len(sites)
+
+    flat = _flatten_yaml_scalars(APP_YML.read_text(encoding="utf-8"))
+    env_names: set[str] = set()
+    for prop in properties:
+        value = flat.get(prop)
+        if value is None:
+            where = next(file for file, name, _ in sites if name == prop)
+            offenders.append(
+                f"application.yml 里没有 {prop}（{where} 在读它）——只能靠 @Value 的代码缺省值，"
+                "而那个缺省值是宿主地址"
+            )
+            continue
+        referenced = re.match(r"^\$\{([A-Z0-9_]+)(?::([^}]*))?\}$", value)
+        if referenced is None:
+            offenders.append(
+                f"application.yml 的 {prop} = {value!r} 是裸字面量：拓扑改不动它，容器里必然指回 "
+                "java 自己的 localhost（第一百零九批实测：POST /api/document/204/parse 400 "
+                'I/O error on POST "http://localhost:9000/api/parse"）'
+            )
+            continue
+        env_names.add(referenced.group(1))
+
+    if len(env_names) > 1:
+        offenders.append(
+            f"这些出站地址属性各自引用不同的环境变量 {sorted(env_names)}——拓扑只需设其中一个，"
+            "另一个就静默留回宿主缺省值"
+        )
+        return offenders, len(sites)
+    if not env_names:
+        return offenders, len(sites)
+
+    shared = next(iter(env_names))
+    for label, path, service in PYTHON_BASE_URL_TOPOLOGIES:
+        if path is None or not path.is_file():
+            offenders.append(f"{label} 不存在，无从核对 {shared} 是否声明")
+            continue
+        text = path.read_text(encoding="utf-8")
+        if service is None:
+            block = text
+        else:
+            block = _compose_service_blocks(_strip_comments(text)).get(service, "")
+            if not block:
+                offenders.append(f"{label} 里没有服务 {service}，无从核对 {shared}")
+                continue
+        if _declared_env(block, shared) is None:
+            offenders.append(
+                f"{label}: java 工作负载没有声明 {shared}，而 application.yml 的出站地址全靠它"
+            )
+    return offenders, len(sites)
+
+
+def _image_probe_port(dockerfile: Path | None) -> str | None:
+    """镜像 HEALTHCHECK 打的端口——它描述的是 CMD 那个进程，不是任意换 command 的进程。
+
+    真仓库那行是带 `\\` 续行的（deploy/Dockerfile.python:52），URL 在下一物理行上，
+    所以先把续行拼成一条逻辑行再找——否则端口恒为 None，"自定义探针仍打服务端口"
+    那一支就永远不触发。
+    """
+    if dockerfile is None or not dockerfile.is_file():
+        return None
+    logical = re.sub(r"\\\s*\n", " ", _dockerfile_final_stage(dockerfile.read_text(encoding="utf-8")))
+    matched = re.search(
+        r"^HEALTHCHECK.*?://[^/\s:]+:(\d+)",
+        logical,
+        re.MULTILINE,
+    )
+    return matched.group(1) if matched else None
+
+
+def _healthcheck_block(block: str) -> str | None:
+    """服务块里的 healthcheck 正文；键不存在返回 None（那就意味着继承镜像的探针）。"""
+    text = _strip_comments(block)
+    head = re.search(r"^\s*healthcheck:\s*$", text, re.MULTILINE)
+    if head is None:
+        return None
+    key_indent = len(head.group(0)) - len(head.group(0).lstrip())
+    lines: list[str] = []
+    for line in text[head.end() :].splitlines():
+        if not line.strip():
+            continue
+        if len(line) - len(line.lstrip()) <= key_indent:
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _worker_health_offenders() -> tuple[list[str], int]:
+    """规则④：跑 arq worker 的服务不得用 HTTP 存活探针——它不监听那个端口。"""
+    offenders: list[str] = []
+    checked = 0
+    for label, path in COMPOSE_TOPOLOGIES:
+        if not path.is_file():
+            continue
+        blocks = _compose_service_blocks(_strip_comments(path.read_text(encoding="utf-8")))
+        for service, block in sorted(blocks.items()):
+            module, _ = _arq_entry_module(_command_tokens(block))
+            if module is None:
+                continue
+            checked += 1
+            _, dockerfile = _service_build_paths(block, path)
+            port = _image_probe_port(dockerfile)
+            health = _healthcheck_block(block)
+            if health is None:
+                offenders.append(
+                    f"{label}/{service}: command 是 `python -m arq`，但服务没写 healthcheck，"
+                    f"于是继承镜像里给 HTTP 进程写的探针（:{port}）——容器 running、心跳在写，"
+                    "状态却永久 unhealthy（第一百零九批实测：probe_http=000、curl exit=7），"
+                    "真正要看的崩溃循环反而被这片假红盖住"
+                )
+                continue
+            if re.search(r"^\s*disable:\s*true\s*$", health, re.MULTILINE):
+                continue
+            if port and f":{port}" in health:
+                offenders.append(
+                    f"{label}/{service}: worker 的自定义 healthcheck 仍在打 :{port} 的 HTTP 面，"
+                    "而 arq 进程不监听它——要么 disable，要么换成真正的存活信号（如队列心跳）"
+                )
+    if checked == 0:
+        offenders.append(
+            "检查 18 规则④的适用面为空：没有任何拓扑再以 command 起 arq worker——"
+            "删掉 worker 服务会让这条门静默变绿"
+        )
+    return offenders, checked
+
+
+def check_container_runtime_contract() -> None:
+    """检查 18：容器轨上"配置写了、实体或语义对不上"的四类断链。
+
+    四条都是第一百零九批在 fullstack 整栈上第一次跑出来的，不是假想：
+      ① `python-ai-worker` 的 command 是 `python -m arq arq_worker.WorkerSettings`，
+         而改前的 deploy/Dockerfile.python 只 COPY 了 app/ ⇒ 容器内 ModuleNotFoundError，
+         崩溃循环 14 次，`arq:queue` 里的 job 滞留 83s 无人消费（API 层全程正常）。
+      ② dev compose 的 redis7 以 `--requirepass "$REDIS_PASSWORD"` 启动，java-backend
+         只给了 SPRING_DATA_REDIS_HOST，登录接口 500 RedisConnectionFailureException；
+         prod compose 同一段一直是成对的（deploy/docker-compose.prod.yml:176）。
+      ③ application.yml 的 python-ai.base-url / python-ai.engine.url 曾是裸字面量，
+         三档拓扑只设 AI_SERVICE_URL ⇒ java 调 python 的解析请求打到自己身上（400）。
+      ④ worker 继承镜像里给 HTTP 进程写的 HEALTHCHECK ⇒ 永久 unhealthy，
+         真信号（进程退出/崩溃循环）被这片假红盖住。
+    共同形状是"起得来、健康检查不红，但链路在别处断"，所以钉成文本门。
+    """
+    worker_offenders, worker_commands = _worker_module_offenders()
+    auth_offenders, auth_clients = _redis_auth_offenders()
+    url_offenders, url_sites = _python_base_url_offenders()
+    health_offenders, health_checked = _worker_health_offenders()
+    offenders = worker_offenders + auth_offenders + url_offenders + health_offenders
+    if offenders:
+        problems.append("容器轨的运行期契约不成立:\n    " + "\n    ".join(offenders))
+    else:
+        print(
+            f"[ok] 容器轨运行期契约：{worker_commands} 处 `python -m arq` 入口模块都被其 Dockerfile "
+            f"的 COPY 集合覆盖、且已脱离 HTTP 探针（{health_checked} 个 worker）；"
+            f"{auth_clients} 个连 requirepass redis 的 java 工作负载成对声明了 host＋密码键；"
+            f"{url_sites} 处 java→python 出站地址同源于一个环境变量，三档拓扑都声明了它"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
@@ -1864,6 +2348,7 @@ def main() -> int:
     parser.add_argument("--workflow-run-scalars", action="store_true")
     parser.add_argument("--db-lock-lifetime", action="store_true")
     parser.add_argument("--flyway-cli", action="store_true")
+    parser.add_argument("--container-runtime-contract", action="store_true")
     args = parser.parse_args()
 
     if not (args.tenant_columns or args.internal_token_keys or args.test_counts
@@ -1873,14 +2358,15 @@ def main() -> int:
             or args.requirements_markers or args.frontend_time_entry
             or args.write_clock_caliber or args.python_clock_caliber
             or args.workflow_run_scalars or args.db_lock_lifetime
-            or args.flyway_cli):
+            or args.flyway_cli or args.container_runtime_contract):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
             args.flyway_doc_sync = args.h2_schema_drift = \
             args.readme_claims = args.helm_value_roots = args.container_uid = \
             args.document_storage_root = args.eval_harness_storage = \
             args.requirements_markers = args.frontend_time_entry = \
             args.write_clock_caliber = args.python_clock_caliber = \
-            args.workflow_run_scalars = args.db_lock_lifetime = args.flyway_cli = True
+            args.workflow_run_scalars = args.db_lock_lifetime = args.flyway_cli = \
+            args.container_runtime_contract = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -1916,6 +2402,8 @@ def main() -> int:
         check_db_lock_lifetime()
     if args.flyway_cli:
         check_flyway_cli()
+    if args.container_runtime_contract:
+        check_container_runtime_contract()
 
     if problems:
         print("\n发现问题:")

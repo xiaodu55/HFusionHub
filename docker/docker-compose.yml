@@ -257,6 +257,12 @@ services:
       DB_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set}
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql8:3306/hfusionhub?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATA_REDIS_HOST: redis7
+      # redis7 的 command 带 --requirepass（本文件 :41），Sa-Token 会话存进的是这个 redis：
+      # 只给 host 不给密码时握手就失败，登录接口 500 RedisConnectionFailureException。
+      # application.yml 的回退链是 ${SPRING_DATA_REDIS_PASSWORD:${REDIS_PASSWORD:}}，两个键
+      # 都没传才真正没救。prod compose 同一段一直成对给（deploy/docker-compose.prod.yml:176），
+      # 门禁 = scripts/static-checks.py --container-runtime-contract 规则②（检查 18）。
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       PYTHON_AI_INTERNAL_TOKEN: ${PYTHON_AI_INTERNAL_TOKEN:?PYTHON_AI_INTERNAL_TOKEN must be set}
       CALLBACK_SECRET: ${CALLBACK_SECRET:?CALLBACK_SECRET must be set}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set}
@@ -380,6 +386,13 @@ services:
       dockerfile: ../deploy/Dockerfile.python
     container_name: hfusionhub-python-worker
     command: ["python", "-m", "arq", "arq_worker.WorkerSettings"]
+    # 镜像里的 HEALTHCHECK（curl -f http://localhost:9000/health）是给 uvicorn 那个进程写的，
+    # arq worker 不监听 9000：继承下来就永远 unhealthy（第一百零九批实测：容器 running、
+    # 心跳键在写，探针却 probe_http=000 / curl exit=7）。把"红"留给真正的死法——
+    # 进程退出或重启策略数到崩溃循环。存活看 redis db2 的 arq:queue:health-check。
+    # 门禁 = scripts/static-checks.py --container-runtime-contract 规则④（检查 18）。
+    healthcheck:
+      disable: true
     environment:
       # 钟面口径同 python-ai（第一百零二批 / static-checks 检查 15）
       TZ: "UTC"

@@ -609,14 +609,39 @@ docker compose exec python-ai      sh -c 'cat /app/uploads/documents/.probe && t
 回 `文件不存在或不在允许的上传目录中`（这个 10001 只在 message 文本里，见上文信封那条）。
 **第八十九批已在镜像层把这一对跑通**（上表 C1/C2/C4 与 C3）：卷是同一块、写与读分属两个
 镜像、`/app/uploads/documents` 由 java 侧建、python 侧读到同哈希字节并反向落文件。
-上面这两条 `docker compose exec` 本身仍未跑——它们要 fullstack 档整栈起来（含 mysql/redis），
-本机没有跑过一次整栈；镜像层的等价命令在 `hfusionhub-scratch/b89cross.sh`。
+
+第一百零九批把这一对升到了**整栈级**：上面那两条 `docker compose exec` 逐字跑过，命令与结果见下。
+
+### 10.2.1 整栈一次真跑（第一百零九批，fullstack 档 9 服务）
+
+`docker/docker-compose.yml` 全栈起栈（java/python/python-worker/frontend + mysql8/redis7/
+milvus/etcd/minio），9 个容器各自报健康；这块卷是 `docker_uploads-data`。**这是本仓库第一次
+在整栈上跑，也是下面四处断链能被量出来的唯一原因**——它们都不会让任何一步变红，处置与门禁见
+检查 18（`docs/CI_GATES.md`）。
+
+| 编号 | 断言 | 实测结果 |
+| --- | --- | --- |
+| W1 | §10.2 那两条 `exec` 命令逐字可用 | `docker compose exec java-backend sh -c 'mkdir -p /app/uploads/documents && …'` / `exec python-ai … cat` 都不需要额外参数即成立；真实业务文件在卷上（下一条） |
+| W2 | java 应用自己写盘的文件，两个 python 容器都能按库里的绝对路径读到同一个字节 | 上传 `title=b109-java-upload` → `document.id=204`、`file_path=/app/uploads/documents/cfc1458c-850b-4524-b3f4-39ac80844a4b.txt`；宿主 / java / python / python-worker / 独立挂载该卷的容器 **五处 sha256 全等于** `879595640d62f69aa4e289c609a86d7537bf32135c3c120d1cc87181dc617bd0` |
+| W3 | 登录在 requirepass redis 上成对（D1） | 改前 `POST /api/user/login` → 500 `RedisConnectionFailureException`；补 `SPRING_DATA_REDIS_PASSWORD` 后 `code=200`、token 36 字符（会话确实落在 redis7） |
+| W4 | java→python 出站地址由拓扑注入（D4） | `POST /api/document/204/parse` → **HTTP 200** `{"data":"开始解析"}`（traceId `03b4e117d8fd4c2cb5525256eb1793f8`），java 日志写明 `调用Python引擎: http://python-ai:9000/api/parse`；改前同一发是 400 I/O error on `http://localhost:9000/api/parse`（traceId `9dae81714a9a41a1812c0cb3155fca89`） |
+| W5 | worker 真在消费队列（D2） | `0.50s → 4ed30ccc9a9c4279921c805c88c69361:process_document({'document_id': '204', …})`，`arq:queue` zcard=0，`arq:result:*` 出现该 job |
+| W6 | worker 不再继承 HTTP 探针（D3） | `docker inspect` → `health=<none> restarts=0`（改前是 `Up (unhealthy)` 且探针 `curl exit=7`、`probe_http=000`）；存活看 redis db2 的 `arq:queue:health-check` |
+| W7 | 回调闭环真的回到 java | worker 处理完后 java 收到回调并写库：`文档状态已更新: 204 -> FAILED`，`status=3 / chunk_count=0 / error_message` 是嵌入失败那句话——**这条红是外部依赖红**：容器里 `OLLAMA_BASE_URL=http://host.docker.internal:11434` 不可达（`Network is unreachable`），链路本身已经通了 |
+
+一个顺带量到的活栈事实（不是缺陷）：往卷上放探针文件后，java 的 `OrphanCleanupScheduler` 会把
+库内没有对应行的文件清掉（日志 `已清理孤儿文件: b109-shared.txt` 等 5 条）。任何"手工往卷上写
+文件做验证"的操作都必须算上这个回收器，否则会误判成"卷没共享"。
 
 ### 10.3 已知未收口
 
-- **"同路径互见"已做到镜像层成对**（第八十九批，10.2 的 C1–C4 + C3）：同一块卷、两个镜像、
-  双向哈希一致、生产校验路径不再回 10001。还差两级：**整栈 compose 起栈后那条 `exec` 命令对**
-  （要 mysql/redis 一起起），以及**一次真实文档全链路**（后台解析需要向量库，探针里缺）。
+- **"同路径互见"三级都到齐了**：镜像层成对（第八十九批 C1–C4 + C3）→ 整栈级（第一百零九批
+  10.2.1 的 W1/W2：宿主/java/python/python-worker/独立挂卷容器五处哈希相同）→ 生产校验路径
+  不再回 10001。**仍差的只有一级：一次嵌入真成功的文档全链路**。第一百零九批 W7 已把
+  java→python→arq 队列→worker→回调→写库这条链在整栈上跑通，但 worker 那一步的死因是外部
+  依赖——容器里 `OLLAMA_BASE_URL=http://host.docker.internal:11434` 不可达（`Network is
+  unreachable`），所以文档 204 终态是 `FAILED / chunk_count=0`。要收这一条需要一个真能出向量的
+  嵌入服务（本机 Ollama 起起来并让容器可达，或把 `EMBEDDING_*` 配成可达的 API），不是配置缺陷。
 - **业务码在错误信封里不可机器读**：`exception_handlers.py:43` 的 `str(exc.detail)` 把
   `{"code":10001,…}` 压成字符串，线上只剩外层 `code=400`。今天没有消费方按 `code` 分支
   （Java 取 message 文本），所以是**契约债**而非活故障；要改得同时决定 401/403/400 三类
@@ -626,9 +651,14 @@ docker compose exec python-ai      sh -c 'cat /app/uploads/documents/.probe && t
   是否要收这个调整，取决于构建环境，本批不动它。**java 侧同批实测无需这个调整**：
   `mvn dependency:go-offline` 568.5 秒后 `package` 21.3 秒一次通过（未改 Dockerfile、未配 mirror），
   但注意 `go-offline` 带 `|| true`——它失败也照样往下走，真正的判据是 `#14 package` 是否退出 0。
-- **`UPLOAD_DIR` 与 `DOCUMENT_STORAGE_ROOT` 是两个不同的根**：前者是 python 自己的暂存/摄取
-  目录（compose 指 `/data/uploads`，进 `python-data`），后者是"允许解析 Java 文件"的围栏根。
-  看到两者不一致不代表配置错了，但它们各自挂哪个卷必须与挂载表一致。
+- **`UPLOAD_DIR` 与 `DOCUMENT_STORAGE_ROOT` 是两个不同的根**：前者是 python 自己的暂存目录
+  （compose 指 `/data/uploads`，进 `python-data` 卷），后者是"允许解析 Java 文件"的围栏根。
+  看到两者不一致不代表配置错了，但它们各自挂哪个卷必须与挂载表一致。第一百零九批在整栈上量到的
+  是：`UPLOAD_DIR` 只有一个消费者——`app/main.py:238` 的 `os.makedirs(config.UPLOAD_DIR)`，
+  业务读写一个都不走它（`grep -rn "config.UPLOAD_DIR" app/` 只命中那一行），容器里
+  `/data/uploads` 除早期探针 `.writable` 外长期为空。**它是"建了但没人用"的半空转键**，
+  不是 flyway 那种纯死键（键名确实被读），所以本批不动它，只把这条事实写下来：文档全链路的
+  落点是 `DOCUMENT_STORAGE_ROOT`，改动 `UPLOAD_DIR` 不会影响任何业务文件。
 - plugin-runner 镜像 uid 未钉 `-u`，1000 只写在 chart 里。
 - mysql/etcd/milvus/redis 仍无 pod securityContext（上游镜像以 root 起、入口脚本自 chown）。
 

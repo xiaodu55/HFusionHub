@@ -11,6 +11,82 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百零九批（2026-10-12：整栈第一次真跑——把"能写/能读"从镜像级抬到活栈级，量出四处"配置写了、容器里没有对应实体"的断链，并新增检查 18 把它们钉成四条规则）
+
+#### 结论（先给判定性质）
+- 本批的对象不是某条 CI 红，而是**一件从没做过的事**：`docker/docker-compose.yml` 9 服务整栈
+  （java / python-ai / python-ai-worker / frontend ＋ mysql8 / redis7 / milvus / etcd / minio）
+  第一次在本机起来、每台自报健康。`docs/PRODUCTION_OPS.md` 10.2 在那之前写着"上面这两条
+  `docker compose exec` 本身仍未跑——它们要 fullstack 档整栈起来，本机没有跑过一次整栈"，
+  跨服务互见只做到镜像层（第八十九批的 C1–C4）。
+- 整栈一跑就量出四处断链，共同形状是**容器起得来、健康检查不红、API 正常，死的是别处**：
+  D1 worker 的 `python -m arq arq_worker.WorkerSettings` 在镜像里没有那个模块（只 COPY 了 `app/`）
+  ⇒ `ModuleNotFoundError` 崩溃循环 `RestartCount=14`，队列里那条 job 滞留 83.69s 无人消费，而
+  API 日志照写 "dispatched via arq"；D2 dev compose 的 redis 起 `--requirepass` 而 java-backend
+  只给 host ⇒ 登录 500 `RedisConnectionFailureException`（traceId `40bb29cf73464ff28f01caa37cbb40b8`），
+  prod compose 同一段一直是成对的，所以这条只在整栈上暴露；D3 `application.yml` 的
+  `python-ai.base-url` / `python-ai.engine.url` 是裸字面量而三档拓扑只设 `AI_SERVICE_URL`
+  ⇒ java 的解析请求打到自己身上（`POST /api/document/204/parse` 400，traceId
+  `9dae81714a9a41a1812c0cb3155fca89`）；D4 worker 继承镜像里给 uvicorn 写的 HTTP 探针
+  ⇒ `Up (unhealthy)` 而 `probe_http=000`、`curl exit=7`，假红盖住了真要看的崩溃循环。
+- 四处都是**把配置对齐到真实存在的实体**，没有一处靠放宽判据或删服务收口；四条方案逐条由用户
+  拍板（D1 镜像补 `COPY`、D2 compose 补成对键、D3 两个键并入同一个环境变量、D4 显式关探针）。
+
+#### 修复与判据
+- `deploy/Dockerfile.python`：`COPY app/ app/` 之后补 `COPY arq_worker.py .`——入口模块在仓库根
+  的顶层，compose 的命令、`arq_worker.py` 的 docstring、`app/core/tasks/queue.py` 与
+  `app/utils/config.py` 的注释用的都是同一条命令，只有 `/app` 下真有这个文件才成立。
+- `docker/docker-compose.yml`：java-backend 补 `SPRING_DATA_REDIS_HOST` ＋
+  `SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-}`（与 prod 同形）；python-ai-worker 补
+  `healthcheck.disable: true`，存活信号改看 redis db2 的 `arq:queue:health-check`。
+- `java-backend/src/main/resources/application.yml`：`python-ai.base-url` 与
+  `python-ai.engine.url` 改成 `${AI_SERVICE_URL:http://localhost:9000}`——键名保留，来源收成
+  只有一个；宿主缺省值留在冒号之后，本地起栈照旧可用。
+- 新增 `scripts/static-checks.py` 检查 18（`--container-runtime-contract`，已并入默认全跑档），
+  四条规则：①每条 `python -m arq` 的入口模块必须落在其 build 上下文那份 Dockerfile 的 `COPY`
+  派生顶层模块集合里、且源文件真在上下文里；②凡拓扑以 `--requirepass` 起 redis，声明了
+  `SPRING_DATA_REDIS_HOST` 的工作负载必须同时声明 `SPRING_DATA_REDIS_PASSWORD` 或 `REDIS_PASSWORD`；
+  ③java 侧以 `:9000` 为缺省值的 `@Value` 属性必须在 yml 里全部由**同一个**环境变量喂，且
+  dev/prod/helm 三档都声明它；④跑 worker 的服务必须显式 disable 或换成不打那个端口的探针。
+  四条各按拓扑钉数量（worker 1 / redis 客户端 2 / 出站点 10），**适用面为空本身判红**。
+- 门的门：`python-ai/tests/test_container_runtime_contract_gate.py`（39 例）。除了"每种历史坏形状
+  注入时各红一次"，还钉三条"形状对但指向别处"的语义面（密码键插值的必须是 redis 自己用的那个
+  变量、`COPY` 的目的地必须是 WORKDIR、worker 自定义探针仍打 `:9000` 照样红），以及两个
+  PyYAML oracle（command 令牌、application.yml 的点号路径），helm 的 redis 至今无 `--requirepass`
+  也写成断言——日后上密码时必须拓宽规则而不是被门默许。
+- 建门过程中门自己纠了一处：`_image_probe_port` 第一版按物理行匹配 URL，而真仓库那行 HEALTHCHECK
+  带 `\` 续行（`deploy/Dockerfile.python:52`），端口恒为 `None` ⇒ "自定义探针仍打服务端口"那一支
+  永不触发。改成先拼逻辑行再匹配。
+
+#### 验证
+- 活栈（`docs/PRODUCTION_OPS.md` 10.2.1 的 W1–W7）：§10.2 那两条 `exec` 逐字跑通；上传
+  `title=b109-java-upload` → `document.id=204`，`file_path=/app/uploads/documents/
+  cfc1458c-850b-4524-b3f4-39ac80844a4b.txt`，宿主 / java / python / python-worker / 独立挂卷容器
+  **五处 sha256 全等于** `879595640d62f69aa4e289c609a86d7537bf32135c3c120d1cc87181dc617bd0`；
+  登录 `code=200`（token 36 字符，会话确实落进 requirepass 的 redis7）；`parse` **HTTP=200**
+  且 java 日志写明 `调用Python引擎: http://python-ai:9000/api/parse`（改前是同一条请求 400 打
+  `localhost:9000`）；worker `0.50s → 4ed30ccc…:process_document({'document_id': '204', …})`、
+  `arq:queue` zcard=0；`docker inspect` → `health=<none> restarts=0`。
+- 套件：`python-ai` 全量两轮一致 **2177 passed / 18 skipped**；`static-checks.py` 全模式 exit 0
+  （新增 39 例后 README 的 Python 计数 1987→2026，四处同步）。
+- `ruff check` 对本批新文件干净；顺带量到 `scripts/static-checks.py` 里一条 HEAD 上就存在的
+  F541（`:995` 那行 `f"[ok] 依赖锁可安装面："`，改前在 `:974`），CI 的 ruff 范围是 `python-ai/`
+  而非 `scripts/`，本批没动它。
+
+#### 诚实边界
+- 端到端只到"按外部依赖失败"这一格：worker 消费后嵌入调用
+  `OLLAMA_BASE_URL=http://host.docker.internal:11434` 报 `Network is unreachable`，文档 204 终态
+  `status=3 / chunk_count=0`；但回调真的回到了 java 并写了库（`文档状态已更新: 204 -> FAILED`）。
+  ⇒ 缺的是一个可达的嵌入端点，不是配置，这条留在 10.3 未收口第一位。
+- 三处 compose / Dockerfile / yml 改动只在**本机活栈**上验过；CI 跑的是 prod compose 与 helm，
+  dev compose 这条轨在 runner 上没有等价执行。D3 的生效前提是重建 java 镜像（yml 打进 jar），
+  本批复测就是这么做的，但它说明规则③本质是文本一致性检查，不证明部署面真的换过镜像。
+- 一处活栈事实差点被误读：手工往卷上放的探针文件被 java 的 `OrphanCleanupScheduler` 清掉了
+  （日志 `已清理孤儿文件: b109-shared.txt` 等 5 条）。这不是缺陷，但任何"往卷上写文件做验证"都
+  必须把这个回收器算进去。
+
+#### 下一批
+- 第一百一十批：judge-cache 驱逐。第一百零五批（license 策略）仍等人拍板。
 ### 第一百零八批（2026-10-12：Flyway 那一步在 CI 里红了一路——把连接信息搬到插件真读的名字上，顺带把插件版本钉成运行时的那个引用）
 
 #### 结论（先给判定性质）

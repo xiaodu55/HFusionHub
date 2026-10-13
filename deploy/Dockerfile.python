@@ -29,6 +29,13 @@ RUN pip install --no-cache-dir \
     "opentelemetry-exporter-otlp-proto-http==1.45.1"
 
 COPY app/ app/
+# arq worker 的入口模块在仓库根的顶层（不是 app/ 的子包）：compose 的
+# `python -m arq arq_worker.WorkerSettings` 与 python-ai/arq_worker.py 的 docstring、
+# app/core/tasks/queue.py、app/utils/config.py 的注释都用同一条命令，只有 /app 下真的
+# 存在 arq_worker.py 才成立。缺这一行时 worker 在容器里 ModuleNotFoundError 崩溃循环，
+# 而失败点是队列侧（job 滞留、解析永远不回调），API 层看起来一切正常。
+# 门禁 = scripts/static-checks.py --container-runtime-contract（检查 18 规则①）。
+COPY arq_worker.py .
 # 运行身份必须钉死：`useradd -r` 从 Debian 系统池（100–999）按基镜像当时占了哪些号
 # 分配 uid，重建镜像就可能换号，而卷的属主（helm 的 fsGroup、compose 命名卷首次
 # 初始化时继承的镜像属主）都按这个数字对齐。10001 在两侧系统池之外，且与

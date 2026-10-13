@@ -115,10 +115,15 @@ knife4j:
 
 # Python AI 服务配置
 python-ai:
-  base-url: http://localhost:9000
+  # 与下面 ai-service.base-url 同一个环境变量来源：第一百零九批实测，这两处原是裸字面量，
+  # 而三档拓扑（dev/prod compose、helm）只设 AI_SERVICE_URL，于是容器里 java 调 python 的
+  # 解析请求打到 java 自己的 localhost:9000（POST /api/document/204/parse → 400 I/O error，
+  # traceId 9dae81714a9a41a1812c0cb3155fca89）。键名可以不同，来源必须只有一个。
+  # 门禁 = scripts/static-checks.py --container-runtime-contract 规则③（检查 18）。
+  base-url: ${AI_SERVICE_URL:http://localhost:9000}
   timeout: 60000
   engine:
-    url: http://localhost:9000
+    url: ${AI_SERVICE_URL:http://localhost:9000}
   callback-base-url: http://localhost:${server.port}${server.servlet.context-path}
   callback-secret: ${CALLBACK_SECRET:}
   internal-token: ${PYTHON_AI_INTERNAL_TOKEN:}

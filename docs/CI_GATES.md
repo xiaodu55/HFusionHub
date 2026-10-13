@@ -385,6 +385,33 @@ hfusionhub, now at version v86`；`flyway_schema_history` 为 `87 行 / success 
 上会过**（改后的步骤要等下一个 push 的 runner 才算真跑）；它也不查 `-Dflyway.locations` 之类的其余
 配置——库名与凭据同源由上面那层语义判据兜，SQL 本身仍由检查 4/5 那两条迁移链门管。
 
+## 检查 18：容器轨的运行期契约（第一百零九批）
+
+第一百零九批第一次把 `docker/docker-compose.yml` 整栈跑起来（9 服务，含 mysql/redis/milvus/
+minio/etcd），量到四处同一形状的断链：**配置写了、容器里没有对应实体或语义指错**。四处都不会让
+任何一步变红——容器起得来、探针绿、API 正常，死的是队列、握手、出站地址或状态可读性。
+
+| 规则 | 坏形状（本批实测） | 判据 |
+|---|---|---|
+| ① | worker 的 command 是 `python -m arq arq_worker.WorkerSettings`，而 `deploy/Dockerfile.python` 只 `COPY app/ app/` | 容器内 `ModuleNotFoundError`，`RestartCount` 14 次崩溃循环，`arq:queue` 那条 job 滞留 83.69s 无人消费，而 python-ai 的 API 日志照写 "dispatched via arq" |
+| ② | dev compose 的 redis7 起 `--requirepass`，java-backend 只给 `SPRING_DATA_REDIS_HOST` | 登录 500 `RedisConnectionFailureException`（traceId `40bb29cf73464ff28f01caa37cbb40b8`）；prod compose 同一段一直是成对的（`deploy/docker-compose.prod.yml:176`），所以只在整栈上暴露 |
+| ③ | `python-ai.base-url` / `python-ai.engine.url` 是 yml 裸字面量，三档拓扑只设 `AI_SERVICE_URL` | java 调 python 的解析请求打到自己身上：`POST /api/document/204/parse` → 400 I/O error on `http://localhost:9000/api/parse`（traceId `9dae81714a9a41a1812c0cb3155fca89`） |
+| ④ | worker 继承镜像里给 uvicorn 写的 `HEALTHCHECK`（`curl -f http://localhost:9000/health`） | 容器 running、心跳键在写，状态永久 `unhealthy`（`probe_http=000`、`curl exit=7`）——真信号（进程退出）被这片假红盖住 |
+
+| 层 | 位置 | 查什么 |
+|---|---|---|
+| 形状 | `scripts/static-checks.py` 检查 18（`--container-runtime-contract`，已并入默认全跑档） | ①每条 `python -m arq` 命令的入口模块必须落在其 build 上下文那份 Dockerfile 的 `COPY` 派生顶层模块集合里，且源文件真在上下文里；②凡拓扑以 `--requirepass` 起 redis，声明 `SPRING_DATA_REDIS_HOST` 的工作负载必须同时声明 `SPRING_DATA_REDIS_PASSWORD` 或 `REDIS_PASSWORD`；③java 侧以 `:9000` 为缺省值的 `@Value` 属性必须在 application.yml 里全部由**同一个**环境变量喂，且 dev/prod/helm 三档都声明它；④跑 worker 的服务必须显式 `healthcheck.disable` 或换成不打那个端口的探针。四条都按拓扑钉数量（worker 1 / redis 客户端 2 / 出站点 10），**适用面为空本身判红** |
+| 语义 | `python-ai/tests/test_container_runtime_contract_gate.py`（39 例） | 真仓库四条都绿、已并入默认全跑档、每种历史坏形状注入时各红一次；三条"形状对但指向别处"的语义面单独钉：密码键插值的必须是 redis 自己用的那个变量、`COPY` 的目的地必须是 WORKDIR、worker 自定义探针仍打 `:9000` 照样红；解析器反空转用 PyYAML 作 oracle（command 令牌、application.yml 的点号路径两条），helm 的 redis 至今无 `--requirepass` 这件事也写成断言——哪天上了密码，规则②必须被拓宽而不是被默许 |
+
+建门过程中门自己纠了一处：`_image_probe_port` 第一版按物理行匹配 URL，而真仓库那行 `HEALTHCHECK`
+是带 `\` 续行的（`deploy/Dockerfile.python:52`），端口恒为 `None` ⇒ "自定义探针仍打服务端口"
+那一支永远不触发。现在先拼逻辑行再匹配，规则④的报告也因此能写出具体的 `:9000`。
+
+诚实边界：检查 18 查的是**文本与拓扑之间的一致性**，不证明链路在跑——①③④的"修好了"来自
+活栈复测（见 `docs/PRODUCTION_OPS.md` 10.2.1 的 W3–W6），②的绿同样在活栈上量到登录 200。
+它也不查"嵌入服务可达吗"这类外部依赖：第一百零九批 W7 里文档 204 终态是 `FAILED`，死因是容器内
+`OLLAMA_BASE_URL` 不可达，那条链路本身已经通到回调写库。
+
 ## 相关文件
 
 - `.github/workflows/ci.yml` — push/PR 主 CI（含 `eval-offline` 门禁 job）
@@ -401,5 +428,6 @@ hfusionhub, now at version v86`；`flyway_schema_history` 为 `87 行 / success 
 - `python-ai/tests/test_plugin_audit.py::TestFlushVerdictReadsCurrentRow` — 审计 flush 的超限判定必须读**行的当前状态**的判据：events 把在途 flush 卡在"快照 → 回写"之间，运维回灌后不得被旧快照翻回 dead-letter（第一百零七批）
 - `python-ai/tests/test_flyway_cli_gate.py` — 检查 17（Flyway 旗标与插件钉版）的判据：真仓库绿、已并入默认全跑档、六种漂移（只给 Spring 键 / 残留空转 env / `continue-on-error` / 删步骤 / 改 goal / pom 未钉或钉数字）各红一次，旗标值与 job 的 mysql service 凭据同源，解析器自身不与 YAML 分歧（第一百零八批）
 - `python-ai/tests/conftest.py::_stop_audit_flusher` + `test_plugin_audit.py::TestAuditFlusherIsolation` — 测试隔离门禁：autouse fixture 换库前后各停一次 `audit-flusher`（join 不掉直接 `pytest.fail`），配一条反空判定先证明 `record_audit` 真起了 daemon，否则"开局无残留线程"会凭空绿（第一百零七批）
+- `python-ai/tests/test_container_runtime_contract_gate.py` — 检查 18（容器轨运行期契约）的判据：四条规则各种历史坏形状各红一次、三种"形状对但指向别处"的语义面单独钉、按拓扑的数量反空转、command 与 application.yml 两处解析器各有一个 PyYAML oracle（第一百零九批）
 - `python-ai/tests/test_eval_suite_eol_binding.py` — 冻结摘要与行尾无关的判据（钉值、两种检出形态、篡改仍红、emit 写 LF）
 - `.git-blame-ignore-revs` + `CONTRIBUTING.md`「Java code style (spotless)」— 全仓重排那一笔如何不污染 `git blame`

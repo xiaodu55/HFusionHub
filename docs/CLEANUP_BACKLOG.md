@@ -446,3 +446,35 @@
   "活栈不可达"这句话）；并把"全部用例同因失败"这种形态本身做成判定——例如错误率＝1 且
   p95 时延接近 0 时输出连接类错误样本，而不是只报一个百分数。**判据要能区分"环境没起来"与
   "模型变差"，两者都不许绿。**
+- [x] **整栈第一次真跑量出的四处"配置写了、容器里没有对应实体"**（第一百零九批取证并处置）——
+  这四处都不是假想，是 `docker/docker-compose.yml` 9 服务（含 mysql/redis/milvus/minio/etcd）
+  第一次起来之后逐个量出来的；共同形状是**容器起得来、健康检查不红、API 正常，死的是别处**：
+  ① `python-ai-worker` 的 command 是 `python -m arq arq_worker.WorkerSettings`，而
+  `deploy/Dockerfile.python` 只 `COPY app/ app/` ⇒ 容器内 `ModuleNotFoundError`，
+  `RestartCount` 14，`arq:queue` 那条 job 滞留 83.69s 无人消费，python-ai 的 API 日志还在写
+  "dispatched via arq"；② dev compose 的 redis7 以 `--requirepass "$REDIS_PASSWORD"` 起，
+  java-backend 只给 `SPRING_DATA_REDIS_HOST` ⇒ 登录 500 `RedisConnectionFailureException`
+  （traceId `40bb29cf73464ff28f01caa37cbb40b8`）；prod 同一段一直是成对的
+  （`deploy/docker-compose.prod.yml:176`），所以这条只在整栈上暴露；③ `application.yml` 的
+  `python-ai.base-url` / `python-ai.engine.url` 是裸字面量 `http://localhost:9000`，而三档拓扑
+  只设 `AI_SERVICE_URL` ⇒ `POST /api/document/204/parse` 400 I/O error（traceId
+  `9dae81714a9a41a1812c0cb3155fca89`），请求打到 java 自己身上；④ worker 继承镜像里给 uvicorn
+  写的 `HEALTHCHECK`（:9000）⇒ `Up (unhealthy)` 而 `probe_http=000`、`curl exit=7`，进程活着、
+  心跳在写，假红盖住了真要看的崩溃循环。
+  **处置（2026-10-12，四条都是用户逐条拍板的方案）**：① `COPY arq_worker.py .`（镜像里补实体，
+  而不是改 command 去迁就残缺的镜像）；② dev compose 补 `SPRING_DATA_REDIS_HOST` +
+  `SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-}`（与 prod 同形）；③ yml 两个键并入
+  `${AI_SERVICE_URL:...}`，键名保留、来源收成只有一个；④ worker 块写 `healthcheck.disable: true`，
+  存活信号看 redis db2 的 `arq:queue:health-check`。活栈复测逐条转绿：`health=<none> restarts=0`、
+  `0.50s → …process_document({'document_id': '204'…})` 且 `arq:queue` zcard=0、登录 `code=200`、
+  parse `HTTP=200` 且 java 日志写明 `调用Python引擎: http://python-ai:9000/api/parse`。
+  门禁：`scripts/static-checks.py` 检查 18（`--container-runtime-contract`，已并入默认全跑档），
+  四条规则各按拓扑钉数量、适用面为空本身判红；`test_container_runtime_contract_gate.py`（39 例）
+  是这条门的门，command 与 application.yml 两处文本解析各配一个 PyYAML oracle。建门时门自己
+  纠正了一次：`_image_probe_port` 第一版按物理行匹配，真仓库那行 `HEALTHCHECK` 带 `\` 续行 ⇒
+  端口恒为 `None`，"自定义探针仍打服务端口"那一支永不触发——已改为先拼逻辑行。
+  诚实边界（仍开着）：全链路的最后一环在活栈上是**按外部依赖失败**的——worker 消费后嵌入调用
+  `OLLAMA_BASE_URL=http://host.docker.internal:11434` 报 `Network is unreachable`，文档 204
+  终态 `status=3 / chunk_count=0`，但回调确实回到了 java 并写了库（`文档状态已更新: 204 -> FAILED`）。
+  ⇒ 链路已通到"有真嵌入服务就能成功"这一步，缺的是一个可达的嵌入端点，不是配置；这条留在
+  `docs/PRODUCTION_OPS.md` 10.3 的第一条未收口里。
