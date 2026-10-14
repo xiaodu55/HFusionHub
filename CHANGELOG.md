@@ -11,6 +11,83 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百一十一批（2026-10-13：推送把三条 run 换成 runner 事实——Flyway 第一次真跑就绿，于是 e2e 翻到下一层"测试步骤写了、:3000 上的进程没有"，补两步并新增检查 19）
+
+#### 结论（先给判定性质）
+- 本批的输入不是本机测量，而是第一百零六～一百零九批那笔 push（commit `779fd23b`）带出的三条
+  runner run：`CI` 38332373222 全绿；`Plugin Security` 38332373261 五绿一红，唯一红是第一百零四批
+  已知、要等第一百零五批拍许可证策略的 `license-check`；`E2E` 38332373255 的
+  `Run Flyway migrations` **第一次在 runner 上绿**——第一百零八批的 `-Dflyway.*` 修法由此从
+  "本机判据"升到"runner 实测"。
+- Flyway 绿既是好消息也是坏消息：它下面那一步 `Run full E2E suite` 从出生起第一次被执行，
+  一跑就是 **35 失败 / 28 通过 / 10 跳过**，35 条报错是同一条
+  `net::ERR_CONNECTION_REFUSED at http://localhost:3000/…`。这不是回归——前三次 e2e run
+  （38233532705 / 38134153616 / 38025985552）都死在 `Run Flyway migrations`、测试步骤是 `skipped`，
+  所以那 35 条一直是被上一层挡着的既有缺陷。
+- 死因是两处各自"合理"的配置合谋：e2e.yml 两个 job 的步骤序列都是
+  `npm ci` → `playwright install` → `npx playwright test`，中间没有任何一步起前端；而
+  `hfusionhub-frontend/playwright.config.ts:31-38` 在 `CI` 为真时把 `webServer` 置成 `undefined`
+  （那是本地开发用来自动起 `npm run dev` 的）。两边合起来 = CI 里没有进程监听 :3000。同 job 的
+  `Wait for Java backend` / `Wait for Python AI` 两条轮询都是绿的，缺的正是前端那一条——与第一百零八批
+  "配置写了、容器里没有实体"同族。
+- 修法由用户拍板为**方案 A：在 workflow 里加显式两步**，而不是把 config 的 CI 分支改成自起
+  `webServer`：显式步骤与同 job 另两条轮询同形、门禁读得到、失败时说的是"前端没起"而不是
+  "playwright 内部超时"。
+
+#### 修复与判据
+- `.github/workflows/e2e.yml`（两个 job 各补两步，同形落地）：`Start frontend dev server`
+  （`npm run dev &`，复用 job 已有的 `defaults.run.working-directory: hfusionhub-frontend`）＋
+  `Wait for frontend dev server`（`curl -sf http://localhost:3000/` 轮询 30 次 ×2s，命中即
+  `exit 0`，超时打印一行后 `exit 1`）。后台进程跨步骤存活是这轨的既有形态
+  （`python -m app.main &`、`mvn spring-boot:run &`），本批没有引入新机制。
+- `scripts/static-checks.py` 新增**检查 19**（`--e2e-frontend-server`，并入默认全跑档），按 job 名
+  下界（`e2e-smoke` / `e2e-full`）逐个判四条规则：① 测试步骤之前必须有后台起前端
+  （`npm run dev|preview … &`）；② 起前端必须晚于 `npm ci`，否则 `node_modules` 还不存在；
+  ③ 起服务与测试之间必须有带 URL 的等待探针；④ 探针端口必须与 `playwright.config.ts` 的
+  `baseURL` 端口同源，且探针要真能失败（缺 `exit 1` 的红判据不算红）。另加一支"双主人"判定：
+  config 在 CI 档也自起 `webServer` ＋ workflow 又显式起 ⇒ 同一端口两个主人（`EADDRINUSE`），判红。
+  适用面为空、适用面缩小了各自判红，删步骤或改命令名都不能让门变绿。
+- `python-ai/tests/test_e2e_frontend_server_gate.py`（22 例）：真仓库绿 ＋ 七种坏形状各红一次 ＋
+  一条 PyYAML 独立 oracle（有名步骤顺序逐条比对；起服务、顺序、探针、`exit 1`、端口两处同源
+  只用 YAML 复算，防文本解析器与 YAML 分歧）。
+- 行为侧不由文本门冒充：本机 `npm run dev` 起 vite 后 `curl -sf http://localhost:3000/` 返回
+  **200**（冷启动 ready in 10354 ms，日志含 "Re-optimizing dependencies"），`/api/health` 经代理返回
+  **502**（本机没有 8080，CI 上有），杀掉进程后同一请求返回 **000/refused**——探针的三种结果
+  在真机上各量过一次。
+
+#### 门自纠
+- `_playwright_ci_autostarts` 第一版是 `webServer: CI \? (\w+) :`，读不出"CI 分支是对象字面量"
+  （`{ port: 3000, … }`），于是"双主人"那支永远不会触发；`test_double_owner_is_red` 与
+  `test_multiline_ternary_is_read_as_one_logical_line` 两条先红把它暴露出来。改成先把三行三元式
+  压平成一条逻辑行、再取 `webServer:` 后第一个非空 token，判据是"该 token ≠ `undefined`"——
+  与检查 18 的 `HEALTHCHECK \` 续行是同一条教训：**跨物理行的构造必须先压平再匹配**。
+- `test_text_parser_agrees_with_yaml_on_step_order` 红过一次：文本解析器把 `services.*.ports` 下的
+  `- 3306:3306` / `- 6379:6379` 认成了无名步骤（每 job 多 2 条）。没有去改共享解析器（它服务十几条门，
+  改它的爆炸半径大于本批），改成"有名步骤逐条比对 ＋ 无名条数按 uses 步骤数与端口行数钉死"，
+  噪声来源写进 docstring。
+
+#### 验证
+- 检查 19 先红（两条 offender，两个 job 各缺起前端与探针）→ 修 e2e.yml →
+  `--e2e-frontend-server` 与 `--container-runtime-contract` 均 EXIT=0。
+- `python-ai/tests/test_e2e_frontend_server_gate.py`：**22 passed**。
+- Python 全量两轮 parity（`python-ai/.venv/Scripts/python.exe -m pytest -q tests`）：
+  **2199 passed / 18 skipped，两轮 exit 0**（第一百零九批口径 2177 ＋ 本批 22 例）。
+  中间一次误用宿主全局解释器（`D:\python3.11.9`，embeddable 发行版）跑出 3 红
+  （`test_eval_retention.py::test_env_override_is_honoured` ＋ `test_milvus_tenant_migration_real.py` 两条），
+  换回 venv 解释器即全绿——**这条红读的是本机安装形态，不是套件回归**，已在
+  `env-network-and-tooling-quirks` 记忆里钉过，本批再确认一次。
+- `static-checks.py` 全模式 EXIT=0；python-ai venv 钉版 ruff 干净；README 测试计数四处 2026→2048
+  （本批新增 22 个 `def test_`）。
+
+#### 诚实边界
+- 本批只证明"**第一道死因已除**"，不证明那 35 条用例会转绿。登录态、seed 数据、mock LLM 这些
+  更高层的失败要等下一次 push 的 e2e run 才分得清——检查 19 判的是"有没有进程监听 :3000"，
+  不判"页面能不能用"。
+- 60 秒探针预算没在 CI 上量过：本机 vite 冷启动 10354 ms，runner 首屏还要现编译依赖。若首跑仍超时，
+  应当把预算调大，而不是把探针删掉。
+- `docs/CI_GATES.md` 检查 17 那句"改后的步骤要等下一个 push 的 runner 才算真跑"已就地改写——本批
+  它被证伪了（Flyway 那一步已经真跑并绿）。保留一条错误边界句属于只代理式断言。
+
 ### 第一百零九批（2026-10-12：整栈第一次真跑——把"能写/能读"从镜像级抬到活栈级，量出四处"配置写了、容器里没有对应实体"的断链，并新增检查 18 把它们钉成四条规则）
 
 #### 结论（先给判定性质）

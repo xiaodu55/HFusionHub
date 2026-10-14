@@ -2329,6 +2329,176 @@ def check_container_runtime_contract() -> None:
         )
 
 
+# ── 检查 19：e2e 轨上"测试步骤在、监听 :3000 的进程不在" ──────────────────────
+
+E2E_WORKFLOW = WORKFLOW_DIR / "e2e.yml"
+PLAYWRIGHT_CONFIG = REPO / "hfusionhub-frontend" / "playwright.config.ts"
+
+# 预期适用面（下界，只防"越扫越少"）：e2e.yml 的两个 job 各一条 `npx playwright test`
+# —— e2e-smoke 走 PR、e2e-full 走 push。少一个就是那条链没人核了。
+E2E_TEST_JOBS = {"e2e-smoke", "e2e-full"}
+
+_FRONTEND_SERVE_RE = re.compile(r"npm run (?:dev|preview)\b[^\n]*&\s*$", re.MULTILINE)
+_NPM_CI_RE = re.compile(r"\bnpm ci\b")
+_PLAYWRIGHT_TEST_RE = re.compile(r"npx playwright test\b")
+_PROBE_URL_RE = re.compile(r"https?://[A-Za-z0-9_.-]+:(\d+)")
+
+
+def _workflow_job_ranges(path: Path) -> list[tuple[str, int, int]]:
+    """`jobs:` 下每个 job 的行号区间 [(名称, 起, 止)]——步骤要按 job 归属才谈得上先后。
+
+    只认 2 空格缩进的那一列：job 内部的 `services:`/`steps:` 在 4 空格、步骤项在 6 空格，
+    都不是 job 名；`on:` 块里也有一批 2 空格键，靠 `jobs:` 这个开关挡住。
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    starts: list[tuple[str, int]] = []
+    in_jobs = False
+    for idx, line in enumerate(lines):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith(" "):
+            in_jobs = line.strip() == "jobs:"
+            continue
+        if in_jobs and len(line) - len(line.lstrip()) == 2:
+            matched = re.match(r"^  ([\w.-]+):", line)
+            if matched:
+                starts.append((matched.group(1), idx))
+    return [
+        (name, start, starts[i + 1][1] if i + 1 < len(starts) else len(lines))
+        for i, (name, start) in enumerate(starts)
+    ]
+
+
+def _playwright_base_url_port(text: str) -> str | None:
+    """测试端真正去的端口——`baseURL` 里那个，不是别处写的数。"""
+    matched = re.search(r"baseURL:[^\n]*?://[A-Za-z0-9_.-]+:(\d+)", text)
+    return matched.group(1) if matched else None
+
+
+def _playwright_ci_autostarts(text: str) -> bool:
+    """CI 档下 Playwright 是否自己起前端。
+
+    真仓库写的是跨三行的三元式（`webServer: CI` / `? undefined` / `: {…}`，
+    playwright.config.ts:31-38），所以先把空白压平成一条逻辑行再匹配——
+    这是第一百零九批检查 18 那条续行教训的同一条规则。压平后只看 `CI ?` 之后第一个
+    非空 token：`undefined` 就是不自起，`{` 或别的都是自起。
+    """
+    flat = re.sub(r"\s+", " ", text)
+    matched = re.search(r"webServer: (?:CI \? )?(?P<branch>\S+)", flat)
+    if matched is None:
+        return False
+    return matched.group("branch") != "undefined"
+
+
+def _e2e_frontend_offenders() -> tuple[list[str], int]:
+    """每个跑 playwright 的 job：测试步骤前必须有进程起在测试端要去的端口上。"""
+    offenders: list[str] = []
+    if not E2E_WORKFLOW.is_file():
+        return [f"检查 19：workflow 文件不存在 {_repo_rel(E2E_WORKFLOW)}"], 0
+    if not PLAYWRIGHT_CONFIG.is_file():
+        return [f"检查 19：{_repo_rel(PLAYWRIGHT_CONFIG)} 不存在，探针该等哪个端口无从同源"], 0
+
+    port = _playwright_base_url_port(PLAYWRIGHT_CONFIG.read_text(encoding="utf-8"))
+    if port is None:
+        return ["检查 19：playwright.config.ts 的 baseURL 里读不到端口，等待探针没有核对依据"], 0
+
+    steps = _workflow_steps(E2E_WORKFLOW)
+    tested: list[str] = []
+    for name, start, end in _workflow_job_ranges(E2E_WORKFLOW):
+        job_steps = [s for s in steps if start <= s["lineno"] <= end]
+        tests = [s for s in job_steps if _PLAYWRIGHT_TEST_RE.search(s["run"])]
+        if not tests:
+            continue
+        tested.append(name)
+        test_step = tests[0]
+        before = [s for s in job_steps if s["lineno"] < test_step["lineno"]]
+        serve = [s for s in before if _FRONTEND_SERVE_RE.search(s["run"])]
+        if not serve:
+            offenders.append(
+                f"{_repo_rel(E2E_WORKFLOW)}#{name}:「{test_step['name']}」之前没有任何以后台方式起前端"
+                f"（`npm run dev … &`）的步骤 ⇒ CI 上 :{port} 没有进程，浏览器用例整批 "
+                "net::ERR_CONNECTION_REFUSED（第一百一十一批取证：run 38332373255 里 35 失败/28 通过，"
+                "35 条报错全是这一条，而它此前被上一步的 Flyway 红挡着从未被执行）"
+            )
+            continue
+        serve_step = serve[-1]
+        install = [s for s in before if _NPM_CI_RE.search(s["run"])]
+        if install and serve_step["lineno"] < install[-1]["lineno"]:
+            offenders.append(
+                f"{_repo_rel(E2E_WORKFLOW)}#{name}: 起前端（:{serve_step['lineno']}）排在装依赖 "
+                f"npm ci（:{install[-1]['lineno']}）之前，那时 node_modules 还不存在，vite 起不来"
+            )
+            continue
+        probes = [
+            s
+            for s in job_steps
+            if serve_step["lineno"] < s["lineno"] < test_step["lineno"] and _PROBE_URL_RE.search(s["run"])
+        ]
+        if not probes:
+            offenders.append(
+                f"{_repo_rel(E2E_WORKFLOW)}#{name}: 起了前端却没有等待探针就直接跑测试——"
+                f"vite 冷启动的几秒里 :{port} 仍是空的，红会以同样的 ERR_CONNECTION_REFUSED 回来"
+            )
+            continue
+        probe = probes[-1]
+        seen = sorted(set(_PROBE_URL_RE.findall(probe["run"])))
+        if port not in seen:
+            offenders.append(
+                f"{_repo_rel(E2E_WORKFLOW)}#{name}: 等待探针等的是 {seen}，"
+                f"而 playwright.config.ts 的 baseURL 端口是 {port}——两处不同源，改一处就孤儿一处"
+            )
+        elif "exit 1" not in probe["run"]:
+            offenders.append(
+                f"{_repo_rel(E2E_WORKFLOW)}#{name}: 等待探针超时后没有 exit 1，"
+                "前端起不来也照样往下跑，红会挪到测试步骤里换一种报错呈现"
+            )
+    if not tested:
+        offenders.append(
+            "检查 19 的适用面为空：没有任何 job 再调用 `npx playwright test`——"
+            f"删步骤或改命令名会让这条门静默变绿（预期 {sorted(E2E_TEST_JOBS)}）"
+        )
+    elif not E2E_TEST_JOBS <= set(tested):
+        offenders.append(
+            f"检查 19 的适用面缩小了：现在扫到 {sorted(tested)}，"
+            f"少了 {sorted(E2E_TEST_JOBS - set(tested))}——那个 job 里的端口契约没人核了"
+        )
+    return offenders, len(tested)
+
+
+def check_e2e_frontend_server() -> None:
+    """检查 19：e2e 轨的"测试步骤写了、:3000 上的实体没有"。
+
+    第一百一十一批的取证：第一百零八批把 Flyway 那一步修绿之后，`Run full E2E suite`
+    第一次真的被执行，于是暴露出它下面那一层——e2e.yml 两个 job 的步骤序列都是
+    `npm ci` → `playwright install` → `npx playwright test`，中间没有一步起前端；
+    同时 playwright.config.ts:31-38 在 `CI` 为真时把 `webServer` 置成 `undefined`
+    （本地开发靠它起 `npm run dev`），于是 CI 里没有任何进程监听 :3000。
+    同 job 的 `Wait for Java backend` / `Wait for Python AI` 两条轮询都绿，
+    缺的正是前端那一条。这条门把这个形状钉住：谁起、按什么顺序起、等多久、
+    等的端口必须与测试端 baseURL 同源，且 config 不得在 CI 档再自起一次
+    （两处各起一半就是 EADDRINUSE）。
+    """
+    offenders, jobs = _e2e_frontend_offenders()
+    if PLAYWRIGHT_CONFIG.is_file() and E2E_WORKFLOW.is_file():
+        text = PLAYWRIGHT_CONFIG.read_text(encoding="utf-8")
+        if _playwright_ci_autostarts(text) and _FRONTEND_SERVE_RE.search(
+            "\n".join(s["run"] for s in _workflow_steps(E2E_WORKFLOW))
+        ):
+            offenders.append(
+                "e2e 轨有两个起前端的主人：playwright.config.ts 在 CI 档也自起 webServer，"
+                f"而 {_repo_rel(E2E_WORKFLOW)} 里另有显式的 `npm run dev … &` 步骤——"
+                f"同一端口抢两次，后起的会 EADDRINUSE。CI 档归工作流管，config 那边必须 undefined"
+            )
+    if offenders:
+        problems.append("e2e 轨的前端服务契约不成立:\n    " + "\n    ".join(offenders))
+    else:
+        port = _playwright_base_url_port(PLAYWRIGHT_CONFIG.read_text(encoding="utf-8"))
+        print(
+            f"[ok] e2e 轨前端服务契约：{jobs} 个含 playwright 测试的 job 都在测试步骤之前起了前端，"
+            f"并带了超时即红的等待探针，探针端口与 playwright.config.ts 的 baseURL 同为 :{port}"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
@@ -2349,6 +2519,7 @@ def main() -> int:
     parser.add_argument("--db-lock-lifetime", action="store_true")
     parser.add_argument("--flyway-cli", action="store_true")
     parser.add_argument("--container-runtime-contract", action="store_true")
+    parser.add_argument("--e2e-frontend-server", action="store_true")
     args = parser.parse_args()
 
     if not (args.tenant_columns or args.internal_token_keys or args.test_counts
@@ -2358,7 +2529,8 @@ def main() -> int:
             or args.requirements_markers or args.frontend_time_entry
             or args.write_clock_caliber or args.python_clock_caliber
             or args.workflow_run_scalars or args.db_lock_lifetime
-            or args.flyway_cli or args.container_runtime_contract):
+            or args.flyway_cli or args.container_runtime_contract
+            or args.e2e_frontend_server):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
             args.flyway_doc_sync = args.h2_schema_drift = \
             args.readme_claims = args.helm_value_roots = args.container_uid = \
@@ -2366,7 +2538,7 @@ def main() -> int:
             args.requirements_markers = args.frontend_time_entry = \
             args.write_clock_caliber = args.python_clock_caliber = \
             args.workflow_run_scalars = args.db_lock_lifetime = args.flyway_cli = \
-            args.container_runtime_contract = True
+            args.container_runtime_contract = args.e2e_frontend_server = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -2404,6 +2576,8 @@ def main() -> int:
         check_flyway_cli()
     if args.container_runtime_contract:
         check_container_runtime_contract()
+    if args.e2e_frontend_server:
+        check_e2e_frontend_server()
 
     if problems:
         print("\n发现问题:")

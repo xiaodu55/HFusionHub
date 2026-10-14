@@ -124,6 +124,16 @@ jobs:
         run: npm ci
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
+      - name: Start frontend dev server
+        run: npm run dev &
+      - name: Wait for frontend dev server
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3000/ && exit 0
+            sleep 2
+          done
+          echo "Frontend dev server failed to start within 60s"
+          exit 1
       - name: Run E2E smoke tests
         env:
           CI: "true"
@@ -263,6 +273,16 @@ jobs:
         run: npm ci
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
+      - name: Start frontend dev server
+        run: npm run dev &
+      - name: Wait for frontend dev server
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3000/ && exit 0
+            sleep 2
+          done
+          echo "Frontend dev server failed to start within 60s"
+          exit 1
       - name: Run full E2E suite
         env:
           CI: "true"

@@ -381,9 +381,47 @@ hfusionhub, now at version v86`；`flyway_schema_history` 为 `87 行 / success 
 `spring-boot-dependencies:3.5.16` 声明 `<flyway.version>11.7.2</flyway.version>`，与历史日志里
 浮动解析到的版本相同 ⇒ **本批没有换掉今天执行的版本**，消除的是"central 哪天发新版就悄悄换插件"。
 
-诚实边界：检查 17 只看 workflow 文本与 pom 的形状，**不证明迁移内容正确、也不证明那一步在 runner
-上会过**（改后的步骤要等下一个 push 的 runner 才算真跑）；它也不查 `-Dflyway.locations` 之类的其余
-配置——库名与凭据同源由上面那层语义判据兜，SQL 本身仍由检查 4/5 那两条迁移链门管。
+诚实边界：检查 17 只看 workflow 文本与 pom 的形状，**不证明迁移内容正确**；它也不查
+`-Dflyway.locations` 之类的其余配置——库名与凭据同源由上面那层语义判据兜，SQL 本身仍由检查 4/5
+那两条迁移链门管。
+
+**补证（第一百一十一批，push `779fd23b` 后取，run 38332373255 / job e2e-full）**：那句"改后的步骤
+要等下一个 push 的 runner 才算真跑"已经有了答案——`Run Flyway migrations` 在 runner 上
+**success**（同一 run 里三个历史红 job 的对照：38233532705 / 38134153616 / 38025985552 的
+`failed_steps` 都是 `["Run Flyway migrations"]`）。同一次 push 的 `CI` run 38332373222 全绿
+（含检查 18 所在的静态门），`Plugin Security Pipeline` run 38332373261 五绿一红，红的仍只有
+第一百零四批登记为**预期真红**的 `license-check`。
+这条绿同时把下一层翻了出来：Flyway 不再挡路后，`Run full E2E suite` 从出生起第一次被执行，
+35 失败 / 28 通过 / 10 跳过，报错全是 `net::ERR_CONNECTION_REFUSED :3000` —— 由下面的检查 19 处置。
+
+## 检查 19：e2e 轨的前端服务契约（第一百一十一批）
+
+`e2e.yml` 两个 job 的步骤序列一直是 `npm ci` → `playwright install --with-deps chromium` →
+`npx playwright test`，**中间没有任何一步起前端**；而 `playwright.config.ts:31-38` 写的是
+`webServer: CI ? undefined : { command: 'npm run dev', port: 3000 }` —— 本地开发靠它起服务器，
+CI 档明确不自起。两边各自都"说得通"，合起来的结果是 CI 上 :3000 从来没有进程，浏览器用例整批
+`net::ERR_CONNECTION_REFUSED`。这条红在第一百一十一批之前看不见，因为上一步的 Flyway 每次都先红
+（10.2 的检查 17 补证有三次 run 的 `failed_steps` 为证）。
+
+| 层 | 位置 | 查什么 |
+|---|---|---|
+| 形状 | `scripts/static-checks.py` 检查 19（`--e2e-frontend-server`，已并入默认全跑档） | 每个含 `npx playwright test` 的 job 必须：①测试步骤之前有以后台方式起前端的步骤（`npm run dev… &`／`npm run preview… &`）；②它排在 `npm ci` **之后**（否则 node_modules 还没装，vite 起不来）；③起服务与测试之间有一条带 URL 的等待探针，探针端口必须等于 `playwright.config.ts` 里 `baseURL` 的端口（跨文件同源，改一处就孤儿一处），且超时后必须 `exit 1`（否则前端起不来也照样往下跑，红换个报错再来一次）；④适用面按 job 名下界钉住 `{e2e-smoke, e2e-full}`，扫不到任何 playwright job 判红，少一个判"适用面缩小了" |
+| 语义 | `python-ai/tests/test_e2e_frontend_server_gate.py`（22 例） | PyYAML 作独立 oracle：只用 YAML 复算"测试步骤前有起前端步骤、且排在 `npm ci` 后、探针在两者之间且带 `exit 1`"；复算探针端口与 `baseURL` 端口同为 3000；有名步骤的顺序与内容与 YAML 逐条相同，无名步骤条数按"uses 步骤数 ＋ 每 job 两条 `- 3306:3306` 端口行"钉住（解析器多吞少吞都会红）；config 那条三元式跨三行必须读得出（`webServer: CI` / `? undefined` / `: {…}` 压平成一条逻辑行再判，与检查 18 的续行教训同一条规则）；七种坏形状各红一次 |
+
+**门自己纠正过一次**：`_playwright_ci_autostarts` 第一版按 `CI \? (\w+) :` 匹配，遇到
+`webServer: CI ? { port: 3000 } : {…}`（CI 档自起的是对象字面量）匹配不上，于是"同一端口两个主人"
+那支判红永不触发；改成"压平后取 `CI ?` 之后第一个非空 token，等于 `undefined` 才是不自起"，
+这条漂移才真的红（测试 `test_multiline_ternary_is_read_as_one_logical_line` 钉住）。
+
+行为侧判据不由文本门冒充，本机量过：`npm run dev` 起 vite 后 `curl -sf http://localhost:3000/`
+= **200**（冷启动 `ready in 10354 ms`，日志含 `Re-optimizing dependencies because lockfile has
+changed`），`/api/health` 经 `vite.config` 的代理返回 **502**（本机没有 8080，CI 上由
+`Start Java backend` 提供），杀掉进程后同一请求 000/refused —— 正是那 35 条红的签名。
+
+诚实边界：本检查只看 workflow 与 config 的文本形状，**不证明那 35 条用例在 runner 上会转绿**——
+起前端只是它们共同的第一道死因，登录态、seed 数据、mock LLM 这些更高层的失败要等下一次 push 的
+e2e run 才分得清；也不证明 `Wait for frontend dev server` 那 60 秒预算够（本机 10.4 秒起来，
+runner 上是冷 npm 缓存，未量）。检查 14 继续管这两个新步骤的 YAML 标量形态。
 
 ## 检查 18：容器轨的运行期契约（第一百零九批）
 
@@ -429,5 +467,6 @@ minio/etcd），量到四处同一形状的断链：**配置写了、容器里�
 - `python-ai/tests/test_flyway_cli_gate.py` — 检查 17（Flyway 旗标与插件钉版）的判据：真仓库绿、已并入默认全跑档、六种漂移（只给 Spring 键 / 残留空转 env / `continue-on-error` / 删步骤 / 改 goal / pom 未钉或钉数字）各红一次，旗标值与 job 的 mysql service 凭据同源，解析器自身不与 YAML 分歧（第一百零八批）
 - `python-ai/tests/conftest.py::_stop_audit_flusher` + `test_plugin_audit.py::TestAuditFlusherIsolation` — 测试隔离门禁：autouse fixture 换库前后各停一次 `audit-flusher`（join 不掉直接 `pytest.fail`），配一条反空判定先证明 `record_audit` 真起了 daemon，否则"开局无残留线程"会凭空绿（第一百零七批）
 - `python-ai/tests/test_container_runtime_contract_gate.py` — 检查 18（容器轨运行期契约）的判据：四条规则各种历史坏形状各红一次、三种"形状对但指向别处"的语义面单独钉、按拓扑的数量反空转、command 与 application.yml 两处解析器各有一个 PyYAML oracle（第一百零九批）
+- `python-ai/tests/test_e2e_frontend_server_gate.py` — 检查 19（e2e 轨前端服务契约）的判据：真仓库绿、已并入默认全跑档、七种坏形状（没起前端 / 探针端口与 baseURL 不同源 / 探针无 `exit 1` / 起前端排在 `npm ci` 前 / 缺探针 / config 在 CI 档也自起=双主人 / 删测试步骤或改命令名）各红一次，适用面下界按 job 名钉住；有名步骤与无名步骤条数都由 PyYAML 复算（第一百一十一批）
 - `python-ai/tests/test_eval_suite_eol_binding.py` — 冻结摘要与行尾无关的判据（钉值、两种检出形态、篡改仍红、emit 写 LF）
 - `.git-blame-ignore-revs` + `CONTRIBUTING.md`「Java code style (spotless)」— 全仓重排那一笔如何不污染 `git blame`

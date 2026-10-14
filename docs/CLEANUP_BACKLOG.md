@@ -478,3 +478,31 @@
   终态 `status=3 / chunk_count=0`，但回调确实回到了 java 并写了库（`文档状态已更新: 204 -> FAILED`）。
   ⇒ 链路已通到"有真嵌入服务就能成功"这一步，缺的是一个可达的嵌入端点，不是配置；这条留在
   `docs/PRODUCTION_OPS.md` 10.3 的第一条未收口里。
+- [x] **e2e 轨"测试步骤写了、:3000 上的进程没有"**（第一百一十一批取证并处置）
+  第一百零八批那条 Flyway 修绿之后，`Run full E2E suite` 从出生起第一次真的执行（run
+  38332373255，push `779fd23b`），于是暴露出它下面那一层：35 失败 / 28 通过 / 10 跳过，
+  35 条报错同一条 `Error: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/…`。
+  三次历史对照证明这不是回归——38233532705 / 38134153616 / 38025985552 的 `failed_steps`
+  都是 `["Run Flyway migrations"]` 且测试步骤 `skipped`，即套件从未跑过；README 里那个
+  "73 E2E" 一直是用例总数而不是通过数。
+  根因是两处各自都"说得通"的配置合起来没有实体：`.github/workflows/e2e.yml` 两个 job 都是
+  `npm ci` → `playwright install` → `npx playwright test`，中间没有一步起前端；而
+  `hfusionhub-frontend/playwright.config.ts:31-38` 写 `webServer: CI ? undefined : {…}`
+  （本地开发靠它起 `npm run dev`）。同 job 的 `Wait for Java backend` / `Wait for Python AI`
+  两条轮询都绿，缺的正是前端那一条。
+  处置（人拍板选 A：工作流里加显式步骤，不动 config）：两个 job 各补
+  `Start frontend dev server`（`npm run dev &`）＋ `Wait for frontend dev server`
+  （`curl -sf http://localhost:3000/`，30×2s，超时 `exit 1`），形态照搬同 job 已有的两条轮询。
+  本地实测把这条新步骤的效果量出来而不是让文本门冒充：vite 起来后 `curl -sf :3000/` = 200
+  （冷启动 `ready in 10354 ms`），`/api/health` 经 vite 代理 = 502（本机无 8080，CI 上有 java），
+  杀进程后同一请求 000/refused ＝ 那 35 条红的签名。
+  门禁：检查 19（`--e2e-frontend-server`，已并入默认全跑档）——起前端存在、排在 `npm ci` 之后、
+  测试前有带端口的探针、探针端口与 config 的 `baseURL` 同源、探针超时必须 `exit 1`，
+  适用面按 job 名下界钉 `{e2e-smoke, e2e-full}`（改名/删步骤判"适用面为空"，少一个判"缩小了"），
+  外加一条"config 在 CI 档也自起 webServer ＋ 工作流显式起 = 同一端口两个主人"判红；
+  `test_e2e_frontend_server_gate.py`（22 例）是这条门的门，有名步骤顺序与无名步骤条数都由
+  PyYAML 复算。建门时门自己纠正一次：`_playwright_ci_autostarts` 第一版按 `CI \? (\w+) :`
+  匹配，读不出 CI 档自起的是对象字面量 ⇒ "双主人"那一支永不触发，改成压平后取第一个非空 token。
+  诚实边界：本批只证"第一道死因已除"，**不证那 35 条会转绿**——登录态、seed 数据、mock LLM
+  这些更高层失败要等下一次 push 的 e2e run 才分得清；60 秒探针预算在本机是 10.4 秒，
+  runner 上是冷 npm 缓存，未量。
