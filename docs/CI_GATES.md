@@ -418,10 +418,30 @@ CI 档明确不自起。两边各自都"说得通"，合起来的结果是 CI �
 changed`），`/api/health` 经 `vite.config` 的代理返回 **502**（本机没有 8080，CI 上由
 `Start Java backend` 提供），杀掉进程后同一请求 000/refused —— 正是那 35 条红的签名。
 
-诚实边界：本检查只看 workflow 与 config 的文本形状，**不证明那 35 条用例在 runner 上会转绿**——
+诚实边界（写下时）：本检查只看 workflow 与 config 的文本形状，**不证明那 35 条用例在 runner 上会转绿**——
 起前端只是它们共同的第一道死因，登录态、seed 数据、mock LLM 这些更高层的失败要等下一次 push 的
 e2e run 才分得清；也不证明 `Wait for frontend dev server` 那 60 秒预算够（本机 10.4 秒起来，
 runner 上是冷 npm 缓存，未量）。检查 14 继续管这两个新步骤的 YAML 标量形态。
+
+**补证（同批推送 `aaaf045b` 之后取，run 38336201364 / job e2e-full）——上面两条边界都有答案了**：
+步骤 15 `Start frontend dev server` 与步骤 16 `Wait for frontend dev server` 都是 **success**
+⇒ 60 秒预算在 runner 的冷 npm 缓存下够用；套件从 `35 失败 / 28 通过 / 10 跳过` 变成
+**`4 失败 / 59 通过 / 10 跳过`**（合计 73，与 README 的 E2E 口径一致）⇒ 那 31 条确实死在
+"没有进程监听 :3000"。同一 push 触发的 `CI` run 38336201365 十一个 job 全绿，其中
+`static-consistency` 就是全跑档的 `static-checks.py`，所以检查 19 也在 runner 上真跑过一遍。
+（`e2e-smoke` 在这个 run 里是 skipped，按设计——`e2e.yml:10` 写 `if: github.event_name ==
+'pull_request'`，push 到 main 只跑 full；检查 19 判的是两个 job 的文本都带这两步，与此不冲突。）
+
+剩下那 4 条**不属于这一层**，已登记为第一百一十二批，死因先记在这里：
+`demo-data.spec.ts:29/78` 等 `li:has-text("知识库文档")`，而 `SetupChecklist.vue:251` 渲染的是
+`{{ section.label }}`、`BidDemoImportServiceImpl.java:149-152` 发的 label 是「招标文件知识库／
+企业资质库／历史标书库／示例投标项目」——"知识库文档"这串字只剩在 `DemoController.java:62` 的
+Swagger 描述里，属测试侧陈旧期望；同族的另一种死法是 `waitForResponse('/api/demo/import' && 200)`
+超时（`SetupChecklist.vue:109` 的 `if (!userStore.isAdmin) return` 在管理员标志未就位时**根本不发请求**，
+同一条用法的两种死法在不同 retry 里都出现过，**主因待 artifact 确认**）；
+`tools.spec.ts:11` 的 `getByText('搜索知识库')` 之前两条静态文案断言（`:9`/`:10`）都通过，只有
+数据驱动的能力卡片没渲染——卡片来自工具注册表（`Tools.vue:124` 按 registry 行取
+`abilityCatalog[tool.name]`），注册表为空就没有卡片。**这是假设，还没有复现。**
 
 ## 检查 18：容器轨的运行期契约（第一百零九批）
 

@@ -506,3 +506,23 @@
   诚实边界：本批只证"第一道死因已除"，**不证那 35 条会转绿**——登录态、seed 数据、mock LLM
   这些更高层失败要等下一次 push 的 e2e run 才分得清；60 秒探针预算在本机是 10.4 秒，
   runner 上是冷 npm 缓存，未量。
+- [x] **上面那条边界在同批推送后就有了答案**（第一百一十一批·补证，run 38336201364 / commit `aaaf045b`）：
+  `Start frontend dev server`＋`Wait for frontend dev server` 两步 success ⇒ 60 秒预算在冷 npm 缓存下够用；
+  套件 `35 失败 / 28 通过 / 10 跳过` → **`4 失败 / 59 通过 / 10 跳过`**（合计 73），31 条确实死在 :3000
+  没人监听。同一 push 的 `CI` run 38336201365 十一个 job 全绿，`static-consistency` 就是全跑档的
+  `static-checks.py` ⇒ 检查 19 也第一次在 runner 上跑过。`e2e-smoke` 是 skipped，按 `e2e.yml:10`
+  `if: github.event_name == 'pull_request'` 的设计，不是缺陷。
+- [ ] **e2e 轨剩下的 4 条红：测试侧陈旧期望 ＋ 数据驱动卡片没渲染**（第一百一十二批的对象，
+  第一百一十一批只做了定位，未处置）
+  - `e2e/demo-data.spec.ts:29` 与 `:78` 等 `li:has-text("知识库文档")`：`SetupChecklist.vue:251` 渲染的
+    是 `{{ section.label }}`，而 `BidDemoImportServiceImpl.java:149-152` 发的 label 是
+    「招标文件知识库／企业资质库／历史标书库／示例投标项目」——"知识库文档"只剩在
+    `DemoController.java:62` 的 Swagger 描述里。**先判哪一侧是对的**（改期望还是改 label 口径），
+    再动代码，不要为了让用例变绿直接放宽选择器。
+  - 同族另一种死法：`waitForResponse('/api/demo/import' && 200)` 超时（`spec:23` 首次、`:40`、`:72`）。
+    `SetupChecklist.vue:109` 的 `if (!userStore.isAdmin) return` 在管理员标志未就位时**不发请求**，
+    所以同一条断言有两种死法，在不同 retry 里都出现过 ⇒ **主因待 artifact 的 error-context 确认**。
+  - `e2e/tools.spec.ts:11` 的 `getByText('搜索知识库')`：`:9`/`:10` 的静态文案都过，只有数据驱动的
+    能力卡片没渲染。卡片来自工具注册表（`Tools.vue:124` 按 registry 行取 `abilityCatalog[tool.name]`），
+    CI 栈里注册表为空或取数失败就没有卡片。**这是假设，需要复现**（本机起 java＋python 后打开该页
+    看 registry 返回，或在 CI 日志里找那一次请求的状态码）。

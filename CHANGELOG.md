@@ -82,9 +82,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 #### 诚实边界
 - 本批只证明"**第一道死因已除**"，不证明那 35 条用例会转绿。登录态、seed 数据、mock LLM 这些
   更高层的失败要等下一次 push 的 e2e run 才分得清——检查 19 判的是"有没有进程监听 :3000"，
-  不判"页面能不能用"。
+  不判"页面能不能用"。**这条边界在同批推送后就闭合了**（run 38336201364，commit `aaaf045b`）：
+  `4 失败 / 59 通过 / 10 跳过`，31 条确实是死在 :3000 没人监听；剩下 4 条不在这层
+  （`demo-data.spec.ts` 三条等 `li:has-text("知识库文档")`，而 `BidDemoImportServiceImpl.java:149-152`
+  发的 label 是「招标文件知识库／企业资质库／历史标书库／示例投标项目」＝测试侧陈旧期望；
+  `tools.spec.ts:11` 只有数据驱动的能力卡片没渲染），登记为第一百一十二批。
 - 60 秒探针预算没在 CI 上量过：本机 vite 冷启动 10354 ms，runner 首屏还要现编译依赖。若首跑仍超时，
-  应当把预算调大，而不是把探针删掉。
+  应当把预算调大，而不是把探针删掉。**也量了**：那两步（`Start frontend dev server` /
+  `Wait for frontend dev server`）在同一 run 里都是 success，预算够用。
+- 同一 push 的 `CI` run 38336201365 十一个 job 全绿，其中 `static-consistency` 就是全跑档的
+  `static-checks.py` ⇒ 检查 19 第一次在 runner 上跑过。`e2e-smoke` 在该 run 里是 skipped，
+  按 `e2e.yml:10` 的 `if: github.event_name == 'pull_request'` 设计如此，不是新缺陷。
 - `docs/CI_GATES.md` 检查 17 那句"改后的步骤要等下一个 push 的 runner 才算真跑"已就地改写——本批
   它被证伪了（Flyway 那一步已经真跑并绿）。保留一条错误边界句属于只代理式断言。
 
