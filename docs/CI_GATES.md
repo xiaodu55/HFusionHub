@@ -432,7 +432,8 @@ runner 上是冷 npm 缓存，未量）。检查 14 继续管这两个新步骤�
 （`e2e-smoke` 在这个 run 里是 skipped，按设计——`e2e.yml:10` 写 `if: github.event_name ==
 'pull_request'`，push 到 main 只跑 full；检查 19 判的是两个 job 的文本都带这两步，与此不冲突。）
 
-剩下那 4 条**不属于这一层**，已登记为第一百一十二批，死因先记在这里：
+剩下那 4 条**不属于这一层**，已登记为第一百一十三批（原写作第一百一十二批，那个号属于
+`eval-runtime` 可达性探针），死因先记在这里：
 `demo-data.spec.ts:29/78` 等 `li:has-text("知识库文档")`，而 `SetupChecklist.vue:251` 渲染的是
 `{{ section.label }}`、`BidDemoImportServiceImpl.java:149-152` 发的 label 是「招标文件知识库／
 企业资质库／历史标书库／示例投标项目」——"知识库文档"这串字只剩在 `DemoController.java:62` 的

@@ -86,7 +86,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `4 失败 / 59 通过 / 10 跳过`，31 条确实是死在 :3000 没人监听；剩下 4 条不在这层
   （`demo-data.spec.ts` 三条等 `li:has-text("知识库文档")`，而 `BidDemoImportServiceImpl.java:149-152`
   发的 label 是「招标文件知识库／企业资质库／历史标书库／示例投标项目」＝测试侧陈旧期望；
-  `tools.spec.ts:11` 只有数据驱动的能力卡片没渲染），登记为第一百一十二批。
+  `tools.spec.ts:11` 只有数据驱动的能力卡片没渲染），登记为第一百一十三批（原写作第一百一十二批，
+  与 `eval-runtime` 可达性探针那条已占用的编号撞车，就地改号）。
 - 60 秒探针预算没在 CI 上量过：本机 vite 冷启动 10354 ms，runner 首屏还要现编译依赖。若首跑仍超时，
   应当把预算调大，而不是把探针删掉。**也量了**：那两步（`Start frontend dev server` /
   `Wait for frontend dev server`）在同一 run 里都是 success，预算够用。
@@ -95,6 +96,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   按 `e2e.yml:10` 的 `if: github.event_name == 'pull_request'` 设计如此，不是新缺陷。
 - `docs/CI_GATES.md` 检查 17 那句"改后的步骤要等下一个 push 的 runner 才算真跑"已就地改写——本批
   它被证伪了（Flyway 那一步已经真跑并绿）。保留一条错误边界句属于只代理式断言。
+- 补证段自己引入过一次**批次编号冲突**：4 条 e2e 红最初登记为第一百一十二批，而那个号在
+  `docs/CLEANUP_BACKLOG.md` 与上面几处"遗留清单"里已经属于 `eval-runtime` 可达性探针。登记新对象前
+  没先核号，只做了"下一号"的推断。四处引用已改为第一百一十三批并在原句里写明改号原因；编号没有
+  门禁管，这类撞号只能靠"先 grep 再登记"挡。
+- 顺着同一处核号往下看，还查出一段**更早的、本批造成的**撞号：`sbom-generation` 组件面那条在
+  `docs/CLEANUP_BACKLOG.md:265` 与上面三处"下一批"清单里写作第一百一十一批，而 111 已被本批占用
+  （它先前从第一百一十批抬到一百一十一批时也没先核号）。四处已改为第一百一十四批并逐处留了原号。
 
 ### 第一百零九批（2026-10-12：整栈第一次真跑——把"能写/能读"从镜像级抬到活栈级，量出四处"配置写了、容器里没有对应实体"的断链，并新增检查 18 把它们钉成四条规则）
 
@@ -319,7 +327,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
    不得靠删步骤或 `continue-on-error` 变绿。
 2. **第一百零九批**：全栈 compose 真跑一次，把"能写／能读"从镜像级升到活栈级。
 3. **第一百一十批**：judge-cache 驱逐。
-4. **第一百一十一批**：SBOM 组件面。**第一百一十二批**：eval-runtime 可达性探针（那条 run 38224268851 的第二条红）。
+4. **第一百一十四批**：SBOM 组件面（原写作第一百一十一批；111 已被本批的 e2e 前端服务契约占用）。**第一百一十二批**：eval-runtime 可达性探针（那条 run 38224268851 的第二条红）。
 5. **第一百零五批仍搁置**：license-check 的 SPDX 复合表达式与 copyleft 口径要**人拍板**，
    不能由改代码的一方顺手往允许清单里加名字。
 ### 第一百零六批（2026-10-12：审计库那个跨线程共享的 SQLite 连接——取用与关闭都收进 `_db_lock` 体内，并新增检查 16 把"锁外取引用"这种形态钉死）
@@ -429,7 +437,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 2. **第一百零八批**：Flyway 迁移步骤四处统一到 `-Dflyway.*`（原第一百零七批）。
 3. **第一百零九批**：全栈 compose 活栈真跑一次。**第一百一十批**：judge-cache 驱逐。
    另有 dev 锁审计门、`UPLOAD_DIR` 残留键、错误信封 code 统一、Java 侧状态码统一四条待排。
-4. **第一百一十一批**：SBOM 组件面对象；**第一百一十二批**：`eval-runtime` 可达性前置探针。
+4. **第一百一十四批**：SBOM 组件面对象（原写作第一百一十一批，该号已被 e2e 前端服务契约占用）；**第一百一十二批**：`eval-runtime` 可达性前置探针。
    第一百零五批（许可证策略）仍需人拍板，不由本批改。
 
 ### 第一百零四批（2026-10-12：`plugin-security.yml` 三个"从诞生起就没绿过"的 job——修的是旗标与解析形态，门的强度一分没降）
@@ -567,7 +575,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`SBOM contains 35 components` 这句话的对象不是产品**：那个 job 从不 `pip install -r requirements.txt`，
   所以它生成的是 **runner 自带 python 环境**的 SBOM（35 个组件），而漏洞门读的是
   `requirements.txt`（76 个包）。同一个 workflow 里两条产物描述的不是同一个对象——本批只发现并登记，
-  不动它（登记为第一百一十一批；第一百零六批就地纠正编号；同时那条"空组件表只打印 WARNING"的弱点一并处置）。
+  不动它（登记为第一百一十四批；第一百零六批、第一百一十一批两次就地纠正编号——111 那个号最终被本批
+  的 e2e 前端服务契约占用；同时那条"空组件表只打印 WARNING"的弱点一并处置）。
 - 顺带取到第一百零五批的实料：对着仓库 venv 生成的 126 组件里许可证串有 14 种形态，含分类器原文
   `License :: OSI Approved :: Apache Software License`、`PSF-2.0`、`Python-2.0`、`MIT-0`、`MIT-CMU`，
   以及 **`License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)`**
@@ -602,7 +611,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 4. **第一百零九批**：全栈 compose 活栈真跑一次（把"能写/能读"从镜像级升到活栈级）。
 5. **第一百一十批**：judge-cache 驱逐。另有 dev 锁审计门、`UPLOAD_DIR` 残留键、
    错误信封 code 统一、Java 侧状态码统一四条待排。
-6. **第一百一十一批**：`sbom-generation` 的组件面改成 python-ai 自己的依赖（现在那 35 个组件是
+6. **第一百一十四批**（原写作第一百一十一批，该号已被 e2e 前端服务契约占用）：`sbom-generation` 的组件面改成 python-ai 自己的依赖（现在那 35 个组件是
    runner 环境，漏洞门审的 76 个包一个都没进 SBOM），并把"组件表为空只打印 `WARNING`"改成判定。
 7. **第一百一十二批**：`eval-runtime` 的可达性前置探针（nightly 现在把"隧道不可达"报成
    "错误率退化"：220 例每个 ≈0.1 秒 ERR、`error_rate=1.000 exceeds maximum 0.020`）。

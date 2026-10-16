@@ -262,7 +262,8 @@
   于是产物里是 runner 的 35 个组件，而同一条流水线 `vulnerability-scan` 审的是 `requirements.txt`
   的 76 个包——两条产物不是同一个对象，SBOM 作为供应链凭证的价值目前是 0。
   本地对照实测：对 `python-ai/.venv` 生成的是 126 组件（scratch `b104_sbom_731.json`），
-  数量差异本身就说明了对象错位。处置方向（第一百一十一批，原写作第一百一十批）：先装 `requirements.txt` 再生成
+  数量差异本身就说明了对象错位。处置方向（第一百一十四批，原写作第一百一十批、再改第一百一十一批；
+  后者已被第一百一十一批的 e2e 前端服务契约占用，登记前没先核号）：先装 `requirements.txt` 再生成
   （或显式把 `<python>` 指到一个装有产品依赖的环境），组件数与锁的 pin 数做一致性判定，
   同时把"空组件表"从 `WARNING` 改成退出码非 0。**改的是产物描述的对象，不是把门放宽。**
 - [x] **`_reset_db()` 关连接不持锁，与后台 flush 线程竞争 ⇒ 解释器崩溃**（第一百零三批实测踩到，
@@ -512,7 +513,8 @@
   没人监听。同一 push 的 `CI` run 38336201365 十一个 job 全绿，`static-consistency` 就是全跑档的
   `static-checks.py` ⇒ 检查 19 也第一次在 runner 上跑过。`e2e-smoke` 是 skipped，按 `e2e.yml:10`
   `if: github.event_name == 'pull_request'` 的设计，不是缺陷。
-- [ ] **e2e 轨剩下的 4 条红：测试侧陈旧期望 ＋ 数据驱动卡片没渲染**（第一百一十二批的对象，
+- [ ] **e2e 轨剩下的 4 条红：测试侧陈旧期望 ＋ 数据驱动卡片没渲染**（第一百一十三批的对象，
+  原写作第一百一十二批，与上面那条 `eval-runtime` 可达性探针已占用的编号撞车，就地改号；
   第一百一十一批只做了定位，未处置）
   - `e2e/demo-data.spec.ts:29` 与 `:78` 等 `li:has-text("知识库文档")`：`SetupChecklist.vue:251` 渲染的
     是 `{{ section.label }}`，而 `BidDemoImportServiceImpl.java:149-152` 发的 label 是
