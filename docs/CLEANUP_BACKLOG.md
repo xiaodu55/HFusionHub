@@ -256,8 +256,8 @@
   **`License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)`**
   ——允许清单里只有 LGPLv3，**没有 LGPLv2+**，所以策略收敛之后这一条要么按 copyleft 判红、
   要么把该包从依赖面里换掉，不能靠给清单加名字放行 copyleft。
-- [ ] **`sbom-generation` 描述的对象不是产品依赖面（35 个组件 ＝ runner 自带环境），空组件表只打印
-  `WARNING` 不判红**（第一百零四批 CI 补证时发现，未处置）—— 那个 job 全程没有
+- [x] **`sbom-generation` 描述的对象不是产品依赖面（35 个组件 ＝ runner 自带环境），空组件表只打印
+  `WARNING` 不判红**（第一百零四批 CI 补证时发现，第一百一十四批处置）—— 那个 job 全程没有
   `pip install -r requirements.txt`，`cyclonedx-py environment` 读的是当前解释器已装的包，
   于是产物里是 runner 的 35 个组件，而同一条流水线 `vulnerability-scan` 审的是 `requirements.txt`
   的 76 个包——两条产物不是同一个对象，SBOM 作为供应链凭证的价值目前是 0。
@@ -266,6 +266,16 @@
   后者已被第一百一十一批的 e2e 前端服务契约占用，登记前没先核号）：先装 `requirements.txt` 再生成
   （或显式把 `<python>` 指到一个装有产品依赖的环境），组件数与锁的 pin 数做一致性判定，
   同时把"空组件表"从 `WARNING` 改成退出码非 0。**改的是产物描述的对象，不是把门放宽。**
+  **处置（第一百一十四批）**：`sbom-generation` 的 `Generate SBOM` 步骤补
+  `pip install -r requirements.txt`（形状沿用同流水线 `license-check`，那条 run 38332373261 的
+  日志 `:345` 实测它在同一个 ubuntu runner 上 90 秒装完 76 个包），组件面判定从内联 `python -c`
+  搬进 `scripts/ci/sbom_lock_coverage_gate.py`：锁的**每一个当前平台适用 pin**都要在 SBOM 里且
+  版本与锁一致，否则退出 1；空组件表/读不出形态退出 2（不再打印 `WARNING` 后继续绿）。
+  适用面按 `sys_platform` marker 算——锁里 `pywin32` / `win32-setctime` 在 ubuntu 上装不到，
+  写死名单会让门**天生红**（第八十八批补 marker 的同一条因果）。
+  判据是把改前的真产物喂给改后的门：run 38332373261 那份 `sbom` artifact 报
+  **42 缺失 ＋ 9 版本不符 / 76 适用 pin**，退出 1；门的门 17 例（`test_plugin_security_gates.py`
+  新增两个类）。
 - [x] **`_reset_db()` 关连接不持锁，与后台 flush 线程竞争 ⇒ 解释器崩溃**（第一百零三批实测踩到，
   第一百零四批补证时再次踩到并拿到崩溃栈，第一百零六批处置）—— `python-ai/app/core/plugin/audit.py:165-188`（改前）
   的 `_db_conn.close()` 与 `_DB_DIR/_DB_PATH` 换绑整段不在 `with _db_lock:` 内，而 `:128` 的连接是

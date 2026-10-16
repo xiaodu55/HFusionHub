@@ -11,6 +11,108 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百一十四批（2026-10-13：SBOM 那 35 个组件不是产品的依赖面——`sbom-generation` 从没装过 `requirements.txt`，空组件表还只打印 `WARNING`；先按锁安装再把组件面判定搬进 helper）
+
+#### 结论（先给判定性质）
+
+- 这一条**不是门红，是门绿而产物没有价值**：`sbom-generation` 在 run 38332373261 上是 success，
+  步骤打印 `SBOM contains 35 components` 后退出 0，但那 35 个组件＝`cyclonedx-bom 7.3.1` 的闭包
+  ＋ `pip`——产品依赖面一个都没进去。`cyclonedx-py environment` 读的是"当前解释器已装的包"，
+  而这个 job 全程没装过产品依赖。
+- 与检查 18（第一百零九批）同族：**配置写了、容器里没有实体**在这里是**产物生成了、产物里没有
+  被描述的对象**。第一百零四批 CI 补证时登记为第四条未处置错位，本批处置；改的是产物描述的对象，
+  不是把门放宽。
+- 更糟的是它没有会红的地方：组件表为空时旧步骤只 `print('WARNING: SBOM has no components')`，
+  退出码仍是 0。
+
+#### 修复与判据
+
+- 判据来自 runner 的产物本体（`gh run download -R xiaodu55/HFusionHub1 38332373261 -n sbom`），
+  不是读 workflow 猜的：组件 **35**；`python-ai/requirements.txt` 顶层 pin **78**，ubuntu 侧按
+  `sys_platform` marker 适用的是 **76**。把那份**改前的真产物**喂给改后的门 ⇒
+  **42 缺失 ＋ 9 版本不符 / 76 适用 pin，退出 1**——缺失含 fastapi / uvicorn / httpx / numpy /
+  pandas / pymilvus / pypdf，版本不符含 lxml / packaging / rpds-py / setuptools / tzdata / fqdn /
+  idna / jsonpointer / pyparsing（后者是工具自己现拉的最新版本，不是锁钉的那一版）。
+- 修复两半同做：
+  ① `Generate SBOM` 步骤补 `pip install -r requirements.txt`。形状沿用**同一条流水线**里
+  `license-check` 的 `Check licenses`——同一条 run 的日志 `:345` 实测它在同一个 ubuntu runner 上
+  90 秒装完这 76 个包（`pywin32` / `win32-setctime` 按 marker 跳过），所以不是纸面推演。
+  ② 组件面判定从内联 `python -c` 搬进 `scripts/ci/sbom_lock_coverage_gate.py`，退出码契约与
+  `vuln_report_gate.py` 同源：**0** 覆盖齐且版本一致 / **1** 至少一个缺失或版本不符（逐个打印）/
+  **2** 读不出被描述的对象（打不开、非 JSON、`components` 缺失**或为空**、锁里出现认不出的行形、
+  同一个包钉两个版本、适用面为空）。空组件表从此是 2，不再是打印一句 `WARNING` 后绿。
+- 适用面**算出来**而不是写死名单：锁里三条带 marker（`pywin32`、`win32-setctime` 是 win32-only，
+  `uvloop` 是非 win32）。如果按 78 个 pin 一律要求出现在 SBOM 里，ubuntu runner 上就是一条
+  **天生红**的门——这与第八十八批给锁补 `sys_platform` marker 是同一条因果。
+  `--sys-platform` 只为门的门存在：不传就按当前宿主算，同一份 fixture 会在 Windows 开发和
+  ubuntu CI 上得出不同结论，那正是要防的漂移。
+- 名字的比对按 PEP 503 规范化（`Boolean.Py` / `typing_extensions` / `charset_normalizer` 与
+  `boolean-py` / `typing-extensions` / `charset-normalizer` 同源），extras（`uvicorn[standard]`）
+  只取分发名——这两条各有一例钉住，因为锁里两种写法都有。
+
+#### 门自纠
+
+- **口径纠正**：登记时写的是"44 个产品包在产物里根本不存在"，那是 **78 个 pin** 的口径；
+  ubuntu 侧适用的口径是 **42**。两个数都对，但门报的是后者，文档与测试 docstring 一律改成
+  "78 pin / 76 适用 / 42 缺失"三层写清，免得下一个人拿 44 去对门的输出。
+- **门的判据一度想数组件个数**（"组件数与锁的 pin 数一致"）。实测否掉了：装完锁的环境里
+  `pip` 这类不在锁上的包必然出现，改后容器实测是 **76 适用 pin / 78 组件**。判"个数相等"会把
+  一条正确产物判红，于是门改成**下界判定**：锁的适用 pin 必须全在且版本一致，多出来的不判。
+- **不用被测代码的输出构造输入**：`test_the_real_lock_is_covered_on_the_ci_platform` 的 fixture
+  由测试侧的独立 oracle（列 0 正则＋marker 字面判断）从真锁现造，再与 helper 的解析对照；
+  helper 若把 `--hash=` 续行或 `# via` 行当成 pin，这条会红而不是空转。
+- 两条反空转前置照抄第一百零四批的纪律：`assert SBOM_GATE.is_file()`（否则 `python <不存在的脚本>`
+  自己就退出 2，所有"必须退出 2"的用例会空过），以及 oracle 解析数 `> 50` 的下界。
+
+#### 验证
+
+- 改后的步骤形状在 `python:3.11-slim` 容器里按同序真跑：`pip install cyclonedx-bom==7.3.1` →
+  `pip install -r requirements.txt` → `cyclonedx-py environment` → 门。门打印
+  `SBOM covers all 76 applicable locked packages (78 components; extras describe the tool itself
+  and are not judged)` 退出 **0**，抽查 fastapi / uvicorn / httpx / numpy / pypdf / pymilvus /
+  lxml / packaging 全部在产物里。**同一份改前产物在这条门口判 1**（就是上面那 42＋9）——宿主上跑 helper
+  显式 `--sys-platform linux` 复现一次，`python:3.11-slim` 容器里同参数再跑一次，两轮都数到
+  **42 缺失＋9 版本不符 / 76 适用 pin**、退出 1，所以这个数不跟宿主漂。
+- venv 全量 pytest 两轮 parity：**2234 passed / 18 skipped**（121.87 s 与 119.24 s 两轮同数）。
+- `static-checks.py` 全模式 EXIT=0（含计数同步那条：Java 718 · Python 2083 · 前端 117）；
+  `python-ai` 钉版 ruff（0.16.3）与 `scripts/ci/`＋本批判据文件 ruff 均 All checks passed。
+- 门的门：`tests/test_plugin_security_gates.py` 32 例全绿（本批新增 17 例＝helper 语义 12 ＋
+  步骤形状/真锁覆盖 5）；红→绿是分两步量的——先只写判据跑出 17 failed / 15 passed，再补 helper
+  与 workflow。
+- 计数：`def test_` 实测 2066→**2083**（本批 17 例），README 四处同源、`--test-counts` 绿，
+  `docs/ROADMAP.md:16` 血统行追一行；`docs/CLEANUP_BACKLOG.md` 那条改成 `[x]` 并写处置；
+  `docs/CI_GATES.md` 相关文件补 helper 与判据文件两条锚点。
+
+#### 诚实边界
+
+- 门是**下界**判定：产品依赖面必须全在且版本与锁一致，产物里多出 `pip` 这类不在锁上的组件不判红。
+  所以它保证的是"CI 这一次生成的 SBOM 描述锁"，不保证部署镜像里装的就是锁——后者是第八十八批
+  的锁与检查 18 那条线。
+- `environment` 子命令的性质没变：它读实装状态，所以门的前提是"步骤确实按锁装过"。本批把它
+  钉成文本契约（`pip install -r requirements.txt` 必须出现在 `cyclonedx-py environment` **之前**）＋
+  语义契约（装完必须真覆盖），但没有把它换成 `cyclonedx-py requirements` 那条"直接从文件生成"的
+  路线——**7.3.1 的那个子命令的旗标表没在本机核过**（仓内 venv 没装 cyclonedx-bom），第一百零四批
+  的教训就是"没核过的旗标会把门写死"，所以宁可沿用同流水线已实测的形状。
+- 改后的步骤**还没在 runner 上跑过**：容器实测只覆盖"python 3.11 ＋ linux ＋ 同一份锁"这一层，
+  runner 的镜像与网络（`--index-url` 走 aliyun 镜像）不在同一台机器上验证过；那要等下一次 push
+  的 `Plugin Security Pipeline` run 才算真跑。
+- 不静音那条老规矩继续覆盖 `sbom-generation`：不删步骤、不加 `continue-on-error`、执行步骤上
+  不出现 `if: always()`（`test_the_three_jobs_are_not_silenced`）。
+- `license-check` 仍是第一百零四批登记的那条**预期真红**（SPDX 复合表达式），本批一个字没动它；
+  第一百一十三批②③④三层（waiter 注册顺序 / 陈旧 label / tools 分页）也仍未处置。
+
+#### 下一批（待拍板，按建议顺序）
+
+- 取本批 push 后 `Plugin Security Pipeline` 的 runner 结果做第一百一十四批补证：`sbom-generation`
+  那一步应当打印 `SBOM covers all 76 applicable locked packages …`，并把产物组件数与 78 对上；
+  顺带补第一百一十三批那条 E2E run 38349608765 的 `e2e-results-full`（本轮已取到 run 结论：
+  `CI` run 38349608746 **success** 含 `static-consistency`＝检查 20 在 runner 上跑过，
+  `E2E` run 38349608765 `e2e-full` **failure**、`e2e-smoke` skipped）。
+- 第一百一十五批候选仍是两条：`license-check` 的许可证策略收敛（第一百零五批，**需人拍板**——
+  LGPLv2+ 那条要么判红要么换包，不能给清单加名字放行 copyleft）、judge-cache 驱逐（第一百一十批）。
+- SBOM 的**消费者**仍缺：产物只是 upload-artifact，没有任何门禁读它。要不要把它接进
+  `vulnerability-scan`（对同一份锁审计、对同一份产物报告）属下一步决策。
+
 ### 第一百一十三批（2026-10-13：e2e 那 4 条红用 trace 拆开——报错写的是"等不到响应"，trace 里响应 16 ms 就回来了、还带着 200 里的信封 403；补上 CI 缺的那个特性开关并新增检查 20）
 
 #### 结论（先给判定性质）

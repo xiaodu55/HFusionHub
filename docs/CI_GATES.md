@@ -529,6 +529,13 @@ minio/etcd），量到四处同一形状的断链：**配置写了、容器里�
 - `python-ai/scripts/eval_baseline.py` — 共享报告 / 门禁 / 基线逻辑（2026-08-29 由 `app/core/rag/` `git mv` 而来，见 `docs/CLEANUP_BACKLOG.md:34`）
 - `python-ai/evaluation/README.md` — 评测系统设计、用例、双轨与基线流程
 - `scripts/ci/check_container_skips.sh` — 容器专项 skip 计数门禁（0/1/2 退出码契约）
+- `scripts/ci/vuln_report_gate.py` — pip-audit 报告的判定门（0 无漏洞 / 1 有 / 2 读不出形态）
+- `scripts/ci/sbom_lock_coverage_gate.py` — SBOM 与依赖锁的一致性判定门（第一百一十四批：
+  0 覆盖齐且版本一致 / 1 缺失或版本不符 / 2 读不出被描述的对象，空组件表归 2 不再只打印 `WARNING`；
+  适用面按 `sys_platform` marker 算，`--sys-platform` 只为门的门而存在）
+- `python-ai/tests/test_plugin_security_gates.py` — `plugin-security.yml` 三个 job 的判据：
+  旗标与当版本旗标表同源、钉版与 `requirements-dev.txt` 同源、两条 helper 的退出码契约
+  （第一百零四批 15 例 ＋ 第一百一十四批 17 例），含"不许静音"那条
 - `python-ai/tests/test_ci_workflow_gates.py` — 上述 compose/skip 两条非评测门禁的判据（含真执行 workflow 步骤体）
 - `python-ai/tests/test_workflow_run_scalars.py` — 检查 14 的判据：四道门的 argv 形状、`--flag` 与 argparse 的契约、历史折叠形态真会红
 - `python-ai/tests/test_python_clock_caliber_gate.py` — 检查 15（python 钟面口径）的判据：真仓库绿、已并入默认全跑档、每种漂移（裸读法 / `TZ` 缺失 / 非 UTC / helm 死键 / 工作负载标记改名）都红；工作负载集合另用 PyYAML 写一个 oracle

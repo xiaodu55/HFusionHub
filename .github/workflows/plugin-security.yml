@@ -121,19 +121,22 @@ jobs:
         # specVersion 1.6 / 126 components 的 SBOM，所以收敛到锁里那版。
         run: pip install cyclonedx-bom==7.3.1
       - name: Generate SBOM
+        # 产物描述的对象必须是**产品依赖面**。`environment` 子命令读的是"当前解释器已经装了
+        # 什么包"，而这个 job 过去只装了 cyclonedx-bom 自己 ⇒ 产物是 runner 环境的 35 个组件
+        # （第一百零四批登记、本批处置；判据是 run 38332373261 的 `sbom` 产物本体：锁在
+        # ubuntu 侧适用的 76 个 pin 里 42 个一个都不在，另有 9 个版本不是钉的那一版）。
+        # 先按锁安装的形状沿用同流水线 `license-check` 的 `Check licenses` 步骤——同一条 run
+        # 的日志 :345 实测它在 ubuntu runner 上 90 秒装完这 76 个包（pywin32 / win32-setctime
+        # 按 sys_platform marker 跳过），所以这里不是纸面推演。
+        # 组件数交给 helper 判定而不是内联 `python -c`：解析逻辑住在 YAML 里就没法被测试
+        # 执行，那正是第一百零四批那条 `AttributeError` 能藏两批的原因。空组件表过去只
+        # print('WARNING: …') 且退出 0，现在由 helper 判 2。
         run: |
           cd python-ai
+          pip install -r requirements.txt
           cyclonedx-py environment -o ../sbom-python.json --output-format JSON
           echo "SBOM generated"
-          python -c "
-          import json, sys
-          with open('../sbom-python.json') as f:
-              data = json.load(f)
-          components = data.get('components', [])
-          print(f'SBOM contains {len(components)} components')
-          if not components:
-              print('WARNING: SBOM has no components')
-          "
+          python ../scripts/ci/sbom_lock_coverage_gate.py ../sbom-python.json requirements.txt
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v4
         with:
