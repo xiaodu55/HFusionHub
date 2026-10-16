@@ -513,18 +513,40 @@
   没人监听。同一 push 的 `CI` run 38336201365 十一个 job 全绿，`static-consistency` 就是全跑档的
   `static-checks.py` ⇒ 检查 19 也第一次在 runner 上跑过。`e2e-smoke` 是 skipped，按 `e2e.yml:10`
   `if: github.event_name == 'pull_request'` 的设计，不是缺陷。
-- [ ] **e2e 轨剩下的 4 条红：测试侧陈旧期望 ＋ 数据驱动卡片没渲染**（第一百一十三批的对象，
-  原写作第一百一十二批，与上面那条 `eval-runtime` 可达性探针已占用的编号撞车，就地改号；
-  第一百一十一批只做了定位，未处置）
-  - `e2e/demo-data.spec.ts:29` 与 `:78` 等 `li:has-text("知识库文档")`：`SetupChecklist.vue:251` 渲染的
-    是 `{{ section.label }}`，而 `BidDemoImportServiceImpl.java:149-152` 发的 label 是
-    「招标文件知识库／企业资质库／历史标书库／示例投标项目」——"知识库文档"只剩在
-    `DemoController.java:62` 的 Swagger 描述里。**先判哪一侧是对的**（改期望还是改 label 口径），
-    再动代码，不要为了让用例变绿直接放宽选择器。
-  - 同族另一种死法：`waitForResponse('/api/demo/import' && 200)` 超时（`spec:23` 首次、`:40`、`:72`）。
-    `SetupChecklist.vue:109` 的 `if (!userStore.isAdmin) return` 在管理员标志未就位时**不发请求**，
-    所以同一条断言有两种死法，在不同 retry 里都出现过 ⇒ **主因待 artifact 的 error-context 确认**。
-  - `e2e/tools.spec.ts:11` 的 `getByText('搜索知识库')`：`:9`/`:10` 的静态文案都过，只有数据驱动的
-    能力卡片没渲染。卡片来自工具注册表（`Tools.vue:124` 按 registry 行取 `abilityCatalog[tool.name]`），
-    CI 栈里注册表为空或取数失败就没有卡片。**这是假设，需要复现**（本机起 java＋python 后打开该页
-    看 registry 返回，或在 CI 日志里找那一次请求的状态码）。
+- [x] **e2e 轨剩下的 4 条红：最外一层已除，两层仍在**（第一百一十三批；
+  原写作第一百一十二批，与上面那条 `eval-runtime` 可达性探针已占用的编号撞车，就地改号）
+  取证（run 38343229817 的 `e2e-results-full` ＋ `playwright-traces`，全部三条 demo-data 的 retry1
+  `trace.zip` 解出 `0-trace.network`）：报错都是 `page.waitForResponse: Timeout 10000ms exceeded`
+  （`demo-data.spec.ts:23`/`:40`/`:72`），但 trace 显示请求**发出去了也回来了**，响应体是
+  `{"code":403,"message":"演示数据功能已关闭（DEMO_ENDPOINTS_ENABLED=false）…"}` 配 HTTP **200**
+  （traceId `d36804ec03644249b011b204d5d97713`／`ac1ca5cb04b74d84b64e47721f767fce`／
+  `57e397cc38ac42c6adee633a75fafd49`）。同一条 trace 的时间轴还量到：`/api/demo/import` 起于
+  `_monotonicTime 114340`、历时 121 ms（≈`114461` 落地），而 `waitForResponse` 在 `114773.2` 才注册
+  ——waiter 比响应晚 312 ms。
+  - [x] **最外一层（CI 侧，本批处置）**：`application.yml:177` 的
+    `endpoints-enabled: ${DEMO_ENDPOINTS_ENABLED:false}` 默认关，`DemoController.java:39/44` 未开启时
+    发 200 里的信封 403；dev 侧一直开着（`docker/docker-compose.yml:272`、`docker/.env:24`），
+    只有 `e2e.yml` 两个 java env 块（`:84-105`、`:236-257`）没带这个键 ⇒ 两处补
+    `DEMO_ENDPOINTS_ENABLED: "true"`。门禁：检查 20（`--e2e-backend-feature-flags`，已并入默认全跑档）
+    ——键必须出现在"既 `spring-boot:run` 起后端、又跑 playwright"的那个 job 的 env 并集里且值为
+    `true`，缺键／值不对／注释冒充／放错步骤各红一次，适用面为空或缩小都判红；
+    `test_e2e_backend_feature_flag_gate.py`（18 例）是这条门的门，含一条 PyYAML oracle 与一条
+    "workflow 钉值 == dev compose 钉值"的跨文件同源判定。建门时门自己纠正一次：
+    "适用面缩小"分支第一版写成 `E2E_TEST_JOBS - set()`（恒真）⇒ 任何裁剪都判绿，改成拿本轮真扫到的
+    job 集合作差。
+  - [ ] **第二层（spec 侧，待拍板）**：`demo-data.spec.ts:21-24`（同族三处）都是
+    `await importButton.click()` **之后**才 `waitForResponse`，响应先到就 10 秒空等。开了关之后导入
+    会真做播种、耗时大概率越过注册点，红会转绿——但那是时序运气不是修好，正确写法是先注册再点
+    （`Promise.all` 或把 waiter 提到 `click()` 前）。**没动任何 `.spec.ts`**：改法涉及三条用例的写法，
+    且要有 runner 上的复测才判得清它现在是否还红。
+  - [ ] **第三层（期望陈旧，待判哪一侧是对的）**：`demo-data.spec.ts:29` 与 `:78` 等
+    `li:has-text("知识库文档")`，而 `SetupChecklist.vue:252` 的分项列表渲染的是 `{{ section.label }}`、
+    `BidDemoImportServiceImpl.java:149-152` 发的 label 是「招标文件知识库／企业资质库／历史标书库／
+    示例投标项目」——"知识库文档"只剩在 `DemoController.java:62` 的 Swagger 描述里（另在
+    `SetupChecklist.vue:220` 的引导文案括号里出现过一次，那是自然语言不是 section label）。
+    先判改期望还是改 label 口径，不要为了让用例变绿直接放宽选择器。
+  - [ ] **第 4 条与开关无关**：`tools.spec.ts:11` 的 `getByText('搜索知识库', { exact: true })` 报
+    `element(s) not found`，而 `:9`/`:10` 的静态文案都过；`Tools.vue:62` 是 `pageSize = 6` 的客户端
+    分页（`:168-171` 按页 `slice`），一页只渲染 6 张卡片，`:20` 才点「知识库」分类 tab。
+    **CI 注册表里工具条数与 `search_knowledge_base` 的排序位置未量**——要判"目标在第几页"还缺这一步。
+    改法（调 `Tools.vue` 默认排序 vs 让用例先点 tab 再断言）属产品/测试侧决策，**待拍板**。

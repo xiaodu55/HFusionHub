@@ -2499,6 +2499,108 @@ def check_e2e_frontend_server() -> None:
         )
 
 
+# 检查 20 的适用面与期望值：e2e 用例假定的后端开关。值是**用例假定的那个值**，
+# 不是"随便写点什么"——`DEMO_ENDPOINTS_ENABLED=false` 照样让 /api/demo/* 返回信封 403。
+E2E_BACKEND_FLAG_EXPECTED = {"DEMO_ENDPOINTS_ENABLED": "true"}
+_JAVA_BACKEND_RUN_RE = re.compile(r"\bspring-boot:run\b")
+
+
+def _job_env_rows(lines: list[str], start: int, end: int) -> list[str]:
+    """job 级 `env:`（4 空格那一列）下的键行；步骤级 env 由 `_workflow_steps` 给。"""
+    rows: list[str] = []
+    in_block = False
+    for line in lines[start:end]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 4 and stripped == "env:":
+            in_block = True
+            continue
+        if in_block and indent <= 4:
+            in_block = False
+        if in_block and indent >= 6:
+            rows.append(stripped)
+    return rows
+
+
+def _e2e_backend_flag_offenders() -> tuple[list[str], int]:
+    """每个"起 java 后端 + 跑 playwright"的 job：被测面依赖的开关必须显式声明且值对。"""
+    offenders: list[str] = []
+    if not E2E_WORKFLOW.is_file():
+        return [f"检查 20：workflow 文件不存在 {_repo_rel(E2E_WORKFLOW)}"], 0
+
+    lines = E2E_WORKFLOW.read_text(encoding="utf-8").splitlines()
+    ranges = _workflow_job_ranges(E2E_WORKFLOW)
+    applicable = 0
+    tested: set[str] = set()
+    for job_name, start, end in ranges:
+        steps = [s for s in _workflow_steps(E2E_WORKFLOW) if start <= s["lineno"] <= end]
+        if not any(_PLAYWRIGHT_TEST_RE.search(s["run"]) for s in steps):
+            continue
+        tested.add(job_name)
+        backend = [s for s in steps if _JAVA_BACKEND_RUN_RE.search(s["run"])]
+        if not backend:
+            offenders.append(
+                f"检查 20：job `{job_name}` 跑 `npx playwright test` 却没有起 java 后端的步骤——"
+                "被测端点由谁提供已经换了地方，这条门的适用面需要跟着改，不能默认绿"
+            )
+            continue
+        applicable += 1
+        env_rows = _job_env_rows(lines, start, end) + [row for s in backend for row in s["env"].splitlines()]
+        for key, want in sorted(E2E_BACKEND_FLAG_EXPECTED.items()):
+            declared = [row for row in env_rows if row.split(":")[0].strip() == key]
+            where = f"{_repo_rel(E2E_WORKFLOW)}（job `{job_name}`，起后端在 :{backend[0]['lineno']}）"
+            if not declared:
+                offenders.append(
+                    f"{where} 没有声明 `{key}`：`application.yml:177` 的默认值是 `false`，"
+                    f"`DemoController` 会对被测端点返回 HTTP 200 里的信封 403，"
+                    f"用例假定的值是 `{want}`（dev 栈同键写的是 `{want}`）"
+                )
+                continue
+            value = declared[0].split(":", 1)[1].strip().strip('"').strip("'")
+            if value != want:
+                offenders.append(
+                    f"{where} 把 `{key}` 声明成 `{value}`，用例假定 `{want}`——"
+                    "键存在不等于开关打开，值不对时被测面照样门控关闭"
+                )
+    if applicable == 0:
+        offenders.append(
+            "检查 20 的适用面为空：没有任何 job 同时起 java 后端并跑 playwright——"
+            f"删步骤或改命令名会让这条门静默变绿（预期 {sorted(E2E_TEST_JOBS)}）"
+        )
+    elif not E2E_TEST_JOBS <= tested:
+        offenders.append(
+            f"检查 20 的适用面缩小了：跑 playwright 的 job 现在是 {sorted(tested)}，"
+            f"少了 {sorted(E2E_TEST_JOBS - tested)}——那条链的后端开关没人核了"
+        )
+    return offenders, applicable
+
+
+def check_e2e_backend_feature_flags() -> None:
+    """检查 20：e2e 轨用的后端把被测端点的开关**显式打开**了没有。
+
+    第一百一十三批的取证（run 38336201364 的 trace 工件）：`demo-data.spec.ts` 三条红的
+    直接死因不是选择器，而是 `POST /api/demo/import` 返回 **HTTP 200 + 信封 `code:403`**
+    ——`DemoController.java:39` 的 `@Value("${app.demo.endpoints-enabled:false}")` 默认关闭，
+    `application.yml:177` 把它接到 `${DEMO_ENDPOINTS_ENABLED:false}`，而 `.github/workflows/e2e.yml`
+    两个 job 的 java env（`:86-96`、`:235-245`）从没带过这个键。对照 `docker/docker-compose.yml:272`
+    与 `docker/.env:24` 都写着 `true`——**dev 栈开、CI 档关**，测试期望的是开着的语义。
+    HTTP 状态是 200，所以"步骤跑绿、用例读到的却是门控关闭"这类断链不会让任何一步变红。
+    这条门判的是形状之外的语义：跑 playwright 又起 java 后端的 job，必须把被测面依赖的开关
+    显式声明成用例假定的值，缺键或值不对都红。
+    """
+    offenders, jobs = _e2e_backend_flag_offenders()
+    if offenders:
+        problems.append("e2e 轨后端特性开关契约不成立:\n    " + "\n    ".join(offenders))
+    else:
+        declared = ", ".join(f'{k}="{v}"' for k, v in sorted(E2E_BACKEND_FLAG_EXPECTED.items()))
+        print(
+            f"[ok] e2e 轨后端特性开关：{jobs} 个既起 java 后端又跑 playwright 的 job 都显式声明了 "
+            f"{declared}（application.yml 的默认值是 false，不写就是 HTTP 200 里的信封 403）"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
@@ -2520,6 +2622,7 @@ def main() -> int:
     parser.add_argument("--flyway-cli", action="store_true")
     parser.add_argument("--container-runtime-contract", action="store_true")
     parser.add_argument("--e2e-frontend-server", action="store_true")
+    parser.add_argument("--e2e-backend-feature-flags", action="store_true")
     args = parser.parse_args()
 
     if not (args.tenant_columns or args.internal_token_keys or args.test_counts
@@ -2530,7 +2633,8 @@ def main() -> int:
             or args.write_clock_caliber or args.python_clock_caliber
             or args.workflow_run_scalars or args.db_lock_lifetime
             or args.flyway_cli or args.container_runtime_contract
-            or args.e2e_frontend_server):
+            or args.e2e_frontend_server
+            or args.e2e_backend_feature_flags):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
             args.flyway_doc_sync = args.h2_schema_drift = \
             args.readme_claims = args.helm_value_roots = args.container_uid = \
@@ -2538,7 +2642,8 @@ def main() -> int:
             args.requirements_markers = args.frontend_time_entry = \
             args.write_clock_caliber = args.python_clock_caliber = \
             args.workflow_run_scalars = args.db_lock_lifetime = args.flyway_cli = \
-            args.container_runtime_contract = args.e2e_frontend_server = True
+            args.container_runtime_contract = args.e2e_frontend_server = \
+            args.e2e_backend_feature_flags = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -2578,6 +2683,8 @@ def main() -> int:
         check_container_runtime_contract()
     if args.e2e_frontend_server:
         check_e2e_frontend_server()
+    if args.e2e_backend_feature_flags:
+        check_e2e_backend_feature_flags()
 
     if problems:
         print("\n发现问题:")

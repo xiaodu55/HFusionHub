@@ -94,6 +94,9 @@ jobs:
           SPRING_DATA_REDIS_HOST: localhost
           SPRING_DATA_REDIS_PORT: 6379
           ADMIN_PASSWORD: "admin123"
+          # DemoController 的端点默认关闭（application.yml:177 = ${DEMO_ENDPOINTS_ENABLED:false}），
+          # 不写这个键时 /api/demo/* 返回 HTTP 200 里的信封 403；dev compose 钉的是 true
+          DEMO_ENDPOINTS_ENABLED: "true"
           CALLBACK_SECRET: "e2e-callback-secret"
           PYTHON_AI_BASE_URL: "http://localhost:9000"
           PYTHON_AI_INTERNAL_TOKEN: "e2e-internal-token"
@@ -243,6 +246,9 @@ jobs:
           SPRING_DATA_REDIS_HOST: localhost
           SPRING_DATA_REDIS_PORT: 6379
           ADMIN_PASSWORD: "admin123"
+          # DemoController 的端点默认关闭（application.yml:177 = ${DEMO_ENDPOINTS_ENABLED:false}），
+          # 不写这个键时 /api/demo/* 返回 HTTP 200 里的信封 403；dev compose 钉的是 true
+          DEMO_ENDPOINTS_ENABLED: "true"
           CALLBACK_SECRET: "e2e-callback-secret"
           PYTHON_AI_BASE_URL: "http://localhost:9000"
           PYTHON_AI_INTERNAL_TOKEN: "e2e-internal-token"

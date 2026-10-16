@@ -11,6 +11,79 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百一十三批（2026-10-13：e2e 那 4 条红用 trace 拆开——报错写的是"等不到响应"，trace 里响应 16 ms 就回来了、还带着 200 里的信封 403；补上 CI 缺的那个特性开关并新增检查 20）
+
+#### 结论（先给判定性质）
+- 输入仍是 runner 事实：第一百一十一批补证＋撞号纠正那两笔（`5a55b042`、`418596c4`）push 后，
+  `CI` run 38343229838 十一个 job **全绿**，`E2E` run 38343229817 只有 `Run full E2E suite` 红，
+  计数与上一批补证一致（**59 通过 / 4 失败 / 10 跳过**）⇒ 检查 19 那两步在 runner 上成立，
+  剩下的 4 条是更里面一层的东西。
+- 本批只除了这 4 条**最外那一层**：CI 起的后端不是用例假定的那个后端
+  （`DEMO_ENDPOINTS_ENABLED` 没声明）。剩下两层（spec 里 waiter 注册顺序、陈旧的 section label 期望）
+  和 tools 那条分页**没有被本批处置**，判据与取证都写进文档了。
+
+#### 修复与判据
+- 取证链（`e2e-results-full/e2e-results.json` ＋ `playwright-traces`，三条 demo-data 的 retry1
+  `trace.zip` 解出 `0-trace.network`）：报错都是 `page.waitForResponse: Timeout 10000ms exceeded`
+  （`demo-data.spec.ts:23`/`:40`/`:72`），但 trace 显示 `/api/demo/import` **确实发出并回来了**，
+  HTTP 200、响应体 `{"code":403,"message":"演示数据功能已关闭（DEMO_ENDPOINTS_ENABLED=false）…"}`
+  （traceId `d36804ec03644249b011b204d5d97713`／`ac1ca5cb04b74d84b64e47721f767fce`／
+  `57e397cc38ac42c6adee633a75fafd49`）。同一条 trace 的时间轴还量到请求 `114340` 起、历时 121 ms
+  （≈`114461` 落地），而 `waitForResponse` 在 `114773.2` 才注册 ⇒ waiter 比响应晚 312 ms。
+  **这两件事叠在一起**：开关关着让后端 16 ms 短路返回，把 spec 里"先点再注册 waiter"的竞态显形。
+- 根因锚点：`application.yml:177` 的 `endpoints-enabled: ${DEMO_ENDPOINTS_ENABLED:false}`、
+  `DemoController.java:39` 的 `@Value("${app.demo.endpoints-enabled:false}")`、`:44` 的
+  `R.fail(403, …)`。dev 侧一直是开的（`docker/docker-compose.yml:272`、`docker/.env:24`），
+  只有 `e2e.yml` 两个 java env 块（`:84-105`、`:236-257`）没带这个键——与检查 18 的
+  "配置写了、容器里没有实体"同族，只是这一族是"开关默认关、CI 没显式开"。
+  因为死在信封里，**步骤不红、探针不红、`Wait for Java backend` 绿**，退出码这一层永远看不见它。
+- 处置：`e2e.yml` 两处补 `DEMO_ENDPOINTS_ENABLED: "true"`（与 dev compose 同源，带两行 WHY 注释）。
+- 门禁：新增**检查 20**（`scripts/static-checks.py --e2e-backend-feature-flags`，已并入默认全跑档）——
+  每个既 `spring-boot:run` 起 java 后端、又 `npx playwright test` 跑用例的 job，其 job 级 env ∪
+  起后端步骤 env 必须显式声明 `DEMO_ENDPOINTS_ENABLED: "true"`；四种坏形状各红一次（缺键／值不是
+  `true`／注释行冒充／键放错步骤），适用面为空与缩小都判红。
+  `python-ai/tests/test_e2e_backend_feature_flag_gate.py`（18 例）是这条门的门：真仓库绿、
+  接线进全跑档、PyYAML 独立 oracle 只用 YAML 复算 env 并集、外加一条跨文件同源判定
+  （workflow 钉的值必须等于 dev compose `:272` 钉的值——防"门跟着 CI 一起变松"）。
+
+#### 门自纠
+- `_e2e_backend_flag_offenders` 的"适用面缩小"分支第一版写成 `E2E_TEST_JOBS - set()`（恒等于全集），
+  于是裁掉 job 也判绿；改成先收集本轮真扫到的 job 名集合、再与下界作差，
+  `test_shrunken_applicability_is_red` 才真的红。
+- 门的红态是**先量后改**：检查 20 落地时真仓库先报 2 条 offender
+  （`job 'e2e-smoke'，起后端在 :84` / `job 'e2e-full'，起后端在 :235`），补键之后转绿；
+  收尾时再把两行键删回去复跑，`RED_RETEST_EXIT=1` 且两条 offender 再现，确认门咬的是这个键
+  而不是别的形状。
+
+#### 验证
+- `python-ai` venv 全量 pytest 两轮 parity：**2217 passed / 18 skipped**（196.6 s 与 202.5 s 两轮同数）。
+- `static-checks.py` 全模式 EXIT=0；检查 20 单独跑 `[ok]`；检查 19 与新门的门测试同跑 40 例全绿；
+  venv 钉版 ruff 干净。
+- 计数：`def test_` 实测 2048→**2066**（本批 18 例），README 四处同源、`--test-counts` 绿，
+  `docs/ROADMAP.md:16` 同步；文档面新增 `docs/CI_GATES.md` 的检查 20 一节，
+  `docs/CLEANUP_BACKLOG.md` 那条 4 红改成 `[x]`＋拆出三条未处置子项。
+
+#### 诚实边界
+- **门绿不等于用例绿**。这 4 条红里的三层只除了最外一层：
+  ②`demo-data.spec.ts:21-24`（同族三处）都是 `await click()` **之后**才注册 `waitForResponse`，
+  开了关后导入会真做播种、耗时大概率越过注册点，红会转绿——那是时序运气不是修好，
+  正确写法是先注册再点；③`:29`/`:78` 等的 `li:has-text("知识库文档")` 本身陈旧
+  （`SetupChecklist.vue:251-252` 渲染 `{{ section.label }}`，`BidDemoImportServiceImpl.java:149-152`
+  发的是「招标文件知识库／企业资质库／历史标书库／示例投标项目」）；
+  ④`tools.spec.ts:11` 与开关无关（`Tools.vue:62` 是 `pageSize = 6` 的客户端分页，
+  `:20` 才点分类 tab），而 **CI 注册表里工具条数与 `search_knowledge_base` 的排序位置未量**。
+- 检查 20 只覆盖 e2e 轨：`deploy/docker-compose.prod.yml:187` 按设计保持
+  `${DEMO_ENDPOINTS_ENABLED:-false}`（`/clear` 有数据破坏性），门不推广成"所有拓扑都得 true"；
+  键也只钉这一条——它是被工件证实的那一条，其余特性开关没证据就不上门。
+- ②③④要怎么改属产品/测试侧决策，**没有拍板就没动任何 `.spec.ts`**；本批的"绿"只到
+  "CI 起的后端与用例假定的后端是同一个"为止，那 3 条是否转绿要等下一次 push 的 e2e run。
+
+#### 下一批（待拍板，按建议顺序）
+- 第一百一十三批·续：spec 侧两条（waiter 先注册再点 ＋ 陈旧 label 判哪一侧对）与 tools 分页那条，
+  需要用户拍板改法；改前先把"CI 注册表里工具条数与排序位置"量出来。
+- 第一百一十四批：SBOM 的组件面改成 python-ai 产品依赖（含空组件表判定），见 `docs/CLEANUP_BACKLOG.md:265`。
+- 第一百一十批：judge-cache 驱逐；第一百零五批：license 策略（需人拍板）。
+
 ### 第一百一十一批（2026-10-13：推送把三条 run 换成 runner 事实——Flyway 第一次真跑就绿，于是 e2e 翻到下一层"测试步骤写了、:3000 上的进程没有"，补两步并新增检查 19）
 
 #### 结论（先给判定性质）

@@ -433,16 +433,66 @@ runner 上是冷 npm 缓存，未量）。检查 14 继续管这两个新步骤�
 'pull_request'`，push 到 main 只跑 full；检查 19 判的是两个 job 的文本都带这两步，与此不冲突。）
 
 剩下那 4 条**不属于这一层**，已登记为第一百一十三批（原写作第一百一十二批，那个号属于
-`eval-runtime` 可达性探针），死因先记在这里：
-`demo-data.spec.ts:29/78` 等 `li:has-text("知识库文档")`，而 `SetupChecklist.vue:251` 渲染的是
-`{{ section.label }}`、`BidDemoImportServiceImpl.java:149-152` 发的 label 是「招标文件知识库／
-企业资质库／历史标书库／示例投标项目」——"知识库文档"这串字只剩在 `DemoController.java:62` 的
-Swagger 描述里，属测试侧陈旧期望；同族的另一种死法是 `waitForResponse('/api/demo/import' && 200)`
-超时（`SetupChecklist.vue:109` 的 `if (!userStore.isAdmin) return` 在管理员标志未就位时**根本不发请求**，
-同一条用法的两种死法在不同 retry 里都出现过，**主因待 artifact 确认**）；
-`tools.spec.ts:11` 的 `getByText('搜索知识库')` 之前两条静态文案断言（`:9`/`:10`）都通过，只有
-数据驱动的能力卡片没渲染——卡片来自工具注册表（`Tools.vue:124` 按 registry 行取
-`abilityCatalog[tool.name]`），注册表为空就没有卡片。**这是假设，还没有复现。**
+`eval-runtime` 可达性探针），死因由 artifact 量出（见下面的检查 20）：3 条 demo-data 叠着三层，
+本批只解开其中最外的一层（CI 起的后端不是用例假定的那个后端），第 4 条 `tools.spec.ts:11`
+是工具列表分页把目标卡片挤到第 3 页，属测试侧问题，**尚未处置**。
+
+## 检查 20：e2e 轨的后端特性开关契约（第一百一十三批）
+
+第一百一十一批把前端进程补上之后，`Run full E2E suite` 从 `35 失败 / 28 通过` 变成
+**`4 失败 / 59 通过 / 10 跳过`**（run 38343229817 的 `e2e-results-full` 工件，合计 73 与 README
+口径一致）。三条 demo-data 的报错是同一条：`page.waitForResponse: Timeout 10000ms exceeded`
+（`demo-data.spec.ts:23`、`:40`、`:72`），第 4 条是 `getByText('搜索知识库')` 找不到元素。
+
+解包 `playwright-traces` 里三条 demo-data 的 retry1 `trace.zip` → `0-trace.network`，请求**确实发出去
+了，而且回来了**，每条留下同一个响应体：
+
+```
+200 http://localhost:3000/api/demo/import
+{"code":403,"message":"演示数据功能已关闭（DEMO_ENDPOINTS_ENABLED=false），如需使用请在环境配置中开启",…}
+```
+
+三条的 traceId 分别是 `d36804ec03644249b011b204d5d97713` / `ac1ca5cb04b74d84b64e47721f767fce` /
+`57e397cc38ac42c6adee633a75fafd49`。根因是键没声明：`application.yml:177` 写
+`endpoints-enabled: ${DEMO_ENDPOINTS_ENABLED:false}`，`DemoController.java:39` 按
+`@Value("${app.demo.endpoints-enabled:false}")` 读，`:44` 在未开启时 `R.fail(403, …)`。
+**HTTP 状态仍是 200**，所以步骤不红、探针不红、`Wait for Java backend` 绿，死的只有用例读到的语义。
+dev 侧一直是开的（`docker/docker-compose.yml:272` 与 `docker/.env:24`），只有 `e2e.yml` 的两个 java
+env 块（`:84-105`、`:236-257`）没带这个键——**"配置写了、容器里没有实体"（检查 18）的同族**，
+只是这一族是"开关默认关、CI 没显式开"。
+
+**但开关不是这三条当时的死因，只是最外那一层。** 同一份 retry1 trace 的时间轴（`_monotonicTime`
+与 `test.trace` 的 `startTime` 同尺度）量到的是：`/api/demo/import` 起于 `114340`、历时 `121 ms`
+⇒ 响应约在 `114461` 落地；而 `click()` 那条 pw:api 到 `114770.8` 才返回，`waitForResponse`
+（`__waitInfo__`）在 `114773.2` 才注册——**waiter 比响应晚 312 ms**，于是 10 秒空等。用例写的是
+`await importButton.click()` 之后再 `waitForResponse`（`demo-data.spec.ts:21-24` 同族三处），
+这个顺序在"端点被关、后端 16 ms 短路返回"的条件下必红。三层从上到下是：
+①CI 没开 `DEMO_ENDPOINTS_ENABLED`（本批处置，且是 16 ms 短路让竞态显形的那一层）；
+②spec 把 waiter 装在 click 之后（**未处置**：开了关后导入会真做播种、耗时大概率越过 `114773`，
+红会转绿，但那是时序运气而不是修好，正确写法是先注册再点）；
+③`li:has-text("知识库文档")` 这一条期望本身陈旧（`SetupChecklist.vue:251-252` 的 `li` 渲染 `{{ section.label }}`，
+`BidDemoImportServiceImpl.java:149-152` 发的 label 是「招标文件知识库／企业资质库／历史标书库／
+示例投标项目」，"知识库文档"只剩在 `DemoController.java:62` 的 Swagger 描述里）。
+②与③要人拍板怎么改，本批没有动任何 `.spec.ts`。
+
+| 层 | 位置 | 查什么 |
+|---|---|---|
+| 形状 | `scripts/static-checks.py` 检查 20（`--e2e-backend-feature-flags`，已并入默认全跑档） | 每个既 `spring-boot:run` 起 java 后端、又 `npx playwright test` 跑用例的 job，其**job 级 env ∪ 起后端步骤 env** 必须显式声明 `DEMO_ENDPOINTS_ENABLED: "true"`；四种坏形状各红一次：键缺失、值不是 `true`（`"false"`／`1`／空串都不算）、被注释掉的行冒充声明、键放在别的步骤里而不在起后端那条链上；适用面为空（没人起后端或没人跑 playwright）与缩小（少一个 job）都判红，不能靠删步骤让门变绿 |
+| 语义 | `python-ai/tests/test_e2e_backend_feature_flag_gate.py`（18 例） | PyYAML 作独立 oracle：只用 YAML 复算"每个 playwright job 的 env 并集里有这个键且值为 `true`"；一条跨文件同源判定——workflow 钉的值必须等于 dev compose `:272` 钉的值，防止"门跟着 CI 一起变松"；键位置的两条（job 级 vs 步骤级都算，放错 job 不算）与注释那支各红一次；fixture 每个 job 都带 `steps: []`，与 `_workflow_steps` 的既有噪声规则同源 |
+
+**门自己纠正过一次**：`_e2e_backend_flag_offenders` 的"适用面缩小"分支第一版写成
+`E2E_TEST_JOBS - set()`（恒等于全集），于是任何裁剪都判绿；改成先收集本轮真扫到的 job 名集合、
+再拿它跟下界作差，`test_shrunken_applicability_is_red` 才真的红。
+
+诚实边界（写下时）：①本检查只覆盖**e2e 轨**，`deploy/docker-compose.prod.yml:187` 的
+`${DEMO_ENDPOINTS_ENABLED:-false}` 按设计保持默认关（`/clear` 有数据破坏性，
+`application.yml:175` 的注释写着这条），所以门不能推广成"所有拓扑都得 true"；②键值只钉
+`DEMO_ENDPOINTS_ENABLED` 一条——它是这 4 条红里被工件证实的那一条，其余特性开关没有证据就不上门，
+否则就成了把 CI 变严而没有红用例支撑的猜测；③**门绿不等于用例绿**：上面那三层里本批只除了最外的
+一层，②waiter 注册顺序与③陈旧 label 都还在，开关解开之后这 3 条是否转绿，要等下一次 push 的
+e2e run 才分得清。第 4 条 `tools.spec.ts:11` 与本检查无关：工具列表按 `pageSize=6` 分页而注册表有
+30 项，`getByText('搜索知识库')` 的目标在第 3 页，**待处置**（改 `Tools.vue` 排序还是让用例先翻页，
+属产品/测试侧决策，未拍板）。
 
 ## 检查 18：容器轨的运行期契约（第一百零九批）
 
@@ -488,6 +538,7 @@ minio/etcd），量到四处同一形状的断链：**配置写了、容器里�
 - `python-ai/tests/test_flyway_cli_gate.py` — 检查 17（Flyway 旗标与插件钉版）的判据：真仓库绿、已并入默认全跑档、六种漂移（只给 Spring 键 / 残留空转 env / `continue-on-error` / 删步骤 / 改 goal / pom 未钉或钉数字）各红一次，旗标值与 job 的 mysql service 凭据同源，解析器自身不与 YAML 分歧（第一百零八批）
 - `python-ai/tests/conftest.py::_stop_audit_flusher` + `test_plugin_audit.py::TestAuditFlusherIsolation` — 测试隔离门禁：autouse fixture 换库前后各停一次 `audit-flusher`（join 不掉直接 `pytest.fail`），配一条反空判定先证明 `record_audit` 真起了 daemon，否则"开局无残留线程"会凭空绿（第一百零七批）
 - `python-ai/tests/test_container_runtime_contract_gate.py` — 检查 18（容器轨运行期契约）的判据：四条规则各种历史坏形状各红一次、三种"形状对但指向别处"的语义面单独钉、按拓扑的数量反空转、command 与 application.yml 两处解析器各有一个 PyYAML oracle（第一百零九批）
+- `python-ai/tests/test_e2e_backend_feature_flag_gate.py` — 检查 20（e2e 轨后端特性开关契约）的判据：真仓库绿、已并入默认全跑档、四种坏形状（键缺失 / 值不是 `true` / 注释冒充 / 键不在起后端那条链上）各红一次、适用面为空与缩小都红，并有一条"workflow 钉值 == dev compose 钉值"的跨文件同源判定（第一百一十三批）
 - `python-ai/tests/test_e2e_frontend_server_gate.py` — 检查 19（e2e 轨前端服务契约）的判据：真仓库绿、已并入默认全跑档、七种坏形状（没起前端 / 探针端口与 baseURL 不同源 / 探针无 `exit 1` / 起前端排在 `npm ci` 前 / 缺探针 / config 在 CI 档也自起=双主人 / 删测试步骤或改命令名）各红一次，适用面下界按 job 名钉住；有名步骤与无名步骤条数都由 PyYAML 复算（第一百一十一批）
 - `python-ai/tests/test_eval_suite_eol_binding.py` — 冻结摘要与行尾无关的判据（钉值、两种检出形态、篡改仍红、emit 写 LF）
 - `.git-blame-ignore-revs` + `CONTRIBUTING.md`「Java code style (spotless)」— 全仓重排那一笔如何不污染 `git blame`
