@@ -11,6 +11,67 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百一十五批（2026-10-13：`tools.spec.ts` 那条 3/3 全红的红既不在开关也不在竞态——注册表按「status＋名称字母序」排、20 条演示业务工具把 `search_knowledge_base` 推到第 15 位，于是把写死的页数换成从页面自报条数推导、工具改成翻页找）
+
+#### 结论（先给判定性质）
+- 这条是**确定性陈旧判据**，不是竞态：`tools.spec.ts:11` 等"第 1 页能看到搜索知识库"、`:13` 写死
+  `第 1 / 2 页`，两行都建立在"公开能力面 10 条"这个已经不存在的事实上。
+- 第一百一十三批登记时写"未量"的两个数本轮量到了（取法是 python venv 里直接调
+  `create_full_registry` ＋ `app/api/tools.py:42` 的 `_build_tool_entry` ＋ `:92-93` 那段 sort，
+  同一函数同一排序键，不是照 YAML 猜）：
+  ① 端点**不按注册顺序出**——`app/api/tools.py:92-93` 按 `(status 档, name 字母序)` 排，
+  status 由 `agent_version` 推（`app/api/tools.py:30-34`：`1.0`→active、`1.1`→beta、`0.0`→experimental）；
+  ② CI 拓扑（`e2e.yml` 那组 env）注册表 **30 条**，其中 20 条 B3 沙箱演示业务工具在
+  `demo_business_tools.py:137` 写 `agent_version="1.0"` ⇒ 与三条 V1 知识库工具同属 active 档、
+  按字母序插在前面 ⇒ `search_knowledge_base` 落**第 15 位**；
+  ③ `Tools.vue:62` 是 `pageSize = 6` 的客户端分页 ⇒ 第 1 页渲染
+  `add_device／apply_annual_leave／apply_sick_leave／cancel_auto_renew／create_incident／export_finance_report`，
+  目标在**第 3 / 5 页**；
+  ④ 活栈（第一百零九批那套 dev 栈）页面 aria 快照自报「全部能力 **32**／知识库 4／日常工具 27／
+  联网能力 1／需要确认 2」＋`第 1 / 6 页` ⇒ **条数与页数本来就随拓扑变**（CI 30→5 页、dev 栈 32→6 页），
+  任何写死的页数都是陈旧的。
+- 两行当年为什么自洽也有反证：摘掉那 20 条 ⇒ 10 条 ⇒ 恰好 2 页、且第 1 页含 `search_knowledge_base`。
+
+#### 处置（用户拍板 A＝改用例，不动产品可见面）
+- 页数改成运行时推导：`totalCount` 读页面「全部能力 N」，`cardsPerPage` 数 `#ability-list article`
+  首屏实际渲染的卡片数（就是每页条数），断言 `第 1 / ceil(totalCount / cardsPerPage) 页`。
+- `搜索知识库` 改成**翻页找到它**（翻页上限＝推导出的页数；只在按钮未禁用时点，所以最后一次点击
+  必然落在存在的页上），不再假设它在第 1 页。
+- 原 `:20` 起那段（点「知识库」tab ⇒ `数学计算` 不出现 ⇒ 点卡片看示例问法／复制／技术详情）原样保留，
+  分组语义仍是判据；演示业务工具继续算公开能力面的一部分（B 方案"让端点不列沙箱工具"没采纳）。
+- 对照组登记进文档：`agent-operations.spec.ts:62` 的 `第 1 / 2 页` **不动**——那页走 `mockAgentApis(page)`，
+  条数由 mock 定。写死在 mock 面是对的，写死在活注册表面才是这一条的红因。
+
+#### 验证
+- **改前取证**（活栈 `:3000`，`npx playwright test e2e/tools.spec.ts`）：`- waiting for
+  getByText('搜索知识库', { exact: true }).first()` ⇒ `:11` 在活栈上以与 CI 同一条报错红，
+  快照里读到的就是上面 ④ 那组数。
+- 改后同一条命令：**2 passed（4.1 s）**。
+- 全量 e2e 套件（本地活栈，73 条）：**63 通过 / 2 失败 / 8 跳过**（2.9 m）。那 2 条不是本批改的文件，
+  且 CI 上是绿的：`document.spec.ts:52` 的索引状态收到 `FAILED`（期望 `COMPLETED`）、
+  `write-note.spec.ts:60` 的回读 `content` 是 `undefined` ⇒ 判为本地 dev 栈拓扑与 CI 的差异，
+  **未取证**，不当成本批的回归。
+- `scripts/static-checks.py` 全跑档 EXIT=0（检查 19/20 同批在跑，本批没动 workflow）。
+- python 侧测试计数不变（本批没碰 python／java）：README 与 `docs/ROADMAP.md:16` 仍是 2083；
+  `docs/ROADMAP.md:16` 那行 e2e 口径从"59/4/10 ＋ 余两层未处置"改成本批的真实状态。
+
+#### 诚实边界
+- **runner 侧还没验**：本批改的正是 `e2e/tools.spec.ts`，CI 拓扑（30 条／5 页）要等下一次 push 的
+  e2e run 才算实测；本轮的绿只到"本地 dev 栈拓扑（32 条／6 页）"。
+- **e2e 的 TS 类型没有任何门**：`e2e/` 不在任何 tsconfig 的 `include`（`tsconfig.app.json:19` 只收
+  `src/**`），`npm run lint` 只跑 `src`，CI 的 `npm run build`（`vue-tsc -b`）同样不覆盖 ⇒
+  本批"过"的含义是 Playwright 真执行过这个文件，不是类型检查过。
+- **没有新增静态门禁**：想把"用例不得写死注册表页数"机器化，就得先判"这个 spec 读的是活注册表还是
+  mock"，那是代理指标（会造出假门），改按书面人工检查登记在 `docs/CLEANUP_BACKLOG.md`。
+- 推导式页数在"总条数 ≤ 每页条数"时会去断言一个不渲染的分页标签（`Tools.vue:505` 的 `v-if totalPages > 1`）；
+  三条 V1 工具＋20 条演示工具是无条件注册的，当前拓扑下不成立，所以没为它加分支。
+- 还剩待拍板的只有 ②：`demo-data.spec.ts:23`/`:40`/`:71` 的 waiter 在 `click()` **之后**注册，
+  是会被 retry 掩盖的竞态。本批没动那三处。
+
+#### 下一批（待拍板，按建议顺序）
+- 第一百一十三批·续（只剩 ②）：waiter 先注册再点（`Promise.all` 或把 waiter 提到 `click()` 前），纯测试卫生。
+- 第一百一十批：judge-cache 驱逐；第一百零五批：license 策略（均需人拍板）。
+
 ### 第一百一十四批（2026-10-13：SBOM 那 35 个组件不是产品的依赖面——`sbom-generation` 从没装过 `requirements.txt`，空组件表还只打印 `WARNING`；先按锁安装再把组件面判定搬进 helper）
 
 #### 结论（先给判定性质）

@@ -8,17 +8,32 @@ test.describe('AI ability center', () => {
 
     await expect(page.getByRole('heading', { name: 'AI 能帮你做什么' })).toBeVisible()
     await expect(page.getByText('怎么使用', { exact: true })).toBeVisible()
-    await expect(page.getByText('搜索知识库', { exact: true }).first()).toBeVisible()
     await expect(page.getByText('示例问法')).toHaveCount(0)
-    await expect(page.getByText('第 1 / 2 页')).toBeVisible()
+
+    // 条数随拓扑变（CI 注册表 30 条、dev 栈 32 条），页数不能写死：由页面上「全部能力」
+    // 自报的条数与首屏实际渲染的卡片数（即每页条数）推出
+    const allTab = page.getByRole('button', { name: /^全部能力\s+\d+$/ })
+    await expect(allTab).toBeVisible()
+    const totalCount = Number((await allTab.innerText()).replace(/\D+/g, ''))
+    const cardsPerPage = await page.locator('#ability-list article').count()
+    expect(cardsPerPage).toBeGreaterThan(0)
+    const expectedPages = Math.ceil(totalCount / cardsPerPage)
+    await expect(page.getByText(`第 1 / ${expectedPages} 页`)).toBeVisible()
 
     const desktopOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     expect(desktopOverflow).toBeLessThanOrEqual(1)
     await page.evaluate(() => window.scrollTo(0, 0))
     await page.screenshot({ path: 'test-results/tools-desktop.png', fullPage: true })
 
+    // 「全部能力」按 status＋名称字母序排，核心知识库工具不保证在第 1 页，用例翻页找它而不是猜页码
+    const kbTool = page.getByText('搜索知识库', { exact: true }).first()
+    for (let i = 1; i < expectedPages && !(await kbTool.isVisible()); i++) {
+      await page.getByRole('button', { name: '下一页' }).click()
+    }
+    await expect(kbTool).toBeVisible()
+
     await page.getByRole('button', { name: /^知识库\s+\d+$/ }).click()
-    await expect(page.getByText('搜索知识库', { exact: true }).first()).toBeVisible()
+    await expect(kbTool).toBeVisible()
     await expect(page.getByText('数学计算', { exact: true })).toHaveCount(0)
     await page.getByRole('button', { name: /搜索知识库/ }).first().click()
     await expect(page.getByText('示例问法')).toBeVisible()

@@ -533,7 +533,8 @@
   没人监听。同一 push 的 `CI` run 38336201365 十一个 job 全绿，`static-consistency` 就是全跑档的
   `static-checks.py` ⇒ 检查 19 也第一次在 runner 上跑过。`e2e-smoke` 是 skipped，按 `e2e.yml:10`
   `if: github.event_name == 'pull_request'` 的设计，不是缺陷。
-- [x] **e2e 轨剩下的 4 条红：最外一层已除（runner 复测 4→3→1），第三层被撤销、第二层改判竞态**（第一百一十三批；
+- [x] **e2e 轨剩下的 4 条红：最外一层已除（runner 复测 4→3→1），第三层被撤销、第二层改判竞态、
+  第 4 条第一百一十五批处置**（第一百一十三批；
   原写作第一百一十二批，与上面那条 `eval-runtime` 可达性探针已占用的编号撞车，就地改号）
   取证（run 38343229817 的 `e2e-results-full` ＋ `playwright-traces`，全部三条 demo-data 的 retry1
   `trace.zip` 解出 `0-trace.network`）：报错都是 `page.waitForResponse: Timeout 10000ms exceeded`
@@ -592,12 +593,33 @@
     run 38349608765 与 38384435241 上**都是通过**，`:78` 那处从未执行到（同用例死在 `:71` 的 waiter）。
     ⇒ 期望与实现一致，**没有陈旧期望可改**；这一层从"待拍板"移到"已撤销"，剩下两条红的成因全部归到
     第二层与第 4 条。建条目时读侧的错法登记为语义漂移，按就地纠正处理，不再另立缺陷号。
-  - [ ] **第 4 条与开关无关（三条 run 里唯一每次都红的：各 3/3 次尝试全失败）**：`tools.spec.ts:11` 的
-    `getByText('搜索知识库', { exact: true })` 报 `element(s) not found`，而 `:9`/`:10` 的静态文案都过；
-    `Tools.vue:62` 是 `pageSize = 6` 的客户端分页（`:168-171` 按页 `slice`），一页只渲染 6 张卡片，
-    `:20` 才点「知识库」分类 tab（`:13` 断言 `第 1 / 2 页` ⇒ 至少两组）。
-    runner 复测后它仍是唯一稳定复现的那条：38349608765／38384435241 各 3/3 次尝试全红，补证二那轮
-    （38388749034）两条 demo 竞态转绿时它照样 3/3 全红。因此与 `DEMO_ENDPOINTS_ENABLED` 无关、
-    也与 waiter 竞态无关这一点已坐实。**CI 注册表里工具条数与 `search_knowledge_base`
-    的排序位置未量**——要判"目标在第几页"还缺这一步。
-    改法（调 `Tools.vue` 默认排序 vs 让用例先点 tab 再断言）属产品/测试侧决策，**待拍板**。
+  - [x] **第 4 条与开关无关（三条 run 里唯一每次都红的：各 3/3 次尝试全失败）——第一百一十五批按"改用例"处置**：
+    `tools.spec.ts:11` 的 `getByText('搜索知识库', { exact: true })` 报 `element(s) not found`，而 `:9`/`:10`
+    的静态文案都过；`Tools.vue:62` 是 `pageSize = 6` 的客户端分页。登记时缺的两个数（**CI 注册表条数**与
+    `search_knowledge_base` 的**排序位置**）本轮量到了：
+    ① 取数侧不按注册顺序出——`python-ai/app/api/tools.py:92-93` 把列表按
+    `(status 档, **name 字母序**)` 排（`active` 档在前），`app/api/tools.py:30-34` 由 `agent_version` 推 status；
+    ② CI 拓扑（`e2e.yml` 那组 env，python venv 里直接跑 `create_full_registry` ＋ `_build_tool_entry` ＋
+    同一段 sort）注册表 **30 条**，其中 20 条 B3 沙箱演示业务工具在 `demo_business_tools.py:137` 写
+    `agent_version="1.0"` ⇒ 与三条 V1 知识库工具同属 `active` 档、按字母序排在前面，
+    `search_knowledge_base` 落**第 15 位** ⇒ 第 1 页渲染的是
+    `add_device／apply_annual_leave／apply_sick_leave／cancel_auto_renew／create_incident／export_finance_report`，
+    它在**第 3 / 5 页**。⇒ 这条不需要竞态假设，是确定性的"第 1 页没有它"，与三条 run 的 attempt 级结果
+    一致（38349608765／38384435241／38388749034 上它各 3/3 全红，补证二那轮两条 demo 竞态转绿时它照样红）；
+    ③ 活栈复测（第一百零九批那套 dev 栈，页面 aria 快照自报）：「全部能力 **32**／知识库 4／日常工具 27／
+    联网能力 1／需要确认 2」＋`第 1 / 6 页` ⇒ **条数与页数本来就随拓扑变**（CI 30→5 页、dev 栈 32→6 页），
+    写死的页数一定是陈旧的；
+    ④ 反证那两行为什么曾自洽：摘掉 20 条演示工具 ⇒ 10 条 ⇒ 恰好 2 页、且第 1 页含 `search_knowledge_base`
+    ⇒ `:11`（第 1 页可见）与 `:13`（写 `第 1 / 2 页`）是**演示工具进注册表之前**写的，两行互相咬合。
+    **处置（用户拍板 A＝改用例，不动产品可见面）**：`:13` 的页数改成运行时推导——由页面自报的
+    「全部能力 N」除以首屏实际渲染的卡片数（就是每页条数）得出，不再写死；`:11` 改成**翻页找到**
+    `搜索知识库`（翻页上限＝推导出的页数）而不是假设它在第 1 页；`:20` 起"点『知识库』tab ⇒ `数学计算`
+    不出现 ⇒ 点卡片看示例问法"那段原样保留，分组仍是判据。演示工具继续算公开能力面的一部分。
+    对照组：`agent-operations.spec.ts:62` 的 `第 1 / 2 页` **不动**——那个页面走 `mockAgentApis(page)`，
+    条数由 mock 定，写死是对的；差别就在"读活注册表"与"读 mock"。
+    本地活栈复测：改前 `tools.spec.ts:11` 在活栈上以同一条报错红（与 CI 同形），改后该 spec 2 条全绿。
+    **诚实边界**：① runner 侧要等下一次 push 的 e2e run，"CI 拓扑也绿"才算实测；② `e2e/` 不在任何
+    tsconfig 的 `include` 里（`tsconfig.app.json:19` 只收 `src/**`），`npm run lint` 只跑 `src`，
+    CI 的 `npm run build`（`vue-tsc -b`）同样不覆盖 ⇒ 用例的 TS 类型**没有门**，本轮的"过"只到
+    "Playwright 真跑过"为止；③ 没有新增静态门禁——要机器化就得判"这个 spec 读的是活注册表还是 mock"，
+    那是代理指标，按书面人工检查登记。
