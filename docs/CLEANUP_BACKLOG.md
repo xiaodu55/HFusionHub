@@ -533,7 +533,7 @@
   没人监听。同一 push 的 `CI` run 38336201365 十一个 job 全绿，`static-consistency` 就是全跑档的
   `static-checks.py` ⇒ 检查 19 也第一次在 runner 上跑过。`e2e-smoke` 是 skipped，按 `e2e.yml:10`
   `if: github.event_name == 'pull_request'` 的设计，不是缺陷。
-- [x] **e2e 轨剩下的 4 条红：最外一层已除（runner 复测 4→3），登记的两层里第三层被撤销**（第一百一十三批；
+- [x] **e2e 轨剩下的 4 条红：最外一层已除（runner 复测 4→3→1），第三层被撤销、第二层改判竞态**（第一百一十三批；
   原写作第一百一十二批，与上面那条 `eval-runtime` 可达性探针已占用的编号撞车，就地改号）
   取证（run 38343229817 的 `e2e-results-full` ＋ `playwright-traces`，全部三条 demo-data 的 retry1
   `trace.zip` 解出 `0-trace.network`）：报错都是 `page.waitForResponse: Timeout 10000ms exceeded`
@@ -543,12 +543,14 @@
   `57e397cc38ac42c6adee633a75fafd49`）。同一条 trace 的时间轴还量到：`/api/demo/import` 起于
   `_monotonicTime 114340`、历时 121 ms（≈`114461` 落地），而 `waitForResponse` 在 `114773.2` 才注册
   ——waiter 比响应晚 312 ms。
-  **runner 复测（改后两次，逐条按 `e2e-results.json` 的 `specs[].file`＋`stats` 对差分）**：
+  **runner 复测（改后三次，除 `stats` 外还逐条读每次 attempt 的 `results[].status`）**：
   改前 run 38343229817 是 **59 通过 / 4 失败 / 10 跳过**；第一百一十三批自己那笔 push（run
   38349608765）变 **60 / 3 / 10**，闭掉的正好是 `demo-data.spec.ts :: should import demo data
   successfully` 这一条，**没有新增红**；第一百一十四批的 push（run 38384435241）与上一条**同一组
-  三条、`flaky 0`**（60/3/10，两轮时长 237.9 s 与 237.3 s）。⇒ 除掉的确实只有最外那一层，
-  剩下三条稳定复现，不是抖动。
+  三条、`flaky 0`**（60/3/10，237.3 s，三条各 3/3 次尝试全红）；第一百一十四批补证那笔 docs-only
+  push（run 38388749034，`e2e` 目录一个字没动）变 **61 通过 / 1 失败 / 1 flaky / 10 跳过**（213.3 s），
+  真红只剩 `tools.spec.ts:11`。⇒ 最外那一层的结论不变，但"剩下三条稳定复现"**只对④成立**：
+  两条 demo waiter 是竞态，`retry` 会把它们掩盖成绿。
   - [x] **最外一层（CI 侧，本批处置）**：`application.yml:177` 的
     `endpoints-enabled: ${DEMO_ENDPOINTS_ENABLED:false}` 默认关，`DemoController.java:39/44` 未开启时
     发 200 里的信封 403；dev 侧一直开着（`docker/docker-compose.yml:272`、`docker/.env:24`），
@@ -560,19 +562,21 @@
     "workflow 钉值 == dev compose 钉值"的跨文件同源判定。建门时门自己纠正一次：
     "适用面缩小"分支第一版写成 `E2E_TEST_JOBS - set()`（恒真）⇒ 任何裁剪都判绿，改成拿本轮真扫到的
     job 集合作差。
-  - [ ] **第二层（spec 侧，待拍板；runner 把"时序运气"这个猜测否掉了）**：同族三处
+  - [ ] **第二层（spec 侧，待拍板；定性是竞态——补证段那句"确定死因"判重了，已就地改）**：同族三处
     （`demo-data.spec.ts:23`/`:40`/`:71`）都是 `await importButton.click()` **之后**才 `waitForResponse`，
-    响应先到就 10 秒空等。第一百一十三批开的是"关"（`DEMO_ENDPOINTS_ENABLED`），当时登记者的判断是
-    "开了关之后导入会真做播种、耗时大概率越过注册点 ⇒ 红会转绿，但那是时序运气不是修好"。**这条判断
-    已被 runner 实测否掉**：run 38384435241 的 `playwright-traces` 里 `/api/demo/import` 两轮耗时分别是
-    **38.342 ms 与 31.011 ms**，而 waiter 的注册点在 `click()` 之后——响应仍在注册前就回来了，
-    `:40`/`:71` 两条照旧死在 `page.waitForResponse: Timeout 10000ms exceeded`。
-    ⇒ 它不是"现在绿着但靠运气"，而是**当前剩下的三条红里两条的确定死因**；正确写法是先注册再点
-    （`Promise.all` 或把 waiter 提到 `click()` 前）。`:23` 那一处同写法却在两条 run 上都是绿的
-    （`should import demo data successfully` 通过），一条能解释的线索是：`demo-data.spec.ts` 三条用例
-    各自点一次导入，`:23` 是本轮第一次真播种、`:40`/`:71` 撞上的是幂等跳过后的重复导入（31–38 ms），
-    但**这个解释未量**——trace 里只核到了那两次请求的耗时，没有核第一次播种请求的耗时，也没有核
-    `skippedCount` 是否非零。**没动任何 `.spec.ts`**：改法涉及三条用例的写法，要拍板。
+    响应先到就 10 秒空等。第一百一十三批登记时的判断是"开了关之后导入会真做播种、耗时大概率越过
+    注册点 ⇒ 红会转绿，但那是时序运气不是修好"；本文件上一版把它写成"已被 runner 实测否掉、是剩下
+    三条红里两条的**确定死因**"，依据是 run 38384435241 的 trace 里 `/api/demo/import` 只花
+    **38.342 ms 与 31.011 ms**、`:40`/`:71` 各 3/3 次尝试全红。
+    **第三条 run 把这句也否掉了**：run 38388749034（`39be2f27` 那笔 docs-only push，e2e 代码逐字节
+    相同）是 **61 通过 / 1 失败 / 1 flaky / 10 跳过**（213.3 s）——`:71` 首次即过、`:40` 首败后
+    retry 通过，而 retry1 的 trace 里同一个请求花 **49.422 ms**（HTTP 200），与 38.3／31.0 ms 同一
+    量级。⇒ 定性回到**竞态（由 retry 掩盖的 flaky by construction）**：响应与注册点都在几十毫秒量级、
+    谁先到不稳定，所以"会转绿、但那是时序运气不是修好"成立；要修的仍是顺序而不是运气，正确写法是
+    先注册再点（`Promise.all` 或把 waiter 提到 `click()` 前）。`:23` 那一处在三条 run 上都是绿的，
+    一条能解释的线索是"三条用例各点一次导入，`:23` 撞上真播种、`:40`/`:71` 撞上幂等跳过后的重复导入"，
+    但**未量**（trace 只核到重复导入那几次，没核第一次播种的耗时，也没核 `skippedCount`）。
+    **没动任何 `.spec.ts`**：改法涉及三条用例的写法，要拍板。
   - [x] **第三层（已撤销：判定取错了 service，runner 与代码两处都不支持它）**：第一百一十三批登记
     "`demo-data.spec.ts:29` 与 `:78` 等 `li:has-text("知识库文档")` 是期望陈旧"，依据写成
     `BidDemoImportServiceImpl.java:149-152` 发的 label 是「招标文件知识库／企业资质库／历史标书库／
@@ -588,11 +592,12 @@
     run 38349608765 与 38384435241 上**都是通过**，`:78` 那处从未执行到（同用例死在 `:71` 的 waiter）。
     ⇒ 期望与实现一致，**没有陈旧期望可改**；这一层从"待拍板"移到"已撤销"，剩下两条红的成因全部归到
     第二层与第 4 条。建条目时读侧的错法登记为语义漂移，按就地纠正处理，不再另立缺陷号。
-  - [ ] **第 4 条与开关无关（三条红里唯一不是 waiter 的那条，仍未量）**：`tools.spec.ts:11` 的
+  - [ ] **第 4 条与开关无关（三条 run 里唯一每次都红的：各 3/3 次尝试全失败）**：`tools.spec.ts:11` 的
     `getByText('搜索知识库', { exact: true })` 报 `element(s) not found`，而 `:9`/`:10` 的静态文案都过；
     `Tools.vue:62` 是 `pageSize = 6` 的客户端分页（`:168-171` 按页 `slice`），一页只渲染 6 张卡片，
     `:20` 才点「知识库」分类 tab（`:13` 断言 `第 1 / 2 页` ⇒ 至少两组）。
-    runner 复测后它仍在红集合里（38349608765 与 38384435241 两条 run 都是同一组三条，`flaky 0`），
-    因此与 `DEMO_ENDPOINTS_ENABLED` 无关这一点已坐实。**CI 注册表里工具条数与 `search_knowledge_base`
+    runner 复测后它仍是唯一稳定复现的那条：38349608765／38384435241 各 3/3 次尝试全红，补证二那轮
+    （38388749034）两条 demo 竞态转绿时它照样 3/3 全红。因此与 `DEMO_ENDPOINTS_ENABLED` 无关、
+    也与 waiter 竞态无关这一点已坐实。**CI 注册表里工具条数与 `search_knowledge_base`
     的排序位置未量**——要判"目标在第几页"还缺这一步。
     改法（调 `Tools.vue` 默认排序 vs 让用例先点 tab 再断言）属产品/测试侧决策，**待拍板**。

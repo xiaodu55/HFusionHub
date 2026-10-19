@@ -109,6 +109,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `license-check` 仍是第一百零四批登记的那条**预期真红**（SPDX 复合表达式），本批一个字没动它；
   第一百一十三批的②④两层（waiter 注册顺序 / tools 分页）仍未处置——**③"陈旧 label"已撤销**
   （判定取错了 service，详见第一百一十三批诚实边界③的原地纠正）。
+- 本批补证那笔 docs-only push（`39be2f27`）自己带出的 run，把②的定性也改了：`CI` run 38388749193
+  **11 个 job 全绿**（`gitleaks / static-consistency / eval-offline / frontend / python-lint / java /
+  python-container / helm / python / docker-compose-validate / docker-build`），`E2E` run 38388749034
+  的 `e2e-full` 由 60/3/0/10 变成 **61 通过 / 1 失败 / 1 flaky / 10 跳过**（213.3 s）——真红只剩
+  `tools.spec.ts:11`（三条 run × 3/3 次尝试全红），`:71` 首次即过、`:40` 首败后 retry 通过，
+  retry1 的 trace 里 `/api/demo/import` 花 **49.422 ms**（HTTP 200）。⇒ 本批补证把②写成
+  "这 2 条的**确定死因**"、并据此宣布 113 原句"被 runner 否掉"，**这两步都判重了**：②是竞态
+  （由 retry 掩盖的 flaky by construction），113 的"会转绿、但那是时序运气不是修好"成立。
+  已按语义漂移就地改进第一百一十三批诚实边界②与末段，不另立缺陷号。
 
 #### 下一批（待拍板，按建议顺序）
 
@@ -181,10 +190,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 #### 诚实边界
 - **门绿不等于用例绿**。这 4 条红里的三层只除了最外一层：
   ②`demo-data.spec.ts:23`/`:40`/`:71`（同族三处）都是 `await click()` **之后**才注册
-  `waitForResponse`。当时推断"开了关后导入会真做播种、耗时大概率越过注册点 ⇒ 红会转绿，但那是
-  时序运气不是修好"——**这句已被 runner 否掉**：run 38384435241 的 `playwright-traces` 里
-  `/api/demo/import` 两轮耗时 38.342 ms 与 31.011 ms，响应仍赶在注册点之前，`:40`/`:71` 照旧死在
-  `page.waitForResponse: Timeout 10000ms exceeded`；正确写法是先注册再点（未拍板，没动 `.spec.ts`）。
+  `waitForResponse`。登记时推断"开了关后导入会真做播种、耗时大概率越过注册点 ⇒ 红会转绿，但那是
+  时序运气不是修好"。第一百一十四批的补证一度把这句判成"已被 runner 否掉"（run 38384435241 的
+  trace 里 `/api/demo/import` 只花 38.342 ms 与 31.011 ms，`:40`/`:71` 各 3/3 次尝试全红）——
+  **那个否定本身又被第三条 run 否掉**：run 38388749034（`39be2f27` 那笔 docs-only push，e2e 代码
+  逐字节相同）是 **61 通过 / 1 失败 / 1 flaky / 10 跳过**，`:71` 首次就过、`:40` 首败后 retry 通过，
+  retry1 的 trace 里同一个请求花 **49.422 ms**、HTTP 200，与 38.3／31.0 ms 同一量级。
+  ⇒ 正确定性是**竞态（由 retry 掩盖的 flaky by construction）**：响应与注册点都在几十毫秒量级、
+  谁先到不稳定，所以"会转绿、但那不是修好"成立；要改的仍是顺序——先注册再点（`Promise.all`
+  或把 waiter 提到 `click()` 前）。未拍板，没动 `.spec.ts`。
   ③原登记"`:29`/`:78` 等的 `li:has-text("知识库文档")` 本身陈旧"——**这条判定取错了 service，已撤销**：
   用例点的是 `DemoController.java:63` 的 `/api/demo/import`，section label 由
   `DemoImportServiceImpl.java:143` 发 `"知识库文档"`（`:195/:200/:203` 同名字符串），招投标那条
@@ -199,11 +213,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `${DEMO_ENDPOINTS_ENABLED:-false}`（`/clear` 有数据破坏性），门不推广成"所有拓扑都得 true"；
   键也只钉这一条——它是被工件证实的那一条，其余特性开关没证据就不上门。
 - ②④要怎么改属产品/测试侧决策，**没有拍板就没动任何 `.spec.ts`**；本批的"绿"只到
-  "CI 起的后端与用例假定的后端是同一个"为止。**"那 3 条是否转绿"现在有了答案**：本批自己的 push
-  （run 38349608765）把 4 失败降到 **3 失败**（60 通过 / 10 跳过），闭掉的正是
+  "CI 起的后端与用例假定的后端是同一个"为止。**"那 3 条是否转绿"现在有三条 run 的数**：本批自己的
+  push（run 38349608765）把 4 失败降到 **3 失败**（60 通过 / 10 跳过），闭掉的正是
   `should import demo data successfully`，**没有新增红**；第一百一十四批的 push（run 38384435241）
-  是同一组三条、`flaky 0`（两轮时长 237.9 s 与 237.3 s）。③不是"转绿"而是**原本就绿**，
-  按语义漂移就地纠正，不另立缺陷号。
+  是同一组三条、`flaky 0`（237.3 s，三条各 3/3 次尝试全红）；第一百一十四批补证的 push
+  （run 38388749034，e2e 代码未变）只剩 `tools.spec.ts:11` 一条真红，另两条 demo 变绿、其中 `:40`
+  记为 flaky。⇒ **唯一确定复现的是 ④**，② 是竞态；③不是"转绿"而是**原本就绿**，按语义漂移
+  就地纠正，不另立缺陷号。
 
 #### 下一批（待拍板，按建议顺序）
 - 第一百一十三批·续：spec 侧两条（waiter 先注册再点、tools 分页）需要用户拍板改法；
