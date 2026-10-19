@@ -93,21 +93,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   语义契约（装完必须真覆盖），但没有把它换成 `cyclonedx-py requirements` 那条"直接从文件生成"的
   路线——**7.3.1 的那个子命令的旗标表没在本机核过**（仓内 venv 没装 cyclonedx-bom），第一百零四批
   的教训就是"没核过的旗标会把门写死"，所以宁可沿用同流水线已实测的形状。
-- 改后的步骤**还没在 runner 上跑过**：容器实测只覆盖"python 3.11 ＋ linux ＋ 同一份锁"这一层，
-  runner 的镜像与网络（`--index-url` 走 aliyun 镜像）不在同一台机器上验证过；那要等下一次 push
-  的 `Plugin Security Pipeline` run 才算真跑。
+- 改后的步骤当时**还没在 runner 上跑过**（本批登记原话）：容器实测只覆盖"python 3.11 ＋ linux ＋
+  同一份锁"这一层，runner 的镜像与网络（`--index-url` 走 aliyun 镜像）当时没在同一台机器上验证过。
+  **这条已闭合，但闭合方式本身是个新坑**：`plugin-security.yml` 的 push 触发带路径过滤（只列
+  `python-ai/plugins/**`、`python-ai/requirements*.in`、`python-ai/app/core/plugin/**`），而本批改的
+  正是 workflow 与 `scripts/ci/` 本身 ⇒ 本批那笔 push **不会**触发 `sbom-generation`，补证只能
+  `workflow_dispatch` 手跑（run 38384621875 / job 115253222329）。该 run 的 `Generate SBOM`
+  **success**，日志第 442 行打印
+  `SBOM covers all 76 applicable locked packages (77 components; extras describe the tool itself and are not judged)`；
+  产物本体下载后独立复算 ⇒ 组件 35 → **77**，76 适用 pin **缺失 0／版本不符 0**，锁外组件
+  **只有 `pip`**；同 run 其余 job（`hash-verify`／`signature-verify`／`plugin-runner-build`／
+  `vulnerability-scan`）绿，`license-check` 仍是第一百零四批那条预期红、原文一字未变。
 - 不静音那条老规矩继续覆盖 `sbom-generation`：不删步骤、不加 `continue-on-error`、执行步骤上
   不出现 `if: always()`（`test_the_three_jobs_are_not_silenced`）。
 - `license-check` 仍是第一百零四批登记的那条**预期真红**（SPDX 复合表达式），本批一个字没动它；
-  第一百一十三批②③④三层（waiter 注册顺序 / 陈旧 label / tools 分页）也仍未处置。
+  第一百一十三批的②④两层（waiter 注册顺序 / tools 分页）仍未处置——**③"陈旧 label"已撤销**
+  （判定取错了 service，详见第一百一十三批诚实边界③的原地纠正）。
 
 #### 下一批（待拍板，按建议顺序）
 
-- 取本批 push 后 `Plugin Security Pipeline` 的 runner 结果做第一百一十四批补证：`sbom-generation`
-  那一步应当打印 `SBOM covers all 76 applicable locked packages …`，并把产物组件数与 78 对上；
-  顺带补第一百一十三批那条 E2E run 38349608765 的 `e2e-results-full`（本轮已取到 run 结论：
-  `CI` run 38349608746 **success** 含 `static-consistency`＝检查 20 在 runner 上跑过，
-  `E2E` run 38349608765 `e2e-full` **failure**、`e2e-smoke` skipped）。
+- 取本批 push 后 `Plugin Security Pipeline` 的 runner 结果做第一百一十四批补证——**已完成**，
+  见上面诚实边界那条（`workflow_dispatch` run 38384621875，`Generate SBOM` success、产物 77 组件）。
+  原写法"并把产物组件数与 78 对上"**作废**：门是下界判定，**组件个数不是判据**——runner 侧
+  77 = 76 适用 pin ＋ `pip`，容器侧 78 = 这 77 ＋ `wheel`，两边集合差只有 `wheel` 一个元素；
+  把 78 当期望等于把"装锁的机器上还多装了些什么"误当判据。
+  顺带已补第一百一十三批那条 E2E run 的 `e2e-results-full`：`CI` run 38349608746 **success**
+  含 `static-consistency`＝检查 20 在 runner 上跑过；`E2E` run 38349608765 与第一百一十四批
+  push 的 run 38384435241 都是 `e2e-full` **failure**（60 / 3 / 10）、`e2e-smoke` skipped
+  （按 `e2e.yml:10` 只在 PR 上跑的设计）。
 - 第一百一十五批候选仍是两条：`license-check` 的许可证策略收敛（第一百零五批，**需人拍板**——
   LGPLv2+ 那条要么判红要么换包，不能给清单加名字放行 copyleft）、judge-cache 驱逐（第一百一十批）。
 - SBOM 的**消费者**仍缺：产物只是 upload-artifact，没有任何门禁读它。要不要把它接进
@@ -167,22 +180,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### 诚实边界
 - **门绿不等于用例绿**。这 4 条红里的三层只除了最外一层：
-  ②`demo-data.spec.ts:21-24`（同族三处）都是 `await click()` **之后**才注册 `waitForResponse`，
-  开了关后导入会真做播种、耗时大概率越过注册点，红会转绿——那是时序运气不是修好，
-  正确写法是先注册再点；③`:29`/`:78` 等的 `li:has-text("知识库文档")` 本身陈旧
-  （`SetupChecklist.vue:251-252` 渲染 `{{ section.label }}`，`BidDemoImportServiceImpl.java:149-152`
-  发的是「招标文件知识库／企业资质库／历史标书库／示例投标项目」）；
+  ②`demo-data.spec.ts:23`/`:40`/`:71`（同族三处）都是 `await click()` **之后**才注册
+  `waitForResponse`。当时推断"开了关后导入会真做播种、耗时大概率越过注册点 ⇒ 红会转绿，但那是
+  时序运气不是修好"——**这句已被 runner 否掉**：run 38384435241 的 `playwright-traces` 里
+  `/api/demo/import` 两轮耗时 38.342 ms 与 31.011 ms，响应仍赶在注册点之前，`:40`/`:71` 照旧死在
+  `page.waitForResponse: Timeout 10000ms exceeded`；正确写法是先注册再点（未拍板，没动 `.spec.ts`）。
+  ③原登记"`:29`/`:78` 等的 `li:has-text("知识库文档")` 本身陈旧"——**这条判定取错了 service，已撤销**：
+  用例点的是 `DemoController.java:63` 的 `/api/demo/import`，section label 由
+  `DemoImportServiceImpl.java:143` 发 `"知识库文档"`（`:195/:200/:203` 同名字符串），招投标那条
+  `/import-bid` 才是 `BidDemoImportServiceImpl.java:149-152` 的四个 label；
+  `SetupChecklist.vue` 唯一的 `<li>` 在 `:251`（`v-for="section in lastSections"`），
+  `:224` 的"（知识库文档、回答方案…）"在 `<div><span>` 引导文案里、不是列表项。
+  runner 侧同样不支持原判：含 `:29` 的用例在 38349608765／38384435241 两条 run 上都是绿的，
+  `:78` 从未执行到（同用例死在 `:71`）；
   ④`tools.spec.ts:11` 与开关无关（`Tools.vue:62` 是 `pageSize = 6` 的客户端分页，
   `:20` 才点分类 tab），而 **CI 注册表里工具条数与 `search_knowledge_base` 的排序位置未量**。
 - 检查 20 只覆盖 e2e 轨：`deploy/docker-compose.prod.yml:187` 按设计保持
   `${DEMO_ENDPOINTS_ENABLED:-false}`（`/clear` 有数据破坏性），门不推广成"所有拓扑都得 true"；
   键也只钉这一条——它是被工件证实的那一条，其余特性开关没证据就不上门。
-- ②③④要怎么改属产品/测试侧决策，**没有拍板就没动任何 `.spec.ts`**；本批的"绿"只到
-  "CI 起的后端与用例假定的后端是同一个"为止，那 3 条是否转绿要等下一次 push 的 e2e run。
+- ②④要怎么改属产品/测试侧决策，**没有拍板就没动任何 `.spec.ts`**；本批的"绿"只到
+  "CI 起的后端与用例假定的后端是同一个"为止。**"那 3 条是否转绿"现在有了答案**：本批自己的 push
+  （run 38349608765）把 4 失败降到 **3 失败**（60 通过 / 10 跳过），闭掉的正是
+  `should import demo data successfully`，**没有新增红**；第一百一十四批的 push（run 38384435241）
+  是同一组三条、`flaky 0`（两轮时长 237.9 s 与 237.3 s）。③不是"转绿"而是**原本就绿**，
+  按语义漂移就地纠正，不另立缺陷号。
 
 #### 下一批（待拍板，按建议顺序）
-- 第一百一十三批·续：spec 侧两条（waiter 先注册再点 ＋ 陈旧 label 判哪一侧对）与 tools 分页那条，
-  需要用户拍板改法；改前先把"CI 注册表里工具条数与排序位置"量出来。
+- 第一百一十三批·续：spec 侧两条（waiter 先注册再点、tools 分页）需要用户拍板改法；
+  改前先把"CI 注册表里工具条数与排序位置"量出来。**原列的"陈旧 label 判哪一侧对"已撤销**
+  （label 与期望一致，见上面诚实边界③），待拍板的从三条减到两条。
 - 第一百一十四批：SBOM 的组件面改成 python-ai 产品依赖（含空组件表判定），见 `docs/CLEANUP_BACKLOG.md:265`。
 - 第一百一十批：judge-cache 驱逐；第一百零五批：license 策略（需人拍板）。
 

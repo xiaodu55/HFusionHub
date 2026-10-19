@@ -276,6 +276,16 @@
   判据是把改前的真产物喂给改后的门：run 38332373261 那份 `sbom` artifact 报
   **42 缺失 ＋ 9 版本不符 / 76 适用 pin**，退出 1；门的门 17 例（`test_plugin_security_gates.py`
   新增两个类）。
+  **runner 补证（第一百十四批 push 后取到）**：这条流水线是**路径过滤**触发
+  （`python-ai/plugins/**`、`requirements*.in`、`app/core/plugin/**`），改 workflow 本身的那笔
+  push 不会跑它 ⇒ 用 `workflow_dispatch` 在 `de9247f6` 上补跑（run 38384621875，job 115253222329）。
+  `Generate SBOM` 步骤 **success**，日志 `:442` 打印
+  `SBOM covers all 76 applicable locked packages (77 components; extras describe the tool itself and
+  are not judged)`；产物本体从 **35 组件变 77**，按同一份门重算：76 适用 pin **缺失 0、版本不符 0**，
+  锁外组件**只有 `pip` 一个**。同一条 run 的其余 job：`hash-verify`／`signature-verify`／
+  `plugin-runner-build`／`vulnerability-scan` success，`license-check` 仍是第一百零四批登记的那条
+  预期红（日志原文 `license BSD License not in allow-only licenses was found for package
+  webcolors:25.10.0`，一句话都没变）。组件个数**不是判据**（下界判定），所以这里记 77 而不是"对上 78"。
 - [x] **`_reset_db()` 关连接不持锁，与后台 flush 线程竞争 ⇒ 解释器崩溃**（第一百零三批实测踩到，
   第一百零四批补证时再次踩到并拿到崩溃栈，第一百零六批处置）—— `python-ai/app/core/plugin/audit.py:165-188`（改前）
   的 `_db_conn.close()` 与 `_DB_DIR/_DB_PATH` 换绑整段不在 `with _db_lock:` 内，而 `:128` 的连接是
@@ -523,7 +533,7 @@
   没人监听。同一 push 的 `CI` run 38336201365 十一个 job 全绿，`static-consistency` 就是全跑档的
   `static-checks.py` ⇒ 检查 19 也第一次在 runner 上跑过。`e2e-smoke` 是 skipped，按 `e2e.yml:10`
   `if: github.event_name == 'pull_request'` 的设计，不是缺陷。
-- [x] **e2e 轨剩下的 4 条红：最外一层已除，两层仍在**（第一百一十三批；
+- [x] **e2e 轨剩下的 4 条红：最外一层已除（runner 复测 4→3），登记的两层里第三层被撤销**（第一百一十三批；
   原写作第一百一十二批，与上面那条 `eval-runtime` 可达性探针已占用的编号撞车，就地改号）
   取证（run 38343229817 的 `e2e-results-full` ＋ `playwright-traces`，全部三条 demo-data 的 retry1
   `trace.zip` 解出 `0-trace.network`）：报错都是 `page.waitForResponse: Timeout 10000ms exceeded`
@@ -533,6 +543,12 @@
   `57e397cc38ac42c6adee633a75fafd49`）。同一条 trace 的时间轴还量到：`/api/demo/import` 起于
   `_monotonicTime 114340`、历时 121 ms（≈`114461` 落地），而 `waitForResponse` 在 `114773.2` 才注册
   ——waiter 比响应晚 312 ms。
+  **runner 复测（改后两次，逐条按 `e2e-results.json` 的 `specs[].file`＋`stats` 对差分）**：
+  改前 run 38343229817 是 **59 通过 / 4 失败 / 10 跳过**；第一百一十三批自己那笔 push（run
+  38349608765）变 **60 / 3 / 10**，闭掉的正好是 `demo-data.spec.ts :: should import demo data
+  successfully` 这一条，**没有新增红**；第一百一十四批的 push（run 38384435241）与上一条**同一组
+  三条、`flaky 0`**（60/3/10，两轮时长 237.9 s 与 237.3 s）。⇒ 除掉的确实只有最外那一层，
+  剩下三条稳定复现，不是抖动。
   - [x] **最外一层（CI 侧，本批处置）**：`application.yml:177` 的
     `endpoints-enabled: ${DEMO_ENDPOINTS_ENABLED:false}` 默认关，`DemoController.java:39/44` 未开启时
     发 200 里的信封 403；dev 侧一直开着（`docker/docker-compose.yml:272`、`docker/.env:24`），
@@ -544,19 +560,39 @@
     "workflow 钉值 == dev compose 钉值"的跨文件同源判定。建门时门自己纠正一次：
     "适用面缩小"分支第一版写成 `E2E_TEST_JOBS - set()`（恒真）⇒ 任何裁剪都判绿，改成拿本轮真扫到的
     job 集合作差。
-  - [ ] **第二层（spec 侧，待拍板）**：`demo-data.spec.ts:21-24`（同族三处）都是
-    `await importButton.click()` **之后**才 `waitForResponse`，响应先到就 10 秒空等。开了关之后导入
-    会真做播种、耗时大概率越过注册点，红会转绿——但那是时序运气不是修好，正确写法是先注册再点
-    （`Promise.all` 或把 waiter 提到 `click()` 前）。**没动任何 `.spec.ts`**：改法涉及三条用例的写法，
-    且要有 runner 上的复测才判得清它现在是否还红。
-  - [ ] **第三层（期望陈旧，待判哪一侧是对的）**：`demo-data.spec.ts:29` 与 `:78` 等
-    `li:has-text("知识库文档")`，而 `SetupChecklist.vue:252` 的分项列表渲染的是 `{{ section.label }}`、
+  - [ ] **第二层（spec 侧，待拍板；runner 把"时序运气"这个猜测否掉了）**：同族三处
+    （`demo-data.spec.ts:23`/`:40`/`:71`）都是 `await importButton.click()` **之后**才 `waitForResponse`，
+    响应先到就 10 秒空等。第一百一十三批开的是"关"（`DEMO_ENDPOINTS_ENABLED`），当时登记者的判断是
+    "开了关之后导入会真做播种、耗时大概率越过注册点 ⇒ 红会转绿，但那是时序运气不是修好"。**这条判断
+    已被 runner 实测否掉**：run 38384435241 的 `playwright-traces` 里 `/api/demo/import` 两轮耗时分别是
+    **38.342 ms 与 31.011 ms**，而 waiter 的注册点在 `click()` 之后——响应仍在注册前就回来了，
+    `:40`/`:71` 两条照旧死在 `page.waitForResponse: Timeout 10000ms exceeded`。
+    ⇒ 它不是"现在绿着但靠运气"，而是**当前剩下的三条红里两条的确定死因**；正确写法是先注册再点
+    （`Promise.all` 或把 waiter 提到 `click()` 前）。`:23` 那一处同写法却在两条 run 上都是绿的
+    （`should import demo data successfully` 通过），一条能解释的线索是：`demo-data.spec.ts` 三条用例
+    各自点一次导入，`:23` 是本轮第一次真播种、`:40`/`:71` 撞上的是幂等跳过后的重复导入（31–38 ms），
+    但**这个解释未量**——trace 里只核到了那两次请求的耗时，没有核第一次播种请求的耗时，也没有核
+    `skippedCount` 是否非零。**没动任何 `.spec.ts`**：改法涉及三条用例的写法，要拍板。
+  - [x] **第三层（已撤销：判定取错了 service，runner 与代码两处都不支持它）**：第一百一十三批登记
+    "`demo-data.spec.ts:29` 与 `:78` 等 `li:has-text("知识库文档")` 是期望陈旧"，依据写成
     `BidDemoImportServiceImpl.java:149-152` 发的 label 是「招标文件知识库／企业资质库／历史标书库／
-    示例投标项目」——"知识库文档"只剩在 `DemoController.java:62` 的 Swagger 描述里（另在
-    `SetupChecklist.vue:220` 的引导文案括号里出现过一次，那是自然语言不是 section label）。
-    先判改期望还是改 label 口径，不要为了让用例变绿直接放宽选择器。
-  - [ ] **第 4 条与开关无关**：`tools.spec.ts:11` 的 `getByText('搜索知识库', { exact: true })` 报
-    `element(s) not found`，而 `:9`/`:10` 的静态文案都过；`Tools.vue:62` 是 `pageSize = 6` 的客户端
-    分页（`:168-171` 按页 `slice`），一页只渲染 6 张卡片，`:20` 才点「知识库」分类 tab。
-    **CI 注册表里工具条数与 `search_knowledge_base` 的排序位置未量**——要判"目标在第几页"还缺这一步。
+    示例投标项目」。核对后两处都不成立：
+    ① 用例点的是「导入演示数据」按钮，走 `DemoController.java:63` 的 `POST /api/demo/import`，
+    由 `DemoImportServiceImpl.java:143` 发 `section("kb", "知识库文档", …)`（`:195/:200/:203` 同名字符串），
+    招投标那条 `import-bid`（`DemoController.java:81`）是**另一个** service、另一套 label，
+    113 把两侧读混了；
+    ② `SetupChecklist.vue` 里唯一的 `<li>` 是 `:251` 的 `<li v-for="section in lastSections">`，
+    `:224` 的"（知识库文档、回答方案…）"在 `<div><span>` 的引导文案里、不是列表项，
+    所以 `li:has-text("知识库文档")` 只能命中 section label，而 section label 正是"知识库文档"。
+    runner 侧同样不支持原判：含 `:29` 的 `should import demo data successfully` 在
+    run 38349608765 与 38384435241 上**都是通过**，`:78` 那处从未执行到（同用例死在 `:71` 的 waiter）。
+    ⇒ 期望与实现一致，**没有陈旧期望可改**；这一层从"待拍板"移到"已撤销"，剩下两条红的成因全部归到
+    第二层与第 4 条。建条目时读侧的错法登记为语义漂移，按就地纠正处理，不再另立缺陷号。
+  - [ ] **第 4 条与开关无关（三条红里唯一不是 waiter 的那条，仍未量）**：`tools.spec.ts:11` 的
+    `getByText('搜索知识库', { exact: true })` 报 `element(s) not found`，而 `:9`/`:10` 的静态文案都过；
+    `Tools.vue:62` 是 `pageSize = 6` 的客户端分页（`:168-171` 按页 `slice`），一页只渲染 6 张卡片，
+    `:20` 才点「知识库」分类 tab（`:13` 断言 `第 1 / 2 页` ⇒ 至少两组）。
+    runner 复测后它仍在红集合里（38349608765 与 38384435241 两条 run 都是同一组三条，`flaky 0`），
+    因此与 `DEMO_ENDPOINTS_ENABLED` 无关这一点已坐实。**CI 注册表里工具条数与 `search_knowledge_base`
+    的排序位置未量**——要判"目标在第几页"还缺这一步。
     改法（调 `Tools.vue` 默认排序 vs 让用例先点 tab 再断言）属产品/测试侧决策，**待拍板**。

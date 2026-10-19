@@ -533,6 +533,12 @@ minio/etcd），量到四处同一形状的断链：**配置写了、容器里�
 - `scripts/ci/sbom_lock_coverage_gate.py` — SBOM 与依赖锁的一致性判定门（第一百一十四批：
   0 覆盖齐且版本一致 / 1 缺失或版本不符 / 2 读不出被描述的对象，空组件表归 2 不再只打印 `WARNING`；
   适用面按 `sys_platform` marker 算，`--sys-platform` 只为门的门而存在）
+  ——runner 侧已实测（补证 run 38384621875，job 115253222329）：`Generate SBOM` success，日志打印
+  `SBOM covers all 76 applicable locked packages (77 components; …)`，产物组件 35→77。
+  两条口径要记住：组件**个数不是判据**（下界判定，runner 77 / 容器 78，集合差只有 `wheel`），
+  且这条 workflow 的 push 触发带路径过滤（只列 `python-ai/plugins/**`、`requirements*.in`、
+  `app/core/plugin/**`），**改 workflow 或 `scripts/ci/` 本身的批次不会自动跑出它的证据**，
+  补证得 `workflow_dispatch` 手跑。
 - `python-ai/tests/test_plugin_security_gates.py` — `plugin-security.yml` 三个 job 的判据：
   旗标与当版本旗标表同源、钉版与 `requirements-dev.txt` 同源、两条 helper 的退出码契约
   （第一百零四批 15 例 ＋ 第一百一十四批 17 例），含"不许静音"那条
