@@ -437,10 +437,13 @@ runner 上是冷 npm 缓存，未量）。检查 14 继续管这两个新步骤�
 本批只解开其中最外的一层（CI 起的后端不是用例假定的那个后端），第 4 条 `tools.spec.ts:11`
 是工具列表分页把目标卡片挤到第 3 页，属测试侧问题，**第一百一十五批已按"改用例"处置**
 （页数改运行时推导、目标改翻页找）；它的 runner 判据**第一百一十七批拿到**（run `38524739182`
-= `61 passed / 2 flaky / 10 skipped`，整份日志里 `tools.spec` 零命中），但那是一条**擦线**通过——
-`e2e.yml:165` 的 `timeout-minutes: 20` 之前连续三条 run 把 `e2e-full` 杀在
-`Install Python dependencies`（一个用例都没执行），这一条作业总耗时 19m30s、其中装依赖吃到
-15m15s，**离上限只剩约 30 秒余量**，慢源再抖一次仍会失明（见 `docs/CLEANUP_BACKLOG.md` F 节的镜像单点条目）。
+= `61 passed / 2 flaky / 10 skipped`，整份日志里 `tools.spec` 零命中），而那一轮是踩着
+`e2e.yml:165` 的 `timeout-minutes: 20` 过的——之前连续三条 run 把 `e2e-full` 杀在
+`Install Python dependencies`（一个用例都没执行），`38524739182` 作业总耗时 19m30s、其中装依赖吃到
+15m15s。当时把它写成"离上限只剩约 30 秒余量"，**第一百一十八批就地纠正这条口径**：同一台 runner 上
+紧接的 run `38530095482`（commit `487e435c`）只花 **13m27s** 就跑完（07:42:35Z→07:56:02Z），
+其中装依赖约 6 min ⇒ 装依赖耗时是**波形**而不是常态，15m15s 不能当基线。不变的是这条上限**仍未解除**：
+慢源抖到高位的哪一轮仍然失明（见 `docs/CLEANUP_BACKLOG.md` F 节的镜像单点条目）。
 
 ## 检查 20：e2e 轨的后端特性开关契约（第一百一十三批）
 
@@ -470,15 +473,14 @@ env 块（`:84-105`、`:236-257`）没带这个键——**"配置写了、容器
 与 `test.trace` 的 `startTime` 同尺度）量到的是：`/api/demo/import` 起于 `114340`、历时 `121 ms`
 ⇒ 响应约在 `114461` 落地；而 `click()` 那条 pw:api 到 `114770.8` 才返回，`waitForResponse`
 （`__waitInfo__`）在 `114773.2` 才注册——**waiter 比响应晚 312 ms**，于是 10 秒空等。用例写的是
-`await importButton.click()` 之后再 `waitForResponse`（`demo-data.spec.ts:21-24` 同族三处），
-这个顺序在"端点被关、后端 16 ms 短路返回"的条件下必红。三层从上到下是：
-①CI 没开 `DEMO_ENDPOINTS_ENABLED`（本批处置，且是 16 ms 短路让竞态显形的那一层）；
-②spec 把 waiter 装在 click 之后（**未处置**：开了关后导入会真做播种、耗时大概率越过 `114773`，
-红会转绿，但那是时序运气而不是修好，正确写法是先注册再点）；
-③`li:has-text("知识库文档")` 这一条期望本身陈旧（`SetupChecklist.vue:251-252` 的 `li` 渲染 `{{ section.label }}`，
-`BidDemoImportServiceImpl.java:149-152` 发的 label 是「招标文件知识库／企业资质库／历史标书库／
-示例投标项目」，"知识库文档"只剩在 `DemoController.java:62` 的 Swagger 描述里）。
-②与③要人拍板怎么改，本批没有动任何 `.spec.ts`。
+`await importButton.click()` 之后再 `waitForResponse`，这个顺序在"端点被关、后端 16 ms 短路返回"
+的条件下必红。这样的位置在本文件里是**四处**（原写"同族三处"是漏数，第一百一十八批就地纠正）：
+三处 `POST /api/demo/import`（改前 `:20`→`:23`、`:39`→`:40`、`:70`→`:71`）加一处
+`POST /api/demo/clear`（改前 `:81`→`:85`）——第三处当时从未执行到，所以只被数成三条红。
+三层从上到下是：
+①CI 没开 `DEMO_ENDPOINTS_ENABLED`（第一百一十三批处置，且是 16 ms 短路让竞态显形的那一层）；
+②spec 把 waiter 装在 click 之后（**第一百一十八批按"改用例"处置**，见下面"②的处置"一节）；
+③`li:has-text("知识库文档")` 这一条期望本身陈旧（**第一百一十四批·补证整条撤销**，理由见下）。
 
 | 层 | 位置 | 查什么 |
 |---|---|---|
@@ -502,11 +504,61 @@ env 块（`:84-105`、`:236-257`）没带这个键——**"配置写了、容器
 `retry` 会把竞态掩盖成"这轮没红"；第四条 run `38524739182` 给的是同一形状——`demo-data.spec.ts:40`
 与 `:71` 各以 `page.waitForResponse: Timeout 10000ms exceeded` 红一次、attempt 2 通过，
 判为 **2 flaky** 而非 failed，所以开关解开之后这 3 条到底几条转绿，
-只能按 attempt 级 `results[].status` 比 ≥3 条 run 来判，单看一轮 `stats` 不够。第 4 条 `tools.spec.ts:11` 与本检查无关：工具列表按 `pageSize=6` 分页而注册表有
+只能按 attempt 级 `results[].status` 比 ≥3 条 run 来判，单看一轮 `stats` 不够。
+**"竞态"这条口径又在第一百一十八批被推翻**：第五条 run `38530095482`（commit `487e435c`）读 attempt
+级是 `61 expected / 2 unexpected / 10 skipped / 0 flaky`，那两条 demo 用例是 **3/3 attempt 全红**
+（`should show demo data in various pages after import`、`should clear demo data with confirmation`），
+同文件的 `:14` 冷态首导同形却通过——所以它不是抖动，是**结构性漏听**，本批已按"改用例"处置（下节）。第 4 条 `tools.spec.ts:11` 与本检查无关：工具列表按 `pageSize=6` 分页而注册表有
 30 项，`getByText('搜索知识库')` 的目标在第 3 页——**第一百一十五批已处置**（用户拍板 A＝改用例：
 页数由页面自报条数推导、工具改成翻页找，本地活栈改前同形红／改后 2 passed），runner 侧那一格
 由第一百一十七批的 run `38524739182` 补上（`tools.spec` 在整份日志里零命中，即两条用例都在
 `61 passed` 内），不再是空档。
+
+### ②的处置：四处监听提到点击之前（第一百一十八批）
+
+改的是 `hfusionhub-frontend/e2e/demo-data.spec.ts` 一处文件、四个位置，形状全部改成
+"先创建 promise → 再 `click()` → 最后 `await`"，与本仓已有的正确写法同源
+（`theme-preference.spec.ts:38-43` 的注释就写着"先挂响应监听再 reload，避免错过事件"）：
+
+| 位置（改后行号） | 监听的请求 | 点击 |
+|---|---|---|
+| `:22-24` | `POST /api/demo/import`（`:14` 冷态首导） | `:25` |
+| `:40-42` | `POST /api/demo/import`（`:37` 导入后各页可见） | `:43` |
+| `:72-74` | `POST /api/demo/import`（`:69` 清除用例的前置导入） | `:75` |
+| `:85-89` | `POST /api/demo/clear` | `:90` |
+
+**为什么"漏听"而不是"网络慢"**：请求是在 `await click()` 内部就发出的。runner 侧
+（run `38530095482` 的 retry1 trace，第一百一十七批量）响应完成时刻比 waiter 注册时刻**早**
+51.9 ms（`:36`）与 80.0 ms（`:67`）；本地活栈同形代码量到的是**晚** 184.5～8688 ms（四组读数：
++184.5 / +289.9 / +594 / +8688 ms，取决于那天服务端播种有多慢）。也就是余量的符号由宿主速度决定，
+用例本身不提供任何顺序保证——`retry` 只会把"这次够慢所以绿"掩盖成"这轮没红"。
+把监听挪到点击前之后，注册先于派发，不再依赖耗时。
+**这条红本地复现不出来**：活栈上改前代码跑出的是"监听漏听"零次（三次跑里要么全绿、要么红在
+另一条断言上，见下），所以改前红判据只有 runner 侧那一条，本批的本地取证只能证明"改后不退化"。
+
+**改后绿判据（本地）**：活栈（dev compose 的 java＋python＋mysql＋redis＋milvus 全 healthy，
+前端换成当前源码的 `npm run dev`）上 `npx playwright test e2e/demo-data.spec.ts` =
+**3 passed (25.7s)**；全量 = **62 passed / 1 failed / 10 skipped（3.1m）**。那 1 条失败与本批无关，
+是 `document.spec.ts:36`「document indexing completes with mock LLM」，库里 `document.error_message`
+原文＝`向量嵌入失败: Embedding生成失败: 无法生成向量嵌入：Ollama 服务不可用`（doc id 236），
+本机没起 Ollama；115 批记的"本地全量 63/2/8"里它就是那两条红之一。skip 从 8 涨到 10 也不是代码变化：
+`write-note.spec.ts:14/:36` 按 `PYTHON_AI_INTERNAL_TOKEN` 是否注入决定跳过，本轮 shell 没带这个变量。
+**runner 侧那一格本批还没闭合**——判据要等这笔改动推上去之后的 `e2e-full`。
+
+**顺带量到一条产品缺陷（未处置，登记在 `docs/CLEANUP_BACKLOG.md` F 节）**：`page.goto` 之后那条
+`演示知识库` 标题断言（改前 `:48`、改后 `:50`）在本地**3/3 全红**，且**改前改后同形**——
+所以它跟监听顺序无关，死因在缓存：`DemoImportServiceImpl.java:316` 用
+`knowledgeBaseMapper.insert(kb)` 直插，绕开了 `KnowledgeBaseServiceImpl.create():113` 的
+`bumpVersionAfterCommit`，于是 B3 热点读缓存的版本键不动，`/api/knowledge-base/my` 继续命中旧页
+（`KnowledgeBaseServiceImpl.java:340-346` 命中即返回缓存），最长 TTL 300 s 内查不到刚导入的库。
+取证：导入 200 返回 `knowledgeBaseId=127／演示知识库／新增 12 项`（10:35:56.569），
+同用户 3 秒后的 `GET /api/knowledge-base/my?page=1&pageSize=9` 仍是 8 条且无该库，而 MySQL 里
+id 127 `deleted=0, recycled_at IS NULL, status=0, user_id=1`；Redis 里
+`kb_list:ver:tenant:t1:user:1 = 6` 且 `kb_list:{4,5,6}:tenant:t1:user:1:p1:s9` 三份旧页并存；
+在同一份改后代码上**只 `DEL` 那个版本键**（代码一行不再动），同一条用例 11.1 s 转过 ⇒ 判死成立。
+清除路径不犯这个错（`DemoImportServiceImpl.java:199` 走 service 的 `delete`，会 bump）⇒ 播种与清除不对称。
+这也给第一百一十五批留的"本地那 2 条 e2e 红＝拓扑差未取证"补上了机制：CI 每轮是新 Redis，
+长寿命活栈才会撞上这条 TTL 窗口。
 
 ## 检查 21：弱默认值扫描器必须拦得住自家示例文件（第一百一十六批）
 

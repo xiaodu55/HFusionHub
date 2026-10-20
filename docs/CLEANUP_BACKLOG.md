@@ -668,6 +668,11 @@
   但这不是"问题消失了"：装依赖那一步自己就吃到 07:07:14（≈15m15 s），**整个 job 离 20 分钟上限只剩约 30 秒**，
   同一条慢源波形再抖一档就会回到七条 `cancelled` 的那个形态；所以本条的严重度口径不变，
   候选 B／C 仍**待拍板**，只是"证据通道断了"从"必然"改成了"擦线"。
+  **再一条读数（第一百一十八批）**：同日 `487e435c`（第一百一十七批本体）的 E2E run `38530095482`
+  `e2e-full` 07:42:35Z→07:56:02Z＝**13m27 s**，其中装依赖约 6 min，跑完且给出用例级读数
+  （`61 expected / 2 unexpected / 10 skipped`）⇒ 上一条的"擦线／只剩 30 秒"是**把 15m15 s 那一轮当成了基线**，
+  实测这三条同 commit 集群的装依赖耗时是 6 min／15m15 s 两档，即慢源呈**波形**；上限本身没解除，
+  抖到高位的轮次仍会整轨失明，候选 B／C 的优先级按"波形的高档"而不是"平均耗时"评估。
   历史面：七条 `cancelled` 的 `e2e-full`（`38135767903`／`38137950016`／`38140336693`／`38145150097`／`38226782059`／
   `38395206533`／`38399840606`）**7/7 停在 `Install Python dependencies`**（取法见上面那条就地纠正），
   也就是说这一轨历史上不是"偶尔"被源拖死，而是**慢源一来就整轨失明**。
@@ -723,3 +728,30 @@
   （`application.yml:89-96` 的 sa-token 段只有 `token-name/timeout/active-timeout/is-concurrent/token-style: uuid/is-log`，
   没有签名密钥可配；`JwtUtils.java` 只是 `StpInterface` 的权限提供者，不读任何密钥），已标作废；
   `docs/PRODUCTION_OPS.md:16` 那句「`--check` 可扫描弱默认值」改成了带退出码与被钉住的完整口径。
+
+- [ ] **演示数据播种直插 mapper，绕开知识库列表缓存的版本递增 ⇒ 刚导入的库最长 300 秒不可见**（第一百一十八批取证，未处置，**待拍板**）——
+  `KnowledgeBaseServiceImpl.listByCurrentUser:315-359` 走 B3 热点读缓存：无名称筛选且 `page ≤ 10` 时可缓存，
+  命中就直接返回缓存页（`:340-346`），数据键形如 `kb_list:{version}:tenant:t{tenant}:user:{uid}:p{page}:s{pageSize}`，
+  版本键 `kb_list:ver:tenant:t{tenant}:user:{uid}`（`HotReadCacheService.java:73-91`），TTL 300 s ±20 % 抖动。
+  写侧的四条正规入口都调 `bumpVersionAfterCommit`（`KnowledgeBaseServiceImpl.java:113` 新建、`:180` 更新、
+  `:226`、`:270`），**唯独演示播种没有**：`DemoImportServiceImpl.java:316` 是
+  `knowledgeBaseMapper.insert(kb)` 直插，不经过 `create()`，版本键因此不动。清除路径反而是对的
+  （`:199` 调 `knowledgeBaseService.delete(...)`，会 bump）⇒ 播种与清除不对称。
+  活栈取证（2026-10-14，dev compose，Redis/MySQL 长寿命）：`POST /api/demo/import` 于 10:35:56.569 返回
+  200、`knowledgeBaseId=127`、「演示知识库／新增 12 项」；同用户 10:35:59.005 的
+  `GET /api/knowledge-base/my?page=1&pageSize=9` 仍是 8 条且不含该库，而 MySQL 里 id 127
+  `deleted=0, recycled_at IS NULL, status=0, user_id=1` 已落库；Redis 里
+  `kb_list:ver:tenant:t1:user:1 = 6`，`kb_list:4/5/6:tenant:t1:user:1:p1:s9` 三份旧页并存。
+  **在同一份改后代码上只 `DEL` 那个版本键**（代码一行不再动），之前红的用例 11.1 s 转过 ⇒
+  死因是失效，不是权限也不是分页。同一断言在改前代码上也是 3/3 全红（改前 `:48`／改后 `:50`），
+  形态与 e2e 的监听顺序无关——这条与第一百一十八批改的是两件事。
+  影响面：任何绕过 service 写 KB 的路径都吃这个 TTL 窗口；CI 每轮是新 Redis 所以看不见，
+  本地活栈/生产长寿命缓存才现形（这也补上了第一百一十五批"本地那 2 条 e2e 红＝拓扑差未取证"的机制）。
+  处置选项，**待拍板**：A＝`DemoImportServiceImpl` 播种后调一次版本递增（把 bump 抽成可复用入口或在
+  演示服务里注入 `HotReadCacheService`），改动在 java 侧一处、需要新增 IT/单测把它钉住；
+  B＝改成走 `knowledgeBaseService.create(...)` 建库（语义最正，但演示播种要的正是绕过 create 的校验分支，
+  改前要先确认 `create()` 会拒绝或改写哪些演示字段）；
+  C＝立案不处置，只在文档钉住"演示播种后 5 分钟内列表可能不含新库"这条已知行为。
+  本批没有动任何 Java 代码，只在 e2e 侧把监听顺序改对。要说清楚的是：**改后本地那三次绿并不证明这条
+  缺陷消失了**——它们发生在我手工 `DEL` 过版本键之后，且期间清除路径本就每次 bump；把这条缓存缺陷
+  留着不动，`demo-data.spec.ts:50` 在长寿命栈上仍然是可能红的（命中未过期的旧页就红），只是本轮没撞上。

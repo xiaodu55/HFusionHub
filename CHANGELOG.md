@@ -10,6 +10,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 > 保留于各版本小节内。
 
 ## [Unreleased]
+### 第一百一十八批（2026-10-14：②那条"竞态"被第五条 run 的 attempt 级读数推翻——它是结构性漏听；四处 `waitForResponse` 全部提到点击之前，本地活栈转绿。取证途中另挖出一条产品缺陷：演示播种绕开了知识库列表缓存的版本递增）
+
+**结论**：`hfusionhub-frontend/e2e/demo-data.spec.ts` 四处"点完再挂监听"改成"先挂再点"，
+②在文档里的判词从**竞态**就地改判为**结构性漏听**并标记已处置；本批只动这一个文件，
+不动门、不动 Java（新挖出的那条缓存缺陷按纪律停下、登记 F 节**待拍板**）。
+
+**红判据（runner 侧，先量到手再改）**：第一百一十七批那笔 push（commit `487e435c`）的 E2E run
+`38530095482`＝`61 expected / 2 unexpected / 10 skipped / 0 flaky`，两条红在 attempt 级是
+**3/3 全红**——`should show demo data in various pages after import`（改前 `:36`）与
+`should clear demo data with confirmation`（改前 `:67`），死因都是 `page.waitForResponse: Timeout 10000ms`；
+同一文件的 `:14` 冷态首导同形却绿。此前"竞态"的判词来自第四条 run `38524739182` 的 `2 flaky` 读数，
+被这一轮的 3/3 否掉。机制（retry1 trace 单调钟）：请求在 `await click()` **内部**就已发出并完成，
+`:36` 的响应比 waiter 注册早 **51.9 ms**、`:67` 早 **80.0 ms** ⇒ 注册永远追不上派发。
+
+**本地余量（改前）**：活栈上同一份改前代码**跑不出这条红**——四处监听量到的余量都是正的
+（+184.5 / +289.9 / +594 / +8688 ms 四组，用 retry1 trace 的单调钟对齐）⇒ 余量的符号由宿主速度决定，
+用例不提供顺序保证，改前的"本地绿"不能当判据；这条红判据只有 runner 侧那一条，本批的本地取证
+只能证明"改后不退化"。
+
+**改了什么**：`demo-data.spec.ts`（1 文件，+14/−12），四处统一成"创建 promise → `click()` → `await`"，
+锚点（改后）＝`:22-24`→`:25`、`:40-42`→`:43`、`:72-74`→`:75`、`:85-89`→`:90`；
+最后那处 `POST /api/demo/clear` 是原记"同族三处"漏数的一条，本批就地纠正为**四处**。
+写法与本仓既有正确用例同源（`theme-preference.spec.ts:38-43`）。
+
+**验证**：
+- 改后绿判据（本地活栈＋当前源码的 `npm run dev` 前端）：`e2e/demo-data.spec.ts` = **3 passed (25.7s)**。
+- 全量：`npx playwright test --project=chromium` = **62 passed / 1 failed / 10 skipped（3.1m）**。
+  那 1 条与本批无关：`document.spec.ts:36`，库里 `document.error_message` 原文＝
+  `向量嵌入失败: Embedding生成失败: 无法生成向量嵌入：Ollama 服务不可用`（doc id 236），本机没起 Ollama，
+  115 批记的"本地全量 63/2/8"里它就是两条红之一；skip 8→10 也不是代码变化，是 `write-note.spec.ts:14/:36`
+  按 `PYTHON_AI_INTERNAL_TOKEN` 是否注入决定跳过，本轮 shell 未带该变量。
+- 门：`scripts/static-checks.py` 全跑档 EXIT=0（检查 1–21）；Python 侧零新增用例 ⇒ README 口径不变（2101）。
+- runner 侧那一格**本批未闭合**：判据要等这笔改动推上去之后的 `e2e-full`。
+
+**顺带挖到的产品缺陷（登记 F 节，待拍板）**：`演示知识库` 标题那条断言（改前 `:48`、改后 `:50`）在本地
+**改前改后都 3/3 全红**，形态与监听顺序无关——死因在缓存：
+`DemoImportServiceImpl.java:316` 用 `knowledgeBaseMapper.insert(kb)` 直插，绕开
+`KnowledgeBaseServiceImpl.create():113` 的 `bumpVersionAfterCommit`，B3 热点读缓存的版本键不动 ⇒
+`/api/knowledge-base/my` 继续返回旧页（命中即返回，`:340-346`），新库最长 TTL 300 s 不可见。
+取证＝导入 200 拿到 `knowledgeBaseId=127`、3 秒后列表仍 8 条无该库、MySQL 里 id 127 已落库
+（`deleted=0, recycled_at IS NULL, status=0, user_id=1`）、Redis 里
+`kb_list:ver:tenant:t1:user:1=6` 加 `kb_list:{4,5,6}:…:p1:s9` 三份旧页；
+**在同一份改后代码上只 `DEL` 那个版本键**（代码一行不再动）⇒ 同一条用例 11.1 s 转过，判死成立。
+清除路径反而正确（`:199` 走 service `delete`，会 bump）⇒ 不对称。
+本批一行 Java 没动，A／B／C 三档见 `docs/CLEANUP_BACKLOG.md` F 节。
+
+**就地纠正的旧口径**（语义漂移，不另立缺陷号）：`docs/CI_GATES.md` 里②的"改判竞态"补第五条 run 改判为
+结构性漏听并写处置与证据，"同族三处"改四处，`demo-data.spec.ts:21-24` 这类行号锚点按改后文件重钉；
+同文件与 `docs/CLEANUP_BACKLOG.md` 那条"离上限只剩约 30 秒余量"的**擦线**口径一并推翻——
+`38530095482` 只花 13m27s（装依赖约 6 min）就跑完 ⇒ 装依赖耗时是波形，15m15s 那轮不能当基线
+（但 `e2e.yml:165` 的 20 分钟上限仍未解除）。
+
+**诚实边界**：①`e2e/` 没有任何类型／lint 门（不在 tsconfig `include`、lint 只跑 `src`、`vue-tsc -b` 不覆盖），
+本批的"改对了"只有本地起栈跑 Playwright 这一条取证通道，runner 侧要到推送后才补得上；
+②本地三次绿不证明那条缓存缺陷消失——它们发生在手工 `DEL` 版本键之后，长寿命栈上 `:50` 仍可能撞上 TTL 窗口；
+③本地跑 e2e 的前置条件本轮被量清：管理员密码要走 `ADMIN_PASSWORD`（CI 种子是 `admin123`），
+连错 5 次会触发 `LoginRateLimiter` 的 15 分钟 Redis 锁定（我解的是 `hf:limit:{attempt,lockout}:172.19.0.10` 两条键），
+`:3000` 上原本挂的是第一百零九批那个陈旧前端容器，已停掉、换成当前源码的 `npm run dev`。
+
 ### 第一百一十七批（2026-10-14：第一百一十六批推送后 CI 的 `gitleaks` 把自家正控 fixture 里那串假密钥点了名——同版本同参数本地复现，值改运行时生成，同一条 push 的另一只鞋（E2E 首次擦线跑进 20 分钟上限）也一并落账）
 
 **结论**：`0305bc25`（第一百一十六批）触发的两条 run 一正一红，红是这批自己带进来的。

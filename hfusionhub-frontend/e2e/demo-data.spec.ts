@@ -17,12 +17,13 @@ test.describe('Demo Data Management', () => {
     // Find and click import demo data button
     const importButton = page.getByRole('button', { name: '导入演示数据', exact: true })
     await expect(importButton).toBeVisible()
-    await importButton.click()
 
-    // Wait for import API response
-    const importResponse = await page.waitForResponse(response =>
+    // 请求在 click resolve 之前就已发出，监听必须点前挂上，否则快响应会被漏听
+    const importResponsePromise = page.waitForResponse(response =>
       response.url().includes('/api/demo/import') && response.status() === 200
     )
+    await importButton.click()
+    const importResponse = await importResponsePromise
     const result = await importResponse.json()
 
     // Verify success: per-section result panel renders (新增/已存在 counts)
@@ -36,10 +37,11 @@ test.describe('Demo Data Management', () => {
   test('should show demo data in various pages after import', async ({ page }) => {
     // Import demo data first
     await page.goto('http://localhost:3000/')
-    await page.getByRole('button', { name: '导入演示数据', exact: true }).click()
-    await page.waitForResponse(response =>
+    const importResponsePromise = page.waitForResponse(response =>
       response.url().includes('/api/demo/import') && response.status() === 200
     )
+    await page.getByRole('button', { name: '导入演示数据', exact: true }).click()
+    await importResponsePromise
     await page.waitForTimeout(2000)
 
     // Check knowledge base has demo data
@@ -67,10 +69,11 @@ test.describe('Demo Data Management', () => {
   test('should clear demo data with confirmation', async ({ page }) => {
     // First import demo data
     await page.goto('http://localhost:3000/')
-    await page.getByRole('button', { name: '导入演示数据', exact: true }).click()
-    await page.waitForResponse(response =>
+    const importResponsePromise = page.waitForResponse(response =>
       response.url().includes('/api/demo/import') && response.status() === 200
     )
+    await page.getByRole('button', { name: '导入演示数据', exact: true }).click()
+    await importResponsePromise
     await page.waitForTimeout(2000)
 
     // Click clear demo data button（当前 UI 直接执行，无确认对话框）
@@ -78,15 +81,14 @@ test.describe('Demo Data Management', () => {
     await expect(page.locator('li:has-text("知识库文档")')).toBeVisible({ timeout: 20_000 })
     const clearButton = page.getByRole('button', { name: '清除演示数据', exact: true })
     await expect(clearButton).toBeEnabled({ timeout: 30_000 })
-    await clearButton.click()
-
-    // Wait for delete API response
-    // 清除走 POST /demo/clear（非 DELETE）
-    await page.waitForResponse(response =>
+    // 清除走 POST /demo/clear（非 DELETE），监听同样在点击前挂
+    const clearResponsePromise = page.waitForResponse(response =>
       response.url().includes('/api/demo/clear') &&
       response.request().method() === 'POST' &&
       response.status() === 200
     )
+    await clearButton.click()
+    await clearResponsePromise
 
     // Verify demo KB is removed from the list
     await page.goto('http://localhost:3000/knowledge-base')
