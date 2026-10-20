@@ -11,6 +11,76 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百一十五批·补证（2026-10-13：runner 判据还是没拿到，但这次量清了它卡在哪——`e2e.yml:165` 的 `timeout-minutes: 20` 把整条 e2e 轨杀在装依赖那一步，而依赖源是被锁文件钉住的那一个镜像；顺带把"cancelled 归因不可判定"这条陈旧口径就地纠正）
+
+#### 结论（先给判定性质）
+
+- 本批**不改代码、不改配置、不放宽任何门**，做两件事：①把"旧 run 里的 `cancelled` 归因不可判定"这条已被测量
+  推翻的口径就地纠正；②把第一百一十五批的 runner 判据状态与它的真实阻碍如实登记。
+- 被纠正的原话有两处：`docs/CLEANUP_BACKLOG.md`（Flyway 那一条里写"**取消来源不能从日志判定**：`e2e.yml` 里没有
+  `concurrency` 键，日志里也没有 timeout 声明"）和本文件第一百零八批的诚实边界（"旧 run 里的 `cancelled` 归因口径
+  不变（`e2e.yml` 无 `concurrency`、日志无 timeout 声明，既不算过也不算被挤掉）"）。前半句到现在仍成立——
+  `grep -rnE "^[[:space:]]*concurrency:" .github/workflows/` 与 `grep -rn "cancel-in-progress" .github/workflows/` 均退出码 1，
+  所以"被新 run 挤掉"确实不成立（唯一的 `concurrency` 字样在 `eval-nightly.yml:142`，那是发给评测 harness 的 JSON 请求体字段，
+  不是 workflow 级键）；
+  **后半句错**：timeout 是声明在 workflow 里而不是打印在日志里，`e2e.yml:165` 给 `e2e-full` 设了
+  `timeout-minutes: 20`（`:13` 给 `e2e-smoke` 设 15）。
+- 量出来的归因（七条 `cancelled` 的 `e2e-full`：`38135767903`／`38137950016`／`38140336693`／`38145150097`／
+  `38226782059`／`38395206533`／`38399840606`）：每条从 job 起算 **20m05 s–20m19 s** 就断，且 **7/7 停在同一步
+  `Install Python dependencies`**（`e2e.yml:211-213`）。对照组关掉另一种解释：`ci.yml` 通篇不设 `timeout-minutes`，
+  同一天被同一个源拖到 **44 分钟**的 CI run `38395206325` 就没有被取消 ⇒ 取消的判据是那道声明，不是并发，也不是人手。
+  更贴的一组对照就在同一 commit 上：`9a5b27da` 的 CI `38399840634` 被同一慢源拖到 **36m32 s** 仍十一个 job 全绿，
+  它的 E2E `38399840606` 却在 **20m19 s** 被取消——两边差别只有那道 `timeout-minutes: 20`。
+  连带纠正：这七条**从没走到 `flyway:migrate`**，不属于 `docs/CLEANUP_BACKLOG.md` 那条里数出来的"连续 5 条死在
+  同一 Flyway 步骤"家族（那 5 条是真正 `failure` 且步骤名对得上的）。
+- 第一百一十五批的 runner 判据（CI 拓扑 30 条 ⇒ 推导式页数＝5 页、`tools.spec.ts` 在 runner 上绿）**仍未取得**：
+  该批自己的 E2E run `38399840606` 于 12:46:57→13:07:16 被超时取消，日志里连一个用例名都没出现。
+  同时没拿到的是 `demo-data` 竞态的第 4 个数据点；而它上一轮的归因写法（"本批 push 把 `38395206533` 挤掉了"，
+  只存在于会话与记忆、没进过仓库文档）也是同一条陈旧口径的复发——那条 run 同样是 20m19 s 超时，本轮按测量改判。
+
+#### 处置
+
+- 两处就地纠正（`docs/CLEANUP_BACKLOG.md` 的 Flyway 条目、本文件第一百零八批那行），原话保留在纠正句里，不另立缺陷号。
+- 新开一条"已取证未修"登记（`docs/CLEANUP_BACKLOG.md` F 节末）：**`--index-url` 钉在锁文件里 ⇒ 一个外部镜像的
+  限流同时卡死 CI 与 e2e 两条轨**。钉点是 `python-ai/requirements.txt:12` 与 `python-ai/requirements-dev.txt:12-13`
+  （pip 会执行 requirements 文件里的选项行），于是 `ci.yml:168/196/248/366`、`e2e.yml:61/213`、
+  `eval-nightly.yml:76/168`、`plugin-security.yml:24/136/165` 八处安装全走 `mirrors.aliyun.com`；仓库里没有
+  `--timeout`／`--retries`／`--extra-index-url`／`PIP_DEFAULT_TIMEOUT` 任何一处配置（grep 为空），韧性只剩 pip 默认的
+  15 s 读超时 × 5 次重试。候选 B（八处加 `--timeout 60 --retries 10`，不动源也不动版本）与 C（换/加 index，动的却是
+  被第九十二批冻结摘要钉住的锁）**都待拍板，本批一个都没执行**。
+- 判据不足所以不动手：同一镜像在当天 10:35（run `38384435241`）和 11:13（run `38388749034`）两轮里让 e2e 全套
+  73 条 **12m09 s** 走完——它不是恒久不可用，"持续限流还是这半小时抖动"本轮没量到。
+
+#### 验证（取法全是 runner 侧读数，不照 YAML 猜）
+
+- 窗口：`gh run view <id> --json jobs --jq '.jobs[]|select(.name=="e2e-full")|{conclusion,startedAt,completedAt}'`；
+  停靠步骤：`gh api repos/xiaodu55/HFusionHub1/actions/runs/<id>/jobs` 取 step 级 `conclusion`
+  （七条全部只有 `Install Python dependencies` 是 `cancelled`，其余为 `success`／`skipped`）。
+- 镜像那两条红的原文：`gh run view 38395206325 --log-failed`——两个 job 各自唯一失败步骤都在
+  `pypdf-6.19.0-py3-none-any.whl` 上 `Read timed out. (read timeout=15)` ×5 后 `error: connection-timeout` 退出 1；
+  同段量到 numpy 16.9 MB＝68.0 kB/s（9m21 s）、pyarrow 50.1 MB＝95.7 kB/s（8m41 s）。
+  同一 run 里不读锁的六个 job（`python-lint` 13 s／`docker-compose-validate` 10 s／`static-consistency` 11 s／
+  `gitleaks` 12 s／`helm` 14 s／`frontend` 33 s）全绿。
+- 本批是 docs-only：`scripts/static-checks.py` 全跑档 EXIT=0，测试计数不变（Python 2083，四处同源）。
+
+#### 诚实边界
+
+- 同 commit 的 CI run `38399840634` 已经收口，结论是 **success、十一个 job 全绿**，但整轮 **36m32 s**
+  （12:46:56→13:23:28，取 `java` 的完成时刻）——对照同一天源正常时的两条：`38388749193` 里
+  `python` 9m15 s／`eval-offline` 7m34 s／`java` 12m33 s，`38384435276` 里 `java` 11m42 s。这一次这四个 job
+  是 33m26 s／32m07 s／28m58 s／36m32 s，**慢 4–5 倍但一个都没红**。⇒ 这构成同 commit 的自然对照：
+  `ci.yml` 不设上限 ⇒ 慢到 36 分钟也跑得完；`e2e.yml:165` 设 20 分钟 ⇒ 同一条源、同一个源因，直接被取消。
+  判据因此不是"源坏了"，而是**同一慢源在两个 job 上有两种结局，差别只在那道 `timeout-minutes`**。
+- 归因到 `timeout-minutes: 20` 是"窗口＋停靠步骤＋对照组"三点一致，GitHub 没有在下载的日志里写
+  "exceeded the configured job timeout"那句声明（只有 `##[error]The operation was canceled.`），所以"超时"与
+  "恰好在第 20 分钟人手取消"这两个解释之间，本批靠的是七次都落在 20m05 s–20m19 s 这一条分布，不是那条字样。
+- 第一百一十五批那处改动的正确性证据仍只有本地活栈（32 条／6 页）那一轮；CI 拓扑那一轮要等 e2e 轨能装完依赖。
+
+#### 下一批（待拍板，按建议顺序）
+
+- 先让 e2e 轨拿到一次 runner 结论：等镜像恢复后 `gh run rerun`，或按候选 B 给八处安装加超时重试（后者是 CI 基础设施改动，要点头）。
+- 第一百一十三批·续（只剩 ②：`demo-data.spec.ts:23`/`:40`/`:71` 的 waiter 先注册再点）；第一百一十批 judge-cache；第一百零五批 license 策略。
+
 ### 第一百一十五批（2026-10-13：`tools.spec.ts` 那条 3/3 全红的红既不在开关也不在竞态——注册表按「status＋名称字母序」排、20 条演示业务工具把 `search_knowledge_base` 推到第 15 位，于是把写死的页数换成从页面自报条数推导、工具改成翻页找）
 
 #### 结论（先给判定性质）
@@ -531,7 +601,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 活库测的是"空库→迁移全绿"，没有业务行；`hfusionhub` 那份数据随容器一并删除。
 - `scripts/static-checks.py:974` 那条 ruff `f-string without placeholders` 是**第八十八批留下的既有行**，
   不在本批 diff 里，按"不顺手清理无关行"留着（`ci.yml` 的 ruff 只跑 `python-ai/`，所以它从未让 CI 红）。
-- 旧 run 里的 `cancelled` 归因口径不变（`e2e.yml` 无 `concurrency`、日志无 timeout 声明，既不算过也不算被挤掉）。
+- 旧 run 里的 `cancelled` 归因口径**已由第一百一十五批·补证就地纠正**（原写作"口径不变"）：`e2e.yml` 确实没有 `concurrency` 键，但 timeout 声明写在 workflow 里——`e2e.yml:165` 给 `e2e-full` 设了 `timeout-minutes: 20`，7 条 `cancelled` 每条从 job 起算跑 20m05 s–20m19 s 就断，且 7/7 停在同一步 `Install Python dependencies`（逐条窗口与取法见 `docs/CLEANUP_BACKLOG.md`）。
 
 #### 下一批
 第一百零九批：全栈 compose 真跑一次（fullstack 档 + mysql/redis），把"能写/能读"从镜像级升到活栈级，

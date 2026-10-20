@@ -396,8 +396,20 @@
   （scratch `ci_e2e_flyway.log` 第 617 行）。这一 `conclusion` 不是今天才有：2026-10-10 / 10-11（三次）/
   10-12 连续 **5** 条 run 的 `e2e-full` 都死在**同一个步骤**（逐 run 核过
   `gh run view <id> --json jobs --jq '.jobs[]|{name,conclusion,failed:[.steps[]|select(.conclusion=="failure")|.name]}'`），
-  中间另有几次是 `cancelled` 而非通过——**取消来源不能从日志判定**：`e2e.yml` 里没有 `concurrency`
-  键，日志里也没有 timeout 声明，所以这些 `cancelled` 既不能算"过"、也不能归因成"被新 run 挤掉"；
+  中间另有几次是 `cancelled`——**原写作"取消来源不能从日志判定：`e2e.yml` 里没有 `concurrency` 键，日志里也没
+  有 timeout 声明，所以这些 `cancelled` 既不能算'过'、也不能归因成'被新 run 挤掉'"，第一百一十五批·补证就地纠正**
+  （那句话把"日志文本里没有 timeout 字样"当成了"没有 timeout 声明"，而声明写在 workflow 里：`e2e.yml:165` 给
+  `e2e-full` 设了 `timeout-minutes: 20`，`:13` 给 `e2e-smoke` 设 15）。逐 run 量作业窗口
+  （`gh run view <id> --json jobs --jq '.jobs[]|select(.name=="e2e-full")|{conclusion,startedAt,completedAt}'`
+  ＋ `gh api repos/.../actions/runs/<id>/jobs --jq '.jobs[]|select(.name=="e2e-full")|.steps[]|select(.conclusion!="success" and .conclusion!="skipped")|.name'`）：
+  **7 条** `cancelled` 的 `e2e-full`（`38135767903`／`38137950016`／`38140336693`／`38145150097`／
+  `38226782059`／`38395206533`／`38399840606`）每条从 job 起算跑 **20m05 s–20m19 s** 就断，且 **7/7 停在同一步
+  `Install Python dependencies`**（`e2e.yml:211-213`）⇒ 归因是**那条 20 分钟作业超时把还在装依赖的 job 杀掉**；
+  "`e2e.yml` 没有 `concurrency` 键"这一半原判定仍成立，所以"被新 run 挤掉"确实不成立，但正确的因果不是"不可判定"
+  而是"有上限、上限到了"。随之要摘出去：这 7 条**从没走到 Flyway 那一步**，不属于上面"连续 5 条死在同一
+  `flyway:migrate` 步骤"的家族（那 5 条是真正 `failure` 且步骤名对得上的）。
+  对照组：`ci.yml` 通篇没有 `timeout-minutes`，同一天同一镜像限流下的 CI run `38395206325` 跑到 **44 分钟**也没被
+  取消，只有设了 20 分钟上限的 `e2e-full` 被杀 ⇒ 取消判据是那道声明，不是并发。
   更早的 2026-09-22、09-29 两次 `failure` 的失败原因不在
   step 列表里（`.steps` 全空），**本条没有把它们算进"同一步红"**，要归因得单独取日志。
   机理核对：`.github/workflows/e2e.yml:75-82` 给步骤设的三个变量是
@@ -618,8 +630,53 @@
     对照组：`agent-operations.spec.ts:62` 的 `第 1 / 2 页` **不动**——那个页面走 `mockAgentApis(page)`，
     条数由 mock 定，写死是对的；差别就在"读活注册表"与"读 mock"。
     本地活栈复测：改前 `tools.spec.ts:11` 在活栈上以同一条报错红（与 CI 同形），改后该 spec 2 条全绿。
-    **诚实边界**：① runner 侧要等下一次 push 的 e2e run，"CI 拓扑也绿"才算实测；② `e2e/` 不在任何
+    **诚实边界**：① runner 侧要等下一次 push 的 e2e run，"CI 拓扑也绿"才算实测
+    ——**第一百一十五批·补证跟进**：那"下一次 push"已经到了（`9a5b27da`，E2E run `38399840606`），但
+    runner 判据**仍然没拿到**，因为那条 run 在 `Install Python dependencies`（`e2e.yml:211-213`）上被
+    `e2e.yml:165` 的 `timeout-minutes: 20` 取消（12:46:57→13:07:16＝20m19 s），一个字节的用例都没执行；
+    所以"CI 拓扑（30 条／5 页）下推导式页数绿"这一条**至今未实测**，本项的 ✅ 只到"改后在活栈拓扑上绿"；
+    ② `e2e/` 不在任何
     tsconfig 的 `include` 里（`tsconfig.app.json:19` 只收 `src/**`），`npm run lint` 只跑 `src`，
     CI 的 `npm run build`（`vue-tsc -b`）同样不覆盖 ⇒ 用例的 TS 类型**没有门**，本轮的"过"只到
     "Playwright 真跑过"为止；③ 没有新增静态门禁——要机器化就得判"这个 spec 读的是活注册表还是 mock"，
     那是代理指标，按书面人工检查登记。
+- [ ] **`--index-url` 钉在锁文件里 ⇒ 一个外部镜像的限流就能把 CI 与 e2e 两条轨同时卡死**（第一百一十五批·补证取证，未处置，**待拍板**）——
+  取证（2026-10-13 一天内同形两轮）：CI run `38395206325`（commit `ad8eb2b0`）九绿二红，红的两个 job 各只红一步——
+  `eval-offline :: Install dependencies`（12:09:26→12:52:45）与 `java :: Start Python AI service (smoke target)`
+  （12:12:38→12:53:01），两条日志死在**同一个 URL**：
+  `https://mirrors.aliyun.com/pypi/packages/3c/2c/c43c03eaf630435f023f1dc61ec4a4a78951ad5530a62c71cc89bde307b7/pypdf-6.19.0-py3-none-any.whl`，
+  `ReadTimeoutError(... host='mirrors.aliyun.com', port=443): Read timed out. (read timeout=15)` 重试 5 次（`total=4→0`）后
+  `error: connection-timeout` 退出码 1；同一阶段的带宽是 numpy 16.9 MB **68.0 kB/s 用 9m21 s**、pyarrow 50.1 MB
+  **95.7 kB/s 用 8m41 s** ⇒ 那 44 分钟几乎全在下载，不是测试跑不完。
+  对照（同一 run，判据是"读不读锁"）：`python-lint` 13 s、`docker-compose-validate` 10 s、`static-consistency` 11 s、
+  `gitleaks` 12 s、`helm` 14 s、`frontend` 33 s 全绿——这些步骤不装锁里的包（`ci.yml:146` 的 `pip install ruff==0.16.3`
+  走的是默认 index）；装锁的四个 job（`python`／`python-container`／`eval-offline`／`java` 的 smoke）全部被拖长，
+  其中 `python` 在 12:52:50 侥幸装完转绿，另两个在同一个 wheel 上红。
+  钉在哪：`python-ai/requirements.txt:12` 与 `python-ai/requirements-dev.txt:12-13` 的
+  `--index-url https://mirrors.aliyun.com/pypi/simple/`（＋`--trusted-host`）——pip 会执行 requirements 文件里的选项行，
+  所以 `ci.yml:168/196/248/366`、`e2e.yml:61/213`、`eval-nightly.yml:76/168`、`plugin-security.yml:24/136/165` 这 8 处安装
+  全都走同一个源；仓库里**没有**任何 `--timeout`／`--retries`／`--extra-index-url`／`PIP_DEFAULT_TIMEOUT` 配置
+  （`grep -rn "PIP_DEFAULT_TIMEOUT|extra-index-url|--retries" .github/workflows docker scripts/ci python-ai/requirements*.txt` 为空），
+  于是韧性只剩 pip 默认的 15 s 读超时 × 5 次重试。
+  e2e 轨的代价更直接：`e2e.yml:165` 给 `e2e-full` 设了 `timeout-minutes: 20`，装依赖一慢就被整 job 取消——
+  当天 `9a5b27da`（第一百一十五批本体）的 E2E run `38399840606` 12:46:57→13:07:16（20m19 s）停在同一步，
+  **一个用例都没跑**，所以第一百一十五批的 runner 判据（30 条拓扑下推导式页数＝5 页、`tools.spec.ts` 转绿）
+  与 `demo-data` 竞态的第 4 个数据点**同时没拿到**；`ci.yml` 通篇不设 `timeout-minutes`，所以 CI 只是慢到 44 分钟、不被取消。
+  历史面：七条 `cancelled` 的 `e2e-full`（`38135767903`／`38137950016`／`38140336693`／`38145150097`／`38226782059`／
+  `38395206533`／`38399840606`）**7/7 停在 `Install Python dependencies`**（取法见上面那条就地纠正），
+  也就是说这一轨历史上不是"偶尔"被源拖死，而是**慢源一来就整轨失明**。
+  **未处置的原因**：两条候选都要人拍板，不属于"测试卫生"。
+  B＝给这 8 处安装加 `--timeout 60 --retries 10`（或 `env: PIP_DEFAULT_TIMEOUT`），index 不变、包版本不变，
+  第一百一十四批的 SBOM 组件面门不受影响，但它是 CI 基础设施改动；
+  C＝把 `--index-url` 换成 `pypi.org` 或补 `--extra-index-url https://pypi.org/simple`，能根治，
+  但改的是被门钉住摘要的锁文件（第九十二批那套冻结基线），且"可复现性来源"本身变了。
+  同日同 commit 的第三条读数（补上后一只鞋）：CI run `38399840634`（`9a5b27da`）**success、十一个 job 全绿**，
+  但整轮 **36m32 s**（12:46:56→13:23:28），四个装锁的 job 是 `python` 33m26 s／`eval-offline` 32m07 s／
+  `python-container` 28m58 s／`java` 36m32 s；源正常时同样四个 job 在 `38388749193` 上是 9m15 s／7m34 s／8m12 s／
+  12m33 s ⇒ 慢 **4–5 倍**却一个不红。也就是说同一慢源下，不设上限的 `ci.yml` 只是慢，设了 20 分钟的 `e2e.yml:165`
+  直接失明——本条的严重度按"证据通道"计，不按"测试红"计。
+  **诚实边界**：①观测覆盖 2026-10-13 约 10:35–13:23 UTC 这一段：10:35 与 11:13 两轮源正常（e2e 全套 73 条 12m09 s 跑完）、
+  12:09 那轮源慢到两个 job 红、12:46 那轮源慢 4–5 倍但 CI 全绿而 e2e 被超时取消 ⇒ **呈"退化—半恢复"波形，
+  是否已进入常态仍需再量**，本条不写成"源坏了"；
+  ②判据来自 runner 日志文本与 job 窗口，没有本地复测带宽；③本条不是"门红"，门（`static-checks.py` 全跑档）仍绿，
+  它是**证据通道**的可用性缺陷，所以不并入检查 19/20，单列。
