@@ -137,6 +137,7 @@ import argparse
 import ast
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -2672,9 +2673,13 @@ def _scan_named_keys(stdout: str) -> set[str]:
 
 
 def _strong_env_file_fixture() -> str:
-    """正控输入：与示例文件同键集，但值全换成强随机形态，且补上加密键。"""
-    rows = [f"{key}=Zq7{index}xKm3pLr9tWv2nBh8sYd4fJg6cXe0" for index, (key, _) in enumerate(_env_rows(DOCKER_ENV_EXAMPLE))]
-    rows.append("MODEL_CREDENTIAL_ENCRYPTION_KEY=***REMOVED-BY-REWRITE***")
+    """正控输入：与示例文件同键集，但值全换成强随机形态，且补上加密键。
+
+    值只在运行时生成、不落字面量：把一串高熵字符写死在仓库里，形状上就等于一条真凭据，
+    第一百一十六批推送后的 CI `gitleaks`（`generic-api-key`）判红的正是这个字面量。
+    """
+    rows = [f"{key}={secrets.token_urlsafe(24)}" for key, _ in _env_rows(DOCKER_ENV_EXAMPLE)]
+    rows.append(f"MODEL_CREDENTIAL_ENCRYPTION_KEY={secrets.token_urlsafe(24)}")
     return "\n".join(rows) + "\n"
 
 

@@ -10,6 +10,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 > 保留于各版本小节内。
 
 ## [Unreleased]
+### 第一百一十七批（2026-10-14：第一百一十六批推送后 CI 的 `gitleaks` 把自家正控 fixture 里那串假密钥点了名——同版本同参数本地复现，值改运行时生成，同一条 push 的另一只鞋（E2E 首次擦线跑进 20 分钟上限）也一并落账）
+
+**结论**：`0305bc25`（第一百一十六批）触发的两条 run 一正一红，红是这批自己带进来的。
+- CI `38524739099`：**10 绿 1 红**，唯一红的是 `gitleaks`（job `115722314260`，步骤 `Scan for secrets (gitleaks)`，命令 `gitleaks detect --redact -v --exit-code=2 ... --log-opts=-1`）。命中 `generic-api-key`、entropy 5.000000、fingerprint `0305bc25…:scripts/static-checks.py:generic-api-key:2677` ⇒ 被点名的是这批新写的 `_strong_env_file_fixture()` 里那行 `MODEL_CREDENTIAL_ENCRYPTION_KEY=<32 位大小写字母数字>`。
+- E2E `38524739182`：**success**，`e2e-full` 06:51:59Z→07:11:29Z＝**19m30 s**，用例读数 `61 passed / 2 flaky / 10 skipped`（73 条，与前三轮同基数）⇒ 第一百一十五批缺的 runner 判据到手：整份日志 `tools.spec` 命中数 **0**，`tools.spec.ts:11` 那格不再是空档。
+
+**红判据（先写先量）**：本机没有 gitleaks、Docker 引擎未起，于是取 CI 的**同一版本** 8.24.3（`gitleaks_8.24.3_windows_x64.zip`）在真仓上按 CI 的参数复跑，`--log-opts=-1` 给出同一条 finding、同 fingerprint，退出码 **2** —— 复现成立才动手。假值不是免责理由：形状与真凭据无异，而"仓库里有没有看着像密钥的字面量"正是这条门的判据，所以这是门抓到了自家新写的东西，不是误报。
+
+**改了什么**：`scripts/static-checks.py`
+- 新增 `import secrets`（与既有 stdlib 同段字母序）。
+- `_strong_env_file_fixture()`：两行值都改成运行时 `secrets.token_urlsafe(24)`，源码里不再出现高熵字面量；docstring 记下为什么不能写死（写死＝往仓库提交一条能被当成凭据的形状）。
+- 语义不变的依据：扫描器对这条键只要求非空（`scripts/rotate-secrets.sh:66` 是 `grep -q '^MODEL_CREDENTIAL_ENCRYPTION_KEY=.'`），门的门只断言键在键集里（`python-ai/tests/test_weak_default_scan_gate.py:264`），都不比字面值。
+- **没有**加 `.gitleaks.toml` 白名单去消这条 fingerprint——那等于把刚抓到真问题的门改成噪音。
+
+**验证**：
+- 复扫：改后同一文件放进隔离临时 git 仓，`--no-git` 逐行全文扫与 `--log-opts=-1` 各一次，双双 `no leaks found`／退出码 **0**。
+- 门：`static-checks.py --weak-default-scan` EXIT=0（负控 10 个占位键全点名且退出码非 0、正控为绿）；全跑档 EXIT=0（检查 1–21）。
+- 门的门：`tests/test_weak_default_scan_gate.py` **18 passed**。
+- ruff（`python-ai/.venv` 里钉的 0.16.3）：HEAD 版与工作区版**同为 18 条**，本批零新增。
+- 计数：Python 侧无新增用例，README 口径不变（2101）。
+
+**就地纠正的旧口径**（语义漂移，不另立缺陷号）：`docs/CI_GATES.md` 两处"runner 判据还空着／原因是 `timeout-minutes: 20`"改判为已到手（并写明 19m30 s 是擦线），②竞态补第四个数据点（`demo-data.spec.ts:40` 与 `:71` 各红一次、attempt 2 通过 ⇒ 2 flaky，`retry` 仍会掩盖竞态）；`docs/CLEANUP_BACKLOG.md` 的镜像单点条目把"证据通道断了"改写成"擦线"，候选 B／C 仍待拍板。
+
+**诚实边界**：①`e2e-full` 这轮过是**余量约 30 秒**的过——装依赖吃到 07:07:14（≈15m15 s），同一条慢源波形再抖一档就回到七条 `cancelled` 的形态，所以别把"115 的 runner 判据到手"读成"上限问题解决了"；②`②的两条 demo 用例`本轮仍只有 flaky 级读数，attempt 级 `results[].status` 的判读纪律不变；③正控的值现在每轮随机 ⇒ 门的门不再逐字节可复现，换来的是仓库少一条可被当成凭据的形状；④`scripts/*.py` 从不在 CI 的 lint 作用域内（`ci.yml:135-148` 的 `working-directory: python-ai`），这处红只有 runner 侧的 gitleaks 抓得到，本地那两套门都够不着——已登记 F 节 A／B／C 三档**待拍板**。
 
 ### 第一百一十六批（2026-10-14：把「`--check` 可扫描弱默认值」这句话按到实测上——量出它拦不住自家示例文件（10 个占位键只点名 1 个、退出码还是 0），修扫描器并把门钉上去，顺带清掉上线清单里两处指向不存在的键的口径）
 

@@ -436,9 +436,11 @@ runner 上是冷 npm 缓存，未量）。检查 14 继续管这两个新步骤�
 `eval-runtime` 可达性探针），死因由 artifact 量出（见下面的检查 20）：3 条 demo-data 叠着三层，
 本批只解开其中最外的一层（CI 起的后端不是用例假定的那个后端），第 4 条 `tools.spec.ts:11`
 是工具列表分页把目标卡片挤到第 3 页，属测试侧问题，**第一百一十五批已按"改用例"处置**
-（页数改运行时推导、目标改翻页找）；但它的 runner 判据至今没拿到——`e2e.yml:165` 的
-`timeout-minutes: 20` 连续三条 run 把 `e2e-full` 杀在 `Install Python dependencies`，
-一个用例都没执行（见 `docs/CLEANUP_BACKLOG.md` F 节的镜像单点条目）。
+（页数改运行时推导、目标改翻页找）；它的 runner 判据**第一百一十七批拿到**（run `38524739182`
+= `61 passed / 2 flaky / 10 skipped`，整份日志里 `tools.spec` 零命中），但那是一条**擦线**通过——
+`e2e.yml:165` 的 `timeout-minutes: 20` 之前连续三条 run 把 `e2e-full` 杀在
+`Install Python dependencies`（一个用例都没执行），这一条作业总耗时 19m30s、其中装依赖吃到
+15m15s，**离上限只剩约 30 秒余量**，慢源再抖一次仍会失明（见 `docs/CLEANUP_BACKLOG.md` F 节的镜像单点条目）。
 
 ## 检查 20：e2e 轨的后端特性开关契约（第一百一十三批）
 
@@ -497,11 +499,14 @@ env 块（`:84-105`、`:236-257`）没带这个键——**"配置写了、容器
 **③"陈旧 label"整条撤销**（用例走 `/api/demo/import`，`DemoImportServiceImpl.java:143` 发的就是
 「知识库文档」；含 `:29` 的那条在两条 run 上都通过，`:78` 从未执行到），
 **②"waiter 注册顺序是死因"改判竞态**（第三条 run 里那两条 demo 用例转绿／flaky，
-`retry` 会把竞态掩盖成"这轮没红"），所以开关解开之后这 3 条到底几条转绿，
+`retry` 会把竞态掩盖成"这轮没红"；第四条 run `38524739182` 给的是同一形状——`demo-data.spec.ts:40`
+与 `:71` 各以 `page.waitForResponse: Timeout 10000ms exceeded` 红一次、attempt 2 通过，
+判为 **2 flaky** 而非 failed，所以开关解开之后这 3 条到底几条转绿，
 只能按 attempt 级 `results[].status` 比 ≥3 条 run 来判，单看一轮 `stats` 不够。第 4 条 `tools.spec.ts:11` 与本检查无关：工具列表按 `pageSize=6` 分页而注册表有
 30 项，`getByText('搜索知识库')` 的目标在第 3 页——**第一百一十五批已处置**（用户拍板 A＝改用例：
-页数由页面自报条数推导、工具改成翻页找，本地活栈改前同形红／改后 2 passed），只是 runner 侧那一格
-还空着，原因同上条的 `timeout-minutes: 20`。
+页数由页面自报条数推导、工具改成翻页找，本地活栈改前同形红／改后 2 passed），runner 侧那一格
+由第一百一十七批的 run `38524739182` 补上（`tools.spec` 在整份日志里零命中，即两条用例都在
+`61 passed` 内），不再是空档。
 
 ## 检查 21：弱默认值扫描器必须拦得住自家示例文件（第一百一十六批）
 
@@ -523,11 +528,31 @@ env 块（`:84-105`、`:236-257`）没带这个键——**"配置写了、容器
 会把自己 `.env` 的弱值埋进噪音里。正控的输入是从示例文件**同键集**派生的（有一条判定专门
 比两个键集），否则"绿"可能只是因为少了几行要被扫的键。
 
+**正控自己被判红了一次（第一百一十七批）**：本地 static-checks 全跑的 检查 21 是绿的，
+推送后 CI 的 `gitleaks` 却把这条门带进来的东西点了名——`_strong_env_file_fixture()` 里写死的
+`MODEL_CREDENTIAL_ENCRYPTION_KEY=<32 位大小写字母数字>` 字面量命中 `generic-api-key`
+（entropy 5.0，fingerprint 指到 `scripts/static-checks.py:2677`，run `38524739099` 的 `gitleaks` job 判失败）。
+那是一串**假值**，但形状与真凭据无异，而"仓库里有没有看着像密钥的字面量"正是 gitleaks 的判据——
+所以这不是误报，是门抓到了自家新写的东西。处置＝值改运行时生成（`secrets.token_urlsafe(24)`，
+两条键值行都不再留字面量）：扫描器对这条键的要求只是"非空"（`rotate-secrets.sh:66` 是
+`grep -q '^MODEL_CREDENTIAL_ENCRYPTION_KEY=.'`），门的门也只断言键在键集里
+（`test_weak_default_scan_gate.py:264`），故 18 例与检查 21 的语义不变。**没有**用
+`.gitleaks.toml` 白名单把这条 fingerprint 消掉——那等于把刚抓到真问题的门改成噪音。
+本地取证用与 CI 同一版本（gitleaks 8.24.3）：改前同参复现出同一条命中且退出码 2，
+改后 `--no-git` 逐行全文扫与 `--log-opts=-1` 复扫都是 `no leaks found`／退出码 0。
+副作用要记下：正控的值现在每轮随机，门因此不再是逐字节可复现的输入，换来的是仓库里少了一条
+可被当成凭据的形状。
+
 诚实边界（写下时）：①本检查只保证**扫描器能拦住照抄示例**，不保证任何环境的 `.env` 真的换过——
 `docker/.env` 不在版本库里，门够不着它；②覆盖面只有 `docker/.env.example` 一个文件，
 `deploy/.env.example` 与 `python-ai/.env.example` 里的占位值至今没有门扫（已登记
 `docs/CLEANUP_BACKLOG.md` F 节，**待拍板**）；③`CALLBACK_SECRET` 的方向口径本轮一并纠正为
-"Java 单向分发"，但 compose 注给 python-ai／worker 的那三行是空转声明，删与留都是行为决策，同条待拍板。
+"Java 单向分发"，但 compose 注给 python-ai／worker 的那三行是空转声明，删与留都是行为决策，同条待拍板；
+④抓到这处红的 `gitleaks` 在 runner 侧，本地那套门够不着它——`ci.yml` 的 lint job `working-directory: python-ai`
+（`:135-148`，`ruff check .` 因此只覆盖 `python-ai/`），仓库根没有 ruff 配置文件，
+`scripts/*.py` 从不在 CI 的 lint 作用域内（本轮量：以 `python-ai/.venv` 里钉的 ruff 0.16.3 手工扫
+`scripts/static-checks.py` 得 **18 条**，HEAD 与工作区同为 18 条 ⇒ 本批没新增，但也没人管它）。
+检查 21 的"门的门"仍只由 `static-checks.py` ＋ 18 例 pytest 两处钉，密钥形态这一半靠 gitleaks 兜。
 
 ## 检查 18：容器轨的运行期契约（第一百零九批）
 

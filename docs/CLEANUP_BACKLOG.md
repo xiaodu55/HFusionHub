@@ -662,6 +662,12 @@
   当天 `9a5b27da`（第一百一十五批本体）的 E2E run `38399840606` 12:46:57→13:07:16（20m19 s）停在同一步，
   **一个用例都没跑**，所以第一百一十五批的 runner 判据（30 条拓扑下推导式页数＝5 页、`tools.spec.ts` 转绿）
   与 `demo-data` 竞态的第 4 个数据点**同时没拿到**；`ci.yml` 通篇不设 `timeout-minutes`，所以 CI 只是慢到 44 分钟、不被取消。
+  **后续读数（第一百一十七批）**：同日 `0305bc25`（第一百一十六批本体）的 E2E run `38524739182` **过了**——
+  `e2e-full` 06:51:59→07:11:29＝**19m30 s**，`61 passed / 2 flaky / 10 skipped`，`tools.spec` 在整份日志零命中，
+  上面那两格（115 的 runner 判据、`demo-data.spec.ts:40`／`:71` 的第 4 个数据点）就此补上。
+  但这不是"问题消失了"：装依赖那一步自己就吃到 07:07:14（≈15m15 s），**整个 job 离 20 分钟上限只剩约 30 秒**，
+  同一条慢源波形再抖一档就会回到七条 `cancelled` 的那个形态；所以本条的严重度口径不变，
+  候选 B／C 仍**待拍板**，只是"证据通道断了"从"必然"改成了"擦线"。
   历史面：七条 `cancelled` 的 `e2e-full`（`38135767903`／`38137950016`／`38140336693`／`38145150097`／`38226782059`／
   `38395206533`／`38399840606`）**7/7 停在 `Install Python dependencies`**（取法见上面那条就地纠正），
   也就是说这一轨历史上不是"偶尔"被源拖死，而是**慢源一来就整轨失明**。
@@ -680,6 +686,18 @@
   是否已进入常态仍需再量**，本条不写成"源坏了"；
   ②判据来自 runner 日志文本与 job 窗口，没有本地复测带宽；③本条不是"门红"，门（`static-checks.py` 全跑档）仍绿，
   它是**证据通道**的可用性缺陷，所以不并入检查 19/20，单列。
+- [ ] **`scripts/*.py` 不在任何 lint 作用域里，`检查 21` 那处密钥形态红只有 runner 侧的 gitleaks 能抓**（第一百一十七批取证，未处置，**待拍板**）——
+  `ci.yml:135-148` 的 `python-lint` job 带 `working-directory: python-ai`，命令是 `ruff check .` ⇒ 覆盖面对象是
+  `python-ai/` 一棵；仓库根没有 `pyproject.toml`／`ruff.toml`／`setup.cfg`（`ls -a` 只有 `.ruff_cache/`），
+  也没有任何 CI 步骤对 `scripts/` 跑 ruff。本轮实测：用 `python-ai/.venv` 里钉住的 ruff 0.16.3 手工扫
+  `scripts/static-checks.py` 得 **18 条**（FURB167×8、ISC004×3、SIM114×2、PLW1510×2、RUF059、PIE810、F541），
+  HEAD 版与工作区版**同为 18 条** ⇒ 第一百一十七批的改动没新增违规，但也说明这些违规一直存在而无人拦。
+  后果是分层缺口：检查 21 的"门的门"（`static-checks.py` ＋ 18 例 pytest）都判不到密钥形态的字面量，
+  上一轮正是靠 `gitleaks` 才抓到 `_strong_env_file_fixture()` 写死的那串假值。处置选项：
+  A＝在 `ci.yml` 加一步对 `scripts/`（或仓库根）跑 ruff，并处理那 18 条存量；
+  B＝把 ruff 的 `--select` 子集并进 `static-checks.py` 的检查里（本地与 CI 同一条命令，无需改 workflow）；
+  C＝维持现状，接受 `scripts/` 靠 gitleaks 这类安全门兜、风格与 `PLW1510`（`subprocess.run` 未带 `check=`）无人管。
+  三档都是门禁面扩张，**待拍板**。
 - [ ] **弱默认值扫描覆盖面只有一个文件；`CALLBACK_SECRET` 在 python 侧是空转声明**（第一百一十六批取证，扫描器本体已修，这两点**未处置、待拍板**）——
   ① **覆盖面**：`scripts/rotate-secrets.sh --check` 只读 `ENV_FILE`（`:30`，默认 `docker/.env`，
   可用 `ROTATE_SECRETS_ENV_FILE` 指到别处，但一次只扫一个文件）。本轮实测三个 env 文件都在仓库工作区
