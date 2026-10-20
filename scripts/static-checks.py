@@ -135,9 +135,12 @@
 
 import argparse
 import ast
+import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -2601,6 +2604,153 @@ def check_e2e_backend_feature_flags() -> None:
         )
 
 
+# ── 检查 21：弱默认值扫描器必须拦得住自家示例文件 ──────────────────────────
+#
+# 第一百一十六批的取证：`docs/PRODUCTION_OPS.md:16` 当时写「`--check` 可扫描弱默认值」，
+# 但把 `docker/.env.example` 原样复制成 `.env` 喂给 `scripts/rotate-secrets.sh --check`
+# 时，10 个占位键只点名 1 个（`minioadmin`），退出码还是 0。根因在
+# `scripts/rotate-secrets.sh` 里那份 `WEAK_PATTERNS`（现 :39）：模式写的是 `change-me`（带连字符），
+# 示例文件实际用的是 `changeme-*`（8 个键），`sk-replace-with-your-own-key` 也不在任何模式里。
+# ⇒ "扫描器说绿"不等于"默认值被换过"，这条门的判据是**扫描器自己必须拦得住自家示例**。
+# 文档那句已就地改成「弱值/占位符/缺键三类都算发现、发现即退出码 1，由检查 21 钉住」——
+# 这条门就是那句话的兑现，改回恒 0 立刻红。
+ROTATE_SCRIPT = REPO / "scripts" / "rotate-secrets.sh"
+DOCKER_ENV_EXAMPLE = REPO / "docker" / ".env.example"
+
+# 独立 oracle：占位形态写在 python 侧，不读脚本里那份模式——
+# 两侧同源的话，模式漏了什么判据也漏什么，这条门就只是把 bug 复述一遍。
+PLACEHOLDER_MARKERS = ("changeme", "change-me", "replace-with", "your-own", "minioadmin", "dummy")
+# 适用面下界：示例文件里的占位键数。有人把示例改成不含占位符时，负控就空转了，必须红。
+PLACEHOLDER_KEYS_LOWER_BOUND = 10
+_NAMED_KEY_RE = re.compile(r"\[\!\]\s+([A-Z0-9_]+)")
+
+
+def _env_rows(path: Path) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        rows.append((key.strip(), value.strip()))
+    return rows
+
+
+def _example_placeholder_keys() -> set[str]:
+    """示例文件里值形如占位符的键——负控必须点名到的集合。"""
+    return {
+        key
+        for key, value in _env_rows(DOCKER_ENV_EXAMPLE)
+        if any(marker in value.lower() for marker in PLACEHOLDER_MARKERS)
+    }
+
+
+def _find_bash() -> str | None:
+    return shutil.which("bash")
+
+
+def _run_weak_scan(env_file: Path) -> tuple[int | None, str, str]:
+    """真跑 `rotate-secrets.sh --check`，让它去扫 env_file；返回 (退出码, stdout, stderr)。"""
+    bash = _find_bash()
+    if bash is None:
+        return None, "", "找不到 bash"
+    result = subprocess.run(
+        [bash, str(ROTATE_SCRIPT), "--check"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={**os.environ, "ROTATE_SECRETS_ENV_FILE": str(env_file).replace("\\", "/")},
+        timeout=120,
+    )
+    return result.returncode, result.stdout, result.stderr
+
+
+def _scan_named_keys(stdout: str) -> set[str]:
+    """扫描器点名的键集合（`[!] KEY ...` 那些行）。"""
+    return {m.group(1) for line in stdout.splitlines() for m in [_NAMED_KEY_RE.search(line)] if m}
+
+
+def _strong_env_file_fixture() -> str:
+    """正控输入：与示例文件同键集，但值全换成强随机形态，且补上加密键。"""
+    rows = [f"{key}=Zq7{index}xKm3pLr9tWv2nBh8sYd4fJg6cXe0" for index, (key, _) in enumerate(_env_rows(DOCKER_ENV_EXAMPLE))]
+    rows.append("MODEL_CREDENTIAL_ENCRYPTION_KEY=***REMOVED-BY-REWRITE***")
+    return "\n".join(rows) + "\n"
+
+
+def _weak_scan_offenders() -> tuple[list[str], int]:
+    offenders: list[str] = []
+    if not ROTATE_SCRIPT.is_file():
+        return [f"检查 21：扫描器本身不存在（{_repo_rel(ROTATE_SCRIPT)}），负控无从跑起"], 0
+    if not DOCKER_ENV_EXAMPLE.is_file():
+        return [f"检查 21：占位符样例不存在（{_repo_rel(DOCKER_ENV_EXAMPLE)}），负控没有输入"], 0
+
+    placeholders = _example_placeholder_keys()
+    if len(placeholders) < PLACEHOLDER_KEYS_LOWER_BOUND:
+        offenders.append(
+            f"检查 21 的适用面缩小了：{_repo_rel(DOCKER_ENV_EXAMPLE)} 里只剩 {sorted(placeholders)}"
+            f"（{len(placeholders)} 个占位键，下界 {PLACEHOLDER_KEYS_LOWER_BOUND}）——"
+            "示例文件一旦不含占位符，这条门的负控就空转，得先把它改回有东西可拦"
+        )
+        return offenders, len(placeholders)
+
+    if _find_bash() is None:
+        offenders.append("检查 21：本机找不到 bash，负控/正控都跑不起来——不能因为跑不了就当绿")
+        return offenders, len(placeholders)
+
+    # 负控：照抄示例文件必须被拦住
+    rc, stdout, stderr = _run_weak_scan(DOCKER_ENV_EXAMPLE)
+    named = _scan_named_keys(stdout)
+    where = f"{_repo_rel(ROTATE_SCRIPT)} 以 {_repo_rel(DOCKER_ENV_EXAMPLE)} 为输入"
+    if rc == 0:
+        offenders.append(
+            f"{where} 退出码 0：照抄示例默认值不判红。"
+            "扫描器绿不代表默认值换过——`docs/PRODUCTION_OPS.md` §0 那条『弱值/占位符/缺键 => 退出码 1』"
+            "要的是一处能拦住它的门，恒 0 的退出码当不了门"
+        )
+    missed = placeholders - named
+    if missed:
+        offenders.append(
+            f"{where} 没点名 {sorted(missed)}（{len(missed)}/{len(placeholders)}）："
+            "这些键的值在示例里就是占位符，照抄上线等于用公开在仓库里的默认口令跑生产"
+        )
+
+    # 正控：强随机值必须一个都不点名、且退出码 0（防"一律红"把门变成噪音）
+    with tempfile.TemporaryDirectory() as tmp:
+        good = Path(tmp) / ".env"
+        good.write_text(_strong_env_file_fixture(), encoding="utf-8")
+        g_rc, g_stdout, g_stderr = _run_weak_scan(good)
+    clean = _scan_named_keys(g_stdout)
+    if g_rc != 0 or clean:
+        offenders.append(
+            f"{_repo_rel(ROTATE_SCRIPT)} 的正控不成立：全强随机值也判红（退出码 {g_rc}、"
+            f"点名 {sorted(clean)}；stderr={g_stderr.strip()[:200]}）——"
+            "一条把正确配置也拦住的门会在第一次真用时被绕过"
+        )
+    return offenders, len(placeholders)
+
+
+def check_weak_default_scan() -> None:
+    """检查 21：`rotate-secrets.sh --check` 必须拦得住照抄 `docker/.env.example` 的上线。
+
+    第一百一十六批的负控实测：把示例文件原样当 `.env` 喂给真脚本，10 个占位键里
+    它只点名 1 个（`minioadmin`），另外 9 个（8 个 `changeme-*` ＋ 1 个
+    `sk-replace-with-your-own-key`）全部放行，退出码还是 0。根因是
+    `scripts/rotate-secrets.sh` 的 `WEAK_PATTERNS`（改前在 :29）写的是 `change-me`（带连字符），
+    而自家示例文件用的是 `changeme`——**扫描器与它要保护的那份样例不同源**。
+    这条门不复制扫描器的模式（那只会把 bug 再述一遍），判据是行为：
+    负控——喂示例文件必须非零退出且点名全部占位键；正控——喂等键集的强随机值必须绿。
+    """
+    offenders, count = _weak_scan_offenders()
+    if offenders:
+        problems.append("弱默认值扫描器覆盖契约不成立:\n    " + "\n    ".join(offenders))
+    else:
+        print(
+            f"[ok] 弱默认值扫描器：{count} 个占位键在负控里全部被点名且退出码非 0，"
+            "正控（等键集强随机值）为绿"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant-columns", action="store_true")
@@ -2623,6 +2773,7 @@ def main() -> int:
     parser.add_argument("--container-runtime-contract", action="store_true")
     parser.add_argument("--e2e-frontend-server", action="store_true")
     parser.add_argument("--e2e-backend-feature-flags", action="store_true")
+    parser.add_argument("--weak-default-scan", action="store_true")
     args = parser.parse_args()
 
     if not (args.tenant_columns or args.internal_token_keys or args.test_counts
@@ -2634,7 +2785,8 @@ def main() -> int:
             or args.workflow_run_scalars or args.db_lock_lifetime
             or args.flyway_cli or args.container_runtime_contract
             or args.e2e_frontend_server
-            or args.e2e_backend_feature_flags):
+            or args.e2e_backend_feature_flags
+            or args.weak_default_scan):
         args.tenant_columns = args.internal_token_keys = args.test_counts = \
             args.flyway_doc_sync = args.h2_schema_drift = \
             args.readme_claims = args.helm_value_roots = args.container_uid = \
@@ -2643,7 +2795,7 @@ def main() -> int:
             args.write_clock_caliber = args.python_clock_caliber = \
             args.workflow_run_scalars = args.db_lock_lifetime = args.flyway_cli = \
             args.container_runtime_contract = args.e2e_frontend_server = \
-            args.e2e_backend_feature_flags = True
+            args.e2e_backend_feature_flags = args.weak_default_scan = True
 
     if args.tenant_columns:
         check_tenant_columns()
@@ -2685,6 +2837,8 @@ def main() -> int:
         check_e2e_frontend_server()
     if args.e2e_backend_feature_flags:
         check_e2e_backend_feature_flags()
+    if args.weak_default_scan:
+        check_weak_default_scan()
 
     if problems:
         print("\n发现问题:")

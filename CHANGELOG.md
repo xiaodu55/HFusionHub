@@ -11,6 +11,87 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百一十六批（2026-10-14：把「`--check` 可扫描弱默认值」这句话按到实测上——量出它拦不住自家示例文件（10 个占位键只点名 1 个、退出码还是 0），修扫描器并把门钉上去，顺带清掉上线清单里两处指向不存在的键的口径）
+
+#### 结论（先给判定性质）
+
+- 本批**只加门、只修那个门要保护的脚本**，不放宽任何既有判据：`scripts/rotate-secrets.sh` 的 `--check`
+  从"恒返回 0 的提示器"改成"发现即退出码 1 的扫描器"，新增 **检查 21**（`--weak-default-scan`，已并入默认全跑档）
+  用**负控**钉住它——把 `docker/.env.example` 原样喂进去必须被拦住。
+- 起因是上线评审里被追问的一条：`docs/PRODUCTION_OPS.md:16` 写着「`--check` 可扫描弱默认值」。
+  这句话**在本地成立、在最常见的失效模式下不成立**，两半都量了：
+  ①真机跑 `bash scripts/rotate-secrets.sh --check`（读工作区里的 `docker/.env`）报 `[ok] 未发现弱默认值`、退出码 0，
+  逐键比对已入库的 `docker/.env.example`（13 个键）**没有一个等于示例占位值** ⇒ 本地这份确实轮换过；
+  ②把 `docker/.env.example` **原样复制**成 `.env` 喂同一个真脚本 ⇒ 10 个占位键
+  （8 个 `changeme-*` ＋ `minioadmin` ＋ `sk-replace-with-your-own-key`）只点名 1 个（`minioadmin`），
+  **退出码还是 0**。照抄仓库里公开的示例上线这条最常见的路径，扫描器一路放行。
+- 根因不在判据松，在**扫描器与它要保护的那份样例不同源**：`WEAK_PATTERNS` 里写的是 `change-me`（带连字符），
+  而自家示例用的是 `changeme`；`sk-replace-with-your-own-key` 不在任何模式里。缺键那一支（`MODEL_CREDENTIAL_ENCRYPTION_KEY`
+  未配置）当时也只打印、不参与退出码。
+
+#### 红判据（改前实测，两轮读数的差别本身也登记）
+
+- 第一版判据落地前测到的是「没点名 …（10/10）」——这个数是**假红**：那时脚本还没实现
+  `ROTATE_SECRETS_ENV_FILE`，负控实际扫的是本机真实 `docker/.env`，等于拿 A 文件判 B 文件。
+  先把覆盖路径（plumbing）落地，再重测的**诚实红**是两条：`退出码 0：照抄示例默认值不判红`
+  ＋`没点名 …（9/10）`（只点名 `minioadmin`）。
+- 教训写成一句话：**负控的输入必须是负控自己那份文件**，否则红判据在测本机环境而不是测判据。
+
+#### 改了什么
+
+- `scripts/rotate-secrets.sh`：①`ENV_FILE` 改成 `${ROTATE_SECRETS_ENV_FILE:-$ROOT/docker/.env}`（门靠它喂样例文件）；
+  ②弱判据拆成两张表——`WEAK_PATTERNS`（值**开头**就是众所周知的弱口令，保守，避免误伤含 `admin`/`test` 的强随机值）
+  与新增的 `PLACEHOLDER_PATTERNS`（值里出现占位符腔：`changeme`／`change-me`／`replace-with`／`your-own`／`sk-replace`／
+  `placeholder`／`xxxxxx`），两张表任一命中即点名；③缺 `MODEL_CREDENTIAL_ENCRYPTION_KEY` 那支现在也置 `found=1`；
+  ④`check_env` 以 `return $found` 收尾，`--check` 分支据此 `exit 1` 并把处置指引打到 stderr。
+  键名解析顺手兜住 `export KEY=` 与两侧空白（`key="${key#export }"` ＋ `tr -d '[:space:]'`）。
+- `scripts/static-checks.py` 新增检查 21：真起 bash 跑两遍——
+  **负控**喂 `docker/.env.example`，要求退出码非 0 **且**每个占位键都被 `[!] KEY` 点名（漏一个红，红文案直接给
+  「没点名 …（N/M）」）；**正控**喂"与示例同键集、值全换成强随机形态、补上加密键"的临时文件，要求退出码 0 且不点任何名
+  （防"一律红"把门变成噪音）。另有四条自反：脚本或示例不存在红、`PLACEHOLDER_KEYS_LOWER_BOUND = 10` 适用面缩小红、
+  本机找不到 bash **不许默认绿**。占位形态写在 python 侧当独立 oracle，不抄脚本那份模式。
+- 文档就地纠正四处语义漂移（不另立缺陷号）：
+  `docs/PRODUCTION_OPS.md:16` 把那句改成带退出码与被钉住事实的完整口径；`:18` 的 `PLUGIN_RUNNER_SECRET_KEY`
+  是全仓零命中的键名，换成现行的 `PLUGIN_RUNNER_TOKEN` 并给出两侧读取点（Java `application.yml:159` ↔
+  Python `app/core/plugin/container_runner.py:29`）；`:21` 的「Sa-Token JWT 密钥 `SA_TOKEN_JWT_SECRET_KEY`」
+  是**虚构项**（`application.yml:89-96` 的 sa-token 段只有 `token-name/timeout/active-timeout/is-concurrent/
+  token-style: uuid/is-log`，没有签名密钥可配；`JwtUtils.java` 只是 `StpInterface` 的权限提供者、不读任何密钥），
+  标作废并说明"照此项去配只会造出一个没人读的空转键"；覆盖密钥清单里 `CALLBACK_SECRET` 那行（现 `scripts/rotate-secrets.sh:15`）原写
+  「`CALLBACK_SECRET` Python → Java 回调 HMAC（两侧一致）」——方向反了且"两侧各配一份"不成立，改成单向分发口径。
+- `docs/CI_GATES.md` 新增「检查 21」章节与门清单行；同时纠正该文件里两处**已被后续 run 推翻的 stale 口径**
+  （`tools.spec.ts:11` 从"尚未处置"改成"第一百一十五批已按改用例处置、runner 判据被 `timeout-minutes: 20` 挡住"；
+  检查 20 诚实边界里"②waiter 注册顺序与③陈旧 label 都还在"改成③整条撤销、②改判竞态的实测读数）。
+- `docs/CLEANUP_BACKLOG.md` F 节新登记两点**待拍板**（本轮只取证不处置）：①扫描覆盖面只有 `docker/.env` 一个文件，
+  `deploy/.env.example:13`（`replace-with-long-random-token-2`）与 `python-ai/.env.example` 的占位值至今没有门扫；
+  ②`CALLBACK_SECRET` 只有 Java 读（`application.yml:128` → `VectorizationServiceImpl.java:725-750` 写进请求体），
+  Python 全程只回显那把钥匙去签名（`vectorization.py:245`、`:810-820`），`grep -rn "environ.*CALLBACK_SECRET" python-ai/app`
+  零命中 ⇒ `docker/docker-compose.yml:318/400`、`deploy/docker-compose.prod.yml:236` 与 `python-ai/.env.example:42`
+  是空转声明（与第一百零九批 `UPLOAD_DIR` 同形），删或留都是行为决策。
+
+#### 验证
+
+- 负控：`rotate-secrets.sh --check` 以 `docker/.env.example` 为输入 ⇒ **退出码 1，10 个占位键全部被点名**；
+  正控（等键集强随机值）⇒ 退出码 0、零点名；本机真 `docker/.env` ⇒ 仍 `[ok] 未发现弱默认值`、退出码 0（**没有误伤**）。
+- `python scripts/static-checks.py --weak-default-scan` 退出码 0；全跑档 `python scripts/static-checks.py` 退出码 0（检查 1–21 全绿）。
+- 门的门 `python-ai/tests/test_weak_default_scan_gate.py`：**18 passed**。首跑 1 红是**判据写错、不是产品错**：
+  我在测试里造了 `[!]KEY`（`[!]` 与键名之间无空格）这种脚本从不产出的形状去要求解析器认它。脚本自己写死的是
+  `echo "  [!] $key ..."`（现 `:59`），解析器就该只绑这个形状；真改成别的形态时宁可判「没点名 …（0/10）」大声红，
+  不猜形状。测试数据改回脚本实际产出的形态（保留 tab 缩进那一支），并把这条边界写进注释。
+- 计数同步：Python 2083 → **2101**（＋18 条门测试），README 四处同源（`:15` badge / `:37` / `:47` / `:241`）；
+  Java 718、前端 117 未动，`--test-counts` 复核绿。
+
+#### 诚实边界
+
+- 检查 21 只保证**扫描器拦得住照抄示例**，不保证任何环境的 `.env` 真换过——`docker/.env` 不在版本库里，门够不着它；
+  所以上线清单那条仍是 `- [ ]`（勾它要的是运维动作，不是门绿）。
+- `PRODUCTION_OPS.md` §0 至今 **34 项未勾**（本批把那条虚构项标 `[x]` 作废，读数从 0/35 变 1/35，性质仍是流程债：
+  没有任何机器判据读这 35 项）。把它做成门要先回答"勾选项由谁核"，本批不做代理指标。
+- 扫描器改的是**判据覆盖面**，值面仍取决于两份模式表；`PLACEHOLDER_MARKERS`（python 侧 oracle）与
+  `WEAK_PATTERNS|PLACEHOLDER_PATTERNS`（bash 侧）今天是两套字面量，将来加形态要两边各改一次才会绿——
+  这是刻意的（抄同源就只是把 bug 复述一遍），但也是维护成本，登记在此。
+- 本批不动 `--index-url` 那笔镜像单点（F 节候选 B/C 待拍板），因此**第一百一十五批的 runner 判据仍没拿到**：
+  本批 push 之后若 `e2e-full` 再被 `timeout-minutes: 20` 取消，就还是同一道上限，不是用例。
+
 ### 第一百一十五批·补证（2026-10-13：runner 判据还是没拿到，但这次量清了它卡在哪——`e2e.yml:165` 的 `timeout-minutes: 20` 把整条 e2e 轨杀在装依赖那一步，而依赖源是被锁文件钉住的那一个镜像；顺带把"cancelled 归因不可判定"这条陈旧口径就地纠正）
 
 #### 结论（先给判定性质）

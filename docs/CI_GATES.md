@@ -435,7 +435,10 @@ runner 上是冷 npm 缓存，未量）。检查 14 继续管这两个新步骤�
 剩下那 4 条**不属于这一层**，已登记为第一百一十三批（原写作第一百一十二批，那个号属于
 `eval-runtime` 可达性探针），死因由 artifact 量出（见下面的检查 20）：3 条 demo-data 叠着三层，
 本批只解开其中最外的一层（CI 起的后端不是用例假定的那个后端），第 4 条 `tools.spec.ts:11`
-是工具列表分页把目标卡片挤到第 3 页，属测试侧问题，**尚未处置**。
+是工具列表分页把目标卡片挤到第 3 页，属测试侧问题，**第一百一十五批已按"改用例"处置**
+（页数改运行时推导、目标改翻页找）；但它的 runner 判据至今没拿到——`e2e.yml:165` 的
+`timeout-minutes: 20` 连续三条 run 把 `e2e-full` 杀在 `Install Python dependencies`，
+一个用例都没执行（见 `docs/CLEANUP_BACKLOG.md` F 节的镜像单点条目）。
 
 ## 检查 20：e2e 轨的后端特性开关契约（第一百一十三批）
 
@@ -488,11 +491,43 @@ env 块（`:84-105`、`:236-257`）没带这个键——**"配置写了、容器
 `${DEMO_ENDPOINTS_ENABLED:-false}` 按设计保持默认关（`/clear` 有数据破坏性，
 `application.yml:175` 的注释写着这条），所以门不能推广成"所有拓扑都得 true"；②键值只钉
 `DEMO_ENDPOINTS_ENABLED` 一条——它是这 4 条红里被工件证实的那一条，其余特性开关没有证据就不上门，
-否则就成了把 CI 变严而没有红用例支撑的猜测；③**门绿不等于用例绿**：上面那三层里本批只除了最外的
-一层，②waiter 注册顺序与③陈旧 label 都还在，开关解开之后这 3 条是否转绿，要等下一次 push 的
-e2e run 才分得清。第 4 条 `tools.spec.ts:11` 与本检查无关：工具列表按 `pageSize=6` 分页而注册表有
-30 项，`getByText('搜索知识库')` 的目标在第 3 页，**待处置**（改 `Tools.vue` 排序还是让用例先翻页，
-属产品/测试侧决策，未拍板）。
+否则就成了把 CI 变严而没有红用例支撑的猜测；③**门绿不等于用例绿**：本批只除了最外的一层，
+内两层后来的读数（第一百一十四批·补证与补证二；③的依据是 run `38349608765`／`38384435241`，
+②的依据是 run `38388749034`）是——
+**③"陈旧 label"整条撤销**（用例走 `/api/demo/import`，`DemoImportServiceImpl.java:143` 发的就是
+「知识库文档」；含 `:29` 的那条在两条 run 上都通过，`:78` 从未执行到），
+**②"waiter 注册顺序是死因"改判竞态**（第三条 run 里那两条 demo 用例转绿／flaky，
+`retry` 会把竞态掩盖成"这轮没红"），所以开关解开之后这 3 条到底几条转绿，
+只能按 attempt 级 `results[].status` 比 ≥3 条 run 来判，单看一轮 `stats` 不够。第 4 条 `tools.spec.ts:11` 与本检查无关：工具列表按 `pageSize=6` 分页而注册表有
+30 项，`getByText('搜索知识库')` 的目标在第 3 页——**第一百一十五批已处置**（用户拍板 A＝改用例：
+页数由页面自报条数推导、工具改成翻页找，本地活栈改前同形红／改后 2 passed），只是 runner 侧那一格
+还空着，原因同上条的 `timeout-minutes: 20`。
+
+## 检查 21：弱默认值扫描器必须拦得住自家示例文件（第一百一十六批）
+
+起因是 `docs/PRODUCTION_OPS.md:16` 那句「`--check` 可扫描弱默认值」。本轮把它按到实测上：
+真机跑 `bash scripts/rotate-secrets.sh --check` 读 `docker/.env` 报 `[ok]`、退出码 0，
+逐键比对 `docker/.env.example` 的 13 个键**没有一个等于示例占位值** ⇒ 本地这份确实轮换过，
+那句在本地成立；但把 `docker/.env.example` **原样复制**成 `.env` 再喂同一个真脚本，
+10 个占位键（8 个 `changeme-*` ＋ `minioadmin` ＋ `sk-replace-with-your-own-key`）只点名 1 个
+（`minioadmin`），**退出码还是 0**。根因是脚本里那份 `WEAK_PATTERNS` 写的是 `change-me`
+（带连字符），而自家示例用的是 `changeme`——扫描器与它要保护的那份样例不同源。
+最常见的失效模式（照抄仓库里公开的示例上线）一路放行，所以"扫描器说绿"当不了"默认值换过"。
+
+| 层 | 位置 | 查什么 |
+|---|---|---|
+| 形状 | `scripts/static-checks.py` 检查 21（`--weak-default-scan`，已并入默认全跑档） | 真起 bash 跑 `rotate-secrets.sh --check`，用 `ROTATE_SECRETS_ENV_FILE` 喂两份输入：**负控**喂 `docker/.env.example`，必须退出码非 0 **且**逐个点名到示例里所有占位键；**正控**喂"与示例同键集、值全换成强随机形态＋补上 `MODEL_CREDENTIAL_ENCRYPTION_KEY`"的临时文件，必须退出码 0 且不点任何名。另有四条自反规则：脚本或示例文件不存在红、`PLACEHOLDER_KEYS_LOWER_BOUND=10` 适用面缩小红（示例一旦不含占位符，负控就空转）、本机找不到 bash **不许默认绿** |
+| 语义 | `python-ai/tests/test_weak_default_scan_gate.py`（18 例） | 判据是**行为**，不把脚本里那份模式抄到 python 侧（抄过来只会把 bug 复述一遍，故有一条 `test_scanner_source_is_not_the_oracle` 直接断言 `WEAK_PATTERNS` 那行里不许出现 `changeme`）；负控/正控各起真 bash；七条红路径各钉一次（恒 0、漏点名、一律红、示例失去占位符、脚本缺失、示例缺失、没有 bash）；`_scan_named_keys` 只认脚本自己写的那个 `[!] KEY` 形状（现 `rotate-secrets.sh:59`），形状一改就判 0/10 红而不是跟着猜 |
+
+**为什么正控也要跑**：只写负控的话，把扫描器改成"一律红"同样能让门变绿，而那种门在真上线时
+会把自己 `.env` 的弱值埋进噪音里。正控的输入是从示例文件**同键集**派生的（有一条判定专门
+比两个键集），否则"绿"可能只是因为少了几行要被扫的键。
+
+诚实边界（写下时）：①本检查只保证**扫描器能拦住照抄示例**，不保证任何环境的 `.env` 真的换过——
+`docker/.env` 不在版本库里，门够不着它；②覆盖面只有 `docker/.env.example` 一个文件，
+`deploy/.env.example` 与 `python-ai/.env.example` 里的占位值至今没有门扫（已登记
+`docs/CLEANUP_BACKLOG.md` F 节，**待拍板**）；③`CALLBACK_SECRET` 的方向口径本轮一并纠正为
+"Java 单向分发"，但 compose 注给 python-ai／worker 的那三行是空转声明，删与留都是行为决策，同条待拍板。
 
 ## 检查 18：容器轨的运行期契约（第一百零九批）
 
@@ -553,5 +588,6 @@ minio/etcd），量到四处同一形状的断链：**配置写了、容器里�
 - `python-ai/tests/test_container_runtime_contract_gate.py` — 检查 18（容器轨运行期契约）的判据：四条规则各种历史坏形状各红一次、三种"形状对但指向别处"的语义面单独钉、按拓扑的数量反空转、command 与 application.yml 两处解析器各有一个 PyYAML oracle（第一百零九批）
 - `python-ai/tests/test_e2e_backend_feature_flag_gate.py` — 检查 20（e2e 轨后端特性开关契约）的判据：真仓库绿、已并入默认全跑档、四种坏形状（键缺失 / 值不是 `true` / 注释冒充 / 键不在起后端那条链上）各红一次、适用面为空与缩小都红，并有一条"workflow 钉值 == dev compose 钉值"的跨文件同源判定（第一百一十三批）
 - `python-ai/tests/test_e2e_frontend_server_gate.py` — 检查 19（e2e 轨前端服务契约）的判据：真仓库绿、已并入默认全跑档、七种坏形状（没起前端 / 探针端口与 baseURL 不同源 / 探针无 `exit 1` / 起前端排在 `npm ci` 前 / 缺探针 / config 在 CI 档也自起=双主人 / 删测试步骤或改命令名）各红一次，适用面下界按 job 名钉住；有名步骤与无名步骤条数都由 PyYAML 复算（第一百一十一批）
+- `python-ai/tests/test_weak_default_scan_gate.py` — 检查 21（弱默认值扫描器覆盖契约）的判据：真仓库绿、已并入默认全跑档、负控与正控各起一次真 bash、七条红路径（恒 0 退出码 / 漏点名 / 一律红 / 示例失去占位符 / 脚本缺失 / 示例缺失 / 没有 bash 时不许默认绿）各红一次；有一条判定反向钉"python 侧不许把脚本里那份 `WEAK_PATTERNS` 抄成 oracle"（第一百一十六批）
 - `python-ai/tests/test_eval_suite_eol_binding.py` — 冻结摘要与行尾无关的判据（钉值、两种检出形态、篡改仍红、emit 写 LF）
 - `.git-blame-ignore-revs` + `CONTRIBUTING.md`「Java code style (spotless)」— 全仓重排那一笔如何不污染 `git blame`

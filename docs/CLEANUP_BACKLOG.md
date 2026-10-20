@@ -680,3 +680,28 @@
   是否已进入常态仍需再量**，本条不写成"源坏了"；
   ②判据来自 runner 日志文本与 job 窗口，没有本地复测带宽；③本条不是"门红"，门（`static-checks.py` 全跑档）仍绿，
   它是**证据通道**的可用性缺陷，所以不并入检查 19/20，单列。
+- [ ] **弱默认值扫描覆盖面只有一个文件；`CALLBACK_SECRET` 在 python 侧是空转声明**（第一百一十六批取证，扫描器本体已修，这两点**未处置、待拍板**）——
+  ① **覆盖面**：`scripts/rotate-secrets.sh --check` 只读 `ENV_FILE`（`:30`，默认 `docker/.env`，
+  可用 `ROTATE_SECRETS_ENV_FILE` 指到别处，但一次只扫一个文件）。本轮实测三个 env 文件都在仓库工作区
+  （`docker/.env`、`deploy/.env`、`python-ai/.env`），而检查 21 的负控输入写死是 `docker/.env.example`
+  （`scripts/static-checks.py` 的 `DOCKER_ENV_EXAMPLE`）⇒ `deploy/.env.example:13` 那种
+  `replace-with-long-random-token-2` 占位值**至今没有任何门扫它**。处置选项：让检查 21 逐个示例文件跑负控
+  （三个 `.env.example` 都在库里，改动只在 python 侧），还是给脚本加多文件参数（改的是运维入口）。**待拍板**。
+  ② **空转声明**：`CALLBACK_SECRET` 只有 Java 读——`application.yml:128` →
+  `VectorizationServiceImpl.java:725-750` 把它写进发起向量化时的请求体；Python 全程只回显请求体里带来的那把
+  钥匙去签名（`app/api/vectorization.py:245`、`:810-820`，透传链 `app/core/tasks/queue.py:39/57`、
+  `app/models/document.py:27`），`grep -rn "environ.*CALLBACK_SECRET|getenv.*CALLBACK_SECRET"` 在
+  `python-ai/app` **零命中**。⇒ `docker/docker-compose.yml:318`（python-ai）、`:400`（python-ai-worker）
+  与 `deploy/docker-compose.prod.yml:236` 注进容器环境的那三行、外加 `python-ai/.env.example:42` 那一条，
+  都是没人读的死声明（与第一百零九批 `UPLOAD_DIR` 同形）。删掉＝改 compose  env 面，
+  不涉及现有门的判据（检查 18 规则②只钉 redis host＋密码成对，`grep CALLBACK_SECRET` 在
+  `scripts/static-checks.py` 零命中）；保留＝每个读 compose 的人都会以为 python 侧也要配这把钥匙。
+  **待拍板**。
+  本轮已按语义漂移就地纠正、不再另立缺陷号的四处口径：`scripts/rotate-secrets.sh:15` 原写
+  「Python → Java 回调 HMAC（两侧一致）」（方向反了，且"两侧各配一份"不成立，现改成单向分发口径并指回本条）；
+  `docs/PRODUCTION_OPS.md:18` 的 `PLUGIN_RUNNER_SECRET_KEY` 是全仓零命中的键名（现行 `PLUGIN_RUNNER_TOKEN`，
+  Java `application.yml:159` ↔ Python `app/core/plugin/container_runner.py:29`）；
+  `docs/PRODUCTION_OPS.md:21` 的 Sa-Token JWT 密钥 `SA_TOKEN_JWT_SECRET_KEY` 同为虚构项
+  （`application.yml:89-96` 的 sa-token 段只有 `token-name/timeout/active-timeout/is-concurrent/token-style: uuid/is-log`，
+  没有签名密钥可配；`JwtUtils.java` 只是 `StpInterface` 的权限提供者，不读任何密钥），已标作废；
+  `docs/PRODUCTION_OPS.md:16` 那句「`--check` 可扫描弱默认值」改成了带退出码与被钉住的完整口径。

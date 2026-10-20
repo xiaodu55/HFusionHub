@@ -13,12 +13,12 @@
 
 ### 🔐 安全配置（必需项，上线前必须完成）
 
-- [ ] **修改所有默认密码** — 运行 `bash scripts/rotate-secrets.sh` 生成全部密钥并按指引同步两侧 `.env`（第十五轮 R15-26 落地脚本；`--check` 可扫描弱默认值与缺失的 `MODEL_CREDENTIAL_ENCRYPTION_KEY`）；MySQL 密码的库内落实用 `bash scripts/rotate-db-password.sh --apply --yes`（经 stdin ALTER，root/hfusionhub 账户），重启栈后 `--check` 复核
+- [ ] **修改所有默认密码** — 运行 `bash scripts/rotate-secrets.sh` 生成全部密钥并按指引同步两侧 `.env`（第十五轮 R15-26 落地脚本）；`--check` 只扫描 `docker/.env`（可用 `ROTATE_SECRETS_ENV_FILE` 换目标），弱口令前缀 + 占位符形态 + 缺 `MODEL_CREDENTIAL_ENCRYPTION_KEY` 三类都算发现、发现即退出码 1。第一百一十六批之前它照抄 `.env.example` 也只报 1/10 个键且退出码 0，现由 `python scripts/static-checks.py --weak-default-scan`（检查 21）用 `.env.example` 作负控钉住；MySQL 密码的库内落实用 `bash scripts/rotate-db-password.sh --apply --yes`（经 stdin ALTER，root/hfusionhub 账户），重启栈后 `--check` 复核
 - [ ] **配置真实 DeepSeek API Key** — `python-ai/.env` → `DEEPSEEK_API_KEY`（当前已配置真实 key，聊天默认 DeepSeek 优先，Ollama 降级为 embedding/离线）
-- [ ] **更新内部通信令牌** — `docker/.env` → `PYTHON_AI_INTERNAL_TOKEN`、`PLUGIN_RUNNER_SECRET_KEY`（32 字符随机字符串，两端一致）
+- [ ] **更新内部通信令牌** — `docker/.env` → `PYTHON_AI_INTERNAL_TOKEN`（Java `application.yml:129` ↔ Python `app/utils/config.py:74`）、`PLUGIN_RUNNER_TOKEN`（Java `application.yml:159` ↔ Python `app/core/plugin/container_runner.py:29`）；两个键名两侧同名、必须同值，长度取 `rotate-secrets.sh` 里 `gen()` 的 40 字符随机串
 - [ ] **启用 HTTPS** — 参考落地样例 `deploy/nginx-https.conf.example`（第十五轮 R15-26：Let's Encrypt certbot 全流程 + SSE 透传 + HSTS + 管理端口/runner 端口不对外清单）
 - [ ] **CORS 白名单** — `app.cors.allow-any-origin=false`（第十五轮起代码默认值即为 false）并配置 `app.cors.allowed-origins=https://your-domain.com`；开发/内网穿透需显式开启 any-origin（启动日志会大声告警）
-- [ ] **Sa-Token JWT 密钥** — `docker/.env` → `SA_TOKEN_JWT_SECRET_KEY`（建议 64 字符）
+- [x] ~~**Sa-Token JWT 密钥** — `docker/.env` → `SA_TOKEN_JWT_SECRET_KEY`~~ — 第一百一十六批就地勘误：这一项不存在。`application.yml:89-96` 的 sa-token 段只有 `token-name/timeout/active-timeout/is-concurrent/token-style: uuid/is-log`，令牌是存 Redis 的 uuid 会话串、没有签名密钥可配；全仓 `grep -rn "SA_TOKEN_JWT\|jwt-secret\|jwt:"` 在 `java-backend/src/main`、`docker/.env.example`、`deploy/.env.example` 三处零命中，`JwtUtils.java` 只是 `StpInterface` 的权限提供者、不读任何密钥。照此项去配环境变量只会造出一个没人读的空转键，故勾掉并登记在 `docs/CLEANUP_BACKLOG.md`
 - [ ] **关闭或限制 Swagger UI** — 生产 `springdoc.swagger-ui.enabled=false` 或 IP 白名单（详见 [SWAGGER_UI.md](SWAGGER_UI.md)）
 
 ### 🗄️ 数据库与持久化

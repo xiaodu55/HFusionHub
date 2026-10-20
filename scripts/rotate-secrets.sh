@@ -12,22 +12,38 @@
 #   MINIO_ROOT_USER / MINIO_ROOT_PASSWORD     MinIO（与 Java minio.access-key/secret-key 一致）
 #   PLUGIN_RUNNER_TOKEN                       Java ↔ plugin-runner（两侧一致）
 #   PYTHON_AI_INTERNAL_TOKEN                  Java ↔ Python（两侧一致）
-#   CALLBACK_SECRET                           Python → Java 回调 HMAC（两侧一致）
+#   CALLBACK_SECRET                           回调 HMAC——单向：Java 读环境变量并写进
+#                                             请求体（application.yml:128 →
+#                                             VectorizationServiceImpl.java:725-750），
+#                                             Python 只回显那把钥匙来签名
+#                                             （vectorization.py:245/810-820），
+#                                             两侧各配一份是误解，见
+#                                             docs/CLEANUP_BACKLOG.md
 #   MODEL_CREDENTIAL_ENCRYPTION_KEY           用户模型凭据加密（独立生成，勿复用内部令牌）
 #   ADMIN_PASSWORD                            平台管理员初始密码
 #
 # 用法：
 #   ./scripts/rotate-secrets.sh              # 打印全部新密钥与更新指引
 #   ./scripts/rotate-secrets.sh --check      # 只检查 docker/.env 中的弱默认值
+#                                            #（发现弱值/缺键 => 退出码 1；
+#                                             被检查的文件可用
+#                                             ROTATE_SECRETS_ENV_FILE 覆盖，
+#                                             static-checks 的检查 21 靠它喂样例文件）
 # ═════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="$ROOT/docker/.env"
+ENV_FILE="${ROTATE_SECRETS_ENV_FILE:-$ROOT/docker/.env}"
 
 gen() { openssl rand -base64 30 | tr -d '/+=' | head -c 40; }
 
+# 两类判据分开：
+#   WEAK_PATTERNS      —— 值**开头**就是众所周知的弱口令（保守，避免误伤含 admin/test 的强随机值）
+#   PLACEHOLDER_PATTERNS —— 值里出现"占位符腔"（本仓 `.env.example` 用的就是 `changeme-*`
+#                          与 `sk-replace-with-your-own-key`，它们不以 WEAK_PATTERNS 里那几个词开头，
+#                          第一百一十六批的负控正是在这里漏掉 9/10 个键）
 WEAK_PATTERNS='^(minioadmin|plugin-runner-secret|123456|password|admin|test|change-me)'
+PLACEHOLDER_PATTERNS='(changeme|change-me|replace-with|your-own|sk-replace|placeholder|xxxxxx)'
 
 check_env() {
   echo "── 检查 $ENV_FILE 中的弱默认值 ──"
@@ -36,21 +52,31 @@ check_env() {
     case "$line" in
       \#*|'') continue ;;
     esac
+    [[ "$line" == *=* ]] || continue
     key="${line%%=*}"; val="${line#*=}"
-    if echo "$val" | grep -qiE "$WEAK_PATTERNS"; then
+    key="${key#export }"; key="$(echo "$key" | tr -d '[:space:]')"
+    if echo "$val" | grep -qiE "$WEAK_PATTERNS" || echo "$val" | grep -qiE "$PLACEHOLDER_PATTERNS"; then
       echo "  [!] $key 使用弱默认值，必须轮换"
       found=1
     fi
   done < "$ENV_FILE"
-  [[ $found -eq 0 ]] && echo "  [ok] 未发现弱默认值"
+  if [[ $found -eq 0 ]]; then
+    echo "  [ok] 未发现弱默认值"
+  fi
   if ! grep -q '^MODEL_CREDENTIAL_ENCRYPTION_KEY=.' "$ENV_FILE"; then
     echo "  [!] MODEL_CREDENTIAL_ENCRYPTION_KEY 未配置——保存/读取用户模型凭据会 fail-fast"
+    found=1
   fi
+  return $found
 }
 
 if [[ "${1:-}" == "--check" ]]; then
-  check_env
-  exit 0
+  if check_env; then
+    exit 0
+  else
+    echo "── 以上项必须处置后才能上线（docs/PRODUCTION_OPS.md §0 的 🔐 安全配置）──" >&2
+    exit 1
+  fi
 fi
 
 echo "══ 新密钥（手动更新后按下方顺序重启）══"
