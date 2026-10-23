@@ -11,6 +11,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百二十批（2026-10-14：第一百一十九批自己触发的两条 run 到手——`63 expected / 0 unexpected / 0 flaky`、attempt 级 73 行里 `retry>0` 零行，"绿不靠 retry"从孤例变成连续两轮；装依赖波形数到第四档）
+
+**结论**：本批**只动文档**（`docs/CI_GATES.md`、`docs/CLEANUP_BACKLOG.md`、`CHANGELOG.md`），一行代码没改。
+补的是第一百一十九批收尾时挂着的那对 run（`b904efbe` 这笔 docs-only push 自己触发的 CI 与 E2E）。
+
+**①两条读数（都到手）**：
+- E2E `38574242376`：`e2e-full` **success**，13:43:50Z→13:56:43Z＝**12m53s**，
+  `Running 73 tests using 1 worker` → **63 passed (2.5m) / 10 skipped**，`stats`＝
+  **63 expected / 0 unexpected / 0 flaky / 10 skipped**。
+- CI `38574242324`：**11/11 全绿**，13:43:47Z→13:57:29Z＝**13m42s**；`gitleaks` 是第一百一十七批
+  那处高熵字面量修好后**连续第三轮**过（`38530095463`→`38568479058`→本轮）。
+
+**②判据的强度变了，靠的是 attempt 级而不是 run 级**：解包 `e2e-results-full` 的 `e2e-results.json`，
+把 `specs[].tests[].results[]` 摊平共 **73 行**（63 `passed` ＋ 10 `skipped`），**`retry>0` 的行数＝0**。
+这条比"退出码 0"硬：`retry` 会把红兜成 flaky 而 flaky 仍记通过（第一百一十四批立的那条纪律就是这个），
+而本轮**从头就没红过**。单次通过耗时：`demo-data.spec.ts` 三条 1830／6065／4066 ms（②那条 6065 ms）、
+`tools.spec.ts` 两条 1940／943 ms。⇒ 第一百一十八批那处改动（四处 `waitForResponse` 提到点击前）
+在 runner 上**连续两轮**给出同一个形态，"不靠 retry 的绿"不是一次性孤例。
+
+**③慢源波形数到第四档**：pip-only（`##[group]Run pip install -r requirements.txt`→下一个 group）
+本轮 **465 s**（13:44:51→13:52:35），套件 **148 s**（13:54:08→13:56:36），离 `e2e.yml:165` 的 20 分钟
+余量 **≈7m07s**。四档＝876／459／423／**465** s ⇒ 459 与 465 同档，**低档不是只出现一次的巧合**；
+但高档那轮仍把余量压到约 30 s，上限未解除，候选 B／C 仍按"波形的高档"评估（见 `docs/CLEANUP_BACKLOG.md` F 节镜像单点）。
+
+**就地纠正的旧口径**：第一百一十九批写的"`E2E Tests` 最近 25 条 run 里 `success` 只有两条"是**写作当时的现行值**，
+本批起现行数为**三条**（`38524739182` 靠 2 flaky／`38568478864`／本轮 `38574242376`），两处原文（`docs/CI_GATES.md`、
+本文件第一百一十九批条目内）都已标注，不留成会被当作现状引用的旧数。
+
+**验证**：`python scripts/static-checks.py` 全跑档 **EXIT=0**（检查 1–21 全 `[ok]`）；docs-only ⇒ 计数 **2101 不变**；
+行尾只判一次（`CHANGELOG.md` 全 CRLF、两份 docs 纯 LF），无二次转换。
+
+**诚实边界**：①本轮仍是 `63 passed / 10 skipped`——那 10 条 skip **没变**，`e2e.yml` 依旧没设任何
+`HFUSIONHUB_RUN_*_LIVE` 旗标，所以"流式对话／插件装卸／审批活链路／python 内部回调"这四条在 runner 上仍**零覆盖**，
+本批的绿不改变第一百一十九批那条结论，`docs/PRODUCTION_OPS.md:50` 仍**未勾、待拍板**；
+②`chat-sse.spec.ts:24` 那条跨源红仍只在本地量过——它在 runner 上是 skip 状态，这两轮都没执行它，
+"CI 上也会红"至今是推断；③本地全量 e2e 本轮没重跑，最新本地读数仍是第一百一十八批的 `62 passed / 1 failed / 10 skipped`。
+
 ### 第一百一十九批（2026-10-14：第一百一十八批欠的 runner 读数到手——`63 passed / 0 unexpected / 0 flaky`，是这个套件第一条不需要 retry 兜住的绿；顺着"10 skipped"往下数，挖出 e2e 覆盖面的两个洞）
 
 **结论**：本批**只动文档**（`docs/CI_GATES.md`、`docs/CLEANUP_BACKLOG.md`、`CHANGELOG.md`），
@@ -29,6 +66,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - "绿不靠 retry"这句是可数的：`E2E Tests` 最近 25 条 run 里只有两条 `success`，
   前一条靠 2 flaky，这一条 `0 unexpected / 0 flaky`；其余要么 `failure`（按定义有 unexpected）
   要么被 20 分钟上限 `cancelled`（拿不到 `stats`）。
+  （**第一百二十批就地标注**：这句是写作当时的现行值，本批 push 自己触发的 `38574242376` 已是第三条，现行数到**三条**。）
 
 **②那 10 条 skip 在 CI 里是永久的**（文档此前只写总数，从没写过它们是谁）：
 `chat-sse.spec.ts:26/:71`（`HFUSIONHUB_RUN_SSE_LIVE`，`:22`）×2、`approval.spec.ts:263/:271`
