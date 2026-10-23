@@ -10,6 +10,67 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 > 保留于各版本小节内。
 
 ## [Unreleased]
+
+### 第一百一十九批（2026-10-14：第一百一十八批欠的 runner 读数到手——`63 passed / 0 unexpected / 0 flaky`，是这个套件第一条不需要 retry 兜住的绿；顺着"10 skipped"往下数，挖出 e2e 覆盖面的两个洞）
+
+**结论**：本批**只动文档**（`docs/CI_GATES.md`、`docs/CLEANUP_BACKLOG.md`、`CHANGELOG.md`），
+一行代码没改。做的是三件事：①把第一百一十八批留空的那格（push 之后的 `e2e-full` 改后读数）补上；
+②数清"10 skipped"到底是哪 10 条、它们在 runner 上是永久的；③把 `chat-sse` 头注释与现行 Java 代码的
+冲突**当场跑一次判死**，结果是"头注释失效＋一条用例红在跨源 URL 上"，按纪律停在登记。
+
+**①runner 侧读数（push `15e93920` 触发的两条 run，都到手）**：
+- E2E `38568478864`：`e2e-full` **success**，13:02:13Z→13:14:07Z＝**11m54s**，
+  `stats`＝**63 passed / 0 unexpected / 0 flaky / 10 skipped**（合计 73，与前四轮同基数）。
+  attempt 级 `results[].status`：`demo-data.spec.ts` 三条**全部单次通过、零 retry**
+  （2231 ms／6626 ms／4466 ms），`tools.spec.ts` 两条同样单次通过（2252 ms／1159 ms）。
+  对账：上一轮 `38524739182`＝`61 passed + 2 flaky + 10 skipped`，本轮 `63 + 0 + 10`
+  ⇒ 转成稳定通过的正是②那两条。
+- CI `38568479058`：**11/11 全绿**，13:02:10Z→13:16:32Z＝**14m22s**。
+- "绿不靠 retry"这句是可数的：`E2E Tests` 最近 25 条 run 里只有两条 `success`，
+  前一条靠 2 flaky，这一条 `0 unexpected / 0 flaky`；其余要么 `failure`（按定义有 unexpected）
+  要么被 20 分钟上限 `cancelled`（拿不到 `stats`）。
+
+**②那 10 条 skip 在 CI 里是永久的**（文档此前只写总数，从没写过它们是谁）：
+`chat-sse.spec.ts:26/:71`（`HFUSIONHUB_RUN_SSE_LIVE`，`:22`）×2、`approval.spec.ts:263/:271`
+（`HFUSIONHUB_RUN_APPROVAL_LIVE`）×2、`plugin.spec.ts:37/:99/:133/:143`（`HFUSIONHUB_RUN_PLUGIN_LIVE`，`:9`）×4、
+`write-note.spec.ts:14/:36`（`PYTHON_AI_INTERNAL_TOKEN`）×2。`grep -rn "HFUSIONHUB_RUN_SSE_LIVE\|
+HFUSIONHUB_RUN_APPROVAL_LIVE" .github/workflows/` 命中 **0** ⇒ **流式对话、插件安装/卸载、审批活链路、
+python 内部回调这四条路径 runner 上零 e2e 覆盖**，`e2e-full` 全绿证明的是另外 63 条。这条直接改变了
+"上线清单里 E2E 那格能不能勾"的含义，故**本批没有勾 `docs/PRODUCTION_OPS.md:50`**，把判据摆出来**待拍板**。
+
+**③`chat-sse` 头注释 vs 现行代码，判死**：头注释（`:12-24`）说这 2 条 skip 是因为
+`sseTaskExecutor` 用 JDK 21 虚拟线程丢 Sa-Token 上下文、"流在首个空事件后终止、没有 `[DONE]`"。
+`git show` 显示写这段注释的 `1ce30072`（2026-08-17，提交信息含"SSE 修复"）**自己那一版**的
+`ThreadPoolConfig.java:24-37` 就已经是 `ThreadPoolTaskExecutor`＋`CallerRunsPolicy`、注释也已经写
+"不能用虚拟线程执行器"⇒ 头注释从诞生那天起描述的就是修复**之前**的形态。实测（活栈＋旗标打开，19.5s）：
+`:70`「SSE response contains [DONE] marker」**通过**（`javaApi` node 侧，不经浏览器）⇒ 那句"没有 `[DONE]`"
+当场否掉；`:93` 通过；`:24` **失败** `page.evaluate: TypeError: Failed to fetch`，栈指 `:31` 的
+`fetch('http://localhost:8080/...')`（页面在 `:3000`）。红的是用例不是后端：`curl -X OPTIONS` 带
+`Origin: http://localhost:3000` 回 **403 且无 `Access-Control-Allow-Origin`**、只有 `CorsFilter` 留下的三个
+`Vary`；而这个"仅放行同源"是**故意的安全姿态**（`CorsConfig.java:31` 白名单默认空＋`:39`
+`allow-any-origin` 默认 `false` ⇒ 走 `:92-93` 空配置分支；compose 侧只有
+`deploy/docker-compose.prod.yml:185` 透传 `APP_CORS_ALLOWED_ORIGINS`，dev 的
+`docker/docker-compose.yml` 两个键都没设），应用侧走 vite 同源代理
+（`vite.config.ts:44-47`）所以不受影响。⇒ **不能靠放开 CORS 把它蒙过去**。A／B／C 登记在 F 节。
+
+**就地纠正的旧口径**（语义漂移，不另立缺陷号）：
+- 第一百一十八批那句"runner 侧那一格本批还没闭合"改成到手读数（`CHANGELOG.md` 那条也标了批次来源）。
+- 装依赖耗时三档用**同一把尺子**（`##[group]Run pip install -r requirements.txt` → 下一个步骤 group）重量并落表：
+  876 s（`38524739182`）／459 s（`38530095482`）／423 s（`38568478864`），套件 184／223／163 s，
+  离上限余量 ≈30s／6m33s／8m06s。核出来两件事：**"15m15s"没有错，只是边界不同**（它是
+  job 起点→装依赖结束，pip-only 是 876 s，差前面 40 秒 setup）；而"**约 6 min**"两种边界都对不上
+  （pip-only 459 s、job 起点→结束 8m15s）⇒ 是没量过的估值，改。
+- 检查 20 一节里"②runner 那一格"与"②的处置"两处口径同步为"已闭合"。
+
+**验证**：`scripts/static-checks.py` 全跑档 EXIT=0（检查 1–21）；docs-only ⇒ 计数不变（Python 2101）。
+本地额外跑了一次 `e2e/chat-sse.spec.ts`（见③），其余用例未重跑。
+
+**诚实边界**：①`63 passed` 不等于 73 条都跑过，那 10 条是永久 skip（②）；②`:24` 这条红**只在本机活栈上量过**，
+runner 上从没跑过（旗标不在 workflow 里），所以"CI 上也会红"是推断不是读数；③plugin／approval／write-note
+三组同样没试过开，只登记"永久 skip"这一条事实；④本地全量这轮没重跑，第一百一十八批记的
+`62 passed / 1 failed`（那条红＝本机没 Ollama）仍是最新的本地全量读数；⑤`test-results/` 里
+`error-context.md` 会把当轮 `ADMIN_PASSWORD` 明文写进本地产物（目录已 git-ignored，本批未清理）。
+
 ### 第一百一十八批（2026-10-14：②那条"竞态"被第五条 run 的 attempt 级读数推翻——它是结构性漏听；四处 `waitForResponse` 全部提到点击之前，本地活栈转绿。取证途中另挖出一条产品缺陷：演示播种绕开了知识库列表缓存的版本递增）
 
 **结论**：`hfusionhub-frontend/e2e/demo-data.spec.ts` 四处"点完再挂监听"改成"先挂再点"，
@@ -42,7 +103,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   115 批记的"本地全量 63/2/8"里它就是两条红之一；skip 8→10 也不是代码变化，是 `write-note.spec.ts:14/:36`
   按 `PYTHON_AI_INTERNAL_TOKEN` 是否注入决定跳过，本轮 shell 未带该变量。
 - 门：`scripts/static-checks.py` 全跑档 EXIT=0（检查 1–21）；Python 侧零新增用例 ⇒ README 口径不变（2101）。
-- runner 侧那一格**本批未闭合**：判据要等这笔改动推上去之后的 `e2e-full`。
+- runner 侧那一格**由第一百一十九批补证闭合**：run `38568478864`（commit `15e93920`）＝
+  `63 passed / 0 unexpected / 0 flaky / 10 skipped`，demo 三条全部单次通过、没有一条走 retry。
 
 **顺带挖到的产品缺陷（登记 F 节，待拍板）**：`演示知识库` 标题那条断言（改前 `:48`、改后 `:50`）在本地
 **改前改后都 3/3 全红**，形态与监听顺序无关——死因在缓存：
@@ -60,6 +122,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 结构性漏听并写处置与证据，"同族三处"改四处，`demo-data.spec.ts:21-24` 这类行号锚点按改后文件重钉；
 同文件与 `docs/CLEANUP_BACKLOG.md` 那条"离上限只剩约 30 秒余量"的**擦线**口径一并推翻——
 `38530095482` 只花 13m27s（装依赖约 6 min）就跑完 ⇒ 装依赖耗时是波形，15m15s 那轮不能当基线
+（**第一百一十九批就地核过这句里的数**：pip 步骤自身是 459 s＝7m39 s，"约 6 min"是没量过的估值；
+15m15s 那条没错，只是它的边界是"job 起点→装依赖结束"，pip-only 为 876 s。详见
+`docs/CLEANUP_BACKLOG.md` 的镜像单点条目与 `docs/CI_GATES.md` 检查 20 的三行表）
 （但 `e2e.yml:165` 的 20 分钟上限仍未解除）。
 
 **诚实边界**：①`e2e/` 没有任何类型／lint 门（不在 tsconfig `include`、lint 只跑 `src`、`vue-tsc -b` 不覆盖），

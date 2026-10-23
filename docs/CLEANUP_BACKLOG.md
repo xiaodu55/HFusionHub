@@ -673,6 +673,16 @@
   （`61 expected / 2 unexpected / 10 skipped`）⇒ 上一条的"擦线／只剩 30 秒"是**把 15m15 s 那一轮当成了基线**，
   实测这三条同 commit 集群的装依赖耗时是 6 min／15m15 s 两档，即慢源呈**波形**；上限本身没解除，
   抖到高位的轮次仍会整轨失明，候选 B／C 的优先级按"波形的高档"而不是"平均耗时"评估。
+  **第三条读数＋口径统一（第一百一十九批）**：`15e93920`（第一百一十八批本体）的 E2E run `38568478864`
+  `e2e-full` 13:02:13Z→13:14:07Z＝**11m54 s**、装依赖 423 s、套件 163 s、`63 passed / 0 unexpected /
+  0 flaky / 10 skipped`。同时把上面两条旧数放到**同一把尺子**下核过（尺子＝`##[group]Run pip install -r
+  requirements.txt` 到下一个步骤 group 的差，即 pip 步骤自身）：`38524739182` 的 **15m15 s 没有错，
+  只是边界不同**——那是 job 起点→装依赖结束（06:51:59→07:07:14＝整 15m15 s），pip-only 是
+  **876 s＝14m36 s**，差在前面 40 秒 setup；`38530095482` 的"约 **6 min**"则两种边界都对不上
+  （pip-only **459 s＝7m39 s**，job 起点→装依赖结束 07:42:35→07:50:50＝**8m15 s**）
+  ⇒ 那条是没量过的估值，就地按 459 s 改。⇒ 三档振幅 876／459／423 s，本条判据不变：**高档仍会整轨失明**。
+  "余量约 30 秒"那条仍然成立（它按 job 总耗时 19m30 s 对 20 分钟上限算，与装依赖占多少无关），
+  被修正的只是拆分口径。
   历史面：七条 `cancelled` 的 `e2e-full`（`38135767903`／`38137950016`／`38140336693`／`38145150097`／`38226782059`／
   `38395206533`／`38399840606`）**7/7 停在 `Install Python dependencies`**（取法见上面那条就地纠正），
   也就是说这一轨历史上不是"偶尔"被源拖死，而是**慢源一来就整轨失明**。
@@ -755,3 +765,33 @@
   本批没有动任何 Java 代码，只在 e2e 侧把监听顺序改对。要说清楚的是：**改后本地那三次绿并不证明这条
   缺陷消失了**——它们发生在我手工 `DEL` 过版本键之后，且期间清除路径本就每次 bump；把这条缓存缺陷
   留着不动，`demo-data.spec.ts:50` 在长寿命栈上仍然是可能红的（命中未过期的旧页就红），只是本轮没撞上。
+- [ ] **e2e 那 10 条 skip 在 CI 里是永久的；其中挂在 SSE 旗标下的两条，头注释的归因已失效，实测一条过、一条红在写死的跨源 URL 上**（第一百一十九批取证，未处置，**待拍板**）——
+  覆盖面事实（`docs/CI_GATES.md` 检查 20 一节有全表）：`grep -rn "HFUSIONHUB_RUN_SSE_LIVE\|
+  HFUSIONHUB_RUN_APPROVAL_LIVE" .github/workflows/` **命中 0**，`HFUSIONHUB_RUN_PLUGIN_LIVE`
+  （`plugin.spec.ts:9`）与 `PYTHON_AI_INTERNAL_TOKEN`（`write-note.spec.ts:14/:36`）同样没有任何 workflow 设置
+  ⇒ **流式对话、插件安装/卸载、审批活链路、python 内部回调这四条路径 runner 上零 e2e 覆盖**，
+  `63 passed / 0 flaky` 证明的是另外 63 条。
+  头注释失效：`chat-sse.spec.ts:12-24` 把这 2 条 skip 归因给"`sseTaskExecutor` 是 JDK 21 虚拟线程、
+  丢 Sa-Token 上下文 ⇒ 流在首个空事件后终止、没有 `[DONE]`"。而写这段注释的那笔提交 `1ce30072`
+  （2026-08-17，提交信息含"SSE 修复"）**自己那一版**的 `ThreadPoolConfig.java:24-37` 就已经是
+  `ThreadPoolTaskExecutor`＋`CallerRunsPolicy`，注释也是"不能用虚拟线程执行器"
+  ⇒ 注释描述的是修复前的形态；现行 `application.yml:15-17` 的 `spring.threads.virtual.enabled`
+  只管 Tomcat 请求线程与 `applicationTaskExecutor`，不是这个 bean。
+  实测（本地活栈＋`HFUSIONHUB_RUN_SSE_LIVE=true`，`npx playwright test e2e/chat-sse.spec.ts`，19.5 s）：
+  `:70`「SSE response contains [DONE] marker」**通过**（走 `javaApi`，node 侧不经浏览器）
+  ⇒ 头注释那句"没有 `[DONE]`"在现行栈上直接否掉；`:93` 页面渲染**通过**；
+  `:24`「send message and receive SSE response」**失败 `page.evaluate: TypeError: Failed to fetch`**，
+  栈指向 `:31` 的 `fetch('http://localhost:8080/api/conversation/message/stream')`（页面在 `:3000`）。
+  死因是同源策略，不是登录态：`curl -X OPTIONS` 带 `Origin: http://localhost:3000` 打到该端点回 **403、
+  无 `Access-Control-Allow-Origin`**，只有 `Vary: Origin/Access-Control-Request-Method/
+  Access-Control-Request-Headers`（`CorsFilter` 留下的）。而这个 CORS 默认值是**故意的安全姿态**——
+  `CorsConfig.java:31`（`app.cors.allowed-origins` 默认空）＋`:39`（`app.cors.allow-any-origin` 默认 `false`）
+  ⇒ 走 `:92-93`"注册空配置、仅放行同源"；应用侧不受影响，前端一律经 vite 同源代理
+  （`vite.config.ts:44-47`）。也就是说：**红的是用例，安全默认值是对的**，不能靠放开 CORS 或
+  `--disable-web-security` 把它蒙过去。
+  处置选项，**待拍板**：A＝`chat-sse.spec.ts:31` 的绝对 URL 改成同源相对路径（`/api/...`，经 vite 代理），
+  就地纠正头注释，并决定是否把 `HFUSIONHUB_RUN_SSE_LIVE=true` 写进 `e2e.yml`（打开＝runner 上第一次真正覆盖
+  流式对话，代价是每轮 e2e 加时，且要和 `e2e.yml:165` 那条 20 分钟上限的既有风险叠加）；
+  B＝只纠正头注释与文档口径（"后端 bug"→"用例写死跨源直连＋旗标从未打开"），覆盖面维持现状；
+  C＝立案不处置。
+  另外三条 skip（plugin／approval／write-note）本批**没有**逐个试开，只登记"它们在 runner 上是永久的"这一事实。

@@ -441,9 +441,25 @@ runner 上是冷 npm 缓存，未量）。检查 14 继续管这两个新步骤�
 `e2e.yml:165` 的 `timeout-minutes: 20` 过的——之前连续三条 run 把 `e2e-full` 杀在
 `Install Python dependencies`（一个用例都没执行），`38524739182` 作业总耗时 19m30s、其中装依赖吃到
 15m15s。当时把它写成"离上限只剩约 30 秒余量"，**第一百一十八批就地纠正这条口径**：同一台 runner 上
-紧接的 run `38530095482`（commit `487e435c`）只花 **13m27s** 就跑完（07:42:35Z→07:56:02Z），
-其中装依赖约 6 min ⇒ 装依赖耗时是**波形**而不是常态，15m15s 不能当基线。不变的是这条上限**仍未解除**：
-慢源抖到高位的哪一轮仍然失明（见 `docs/CLEANUP_BACKLOG.md` F 节的镜像单点条目）。
+紧接的 run `38530095482`（commit `487e435c`）只花 **13m27s** 就跑完（07:42:35Z→07:56:02Z）
+⇒ 装依赖耗时是**波形**而不是常态，高位那轮不能当基线。
+
+**第一百一十九批把这条波形数到三个点**，口径统一＝日志里 `##[group]Run pip install -r requirements.txt`
+到下一个步骤 group 的差；套件耗时＝`Run npx playwright test --project=chromium` group 到下一个 group 的差：
+
+| run | commit | 作业总耗时 | 装依赖 | 套件 | 离 20 分钟上限的余量 |
+|---|---|---|---|---|---|
+| `38524739182` | `0305bc25` | 19m30s（06:51:59Z→07:11:29Z） | **876 s**（06:52:39→07:07:14） | 184 s | ≈30 s |
+| `38530095482` | `487e435c` | 13m27s（07:42:35Z→07:56:02Z） | **459 s**（07:43:12→07:50:50） | 223 s（含 6 次 retry） | ≈6m33s |
+| `38568478864` | `15e93920` | 11m54s（13:02:13Z→13:14:07Z） | **423 s**（13:02:55→13:09:58） | 163 s | ≈8m06s |
+
+同一把尺子量下来，两个旧数的处境不一样，得分开说：
+- "装依赖吃到 **15m15s**"**没有错，只是边界不同**：那是 job 起点→装依赖结束（06:51:59→07:07:14＝整 15m15s），
+  本表里的 **876 s** 是 pip 步骤自己（06:52:39→07:07:14），差的就是前面那 40 秒 setup。两个数都成立，
+  以后引用要带边界。
+- "约 **6 min**"对不上任何一种边界：pip-only 是 **459 s＝7m39s**，job 起点→装依赖结束是
+  07:42:35→07:50:50＝**8m15s** ⇒ 那条是没量过的估值，本批就地改掉，并按 459 s 记。结论不变：876／459／423 s 是同一个慢源在三条 run 上的三个振幅，
+这条上限**仍未解除**，抖到高位的哪一轮仍然失明（见 `docs/CLEANUP_BACKLOG.md` F 节的镜像单点条目）。
 
 ## 检查 20：e2e 轨的后端特性开关契约（第一百一十三批）
 
@@ -543,7 +559,85 @@ env 块（`:84-105`、`:236-257`）没带这个键——**"配置写了、容器
 原文＝`向量嵌入失败: Embedding生成失败: 无法生成向量嵌入：Ollama 服务不可用`（doc id 236），
 本机没起 Ollama；115 批记的"本地全量 63/2/8"里它就是那两条红之一。skip 从 8 涨到 10 也不是代码变化：
 `write-note.spec.ts:14/:36` 按 `PYTHON_AI_INTERNAL_TOKEN` 是否注入决定跳过，本轮 shell 没带这个变量。
-**runner 侧那一格本批还没闭合**——判据要等这笔改动推上去之后的 `e2e-full`。
+**runner 侧那一格由第一百一十九批补证闭合**：这笔改动推上去（commit `15e93920`）的 E2E run
+`38568478864` 的 `e2e-full`＝**success**（13:02:13Z→13:14:07Z＝11m54s），`stats`＝
+**63 passed / 0 unexpected / 0 flaky / 10 skipped**（合计 73，与前四轮同基数）。按 attempt 级
+`results[].status` 读，`demo-data.spec.ts` 三条**全部单次通过、没有一条走过 retry**：
+`should import demo data successfully` 2231 ms、`should show demo data in various pages after import`
+（②那条）6626 ms、`should clear demo data with confirmation` 4466 ms。对账：上一轮（`38524739182`）是
+`61 passed + 2 flaky + 10 skipped`，本轮 `63 + 0 + 10` ⇒ 转成稳定通过的那两条正是②。
+`tools.spec.ts` 两条同样单次通过（2252 ms／1159 ms）⇒ 第一百一十五批与第一百一十七批的判据在这一轮再确认一次。
+这条"绿不靠 retry"是可以数出来的：`E2E Tests` 最近 25 条 run（2026-10-10→2026-10-14）里
+`success` 只有两条——`38524739182` 与本轮 `38568478864`，前者靠 **2 条 flaky**（Playwright 把 flaky
+记为通过、退出码 0，红被 `retry` 兜住），后者 `0 unexpected / 0 flaky`；其余 23 条要么 `failure`
+（按定义至少有一条 unexpected）要么被 20 分钟上限 `cancelled`（拿不到 `stats`）
+⇒ 这是这个套件第一条不需要 retry 兜住的绿。
+CI 侧同一笔 push 的 run `38568479058` 十一 job 全绿（13:02:10Z→13:16:32Z＝14m22s）。
+
+**但"63 passed"不等于"73 条都跑过"——那 10 条 skip 在 CI 里是永久的**（第一百一十九批数出来的，
+文档此前只写总数、从没写过这 10 条是什么）：
+
+| 条数 | 文件与行 | 跳过判据 | runner 上是否可能被打开 |
+|---|---|---|---|
+| 2 | `chat-sse.spec.ts:26`／`:71` | `HFUSIONHUB_RUN_SSE_LIVE == 'true'`（`:22`） | 否——没有任何 workflow 设过这个变量 |
+| 2 | `approval.spec.ts:263`／`:271` | 行内读 `HFUSIONHUB_RUN_APPROVAL_LIVE` | 否 |
+| 4 | `plugin.spec.ts:37`／`:99`／`:133`／`:143` | `HFUSIONHUB_RUN_PLUGIN_LIVE == 'true'`（`:9`） | 否 |
+| 2 | `write-note.spec.ts:14`／`:36` | `PYTHON_AI_INTERNAL_TOKEN` 是否注入 | 否 |
+
+`grep -rn "HFUSIONHUB_RUN_SSE_LIVE\|HFUSIONHUB_RUN_APPROVAL_LIVE" .github/workflows/` 命中数 **0**。
+后果要说白：**流式对话（SSE）、插件安装/卸载、审批活链路、python 内部回调这四条路径在 runner 上
+没有一条 e2e 覆盖**，`e2e-full` 全绿证明的是另外 63 条。本地活栈同理——本批那三轮也是 10 skipped。
+
+**顺带发现一处说法冲突，未取证、没动代码**：`chat-sse.spec.ts:12-24` 的文件头把这 2 条 skip 归因给
+"后端 bug：`sseTaskExecutor` 用 JDK 21 虚拟线程、不继承 Sa-Token 的 `ThreadLocal` ⇒ `NotLoginException`"，
+并称"待后端修复（例如给执行器加 Sa-Token 上下文传递）后即可恢复"。而现行
+`ThreadPoolConfig.java:34-45` 是**平台线程池**（`ThreadPoolTaskExecutor`＋`CallerRunsPolicy`），
+它自己的注释（`:25-33`）写的恰恰是"不能用虚拟线程执行器……虚拟线程不继承父线程的普通 ThreadLocal，
+Sa-Token/租户上下文会丢失（表现为流式对话 NotLoginException）"——也就是说**用例头注释描述的那个执行器
+形态已经不是现在代码里的形态**。登记完当场就把它跑了（判据＝活栈上带 `HFUSIONHUB_RUN_SSE_LIVE=true`
+跑 `e2e/chat-sse.spec.ts`，19.5 s，读数见下）。
+
+来源也钉住（`git show` 读历史，不改代码）：写这段头注释的那笔提交就是 `1ce30072`（2026-08-17，
+提交信息带"SSE 修复"），而**同一笔提交里** `ThreadPoolConfig.java:24-37`（该提交版本）的
+`sseTaskExecutor` 已经是 `ThreadPoolTaskExecutor`＋`CallerRunsPolicy`、注释也已经是"不能用虚拟线程执行器"
+⇒ 头注释从写下那天起描述的就是修复**之前**的执行器形态。现行
+`application.yml:15-17` 的 `spring.threads.virtual.enabled: ${SPRING_THREADS_VIRTUAL_ENABLED:true}`
+作用在 Tomcat 请求线程与 Spring 的 `applicationTaskExecutor`，不是这个 bean
+⇒ "虚拟线程＝`sseTaskExecutor`"这句在现行代码里找不到对应物。
+
+**实测读数（本地活栈，旗标 `HFUSIONHUB_RUN_SSE_LIVE=true`；这个文件里是 3 条用例，其中 2 条挂旗标）**：
+
+| 用例 | 走法 | 结果 |
+|---|---|---|
+| `:24` send message and receive SSE response | 浏览器内 `page.evaluate` 里 `fetch('http://localhost:8080/api/conversation/message/stream')`（`:31` 写死绝对 URL） | **失败** `page.evaluate: TypeError: Failed to fetch`（栈指向 `:31`） |
+| `:70` SSE response contains [DONE] marker | `javaApi.post`（node 侧请求，不经浏览器） | **通过** |
+| `:93` chat detail page renders | 页面渲染 | **通过** |
+
+⇒ 头注释那句"SSE 流在首个空事件后即被终止、**没有 `[DONE]`**"在当前活栈上被直接否掉：`:70` 断的正是
+`toContain('[DONE]')`，它过了。`:24` 的红与 Sa-Token／虚拟线程无关，死因是**同源策略**——
+
+```
+curl -X OPTIONS http://localhost:8080/api/conversation/message/stream \
+  -H 'Origin: http://localhost:3000' \
+  -H 'Access-Control-Request-Headers: content-type,satoken,accept'
+→ HTTP/1.1 403
+  X-Trace-ID: 0d934f7eebbb49a8ad4d78651771410d
+  Vary: Origin / Access-Control-Request-Method / Access-Control-Request-Headers
+  （没有 Access-Control-Allow-Origin）
+```
+
+三个 `Vary` 是 Spring `CorsFilter` 留下的，说明拒绝发生在 CORS 过滤器而不是登录拦截器。而 CORS 不放行是
+**按设计**：`CorsConfig.java:31` 的 `app.cors.allowed-origins` 默认空、`:39` 的
+`app.cors.allow-any-origin` 默认 `false` ⇒ 走 `:92-93`"注册空配置、仅放行同源"这条分支。
+compose 侧只有 `deploy/docker-compose.prod.yml:185` 透传 `APP_CORS_ALLOWED_ORIGINS`（值取
+`${CORS_ALLOWED_ORIGINS:-}`，不配就是空），dev 的 `docker/docker-compose.yml` 两个键都没设；
+键的口径记录在 `docs/ENVIRONMENT.md:75` 与 `docs/PRODUCTION_OPS.md:20`（含"禁止 `*`"与
+"开发/内网穿透需显式开 `APP_CORS_ALLOW_ANY_ORIGIN=true`"）。应用本身不受影响，
+前端一律走 vite 同源代理（`vite.config.ts:44-47` 把 `/api` 转到 `http://localhost:8080`）。
+
+所以这条红的性质是**用例侧写死跨源绝对 URL，撞上一条正确的安全默认值**，与第一百一十一批的"`:3000` 契约"、
+第一百一十三批的"后端特性开关"同族，是它的第三个数据点。本批一行代码没改、旗标也没进 workflow，
+A／B／C 见 `docs/CLEANUP_BACKLOG.md` F 节。
 
 **顺带量到一条产品缺陷（未处置，登记在 `docs/CLEANUP_BACKLOG.md` F 节）**：`page.goto` 之后那条
 `演示知识库` 标题断言（改前 `:48`、改后 `:50`）在本地**3/3 全红**，且**改前改后同形**——
