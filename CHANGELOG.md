@@ -11,6 +11,66 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百二十六批（2026-10-16：候选 D 用**只读通道**跑完一遍——`.github/workflows/` 一个字没动，就把上一批留给 runner 取证步的那个问题答掉了大半；净新增是**三处自我撤回＋一个新矛盾**）
+
+**结论**：本批**只动 `docs/CI_GATES.md`＋`docs/CLEANUP_BACKLOG.md`**（＋本文件），代码、workflow、门禁定义一律没碰，
+计数 **2101 不变**。这一轮没有新的 runner 时长读数（只读旧数据），但把候选 D 从"要改 workflow 才能答"变成"三行只读 API＋一份旧日志就答了"，
+并且**推翻的三句全是上一批我自己写的**。
+
+① **写手与上传成本**：`GET /repos/…/actions/caches` 分页拉全＝**385 条／10,665,585,548 B（9.93 GB）**，pip 家族**只剩 1 条**
+`setup-python-…-pip-bda709e7…`／`size_in_bytes` **152908538**／`created_at` **2026-10-11T14:48:53.064538Z**；
+那毫秒对得上 CI run **`38145150155`（`06ea5607`）的 `eval-offline` job 114486827675**——那次运行里三个 restore 过缓存的 job
+（`eval-offline`／`python`／`python-container`）**只有它**打印 `Cache saved with the key`。保存跨度
+`tar --posix -cf cache.tzst`（14:48:51.6727531）→`Cache saved`（14:48:53.0989797）＝**1.426 s**（自 `Post job cleanup` 起算 1.578 s）、
+自报 **174.2 MB/s** ⇒ 上一批边界 5 那句"上传成本在这套 workflow 里没有读数"补上：**付过一次，很便宜**；
+"六轮 Post 全是 `not saving cache`"≠"这个条目从没被保存过"。
+
+② **"配额驱逐已排除"撤回**：上一批的推理是"若是驱逐，key 不会恒命中、字节数不会六轮不变"——这句把**"当前条目稳定"**当成了
+**"从未发生过驱逐"**。证据：那次保存自己 restore 的是**前一个 key** `…-pip-cdb57277…`（152584972 B），而它**不在今天的 385 条里**
+⇒ 中间确实删过一条。形态也更贴驱逐：**`index-buildkit-*` 379 条／9.34 GB＝总量的 94.0%**，pip＋maven＋npm＋gitleaks 四条工具缓存
+共 **0.593 GB＝6.0%**；`last_accessed_at == created_at`（写过再没读过）**294 条／8.67 GB＝87.3%**（其中 292 条 buildkit）；
+最老条目 `2026-10-10T05:00:03Z`＝**六天前的东西全不留**。"仓库级 10 GB 上限"这个数字是平台文档口径、**本仓未取证**。
+
+③ **"只剩名单不同批"撤回**：写手那次 run 的 99 个 `Downloading` 包名 vs 本轮 `e2e-full` 的 72 个 ⇒ **同名 70 条＝97.2%**、
+版本漂移只 **2 条**（`cryptography-50.0.0`、`grpcio-1.83.1`）、快照侧多 29 条 ⇒ "不是同一批"不成立。
+剩下的问题精确成"**同名同版本为什么等于没命中**"。**口径**：集合差是"下载名单 vs 下载名单"，不是归档目录的枚举
+（那要 runner 上 `pip cache list`）——它够否掉"不相交"，**不够**断言"这 70 条的 body 就在恢复出来的目录里"。
+另有一条反差没解释：本轮 4 条 `Using cached` 里 `faiss_cpu-1.14.3`／`uvloop-0.23.0` **不在 10-11 名单**（＝比这次保存更早就在目录里），
+反倒是最先被复用的大件。
+
+④ **镜像侧不存在"过期就得整包重下"这堵墙**（会话里我口头给过这条机制，落文档时按实测改写成撤回）：本机 `curl -s -o NUL -D -`
+对 `mirrors.aliyun.com` 量到——index `simple/urllib3/` 与 wheel `urllib3-2.8.0-py3-none-any.whl`（135717 B）都回
+`Cache-Control: max-age=43200`；index **无 `ETag`** 但有 `Last-Modified`，wheel 另有 `ETag: "6aa99c9e-21225"`；
+**两条带 `If-Modified-Since` 的条件请求都答 304**（`If-None-Match` 对 index 答 200，因为没 ETag 可比）
+⇒ pip 在 12 h 之后本可靠条件请求复用旧 body，"过期"不能解释③那 70 条整包重下。**边界**：这是**本机→镜像 CDN 边缘**的读数，
+runner 落哪个边缘未知、pip 的实际请求形态（`Range`／头集合）未量，所以这张表**只否**"镜像不支持条件请求"，
+**不撑**"pip 应该能命中"。
+
+④b **新矛盾（未取证）**：条目从它 restore 的那份长成 `152908538 B`，**只大了 323,566 B＝0.21%**，而同一次运行带体积标注的
+11 条下载合计 **110.6 MB**（pyarrow 50.1 MB 在内）⇒ **"新下载的 body 进了被归档的那份目录"这个模型对不上**
+（`size_in_bytes` 是 tzst 后的量，而 wheel 本身已压缩，0.3 MB 不像压缩率造成的；`pip cache dir` 打印的
+`/home/runner/.cache/pip` 与恢复路径在上一层已对得上）。
+
+⑤ **候选排序的处置**：D 从"待开的取证步"降为"**只差 runner 侧两行**"（恢复后 `pip cache list` 条数＋`du -sh`，
+再跑一次 `pip install -vv` 看有没有 `Reusing / Cached response`）；**新登记 E＝buildkit 层缓存的保留期／清理**
+（`gh api -X DELETE …/actions/caches/{id}` 是**写操作**，本批**未执行**）。E 自带一条**可证伪预测**：既然那 146 MB 对
+107.4 MB 的下载几乎没帮忙，那 **pip 条目哪天被驱逐之后，pip-only 时长应仍落在 338～876 s 这条谱上、不冒新的高档**——
+若冒出显著更高的一档，就是"缓存没帮忙"这个判断错了、③要重开。B／C 的既有判定不变（B 治不到这种稳定慢速传输，
+C 的依据仍是第一百二十四批④那条吞吐实测）。**B／C／D／E 全部待拍板。**
+
+**风险口径本批未动**：坏情况照旧按 876 s 换掉本轮 338.152 s ⇒ 631＋537.848≈**1168.8 s＝19m29 s**、余量约 **31 s**；
+`docs/PRODUCTION_OPS.md:50` 仍未勾、`e2e` 那 **10 条永久 skip**、`chat-sse.spec.ts:24` 仍是推断——**三条本批都未动**。
+
+**验证**：`python scripts/static-checks.py`（全跑档）**EXIT=0**、门禁计数 **2101 不变**；三份文件按 raw bytes 判行尾——
+`CHANGELOG.md` 纯 CRLF（5372→本批后更长、bare LF＝0）、两份 docs 纯 LF；新增行做了密钥形态自查（无高熵字面量、
+未出现任何真实键值），再用本机 gitleaks 8.24.3 按 CI 同参 `detect --redact -v --exit-code=2 --log-opts=-1` 复扫＝`no leaks found`。
+**取证配方（可复现，全只读）**：`gh api repos/{o}/{r}/actions/caches --paginate` 取 key/size/created_at/last_accessed_at
+（`created_at` 精确到毫秒的那条＝唯一写手，`key` 缺席＝驱逐发生过）；分 job 日志
+`gh api --allow-escape-sequences repos/{o}/{r}/actions/jobs/<id>/logs`（不带这个 flag `gh` 会因 ANSI 拒绝输出，
+`--silent` 只会落一个 0 字节文件）；本地对镜像 `curl -s -o NUL -D - <URL>` 与 `-H "If-Modified-Since: <回读的 Last-Modified>"` 各一次。
+**坑**：`gh api --jq` 不吃 `;` 分隔的多条语句（把 JSON 落文件再解析）；`runs?created=<区间>` 这个过滤器在本机版本返回空行，
+得 `--paginate` 后本地 `select`，而 `actions/caches?created=` 的过滤器是好的。
+
 ### 第一百二十五批（2026-10-16：`c26703ef` 自触发那对 run 的读数到手（pip-only 第十个点 **338.152 s**），净新增四条——轮次级共同因子第一次有数、pip 缓存那条从"命中率低"升级为"**条目被冻住**"、同一台 runner 上缓存通道比 index 通道快约 270 倍的实测、以及上一批并发表的第四列量的**不是安装窗口**）
 
 **结论**：本批**只动 `docs/CI_GATES.md`＋`docs/CLEANUP_BACKLOG.md`**（＋本文件），代码、workflow、门禁定义一律没碰，
