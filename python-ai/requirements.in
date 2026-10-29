@@ -2,7 +2,7 @@
 # Rebuild lock separately: pip-compile --generate-hashes --allow-unsafe --output-file=requirements.txt requirements.in
 
 fastapi>=0.141.1
-uvicorn[standard]>=0.27.0
+uvicorn[standard]>=0.54.0
 pydantic>=2.13.5
 # 下面四条的下限是**漏洞下限**（第一百零三批）：pip-audit 给出的是"最早修复版本"，
 # 锁里钉的是那个版本。写下限的意义在于——重新 compile 时不会又落回带 PYSEC 的版本，
