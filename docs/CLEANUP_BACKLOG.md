@@ -890,6 +890,22 @@
   **C＝缩 tick／事件即时触发**（影响所有删除链，收益不匹配）、**D＝只登记**。**推荐 A**，本批未动任何用例与生产代码。
   风险口径不变（坏情况仍按 876 s＝19m29 s／余量约 31 s），且本条与候选 B／C／D／E 无交集——A 落地最多让 e2e 轨少 30 s。
 
+  第一百二十八批·补证（把上面那句"前提未实测"取到数，顺带量到一条新的不对称；仍只在活栈，未动任何代码／workflow）：
+  **① A 的前提被否掉一半**——`delete#2` 后 0.38 s（`status=4／deleted=0`）调 `DELETE /document/{id}/purge` ⇒
+  **HTTP 400**、`回收站中不存在该文档`、0.228 s，任务表**没**新增 `DOCUMENT_PURGE` 行。门在 service 入口
+  （`DocumentServiceImpl.java:357` 要求 `deleted==1`），`DeletionServiceImpl.java:400` 那条链侧的免疫**走不到**；
+  上面"纸面可行"是把链的性质误安到入口上，**就地纠正**。⇒ **A 精确成 A1＝去掉第二次 poll＋purge，只留 `delete#2`＋`apiDeleteKB`
+  fire-and-return**（实测卫生面成立：那条 `DOCUMENT_DELETE` 照旧在下个 tick 从 `PENDING/idx=0` 直接跳到 `COMPLETED/idx=4`，
+  75 s 内无 `FAILED`、`retry_count` 恒 0，文档与知识库在列表里都不可见，残留是回收站行、7 天由 `RecycleBinCleanupScheduler` 收）。
+  **② 新登记的不对称（与 60 秒无关）**：`DELETE /knowledge-base/{id}` 是**同步**的——`KnowledgeBaseServiceImpl.java:219-220`
+  在请求里 `markRecycled`，实测 HTTP 200／0.223 s、返回即 `deleted=1`、任务表里**没有任何 KB_DELETE 行**；
+  同一个"删除"动词文档侧等 30 s tick、知识库侧 0.2 s 进回收站 ⇒ **B 的性质从"新设计"变成"向仓内既有先例看齐"**。
+  **③ 周期有同钟依据、相位本批不能定**：库内两个 `recycled_at` 是 04:18:31／04:19:01＝整 30 s（同一把钟），
+  但宿主 Node 钟与 JVM 钟的 skew 未校，所以不能说"格子平移到了 :31/:01"。
+  **④ 另一处尺子纠正**：第一百二十八批"按秒采样（doc 242）"那行的 `t+Ns` 是**循环次数不是秒**
+  （每轮串行 `docker exec`＋`curl`，实测约 1.5 s／轮），不能用它判"可见先于翻转"；补证探针的时间戳改成现取 `date -u +%T.%3N`。
+  待拍板清单不变，只是 **A→A1**、B 的理由变硬：**候选 B／C／D／E、60 秒的 A1／B／C／D、新缺陷的甲／乙／丙**。
+
   历史面：七条 `cancelled` 的 `e2e-full`（`38135767903`／`38137950016`／`38140336693`／`38145150097`／`38226782059`／
   `38395206533`／`38399840606`）**7/7 停在 `Install Python dependencies`**（取法见上面那条就地纠正），
   也就是说这一轨历史上不是"偶尔"被源拖死，而是**慢源一来就整轨失明**。

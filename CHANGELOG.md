@@ -58,6 +58,22 @@ B（生产侧改同步＝用户可见行为变更）／C（缩 tick＝影响所�
 **本批未动**：`e2e` 那 **10 条永久 skip**、`docs/PRODUCTION_OPS.md:50` 未勾、`chat-sse.spec.ts:24` 仍是推断；
 127 自触发那对 run（`CI 38916938554`／`E2E 38916938497`）**本批没读取数**（同形重读只加振幅，无新判据）。
 
+**补证（同日，仍只动这两份文档＋本文件，代码／workflow／用例一律没碰）**：去量④里那句"前提待核验——purge 在未翻转时是否幂等"，
+结果**A 的前提被实测否掉一半**：`delete#2` 后 **0.38 s**（`status=4／deleted=0`）调 `DELETE /document/{id}/purge` ⇒
+**HTTP 400**、`回收站中不存在该文档`、0.228 s，`deletion_task` 里**没有**新增 `DOCUMENT_PURGE` 行——门在 service 入口
+（`DocumentServiceImpl.java:357` 要求 `deleted==1`），`DeletionServiceImpl.java:400` 那条"链侧免疫"根本走不到。
+**"纸面可行"是我把链的性质误安到入口上，就地纠正**；A 精确成 **A1＝去掉第二次 poll＋purge，只留 `delete#2`＋`apiDeleteKB`
+fire-and-return**，卫生面实测成立：那条 `DOCUMENT_DELETE` 照旧在下一个 tick 从 `PENDING/idx=0` **直接**跳到 `COMPLETED/idx=4`
+（一次 tick 内循环推完 step 0→3），75 s 采样里**无 `FAILED`、`retry_count` 恒 0**，文档与知识库在列表里都不可见，
+残留是回收站行（7 天后由 `RecycleBinCleanupScheduler` 收）。
+**顺带量到一条新的不对称**：`DELETE /knowledge-base/{id}` 是**同步**的——`KnowledgeBaseServiceImpl.java:219-220` 在请求里
+`markRecycled`，HTTP 200／**0.223 s**、返回即 `deleted=1`、任务表里**没有任何 KB_DELETE 行** ⇒ 同一个"删除"动词文档侧等 30 s、
+知识库侧 0.2 s；**处置 B 因此从"新设计"变成"向仓内既有先例看齐"**，理由与代价一起变小（仍待拍板）。
+**周期的读数与一条尺子纠正**：库内两个 `recycled_at`＝04:18:31／04:19:01＝整 30 s（同一把钟），但宿主 Node 钟与 JVM 钟的
+skew 未校 ⇒ 只能说**周期 30 s**，不能说"格子平移到 :31/:01"；并且本批"按秒采样（doc 242）"那列 `t+Ns` 其实是
+**循环次数**（每轮串行 `docker exec`＋`curl` 约 1.5 s），不能用它判"可见先于翻转"——补证探针的时间戳改为现取 `date -u +%T.%3N`。
+**待拍板清单不变，只是 A→A1、B 的理由变硬**：候选 B／C／D／E、60 秒的 **A1**／B／C／D、新缺陷的甲／乙／丙。
+
 ### 第一百二十七批（2026-10-16：第二份缓存快照＋`2910f1c6` 自触发那对 run 的读数——全程只读，`.github/workflows/` 未动；净新增是**驱逐机制、包级恒定吞吐、一条 60 秒固定成本**，外加两处就地撤回）
 
 **结论**：本批**只动 `docs/CI_GATES.md`＋`docs/CLEANUP_BACKLOG.md`**（＋本文件），代码、workflow、门禁定义一律没碰，
