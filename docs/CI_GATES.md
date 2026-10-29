@@ -906,6 +906,7 @@ pip-only 应仍落在 338～876 s）**短期内不可用**：等不到它被驱�
 极差 **0.77%**，占该轮整条 e2e 墙钟的 **36.6～40.8%**（本轮 60.1 s／148.0 s）。同一文件里用**同一个**
 `pollRecycleBinHasDoc`（`helpers.ts:219-236`，默认 180 s／500 ms）的姊妹用例
 `delete document moves to recycle bin` 在同样 9 份里是 **12.6～25.7 s**（2 倍振幅）⇒ **这 60 秒不是"等回收站可见"**。
+**（这句推论已被第一百二十八批就地收回：它恰恰就是"等回收站可见"，等两次；姊妹条只等一次且相位随机。下同段的"固定成本／常量"措辞。）**
 排除项还有两条：`pollDocIndexing` 的 60 s 默认值（`helpers.ts:306`）**不在该用例调用路径**上（只有 `document.spec.ts:50` 传参用到），
 Java 侧精确 60 s 的两个定时器（`ApprovalExpiryScheduler.java:24`、`PluginQuotaReservationReaper.java:39`）与文档链路无关，
 而删除任务调度器是 **30 s**（`DeletionTaskScheduler.java:28`）。**所以本条只登记读数，不写死因**。
@@ -914,6 +915,7 @@ Java 侧精确 60 s 的两个定时器（`ApprovalExpiryScheduler.java:24`、`Pl
 **A＝先定位**（把该用例拆段计时或落 trace，量出 60 s 落在 restore 前还是清理段，再谈修）；
 **B＝挪出主轨**（放进需要显式旗标的用例，主轨只留姊妹那条 12～26 s 的）；
 **C＝只登记**（承认它是常量，把它算进 20 分钟上限的分母）。**待拍板，默认 C 之前不碰用例。**
+**（第一百二十八批：A 已执行完，落点与死因见该批；B 的前提"它是常量"不成立；新的处置候选在该批末尾另列。）**
 
 **⑥门禁链（本轮）**：CI `38910654094` **十一 job 全绿**、run 13:47:58Z→14:02:40Z＝**14m42s**，`gitleaks` 逐 job 数到**第十轮**；
 E2E `38910654163` 的 `e2e-full` success、job 13:48:01Z→14:00:12Z＝**12m11s**、
@@ -923,6 +925,7 @@ skip 四条子轨仍是 plugin 4／approval 2／chat-sse 2／write-note 2。
 **净新增／自我推翻的账**：撤回两处（126② 的"pip 也会先被驱逐"、以及"贴顶"这个口径），新增**驱逐机制**（严格 LRU＋
 工具缓存结构上最后被剪）、**包级恒定吞吐**（把轮次级因子下沉一层并排除邻居假设）、**60 s 固定成本**（9/9、含本机轮）；
 pip-only 第十一个点 **440.914 s** 落在 338～876 s 谱内、**谱没变长也没变短**。
+（⑤ 的"固定成本"已由第一百二十八批改判为"两腿 × 30 s 调度周期＋自锁相"，两处撤回以该批为准。）
 **风险口径不变**：坏情况仍按 876 s 算＝**1168.8 s＝19m29 s／余量约 31 s**；**B／C／D／E 与⑤的 A／B／C 全部待拍板**。
 
 **本批诚实边界**：
@@ -937,7 +940,78 @@ pip-only 第十一个点 **440.914 s** 落在 338～876 s 谱内、**谱没变�
    已排除在对照表外；四台 runner 是否同一规格未取证，本批只能说"四份独立通道给出同一窄带"。
 5. ⑤**没有定位到 60 s 落点**——Playwright JSON 只有用例级 `duration`，没有步骤级时间戳；写完这条别被读成"已知道它为什么是 60 秒"。
    9 份工件里两份是本机轨（`b113_results` 那轮整轨 299 s），它同样 60.4 s ⇒ 这个常量**不是 runner 特有的**。
+   **（第一百二十八批把落点定位了：两条删除腿各跨一个 30 s 调度 tick，且被用例自身节奏锁相；"常量"这个措辞在该批被收回。本机轨的 60.4 s 仍成立。）**
 6. `e2e` 那 **10 条永久 skip**、`docs/PRODUCTION_OPS.md:50` 未勾、`chat-sse.spec.ts:24` 仍是推断——**三条本批都未动**。
+
+### 第一百二十八批：⑤ 那 60 秒定位完成——不是常量，是两条删除腿各跨一个 30 s 调度 tick，而锁相是它自己造成的
+
+第一百一十七批起这条链路只在 demo-data 上留过证据，⑤是第一百二十七批**新登记**的"机制未取证"，同批又把它写成"一条 60 秒的**固定成本**"。本批执行当时列的
+处置 **A＝拆段定位**：在**活栈**上（dev compose 起 mysql8／redis7／minio／etcd／milvus／java／python／worker，
+八台全部自报 healthy）用一个**临时、未提交、跑完即删**的探针 spec 逐段计时，再用按秒采样脚本把
+"库里那一行何时翻"和"回收站接口何时看得见"分开量。代码、workflow、门禁定义一律没碰。
+
+**读数（全部本批实测）**：
+
+| 通道 | 读数 |
+|---|---|
+| 静态排除 | `python-ai/app/core/vectorstore/` 四个实现文件按 `sleep\|timeout\|60\|retry` grep **零命中** ⇒ python 侧删除路径里没有等待 |
+| 探针单条跑（两轮） | `poll#1` **12.214／12.58 s**、`restore` 0.115／0.016、`get` 0.174／0.083、`delete#2` 0.024／0.018、**`poll#2` 30.401／30.32 s**、`purge` 0.017／0.019、`deleteKB` 0.069／0.017 ⇒ 整条 **45.0／44.4 s** |
+| 真实文件顺序跑 | 姊妹条 15.8 s、**restore 60.7 s**、page 那条 3.0 s failed（本批用 `CI=1` 省掉 webServer ⇒ :3000 没人监听，是探针的运行方式不是产品读数） |
+| 双腿顺序探针 | T1 `POLL` 10.353 s 收在 **03:58:00.018**；T2 `POLL#1` **29.564 s** 收在 **03:58:30.025**；T2 `POLL#2` **29.928 s** 收在 **03:59:00.123**；T2 `delete#1` 距 T1 poll 结束 **0.795 s**、`delete#2` 距 `POLL#1` 结束 **0.170 s** ⇒ 两腿合计 **59.5 s** |
+| 按秒采样（doc 242） | `DELETE` 03:43:06 发出 ⇒ 行**立刻** `status=4`(DELETING)、`deleted=0`、`recycled_at=NULL`；回收站列表在 **03:43:17** 开始含该条；同一秒前后行翻成 `deleted=1 / recycled_at=03:43:25`；回收站请求耗时 **0.218～0.229 s**（5 次）⇒ 不是慢查询 |
+| 任务表 | DOCUMENT_DELETE（108／109／111／112）＝ `COMPLETED / step=DOC_NOT_FOUND / step_index=4 / retry_count=0`；DOCUMENT_PURGE（110／113）＝ `COMPLETED / step=COMPLETED / step_index=5`；日志里只有 PURGE 打出"删除任务完成"（03:36:53.976、03:38:54.572），**DELETE 四条一条都没有** |
+
+**死因**：60 s ＝ **2 × 到下一个 30 s tick 的等待**。`DeletionTaskScheduler.java:28` 是
+`@Scheduled(fixedDelay = 30_000)`；一条"删除 → 回收站可见"的腿要等这个 tick 去跑
+`DeletionServiceImpl.java:381-393`（step 3 `markRecycled`）把 `document.deleted` 翻成 1，而查询侧要求
+`d.deleted = 1`（`DocumentMapper.java:69` 的 `countRecycle`、`:78` 的 `selectRecyclePage`）；
+`DocumentServiceImpl.java:291-297` 的 `delete()` 只同步写 `status=DELETING`，**不碰 `deleted`**。
+腿长＝发出时刻到下一个 tick 的距离 ⇒ 相位随机时是 0～30 s（姊妹条 13 轮 **8.2～30.9 s**、本机单跑 12.2／12.6 s）。
+**restore 的两腿都不在随机相位上**：它的每次 poll 恰好在 tick 上返回，而 restore＋get＋delete 只花 0.17～0.80 s，
+于是下一次删除仍落在"刚过 tick"的位置 ⇒ 每腿等满一个整周期。**锁相是自维持的**：上一条用例的 poll 结束时刻
+就是下一条用例 `delete#1` 的起点前 0.8 s——这也是为什么它在 runner 上 13/13 轮都恰好是 60 秒而不是 0～60 秒的散布。
+三条 poll 全收在 **:00／:30** 的格子上，就是这个机制的直接形状。
+
+**两处就地撤回（都写在 127⑤ 原位，不改历史结论的形状只改结论）**：
+① "姊妹用例有 2 倍振幅 ⇒ 这 60 秒不是等回收站可见"——**收回**，它正是等回收站可见，等两次；姊妹条只等一次且相位随机，
+所以它的带是 0～30 s，restore 的带是 30＋30 s。
+② "一条 60 秒**固定成本**／这个**常量**"——**措辞收回**。60 不是常量：同一条用例在没有姊妹条前置的隔离跑法下本机实测 **44～45 s**
+（12.2＋30.3）。常量是**周期 30 s**（代码里的 `fixedDelay`），60 是"这条用例结构上要等两次，且两次都被自己的节奏推到整周期"的读数。
+
+**新登记（本批实测出来的缺陷，与 60 秒无关，待拍板）**：DOCUMENT_DELETE 任务的 `step` 标签是错的，且它的完成在日志里**完全不可见**。
+链正常跑完 step 0→3 后，`advanceStep`（`DeletionServiceImpl.java:461-466`）把 `step_index` 推到 4、状态推回 `PENDING`，
+调度器循环（`DeletionTaskScheduler.java:40-45`）紧接着再进 `executeDocumentDeleteStep`——此时文档已被 step 3 逻辑删除，
+`selectById` 返回 null ⇒ 落到 `:356-361` 的 not-found 分支，把 `step` 覆盖成 `DOC_NOT_FOUND`、状态置 COMPLETED，
+**而这条分支不调 `completeTask`、不打日志**。PURGE 不受影响是因为它入口用 `selectIncludingDeleted`（`:400`）。
+两个后果：(a) `deletion_task.step` 对**所有成功删除的文档**都是假的（本批 4/4 如此）；(b) 运维在日志里看不到文档删除完成，
+只能靠查表。处置候选：**甲＝让 index==4 的收尾走 `case 4`（或让 not-found 分支也调 `completeTask` 打日志）**，纯 java 侧，
+改后要重跑 Java 全量测试与覆盖率口径；**乙＝只登记**；**丙＝顺手一并处理 `application.yml:124` 的 `python-ai.timeout: 60000`——
+本批按 `@Value` 扫过全仓 java 侧，`python-ai.*` 被读的只有 `internal-token／base-url／callback-secret／engine.url／callback-base-url`
+五处，`python-ai.timeout` 零消费者 ⇒ 与第一百一十六批那条 `CALLBACK_SECRET` 空转声明同族**。**均待拍板，本批未动任何代码。**
+
+**60 秒本身的处置（旧的 A/B/C 已失效，换一批新的）**：**A＝用例侧去掉第二腿**（restore 的清理段不再第二次 delete→poll，
+直接 purge 或交给 `apiDeleteKB` 级联）⇒ 省约 30 s，零生产风险；前提待核验——purge 在 `deleted` 尚未翻转时是否幂等
+（纸面可行：PURGE step 0 用 `selectIncludingDeleted`，**未实测**）。
+**B＝生产侧把"进回收站"改同步**（`delete()` 事务里直接写 `deleted=1／recycled_at`，状态机只管向量与分块清理）
+⇒ 两腿都归零（省 ≈60 s），语义上"删除即可见"更像用户预期，但这是**用户可见的行为变更**，并且让
+`DocumentStatus.DELETING` 这个中间态失去存在意义。**C＝缩 tick 或改事件即时触发** ⇒ 影响所有删除链的延迟，收益不匹配。
+**D＝只登记**（现已取证）。**推荐 A**，但**本批未动任何用例与生产代码**，等拍板。
+
+**账**：风险口径不变——坏情况仍按 pip-only **876 s** 算＝**19m29 s／余量约 31 s**；本批这条与候选 B／C／D／E 无交集，
+A 落地最多让 e2e 轨少 30 s（约 0.4%）。**待拍板清单**：候选 B／C／D／E、本批 60 秒的 A／B／C／D、新缺陷的甲／乙／丙。
+
+**本批诚实边界**：
+1. 本机活栈与 runner 拓扑不同（本机有 Milvus＋worker，runner 两者皆无），但两处的 restore 读数同带
+   （本机文件顺序 **60.7 s**；runner 13 轮 60.0～60.5 s）⇒ 结论只依赖"调度器 `fixedDelay=30_000`"这个代码常量，不依赖拓扑。
+   **没有**在 runner 上量过分段：runner 上 `trace: 'on-first-retry'` 对绿的用例不产 trace，后台 `&` 步骤的 stdout 也不进 job 日志。
+2. tick 相位落在 **:00／:30** 只有 **n=3** 的一次观察；"周期 30 s"另有代码依据，但**一轮工作超过 30 s 时会不会漂移**本批未测。
+3. 分段计时来自**临时未提交的探针 spec**（逐段复刻两条用例，含 `test.setTimeout(480_000)`），跑完已删除，仓库 `e2e/` 未留插桩。
+   第一次探针跑失败是我自己的环境口径错：本机 java 容器的 `ADMIN_PASSWORD` 不是 e2e 那份 `admin123`，
+   `ensureAdmin`（`helpers.ts:320-330`）先登录失败、回退去注册就撞 1003——**不是产品缺陷**。凭据值全程未打印，只从容器 env 取进变量。
+4. 探针里 `poll#1` 与 `poll#2` 之和（本机单跑 42.6 s）小于两腿的理论上限 60 s，因为第一腿落在随机相位；
+   这条差异本身就是锁相假设的**可证伪点**，本批用"文件顺序跑 ⇒ 60.7 s"正面验掉了。
+5. "13 轮"是把手上 18 份 `e2e-results*.json` 按 `(姊妹, restore)` 时长对去重得到的（`b125_ch_*` 与
+   `b123_art_*`／`b124_art_*`／`b125_art_*` 是同批 run 的重复下载）。127 记的 9 份是当时手上的子集，两组读数不冲突。
 
 ## 检查 20：e2e 轨的后端特性开关契约（第一百一十三批）
 

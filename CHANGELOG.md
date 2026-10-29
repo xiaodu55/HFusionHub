@@ -11,6 +11,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百二十八批（2026-10-18：执行第一百二十七批⑤列的处置 A——把那 60 秒**拆段定位**掉了；活栈上三条独立通道（逐段计时／按秒采样／任务表＋日志）给出同一个死因，外加两处就地撤回与一个新登记的 java 侧缺陷）
+
+**结论**：本批**只动 `docs/CI_GATES.md`＋`docs/CLEANUP_BACKLOG.md`**（＋本文件），代码、workflow、门禁定义一律没碰，
+计数 **2101 不变**（`scripts/static-checks.py` 全跑档 **EXIT=0**、检查 1–21 逐条 `[ok]`）。取证用的是一个**临时、未提交、跑完即删**的
+探针 spec 和一份 scratch 目录里的采样脚本，仓库 `e2e/` 没留插桩。上一批写的"机制未取证／固定成本"两处口径，本批**由我自己收回**。
+
+① **死因（60 s ＝ 2 × 到下一个 30 s tick 的等待）**：`DeletionTaskScheduler.java:28` 是 `@Scheduled(fixedDelay = 30_000)`；
+一条"删除 → 回收站可见"的腿要等这个 tick 去跑 `DeletionServiceImpl.java:381-393`（step 3 `markRecycled`）把 `document.deleted`
+翻成 1，而查询侧要求 `d.deleted = 1`（`DocumentMapper.java:69` `countRecycle`、`:78` `selectRecyclePage`），
+`DocumentServiceImpl.java:291-297` 的 `delete()` 只同步写 `status=DELETING`、**不碰 `deleted`**。
+腿长＝发出时刻到下一个 tick 的距离 ⇒ 相位随机时 0～30 s（姊妹条 runner 13 轮 **8.2～30.9 s**、本机单跑 12.2／12.6 s）。
+**restore 那两条腿都不在随机相位上**：每次 poll 恰好在 tick 上返回（三条 poll 全收在 **:00／:30**），
+而中间的 restore＋get＋delete 只花 **0.17～0.80 s** ⇒ 下一次删除仍落在"刚过 tick"，每腿等满一个整周期。
+锁相还是**跨用例自维持**的：T2 的 `delete#1` 距 T1 的 poll 结束只有 **0.795 s**。
+这就是它在 runner 上 **13/13 轮恰好 60 秒**、而不是 0～60 s 散布的原因。
+
+② **读数**：探针单条跑（两轮）`poll#1` 12.214／12.58 s、`poll#2` **30.401／30.32 s**、其余五段全在 0.016～0.174 s ⇒ 整条 **45.0／44.4 s**；
+按真实文件顺序跑＝姊妹条 15.8 s、**restore 60.7 s**（runner 的 60.0～60.5 在本地整文件顺序下复现）；
+双腿顺序探针两腿合计 **59.5 s**（29.564＋29.928）；按秒采样（doc 242）`DELETE` 03:43:06 发出⇒行**立刻** `status=4／deleted=0／recycled_at=NULL`，
+回收站列表 **03:43:17** 起含该条、同一秒前后行翻成 `deleted=1／recycled_at=03:43:25`，回收站请求 **0.218～0.229 s**（5 次）⇒ **不是慢查询**；
+静态排除＝`python-ai/app/core/vectorstore/` 四个实现对 `sleep|timeout|60|retry` **零命中** ⇒ python 侧删除路径里没有等待。
+
+③ **两处就地撤回（写在 127⑤ 原位）**：(a) "姊妹用例有 2 倍振幅 ⇒ 这 60 秒**不是**等回收站可见"——**收回**，它正是等回收站可见，
+等两次；姊妹条只等一次且相位随机，所以它的带是 0～30 s，restore 的带是 30＋30 s。
+(b) "一条 60 秒**固定成本**／这个**常量**"——**措辞收回**：60 不是常量（隔离跑法实测 44～45 s），
+常量是代码里的**周期 30 s**，60 是"这条用例结构上要等两次、且两次都被自己的节奏推到整周期"的读数。
+`document-lifecycle.spec.ts` 那条 page 用例在探针里 failed 是**我的运行方式**（用 `CI=1` 省掉 webServer ⇒ :3000 无人监听），不是产品读数；
+第一次探针跑挂同理＝本机 java 容器 `ADMIN_PASSWORD` 非 e2e 那份 `admin123`，`ensureAdmin`（`helpers.ts:320-330`）登录失败后回退注册撞 1003，
+**凭据值全程未打印**（只从容器 env 取进变量）。
+
+④ **新登记（本批实测、与 60 秒无关，待拍板）**：DOCUMENT_DELETE 任务的 `step` 标签是错的，且完成在日志里**完全不可见**。
+链跑完 step 0→3 后 `advanceStep`（`DeletionServiceImpl.java:461-466`）把 `step_index` 推到 4、状态推回 `PENDING`，
+调度器循环（`DeletionTaskScheduler.java:40-45`）再进一次 `executeDocumentDeleteStep`——此时文档已被逻辑删除，
+`selectById` 返 null ⇒ 落 `:356-361` 的 not-found 分支，把 `step` 覆盖成 `DOC_NOT_FOUND`、置 COMPLETED，
+**而这条分支不调 `completeTask`、不打日志**（PURGE 无此问题，它入口用 `selectIncludingDeleted`，`:400`）。
+实测＝任务表 108／109／111／112 全为 `COMPLETED／step=DOC_NOT_FOUND／step_index=4／retry_count=0`，
+日志里只有 PURGE 打出"删除任务完成"（03:36:53.976、03:38:54.572），**DELETE 四条一条都没有**。
+处置 **甲**（收尾走 `case 4` 或让 not-found 分支也调 `completeTask`）／**乙**（只登记）／
+**丙**（顺手处理 `application.yml:124` 的 `python-ai.timeout: 60000`——本批按 `@Value` 扫过 java 侧，`python-ai.*` 被读的只有
+`internal-token／base-url／callback-secret／engine.url／callback-base-url` 五处，`timeout` **零消费者** ⇒ 与第一百一十六批那条
+`CALLBACK_SECRET` 空转声明同族）。另把 60 秒旧处置换成 **A（用例侧去掉第二腿，省 ≈30 s，推荐；前提"purge 在未翻转时幂等"纸面可行、未实测）**／
+B（生产侧改同步＝用户可见行为变更）／C（缩 tick＝影响所有删除链）／D（只登记，现已取证）——**均待拍板，本批未动任何代码与用例**。
+
+**风险口径不变**：坏情况仍按 pip-only **876 s** 算＝**19m29 s／余量约 31 s**；本批与候选 B／C／D／E 无交集，A 落地最多让 e2e 轨少 30 s（约 0.4%）。
+**本批未动**：`e2e` 那 **10 条永久 skip**、`docs/PRODUCTION_OPS.md:50` 未勾、`chat-sse.spec.ts:24` 仍是推断；
+127 自触发那对 run（`CI 38916938554`／`E2E 38916938497`）**本批没读取数**（同形重读只加振幅，无新判据）。
+
 ### 第一百二十七批（2026-10-16：第二份缓存快照＋`2910f1c6` 自触发那对 run 的读数——全程只读，`.github/workflows/` 未动；净新增是**驱逐机制、包级恒定吞吐、一条 60 秒固定成本**，外加两处就地撤回）
 
 **结论**：本批**只动 `docs/CI_GATES.md`＋`docs/CLEANUP_BACKLOG.md`**（＋本文件），代码、workflow、门禁定义一律没碰，

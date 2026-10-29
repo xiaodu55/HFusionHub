@@ -854,10 +854,41 @@
   ⇒ **只登记读数、不写死因**（Playwright JSON 只有用例级 `duration`，落点未定位）。它记在本条名下是因为：这是该轨**唯一一条
   与缓存／镜像／并发无关**的固定开销，B／C／D／E 任何一条落地都碰不到它，而它一条＝本条那 31 s 余量的一倍。
   处置候选 **A＝先拆段定位**／**B＝挪出主轨**／**C＝只登记**，**待拍板**。
+  **（第一百二十八批：A 已执行，落点与死因量到了——不是常量，是**两条删除腿各跨一个 30 s 调度 tick＋用例自锁相**；
+  上面那句"这 60 秒不是等回收站可见"与"固定成本／常量"两处口径**就地收回**，读数与处置候选见本条末尾的第一百二十八批段。）**
   ⑥ 链：CI 十一 job 全绿 **14m42s**、`gitleaks` 逐 job 数到第十轮；E2E `e2e-full` success **12m11s**、
   `63/0/0/10`、attempt 级摊平 73 行 `retry>0`＝**0 行**（连续第十轮）。
   ⇒ **本条严重度、风险口径与候选排序不变**：坏情况仍按 876 s＝**19m29 s／余量约 31 s**；
   **B／C／D／E 与⑤的 A／B／C 全部待拍板**，本批**未执行任何写操作**（无 DELETE、无 workflow 改动）。
+
+  第一百二十八批（⑤ 的 60 秒定位完成，＋一个新登记的 java 侧标签缺陷；全表见 `docs/CI_GATES.md` 该批段）：
+  用户拍板 A＝拆段定位，在**活栈**上（dev compose 八台全 healthy）用一个**临时未提交、跑完即删**的探针 spec 逐段计时，
+  另加一个按秒采样脚本分开量"库里那一行何时翻"与"回收站接口何时看得见"。**死因**：
+  `DeletionTaskScheduler.java:28` 的 `@Scheduled(fixedDelay = 30_000)` 是那个 30 秒周期的来源；一条
+  "删除→回收站可见"的腿必须等下一个 tick 去跑 `DeletionServiceImpl.java:381-393`（step 3 `markRecycled`）把
+  `document.deleted` 翻成 1，因为查询侧要求 `d.deleted = 1`（`DocumentMapper.java:69`／`:78`），而
+  `DocumentServiceImpl.java:291-297` 的 `delete()` 只同步写 `status=DELETING`、不碰 `deleted`。
+  **为什么恰好是 60 而不是 0～60 的散布**：这条用例的每次 poll 都在 tick 上返回，随后的 restore＋get＋delete 只花
+  0.17～0.80 s ⇒ 下一次删除仍落在"刚过 tick"处 ⇒ **两腿各等满一个整周期**，锁相自维持（连上一条用例的 poll 结束点也算在内）。
+  实测三条 poll 收在 **03:58:00.018／03:58:30.025／03:59:00.123**，两腿 **29.564／29.928 s**。
+  可证伪点都验掉了：单独跑该用例＝**44～45 s**（12.2＋30.3，两轮），按文件顺序跑（姊妹条在前）＝**60.7 s**，
+  runner 13 轮＝**60.0～60.5 s**；本机有 Milvus＋worker、runner 两者皆无而同带 ⇒ 结论只挂在代码常量上。
+  采样还排掉两个借口：回收站请求本身 **0.218～0.229 s**（不是慢查询），python 侧
+  `app/core/vectorstore/` 四个实现按 `sleep|timeout|60|retry` grep **零命中**（不是向量库删除在等）。
+  **新登记（与 60 秒无关，待拍板）**：DOCUMENT_DELETE 任务的 `step` 对所有成功删除都是 `DOC_NOT_FOUND`、
+  且完成日志**一条没有**（实测 108／109／111／112 四条：`COMPLETED / step=DOC_NOT_FOUND / step_index=4 / retry_count=0`；
+  两条 PURGE 则是 `step=COMPLETED / step_index=5` 且有日志）。机制＝链跑完 step 3 后 `advanceStep`
+  （`DeletionServiceImpl.java:461-466`）把 index 推到 4、状态推回 PENDING，调度器循环（`DeletionTaskScheduler.java:40-45`）
+  再进一次 `executeDocumentDeleteStep`，此时文档已被逻辑删除 ⇒ `selectById` 返回 null ⇒ 走 `:356-361` 的 not-found 分支，
+  覆盖 `step`、置 COMPLETED，而这条分支**不调 `completeTask`、不打日志**。PURGE 幸免是因为入口用
+  `selectIncludingDeleted`（`:400`）。处置 **甲＝让 index==4 的收尾走 `case 4`（或让 not-found 分支也打完成日志）**
+  ／**乙＝只登记**／**丙＝顺手处理 `application.yml:124` 的 `python-ai.timeout: 60000`**（本批按 `@Value` 扫全仓 java 侧：
+  `python-ai.*` 被读的只有 `internal-token／base-url／callback-secret／engine.url／callback-base-url` 五处，
+  `python-ai.timeout` **零消费者** ⇒ 与第一百一十六批 `CALLBACK_SECRET` 空转声明同族）——**均待拍板，本批未动代码**。
+  60 秒的处置候选随之更换：**A＝用例侧去掉第二腿**（省 ≈30 s，零生产风险；前提"purge 在 `deleted` 未翻转时幂等"纸面可行、**未实测**）、
+  **B＝生产侧把"进回收站"改同步**（省 ≈60 s，但是用户可见的行为变更、且让 `DocumentStatus.DELETING` 中间态失去意义）、
+  **C＝缩 tick／事件即时触发**（影响所有删除链，收益不匹配）、**D＝只登记**。**推荐 A**，本批未动任何用例与生产代码。
+  风险口径不变（坏情况仍按 876 s＝19m29 s／余量约 31 s），且本条与候选 B／C／D／E 无交集——A 落地最多让 e2e 轨少 30 s。
 
   历史面：七条 `cancelled` 的 `e2e-full`（`38135767903`／`38137950016`／`38140336693`／`38145150097`／`38226782059`／
   `38395206533`／`38399840606`）**7/7 停在 `Install Python dependencies`**（取法见上面那条就地纠正），
