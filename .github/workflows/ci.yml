@@ -302,7 +302,7 @@ jobs:
         run: python scripts/eval_bid_workflow.py
       - name: Upload evaluation report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-offline-report
           path: python-ai/evaluation/reports/*

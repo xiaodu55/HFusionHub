@@ -146,14 +146,14 @@ jobs:
 
       - name: Upload Playwright report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: hfusionhub-frontend/playwright-report/
           retention-days: 7
       - name: Upload test results JSON
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-results
           path: hfusionhub-frontend/e2e-results.json
@@ -298,21 +298,21 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report-full
           path: hfusionhub-frontend/playwright-report/
           retention-days: 14
       - name: Upload test results JSON
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-results-full
           path: hfusionhub-frontend/e2e-results.json
           if-no-files-found: warn
       - name: Upload test traces
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-traces
           path: hfusionhub-frontend/test-results/
