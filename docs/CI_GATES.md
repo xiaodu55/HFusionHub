@@ -1127,6 +1127,95 @@ tick 延后不是随机漂移而是被同池任务挤住）。候选：**甲＝�
 而本机跑 e2e 会把明文 `ADMIN_PASSWORD` 写进 `e2e/test-results/**/error-context.md`（gitignore 但不自动清），不制造这个副作用。
 覆盖率口径未重测（只跑 `mvn test`，没跑第九十四批含 IT 的 jacoco 尺子）。**runner 侧零读数**：本批未 push。
 
+### 第一百三十批：python job 那条唯一红——用**真用例**在容器里把它打红了，但**死形与 CI 不同形**（一处自我撤回＋一条被代码排除的可能）
+
+**起因（runner 读数，CI run `39099667904`／job `117593162392`，`0b8025eb` 自触发）**：`python` job 十一条里只红一条，
+红的是 `tests/test_sandbox_fd_budget.py::TestEndToEndWithLoadedParent::test_execute_in_sandbox_survives_fd_loaded_parent`，
+日志原文 `error_code=plugin_timeout error=插件执行超时: 20s`、`duration_ms=20009.35`，套件 `1 failed, 2220 passed, 7 skipped in 110.26s`，
+覆盖率 `Required test coverage of 74% reached. Total coverage: 77.09%`（棘轮没过线，红与它无关）。
+批次归因先做：`git show --name-only 0b8025eb | grep -c ^python-ai/` = **0** ⇒ 第一百二十九批一字未碰 python 侧，
+而它之前该 job 连绿十二轮 ⇒ 这是一次单点复发，不是新代码引入的确定死因。
+另有一条尺子：十二份绿轮的 `--durations=20` 里**从没出现**这条用例 ⇒ 它常态用时 <0.24 s，20.009 s 是**挂住**，不是慢。
+
+**先把"死形"这把尺子立起来（读码得到的排除，不是猜）**：`sandbox_runner.py:545-604` 的父侧控制流里，
+`plugin_timeout`（`:562-572`）**只有一条路**能产生＝`worker.join(timeout=20)` 之后仍 `worker.is_alive()`；
+子进程若已经死了，返回的是 `plugin_process_error`（`:575-580`，`exitcode != 0`）、`plugin_no_response`（`:594`，`poll(1.0)` 无数据）
+或 `plugin_comm_error`（`:599-604`，`EOFError`／`JSONDecodeError`）。⇒ **CI 那次的子进程活了满 20 s**。
+我先前设想的"子进程死在发 payload 之前，所以父侧只剩超时"**被这段码排除**，本批就地撤回该设想，不再复述。
+
+**容器内把这条断言真打红（同一份测试文件、CI 的文件序，`ghcr.io/xiaodu55/hfusionhub-python:latest`＋dev 依赖）**：
+
+| 跑法 | 结果 | setup 时父进程读数 |
+|---|---|---|
+| 单跑 `tests/test_sandbox_fd_budget.py` | **11 passed** | VmSize **120,488 kB** |
+| `tests/test_milvus_tenant_migration_real.py` 在前、再跑上面那份 | **1 failed / 14 passed**，死形 `plugin_execution_error`／`duration_ms=76.44`／`error=error return without exception set` | VmSize **7,360,404 kB**、threads 17、fds 37 |
+| 同上再加 CI 独有的 `--cov=app` | 仍红，`duration_ms=118.2`、**`error=''`（连消息都是空）** | VmSize 7,366,212 kB |
+
+文件序这一条不是挑的：`ci.yml:177` 的命令是 `pytest -q tests`，dev 依赖里没有 pytest-xdist ⇒ 单会话按字母序收集，
+`test_milvus_*` 恒在 `test_sandbox_*` 之前。⇒ **同一条断言、真用例、CI 文件序下能确定打红**，
+但**死形不同**（76～118 ms 的 `plugin_execution_error` vs CI 的 20,009 ms `plugin_timeout`）
+⇒ 我复现到的是这条断言的一个**充分因**，**不等于** CI 那次的死因；coverage 的 `settrace` 被 fork 继承这一条已量过、不是那 20 s。
+**CI 那 20 s 的机理本批仍是未取证**。
+
+**单变量实验（把"线程"从因里摘出去，全部在容器、`execute_in_sandbox` 原函数）**：
+
+| 实验 | threads | 父 VmSize (kB) | `memory_mb` | 结果 |
+|---|---|---|---|---|
+| 全新解释器 | 1 | 18,536 | 256（缺省） | success `79.01 ms` |
+| held mmap 抬 VSZ、无 Milvus | 1 | 3,033,192 | 256 | `plugin_execution_error` `64.69 ms` |
+| held mmap 抬到 7.5 GB | 1 | 7,555,176 | 256 | `plugin_execution_error` `19.81 ms` |
+| 真 MilvusLite 客户端（泄漏，grpc 线程活着） | 4 | 5,543,608 | **8192** | **success `40.92 ms`** |
+| CI 文件序的那条用例 | 17 | 7,360,404 | 256（用例缺省） | 红 |
+
+⇒ 决定性变量只有一个：**`RLIMIT_AS` 在 fork 之后设成 `memory_mb`（`sandbox_runner.py:126`，缺省 256＝`:43`）对上了子进程继承的 VSZ**。
+grpc 线程既非必要（threads=1 无 Milvus 照样死）也非充分（threads=4／17 在放开 `RLIMIT_AS` 后正常成功）。
+fork 本身也不是那 20 s：`Process.start()` 的墙钟在 VSZ 7,555,176 kB 下量到 **0.001 s**。
+
+**就地撤回两条我自己的口径**：① 第一百三十批中途把这条红写成"MilvusLite 泄漏 grpc 线程 × fork 不安全"——
+对上表所复现的那个死形而言线程已被排除，标题与结论一起改；② "绿轮日志里没有那行 glog"当证据——
+绿轮日志里 `"Captured stderr"` 区块数＝**0**（pytest 只在失败时打印），观察面根本看不见它，
+与第一百二十三批那个"零重叠对照组"是同一类错觉（判据面只放在自己看得见的轨道里）。
+边界写清楚：`fork_posix.cc:71 Other threads are currently calling into gRPC, skipping fork() handlers` 在 CI 红轮和我的红跑里**都**出现，
+它是否构成 CI 那 20 s **挂起**的机理，本批**没测**、不作主张。
+
+**生产暴露面（登记为缺陷丁，含 reachability 的实测边界）**：
+`runner_mode` 的缺省是 subprocess 且写了两处——`sandbox_runner.py:50`（`SubprocessConfig`）与 `sandbox.py:66`（`RunnerConfig.mode`）；
+`registry.py:76` 只在 manifest **写了** `runner` 时才覆盖，省略即落缺省。
+两份随镜像发布的新建 manifest 都显式 `container`：`plugins/bid_docx/hfusion_plugin.json:23-26`、`plugins/bid_quote/hfusion_plugin.json:23-26`，
+Java 种子同源：`V73__bid_plugin_builtins.sql:31`／`:68` ⇒ **今天上架的插件不走 fork 档**，本批不主张"生产正在坏"。
+但安装入口 `api/plugin_admin.py:102` 读的是 wheel 自带 manifest，而仓内**没有**任何"生产必须 container"的门
+（`require_container|PLUGIN_RUNNER_MODE|force.*container` 在 `python-ai/app` 零命中）⇒ 省略 `runner.mode` 的第三方 wheel 就落到 fork＋`RLIMIT_AS`。
+活服务侧量到的可用底数：`docker exec hfusionhub-python` 的 pid 1（`python -m app.main`）`VmSize=2,978,184 kB`（≈2.84 GB）
+⇒ 在这个进程里 fork 出的子进程，256 MB 额度下**任何新映射即失败**。
+证据分层：2.84 GB＝活进程实测；"插件因此失败"＝**同形状的全新解释器**里测的（VSZ 2,914,744 kB、fds 6、插件 `import numpy` → `[Errno 12] Cannot allocate memory`），
+**没有**在活栈上注入插件调用（那要往活栈写插件文件），故不主张端到端。
+
+**观测面缺口（缺陷戊，读了码也跑了码）**：子进程把 `traceback` 放进 payload（`sandbox_runner.py:426`），
+父侧只取 `success`/`data`/`error`/`error_code`（`:586-595`）⇒ 栈在 CI 与生产里都被丢；
+上面那张表里 `--cov` 那行 `error=''` 是同缺口的另一面（子进程连异常消息都没了，父侧再丢栈 ⇒ 只剩"超时"两个字）。
+核查方式＝同一份 `_subprocess_worker` 直接起 `Process` 收全 payload，`keys` 含 `traceback` 而 `execute_in_sandbox` 的返回对象里没有该字段。
+
+**测试隔离（缺陷己）**：`tests/test_milvus_tenant_migration_real.py:26-49` 的 fixture 只 monkeypatch 路径＋`factory.reset_vector_store()`，
+不释放 MilvusLite 客户端／本地服务器；`release_all|release_server` 在 `python-ai/app` 与 `python-ai/tests` **零调用点**（grep 过），
+只有 milvus-lite 自己的 `server_manager.py:101`／`:108` 在解释器退出时才跑 ⇒ 会话内一次 `ensure_collection()` 就把 VSZ 抬到 5.5 GB、threads 抬到 4。
+这条不是生产缺陷（生产路径的 store 常驻是有意的），是**用例之间互相污染**，而它正是上表第二行的触发器。
+
+**处置（三组选项，全部待拍板，本批未动任何代码）**：
+- 测试面 **A1**＝给那条 e2e 用例显式 `memory_mb=8192`（本文件 `:50-52` 早已为观测用例写过同一理由，`_OBSERVE_CONFIG_KWARGS`），
+  fd 断言与覆盖率棘轮都不动；代价＝把缺陷丁在这条用例上**永久掩盖**。**A2**＝修 fixture 的释放（把会话 VSZ 拉回），
+  去掉的是触发器而不是阈值。**A3**＝只登记，CI 继续偶发（13 轮 1 次）。
+- 生产面 **B1**＝`RLIMIT_AS` 改成"继承量＋预算"，与第九十七／九十九批对 `RLIMIT_NOFILE` 的修法同形（仓内先例 `_apply_fd_budget` `:91-104`）。
+  **B2**＝把 subprocess 档从生产摘掉（缺省改 container＋安装期强制），是安全姿态变化。**B3**＝fork 换成新解释器（`posix_spawn`／`subprocess`）
+  让继承面归零，改动最大。**B4**＝只登记。
+- CI 那 20 s 的取证 **C1**＝在 `ci.yml` 的 python 步骤里加一条一次性诊断（打印 pytest 父进程 VSZ／threads，不放宽任何门）；
+  **C2**＝等自然复发；**C3**＝不做。
+  **推荐 A2＋B1**：A1 单独做等于把刚抓到的生产缺陷按下去，C 档与 A／B 相互独立。
+
+**账与本批边界**：docs-only——`.github/workflows/`、`e2e/`、`python-ai/app`、`python-ai/tests` 一字未碰，Python 计数 **2101 不变**，
+runner 侧零新增读数（本批未 push）；风险口径不变（坏情况仍按 pip-only **876 s**＝**19m29 s／余量约 31 s**）。
+既有待拍板清单全部未动：128 的 60 秒 A1／B／C／D、129 的调度器共池与 `KB_DELETE`、候选 B／C／D／E、`docs/PRODUCTION_OPS.md:50`、
+10 条永久 skip、`chat-sse.spec.ts:24`。取证用的容器 `b130fd` 与其可写层已随本批结束删除，仓库外脚本未进仓。
+
 ## 检查 20：e2e 轨的后端特性开关契约（第一百一十三批）
 
 第一百一十一批把前端进程补上之后，`Run full E2E suite` 从 `35 失败 / 28 通过` 变成

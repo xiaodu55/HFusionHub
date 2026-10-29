@@ -1067,3 +1067,36 @@
   乙＝让 `ScheduledExecutorService` 类型的 bean 不再唯一（**排除**——那样 Spring 回到默认单线程，10 条调度挤 1 条，比现状更差，列出来只为记账）；
   丙＝只登记。**本批未动任何配置。** 证据分层：线程名＝活栈实测、bean 唯一＝grep，各自独立成立；
   "Boot 的自动配置因 `@ConditionalOnMissingBean` 把 `ScheduledExecutorService` 也算进去所以没建 `taskScheduler`"是**纸面推断，未在本机核对 Boot 版本源码**。
+- [ ] **缺陷丁：子进程沙箱在 fork **之后**把 `RLIMIT_AS` 设成 `memory_mb`，于是"继承的 VSZ"被算进了额度**（第一百三十批取证，未处置，**待拍板**）——
+  与第九十七／九十九批那条 `RLIMIT_NOFILE` 是同一类形状（设限发生在使用者已经背着继承量的时候），那次修了 fd，内存这条没动。
+  设限点 `python-ai/app/core/plugin/sandbox_runner.py:126`（`resource.setrlimit(RLIMIT_AS, (mem_bytes, mem_bytes))`），缺省额度 `:43`（`memory_mb: int = 256`），
+  fork 来源 `:32`（`from multiprocessing import Pipe, Process`）。容器内单变量实验（详见 `docs/CI_GATES.md` 第一百三十批那张表）：
+  threads=1、无 Milvus、只用 mmap 抬 VSZ 到 3,033,192 kB → `plugin_execution_error` 64.69 ms；抬到 7,555,176 kB → 同形 19.81 ms；
+  而真 MilvusLite 客户端在场（threads 4、VSZ 5,543,608 kB）只要把 `memory_mb` 放开到 8192 → **success 40.92 ms** ⇒ 唯一变量是额度对上继承量。
+  **可达面（本批把"生产正在坏"这条否掉了，但把门找到了）**：`runner_mode` 缺省 subprocess 有两处
+  （`sandbox_runner.py:50`、`app/core/plugin/sandbox.py:66`），`registry.py:76` 只在 manifest 写了 `runner` 时才覆盖；
+  两份内建 manifest 与 Java 种子都显式 `container`（`plugins/bid_docx/hfusion_plugin.json:23-26`、`plugins/bid_quote/hfusion_plugin.json:23-26`、
+  `java-backend/src/main/resources/db/migration/V73__bid_plugin_builtins.sql:31`／`:68`）⇒ 现上架的插件不走 fork；
+  而 `app/api/plugin_admin.py:102` 收的是 wheel 自带 manifest，仓内无"必须 container"的门
+  （`require_container|PLUGIN_RUNNER_MODE|force.*container` 在 `python-ai/app` 零命中）⇒ 省略 `runner.mode` 的第三方 wheel 落进 fork。
+  活服务底数量过：`hfusionhub-python` pid 1 `VmSize=2,978,184 kB`（≈2.84 GB）⇒ 该进程 fork 出的子进程在 256 MB 额度下任何新映射即失败；
+  **"因此插件跑不起来"是在同形状的全新解释器里测的（VSZ 2,914,744 kB → `[Errno 12] Cannot allocate memory`），没在活栈注入插件**。
+  候选：**甲＝`RLIMIT_AS` 改成"继承量＋预算"**（照 `_apply_fd_budget` `:91-104` 的既有形状办）；
+  **乙＝把 subprocess 档从生产摘掉**（缺省 container＋安装期强制，属安全姿态变化）；
+  **丙＝fork 换成新解释器**（`posix_spawn`／`subprocess`，继承面归零，改动最大）；**丁＝只登记**。本批未动代码。
+- [ ] **缺陷戊：子进程发回的 `traceback` 被父侧丢弃，插件失败在 CI 与生产里都只剩一句话**（第一百三十批取证，未处置，**待拍板**）——
+  子进程侧 `sandbox_runner.py:421-427` 把 `traceback.format_exc()` 放进 payload（`:426`），父侧 `:586-595` 只读
+  `success`/`data`/`error`/`error_code` 四个键 ⇒ 栈就地消失。跑了码也读了码：同一份 `_subprocess_worker` 直接收 payload 时 `keys` 含 `traceback`，
+  而 `execute_in_sandbox` 的返回对象没这条字段。放大效应实测到两次：容器里那条红在 `--cov=app` 下 `error=''`（消息本身空了），
+  CI 那次则只剩父侧自造的"插件执行超时: 20s"。候选：甲＝把 traceback 首行并入 `error`（或 `SubprocessResult` 加一个显式字段，注意别把源码路径外泄给插件作者之外的读者）；
+  乙＝只记日志不落返回值；丙＝只登记。本批未动代码。
+- [ ] **缺陷己：`test_milvus_tenant_migration_real.py` 的 fixture 不释放 MilvusLite 客户端／本地服务器，同会话后续用例的父进程 VSZ 被抬到 7.36 GB**（第一百三十批取证，未处置，**待拍板**）——
+  `python-ai/tests/test_milvus_tenant_migration_real.py:26-49` 只做 `monkeypatch.setattr(..., "MILVUS_LITE_PATH", db_file.resolve())` 与
+  `factory.reset_vector_store()`，没有任何一处释放 client；`release_all|release_server` 在 `python-ai/app` 与 `python-ai/tests` **零调用点**（grep 过），
+  只有依赖自带 `milvus_lite/server_manager.py:101`／`:108` 在解释器退出时才跑。实测：一次 `ensure_collection()` 后全新解释器 VSZ 5,543,608 kB、threads 4；
+  CI 文件序（`pytest -q tests` 单会话按字母序，`test_milvus_*` 恒在 `test_sandbox_*` 前，dev 依赖里无 xdist）把该文件放到
+  `tests/test_sandbox_fd_budget.py` 之前，那条 e2e 用例 setup 时 VmSize **7,360,404 kB／threads 17／fds 37** 并确定打红（76.44 ms）。
+  单跑那份 fd 文件时同一处只有 120,488 kB ⇒ 11 passed。这条与缺陷丁是同一条链的两端（丁是被抬起来的 VSZ 撞上限，己是抬起来的来源）。
+  候选：甲＝fixture teardown 里显式释放（`store._client` 关闭＋`server_manager` 的 release），把会话量拉回；
+  乙＝给该文件的用例加"用完即弃"的会话级隔离（例如把这批真库用例并入独立 pytest 会话，代价是 CI 多起一次进程）；
+  丙＝只登记。本批未动测试文件。

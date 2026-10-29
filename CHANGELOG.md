@@ -11,6 +11,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百三十批（2026-10-18：`python` job 那条唯一红按"死形"重新取证——真用例在容器里确定打红，但**红的是另一条命**；两处口径就地撤回，登记三个新缺陷，本批一字未动代码）
+
+**结论先摆**：docs-only 批次（`docs/CI_GATES.md` ＋ `docs/CLEANUP_BACKLOG.md` ＋ 本文件三份；`.github/workflows/`、`e2e/`、`python-ai/app`、
+`python-ai/tests` **零改动**），`scripts/static-checks.py` 全跑档 **EXIT=0**、检查 1–21 逐条 `[ok]`、Python 计数 **2101 不变**；
+无远端写操作（push 等单独授权）。起因是第一百二十九批那次 push 自触发的 CI run `39099667904`：`python` job 唯一红
+`tests/test_sandbox_fd_budget.py::TestEndToEndWithLoadedParent::test_execute_in_sandbox_survives_fd_loaded_parent`，
+`error_code=plugin_timeout error=插件执行超时: 20s`／`duration_ms=20009.35`，套件 `1 failed, 2220 passed, 7 skipped in 110.26s`，
+覆盖率 77.09%（棘轮 74 没过线）。归因第一步：`git show --name-only 0b8025eb | grep -c ^python-ai/` ＝ **0** ⇒ 上一批不可能引入它。
+
+**这一轮的"新判据"是把尺子换成死形，而不是再取一次读数**：读 `sandbox_runner.py:545-604` 得到一条硬排除——
+`plugin_timeout`（`:562-572`）**只**能在 `worker.join(20)` 之后仍 `is_alive()` 时产生；子进程若死了必然是
+`plugin_process_error`（`:575-580`）／`plugin_no_response`（`:594`）／`plugin_comm_error`（`:599-604`）。
+⇒ **CI 那次的子进程活了满 20 s**，我原先设想的"死在发 payload 之前所以父侧超时"被这段码否掉（就地撤回，不复述）。
+
+**容器内复现（`ghcr.io/xiaodu55/hfusionhub-python:latest`＋dev 依赖，真测试文件、CI 文件序）**：
+单跑 `tests/test_sandbox_fd_budget.py`＝**11 passed**（该用例 setup 时 VmSize **120,488 kB**）；
+把 `tests/test_milvus_tenant_migration_real.py` 放它前面＝**1 failed / 14 passed**，setup 时 VmSize **7,360,404 kB／threads 17／fds 37**，
+死形 `plugin_execution_error`／**76.44 ms**／`error=error return without exception set`；再加 CI 独有的 `--cov=app` 仍红（**118.2 ms**、`error=''`）
+⇒ coverage 的 `settrace` 被 fork 继承不是那 20 s 的来源。文件序不是挑出来的：`ci.yml:177` 是 `pytest -q tests`、dev 依赖无 xdist，按字母序 `test_milvus_*` 恒在 `test_sandbox_*` 前。
+**⇒ 复现到的是这条断言的一个充分因，不是 CI 那次的死因；CI 的 20 s 机理仍未取证。**
+
+**单变量实验（五组，全在容器、走 `execute_in_sandbox` 原函数）**：threads=1 无 Milvus、只拿 mmap 抬 VSZ——18,536 kB→success 79.01 ms／
+3,033,192 kB→`plugin_execution_error` 64.69 ms／7,555,176 kB→同形 19.81 ms；真 MilvusLite 客户端在场（threads 4、VSZ 5,543,608 kB）
+只要把 `memory_mb` 放开到 8192→**success 40.92 ms**；`Process.start()` 在 7.5 GB VSZ 下墙钟 **0.001 s**（fork 不慢）。
+⇒ 唯一变量＝**fork 之后设的 `RLIMIT_AS`（`:126`，缺省 `memory_mb=256` `:43`）对上了子进程继承的 VSZ**；grpc 线程既非必要也非充分。
+
+**两处就地撤回**：① 把这条红写成"MilvusLite 泄漏 grpc 线程 × fork 不安全"——对上表复现的那个死形，线程已被排除，标题与结论一起改；
+② "绿轮日志里没有那行 glog"当证据——绿轮日志里 `"Captured stderr"` 区块数＝**0**（pytest 只在失败时打印），是观察面错觉，
+与第一百二十三批"零重叠对照组"同类。边界写清：`fork_posix.cc:71 skipping fork() handlers` 在 CI 红轮与我的红跑里**都**出现，
+它是否是 CI 那 20 s **挂起**的机理，本批**没测**、不作主张。
+
+**生产暴露面的 reachability 被本批收窄了（也顺手否掉自己的夸大）**：`runner_mode` 缺省是 subprocess（`sandbox_runner.py:50`、`sandbox.py:66`），
+`registry.py:76` 只在 manifest 写了 `runner` 时才覆盖；但两份内建 manifest 与 Java 种子都显式 `container`
+（`plugins/bid_docx/hfusion_plugin.json:23-26`、`plugins/bid_quote/hfusion_plugin.json:23-26`、`V73__bid_plugin_builtins.sql:31`／`:68`）
+⇒ **现上架的插件不走 fork，本批不主张"生产正在坏"**；缺口在门——`plugin_admin.py:102` 收 wheel 自带 manifest，
+仓内无"必须 container"的强制（三个候选正则在本机 grep＝零命中）⇒ 省略 `runner.mode` 的第三方 wheel 落进 fork。
+活服务底数：`hfusionhub-python` pid 1 `VmSize=2,978,184 kB`（≈2.84 GB，`/proc/1/status` 实测）；
+"插件因此失败"是在**同形状的全新解释器**里测的（VSZ 2,914,744 kB → `[Errno 12] Cannot allocate memory`），**未在活栈注入插件**，证据分层写进文档。
+
+**登记三个新缺陷（`docs/CLEANUP_BACKLOG.md` F 节末尾，处置全部待拍板）**：
+**丁**＝`RLIMIT_AS` 把继承量算进额度（与 97／99 批的 fd 同族，那次只修了 fd），候选甲"继承量＋预算"／乙"生产禁用 subprocess 档"／丙"换解释器"／丁"只登记"；
+**戊**＝子进程发回的 `traceback` 被父侧 `:586-595` 丢弃（跑了码：payload `keys` 含 `traceback`，返回对象没有），候选甲并首行／乙只记日志／丙只登记；
+**己**＝`test_milvus_tenant_migration_real.py:26-49` 不释放 MilvusLite 客户端（`release_all|release_server` 在本仓零调用点），
+是"7.36 GB 会话 VSZ"的来源，候选甲 teardown 释放／乙独立 pytest 会话／丙只登记。
+测试面另有 **A1**（给该用例显式 `memory_mb=8192`，即本文件 `:50-52` 早写过的理由——代价是把丁永久掩盖）／**A2**（修己）／**A3**（只登记），
+CI 取证另有 **C1**（`ci.yml` 加一条打印父进程 VSZ／threads 的一次性诊断，不放宽门）／**C2**（等复发）／**C3**（不做）。**推荐 A2＋B1**。
+**没有为了让这条红消失而放宽任何门**：fd 断言（`test_sandbox_fd_budget.py:213`）、覆盖率棘轮 74、选择器与 workflow 全未动。
+
+**账**：128 的 60 秒 A1／B／C／D、129 的调度器共池与 `KB_DELETE`、候选 B／C／D／E、`docs/PRODUCTION_OPS.md:50`、10 条永久 skip、`chat-sse.spec.ts:24`
+一律未动；风险口径不变（坏情况仍按 pip-only **876 s**＝**19m29 s／余量约 31 s**，本批不在 e2e 轨上）。
+取证容器 `b130fd` 与其可写层已删除，探针脚本一律留在仓库外（`hfusionhub-scratch/`），未进仓、未提交。
+
 ### 第一百二十九批（2026-10-18：把第一百二十八批登记的缺陷按"甲"落地——本会话第一条**动了生产代码**的批次；红判据先行，活栈复跑取到"改前根本没有的那条完成日志"，顺带量到两处新登记的暴露面）
 
 **结论**：生产代码改 **2 处**（`DeletionServiceImpl.java` 的两个 not-found 分支，各 −4/+1 行）＋新增 **2 条单测**（+102 行），
