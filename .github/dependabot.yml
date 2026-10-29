@@ -1,11 +1,11 @@
-# Dependabot 依赖更新（每日检查，自动创建 PR）
+# Dependabot 依赖更新（每月检查，自动创建 PR）
 version: 2
 updates:
   - package-ecosystem: "npm"
     directory: "/hfusionhub-frontend"
     schedule:
-      interval: "daily"
-    open-pull-requests-limit: 5
+      interval: "monthly"
+    open-pull-requests-limit: 1
     labels:
       - "dependencies"
       - "frontend"
@@ -13,8 +13,8 @@ updates:
   - package-ecosystem: "maven"
     directory: "/java-backend"
     schedule:
-      interval: "daily"
-    open-pull-requests-limit: 5
+      interval: "monthly"
+    open-pull-requests-limit: 1
     labels:
       - "dependencies"
       - "backend"
@@ -22,8 +22,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/python-ai"
     schedule:
-      interval: "daily"
-    open-pull-requests-limit: 5
+      interval: "monthly"
+    open-pull-requests-limit: 1
     labels:
       - "dependencies"
       - "python"
@@ -31,8 +31,8 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 3
+      interval: "monthly"
+    open-pull-requests-limit: 1
     labels:
       - "dependencies"
       - "ci"
