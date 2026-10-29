@@ -2,6 +2,9 @@
 
 > 2026-08-29 前端主题统一改造时盘点生成。本次**只登记不删除**，逐项评估后处理。
 > 删除前先确认测试基线（Java 718 · Python 1936 · 前端 117）仍全绿。
+> **（第一百二十九批就地追平，防止有人按这行去对数：现行基线是 `static-checks.py --test-counts` 报的
+> **Java 720 · Python 2101 · 前端单测 117**（另有 73 个 E2E 未计入徽章），2026-10-18 实测；
+> 上面那串 1936／718 是 2026-08-29 生成盘点时的快照，保留不改＝记账，前端 117 至今未变。）**
 
 ## A. 冻结的实验功能（治理决策：保留代码，待后续补强）
 
@@ -29,6 +32,16 @@
   `["sh","-c","java $JAVA_OPTS -jar app.jar"]`（那会真的把堆钉到 512m，而 helm values 里
   的 requests/limits 是按别的数配的）。第九十六批只登记未动，同时纠正了
   `docs/OPTIMIZATION_PLAN.md:220` 把 `JAVA_OPTS -Xmx512m` 当成生效堆上限的那句。
+- [ ] **`KB_DELETE` 是一个没有创建点的任务类型**（第一百二十九批登记）—— main 侧 `deletionService.createTask(…)` 的
+  全部调用点是 `DocumentServiceImpl.java:295`（DOCUMENT_DELETE）／`:364`（DOCUMENT_PURGE）、
+  `KnowledgeBaseServiceImpl.java:170`（KB_DISABLE）／`:277`（KB_PURGE）、`RecycleBinCleanupScheduler.java:39`
+  （DOCUMENT_PURGE）／`:47`（KB_PURGE），**没有任何一处创建 `KB_DELETE`**；这个名字只出现在 `DeletionTask.java:22` 与
+  `DeletionService.java:15` 的注释、以及 V3 迁移的列注释里。但它的执行侧是**完整存在**的
+  （`DeletionServiceImpl.java:103` 分发、`:138-155` 八步链、`:129` 向量步判定、`:488-494` 失败回写）
+  ⇒ 这是"半条链没人启动"，不是纯死代码。删除它要连带决定链与失败回写怎么处理（＝行为决策，且 V3 迁移注释是历史面）；
+  保留它的代价是：任何读代码的人会以为知识库删除走这条链（第一百二十八批的补证就差点这么读——真正在跑的是
+  `KnowledgeBaseServiceImpl.java:219-220` 的请求内同步 `markRecycled`）。**本批只登记未删**，
+  但已把该链的终态分支修成与兄弟链一致（见 `docs/CI_GATES.md` 第一百二十九批段），使"哪天有人接上创建点"不会重现标签缺陷。
 
 ## C. 新旧双轨实现（待稳定后收敛）
 
@@ -885,6 +898,9 @@
   ／**乙＝只登记**／**丙＝顺手处理 `application.yml:124` 的 `python-ai.timeout: 60000`**（本批按 `@Value` 扫全仓 java 侧：
   `python-ai.*` 被读的只有 `internal-token／base-url／callback-secret／engine.url／callback-base-url` 五处，
   `python-ai.timeout` **零消费者** ⇒ 与第一百一十六批 `CALLBACK_SECRET` 空转声明同族）——**均待拍板，本批未动代码**。
+  **（第一百二十九批：甲已落地，取的是括号里那半——两条 not-found 分支（`executeKbDeleteStep` `:138-142`／
+  `executeDocumentDeleteStep` `:352-356`）改调 `completeTask`；乙随之作废；丙仍未动。
+  红判据、活栈读数与另两条新登记见下面"第一百二十九批"段与 `docs/CI_GATES.md` 该批段。）**
   60 秒的处置候选随之更换：**A＝用例侧去掉第二腿**（省 ≈30 s，零生产风险；前提"purge 在 `deleted` 未翻转时幂等"纸面可行、**未实测**）、
   **B＝生产侧把"进回收站"改同步**（省 ≈60 s，但是用户可见的行为变更、且让 `DocumentStatus.DELETING` 中间态失去意义）、
   **C＝缩 tick／事件即时触发**（影响所有删除链，收益不匹配）、**D＝只登记**。**推荐 A**，本批未动任何用例与生产代码。
@@ -905,6 +921,20 @@
   **④ 另一处尺子纠正**：第一百二十八批"按秒采样（doc 242）"那行的 `t+Ns` 是**循环次数不是秒**
   （每轮串行 `docker exec`＋`curl`，实测约 1.5 s／轮），不能用它判"可见先于翻转"；补证探针的时间戳改成现取 `date -u +%T.%3N`。
   待拍板清单不变，只是 **A→A1**、B 的理由变硬：**候选 B／C／D／E、60 秒的 A1／B／C／D、新缺陷的甲／乙／丙**。
+
+  第一百二十九批（新缺陷的**甲落地**——本会话第一条动生产代码的批次；红判据先行，活栈复跑取到"改前根本没有的那条完成日志"）：
+  **改了什么**＝`DeletionServiceImpl.java` 两处 not-found 分支各 −4/+1 行＋`DeletionServiceImplTest` 新增 2 条单测（+102 行），
+  Java 计数 **718→720**（`README.md` 四处与 `docs/ROADMAP.md:16` 已同步）；门禁定义、`.github/workflows/`、`e2e/`、python 侧未碰，
+  Python 计数 2101 不变。**红判据**＝`Tests run: 8, Failures: 2`（`expected: <COMPLETED> but was: <DOC_NOT_FOUND>`／`<KB_NOT_FOUND>`），
+  改后 8/8 绿、全量 `720/0/1` BUILD SUCCESS、`mvn -q spotless:check` EXIT=0、`static-checks.py` 全跑档 EXIT=0
+  （改前它是 EXIT=1，报的是**我没同步 README**：`java: 文档 718 ≠ 实测 720`，判据在 `scripts/static-checks.py:343`／`:360`）。
+  **活栈读数**＝`id=147 DOCUMENT_DELETE` 由 `PENDING/step=-/idx=0` 到 `COMPLETED/**step=COMPLETED**/idx=4`（128 那批同形状是 `DOC_NOT_FOUND`），
+  且新增一条 `删除任务完成: taskId=147, type=DOCUMENT_DELETE, targetId=258`＝该类型改前**零条**的完成日志；
+  delete→回收可见 16.4 s 只是 tick 相位落点，不是新机制读数。**没取 runner 读数**（本批未 push），
+  推送后的判据＝`.github/workflows/ci.yml:351` 那条 `mvn --batch-mode test` 数到 720／0 失败。
+  **本批另登记两条（均待拍板，见本节末尾的两个新条目）**：①完成日志打在线程 `[webhook-retry]` 上 ⇒ 10 个 `@Scheduled`
+  与 webhook 重试共用 2 线程池；②`KB_DELETE` 是一个**没有创建点**的任务类型 ⇒ 本批 KB 半边是潜伏修复、只有单测覆盖。
+  待拍板清单在这一格上更新为：**候选 B／C／D／E、60 秒的 A1／B／C／D、丙（`python-ai.timeout` 空转）、调度器共池的甲／丙、`KB_DELETE` 的处置**。
 
   历史面：七条 `cancelled` 的 `e2e-full`（`38135767903`／`38137950016`／`38140336693`／`38145150097`／`38226782059`／
   `38395206533`／`38399840606`）**7/7 停在 `Install Python dependencies`**（取法见上面那条就地纠正），
@@ -1018,3 +1048,22 @@
   B＝只纠正头注释与文档口径（"后端 bug"→"用例写死跨源直连＋旗标从未打开"），覆盖面维持现状；
   C＝立案不处置。
   另外三条 skip（plugin／approval／write-note）本批**没有**逐个试开，只登记"它们在 runner 上是永久的"这一事实。
+- [ ] **10 个 `@Scheduled` 方法与 webhook 重试共用同一个 2 线程池**（第一百二十九批登记，待拍板）—— 证据是意外落进来的：
+  本批新加的删除完成日志打在线程 **`[webhook-retry]`** 上（`2026-10-18 04:45:13.372 [webhook-retry] [] INFO c.h.service.impl.DeletionServiceImpl -
+  删除任务完成: taskId=147, type=DOCUMENT_DELETE, targetId=258`），而调用方是 `@Scheduled` 的 `DeletionTaskScheduler.java:27-29`
+  （`fixedDelay=30_000`）。那个线程名属于 `WebhookConfig.java:51-57` 的 `ScheduledExecutorService` bean（`Executors.newScheduledThreadPool(2, …)` `:53`）。
+  全仓该**类型的 bean 只有这一个**（其余五处 `Executors.newScheduledThreadPool/newSingleThreadScheduledExecutor` 都是组件内部
+  `private final` 字段，不是 bean：`AgentTaskRecoveryScheduler.java:24`／`AgentTaskWorkerScheduler.java:25`／
+  `PromptTestSetRunWorkerScheduler.java:59`／`ApprovalEventSseManager.java:43`／`TaskEventSseManager.java:43`），
+  且仓内没有 `TaskScheduler` bean、`application.yml` 没有 `spring.task.scheduling.*` ⇒ Spring `@Scheduled` 的兜底调度器就是那 2 条线程，
+  共 **10 个方法**：`AgentAlertScheduler:27`／`AgentStatusEventCleanupScheduler:24`／`ApprovalExpiryScheduler:24`／`DeletionTaskScheduler:28`／
+  `DocumentIndexRecoveryScheduler:20`＋`:34`／`OrphanCleanupScheduler:39`／`PluginQuotaReservationReaper:39`／`RecycleBinCleanupScheduler:33`／
+  `VectorReconciliationScheduler:28`。
+  **暴露面**：`DeletionTaskScheduler` 一圈内对**每个** pending 任务串行最多推 10 步（`MAX_STEPS_PER_TASK=10` `:23`、循环 `:40-41`），
+  而向量步是"同步调 Python（最长 120s/次）"（`DeletionServiceImpl.java:111`、注释 `:123`）⇒ 一个 tick 可以把一条线程占住分钟级，
+  其余调度与 webhook 重试一起排队。**这条给第一百二十八批"tick 周期／相位"那把尺子加了一个未测的干扰项**：
+  若某轮删除工作超过 30 s，tick 延后不是随机漂移，而是被同池任务挤住（本批**未测**该场景）。
+  候选：**甲＝显式配一个 `TaskScheduler`**（`spring.task.scheduling.pool.size` 或自建 `ThreadPoolTaskScheduler` bean，把调度池与 webhook 退避池分开）；
+  乙＝让 `ScheduledExecutorService` 类型的 bean 不再唯一（**排除**——那样 Spring 回到默认单线程，10 条调度挤 1 条，比现状更差，列出来只为记账）；
+  丙＝只登记。**本批未动任何配置。** 证据分层：线程名＝活栈实测、bean 唯一＝grep，各自独立成立；
+  "Boot 的自动配置因 `@ConditionalOnMissingBean` 把 `ScheduledExecutorService` 也算进去所以没建 `taskScheduler`"是**纸面推断，未在本机核对 Boot 版本源码**。

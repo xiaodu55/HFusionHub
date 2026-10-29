@@ -138,9 +138,7 @@ public class DeletionServiceImpl implements DeletionService {
     private void executeKbDeleteStep(DeletionTask task) {
         KnowledgeBase kb = knowledgeBaseMapper.selectById(task.getTargetId());
         if (kb == null) {
-            task.setStatus("COMPLETED");
-            task.setStep("KB_NOT_FOUND");
-            deletionTaskMapper.updateById(task);
+            completeTask(task);
             return;
         }
 
@@ -354,9 +352,7 @@ public class DeletionServiceImpl implements DeletionService {
     private void executeDocumentDeleteStep(DeletionTask task) {
         Document doc = documentMapper.selectById(task.getTargetId());
         if (doc == null) {
-            task.setStatus("COMPLETED");
-            task.setStep("DOC_NOT_FOUND");
-            deletionTaskMapper.updateById(task);
+            completeTask(task);
             return;
         }
 

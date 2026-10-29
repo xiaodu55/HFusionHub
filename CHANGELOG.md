@@ -11,6 +11,81 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 第一百二十九批（2026-10-18：把第一百二十八批登记的缺陷按"甲"落地——本会话第一条**动了生产代码**的批次；红判据先行，活栈复跑取到"改前根本没有的那条完成日志"，顺带量到两处新登记的暴露面）
+
+**结论**：生产代码改 **2 处**（`DeletionServiceImpl.java` 的两个 not-found 分支，各 −4/+1 行）＋新增 **2 条单测**（+102 行），
+Java 测试计数 **718→720**（`README.md` 四处同源数字与 `docs/ROADMAP.md:16` 已同步）；`mvn -q spotless:check` **EXIT=0**，
+全量套件 `Tests run: 720, Failures: 0, Errors: 0, Skipped: 1`／BUILD SUCCESS，`scripts/static-checks.py` 全跑档 **EXIT=0**、
+检查 1–21 逐条 `[ok]`、Python 计数 **2101 不变**（本批没动 python 侧与门禁定义）。`.github/workflows/`、`e2e/` 一字未碰；
+无远端写操作（push 等单独授权）。
+
+**红判据（改前，`mvn test -Dtest=DeletionServiceImplTest`）**：`Tests run: 8, Failures: 2`，两条死因字符串就是缺陷本身——
+`expected: <COMPLETED> but was: <DOC_NOT_FOUND>` 与 `expected: <COMPLETED> but was: <KB_NOT_FOUND>`。改后同类 **8/8 绿**。
+
+**为什么选"甲"的后半（not-found 分支也调 `completeTask`）而不是前半（让收尾走 `case 4`）**：把两条链的终态形状读全之后，
+前半在两侧代价都更大——DOCUMENT_DELETE 确实有 `case 4 -> completeTask`（`:390`），但**正常链走不到它**：step 3 的
+`markRecycled`（`:379-386`）已把 `deleted` 翻 1，下一圈入口的 `selectById`（`:353`）返回 null，永远先落到 not-found 分支；
+而 KB_DELETE 根本没有 `case 8`（`case 7 -> logicalDeleteKnowledgeBase` `:153`／`:345-347` 之后 `default -> throw`）。
+后半则是**仓内既有写法**：`executeKbPurgeStep`（`:160-164`）、`executeKbDisableStep`（`:225-229`）、`executeDocumentPurgeStep`
+（`:395-399`）三条兄弟 handler 的 not-found 分支本来就在调 `completeTask`。⇒ 本批是把两条漏配的分支并入既有惯例，
+不是新机制、不新增抽象。`case 4 -> completeTask`（`:390`）**保留未删**（"行还在、idx 已到 4"的异常形状下仍可达），
+本批不主张任何死代码清理。
+
+**活栈复跑读数**（`docker/docker-compose.yml` 的 dev 栈，重建 java 容器；第一次 `docker compose build` 只花 48 ms 就打印
+"Image … up to date"＝没有真构建，加 `--progress=plain` 重跑才量到 68.7 s 的真构建与新 manifest）：
+- 任务表：`t+1`＝`id=147 DOCUMENT_DELETE:PENDING/step=-/idx=0`，`t+12`＝**`COMPLETED/step=COMPLETED/idx=4/err=-`**。
+  同一条形状在第一百二十八批的探针里是 `COMPLETED/step=DOC_NOT_FOUND/idx=4`（那里 4 条 DOCUMENT_DELETE 全是假标签，
+  而 PURGE 侧一直是 `step=COMPLETED`＝缺陷只在"逻辑删除后行不可见"的两条链上）。
+- 日志：**`2026-10-18 04:45:13.372 [webhook-retry] [] INFO c.h.service.impl.DeletionServiceImpl - 删除任务完成: taskId=147, type=DOCUMENT_DELETE, targetId=258`**
+  ＝这条链改前**一条都不打**的完成日志（`completeTask` `:464-470` 里那句 `log.info`）⇒ 后果 (b)"运维在日志里看不到文档删除完成"闭合。
+- delete→回收可见 **16.4 s**（04:44:57 → 04:45:13）：这只是 tick 相位落点，**不是**新的机制读数；60 秒那条仍按 A1／B／C／D 待拍板。
+- 清理：探针知识库 `DELETE /knowledge-base/162` HTTP **200**／0.3496 s。
+
+**新登记之一（从线程名量到的，待拍板）**：完成日志的线程是 **`[webhook-retry]`**，而打点它的调用来自 `@Scheduled`
+（`DeletionTaskScheduler.java:27-29`，`fixedDelay=30_000`）。那个线程名属于 `WebhookConfig.java:51-57` 的
+`ScheduledExecutorService` bean（`Executors.newScheduledThreadPool(2, …)` `:53`）。全仓 `ScheduledExecutorService` **类型的 bean 只有这一个**
+（其余五处是组件内部 `private final` 字段，不是 bean：`AgentTaskRecoveryScheduler.java:24`／`AgentTaskWorkerScheduler.java:25`／
+`PromptTestSetRunWorkerScheduler.java:59`／`ApprovalEventSseManager.java:43`／`TaskEventSseManager.java:43`），仓内没有 `TaskScheduler` bean，
+`application.yml` 里也没有 `spring.task.scheduling.*` ⇒ Spring `@Scheduled` 的兜底把这唯一一个 `ScheduledExecutorService` 适配成了调度器，
+于是 **10 个 `@Scheduled` 方法**（`AgentAlertScheduler:27`／`AgentStatusEventCleanupScheduler:24`／`ApprovalExpiryScheduler:24`／
+`DeletionTaskScheduler:28`／`DocumentIndexRecoveryScheduler:20` 与 `:34`／`OrphanCleanupScheduler:39`／`PluginQuotaReservationReaper:39`／
+`RecycleBinCleanupScheduler:33`／`VectorReconciliationScheduler:28`）与 webhook 重试**共用那 2 条线程**。
+暴露面：`DeletionTaskScheduler` 一圈里对**每个** pending 任务串行最多推 10 步（`MAX_STEPS_PER_TASK=10` `:23`，循环 `:40-41`），
+而向量步骤是"同步调 Python（最长 120s/次）"（代码 `:111`、注释 `:123`）⇒ 一个 tick 可以把一条线程占住分钟级，
+其余调度与 webhook 重试一起排在后面。这条同时给第一百二十八批"tick 周期／相位"那把尺子加了一个**未测的干扰项**。
+候选：**甲＝显式配一个 `TaskScheduler`（`spring.task.scheduling.pool.size` 或自建 `ThreadPoolTaskScheduler` bean）**；
+**乙＝把 `webhookRetryScheduler` 改成非 `ScheduledExecutorService` 返回类型使该类型 bean 不再唯一**——列出来是为了**排除**它
+（那样 Spring 回到默认单线程，10 条调度挤一条线程，比现在更差）；**丙＝只登记**。**本批未动任何配置。**
+机制链的诚实分层：线程名＝实测、bean 唯一＝grep，两者各自独立成立；
+"Boot 的自动配置因 `@ConditionalOnMissingBean` 把 `ScheduledExecutorService` 也算进去所以没建 `taskScheduler`"是**纸面推断，未在本机核对 Boot 版本源码**。
+
+**新登记之二（读 KB_DELETE 链时发现，纯登记）**：**`KB_DELETE` 是一个没有创建点的任务类型**——main 侧
+`deletionService.createTask(…)` 的全部调用点是 `DocumentServiceImpl.java:295`（DOCUMENT_DELETE）／`:364`（DOCUMENT_PURGE）／
+`KnowledgeBaseServiceImpl.java:170`（KB_DISABLE）／`:277`（KB_PURGE）／`RecycleBinCleanupScheduler.java:39`（DOCUMENT_PURGE）与 `:47`（KB_PURGE），
+**没有任何一处创建 `KB_DELETE`**；这个名字只活在 `DeletionTask.java:22` 与 `DeletionService.java:15` 的注释和 V3 迁移的列注释里
+⇒ 本批 KB 半边的修复是**潜伏的、只有单测覆盖**，活栈上不可能有它的读数（不主张端到端验证过）。
+是否该删（＝死代码清理，`docs/CLEANUP_BACKLOG.md` 的现行口径是"只登记不删除"）待拍板。
+
+**计数与门**：改前 `scripts/static-checks.py` 报红
+`✗ README.md 测试计数漂移（badge）: java: 文档 718 ≠ 实测 720`（EXIT=1）⇒ **是门抓住我没同步文档，不是门误报**；
+把 `README.md` 四处（`:15` badge、`:37`、`:47`、`:241`）与 `docs/ROADMAP.md:16` 改成 **720** 后 EXIT=0。
+
+**本批诚实边界**：
+1. **没重跑 e2e**：`deletion_task.step` 在 main 侧**零读取者**——写点只有 `advanceStep`（`:457-458`）与 `completeTask`（`:466`，
+   本批之后两条 not-found 分支不再自己写标签），全仓对 `getStep()` 的读**只**出现在 `DeletionServiceImplTest` 的 9 条断言里
+   （7 条改前既有＋本批新增 2 条），`mapper/*.xml` 里没有按 `step` 过滤的 SQL ⇒ 本批改动不可能改变任何 e2e 用例断言；
+   而本机跑 e2e 会把明文 `ADMIN_PASSWORD` 写进 `e2e/test-results/**/error-context.md`（目录已 gitignore 但不会自动清），
+   没有必要就不制造这个副作用。
+2. 覆盖率口径未重测——只跑 `mvn test`，没跑第九十四批那把含 IT 的 jacoco 尺子，故那份读数不变、也不声称被本批刷新。
+3. **runner 侧零读数**：本批未 push，新代码在 CI 上仍是未验证状态；推送后要看的判据＝`java` job 是否 `Tests run: 720, Failures: 0`。
+4. 环境残留：dev 栈仍在运行；本批探针为 KB 162／doc 258／task 147（KB 已按接口删除，回收站行 7 天后由 `RecycleBinCleanupScheduler` 收），
+   第一百二十八批的 145~147／240+ 仍在库里。
+
+**账**：128 缺陷的**甲已落地**，乙（只登记）随之作废，**丙（`application.yml:124` 的 `python-ai.timeout: 60000` 零消费者）仍待拍板**；
+新登记"调度器共用 2 线程池"的甲／乙／丙、"KB_DELETE 无创建点"的处置、60 秒的 A1／B／C／D、候选 B／C／D（runner 两行）／E
+（buildkit 清理，需 DELETE 授权）、`docs/PRODUCTION_OPS.md:50`、10 条永久 skip、`chat-sse.spec.ts:24` **全部未动**。
+风险口径不变——坏情况仍按 pip-only **876 s** 算＝**19m29 s／余量约 31 s**；本批那 2 行生产改动不在 e2e 轨上，不影响这个数。
+
 ### 第一百二十八批（2026-10-18：执行第一百二十七批⑤列的处置 A——把那 60 秒**拆段定位**掉了；活栈上三条独立通道（逐段计时／按秒采样／任务表＋日志）给出同一个死因，外加两处就地撤回与一个新登记的 java 侧缺陷）
 
 **结论**：本批**只动 `docs/CI_GATES.md`＋`docs/CLEANUP_BACKLOG.md`**（＋本文件），代码、workflow、门禁定义一律没碰，

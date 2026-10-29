@@ -347,4 +347,106 @@ class DeletionServiceImplTest {
         assertEquals("KB_DISABLE_DOCUMENTS_RESET", task.getStep());
         assertEquals(4, task.getStepIndex());
     }
+
+    /**
+     * 第一百二十八批在活栈上量到的形状：DOCUMENT_DELETE 链在 step 3 把文档逻辑删除后，
+     * 调度器同一个 tick 的下一圈再进一次，此时 selectById 读不到行。终态收尾必须走
+     * completeTask（step=COMPLETED），而不是把成功链标成 DOC_NOT_FOUND。
+     */
+    @Test
+    void documentDeleteChainEndsAsCompletedAfterRecyclingTheDocument() {
+        DeletionTaskMapper deletionTaskMapper = mock(DeletionTaskMapper.class);
+        KnowledgeBaseMapper knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentChunkMapper documentChunkMapper = mock(DocumentChunkMapper.class);
+        DocumentIndexJobMapper documentIndexJobMapper = mock(DocumentIndexJobMapper.class);
+        ConversationMapper conversationMapper = mock(ConversationMapper.class);
+        MessageMapper messageMapper = mock(MessageMapper.class);
+        VectorizationService vectorizationService = mock(VectorizationService.class);
+
+        DeletionServiceImpl service = new DeletionServiceImpl(
+                deletionTaskMapper,
+                knowledgeBaseMapper,
+                documentMapper,
+                documentChunkMapper,
+                documentIndexJobMapper,
+                conversationMapper,
+                messageMapper,
+                vectorizationService,
+                passThroughTxTemplate());
+
+        Document document = new Document();
+        document.setId(242L);
+        when(documentMapper.selectById(242L))
+                .thenReturn(document)
+                .thenReturn(document)
+                .thenReturn(document)
+                .thenReturn(document)
+                .thenReturn(null);
+        when(documentMapper.markRecycled(any(), any(), any(), any(), any())).thenReturn(1);
+
+        DeletionTask task = new DeletionTask();
+        task.setId(112L);
+        task.setTaskType("DOCUMENT_DELETE");
+        task.setTargetId(242L);
+        task.setStatus("PENDING");
+        task.setStepIndex(0);
+        task.setRetryCount(0);
+        task.setMaxRetries(5);
+
+        for (int i = 0; i < 5; i++) {
+            service.executeStep(task);
+        }
+
+        assertEquals("COMPLETED", task.getStatus());
+        assertEquals(4, task.getStepIndex());
+        assertEquals("COMPLETED", task.getStep());
+        assertEquals(null, task.getErrorMessage());
+        verify(vectorizationService).deleteDocumentIndex(242L);
+        verify(documentChunkMapper).deleteByDocumentId(242L);
+        verify(documentMapper).markRecycled(any(), any(), any(), any(), any());
+    }
+
+    /** KB_DELETE 是同一种形状：逻辑删除知识库后终态那一圈读不到行，收尾也要走 completeTask。 */
+    @Test
+    void kbDeleteFinalStepCompletesWhenKnowledgeBaseRowIsNoLongerVisible() {
+        DeletionTaskMapper deletionTaskMapper = mock(DeletionTaskMapper.class);
+        KnowledgeBaseMapper knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        DocumentMapper documentMapper = mock(DocumentMapper.class);
+        DocumentChunkMapper documentChunkMapper = mock(DocumentChunkMapper.class);
+        DocumentIndexJobMapper documentIndexJobMapper = mock(DocumentIndexJobMapper.class);
+        ConversationMapper conversationMapper = mock(ConversationMapper.class);
+        MessageMapper messageMapper = mock(MessageMapper.class);
+        VectorizationService vectorizationService = mock(VectorizationService.class);
+
+        DeletionServiceImpl service = new DeletionServiceImpl(
+                deletionTaskMapper,
+                knowledgeBaseMapper,
+                documentMapper,
+                documentChunkMapper,
+                documentIndexJobMapper,
+                conversationMapper,
+                messageMapper,
+                vectorizationService,
+                passThroughTxTemplate());
+
+        when(knowledgeBaseMapper.selectById(11L)).thenReturn(null);
+
+        DeletionTask task = new DeletionTask();
+        task.setId(113L);
+        task.setTaskType("KB_DELETE");
+        task.setTargetId(11L);
+        task.setStatus("PENDING");
+        task.setStepIndex(8);
+        task.setStep("DOCUMENT_LOGIC_DELETED");
+        task.setRetryCount(0);
+        task.setMaxRetries(5);
+
+        service.executeStep(task);
+
+        assertEquals("COMPLETED", task.getStatus());
+        assertEquals("COMPLETED", task.getStep());
+        assertEquals(8, task.getStepIndex());
+        assertEquals(null, task.getErrorMessage());
+    }
 }

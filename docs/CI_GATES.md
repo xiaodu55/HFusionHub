@@ -988,6 +988,8 @@ pip-only 第十一个点 **440.914 s** 落在 338～876 s 谱内、**谱没变�
 改后要重跑 Java 全量测试与覆盖率口径；**乙＝只登记**；**丙＝顺手一并处理 `application.yml:124` 的 `python-ai.timeout: 60000`——
 本批按 `@Value` 扫过全仓 java 侧，`python-ai.*` 被读的只有 `internal-token／base-url／callback-secret／engine.url／callback-base-url`
 五处，`python-ai.timeout` 零消费者 ⇒ 与第一百一十六批那条 `CALLBACK_SECRET` 空转声明同族**。**均待拍板，本批未动任何代码。**
+**（第一百二十九批：甲已落地——取的是括号里那半，两条 not-found 分支改调 `completeTask`；乙随之作废；丙仍未动。
+读数、选择理由与两条新登记见下面"第一百二十九批"段。）**
 
 **60 秒本身的处置（旧的 A/B/C 已失效，换一批新的）**：**A＝用例侧去掉第二腿**（restore 的清理段不再第二次 delete→poll，
 直接 purge 或交给 `apiDeleteKB` 级联）⇒ 省约 30 s，零生产风险；前提待核验——purge 在 `deleted` 尚未翻转时是否幂等
@@ -1005,6 +1007,8 @@ A 因此精确成 A1＝只去掉第二次 poll＋purge，保留 `delete#2`＋`ap
 
 **账**：风险口径不变——坏情况仍按 pip-only **876 s** 算＝**19m29 s／余量约 31 s**；本批这条与候选 B／C／D／E 无交集，
 A 落地最多让 e2e 轨少 30 s（约 0.4%）。**待拍板清单**：候选 B／C／D／E、本批 60 秒的 A／B／C／D、新缺陷的甲／乙／丙。
+**（第一百二十九批更新这一格：新缺陷的甲已落地、乙作废、丙仍在；60 秒四条与候选 B／C／D／E 一律未动，另新增两条待拍板＝
+"10 条 `@Scheduled` 与 webhook 重试共用 2 线程池"与"`KB_DELETE` 无创建点"。）**
 
 **本批诚实边界**：
 1. 本机活栈与 runner 拓扑不同（本机有 Milvus＋worker，runner 两者皆无），但两处的 restore 读数同带
@@ -1064,6 +1068,64 @@ A 落地最多让 e2e 轨少 30 s（约 0.4%）。**待拍板清单**：候选 B
 
 **账**：补证后待拍板清单不变，只是 **A 换成 A1**、B 的性质变了：**候选 B／C／D／E、60 秒的 A1／B／C／D、新缺陷的甲／乙／丙**。
 风险口径仍按 pip-only **876 s**＝**19m29 s／余量约 31 s**。**本批与补证都没动任何代码、用例或 workflow，也没有写操作。**
+
+### 第一百二十九批：缺陷"甲"落地——本会话第一条动生产代码的批次（红判据先行，活栈取到"改前根本没有的完成日志"），顺带登记两处新暴露面
+
+**动了什么**：`DeletionServiceImpl.java` 的两处 not-found 分支各 −4/+1 行（`executeKbDeleteStep` `:138-142`、
+`executeDocumentDeleteStep` `:352-356` 由"自己写 `status`/`step` 再 `updateById`"改成调 `completeTask`（`:464-470`））＋
+`DeletionServiceImplTest` 新增 2 条单测（+102 行）。门禁定义、`.github/workflows/`、`e2e/`、python 侧**一字未碰**；
+Python 计数 **2101 不变**，Java 计数 **718→720**。
+
+**红判据先行**：`mvn test -Dtest=DeletionServiceImplTest` 改前 `Tests run: 8, Failures: 2`，
+两条失败消息就是缺陷形状（`expected: <COMPLETED> but was: <DOC_NOT_FOUND>`／`<KB_NOT_FOUND>`），改后 **8/8 绿**；
+`mvn -q spotless:check` **EXIT=0**；全量 `Tests run: 720, Failures: 0, Errors: 0, Skipped: 1`／BUILD SUCCESS。
+**没有**为了让测试过而放宽任何选择器或门——两条新断言写的是"终态应当是 `COMPLETED`"，正是第一百二十八批在库里读到的假标签的反面。
+
+**取的是甲的哪一半，为什么**：甲原文有两半（"让 index==4 的收尾走 `case 4`"或"让 not-found 分支也调 `completeTask` 打日志"）。
+读全两条链的形状之后前半在两侧代价都更大：DOCUMENT_DELETE 有 `case 4 -> completeTask`（`:390`）但**正常链到不了**
+（step 3 的 `markRecycled` `:377-388` 已把 `deleted` 翻 1，下一圈入口 `selectById`（`:353`）返 null）；
+KB_DELETE 连 `case 8` 都没有（`case 7 -> logicalDeleteKnowledgeBase` `:153`／`:345-347`，之后 `default -> throw`）。
+而后半是**仓内既有写法**——`executeKbPurgeStep`（`:160-164`）／`executeKbDisableStep`（`:225-229`）／`executeDocumentPurgeStep`（`:395-399`）
+的 not-found 分支本来就在调 `completeTask`。⇒ 本批是把两条漏配的分支并进惯例，不新增抽象。
+`case 4 -> completeTask`（`:390`）**保留未删**（异常形状"行还在、idx 已到 4"仍可达），本批不主张任何死代码清理。
+
+**活栈读数**（dev 栈＋重建 java 容器；`docker compose build` 第一次 48 ms 打印 "up to date"＝没真构建，`--progress=plain` 重跑量到 68.7 s 真构建）：
+`id=147 DOCUMENT_DELETE` 从 `t+1 PENDING/step=-/idx=0` 到 `t+12 COMPLETED/**step=COMPLETED**/idx=4/err=-`
+（第一百二十八批同一条形状是 `step=DOC_NOT_FOUND`）；日志新增 **`2026-10-18 04:45:13.372 [webhook-retry] [] INFO c.h.service.impl.DeletionServiceImpl - 删除任务完成: taskId=147, type=DOCUMENT_DELETE, targetId=258`**
+＝改前该类型**零条**完成日志 ⇒ 后果 (a) 标签与 (b) 可观测性同时闭合。delete→回收可见 16.4 s 只是 tick 相位落点，**不构成新机制读数**。
+
+**计数门抓到的是我**：改后首跑 `scripts/static-checks.py` EXIT=1，`✗ README.md 测试计数漂移（badge）: java: 文档 718 ≠ 实测 720`
+（门在 `check_test_counts()` `scripts/static-checks.py:343`，判据 `:360`）⇒ 同步 `README.md` 四处（`:15` badge、`:37`、`:47`、`:241`）
+与 `docs/ROADMAP.md:16` 后 EXIT=0、检查 1–21 逐条 `[ok]`。runner 侧的 `java` job 跑的是同一条命令（`.github/workflows/ci.yml:351`
+`mvn --batch-mode test`），所以推送后应数到的判据就是 **720／0 失败**。
+
+**新登记之一（不是门禁缺陷，是运行时暴露面，待拍板）**：完成日志打在线程 **`[webhook-retry]`** 上，而调用来自 `@Scheduled`
+（`DeletionTaskScheduler.java:27-29`）。该线程名属于 `WebhookConfig.java:51-57` 的 `ScheduledExecutorService` bean
+（`Executors.newScheduledThreadPool(2, …)` `:53`）；全仓该**类型的 bean 只有这一个**（其余五处是组件内 `private final` 字段：
+`AgentTaskRecoveryScheduler.java:24`／`AgentTaskWorkerScheduler.java:25`／`PromptTestSetRunWorkerScheduler.java:59`／
+`ApprovalEventSseManager.java:43`／`TaskEventSseManager.java:43`），无 `TaskScheduler` bean、无 `spring.task.scheduling.*`
+⇒ `@Scheduled` 的兜底调度器就是那 2 条线程，**10 个 `@Scheduled` 方法**（`AgentAlertScheduler:27`／`AgentStatusEventCleanupScheduler:24`／
+`ApprovalExpiryScheduler:24`／`DeletionTaskScheduler:28`／`DocumentIndexRecoveryScheduler:20`＋`:34`／`OrphanCleanupScheduler:39`／
+`PluginQuotaReservationReaper:39`／`RecycleBinCleanupScheduler:33`／`VectorReconciliationScheduler:28`）与 webhook 重试共用。
+叠加 `DeletionTaskScheduler` 一圈内对每个 pending 任务**串行**最多 10 步（`:23`／`:40-41`）、向量步"同步调 Python（最长 120s/次）"（`:111`、注释 `:123`）
+⇒ 一个 tick 可把一条线程占住分钟级。**这条给第一百二十八批那把"tick 周期／相位"尺子加了一个未测的干扰项**（若某轮工作超 30 s，
+tick 延后不是随机漂移而是被同池任务挤住）。候选：**甲＝显式配 `TaskScheduler`（`spring.task.scheduling.pool.size` 或自建 `ThreadPoolTaskScheduler`）**；
+乙＝让该类型 bean 不再唯一（**排除**：Spring 回到默认单线程，10 条调度挤 1 条，比现状差）；丙＝只登记。**本批未动任何配置。**
+证据分层：线程名＝实测、bean 唯一＝grep；"Boot 自动配置被 `@ConditionalOnMissingBean`（含 `ScheduledExecutorService`）抑制"是**纸面推断，未在本机核对 Boot 版本源码**。
+
+**新登记之二（纯登记）**：**`KB_DELETE` 没有创建点**——main 侧 `deletionService.createTask(…)` 的全部调用点是
+`DocumentServiceImpl.java:295`／`:364`、`KnowledgeBaseServiceImpl.java:170`／`:277`、`RecycleBinCleanupScheduler.java:39`／`:47`，
+类型里没有 `KB_DELETE`；该名字只出现在 `DeletionTask.java:22`、`DeletionService.java:15` 的注释与 V3 迁移列注释里
+⇒ 本批 KB 半边是**潜伏修复、只有单测覆盖**，活栈上不可能有它的读数（不主张端到端验证过）。删除它属于死代码清理
+（`docs/CLEANUP_BACKLOG.md` 现行口径"只登记不删除"），待拍板。
+
+**账与本批边界**：128 的**甲已落地／乙作废／丙（`application.yml:124` `python-ai.timeout: 60000` 零消费者）仍在**；
+60 秒的 A1／B／C／D、候选 B／C／D／E、`docs/PRODUCTION_OPS.md:50`、10 条永久 skip、`chat-sse.spec.ts:24` 全部未动。
+风险口径不变（坏情况仍按 pip-only **876 s**＝**19m29 s／余量约 31 s**；本批改动不在 e2e 轨上）。
+**没重跑 e2e** 的理由是取证面的：`deletion_task.step` 在 main 侧零读取者（写点只剩 `advanceStep` `:457-458` 与 `completeTask` `:466`，
+`getStep()` 的读只出现在 `DeletionServiceImplTest` 的 9 条断言里，`mapper/*.xml` 无按 `step` 过滤的 SQL）⇒ 不可能改变用例断言；
+而本机跑 e2e 会把明文 `ADMIN_PASSWORD` 写进 `e2e/test-results/**/error-context.md`（gitignore 但不自动清），不制造这个副作用。
+覆盖率口径未重测（只跑 `mvn test`，没跑第九十四批含 IT 的 jacoco 尺子）。**runner 侧零读数**：本批未 push。
 
 ## 检查 20：e2e 轨的后端特性开关契约（第一百一十三批）
 
