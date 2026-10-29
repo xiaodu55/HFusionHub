@@ -22,7 +22,7 @@ cyclonedx-bom>=4.0.0
 # 原上界 <1.0 是 fastapi 尚未适配 starlette 1.x 时加的；fastapi 0.141.1 的元数据只写
 # starlette>=0.46.0（无上界），而 starlette 1.3.1 是清掉 PYSEC-2026-161/2280/2281/248/249
 # 的最早版本，故这里换成主版本守卫。
-starlette>=1.3.1,<2.0
+starlette>=1.10.0,<2.0
 # 任务队列 worker（Batch 8）：镜像经 Dockerfile 显式钉版安装；重新 pip-compile 后可移除该注释
 arq>=0.26
 # opentelemetry（第六十五批的 telemetry.py）刻意**不写在这里**：它曾以三条裸 pin 手工追加到
