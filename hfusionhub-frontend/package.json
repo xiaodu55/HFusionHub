@@ -25,7 +25,7 @@
     "clsx": "^2.1.1",
     "dompurify": "^3.4.16",
     "lucide-vue-next": "^0.577.0",
-    "marked": "^18.0.7",
+    "marked": "^18.1.2",
     "pinia": "^4.0.2",
     "radix-vue": "^1.9.17",
     "tailwind-merge": "^3.6.0",
