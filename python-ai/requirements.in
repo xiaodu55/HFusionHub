@@ -9,7 +9,7 @@ pydantic>=2.13.5
 # 否则同一批 CVE 会在下一次重编译里静默复活。
 python-dotenv>=1.2.2
 loguru>=0.7.3
-pypdf>=6.19.0
+pypdf>=6.21.4
 python-docx>=1.1.0
 pymilvus>=3.0.0
 milvus-lite>=3.1.0
